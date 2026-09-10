@@ -18,8 +18,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         import.meta.env.VITE_OIDC_SCOPE ??
         "openid profile email offline_access"
       }
-      prompt={import.meta.env.VITE_OIDC_PROMPT ?? "select_account"}
-      automaticSilentRenew
       // Sahifa yangilanganda sessiya yo'qolmasligi uchun
       userStore={new WebStorageStateStore({ store: window.localStorage })}
       // Login'dan keyin URL'dan ?code=&state= ni tozalash

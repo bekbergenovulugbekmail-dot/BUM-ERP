@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useConvexAuth, useMutation } from "convex/react";
 import { useAuth } from "react-oidc-context";
+import { ErrorResponse } from "oidc-client-ts";
 import { api } from "@/convex/_generated/api.js";
 import { Spinner } from "@/components/ui/spinner.tsx";
 import { Button } from "@/components/ui/button.tsx";
@@ -13,6 +14,20 @@ import { Button } from "@/components/ui/button.tsx";
  * qayta ishlaydi. Bu sahifa faqat kutadi: OIDC tugagach → Convex auth
  * tasdiqlangach → users jadvalini sinxronlaydi → bosh sahifaga o'tadi.
  */
+
+/**
+ * Bu kodlar haqiqiy xato emas — provayder shunchaki interaktiv login
+ * kerakligini bildiradi. Foydalanuvchiga xato ko'rsatmay, qayta yo'naltiramiz.
+ */
+const RETRYABLE_ERRORS = ["login_required", "consent_required"];
+
+function retryableErrorCode(error: unknown): string | undefined {
+  if (error instanceof ErrorResponse && error.error && RETRYABLE_ERRORS.includes(error.error)) {
+    return error.error;
+  }
+  return undefined;
+}
+
 export default function AuthCallback() {
   const navigate = useNavigate();
   const oidc = useAuth();
@@ -21,12 +36,26 @@ export default function AuthCallback() {
 
   const [syncError, setSyncError] = useState<string | null>(null);
   const synced = useRef(false);
+  const retriedSignin = useRef(false);
 
   const goHome = useCallback(() => navigate("/", { replace: true }), [navigate]);
+
+  const retryableCode = retryableErrorCode(oidc.error);
+  const { signinRedirect } = oidc;
 
   useEffect(() => {
     // OIDC hali ishlayapti
     if (oidc.isLoading || oidc.activeNavigator) return;
+
+    // login_required / consent_required — qaytadan login qilish kifoya.
+    // Ref faqat shu effekt ichida o'qiladi (StrictMode'da ikki marta
+    // yo'naltirib yubormaslik uchun), render paytida emas.
+    if (retryableCode) {
+      if (retriedSignin.current) return;
+      retriedSignin.current = true;
+      void signinRedirect();
+      return;
+    }
 
     // Login bo'lmagan holda bu sahifaga tushib qolgan
     if (!oidc.isAuthenticated) {
@@ -54,9 +83,11 @@ export default function AuthCallback() {
     isConvexAuthenticated,
     updateCurrentUser,
     goHome,
+    retryableCode,
+    signinRedirect,
   ]);
 
-  const error = syncError ?? oidc.error?.message;
+  const error = syncError ?? (retryableCode ? undefined : oidc.error?.message);
 
   if (error) {
     return (
