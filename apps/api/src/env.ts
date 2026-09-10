@@ -2,6 +2,7 @@
  * Muhit o'zgaruvchilari — ishga tushishda bir marta tekshiriladi.
  * Yetishmayotgan sozlama serverni darhol to'xtatadi, ish vaqtida emas.
  */
+import "./load-env.js";
 import { z } from "zod";
 
 const schema = z.object({

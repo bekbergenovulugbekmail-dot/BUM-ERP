@@ -5,7 +5,7 @@
  * Ataylab `env.ts` ni import qilmaydi: migratsiyaga faqat DATABASE_URL kerak,
  * server sozlamalari (SESSION_SECRET va h.k.) talab qilinmasligi kerak.
  */
-import { existsSync } from "node:fs";
+import "../load-env.js";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -14,14 +14,6 @@ import pg from "pg";
 
 /** src/db va dist/db ikkalasidan ham bir xil chuqurlikda — ishchi papkaga bog'liq emas. */
 const apiRoot = fileURLToPath(new URL("../../", import.meta.url));
-const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
-
-/**
- * Lokal ishlab chiqishda ildizdagi .env yuklanadi. Mavjud o'zgaruvchilar
- * ustiga yozilmaydi — Railway'da platforma bergan qiymat ustun.
- */
-const envFile = join(repoRoot, ".env");
-if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 const url = process.env.DATABASE_URL;
 if (!url) {
