@@ -28,6 +28,7 @@ tsconfig.tsbuildinfo
 
 # Environment variables
 .env*
+!.env.example
 
 # Convex AI skills — `npx convex ai-files install` bilan tiklanadi
 .agents/

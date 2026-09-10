@@ -3,18 +3,21 @@
 # ya'ni VPS'ga ko'chish `docker compose up` darajasida qoladi.
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18
+    container_name: bum-pg
     restart: unless-stopped
     environment:
-      POSTGRES_USER: bum
-      POSTGRES_PASSWORD: bum_local_dev
-      POSTGRES_DB: bum_erp
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: bumerp
+      POSTGRES_DB: bumerp
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # PG18 image'i ma'lumotni /var/lib/postgresql/18/docker ga yozadi,
+      # shuning uchun volume eski .../data ga emas, ota papkaga ulanadi.
+      - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bum -d bum_erp"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bumerp"]
       interval: 5s
       timeout: 3s
       retries: 10
