@@ -5,7 +5,6 @@ import LocaleWrapper from "./components/providers/locale-wrapper.tsx";
 import { SAVED_OR_DEFAULT_LOCALE, setLocaleInPath } from "./i18n.ts";
 import "./i18n.ts";
 import { useServiceWorker } from "./hooks/use-service-worker.ts";
-import AuthCallback from "./pages/auth/Callback.tsx";
 import ERPLayout from "./components/erp-layout.tsx";
 import DashboardPage from "./pages/dashboard/page.tsx";
 import ProductsPage from "./pages/products/page.tsx";
@@ -59,9 +58,6 @@ function AdminSubdomainApp() {
   return (
     <Suspense fallback={<FullPageSpinner />}>
       <Routes>
-        {/* Auth callback must always work */}
-        <Route path="/auth/callback" element={<AuthCallback />} />
-
         {/* Any locale prefix (/uz, /ru, /kz) */}
         <Route
           path="/:lng/*"
@@ -93,9 +89,6 @@ function MainApp() {
       <Routes>
         {/* Root redirect */}
         <Route path="/" element={<RootRedirect />} />
-
-        {/* Non-localized routes */}
-        <Route path="/auth/callback" element={<AuthCallback />} />
 
         {/* Tenant portal: app.bum-erp.uz/t/:slug */}
         <Route path="/t/:slug" element={<TenantPortalPage />} />

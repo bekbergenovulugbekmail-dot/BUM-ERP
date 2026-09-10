@@ -1,4 +1,5 @@
 import { ConvexError, v } from "convex/values";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { DEFAULT_ROLES } from "../src/lib/permissions.ts";
 import { requireTenantAccess, getTenantId, requireAuth } from "./tenant.ts";
@@ -232,15 +233,13 @@ export const createAuditLog = mutation({
     severity: v.union(v.literal("info"), v.literal("warning"), v.literal("error")),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const authUserId = await getAuthUserId(ctx);
     let userId = undefined;
-    let userName = identity?.name;
-    if (identity) {
-      const user = await ctx.db
-        .query("users")
-        .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-        .unique();
+    let userName = undefined;
+    if (authUserId) {
+      const user = await ctx.db.get("users", authUserId);
       userId = user?._id;
+      userName = user?.name;
     }
     const tenantId = await getTenantId(ctx);
     await ctx.db.insert("auditLogs", {
@@ -259,12 +258,9 @@ export const createAuditLog = mutation({
 export const getCompany = query({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) return null;
+    const user = await ctx.db.get("users", authUserId);
     if (!user?.activeCompanyId) {
       // Fall back to default company (pre-migration)
       return ctx.db.query("companies").withIndex("by_default", (q) => q.eq("isDefault", true)).first();
@@ -336,13 +332,10 @@ export const upsertSetting = mutation({
   },
   handler: async (ctx, args) => {
     const tenantId = await requireTenantAccess(ctx);
-    const identity = await ctx.auth.getUserIdentity();
+    const authUserId = await getAuthUserId(ctx);
     let userId = undefined;
-    if (identity) {
-      const user = await ctx.db
-        .query("users")
-        .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-        .unique();
+    if (authUserId) {
+      const user = await ctx.db.get("users", authUserId);
       userId = user?._id;
     }
     // Find existing setting scoped to this company

@@ -1,19 +1,34 @@
 import { defineSchema, defineTable } from "convex/server";
+import { authTables } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  // Convex Auth jadvallari: authSessions, authAccounts, authRefreshTokens,
+  // authVerificationCodes, authVerifiers, authRateLimits.
+  // `users` quyida qayta ta'riflanadi — kutubxona maydonlari + BUM ERP maydonlari.
+  ...authTables,
+
   // ─── Platform ────────────────────────────────────────────────────────────────
 
   users: defineTable({
-    tokenIdentifier: v.string(),
+    // ── Convex Auth talab qiladigan maydonlar ──
     name: v.optional(v.string()),
+    image: v.optional(v.string()),
+    // Password provayderi hisob ID sifatida shuni ishlatadi. Bu ilovada
+    // login identifikatori telefon raqam, shuning uchun bu yerda ham telefon
+    // turadi (qarang: convex/auth.ts).
     email: v.optional(v.string()),
+    emailVerificationTime: v.optional(v.number()),
+    phone: v.optional(v.string()),
+    phoneVerificationTime: v.optional(v.number()),
+    isAnonymous: v.optional(v.boolean()),
+
+    // ── BUM ERP maydonlari ──
     // RBAC
     role: v.optional(v.string()),
     roleId: v.optional(v.id("roles")),
     isActive: v.optional(v.boolean()),
     avatar: v.optional(v.string()),
-    phone: v.optional(v.string()),
     lastSeen: v.optional(v.string()),
     // Multi-tenant
     activeCompanyId: v.optional(v.id("companies")),
@@ -24,7 +39,9 @@ export default defineSchema({
     pinFailedAttempts: v.optional(v.number()), // consecutive wrong PINs
     pinLockedUntil: v.optional(v.string()),    // ISO: temporary PIN lock
     autoLockTimeoutSeconds: v.optional(v.number()), // 0 = disabled; default 30
-  }).index("by_token", ["tokenIdentifier"]),
+  })
+    .index("email", ["email"])
+    .index("phone", ["phone"]),
 
   roles: defineTable({
     name: v.string(),

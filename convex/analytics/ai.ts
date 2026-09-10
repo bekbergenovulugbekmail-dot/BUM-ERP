@@ -1,5 +1,6 @@
 "use node";
 
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { v, ConvexError } from "convex/values";
 import Anthropic from "@anthropic-ai/sdk";
 import { action } from "../_generated/server";
@@ -33,8 +34,8 @@ export const askAssistant = action({
   },
   handler: async (ctx, args): Promise<{ answer: string }> => {
     // XAVFSIZLIK: ma'lumotga tegishdan oldin autentifikatsiya
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) {
       throw new ConvexError({
         code: "UNAUTHENTICATED",
         message: "Tizimga kirish talab etiladi",

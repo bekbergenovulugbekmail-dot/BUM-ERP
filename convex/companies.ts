@@ -12,6 +12,7 @@
  *   4. Users.updateCurrentUser is patched with activeCompanyId
  *   5. Redirect to /:lng/dashboard
  */
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { v, ConvexError } from "convex/values";
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
@@ -93,12 +94,9 @@ export const getActiveCompany = query({
 export const listMyCompanies = query({
   args: {},
   handler: async (ctx) => {
-    const user = await ctx.auth.getUserIdentity();
-    if (!user) return [];
-    const dbUser = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", user.tokenIdentifier))
-      .unique();
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) return [];
+    const dbUser = await ctx.db.get("users", authUserId);
     if (!dbUser) return [];
 
     const memberships = await ctx.db
@@ -665,12 +663,9 @@ export const acceptInvitation = mutation({
 export const platformListCompanies = query({
   args: { status: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const admin = await ctx.auth.getUserIdentity();
-    if (!admin) return [];
-    const dbUser = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", admin.tokenIdentifier))
-      .unique();
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) return [];
+    const dbUser = await ctx.db.get("users", authUserId);
     if (!dbUser?.isPlatformAdmin) return [];
 
     const companies = await ctx.db.query("companies").collect();
@@ -725,12 +720,9 @@ export const platformUpdateCompanyStatus = mutation({
 export const platformGetStats = query({
   args: {},
   handler: async (ctx) => {
-    const admin = await ctx.auth.getUserIdentity();
-    if (!admin) return null;
-    const dbUser = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", admin.tokenIdentifier))
-      .unique();
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) return null;
+    const dbUser = await ctx.db.get("users", authUserId);
     if (!dbUser?.isPlatformAdmin) return null;
 
     const companies = await ctx.db.query("companies").collect();
@@ -752,12 +744,9 @@ export const platformGetStats = query({
 export const platformListAuditLogs = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    const admin = await ctx.auth.getUserIdentity();
-    if (!admin) return [];
-    const dbUser = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", admin.tokenIdentifier))
-      .unique();
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) return [];
+    const dbUser = await ctx.db.get("users", authUserId);
     if (!dbUser?.isPlatformAdmin) return [];
 
     const logs = await ctx.db
@@ -778,12 +767,9 @@ export const platformListAuditLogs = query({
 export const platformGetCompany = query({
   args: { companyId: v.id("companies") },
   handler: async (ctx, args) => {
-    const admin = await ctx.auth.getUserIdentity();
-    if (!admin) return null;
-    const dbUser = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", admin.tokenIdentifier))
-      .unique();
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) return null;
+    const dbUser = await ctx.db.get("users", authUserId);
     if (!dbUser?.isPlatformAdmin) return null;
 
     const company = await ctx.db.get(args.companyId);
@@ -821,12 +807,9 @@ export const platformGetCompany = query({
 export const platformListAllUsers = query({
   args: {},
   handler: async (ctx) => {
-    const admin = await ctx.auth.getUserIdentity();
-    if (!admin) return [];
-    const dbUser = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", admin.tokenIdentifier))
-      .unique();
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) return [];
+    const dbUser = await ctx.db.get("users", authUserId);
     if (!dbUser?.isPlatformAdmin) return [];
 
     const users = await ctx.db.query("users").collect();
@@ -1220,13 +1203,10 @@ export const getCompanyBySlug = query({
 export const verifyTenantAccess = query({
   args: { slug: v.string() },
   handler: async (ctx, args): Promise<{ allowed: boolean; companyId: string | null; reason: string }> => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return { allowed: false, companyId: null, reason: "unauthenticated" };
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) return { allowed: false, companyId: null, reason: "unauthenticated" };
 
-    const dbUser = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
+    const dbUser = await ctx.db.get("users", authUserId);
     if (!dbUser) return { allowed: false, companyId: null, reason: "user_not_found" };
 
     // Platform admin can access any company

@@ -11,6 +11,7 @@
 import type * as admin from "../admin.js";
 import type * as analytics_ai from "../analytics/ai.js";
 import type * as analytics_reports from "../analytics/reports.js";
+import type * as auth from "../auth.js";
 import type * as companies from "../companies.js";
 import type * as crm_activities from "../crm/activities.js";
 import type * as crm_distribution from "../crm/distribution.js";
@@ -24,6 +25,7 @@ import type * as finance_journalHelper from "../finance/journalHelper.js";
 import type * as hr_attendance from "../hr/attendance.js";
 import type * as hr_employees from "../hr/employees.js";
 import type * as hr_salary from "../hr/salary.js";
+import type * as http from "../http.js";
 import type * as manufacturing_boms from "../manufacturing/boms.js";
 import type * as manufacturing_orders from "../manufacturing/orders.js";
 import type * as notifications from "../notifications.js";
@@ -53,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   "analytics/ai": typeof analytics_ai;
   "analytics/reports": typeof analytics_reports;
+  auth: typeof auth;
   companies: typeof companies;
   "crm/activities": typeof crm_activities;
   "crm/distribution": typeof crm_distribution;
@@ -66,6 +69,7 @@ declare const fullApi: ApiFromModules<{
   "hr/attendance": typeof hr_attendance;
   "hr/employees": typeof hr_employees;
   "hr/salary": typeof hr_salary;
+  http: typeof http;
   "manufacturing/boms": typeof manufacturing_boms;
   "manufacturing/orders": typeof manufacturing_orders;
   notifications: typeof notifications;

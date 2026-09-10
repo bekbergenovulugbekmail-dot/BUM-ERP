@@ -1,4 +1,5 @@
 import { ConvexError, v } from "convex/values";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
 import { DEFAULT_ROLES } from "../src/lib/permissions.ts";
@@ -6,24 +7,30 @@ import { DEFAULT_ROLES } from "../src/lib/permissions.ts";
 export const updateCurrentUser = mutation({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) {
       throw new ConvexError({ code: "UNAUTHENTICATED", message: "User not logged in" });
     }
 
-    const existing = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
+    // Convex Auth foydalanuvchi yozuvini signUp paytida o'zi yaratadi.
+    // Bu mutatsiya uni ERP maydonlari bilan to'ldiradi (rol, platforma admini).
+    const existing = await ctx.db.get("users", authUserId);
+    if (!existing) {
+      throw new ConvexError({ code: "UNAUTHENTICATED", message: "User not found" });
+    }
 
-    if (existing) {
+    const alreadyProvisioned = existing.isActive !== undefined;
+
+    // Rol allaqachon berilgan bo'lsa — faqat lastSeen yangilanadi
+    if (alreadyProvisioned && existing.roleId !== undefined) {
       await ctx.db.patch(existing._id, { lastSeen: new Date().toISOString() });
       return existing._id;
     }
 
-    // First user ever → Platform Admin + seed global roles
+    // Birinchi foydalanuvchi → Platform Admin + global rollarni seed qilish.
+    // O'zi allaqachon jadvalda bo'lgani uchun chegara 1 ta.
     const allUsers = await ctx.db.query("users").collect();
-    const isFirstUser = allUsers.length === 0;
+    const isFirstUser = allUsers.length <= 1 || existing.isPlatformAdmin === true;
 
     // Seed global (non-company) default roles if none exist
     const rolesExist = await ctx.db.query("roles")
@@ -47,40 +54,39 @@ export const updateCurrentUser = mutation({
     let roleId = undefined;
     let roleName = undefined;
     if (isFirstUser) {
+      // MUHIM: by_name indeksi kompaniyaga tegishli rollarni ham qaytaradi.
+      // Global (companyId yo'q) rolni aniq tanlash kerak, aks holda birinchi
+      // foydalanuvchi rolsiz qolib ketadi.
       const superadminRole = await ctx.db
         .query("roles")
         .withIndex("by_name", (q) => q.eq("name", "Superadmin"))
+        .filter((q) => q.eq(q.field("companyId"), undefined))
         .first();
-      if (superadminRole && !superadminRole.companyId) {
+      if (superadminRole) {
         roleId = superadminRole._id;
         roleName = "Superadmin";
         await ctx.db.patch(superadminRole._id, { memberCount: superadminRole.memberCount + 1 });
       }
     }
 
-    return ctx.db.insert("users", {
-      name: identity.name,
-      email: identity.email,
-      tokenIdentifier: identity.tokenIdentifier,
-      role: roleName,
-      roleId,
+    await ctx.db.patch(existing._id, {
+      ...(roleName !== undefined ? { role: roleName } : {}),
+      ...(roleId !== undefined ? { roleId } : {}),
       isActive: true,
       lastSeen: new Date().toISOString(),
       // First ever user is Platform Admin
       isPlatformAdmin: isFirstUser,
     });
+    return existing._id;
   },
 });
 
 export const getCurrentUser = query({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) return null;
+    const user = await ctx.db.get("users", authUserId);
     if (!user) return null;
 
     // Enrich with active company info

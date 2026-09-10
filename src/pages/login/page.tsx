@@ -1,29 +1,32 @@
 /**
  * BUM ERP Login Page
  *
- * Bu sahifa foydalanuvchilarga BUM ERP uslubida login UI ko'rsatadi.
- * "Kirish" bosilganda OIDC provayderning login sahifasi ochiladi — unda
- * faqat "Username (telefon) + Parol" metodi ko'rsatilishi uchun provayder
- * konsolida boshqa kirish usullari o'chirib qo'yilishi kerak.
+ * Telefon raqam + parol formasi. Autentifikatsiya Convex Auth orqali —
+ * tashqi provayder sahifasiga yo'naltirish yo'q, hammasi shu sahifada.
  *
  * Platform Admin uchun admin.bum-erp.uz alohida.
  */
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth.ts";
 import { useConvexAuth } from "convex/react";
 import { motion } from "motion/react";
 import {
   Phone, Lock, ArrowRight, Shield, Building2,
-  ChevronRight, Sparkles,
+  ChevronRight, Loader2, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 
 export default function LoginPage() {
-  const { signinRedirect } = useAuth();
+  const { signInWithPassword } = useAuth();
   const { isAuthenticated } = useConvexAuth();
   const navigate = useNavigate();
   const { lng } = useParams<{ lng: string }>();
+
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // If already authenticated, redirect to dashboard
   useEffect(() => {
@@ -32,8 +35,19 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, navigate, lng]);
 
-  const handleLogin = async () => {
-    await signinRedirect();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phone.trim() || !password) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await signInWithPassword(phone.trim(), password);
+      // muvaffaqiyatli bo'lsa yuqoridagi useEffect dashboard'ga o'tkazadi
+    } catch {
+      setError("Telefon raqam yoki parol noto'g'ri");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -120,51 +134,66 @@ export default function LoginPage() {
             </p>
           </div>
 
-          {/* Info card — explains credentials */}
-          <div className="space-y-3 p-4 rounded-2xl bg-white/5 border border-white/8">
-            <div className="flex items-start gap-3">
-              <div className="h-8 w-8 rounded-lg bg-primary/15 flex items-center justify-center shrink-0">
-                <Phone className="h-4 w-4 text-primary" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-white">Telefon raqami</p>
-                <p className="text-xs text-white/40 mt-0.5">
-                  Login sahifasida "Username" maydoniga telefon raqamingizni kiriting
-                </p>
-                <p className="text-xs text-primary/70 mt-1 font-mono">Masalan: +998901234567</p>
-              </div>
-            </div>
-            <div className="border-t border-white/5" />
-            <div className="flex items-start gap-3">
-              <div className="h-8 w-8 rounded-lg bg-primary/15 flex items-center justify-center shrink-0">
-                <Lock className="h-4 w-4 text-primary" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-white">Parol</p>
-                <p className="text-xs text-white/40 mt-0.5">
-                  Sizga admin tomonidan berilgan parolni kiriting
-                </p>
+          {/* Login form */}
+          <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
+            <div className="space-y-1.5">
+              <label htmlFor="phone" className="text-xs font-medium text-white/50">
+                Telefon raqam
+              </label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/25" />
+                <input
+                  id="phone"
+                  name="phone"
+                  type="tel"
+                  autoComplete="username"
+                  value={phone}
+                  onChange={(e) => { setPhone(e.target.value); setError(null); }}
+                  placeholder="+998901234567"
+                  className="w-full h-11 rounded-xl bg-white/5 border border-white/10 pl-9 pr-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 transition-all"
+                />
               </div>
             </div>
-          </div>
 
-          {/* Login button */}
-          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label htmlFor="password" className="text-xs font-medium text-white/50">
+                Parol
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/25" />
+                <input
+                  id="password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError(null); }}
+                  placeholder="••••••••"
+                  className="w-full h-11 rounded-xl bg-white/5 border border-white/10 pl-9 pr-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 transition-all"
+                />
+              </div>
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-2 text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2.5">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                {error}
+              </div>
+            )}
+
             <Button
-              onClick={handleLogin}
+              type="submit"
               size="lg"
+              disabled={submitting || !phone.trim() || !password}
               className="w-full gap-2 h-12 text-base font-semibold"
             >
-              <Sparkles className="h-5 w-5" />
-              Tizimga kirish
-              <ArrowRight className="h-4 w-4 ml-auto" />
+              {submitting ? (
+                <><Loader2 className="h-5 w-5 animate-spin" /> Kirilmoqda...</>
+              ) : (
+                <>Tizimga kirish <ArrowRight className="h-4 w-4 ml-auto" /></>
+              )}
             </Button>
-
-            <p className="text-xs text-white/30 text-center leading-relaxed">
-              Kirish tugmasini bosganda BUM ERP autentifikatsiya sahifasi ochiladi.
-              Telefon raqamingiz va parolingizni u yerda kiriting.
-            </p>
-          </div>
+          </form>
 
           {/* Help section */}
           <div className="space-y-2 border-t border-white/5 pt-5">

@@ -1,5 +1,5 @@
-import { AuthProvider } from "./auth.tsx";
 import { ConvexProvider } from "./convex.tsx";
+import { UserSync } from "./user-sync.tsx";
 import { QueryClientProvider } from "./query-client.tsx";
 import { ThemeProvider } from "./theme.tsx";
 import { Toaster } from "../ui/sonner.tsx";
@@ -8,8 +8,8 @@ import { ModuleProvider } from "./module-provider.tsx";
 
 export function DefaultProviders({ children }: { children: React.ReactNode }) {
   return (
-    <AuthProvider>
-      <ConvexProvider>
+    <ConvexProvider>
+      <UserSync>
         <QueryClientProvider>
           <TooltipProvider>
             <ThemeProvider>
@@ -20,7 +20,7 @@ export function DefaultProviders({ children }: { children: React.ReactNode }) {
             </ThemeProvider>
           </TooltipProvider>
         </QueryClientProvider>
-      </ConvexProvider>
-    </AuthProvider>
+      </UserSync>
+    </ConvexProvider>
   );
 }

@@ -14,6 +14,7 @@
  * IMPORTANT: PIN is a UI-only session unlock mechanism.
  * It cannot create a new OIDC session or change userId/companyId.
  */
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
@@ -40,14 +41,11 @@ async function hashPin(pin: string, salt: string): Promise<string> {
 // ─── Helper: get current authenticated user ───────────────────────────────────
 
 async function requireCurrentUser(ctx: MutationCtx) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) {
+  const authUserId = await getAuthUserId(ctx);
+  if (!authUserId) {
     throw new ConvexError({ code: "UNAUTHENTICATED", message: "Tizimga kiring" });
   }
-  const user = await ctx.db
-    .query("users")
-    .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-    .unique();
+  const user = await ctx.db.get("users", authUserId);
   if (!user) {
     throw new ConvexError({ code: "NOT_FOUND", message: "Foydalanuvchi topilmadi" });
   }
@@ -156,13 +154,10 @@ export const verifyPin = mutation({
     expectedCompanyId: v.optional(v.id("companies")),
   },
   handler: async (ctx, args): Promise<{ success: boolean; reason?: string }> => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return { success: false, reason: "UNAUTHENTICATED" };
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) return { success: false, reason: "UNAUTHENTICATED" };
 
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
+    const user = await ctx.db.get("users", authUserId);
 
     if (!user) return { success: false, reason: "USER_NOT_FOUND" };
 
@@ -267,13 +262,9 @@ export const setAutoLockTimeout = mutation({
 export const getSecuritySettings = query({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) return null;
+    const user = await ctx.db.get("users", authUserId);
 
     if (!user) return null;
 

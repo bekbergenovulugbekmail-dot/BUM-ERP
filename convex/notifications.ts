@@ -8,6 +8,7 @@
  * - generateSmartAlerts scans per-tenant, not globally
  */
 
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query, internalMutation } from "./_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
@@ -18,12 +19,9 @@ import { getTenantId, requireTenantAccessForWrite } from "./tenant.ts";
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async function getCurrentUserId(ctx: QueryCtx | MutationCtx): Promise<Id<"users"> | null> {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) return null;
-  const user = await ctx.db
-    .query("users")
-    .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-    .unique();
+  const authUserId = await getAuthUserId(ctx);
+  if (!authUserId) return null;
+  const user = await ctx.db.get("users", authUserId);
   return user?._id ?? null;
 }
 
@@ -462,13 +460,9 @@ export const generateSmartAlerts = internalMutation({
 export const triggerSmartAlerts = mutation({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return; // silently skip for unauthenticated
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) return; // silently skip for unauthenticated
+    const user = await ctx.db.get("users", authUserId);
     if (!user?.activeCompanyId) return;
 
     await ctx.scheduler.runAfter(0, internal.notifications.generateSmartAlerts, {

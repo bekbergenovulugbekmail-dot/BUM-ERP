@@ -8,6 +8,7 @@
  * - Suspended companies: users see a suspension screen, all mutations throw FORBIDDEN
  * - Backend permissions are enforced via requirePermission() — frontend checks are UX only
  */
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError } from "convex/values";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
@@ -15,12 +16,9 @@ import type { Id } from "./_generated/dataModel";
 // ─── User resolution ─────────────────────────────────────────────────────────
 
 export async function getCurrentUser(ctx: QueryCtx | MutationCtx) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) return null;
-  return ctx.db
-    .query("users")
-    .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-    .unique();
+  const authUserId = await getAuthUserId(ctx);
+  if (!authUserId) return null;
+  return ctx.db.get("users", authUserId);
 }
 
 export async function requireAuth(ctx: QueryCtx | MutationCtx) {

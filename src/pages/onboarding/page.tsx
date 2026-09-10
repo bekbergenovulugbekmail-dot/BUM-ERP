@@ -356,8 +356,8 @@ export default function OnboardingPage() {
             {/* Sign out link */}
             <p className="text-center text-xs text-white/30 mt-4">
               Allaqachon kompaniyangiz bormi?{" "}
-              <a href="/auth/callback" className="text-primary/80 underline cursor-pointer hover:text-primary">
-                Kirish
+              <a href="/uz/select-company" className="text-primary/80 underline cursor-pointer hover:text-primary">
+                Kompaniyani tanlash
               </a>
             </p>
           </>
