@@ -9,8 +9,8 @@ lerna-debug.log*
 
 # Dependencies and build artifacts
 node_modules
-/dist
-/dist-ssr
+dist
+dist-ssr
 *.local
 .eslintcache
 tsconfig.tsbuildinfo
