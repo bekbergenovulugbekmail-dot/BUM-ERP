@@ -2,7 +2,7 @@ import { forwardRef, useCallback, useEffect } from "react";
 import { type VariantProps } from "class-variance-authority";
 import { Loader2, LogIn, LogOut } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth } from "@usehercules/auth/react";
+import { useAuth } from "@/hooks/use-auth.ts";
 import { Button, buttonVariants } from "@/components/ui/button.tsx";
 
 export interface SignInButtonProps
@@ -66,22 +66,22 @@ export const SignInButton = forwardRef<HTMLButtonElement, SignInButtonProps>(
     useEffect(() => {
       if (error) {
         toast.error("Login error", {
-          description: error.message,
+          description: error,
         });
         console.error("Login error", error);
       }
     }, [error]);
 
     const handleClick = useCallback(
-      async (event: React.MouseEvent<HTMLButtonElement>) => {
+      (event: React.MouseEvent<HTMLButtonElement>) => {
         // Run custom onClick first
         onClick?.(event);
 
         try {
           if (isAuthenticated) {
-            await signout();
+            signout();
           } else {
-            await signin();
+            signin();
           }
         } catch (err) {
           console.error("Authentication error:", err);

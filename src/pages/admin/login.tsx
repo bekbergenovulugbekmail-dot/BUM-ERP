@@ -2,14 +2,14 @@
  * Platform Admin Login Page
  * Route: admin.bum-erp.uz (entry point before auth)
  *
- * Uses Hercules Auth (OIDC) — auth is always through Hercules Auth portal.
+ * Uses the OIDC auth adapter (@/hooks/use-auth) — auth is always through the OIDC provider.
  * After sign-in, checks isPlatformAdmin:
  *   - true  → onAuthorized()
  *   - false AND no admins exist → onNeedBootstrap()
  *   - false AND admins exist    → "Access denied"
  */
 import { useEffect } from "react";
-import { useAuth } from "@usehercules/auth/react";
+import { useAuth } from "@/hooks/use-auth.ts";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api.js";
 import { AuthLoading, Authenticated, Unauthenticated } from "convex/react";

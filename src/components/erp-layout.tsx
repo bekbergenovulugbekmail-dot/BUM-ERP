@@ -319,17 +319,17 @@ function UserMenu() {
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" className="h-8 gap-2 px-2">
           <div className="h-6 w-6 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs font-bold">
-            {user?.profile?.name?.[0]?.toUpperCase() ?? "U"}
+            {user?.name?.[0]?.toUpperCase() ?? "U"}
           </div>
           <span className="hidden sm:inline text-xs max-w-[100px] truncate">
-            {user?.profile?.name ?? t("auth.welcome")}
+            {user?.name ?? t("auth.welcome")}
           </span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
         <div className="px-3 py-2">
-          <p className="font-medium text-sm">{user?.profile?.name ?? t("auth.welcome")}</p>
-          <p className="text-xs text-muted-foreground">{user?.profile?.email}</p>
+          <p className="font-medium text-sm">{user?.name ?? t("auth.welcome")}</p>
+          <p className="text-xs text-muted-foreground">{user?.email}</p>
           {currentUser?.isPlatformAdmin && (
             <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-500 border border-purple-500/20">
               <Shield className="h-2.5 w-2.5" />

@@ -9,7 +9,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api.js";
 import { ConvexError } from "convex/values";
-import { useAuth } from "@usehercules/auth/react";
+import { useAuth } from "@/hooks/use-auth.ts";
 import { motion } from "motion/react";
 import { Layers, Shield, KeyRound, CheckCircle, AlertTriangle, LogOut, Loader2, ChevronDown } from "lucide-react";
 
