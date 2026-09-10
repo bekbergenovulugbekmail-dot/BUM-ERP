@@ -9,8 +9,7 @@ onlyBuiltDependencies:
 blockExoticSubdeps: true
 
 minimumReleaseAge: 4320
-minimumReleaseAgeExclude:
-  - "@usehercules/*"
 allowBuilds:
   "@swc/core": true
+  core-js: false
   esbuild: true
