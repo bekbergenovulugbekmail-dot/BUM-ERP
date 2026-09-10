@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useConvexAuth } from "convex/react";
 import { api } from "@/convex/_generated/api.js";
 import { motion } from "motion/react";
 import {
@@ -35,16 +35,18 @@ export default function WarehousePage() {
   const [transferOpen, setTransferOpen] = useState(false);
   const [warehouseScannerOpen, setWarehouseScannerOpen] = useState(false);
 
+  const { isAuthenticated } = useConvexAuth();
   const warehouses = useQuery(api.warehouse.warehouses.list, {});
   const seedDefault = useMutation(api.warehouse.warehouses.seedDefault);
   const seededRef = useRef(false);
 
-  // Seed default warehouse once on first load
+  // Seed default warehouse once — faqat Convex auth tasdiqlangach. Aks holda
+  // sahifa login'ga yo'naltirilgunicha UNAUTHENTICATED xatosi konsolga tushadi.
   useEffect(() => {
-    if (seededRef.current) return;
+    if (!isAuthenticated || seededRef.current) return;
     seededRef.current = true;
     seedDefault().catch(() => {/* already seeded */});
-  }, [seedDefault]);
+  }, [isAuthenticated, seedDefault]);
 
   // Auto-select default warehouse
   useEffect(() => {

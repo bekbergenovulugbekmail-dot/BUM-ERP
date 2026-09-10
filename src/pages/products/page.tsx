@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery, useMutation, usePaginatedQuery } from "convex/react";
+import { useQuery, useMutation, usePaginatedQuery, useConvexAuth } from "convex/react";
 import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
 import { motion } from "motion/react";
@@ -50,13 +50,13 @@ export default function ProductsPage() {
   const removeProduct = useMutation(api.products.products.remove);
 
   // Seed units once on first authenticated mount
+  const { isAuthenticated } = useConvexAuth();
   const unitSeededRef = useRef(false);
   useEffect(() => {
-    if (unitSeededRef.current) return;
+    if (!isAuthenticated || unitSeededRef.current) return;
     unitSeededRef.current = true;
     void seedUnits({}).catch(() => {/* already seeded */});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isAuthenticated, seedUnits]);
 
   const { results, status, loadMore } = usePaginatedQuery(
     api.products.products.list,

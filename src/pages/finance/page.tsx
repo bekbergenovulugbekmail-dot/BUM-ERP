@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useConvexAuth } from "convex/react";
 import { api } from "@/convex/_generated/api.js";
 import { motion } from "motion/react";
 import {
@@ -30,14 +30,16 @@ export default function FinancePage() {
   const stats = useQuery(api.finance.cashAccounts.getDashboardStats, {});
   const expStats = useQuery(api.finance.expenses.getStats, {});
   const seedAccounts = useMutation(api.finance.accounts.seedDefaultAccounts);
+  const { isAuthenticated } = useConvexAuth();
   const seededRef = useRef(false);
 
-  // Seed default accounts once on first load
+  // Seed default accounts once — faqat Convex auth tasdiqlangach. Aks holda
+  // sahifa login'ga yo'naltirilgunicha UNAUTHENTICATED xatosi konsolga tushadi.
   useEffect(() => {
-    if (seededRef.current) return;
+    if (!isAuthenticated || seededRef.current) return;
     seededRef.current = true;
     seedAccounts().catch(() => {/* already seeded */});
-  }, [seedAccounts]);
+  }, [isAuthenticated, seedAccounts]);
 
   const statCards = [
     {
