@@ -1,0 +1,256 @@
+/**
+ * Sotuv va POS.
+ *
+ * Atomarlik talabi (audit §9):
+ *   Jo'natish  → 5 jadval: order, items, stock_levels, stock_movements, JE
+ *   POS sotuvi → 6 jadval: yuqoridagilar + cash_transactions + shift yig'indisi
+ *
+ * `sales_order_items.cost_price` — sotuv paytidagi AVCO qiymati. U keyin
+ * o'zgarmaydi, chunki COGS o'sha lahzadagi tannarxga bog'langan.
+ */
+import { relations, sql } from "drizzle-orm";
+import {
+  boolean,
+  check,
+  date,
+  index,
+  integer,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+  varchar,
+} from "drizzle-orm/pg-core";
+import { companies, users } from "./platform.js";
+import { products, units } from "./catalog.js";
+import { warehouses } from "./inventory.js";
+import { cashAccounts, journalEntries } from "./finance.js";
+import { paymentMethod } from "./purchase.js";
+import { legacyId, money, percent, pk, price, qty, timestamps } from "./_shared.js";
+
+export const salesOrderStatus = pgEnum("sales_order_status", [
+  "draft",
+  "confirmed",
+  "shipped",
+  "delivered",
+  "returned",
+  "cancelled",
+]);
+
+export const posShiftStatus = pgEnum("pos_shift_status", ["open", "closed"]);
+
+// ─── customers ───────────────────────────────────────────────────────────────
+
+export const customers = pgTable(
+  "customers",
+  {
+    id: pk(),
+    legacyId: legacyId(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+
+    name: varchar("name", { length: 200 }).notNull(),
+    code: varchar("code", { length: 32 }).notNull(),
+    phone: varchar("phone", { length: 20 }),
+    email: varchar("email", { length: 255 }),
+    address: text("address"),
+    taxId: varchar("tax_id", { length: 32 }),
+
+    discountPercent: percent("discount_percent").notNull().default("0"),
+    creditLimit: money("credit_limit").notNull().default("0"),
+    paymentTermDays: integer("payment_term_days").notNull().default(0),
+    currency: varchar("currency", { length: 3 }).notNull().default("UZS"),
+
+    totalDebt: money("total_debt").notNull().default("0"),
+    totalPurchased: money("total_purchased").notNull().default("0"),
+
+    isActive: boolean("is_active").notNull().default(true),
+    notes: text("notes"),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("customers_company_code_key").on(t.companyId, t.code),
+    index("customers_company_active_idx").on(t.companyId, t.isActive),
+    index("customers_company_phone_idx").on(t.companyId, t.phone),
+  ],
+);
+
+// ─── pos_shifts ──────────────────────────────────────────────────────────────
+
+export const posShifts = pgTable(
+  "pos_shifts",
+  {
+    id: pk(),
+    legacyId: legacyId(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    warehouseId: uuid("warehouse_id").notNull().references(() => warehouses.id, { onDelete: "restrict" }),
+
+    cashierId: uuid("cashier_id").references(() => users.id, { onDelete: "set null" }),
+    cashierName: varchar("cashier_name", { length: 200 }),
+
+    status: posShiftStatus("status").notNull().default("open"),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+
+    openingCash: money("opening_cash").notNull().default("0"),
+    closingCash: money("closing_cash"),
+    totalSales: money("total_sales").notNull().default("0"),
+    totalCash: money("total_cash").notNull().default("0"),
+    totalCard: money("total_card").notNull().default("0"),
+    receiptCount: integer("receipt_count").notNull().default(0),
+
+    notes: text("notes"),
+    ...timestamps(),
+  },
+  (t) => [
+    index("ps_company_warehouse_idx").on(t.companyId, t.warehouseId),
+    index("ps_company_status_idx").on(t.companyId, t.status),
+    /** Bitta omborda bir vaqtda faqat bitta ochiq smena. */
+    uniqueIndex("ps_one_open_per_warehouse")
+      .on(t.companyId, t.warehouseId)
+      .where(sql`${t.status} = 'open'`),
+  ],
+);
+
+// ─── sales_orders ────────────────────────────────────────────────────────────
+
+export const salesOrders = pgTable(
+  "sales_orders",
+  {
+    id: pk(),
+    legacyId: legacyId(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+
+    number: varchar("number", { length: 32 }).notNull(),
+    /** POS sotuvida mijoz ko'rsatilmasligi mumkin. */
+    customerId: uuid("customer_id").references(() => customers.id, { onDelete: "restrict" }),
+    warehouseId: uuid("warehouse_id").notNull().references(() => warehouses.id, { onDelete: "restrict" }),
+
+    status: salesOrderStatus("status").notNull().default("draft"),
+    orderDate: date("order_date").notNull(),
+    deliveryDate: date("delivery_date"),
+
+    currency: varchar("currency", { length: 3 }).notNull().default("UZS"),
+    exchangeRate: price("exchange_rate").notNull().default("1"),
+
+    subtotal: money("subtotal").notNull().default("0"),
+    taxAmount: money("tax_amount").notNull().default("0"),
+    discountAmount: money("discount_amount").notNull().default("0"),
+    totalAmount: money("total_amount").notNull().default("0"),
+    paidAmount: money("paid_amount").notNull().default("0"),
+
+    isPos: boolean("is_pos").notNull().default(false),
+    posShiftId: uuid("pos_shift_id").references(() => posShifts.id, { onDelete: "set null" }),
+
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("so_company_number_key").on(t.companyId, t.number),
+    index("so_company_status_idx").on(t.companyId, t.status),
+    index("so_company_customer_idx").on(t.companyId, t.customerId),
+    index("so_company_date_idx").on(t.companyId, t.orderDate),
+    index("so_pos_shift_idx").on(t.posShiftId),
+    check("so_amounts_non_negative", sql`${t.totalAmount} >= 0 AND ${t.paidAmount} >= 0`),
+  ],
+);
+
+export const salesOrderItems = pgTable(
+  "sales_order_items",
+  {
+    id: pk(),
+    legacyId: legacyId(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    orderId: uuid("order_id").notNull().references(() => salesOrders.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+    unitId: uuid("unit_id").notNull().references(() => units.id),
+
+    quantity: qty("quantity").notNull(),
+    unitPrice: price("unit_price").notNull(),
+    taxRate: percent("tax_rate").notNull().default("0"),
+    discountPercent: percent("discount_percent").notNull().default("0"),
+    lineTotal: money("line_total").notNull().default("0"),
+
+    /** Sotuv lahzasidagi AVCO tannarx — COGS shundan hisoblanadi, keyin o'zgarmaydi. */
+    costPrice: price("cost_price").notNull().default("0"),
+
+    notes: text("notes"),
+    ...timestamps(),
+  },
+  (t) => [
+    index("soi_order_idx").on(t.orderId),
+    index("soi_company_product_idx").on(t.companyId, t.productId),
+    check("soi_qty_positive", sql`${t.quantity} > 0`),
+    check("soi_price_non_negative", sql`${t.unitPrice} >= 0 AND ${t.costPrice} >= 0`),
+  ],
+);
+
+// ─── customer_payments ───────────────────────────────────────────────────────
+
+export const customerPayments = pgTable(
+  "customer_payments",
+  {
+    id: pk(),
+    legacyId: legacyId(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+
+    customerId: uuid("customer_id").references(() => customers.id, { onDelete: "restrict" }),
+    orderId: uuid("order_id").references(() => salesOrders.id, { onDelete: "set null" }),
+
+    amount: money("amount").notNull(),
+    currency: varchar("currency", { length: 3 }).notNull().default("UZS"),
+    exchangeRate: price("exchange_rate").notNull().default("1"),
+    paymentDate: date("payment_date").notNull(),
+    method: paymentMethod("method").notNull().default("cash"),
+
+    reference: varchar("reference", { length: 100 }),
+    notes: text("notes"),
+    cashAccountId: uuid("cash_account_id").references(() => cashAccounts.id, { onDelete: "set null" }),
+    journalEntryId: uuid("journal_entry_id").references(() => journalEntries.id, { onDelete: "set null" }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    index("cp_company_customer_idx").on(t.companyId, t.customerId),
+    index("cp_company_date_idx").on(t.companyId, t.paymentDate),
+    index("cp_order_idx").on(t.orderId),
+    check("cp_amount_positive", sql`${t.amount} > 0`),
+  ],
+);
+
+// ─── relations ───────────────────────────────────────────────────────────────
+
+export const customersRelations = relations(customers, ({ many }) => ({
+  orders: many(salesOrders),
+  payments: many(customerPayments),
+}));
+
+export const salesOrdersRelations = relations(salesOrders, ({ one, many }) => ({
+  customer: one(customers, { fields: [salesOrders.customerId], references: [customers.id] }),
+  warehouse: one(warehouses, { fields: [salesOrders.warehouseId], references: [warehouses.id] }),
+  shift: one(posShifts, { fields: [salesOrders.posShiftId], references: [posShifts.id] }),
+  items: many(salesOrderItems),
+  payments: many(customerPayments),
+}));
+
+export const salesOrderItemsRelations = relations(salesOrderItems, ({ one }) => ({
+  order: one(salesOrders, { fields: [salesOrderItems.orderId], references: [salesOrders.id] }),
+  product: one(products, { fields: [salesOrderItems.productId], references: [products.id] }),
+}));
+
+export const posShiftsRelations = relations(posShifts, ({ one, many }) => ({
+  warehouse: one(warehouses, { fields: [posShifts.warehouseId], references: [warehouses.id] }),
+  orders: many(salesOrders),
+}));
