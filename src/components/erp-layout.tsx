@@ -387,33 +387,34 @@ function CompanySwitcher() {
           {(myCompanies?.length ?? 0) > 1 && <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />}
         </Button>
       </DropdownMenuTrigger>
-      {(myCompanies?.length ?? 0) > 1 && (
-        <DropdownMenuContent align="start" className="w-52">
-          {myCompanies?.filter(Boolean).map((c) => (
-            <DropdownMenuItem
-              key={c!._id}
-              className="cursor-pointer"
-              onClick={async () => {
-                await switchCompany({ companyId: c!._id });
-                navigate(`/${lng}/dashboard`);
-              }}
-            >
-              <Building2 className="mr-2 h-4 w-4" />
-              <span className="truncate">{c!.name}</span>
-              {c!._id === currentUser.activeCompanyId && (
-                <span className="ml-auto text-xs text-primary">✓</span>
-              )}
-            </DropdownMenuItem>
-          ))}
-          <DropdownMenuSeparator />
+      {/* Dropdown har doim ochiladi: bitta kompaniyasi bor foydalanuvchi ham
+          "+ Yangi kompaniya" orqali ikkinchisini qo'sha olishi kerak. */}
+      <DropdownMenuContent align="start" className="w-52">
+        {(myCompanies?.length ?? 0) > 1 &&
+          myCompanies?.filter(Boolean).map((c) => (
           <DropdownMenuItem
-            className="cursor-pointer text-muted-foreground text-xs"
-            onClick={() => navigate(`/${lng}/onboarding`)}
+            key={c!._id}
+            className="cursor-pointer"
+            onClick={async () => {
+              await switchCompany({ companyId: c!._id });
+              navigate(`/${lng}/dashboard`);
+            }}
           >
-            + Yangi kompaniya
+            <Building2 className="mr-2 h-4 w-4" />
+            <span className="truncate">{c!.name}</span>
+            {c!._id === currentUser.activeCompanyId && (
+              <span className="ml-auto text-xs text-primary">✓</span>
+            )}
           </DropdownMenuItem>
-        </DropdownMenuContent>
-      )}
+        ))}
+        {(myCompanies?.length ?? 0) > 1 && <DropdownMenuSeparator />}
+        <DropdownMenuItem
+          className="cursor-pointer text-muted-foreground text-xs"
+          onClick={() => navigate(`/${lng}/onboarding`)}
+        >
+          + Yangi kompaniya
+        </DropdownMenuItem>
+      </DropdownMenuContent>
     </DropdownMenu>
   );
 }

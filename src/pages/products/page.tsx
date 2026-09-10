@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, usePaginatedQuery, useConvexAuth } from "convex/react";
 import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
+import Papa from "papaparse";
 import { motion } from "motion/react";
 import {
   Plus, Search, Filter, Download, Upload, MoreHorizontal,
@@ -48,6 +49,10 @@ export default function ProductsPage() {
   const categories = useQuery(api.products.categories.list, {});
   const seedUnits = useMutation(api.products.units.seedDefaultUnits);
   const removeProduct = useMutation(api.products.products.remove);
+  const createProduct = useMutation(api.products.products.create);
+  const units = useQuery(api.products.units.list, {});
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
 
   // Seed units once on first authenticated mount
   const { isAuthenticated } = useConvexAuth();
@@ -67,6 +72,127 @@ export default function ProductsPage() {
     },
     { initialNumItems: 20 }
   );
+
+  // ── CSV export: joriy filtrga mos yuklangan mahsulotlar ──
+  const handleExport = () => {
+    if (!results || results.length === 0) {
+      toast.error("Eksport uchun mahsulot yo'q");
+      return;
+    }
+    const rows = results.map((p) => ({
+      "Nomi": p.name,
+      "SKU": p.sku,
+      "Shtrix-kod": p.barcode ?? "",
+      "Kategoriya": p.categoryName ?? "",
+      "Brend": p.brandName ?? "",
+      "O'lchov birligi": p.baseUnitName ?? "",
+      "Kirim narxi": p.purchasePrice,
+      "Sotuv narxi": p.salesPrice,
+      "Min. qoldiq": p.minStock,
+      "Faol": p.isActive ? "ha" : "yo'q",
+    }));
+    const csv = Papa.unparse(rows);
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `mahsulotlar-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success(`${rows.length} ta mahsulot eksport qilindi`);
+  };
+
+  // ── CSV import ──
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // bir xil faylni qayta tanlash mumkin bo'lsin
+    if (!file) return;
+
+    const unitList = units ?? [];
+    if (unitList.length === 0) {
+      toast.error("O'lchov birliklari yuklanmagan — biroz kuting va qayta urining");
+      return;
+    }
+
+    setImporting(true);
+    Papa.parse<Record<string, string>>(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (parsed) => {
+        void (async () => {
+          const rows = parsed.data;
+          let ok = 0;
+          const errors: string[] = [];
+
+          for (const [i, row] of rows.entries()) {
+            const name = (row["Nomi"] ?? row["name"] ?? "").trim();
+            const sku = (row["SKU"] ?? row["sku"] ?? "").trim();
+            if (!name || !sku) {
+              errors.push(`${i + 2}-qator: "Nomi" va "SKU" majburiy`);
+              continue;
+            }
+            // Eksport `shortName` yozadi ("d"), foydalanuvchi to'liq nom yozishi
+            // mumkin ("Dona") — ikkalasini ham qabul qilamiz.
+            const unitName = (row["O'lchov birligi"] ?? row["unit"] ?? "").trim().toLowerCase();
+            const unit =
+              unitList.find(
+                (u) =>
+                  u.shortName.toLowerCase() === unitName ||
+                  u.name.toLowerCase() === unitName,
+              ) ?? unitList[0];
+            const num = (key: string, alt: string) => {
+              const v = (row[key] ?? row[alt] ?? "").toString().replace(/\s/g, "").replace(",", ".");
+              const n = Number(v);
+              return Number.isFinite(n) ? n : 0;
+            };
+
+            try {
+              await createProduct({
+                name,
+                sku,
+                barcode: (row["Shtrix-kod"] ?? row["barcode"] ?? "").trim() || undefined,
+                baseUnitId: unit._id,
+                purchasePrice: num("Kirim narxi", "purchasePrice"),
+                salesPrice: num("Sotuv narxi", "salesPrice"),
+                taxRate: 0,
+                taxIncluded: true,
+                minStock: num("Min. qoldiq", "minStock"),
+                trackBatch: false,
+                trackExpiry: false,
+                costingMethod: "average",
+                isSaleable: true,
+                isPurchaseable: true,
+                isManufactured: false,
+              });
+              ok++;
+            } catch (err) {
+              const msg =
+                err && typeof err === "object" && "data" in err
+                  ? String((err as { data?: { message?: string } }).data?.message ?? "xatolik")
+                  : "xatolik";
+              errors.push(`${i + 2}-qator (${sku}): ${msg}`);
+            }
+          }
+
+          setImporting(false);
+          if (ok > 0) toast.success(`${ok} ta mahsulot import qilindi`);
+          if (errors.length > 0) {
+            toast.error(`${errors.length} ta qator o'tmadi`, {
+              description: errors.slice(0, 3).join("; "),
+              duration: 8000,
+            });
+          }
+          if (ok === 0 && errors.length === 0) toast.error("Faylda qator topilmadi");
+        })();
+      },
+      error: () => {
+        setImporting(false);
+        toast.error("CSV faylni o'qib bo'lmadi");
+      },
+    });
+  };
 
   const handleDelete = async (id: Id<"products">) => {
     try {
@@ -98,10 +224,22 @@ export default function ProductsPage() {
             <Button size="sm" variant="secondary" onClick={() => setScannerOpen(true)}>
               <ScanBarcode className="h-4 w-4 mr-1" /> Skaner
             </Button>
-            <Button size="sm" variant="secondary">
-              <Upload className="h-4 w-4 mr-1" /> Import
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={importing}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="h-4 w-4 mr-1" /> {importing ? "Import..." : "Import"}
             </Button>
-            <Button size="sm" variant="secondary">
+            <Button size="sm" variant="secondary" onClick={handleExport}>
               <Download className="h-4 w-4 mr-1" /> Export
             </Button>
             <Button size="sm" onClick={() => { setEditId(null); setFormOpen(true); }}>
