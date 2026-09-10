@@ -1,30 +1,48 @@
 "use node";
 
 import { v, ConvexError } from "convex/values";
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { action } from "../_generated/server";
 import { api } from "../_generated/api";
 
-const openai = new OpenAI({
-  baseURL: "https://ai-gateway.hercules.app/v1",
-  apiKey: process.env.HERCULES_API_KEY,
+/**
+ * To'g'ridan-to'g'ri Anthropic API.
+ * Hercules AI gateway'iga bog'liqlik olib tashlandi.
+ *
+ * Convex env: npx convex env set ANTHROPIC_API_KEY sk-ant-...
+ */
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
 });
+
+const MODEL = "claude-sonnet-4-6";
 
 export const askAssistant = action({
   args: {
     question: v.string(),
     context: v.optional(v.string()),
+    /** Ko'p bosqichli suhbat uchun oldingi xabarlar */
+    history: v.optional(
+      v.array(
+        v.object({
+          role: v.union(v.literal("user"), v.literal("assistant")),
+          content: v.string(),
+        }),
+      ),
+    ),
   },
   handler: async (ctx, args): Promise<{ answer: string }> => {
-    // SECURITY: require authentication before any data access
+    // XAVFSIZLIK: ma'lumotga tegishdan oldin autentifikatsiya
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
-      throw new ConvexError({ code: "UNAUTHENTICATED", message: "Tizimga kirish talab etiladi" });
+      throw new ConvexError({
+        code: "UNAUTHENTICATED",
+        message: "Tizimga kirish talab etiladi",
+      });
     }
 
-    // All sub-queries run with the caller's auth context.
-    // They are now tenant-scoped (each uses getTenantId internally),
-    // so they will ONLY return data for the authenticated user's active company.
+    // Barcha so'rovlar chaqiruvchining auth konteksti bilan ishlaydi va
+    // tenant-scoped — faqat joriy kompaniya ma'lumotini qaytaradi.
     const [salesStats, stockLevels, employees, expenses] = await Promise.all([
       ctx.runQuery(api.analytics.reports.getSalesSummary, { days: 30 }),
       ctx.runQuery(api.analytics.reports.getStockSummary, {}),
@@ -32,50 +50,72 @@ export const askAssistant = action({
       ctx.runQuery(api.analytics.reports.getExpenseSummary, { days: 30 }),
     ]);
 
-    const bizContext = `
-You are an ERP AI assistant for a business management system. Here is real-time business data for the current authenticated company ONLY:
+    const systemPrompt = `Siz BUM ERP tizimining biznes-tahlilchi yordamchisisiz.
 
-SALES (last 30 days):
-- Total orders: ${salesStats.totalOrders}
-- Total revenue: ${salesStats.totalRevenue.toLocaleString()} UZS
-- Paid: ${salesStats.paidRevenue.toLocaleString()} UZS
-- Top products: ${salesStats.topProducts.map((p) => `${p.name} (${p.qty} sold)`).join(", ") || "none"}
+Quyida joriy kompaniyaning real vaqtdagi ma'lumotlari keltirilgan.
+Faqat shu ma'lumotlarga tayaning. Raqamlarni o'ylab topmang —
+ma'lumot yetishmasa, buni ochiq ayting.
 
-INVENTORY:
-- Total SKUs: ${stockLevels.totalProducts}
-- Low stock items: ${stockLevels.lowStock}
-- Out of stock: ${stockLevels.outOfStock}
-- Total stock value: ${stockLevels.totalValue.toLocaleString()} UZS
+SOTUV (oxirgi 30 kun):
+- Buyurtmalar: ${salesStats.totalOrders}
+- Aylanma: ${salesStats.totalRevenue.toLocaleString()} so'm
+- To'langan: ${salesStats.paidRevenue.toLocaleString()} so'm
+- Eng ko'p sotilgan: ${salesStats.topProducts.map((p) => `${p.name} (${p.qty} dona)`).join(", ") || "ma'lumot yo'q"}
 
-EMPLOYEES:
-- Active staff: ${employees.active}
-- Total salary fund: ${employees.totalSalary.toLocaleString()} UZS/month
+OMBOR:
+- Jami SKU: ${stockLevels.totalProducts}
+- Kam qolgan: ${stockLevels.lowStock}
+- Tugagan: ${stockLevels.outOfStock}
+- Qoldiq qiymati: ${stockLevels.totalValue.toLocaleString()} so'm
 
-EXPENSES (last 30 days):
-- Total: ${expenses.total.toLocaleString()} UZS
-- By category: ${expenses.byCategory.map((c) => `${c.category}: ${c.amount.toLocaleString()}`).join(", ") || "none"}
+XODIMLAR:
+- Faol: ${employees.active}
+- Oylik fondi: ${employees.totalSalary.toLocaleString()} so'm/oy
 
-${args.context ? `Additional context: ${args.context}` : ""}
+XARAJATLAR (oxirgi 30 kun):
+- Jami: ${expenses.total.toLocaleString()} so'm
+- Turlari bo'yicha: ${expenses.byCategory.map((c) => `${c.category}: ${c.amount.toLocaleString()}`).join(", ") || "ma'lumot yo'q"}
+${args.context ? `\nQo'shimcha kontekst: ${args.context}` : ""}
 
-Answer questions in the same language the user writes in (Uzbek, Russian, or Kazakh). Be concise, specific, and give actionable recommendations.`;
+QOIDALAR:
+- Foydalanuvchi qaysi tilda yozsa, o'sha tilda javob bering (o'zbek, rus yoki qoraqalpoq).
+- Qisqa va aniq bo'ling. Umumiy maslahat emas, shu raqamlarga asoslangan xulosa bering.
+- Muammo ko'rsangiz, uni nima qilish kerakligi bilan birga ayting.`;
 
     try {
-      const response = await openai.chat.completions.create({
-        model: "openai/gpt-5.6-luna",
-        reasoning_effort: "low",
+      const response = await anthropic.messages.create({
+        model: MODEL,
+        max_tokens: 2048,
+        system: systemPrompt,
         messages: [
-          { role: "system", content: bizContext },
-          { role: "user", content: args.question },
+          ...(args.history ?? []),
+          { role: "user" as const, content: args.question },
         ],
       });
-      return { answer: response.choices[0]?.message?.content ?? "Javob olishda xatolik" };
+
+      const answer = response.content
+        .filter((block): block is Anthropic.TextBlock => block.type === "text")
+        .map((block) => block.text)
+        .join("\n")
+        .trim();
+
+      return { answer: answer || "Javob olishda xatolik" };
     } catch (error) {
-      if (error instanceof OpenAI.APIError) {
+      if (error instanceof Anthropic.APIError) {
+        const msg =
+          error.status === 429
+            ? "So'rovlar chegarasi oshdi. Bir oz kutib qayta urining."
+            : error.status === 401
+              ? "AI kaliti noto'g'ri. Administratorga murojaat qiling."
+              : `AI xatoligi: ${error.message}`;
         // eslint-disable-next-line preserve-caught-error
-        throw new Error(`AI xatoligi: ${error.message}`);
+        throw new ConvexError({ code: "AI_ERROR", message: msg });
       }
       // eslint-disable-next-line preserve-caught-error
-      throw new Error("AI assistant ishlamayapti. Qayta urinib ko'ring.");
+      throw new ConvexError({
+        code: "AI_ERROR",
+        message: "AI yordamchi ishlamayapti. Qayta urinib ko'ring.",
+      });
     }
   },
 });

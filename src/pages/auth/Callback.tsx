@@ -1,44 +1,82 @@
-import { useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuthCallback } from "@usehercules/auth/react";
 import { useConvexAuth, useMutation } from "convex/react";
+import { useAuth } from "react-oidc-context";
 import { api } from "@/convex/_generated/api.js";
 import { Spinner } from "@/components/ui/spinner.tsx";
 import { Button } from "@/components/ui/button.tsx";
 
+/**
+ * OIDC redirect callback.
+ *
+ * react-oidc-context `AuthProvider` URL'dagi ?code=&state= ni avtomatik
+ * qayta ishlaydi. Bu sahifa faqat kutadi: OIDC tugagach → Convex auth
+ * tasdiqlangach → users jadvalini sinxronlaydi → bosh sahifaga o'tadi.
+ */
 export default function AuthCallback() {
   const navigate = useNavigate();
+  const oidc = useAuth();
   const { isAuthenticated: isConvexAuthenticated } = useConvexAuth();
   const updateCurrentUser = useMutation(api.users.updateCurrentUser);
 
-  const onSync = useCallback(async () => {
-    await updateCurrentUser();
-  }, [updateCurrentUser]);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const synced = useRef(false);
 
-  const navigateHome = useCallback(
-    () => navigate("/", { replace: true }),
-    [navigate],
-  );
+  const goHome = useCallback(() => navigate("/", { replace: true }), [navigate]);
 
-  const { status, error, retry } = useAuthCallback({
-    isBackendAuthenticated: isConvexAuthenticated,
-    onSync,
-    onSuccess: navigateHome,
-    onNoAuthParams: navigateHome,
-  });
+  useEffect(() => {
+    // OIDC hali ishlayapti
+    if (oidc.isLoading || oidc.activeNavigator) return;
 
-  if (status === "error" && error) {
+    // Login bo'lmagan holda bu sahifaga tushib qolgan
+    if (!oidc.isAuthenticated) {
+      if (!oidc.error) goHome();
+      return;
+    }
+
+    // Convex tokenni hali qabul qilmagan
+    if (!isConvexAuthenticated) return;
+
+    if (synced.current) return;
+    synced.current = true;
+
+    updateCurrentUser()
+      .then(goHome)
+      .catch((e: unknown) => {
+        synced.current = false;
+        setSyncError(e instanceof Error ? e.message : "Sinxronlashda xatolik");
+      });
+  }, [
+    oidc.isLoading,
+    oidc.isAuthenticated,
+    oidc.activeNavigator,
+    oidc.error,
+    isConvexAuthenticated,
+    updateCurrentUser,
+    goHome,
+  ]);
+
+  const error = syncError ?? oidc.error?.message;
+
+  if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-svh gap-6 px-4">
         <div className="flex flex-col items-center gap-2 text-center">
-          <p className="text-destructive font-medium">Something went wrong</p>
+          <p className="text-destructive font-medium">Xatolik yuz berdi</p>
           <p className="text-sm text-muted-foreground max-w-md">{error}</p>
         </div>
         <div className="flex gap-3">
-          <Button variant="secondary" onClick={navigateHome}>
-            Return home
+          <Button variant="secondary" onClick={goHome}>
+            Bosh sahifa
           </Button>
-          <Button onClick={retry}>Try again</Button>
+          <Button
+            onClick={() => {
+              setSyncError(null);
+              void oidc.signinRedirect();
+            }}
+          >
+            Qayta urinish
+          </Button>
         </div>
       </div>
     );
@@ -47,7 +85,7 @@ export default function AuthCallback() {
   return (
     <div className="flex flex-col items-center justify-center h-svh gap-4">
       <Spinner className="size-8" />
-      <p className="text-sm text-muted-foreground">Loading...</p>
+      <p className="text-sm text-muted-foreground">Yuklanmoqda...</p>
     </div>
   );
 }
