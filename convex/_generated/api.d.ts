@@ -40,6 +40,7 @@ import type * as sales_customers from "../sales/customers.js";
 import type * as sales_orders from "../sales/orders.js";
 import type * as sales_pos from "../sales/pos.js";
 import type * as tenant from "../tenant.js";
+import type * as userAdmin from "../userAdmin.js";
 import type * as users from "../users.js";
 import type * as warehouse_inventoryCounts from "../warehouse/inventoryCounts.js";
 import type * as warehouse_stock from "../warehouse/stock.js";
@@ -84,6 +85,7 @@ declare const fullApi: ApiFromModules<{
   "sales/orders": typeof sales_orders;
   "sales/pos": typeof sales_pos;
   tenant: typeof tenant;
+  userAdmin: typeof userAdmin;
   users: typeof users;
   "warehouse/inventoryCounts": typeof warehouse_inventoryCounts;
   "warehouse/stock": typeof warehouse_stock;

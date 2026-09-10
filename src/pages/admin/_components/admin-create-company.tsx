@@ -1,15 +1,15 @@
 /**
  * Admin Create Company — platform admins can provision a new company (tenant)
- * and assign a Business Owner by phone number (OIDC username).
+ * and assign a Business Owner by phone number (login identifikatori).
  *
  * Majburiy maydonlar:
  *   1. Kompaniya nomi
  *   2. Biznes egasining telefon raqami (username sifatida)
  *   3. Dastlabki parol
  *
- * MUHIM: kirish akkauntlari OIDC provayder konsolining Users bo'limidan
- * yaratiladi. Bu forma biznes egasi uchun akkaunt yaratish ko'rsatmasi va
- * kompaniya DB yozuvini birga boshqaradi.
+ * MUHIM: kirish akkauntlari Admin panel -> Foydalanuvchilar -> "Yangi
+ * foydalanuvchi" orqali yaratiladi. Bu forma kompaniya yozuvini yaratadi va
+ * biznes egasi uchun kerakli ma'lumotlarni ko'rsatadi.
  */
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -143,8 +143,9 @@ export default function AdminCreateCompany() {
           <p className="font-semibold text-blue-300">Muhim: kirish akkauntini ham yaratish kerak</p>
           <p>
             Bu forma faqat kompaniya yozuvini yaratadi. Biznes egasi tizimga kirishi uchun
-            OIDC provayder konsolining{" "}<strong>Users</strong>{" "}
-            bo'limida ham username=telefon, parol=quyidagi parol bilan akkaunt yarating.
+            <strong>{" "}Foydalanuvchilar{" "}</strong> bo'limidagi{" "}
+            <strong>"Yangi foydalanuvchi"</strong> tugmasi orqali telefon raqam va
+            parol bilan akkaunt oching.
           </p>
         </div>
       </div>
@@ -159,7 +160,7 @@ export default function AdminCreateCompany() {
             </p>
           </div>
           <p className="text-xs text-green-300/70">
-            Quyidagi ma'lumotlarni biznes egasiga bering va OIDC provayderda ham akkaunt oching:
+            Quyidagi ma'lumotlarni biznes egasiga bering va Foydalanuvchilar bo'limida akkaunt oching:
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <CredBox label="Telefon / Username" value={created.phone} />
@@ -217,7 +218,7 @@ export default function AdminCreateCompany() {
                     type="tel"
                   />
                   <p className="text-[11px] text-white/25">
-                    Bu telefon raqam OIDC provayderda username sifatida ishlatiladi
+                    Bu telefon raqam tizimga kirishda login sifatida ishlatiladi
                   </p>
                   {errors.ownerPhone && <p className="text-xs text-red-400">{errors.ownerPhone.message}</p>}
                 </div>
@@ -333,19 +334,17 @@ export default function AdminCreateCompany() {
         <CardHeader className="pb-2">
           <CardTitle className="text-sm text-white/80 flex items-center gap-2">
             <Info className="h-4 w-4 text-blue-400" />
-            OIDC provayderda akkaunt yaratish tartibi
+            Kirish akkaunti yaratish tartibi
           </CardTitle>
         </CardHeader>
         <CardContent>
           <ol className="space-y-2.5 text-xs text-white/50">
             {[
-              ["OIDC provayder konsoliga kiring", "Administrator akkaunti bilan kiring"],
-              ["Users bo'limini oching", "Foydalanuvchilarni boshqarish sahifasi"],
-              ["\"Username and password\" metodini yoqing", "Agar yoqilmagan bo'lsa, avval sozlamalardan yoqing"],
-              ["\"+ Add user\" tugmasini bosing", "Yangi foydalanuvchi yaratish formasi ochiladi"],
-              ["Username = telefon raqam", "Masalan: +998901234567"],
-              ["Parolni kiriting", "Yuqoridagi formada ko'rsatilgan parolni kiriting"],
-              ["Saqlang va biznes egasiga yuboring", "Endi biznes egasi shu ma'lumotlar bilan tizimga kira oladi"],
+              ["Admin panel -> Foydalanuvchilar", "Chap menyudagi Foydalanuvchilar bo'limi"],
+              ["\"Yangi foydalanuvchi\" tugmasini bosing", "O'ng yuqoridagi tugma"],
+              ["Telefon raqamni kiriting", "Masalan: +998901234567 — bu login bo'ladi"],
+              ["Parol o'ylab toping", "Kamida 8 ta belgi"],
+              ["Yarating va biznes egasiga yuboring", "Endi biznes egasi shu ma'lumotlar bilan tizimga kira oladi"],
             ].map(([title, desc], i) => (
               <li key={i} className="flex items-start gap-2.5">
                 <span className="h-5 w-5 rounded-full bg-white/10 text-white/50 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
