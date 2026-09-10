@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="uz">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Internet yo'q — BUM ERP</title>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0f0e1a;
+        color: #e2e8f0;
+        padding: 1.5rem;
+      }
+
+      .card {
+        text-align: center;
+        max-width: 380px;
+        width: 100%;
+        padding: 2.5rem 2rem;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 1.25rem;
+      }
+
+      .icon {
+        width: 80px;
+        height: 80px;
+        margin: 0 auto 1.5rem;
+        background: rgba(99, 102, 241, 0.15);
+        border-radius: 1.25rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .icon svg {
+        width: 40px;
+        height: 40px;
+        color: #818cf8;
+        stroke: #818cf8;
+        fill: none;
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      h1 {
+        font-size: 1.375rem;
+        font-weight: 700;
+        margin-bottom: 0.625rem;
+        color: #f1f5f9;
+      }
+
+      p {
+        font-size: 0.9rem;
+        color: #94a3b8;
+        line-height: 1.6;
+        margin-bottom: 1.75rem;
+      }
+
+      button {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.625rem 1.5rem;
+        background: #4f46e5;
+        color: #fff;
+        border: none;
+        border-radius: 0.625rem;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      button:hover { background: #4338ca; }
+
+      .badge {
+        display: inline-block;
+        margin-bottom: 1rem;
+        font-size: 0.7rem;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #6366f1;
+        background: rgba(99, 102, 241, 0.12);
+        border-radius: 999px;
+        padding: 0.25rem 0.75rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="icon">
+        <svg viewBox="0 0 24 24">
+          <path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0" />
+          <path d="M3.6 9h16.8M3.6 15h16.8" />
+          <path d="M11.5 3a17 17 0 0 0 0 18M12.5 3a17 17 0 0 1 0 18" />
+        </svg>
+      </div>
+      <span class="badge">BUM ERP</span>
+      <h1>Internet aloqasi yo'q</h1>
+      <p>
+        Tarmoq ulanishini tekshiring va qayta urinib ko'ring.
+        Ba'zi ma'lumotlar oflayn rejimda mavjud bo'lishi mumkin.
+      </p>
+      <button onclick="window.location.reload()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+          <path d="M21 3v5h-5"/>
+          <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+          <path d="M8 16H3v5"/>
+        </svg>
+        Qayta urinish
+      </button>
+    </div>
+  </body>
+</html>
