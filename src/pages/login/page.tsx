@@ -2,10 +2,9 @@
  * BUM ERP Login Page
  *
  * Bu sahifa foydalanuvchilarga BUM ERP uslubida login UI ko'rsatadi.
- * "Kirish" bosilganda Hercules Auth portali ochiladi — lekin unda
- * faqat "Username (telefon) + Parol" metodi ko'rsatilishi uchun
- * Hercules Dashboard → Users & Access → Auth Portal sozlamalarida
- * faqat "Username and password" metodi yoqilishi kerak.
+ * "Kirish" bosilganda OIDC provayderning login sahifasi ochiladi — unda
+ * faqat "Username (telefon) + Parol" metodi ko'rsatilishi uchun provayder
+ * konsolida boshqa kirish usullari o'chirib qo'yilishi kerak.
  *
  * Platform Admin uchun admin.bum-erp.uz alohida.
  */

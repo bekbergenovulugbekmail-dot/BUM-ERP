@@ -6,7 +6,7 @@
  *   - one or more members (employees / users)
  *
  * Registration flow:
- *   1. User signs in via Hercules Auth
+ *   1. User signs in via the OIDC provider
  *   2. No activeCompanyId → redirect to /onboarding
  *   3. Onboarding calls registerCompany → creates company + branch + membership
  *   4. Users.updateCurrentUser is patched with activeCompanyId

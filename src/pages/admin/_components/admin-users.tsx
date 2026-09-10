@@ -9,7 +9,7 @@ import { ConvexError } from "convex/values";
 import { toast } from "sonner";
 import {
   Search, Shield, ShieldOff, User, Building2,
-  Phone, KeyRound, Info, ExternalLink,
+  Phone, KeyRound, Info,
 } from "lucide-react";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -87,19 +87,10 @@ export default function AdminUsers() {
         <div className="text-xs text-blue-300/80 space-y-1">
           <p className="font-semibold text-blue-300">Parol tiklash haqida</p>
           <p>
-            Foydalanuvchi parolini unutsa, admin{" "}
-            <strong>Hercules Dashboard → Branding → Users</strong> bo'limidan
-            yangi parol o'rnatib beradi. SMS tiklash Hercules Auth'da mavjud emas.
+            Foydalanuvchi parolini unutsa, admin OIDC provayder konsolining{" "}
+            <strong>Users</strong> bo'limidan yangi parol o'rnatib beradi.
+            SMS orqali tiklash mavjud emas.
           </p>
-          <a
-            href="https://hercules.app/dashboard"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 underline"
-          >
-            <ExternalLink className="h-3 w-3" />
-            Hercules Dashboard → Users
-          </a>
         </div>
       </div>
 
@@ -226,9 +217,8 @@ export default function AdminUsers() {
                           size="sm"
                           variant="secondary"
                           onClick={() => {
-                            toast.info("Parolni tiklash: Hercules Dashboard → Branding → Users bo'limiga o'ting", {
+                            toast.info("Parolni tiklash: OIDC provayder konsoli → Users bo'limiga o'ting", {
                               duration: 6000,
-                              action: { label: "Dashboard", onClick: () => window.open("https://hercules.app/dashboard", "_blank") },
                             });
                           }}
                           className="bg-white/5 border-white/10 text-white/40 hover:text-white/70 h-7 text-xs"

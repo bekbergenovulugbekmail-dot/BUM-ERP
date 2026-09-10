@@ -18,7 +18,7 @@ export function getSubdomain(): string | null {
 export function isAdminSubdomain(): boolean {
   const sub = getSubdomain();
   if (sub === "admin") return true;
-  // Dev convenience: ?surface=admin on localhost / onhercules.app preview
+  // Dev convenience: ?surface=admin on localhost / preview hosts
   if (typeof window !== "undefined") {
     const sp = new URLSearchParams(window.location.search);
     if (sp.get("surface") === "admin") return true;

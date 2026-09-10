@@ -1,15 +1,15 @@
 /**
  * Admin Create Company — platform admins can provision a new company (tenant)
- * and assign a Business Owner by phone number (Hercules Auth username).
+ * and assign a Business Owner by phone number (OIDC username).
  *
  * Majburiy maydonlar:
  *   1. Kompaniya nomi
  *   2. Biznes egasining telefon raqami (username sifatida)
  *   3. Dastlabki parol
  *
- * MUHIM: Hercules Auth akkauntlari faqat Hercules Dashboard → Branding → Users
- * bo'limidan yaratiladi. Bu forma biznes egasi uchun akkaunt yaratish
- * ko'rsatmasi va kompaniya DB yozuvini birga boshqaradi.
+ * MUHIM: kirish akkauntlari OIDC provayder konsolining Users bo'limidan
+ * yaratiladi. Bu forma biznes egasi uchun akkaunt yaratish ko'rsatmasi va
+ * kompaniya DB yozuvini birga boshqaradi.
  */
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -22,7 +22,7 @@ import { ConvexError } from "convex/values";
 import { toast } from "sonner";
 import {
   Building2, PlusCircle, Phone, Lock, Eye, EyeOff,
-  Info, Copy, Check, ExternalLink, AlertCircle,
+  Info, Copy, Check, AlertCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -136,25 +136,16 @@ export default function AdminCreateCompany() {
         </p>
       </div>
 
-      {/* Hercules Auth notice */}
+      {/* OIDC akkaunt eslatmasi */}
       <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-500/8 border border-blue-500/20">
         <Info className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
         <div className="text-xs text-blue-300/80 space-y-1">
-          <p className="font-semibold text-blue-300">Muhim: Hercules Auth akkauntini ham yaratish kerak</p>
+          <p className="font-semibold text-blue-300">Muhim: kirish akkauntini ham yaratish kerak</p>
           <p>
             Bu forma faqat kompaniya yozuvini yaratadi. Biznes egasi tizimga kirishi uchun
-            {" "}<strong>Hercules Dashboard → Branding → Users</strong>{" "}
+            OIDC provayder konsolining{" "}<strong>Users</strong>{" "}
             bo'limida ham username=telefon, parol=quyidagi parol bilan akkaunt yarating.
           </p>
-          <a
-            href="https://hercules.app/dashboard"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 underline mt-1"
-          >
-            <ExternalLink className="h-3 w-3" />
-            Hercules Dashboard
-          </a>
         </div>
       </div>
 
@@ -168,7 +159,7 @@ export default function AdminCreateCompany() {
             </p>
           </div>
           <p className="text-xs text-green-300/70">
-            Quyidagi ma'lumotlarni biznes egasiga bering va Hercules Auth'da ham akkaunt oching:
+            Quyidagi ma'lumotlarni biznes egasiga bering va OIDC provayderda ham akkaunt oching:
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <CredBox label="Telefon / Username" value={created.phone} />
@@ -226,7 +217,7 @@ export default function AdminCreateCompany() {
                     type="tel"
                   />
                   <p className="text-[11px] text-white/25">
-                    Bu telefon raqam Hercules Auth'da username sifatida ishlatiladi
+                    Bu telefon raqam OIDC provayderda username sifatida ishlatiladi
                   </p>
                   {errors.ownerPhone && <p className="text-xs text-red-400">{errors.ownerPhone.message}</p>}
                 </div>
@@ -337,20 +328,20 @@ export default function AdminCreateCompany() {
         </Card>
       )}
 
-      {/* Hercules Auth step-by-step guide */}
+      {/* Akkaunt yaratish bo'yicha qadamlar */}
       <Card className="bg-white/5 border-white/8">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm text-white/80 flex items-center gap-2">
             <Info className="h-4 w-4 text-blue-400" />
-            Hercules Auth'da akkaunt yaratish tartibi
+            OIDC provayderda akkaunt yaratish tartibi
           </CardTitle>
         </CardHeader>
         <CardContent>
           <ol className="space-y-2.5 text-xs text-white/50">
             {[
-              ["Hercules.app ga o'ting", "https://hercules.app dashboard'iga kiring"],
-              ["Branding → Users bo'limini oching", "Chap menyu → Branding → Users"],
-              ["\"Username and password\" metodini yoqing", "Agar yoqilmagan bo'lsa, avval Configure tugmasini bosing"],
+              ["OIDC provayder konsoliga kiring", "Administrator akkaunti bilan kiring"],
+              ["Users bo'limini oching", "Foydalanuvchilarni boshqarish sahifasi"],
+              ["\"Username and password\" metodini yoqing", "Agar yoqilmagan bo'lsa, avval sozlamalardan yoqing"],
               ["\"+ Add user\" tugmasini bosing", "Yangi foydalanuvchi yaratish formasi ochiladi"],
               ["Username = telefon raqam", "Masalan: +998901234567"],
               ["Parolni kiriting", "Yuqoridagi formada ko'rsatilgan parolni kiriting"],

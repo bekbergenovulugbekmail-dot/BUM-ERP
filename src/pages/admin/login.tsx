@@ -136,7 +136,7 @@ function AdminSignInScreen({
           )}
 
           <p className="text-center text-xs text-white/25 mt-4 leading-relaxed">
-            Kirish uchun Hercules Auth orqali autentifikatsiya qilinadi
+            Kirish uchun OIDC provayder orqali autentifikatsiya qilinadi
           </p>
         </div>
 

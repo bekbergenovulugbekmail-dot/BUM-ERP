@@ -1,7 +1,7 @@
 /**
  * PWAInstallBanner — shows an install prompt for Chrome/Edge (beforeinstallprompt)
  * and instructions for iOS/Safari. Appears as a floating banner at the bottom.
- * Hides automatically when running inside the Hercules App Builder iframe.
+ * Hides automatically when running inside an app builder preview iframe.
  */
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";

@@ -5,7 +5,7 @@
  * has NOT yet set an activeCompanyId (or just logged in fresh).
  *
  * UX flow:
- *   1. User logs in via Hercules Auth
+ *   1. User logs in via the OIDC provider
  *   2. Auth callback → / → RootRedirect → /:lng
  *   3. ERPLayout guard detects no activeCompany → this page
  *   4. User picks a company → switchCompany mutation → /dashboard

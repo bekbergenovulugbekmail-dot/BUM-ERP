@@ -3,7 +3,7 @@
  *
  * Butun ilova auth'ga FAQAT shu fayl orqali murojaat qiladi.
  * Provayter almashtirilsa (Keycloak → Logto → Auth0), boshqa hech bir
- * fayl o'zgarmaydi. Hercules'dagi kabi lock-in takrorlanmasligi uchun.
+ * fayl o'zgarmaydi. Vendor lock-in takrorlanmasligi uchun.
  *
  * Asos: react-oidc-context (standart OIDC, hech kimga bog'lanmagan).
  */
@@ -51,7 +51,7 @@ export function useAuth() {
     error: oidc.error?.message,
     signin,
     signout,
-    // Hercules API bilan moslik uchun aliaslar
+    // Eski chaqiruvlar bilan moslik uchun aliaslar
     signinRedirect: signin,
     signoutRedirect: signout,
   };

@@ -12,7 +12,7 @@
  *  - 5 wrong attempts → 5 minute lockout
  *
  * IMPORTANT: PIN is a UI-only session unlock mechanism.
- * It cannot create a new Hercules Auth session or change userId/companyId.
+ * It cannot create a new OIDC session or change userId/companyId.
  */
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";

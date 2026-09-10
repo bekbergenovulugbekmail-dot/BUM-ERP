@@ -3,7 +3,7 @@
  * a textarea fallback for manual entry and USB HID scanners.
  *
  * NOTE: Camera scanning via BarcodeDetector doesn't work inside iframes
- * (Hercules App Builder preview). It works fine in the published app.
+ * (app builder preview iframe). It works fine in the published app.
  */
 import { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";

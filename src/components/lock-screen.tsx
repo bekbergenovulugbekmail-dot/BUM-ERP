@@ -147,8 +147,8 @@ export default function LockScreen({ onUnlocked }: LockScreenProps) {
     }
   };
 
-  // ── Password fallback (re-auth via Hercules Auth) ─────────────────────────
-  // In Hercules Auth, "password unlock" = signout + signIn redirect.
+  // ── Password fallback (re-auth via the OIDC provider) ─────────────────────
+  // With OIDC, "password unlock" = signout + signIn redirect.
   // The user will be redirected back after signing in again.
   const handlePasswordFallback = async () => {
     await signout();

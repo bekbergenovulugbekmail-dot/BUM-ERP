@@ -6,7 +6,7 @@
  *  - lock state (isLocked, lastActivePath)
  *  - PIN setup status (hasPIN from backend)
  *
- * IMPORTANT: lock is UI-only — Hercules Auth session stays alive.
+ * IMPORTANT: lock is UI-only — the OIDC session stays alive.
  * PIN or password required to unlock.
  */
 import { useCallback, useEffect, useRef, useState } from "react";

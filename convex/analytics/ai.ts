@@ -7,7 +7,7 @@ import { api } from "../_generated/api";
 
 /**
  * To'g'ridan-to'g'ri Anthropic API.
- * Hercules AI gateway'iga bog'liqlik olib tashlandi.
+ * Tashqi AI gateway'ga bog'liqlik yo'q — to'g'ridan-to'g'ri Anthropic API.
  *
  * Convex env: npx convex env set ANTHROPIC_API_KEY sk-ant-...
  */

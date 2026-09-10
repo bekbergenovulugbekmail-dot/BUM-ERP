@@ -6,7 +6,7 @@
  *   B. Platform admin with pre-existing data → Quick Setup card (1-click)
  *
  * Collected data (as per spec):
- *   USER: name/email/phone are already on the user record from Hercules Auth
+ *   USER: name/email/phone are already on the user record from the OIDC provider
  *   COMPANY: legalName, displayName, taxId, country, region, city, address, phone, email, currency, language
  *   BRANCH: name, address, phone, city
  */

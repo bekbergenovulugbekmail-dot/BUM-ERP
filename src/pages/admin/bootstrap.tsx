@@ -165,9 +165,9 @@ export default function AdminBootstrapPage({ userEmail, onBootstrapped }: Bootst
           </button>
           {showHelp && (
             <div className="px-4 pb-4 text-xs text-white/40 space-y-2 border-t border-white/6 pt-3">
-              <p>Hercules App Builder → <strong className="text-white/60">Advanced</strong> → <strong className="text-white/60">Secrets</strong></p>
-              <p>Key: <code className="text-primary bg-primary/10 px-1.5 py-0.5 rounded">PLATFORM_BOOTSTRAP_KEY</code></p>
-              <p>Value: o'zingiz belgilagan maxfiy kalit (kamida 12 belgi)</p>
+              <p>Convex backend muhit o'zgaruvchisi sifatida o'rnatiladi:</p>
+              <p><code className="text-primary bg-primary/10 px-1.5 py-0.5 rounded">npx convex env set PLATFORM_BOOTSTRAP_KEY &lt;kalit&gt;</code></p>
+              <p>Kalit: o'zingiz belgilagan maxfiy qiymat (kamida 12 belgi)</p>
             </div>
           )}
         </div>
