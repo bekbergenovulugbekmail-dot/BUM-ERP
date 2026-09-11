@@ -8,7 +8,7 @@
 | Branch | `feat/postgres-migration` |
 | Oxirgi yangilanish | 2026-09-11 |
 | Umumiy holat | 16 / 16 PHASE — kod tayyor; qolgan: brauzerda qo'lda sinov, production deploy va ma'lumot importi |
-| Ishlab turgan ilova | Production hali Convex'da (`main`). Bu branch'da frontend to'liq API'da, Convex kodi olib tashlangan |
+| Ishlab turgan ilova | Yangi versiya Railway'da ishlayapti: https://bum-web-production.up.railway.app (bum-erp.uz DNS o'zgarishini kutmoqda). Eski Convex versiyasi `main` da |
 
 **Holat belgilari:** ✅ tugallandi · 🟡 jarayonda · ⬜ boshlanmagan
 
@@ -604,8 +604,20 @@ Kod tomoni tugadi. Brauzerda qo'lda sinov, production deploy va ma'lumot importi
    - buxgalteriya: aylanma balansi teng (96 000 / 96 000), foyda 12 000, kassa 36 000
    - **topilgan kamchilik:** ombordagi qo'lda kirim (`POST /api/inventory/stock/movements`, `receive`) buxgalteriya yozuvi yaratmaydi — sotuvdan keyin 1200 "Tovar zaxirasi" −24 000 bo'ladi. Qarshi hisob tanlanishi kerak (masalan 3000 kapital — boshlang'ich qoldiq); xarid qabuli esa to'g'ri yozadi
    - qolgan: brauzerda qo'lda — `pnpm --filter @bum/api dev` va `pnpm dev`, `http://localhost:5173` (POS, fayl yuklash, sozlamalar, admin panel)
-2. **Production (foydalanuvchi kaliti kerak):**
-   - Convex tuzatishini (`main` `3f958f1`) deploy qilish
-   - Railway: PostgreSQL; API (`apps/api/Dockerfile`, pre-deploy `node dist/db/migrate.js`); web (`Dockerfile.web`, `API_UPSTREAM`); S3 bucket; env `.env.example` bo'yicha; app.* va admin.* domenlari web xizmatiga
-   - `main` checkout'da `npx convex export` → `db:import-convex --dry-run` → hisobotni ko'rib chiqish → import → foydalanuvchilarga PIN qayta o'rnatilishi haqida xabar
+2. **Production — Railway'ga deploy qilindi (2026-09-11):**
+   - Qarorlar: darhol bum-erp.uz ga; Convex ma'lumotlari ko'chirilmaydi (noldan boshlanadi); logto o'chiriladi (Railway panelida foydalanuvchi)
+   - Railway loyihasi `bum-erp`, muhit `production`:
+     - `bum-api` — `apps/api/Dockerfile` (`RAILWAY_DOCKERFILE_PATH`), `PORT=3000`, ichki manzil `bum-api.railway.internal`, ommaviy domeni yo'q. Konteyner ishga tushishda migratsiya → bootstrap admin seed → server
+     - `bum-web` — `Dockerfile.web`, `PORT=8080`, `API_UPSTREAM=http://bum-api.railway.internal:3000`; domenlar: `bum-web-production.up.railway.app`, `bum-erp.uz`, `www.bum-erp.uz`
+     - `Postgres--bSX` — ilova bazasi (`bum-api` `DATABASE_URL` shunga havola). Eski `Postgres` — logto'niki
+     - eski `BUM-ERP` (bo'sh, build xatosi) va `logto` — o'chirish uchun
+   - Deploy usuli: repo ildizidan `railway up --project <id> --environment production --service bum-api|bum-web` (GitHub ulanmagan)
+   - Tekshirildi: sahifalar 200, `/api` proksi, bootstrap admin (+998999635353) HTTPS orqali kirdi, cookie `Secure` + `HttpOnly`. Admin paroli foydalanuvchi kompyuterida `Documents\BUM-ERP-production-admin.txt`
+   - Tuzatildi: nginx API manzilini har so'rovda DNS orqali aniqlaydi (web API'dan oldin ishga tushganda yiqilardi)
+   - **Qolgan:**
+     - DNS (foydalanuvchi): `@` → CNAME `lfc59hrl.up.railway.app` (A 95.46.96.77 o'chiriladi), `www` → CNAME `br5m6hjv.up.railway.app`, TXT `_railway-verify` va `_railway-verify.www` (tokenlar `railway domain status <domen> --service bum-web --json` da)
+     - Railway tarifida bir xizmatga 2 ta shaxsiy domen — `admin.bum-erp.uz` qo'shilmadi; admin panel `https://bum-erp.uz/uz/admin`. Kirish sahifasidagi "admin.bum-erp.uz" havolasi yangilanishi kerak
+     - logto o'chirilgach `auth.bum-erp.uz` va `logto-admin.bum-erp.uz` CNAME yozuvlarini ham o'chirish (osilib qolgan CNAME — subdomen egallash xavfi)
+     - fayl saqlash (S3) sozlanmagan — rasm/chek yuklash 503; SMS (Eskiz) va AI kalitlari yo'q — tegishli funksiyalar o'chiq
+     - Convex RBAC tuzatishi (`main` `3f958f1`) — Convex ishlatilmasa kerak emas
 3. **PR:** `feat/postgres-migration` → `main` — production'ga o'tish kuni kelishilgach
