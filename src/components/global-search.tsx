@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { useNavigate, useParams } from "react-router-dom";
 import { useDebounce } from "@/hooks/use-debounce.ts";
+import { useApiQuery } from "@/lib/query.ts";
 import { Package, Users, Truck } from "lucide-react";
 import {
   CommandDialog,
@@ -18,6 +17,11 @@ type GlobalSearchProps = {
   onClose: () => void;
 };
 
+type ProductHit = { id: string; name: string; sku: string | null };
+type PartyHit = { id: string; name: string; phone: string | null };
+
+const LIMIT = 8;
+
 export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
   const { lng = "uz" } = useParams<{ lng: string }>();
   const navigate = useNavigate();
@@ -29,47 +33,26 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
     if (!open) setQuery("");
   }, [open]);
 
-  // Products: use server-side search via the search arg
-  const products = useQuery(
-    api.products.products.list,
-    open && debouncedQuery.length >= 2
-      ? {
-          search: debouncedQuery,
-          paginationOpts: { numItems: 8, cursor: null },
-        }
-      : "skip",
-  );
+  // Hammasi server tomonida qidiriladi; ruxsat bo'lmagan bo'lim (403) shunchaki bo'sh chiqadi
+  const active = open && debouncedQuery.length >= 2;
+  const search = { search: debouncedQuery, limit: LIMIT };
 
-  // Suppliers: fetch all, filter client-side
-  const allSuppliers = useQuery(
-    api.purchase.suppliers.list,
-    open ? {} : "skip",
-  );
+  const products = useApiQuery<{ products: ProductHit[] }>(active ? "/api/catalog/products" : null, search).data
+    ?.products;
+  const customers = useApiQuery<{ customers: PartyHit[] }>(active ? "/api/sales/customers" : null, search).data
+    ?.customers;
+  const suppliers = useApiQuery<{ suppliers: PartyHit[] }>(active ? "/api/purchase/suppliers" : null, {
+    search: debouncedQuery,
+  }).data?.suppliers;
 
-  // Customers: use server-side search when available
-  const customers = useQuery(
-    api.sales.customers.list,
-    open && debouncedQuery.length >= 2
-      ? { search: debouncedQuery, limit: 8 }
-      : "skip",
-  );
-
-  const filteredSuppliers =
-    debouncedQuery.length >= 2 && allSuppliers
-      ? allSuppliers
-          .filter((s) =>
-            s.name.toLowerCase().includes(debouncedQuery.toLowerCase()),
-          )
-          .slice(0, 8)
-      : [];
-
-  const productResults = products?.page ?? [];
+  const productResults = products ?? [];
   const customerResults = customers ?? [];
+  const supplierResults = (suppliers ?? []).slice(0, LIMIT);
 
   const hasResults =
     productResults.length > 0 ||
     customerResults.length > 0 ||
-    filteredSuppliers.length > 0;
+    supplierResults.length > 0;
 
   const navigateTo = useCallback(
     (path: string) => {
@@ -89,6 +72,7 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
       description="Mahsulot, mijoz yoki yetkazib beruvchini qidiring"
       showCloseButton={false}
     >
+      {/* Server allaqachon saralagan — cmdk o'z filtri bilan natijani yashirmasin */}
       <CommandInput
         placeholder="Qidiruv..."
         value={query}
@@ -105,8 +89,8 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
           <CommandGroup heading="Mahsulotlar">
             {productResults.map((p) => (
               <CommandItem
-                key={p._id}
-                value={`product-${p._id}`}
+                key={p.id}
+                value={`product-${p.id} ${p.name} ${p.sku ?? ""}`}
                 onSelect={() => navigateTo("products")}
                 className="cursor-pointer"
               >
@@ -128,8 +112,8 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
           <CommandGroup heading="Mijozlar">
             {customerResults.map((c) => (
               <CommandItem
-                key={c._id}
-                value={`customer-${c._id}`}
+                key={c.id}
+                value={`customer-${c.id} ${c.name} ${c.phone ?? ""}`}
                 onSelect={() => navigateTo("sales")}
                 className="cursor-pointer"
               >
@@ -147,12 +131,12 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
           </CommandGroup>
         )}
 
-        {filteredSuppliers.length > 0 && (
+        {supplierResults.length > 0 && (
           <CommandGroup heading="Yetkazib beruvchilar">
-            {filteredSuppliers.map((s) => (
+            {supplierResults.map((s) => (
               <CommandItem
-                key={s._id}
-                value={`supplier-${s._id}`}
+                key={s.id}
+                value={`supplier-${s.id} ${s.name} ${s.phone ?? ""}`}
                 onSelect={() => navigateTo("purchase")}
                 className="cursor-pointer"
               >

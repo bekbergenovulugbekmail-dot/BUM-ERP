@@ -12,8 +12,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { cn } from "@/lib/utils.ts";
-import { useMutation, useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
+import { api } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import type { AppNotification } from "@/hooks/use-notifications.ts";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { uz } from "date-fns/locale";
@@ -83,10 +84,16 @@ export default function NotificationsSection() {
   });
 
   const [refreshing, setRefreshing] = useState(false);
-  const triggerAlerts = useMutation(api.notifications.triggerSmartAlerts);
-  const markAllRead = useMutation(api.notifications.markAllRead);
-  const notifications = useQuery(api.notifications.list, { limit: 5 });
-  const unreadCount = useQuery(api.notifications.unreadCount, {});
+  const triggerAlerts = useApiMutation(
+    () => api.post<{ throttled?: boolean }>("/api/notifications/refresh"),
+    { invalidate: ["/api/notifications"] },
+  );
+  const markAllRead = useApiMutation(() => api.post("/api/notifications/read-all"), {
+    invalidate: ["/api/notifications"],
+  });
+  const notifications = useApiQuery<{ notifications: AppNotification[] }>("/api/notifications", { limit: 5 }).data
+    ?.notifications;
+  const unreadCount = useApiQuery<{ count: number }>("/api/notifications/unread-count").data?.count;
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(enabled));
@@ -100,8 +107,9 @@ export default function NotificationsSection() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      await triggerAlerts({});
-      toast.success("Bildirishnomalar yangilandi");
+      const result = await triggerAlerts.mutateAsync();
+      if (result?.throttled) toast.info("Ogohlantirishlar yaqinda tekshirilgan — 5 daqiqadan keyin qayta urinib ko'ring");
+      else toast.success("Bildirishnomalar yangilandi");
     } catch {
       toast.error("Xatolik yuz berdi");
     } finally {
@@ -110,7 +118,7 @@ export default function NotificationsSection() {
   };
 
   const handleMarkAllRead = async () => {
-    await markAllRead({});
+    await markAllRead.mutateAsync();
     toast.success("Barchasi o'qilgan deb belgilandi");
   };
 
@@ -240,7 +248,7 @@ export default function NotificationsSection() {
           ) : (
             notifications.slice(0, 5).map((n) => (
               <div
-                key={n._id}
+                key={n.id}
                 className={cn(
                   "flex items-start gap-3 p-3 rounded-xl border transition-colors",
                   !n.isRead ? "bg-primary/5 border-primary/20" : "bg-muted/30 border-transparent"

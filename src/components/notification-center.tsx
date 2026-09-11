@@ -62,19 +62,19 @@ export default function NotificationCenter() {
     : notifications;
 
   const handleMarkRead = async (id: string) => {
-    await markRead({ id: id as never });
+    await markRead(id);
   };
 
   const handleRemove = async (id: string) => {
-    await remove({ id: id as never });
+    await remove(id);
   };
 
   const handleMarkAllRead = async () => {
-    await markAllRead({});
+    await markAllRead();
   };
 
   const handleClearRead = async () => {
-    await clearRead({});
+    await clearRead();
   };
 
   return (
@@ -218,7 +218,7 @@ export default function NotificationCenter() {
 
                     return (
                       <motion.div
-                        key={notif._id}
+                        key={notif.id}
                         layout
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
@@ -253,7 +253,7 @@ export default function NotificationCenter() {
                         <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                           {!notif.isRead && (
                             <button
-                              onClick={() => handleMarkRead(notif._id)}
+                              onClick={() => handleMarkRead(notif.id)}
                               className="h-6 w-6 rounded-md hover:bg-muted flex items-center justify-center cursor-pointer"
                               title="O'qilgan deb belgilash"
                             >
@@ -261,7 +261,7 @@ export default function NotificationCenter() {
                             </button>
                           )}
                           <button
-                            onClick={() => handleRemove(notif._id)}
+                            onClick={() => handleRemove(notif.id)}
                             className="h-6 w-6 rounded-md hover:bg-destructive/10 flex items-center justify-center cursor-pointer"
                             title="O'chirish"
                           >
