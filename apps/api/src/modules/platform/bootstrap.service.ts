@@ -1,66 +1,37 @@
 /**
- * Birinchi platforma adminini yaratish (bootstrap).
+ * Bootstrap admin — tizimning ildiz platforma admini.
  *
- * Convex'dagi companies.platformSetAdminByEmail muqobili, lekin:
- *  - ochiq ro'yxatdan o'tish yo'q, shuning uchun foydalanuvchi shu yerda
- *    yaratiladi; raqam band bo'lsa — hisob egasining paroli talab qilinadi;
- *  - faqat hali birorta platforma admini YO'Q bo'lsa ishlaydi;
- *  - kalit doimiy vaqtda solishtiriladi (Convex'da oddiy `!==` edi);
- *  - global standart rollar (DEFAULT_ROLES) shu yerda qo'shiladi — Convex'da
- *    bu birinchi foydalanuvchi kirganda (users.updateCurrentUser) bo'lardi.
+ * Manba: .env dagi BOOTSTRAP_ADMIN_PHONE / BOOTSTRAP_ADMIN_PASSWORD
+ * (`pnpm --filter @bum/api db:seed`). Seed idempotent: .env ni o'zgartirib qayta
+ * ishga tushirish telefon va parolni yangilaydi. Parol faqat argon2id xeshi
+ * sifatida saqlanadi; almashganda eski sessiyalar bekor qilinadi.
  *
- * Ikki kirish yo'li shu servisni chaqiradi: HTTP (PLATFORM_BOOTSTRAP_KEY bilan)
- * va CLI (`platform:bootstrap` — bazaga kirish huquqining o'zi yetarli).
+ * Himoya ikki qatlamda:
+ *  - API: hech bir endpoint bootstrap adminni o'zgartira olmaydi (users/user-admin.service.ts);
+ *  - baza (0002 migratsiya): CHECK — bootstrap admin doim faol platforma admini;
+ *    partial unique — bittadan ortiq bo'lmaydi; trigger — o'chirish va
+ *    bootstrap maqomini olish taqiqlangan.
+ *
+ * Convex'dagi PLATFORM_BOOTSTRAP_KEY oqimi (platformSetAdminByEmail) shu bilan almashtirildi.
  */
-import { createHash, timingSafeEqual } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
-import {
-  DEFAULT_ROLES,
-  badRequest,
-  conflict,
-  isValidPhone,
-  normalizePhone,
-  unauthenticated,
-} from "@bum/shared";
-import { db } from "../../db/client.js";
+import { DEFAULT_ROLES, conflict } from "@bum/shared";
 import { roles, users } from "../../db/schema/platform.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
-import type { SessionUser } from "../auth/session.js";
+import { revokeUserSessions, type SessionUser } from "../auth/session.js";
+import { assertPasswordPolicy, normalizePhoneOrThrow } from "../users/user-admin.service.js";
 
-/** Convex'dagi userAdmin.MIN_PASSWORD bilan bir xil. */
-export const MIN_PASSWORD_LENGTH = 8;
+export type SeedAction = "created" | "promoted" | "updated" | "unchanged";
 
-export type BootstrapInput = {
-  phone: string;
-  password: string;
-  name?: string | null;
-};
-
-export type BootstrapResult = {
+export type SeedResult = {
   user: SessionUser;
-  /** false — mavjud hisobga admin huquqi berildi. */
-  created: boolean;
+  action: SeedAction;
+  /** Nima o'zgardi: "phone", "name", "password" — qiymatlarning o'zi emas. */
+  changes: string[];
   rolesSeeded: number;
 };
-
-export function bootstrapKeyMatches(provided: string, expected: string | undefined): boolean {
-  if (!expected) return false;
-  // Avval xeshlanadi — timingSafeEqual teng uzunlik talab qiladi va kalit uzunligi oshkor bo'lmaydi
-  const a = createHash("sha256").update(provided).digest();
-  const b = createHash("sha256").update(expected).digest();
-  return timingSafeEqual(a, b);
-}
-
-export async function hasPlatformAdmin(conn: DbOrTx = db): Promise<boolean> {
-  const [row] = await conn
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.isPlatformAdmin, true))
-    .limit(1);
-  return row !== undefined;
-}
 
 /**
  * Global (company_id NULL) standart rollarni qo'shadi, mavjudlariga tegmaydi.
@@ -84,65 +55,106 @@ export async function seedGlobalRoles(conn: DbOrTx): Promise<number> {
   return inserted.length;
 }
 
-/** Tranzaksiyani chaqiruvchi ochadi (HTTP controller yoki CLI). */
-export async function bootstrapPlatformAdmin(
+async function passwordIsCurrent(user: SessionUser, password: string): Promise<boolean> {
+  return (
+    user.passwordHash !== null &&
+    user.passwordAlgo === "argon2id" &&
+    (await verifyPassword(user.passwordHash, "argon2id", password))
+  );
+}
+
+export async function seedBootstrapAdmin(
   tx: Tx,
-  input: BootstrapInput,
-  meta: RequestMeta & { via: "http" | "cli" },
-): Promise<BootstrapResult> {
-  const phone = normalizePhone(input.phone);
-  if (!phone || !isValidPhone(phone)) throw badRequest("Telefon raqam noto'g'ri formatda");
-  if (input.password.length < MIN_PASSWORD_LENGTH) {
-    throw badRequest(`Parol kamida ${MIN_PASSWORD_LENGTH} ta belgidan iborat bo'lishi kerak`);
+  input: { phone: string; password: string; name?: string | null },
+  meta: RequestMeta,
+): Promise<SeedResult> {
+  const phone = normalizePhoneOrThrow(input.phone);
+  assertPasswordPolicy(input.password);
+  const name = input.name?.trim() || null;
+
+  // Bir vaqtda ikki seed (masalan, parallel deploy) bir-birini buzmasligi uchun
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('bootstrap-admin-seed'))`);
+
+  const [root] = await tx
+    .select()
+    .from(users)
+    .where(eq(users.isBootstrapAdmin, true))
+    .limit(1)
+    .for("update");
+  const [phoneOwner] = await tx.select().from(users).where(eq(users.phone, phone)).limit(1).for("update");
+
+  if (root && phoneOwner && phoneOwner.id !== root.id) {
+    throw conflict("BOOTSTRAP_ADMIN_PHONE boshqa foydalanuvchiga tegishli");
   }
 
-  // Ikki parallel bootstrap ikkita admin yaratib qo'ymasligi uchun
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('platform-bootstrap'))`);
-  if (await hasPlatformAdmin(tx)) throw conflict("Platforma admini allaqachon mavjud");
-
-  const name = input.name?.trim() || null;
-  const [existing] = await tx.select().from(users).where(eq(users.phone, phone)).limit(1).for("update");
-
+  const target = root ?? phoneOwner;
+  const changes: string[] = [];
   let user: SessionUser;
-  if (existing) {
-    // Kalit egasi boshqa odamning hisobini egallab olmasligi uchun
-    const ownsAccount =
-      existing.passwordHash !== null &&
-      (await verifyPassword(existing.passwordHash, existing.passwordAlgo, input.password));
-    if (!ownsAccount) throw unauthenticated("Bu raqam band. Hisob egasining parolini kiriting");
-    if (!existing.isActive) throw badRequest("Hisob faol emas");
+  let action: SeedAction;
 
-    const [updated] = await tx
-      .update(users)
-      .set({ isPlatformAdmin: true, ...(name && !existing.name ? { name } : {}) })
-      .where(eq(users.id, existing.id))
-      .returning();
-    user = updated!;
-  } else {
+  if (!target) {
     const [inserted] = await tx
       .insert(users)
-      .values({ phone, name, passwordHash: await hashPassword(input.password), isPlatformAdmin: true })
+      .values({
+        phone,
+        name,
+        passwordHash: await hashPassword(input.password),
+        passwordChangedAt: new Date(),
+        isPlatformAdmin: true,
+        isBootstrapAdmin: true,
+      })
       .returning();
     user = inserted!;
+    action = "created";
+  } else {
+    const set: Partial<typeof users.$inferInsert> = {};
+    if (target.phone !== phone) {
+      set.phone = phone;
+      changes.push("phone");
+    }
+    if (name && target.name !== name) {
+      set.name = name;
+      changes.push("name");
+    }
+    if (!(await passwordIsCurrent(target, input.password))) {
+      set.passwordHash = await hashPassword(input.password);
+      set.passwordAlgo = "argon2id";
+      set.passwordChangedAt = new Date();
+      changes.push("password");
+    }
+
+    // Mavjud hisob (shu raqamdagi) bootstrap adminga aylantiriladi
+    const promoting = !target.isBootstrapAdmin;
+    if (promoting) Object.assign(set, { isBootstrapAdmin: true, isPlatformAdmin: true, isActive: true });
+
+    if (Object.keys(set).length > 0) {
+      const [updated] = await tx.update(users).set(set).where(eq(users.id, target.id)).returning();
+      user = updated!;
+    } else {
+      user = target;
+    }
+
+    if (changes.includes("password")) await revokeUserSessions(tx, user.id);
+    action = promoting ? "promoted" : changes.length > 0 ? "updated" : "unchanged";
   }
 
   const rolesSeeded = await seedGlobalRoles(tx);
-  const created = !existing;
 
-  await writeAuditLog(
-    {
-      userId: user.id,
-      userName: user.name,
-      action: "PLATFORM_ADMIN_BOOTSTRAP",
-      resource: "users",
-      resourceId: user.id,
-      severity: "warning",
-      details: { via: meta.via, created, rolesSeeded },
-      ipAddress: meta.ipAddress,
-      userAgent: meta.userAgent,
-    },
-    tx,
-  );
+  if (action !== "unchanged") {
+    await writeAuditLog(
+      {
+        userId: user.id,
+        userName: user.name,
+        action: "BOOTSTRAP_ADMIN_SEEDED",
+        resource: "users",
+        resourceId: user.id,
+        severity: "warning",
+        details: { action, changes },
+        ...meta,
+      },
+      tx,
+    );
+  }
 
-  return { user, created, rolesSeeded };
+  return { user, action, changes, rolesSeeded };
 }

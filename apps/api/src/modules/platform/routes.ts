@@ -1,64 +1,91 @@
 /**
- * /api/platform — hozircha faqat bootstrap. PHASE 5 da kompaniya va
- * platforma admin boshqaruvi shu yerga qo'shiladi.
+ * /api/platform — platforma admini. Barcha marshrutlar `requirePlatformAdmin` ortida.
  *
- * Convex mosligi:
- *   companies.platformAdminCount      → GET  /bootstrap  ({ enabled, needed })
- *   companies.platformSetAdminByEmail → POST /bootstrap
+ *   GET   /companies                  kompaniyalar egalari bilan
+ *   POST  /companies                  kompaniya + egasi (platformCreateCompany)
+ *   PATCH /users/:userId              telefon raqamini o'zgartirish
+ *   POST  /users/:userId/password     parolni tiklash — sessiyalar bekor
+ *   POST  /users/:userId/status       faollashtirish / bloklash
+ *
+ * Bootstrap admin va boshqa platforma adminlariga bu marshrutlar ta'sir qilmaydi
+ * (users/user-admin.service.ts). Bootstrap admin `db:seed` orqali yaratiladi.
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { forbidden, notFound } from "@bum/shared";
+import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
-import { env } from "../../env.js";
 import { requestMeta } from "../../shared/audit.js";
-import { assertNotLimited, recordHit } from "../../shared/rate-limit.js";
-import { startSession } from "../auth/auth.service.js";
-import { setSessionCookie } from "../auth/session.js";
+import { authOf, requirePlatformAdmin } from "../auth/guard.js";
 import {
-  bootstrapKeyMatches,
-  bootstrapPlatformAdmin,
-  hasPlatformAdmin,
-} from "./bootstrap.service.js";
+  platformChangePhone,
+  platformResetPassword,
+  platformSetActive,
+} from "../users/user-admin.service.js";
+import { createCompanyWithOwner, listCompanies } from "./company.service.js";
 
-const BOOTSTRAP_WINDOW_SECONDS = 15 * 60;
-/** Kalitni tanlab topishga qarshi: bitta IP dan 15 daqiqada 5 ta xato. */
-const MAX_BOOTSTRAP_FAILS_PER_IP = 5;
+const optionalText = (max: number) => z.string().trim().min(1).max(max).optional();
 
-const bootstrapBody = z.object({
-  secretKey: z.string().min(1).max(512),
-  phone: z.string().min(1).max(32),
-  password: z.string().min(1).max(256),
-  name: z.string().max(200).optional(),
+const createCompanyBody = z.object({
+  name: z.string().trim().min(1).max(200),
+  legalName: optionalText(300),
+  taxId: optionalText(32),
+  phone: optionalText(20),
+  address: optionalText(500),
+  city: optionalText(100),
+  region: optionalText(100),
+  country: z.string().length(2).optional(),
+  currency: z.string().length(3).optional(),
+  language: z.string().length(2).optional(),
+  branchName: optionalText(200),
+  owner: z.object({
+    phone: z.string().min(1).max(32),
+    password: z.string().min(1).max(256),
+    name: z.string().max(200).optional(),
+  }),
 });
+const userParams = z.object({ userId: z.uuid() });
+const updateUserBody = z.object({ phone: z.string().min(1).max(32) });
+const resetPasswordBody = z.object({ newPassword: z.string().min(1).max(256) });
+const statusBody = z.object({ isActive: z.boolean() });
 
 export async function platformRoutes(app: FastifyInstance): Promise<void> {
-  /** Faqat ikki boolean — PII yo'q (Convex'da adminlar soni qaytardi). */
-  app.get("/bootstrap", async () => ({
-    enabled: Boolean(env.PLATFORM_BOOTSTRAP_KEY),
-    needed: !(await hasPlatformAdmin()),
-  }));
+  app.addHook("preHandler", requirePlatformAdmin);
 
-  app.post("/bootstrap", async (req, reply) => {
-    if (!env.PLATFORM_BOOTSTRAP_KEY) throw notFound("Bootstrap o'chirilgan");
+  app.get("/companies", async () => ({ companies: await listCompanies(db) }));
 
-    const body = bootstrapBody.parse(req.body);
-    const meta = requestMeta(req);
+  app.post("/companies", async (req, reply) => {
+    const body = createCompanyBody.parse(req.body);
+    const { user } = authOf(req);
+    const created = await withTransaction((tx) =>
+      createCompanyWithOwner(tx, user, body, requestMeta(req)),
+    );
+    reply.status(201);
+    return created;
+  });
 
-    const bucket = `bootstrap:ip:${meta.ipAddress}`;
-    await assertNotLimited(bucket, MAX_BOOTSTRAP_FAILS_PER_IP, BOOTSTRAP_WINDOW_SECONDS);
-    if (!bootstrapKeyMatches(body.secretKey, env.PLATFORM_BOOTSTRAP_KEY)) {
-      await recordHit(bucket, BOOTSTRAP_WINDOW_SECONDS);
-      throw forbidden("Noto'g'ri maxfiy kalit");
-    }
+  app.patch("/users/:userId", async (req) => {
+    const { userId } = userParams.parse(req.params);
+    const { phone } = updateUserBody.parse(req.body);
+    const { user } = authOf(req);
+    const updated = await withTransaction((tx) =>
+      platformChangePhone(tx, user, userId, phone, requestMeta(req)),
+    );
+    return { user: { id: updated.id, phone: updated.phone, name: updated.name } };
+  });
 
-    // Admin yaratiladi va shu tranzaksiyada tizimga kiritiladi
-    const { session, me } = await withTransaction(async (tx) => {
-      const { user } = await bootstrapPlatformAdmin(tx, body, { ...meta, via: "http" });
-      return startSession(tx, { user, upgradedHash: null }, meta);
-    });
+  app.post("/users/:userId/password", async (req) => {
+    const { userId } = userParams.parse(req.params);
+    const { newPassword } = resetPasswordBody.parse(req.body);
+    const { user } = authOf(req);
+    await withTransaction((tx) => platformResetPassword(tx, user, userId, newPassword, requestMeta(req)));
+    return { ok: true };
+  });
 
-    setSessionCookie(reply, session.token, session.expiresAt);
-    return { user: me };
+  app.post("/users/:userId/status", async (req) => {
+    const { userId } = userParams.parse(req.params);
+    const { isActive } = statusBody.parse(req.body);
+    const { user } = authOf(req);
+    await withTransaction((tx) => platformSetActive(tx, user, userId, isActive, requestMeta(req)));
+    return { ok: true };
   });
 }

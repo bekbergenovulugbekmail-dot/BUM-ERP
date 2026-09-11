@@ -10,7 +10,6 @@ import { AppError } from "@bum/shared";
 import { isProd } from "../env.js";
 import { logger } from "./logger.js";
 
-
 function hasStatusCode(e: unknown): e is { statusCode: number } {
   return (
     typeof e === "object" &&
@@ -18,6 +17,15 @@ function hasStatusCode(e: unknown): e is { statusCode: number } {
     "statusCode" in e &&
     typeof (e as { statusCode: unknown }).statusCode === "number"
   );
+}
+
+/** PostgreSQL xato kodi — Drizzle uni `cause` ichiga o'rab beradi. */
+function pgErrorCode(e: unknown): string | undefined {
+  const codeOf = (x: unknown) =>
+    typeof x === "object" && x !== null && "code" in x && typeof x.code === "string"
+      ? x.code
+      : undefined;
+  return codeOf(e) ?? (typeof e === "object" && e !== null && "cause" in e ? codeOf(e.cause) : undefined);
 }
 
 export function registerErrorHandler(app: FastifyInstance): void {
@@ -34,6 +42,14 @@ export function registerErrorHandler(app: FastifyInstance): void {
           field: i.path.join("."),
           message: i.message,
         })),
+      });
+    }
+
+    // unique_violation — servis tekshiruvidan keyingi poyga (masalan, bir xil telefon)
+    if (pgErrorCode(err) === "23505") {
+      return reply.status(409).send({
+        code: "CONFLICT",
+        message: "Bunday yozuv allaqachon mavjud",
       });
     }
 

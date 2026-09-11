@@ -40,7 +40,13 @@ const schema = z.object({
   STORAGE_ACCESS_KEY: z.string().optional(),
   STORAGE_SECRET_KEY: z.string().optional(),
 
-  PLATFORM_BOOTSTRAP_KEY: z.string().optional(),
+  /**
+   * Bootstrap (ildiz) platforma admini — `db:seed` shu qiymatlardan yaratadi
+   * yoki yangilaydi. Server ishlashi uchun shart emas.
+   */
+  BOOTSTRAP_ADMIN_PHONE: z.string().optional(),
+  BOOTSTRAP_ADMIN_PASSWORD: z.string().optional(),
+  BOOTSTRAP_ADMIN_NAME: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

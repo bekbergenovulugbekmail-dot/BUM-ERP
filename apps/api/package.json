@@ -12,7 +12,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "platform:bootstrap": "tsx src/cli/platform-bootstrap.ts"
+    "db:seed": "tsx src/cli/seed-bootstrap-admin.ts"
   },
   "dependencies": {
     "@bum/shared": "workspace:*",

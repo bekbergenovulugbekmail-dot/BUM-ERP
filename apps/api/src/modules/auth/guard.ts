@@ -6,7 +6,7 @@
  *   });
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { unauthenticated } from "@bum/shared";
+import { forbidden, unauthenticated } from "@bum/shared";
 import {
   SESSION_COOKIE,
   clearSessionCookie,
@@ -30,6 +30,11 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Pro
     throw unauthenticated();
   }
   req.auth = session;
+}
+
+export async function requirePlatformAdmin(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+  await requireAuth(req, reply);
+  if (!req.auth?.user.isPlatformAdmin) throw forbidden("Faqat platforma admini uchun");
 }
 
 /** `requireAuth` dan keyin — sessiyani tip jihatdan aniq qaytaradi. */

@@ -8,8 +8,6 @@ export default defineConfig({
     env: {
       NODE_ENV: "test",
       DATABASE_URL: testDatabaseUrl(),
-      // test/bootstrap.test.ts dagi TEST_BOOTSTRAP_KEY bilan bir xil
-      PLATFORM_BOOTSTRAP_KEY: "test-bootstrap-key",
     },
     // Hamma test fayllari bitta test bazasini tozalaydi — parallel ishlamasin
     fileParallelism: false,

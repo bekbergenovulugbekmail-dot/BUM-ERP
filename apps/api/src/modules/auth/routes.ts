@@ -1,10 +1,11 @@
 /**
- * /api/auth — kirish, chiqish, joriy foydalanuvchi va PIN.
+ * /api/auth — kirish, chiqish, joriy foydalanuvchi, o'z paroli va PIN.
  *
  * Convex mosligi:
  *   signIn("password")        → POST /login
  *   signOut                   → POST /logout
  *   users.getCurrentUser      → GET  /me
+ *   (yangi)                   → POST /password     o'z parolini eski parol bilan
  *   pin.getSecuritySettings   → GET  /security
  *   pin.setPin                → POST /pin
  *   pin.changePin             → POST /pin/change
@@ -17,6 +18,7 @@ import { z } from "zod";
 import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
+import { changeOwnPassword, verifyCurrentPassword } from "../users/user-admin.service.js";
 import { authenticate, buildMe, startSession } from "./auth.service.js";
 import { authOf, requireAuth } from "./guard.js";
 import {
@@ -31,6 +33,7 @@ import {
 import {
   SESSION_COOKIE,
   clearSessionCookie,
+  createSession,
   revokeSession,
   setSessionCookie,
 } from "./session.js";
@@ -38,6 +41,10 @@ import {
 const loginBody = z.object({
   phone: z.string().min(1).max(32),
   password: z.string().min(1).max(256),
+});
+const changePasswordBody = z.object({
+  currentPassword: z.string().min(1).max(256),
+  newPassword: z.string().min(1).max(256),
 });
 const setPinBody = z.object({ pin: z.string() });
 const changePinBody = z.object({ oldPin: z.string(), newPin: z.string() });
@@ -70,6 +77,22 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/me", { preHandler: requireAuth }, async (req) => {
     return { user: await buildMe(db, authOf(req).user) };
+  });
+
+  app.post("/password", { preHandler: requireAuth }, async (req, reply) => {
+    const body = changePasswordBody.parse(req.body);
+    const { user } = authOf(req);
+    const meta = requestMeta(req);
+
+    await verifyCurrentPassword(user, body.currentPassword);
+    const session = await withTransaction(async (tx) => {
+      await changeOwnPassword(tx, user, body.currentPassword, body.newPassword, meta);
+      // Barcha sessiyalar bekor qilindi — joriy qurilma uchun yangisi ochiladi
+      return createSession(tx, { userId: user.id, ...meta });
+    });
+
+    setSessionCookie(reply, session.token, session.expiresAt);
+    return { ok: true };
   });
 
   // ─── PIN ─────────────────────────────────────────────────────────────────

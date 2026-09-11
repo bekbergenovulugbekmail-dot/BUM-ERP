@@ -5,9 +5,10 @@
  * `users`, `companies` va `sessions` — tenantdan YUQORIDA turadi, ya'ni
  * ularda `company_id` yo'q. Qolgan hamma narsada bor.
  */
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -49,6 +50,11 @@ export const users = pgTable(
 
     isActive: boolean("is_active").notNull().default(true),
     isPlatformAdmin: boolean("is_platform_admin").notNull().default(false),
+    /**
+     * Ildiz platforma admini — .env dan seed qilinadi (`db:seed`). API orqali
+     * o'zgartirilmaydi; bazada o'chirish va maqomini olish trigger bilan taqiqlangan.
+     */
+    isBootstrapAdmin: boolean("is_bootstrap_admin").notNull().default(false),
 
     activeCompanyId: uuid("active_company_id"),
 
@@ -66,6 +72,15 @@ export const users = pgTable(
     uniqueIndex("users_phone_key").on(t.phone),
     uniqueIndex("users_legacy_id_key").on(t.legacyId),
     index("users_active_company_idx").on(t.activeCompanyId),
+    /** Bootstrap admin faqat bitta bo'ladi. */
+    uniqueIndex("users_single_bootstrap_admin_key")
+      .on(t.isBootstrapAdmin)
+      .where(sql`${t.isBootstrapAdmin}`),
+    /** Bootstrap admin doim faol platforma admini — adminlikni olish yoki bloklash imkonsiz. */
+    check(
+      "users_bootstrap_admin_active_platform_admin",
+      sql`NOT ${t.isBootstrapAdmin} OR (${t.isPlatformAdmin} AND ${t.isActive})`,
+    ),
   ],
 );
 

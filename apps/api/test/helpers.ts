@@ -52,3 +52,48 @@ export async function signedIn(app: FastifyInstance, overrides: NewUser = {}) {
   if (!cookie) throw new Error("Test foydalanuvchisi kira olmadi");
   return { ...created, cookie };
 }
+
+export function me(app: FastifyInstance, cookie: string) {
+  return app.inject({ method: "GET", url: "/api/auth/me", headers: { cookie } });
+}
+
+/** Platforma admini API orqali kompaniya va egasini yaratadi, egasi tizimga kiradi. */
+export async function createCompany(
+  app: FastifyInstance,
+  adminCookie: string,
+  input: { name?: string; ownerPhone?: string; ownerPassword?: string } = {},
+) {
+  seq += 1;
+  const owner = {
+    phone: input.ownerPhone ?? `+99891${String(seq).padStart(7, "0")}`,
+    password: input.ownerPassword ?? "egasi-parol-123",
+    name: `Ega ${seq}`,
+  };
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/platform/companies",
+    headers: { cookie: adminCookie },
+    payload: { name: input.name ?? `Kompaniya ${seq}`, owner },
+  });
+  if (res.statusCode !== 201) throw new Error(`Kompaniya yaratilmadi: ${res.statusCode} ${res.body}`);
+  const body = res.json() as { company: { id: string; slug: string }; owner: { id: string } };
+
+  const { cookie } = await login(app, owner.phone, owner.password);
+  if (!cookie) throw new Error("Kompaniya egasi kira olmadi");
+
+  return {
+    companyId: body.company.id,
+    slug: body.company.slug,
+    owner: { ...owner, id: body.owner.id },
+    ownerCookie: cookie,
+  };
+}
+
+let phoneSeq = 0;
+
+/** Testlar orasida takrorlanmaydigan telefon raqam. */
+export function uniquePhone(prefix = "93"): string {
+  phoneSeq += 1;
+  return `+998${prefix}${String(phoneSeq).padStart(7, "0")}`;
+}

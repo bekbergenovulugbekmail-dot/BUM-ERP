@@ -4,12 +4,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_ROLES } from "@bum/shared";
 import { closeDb, db } from "../src/db/client.js";
 import { auditLogs, roles, users } from "../src/db/schema/platform.js";
-import { bootstrapKeyMatches, seedGlobalRoles } from "../src/modules/platform/bootstrap.service.js";
+import { withTransaction } from "../src/db/transaction.js";
+import { seedBootstrapAdmin, seedGlobalRoles } from "../src/modules/platform/bootstrap.service.js";
 import { buildServer } from "../src/server.js";
-import { createUser, resetDatabase } from "./helpers.js";
-
-/** vitest.config.ts dagi PLATFORM_BOOTSTRAP_KEY. */
-const TEST_BOOTSTRAP_KEY = "test-bootstrap-key";
+import { createUser, login, me, resetDatabase, signedIn } from "./helpers.js";
 
 let app: FastifyInstance;
 
@@ -25,100 +23,141 @@ afterAll(async () => {
 
 beforeEach(resetDatabase);
 
-const valid = {
-  secretKey: TEST_BOOTSTRAP_KEY,
-  phone: "+998901000001",
-  password: "admin-parol-123",
-  name: "Birinchi admin",
-};
+const meta = { ipAddress: "test", userAgent: null };
+const ROOT = { phone: "+998901000001", password: "root-parol-123", name: "Ildiz admin" };
 
-const bootstrap = (payload: object) =>
-  app.inject({ method: "POST", url: "/api/platform/bootstrap", payload });
+const seed = (input: Partial<typeof ROOT> = {}) =>
+  withTransaction((tx) => seedBootstrapAdmin(tx, { ...ROOT, ...input }, meta));
 
-const status = async () =>
-  (await app.inject({ method: "GET", url: "/api/platform/bootstrap" })).json();
+const seedAudits = () =>
+  db.select().from(auditLogs).where(eq(auditLogs.action, "BOOTSTRAP_ADMIN_SEEDED"));
 
-const countUsers = async () => (await db.select({ id: users.id }).from(users)).length;
+describe("db:seed — bootstrap admin", () => {
+  it("yaratadi: platforma admini, argon2id xesh, global rollar, audit", async () => {
+    const result = await seed();
+    expect(result).toMatchObject({ action: "created", changes: [], rolesSeeded: DEFAULT_ROLES.length });
+    expect(result.user).toMatchObject({
+      phone: ROOT.phone,
+      name: ROOT.name,
+      isPlatformAdmin: true,
+      isBootstrapAdmin: true,
+      isActive: true,
+    });
+    expect(result.user.passwordHash).toMatch(/^\$argon2id\$/);
 
-describe("GET /api/platform/bootstrap", () => {
-  it("admin yo'qligida kerakligini, keyin kerak emasligini ko'rsatadi", async () => {
-    expect(await status()).toEqual({ enabled: true, needed: true });
-    expect((await bootstrap(valid)).statusCode).toBe(200);
-    expect(await status()).toEqual({ enabled: true, needed: false });
+    // Parol ochiq holda hech qayerda saqlanmaydi
+    const rows = await db.select().from(users);
+    const audits = await seedAudits();
+    expect(JSON.stringify(rows)).not.toContain(ROOT.password);
+    expect(JSON.stringify(audits)).not.toContain(ROOT.password);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.details).toEqual({ action: "created", changes: [] });
+
+    expect((await login(app, "90 100 00 01", ROOT.password)).res.statusCode).toBe(200);
+  });
+
+  it("takroriy seed hech narsani o'zgartirmaydi va audit yozmaydi", async () => {
+    await seed();
+    const again = await seed();
+    expect(again).toMatchObject({ action: "unchanged", changes: [], rolesSeeded: 0 });
+    expect(await db.select().from(users)).toHaveLength(1);
+    expect(await seedAudits()).toHaveLength(1);
+  });
+
+  it(".env dagi parol o'zgarsa — xesh almashadi va barcha sessiyalar bekor qilinadi", async () => {
+    await seed();
+    const { cookie } = await login(app, ROOT.phone, ROOT.password);
+    expect((await me(app, cookie!)).statusCode).toBe(200);
+
+    const rotated = await seed({ password: "yangi-root-parol-456" });
+    expect(rotated).toMatchObject({ action: "updated", changes: ["password"] });
+
+    expect((await me(app, cookie!)).statusCode).toBe(401);
+    expect((await login(app, ROOT.phone, ROOT.password)).res.statusCode).toBe(401);
+    expect((await login(app, ROOT.phone, "yangi-root-parol-456")).res.statusCode).toBe(200);
+  });
+
+  it(".env dagi telefon o'zgarsa — o'sha hisobning raqami yangilanadi", async () => {
+    const { user } = await seed();
+    const moved = await seed({ phone: "+998901000002" });
+    expect(moved).toMatchObject({ action: "updated", changes: ["phone"] });
+    expect(moved.user.id).toBe(user.id);
+    expect(await db.select().from(users)).toHaveLength(1);
+  });
+
+  it("raqam mavjud hisobga tegishli bo'lsa — uni bootstrap admin qiladi, parol .env dan", async () => {
+    const existing = await createUser({ phone: ROOT.phone, password: "eski-parol-789" });
+    const promoted = await seed();
+
+    expect(promoted.action).toBe("promoted");
+    expect(promoted.user).toMatchObject({ id: existing.user.id, isBootstrapAdmin: true, isPlatformAdmin: true });
+    expect((await login(app, ROOT.phone, "eski-parol-789")).res.statusCode).toBe(401);
+    expect((await login(app, ROOT.phone, ROOT.password)).res.statusCode).toBe(200);
+  });
+
+  it("bootstrap admin bor, .env raqami esa boshqa foydalanuvchiniki — CONFLICT", async () => {
+    await seed();
+    const other = await createUser();
+    await expect(seed({ phone: other.phone })).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("qisqa parol va noto'g'ri raqamni rad etadi", async () => {
+    await expect(seed({ password: "1234567" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(seed({ phone: "abc" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(await db.select().from(users)).toHaveLength(0);
   });
 });
 
-describe("POST /api/platform/bootstrap", () => {
-  it("adminni yaratadi, rollarni qo'shadi, audit yozadi va tizimga kiritadi", async () => {
-    const res = await bootstrap(valid);
-    expect(res.statusCode).toBe(200);
-    expect(res.json().user).toMatchObject({ phone: valid.phone, name: valid.name, isPlatformAdmin: true });
+describe("Bootstrap admin — baza darajasidagi himoya", () => {
+  it("o'chirib, adminlikni olib, bloklab yoki maqomini olib bo'lmaydi", async () => {
+    const { user } = await seed();
+    const byId = eq(users.id, user.id);
 
-    const cookie = res.cookies.find((c) => c.name === "bum_session");
-    expect(cookie?.value).toBeTruthy();
-    const me = await app.inject({
-      method: "GET",
-      url: "/api/auth/me",
-      headers: { cookie: `bum_session=${cookie!.value}` },
+    await expect(db.delete(users).where(byId)).rejects.toThrow();
+    await expect(db.update(users).set({ isPlatformAdmin: false }).where(byId)).rejects.toThrow();
+    await expect(db.update(users).set({ isActive: false }).where(byId)).rejects.toThrow();
+    await expect(db.update(users).set({ isBootstrapAdmin: false }).where(byId)).rejects.toThrow();
+
+    const [row] = await db.select().from(users).where(byId);
+    expect(row).toMatchObject({ isBootstrapAdmin: true, isPlatformAdmin: true, isActive: true });
+  });
+
+  it("ikkinchi bootstrap admin bo'lmaydi", async () => {
+    await seed();
+    await expect(
+      db.insert(users).values({ phone: "+998901000009", isPlatformAdmin: true, isBootstrapAdmin: true }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("Bootstrap admin — API darajasidagi himoya", () => {
+  it("o'z parolini API orqali o'zgartira olmaydi", async () => {
+    await seed();
+    const { cookie } = await login(app, ROOT.phone, ROOT.password);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/auth/password",
+      headers: { cookie: cookie! },
+      payload: { currentPassword: ROOT.password, newPassword: "boshqa-parol-000" },
     });
-    expect(me.json().user.isPlatformAdmin).toBe(true);
-
-    const [admin] = await db.select().from(users).where(eq(users.phone, valid.phone));
-    expect(admin!.passwordHash).toMatch(/^\$argon2id\$/);
-
-    const globalRoles = await db.select().from(roles).where(isNull(roles.companyId));
-    expect(globalRoles.map((r) => r.name).sort()).toEqual(DEFAULT_ROLES.map((r) => r.name).sort());
-
-    const [audit] = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.action, "PLATFORM_ADMIN_BOOTSTRAP"));
-    expect(audit).toMatchObject({ userId: admin!.id, severity: "warning" });
-    expect(audit!.details).toMatchObject({ via: "http", created: true, rolesSeeded: DEFAULT_ROLES.length });
-  });
-
-  it("admin mavjud bo'lsa ikkinchi marta ishlamaydi (409)", async () => {
-    expect((await bootstrap(valid)).statusCode).toBe(200);
-    const again = await bootstrap({ ...valid, phone: "+998901000002" });
-    expect(again.statusCode).toBe(409);
-    expect(again.json().code).toBe("CONFLICT");
-    expect(await countUsers()).toBe(1);
-  });
-
-  it("noto'g'ri kalit — 403, hech narsa yaratilmaydi", async () => {
-    const res = await bootstrap({ ...valid, secretKey: "boshqa-kalit" });
     expect(res.statusCode).toBe(403);
-    expect(res.cookies.find((c) => c.name === "bum_session")).toBeUndefined();
-    expect(await countUsers()).toBe(0);
   });
 
-  it("5 ta noto'g'ri kalitdan keyin to'g'ri kalit ham bloklanadi", async () => {
-    for (let i = 0; i < 5; i++) {
-      expect((await bootstrap({ ...valid, secretKey: `xato-${i}` })).statusCode).toBe(403);
+  it("boshqa platforma admini uning parolini, raqamini va holatini o'zgartira olmaydi", async () => {
+    const { user: root } = await seed();
+    const admin = await signedIn(app, { isPlatformAdmin: true });
+    const headers = { cookie: admin.cookie };
+
+    const attempts = [
+      app.inject({ method: "POST", url: `/api/platform/users/${root.id}/password`, headers, payload: { newPassword: "egallash-parol-1" } }),
+      app.inject({ method: "PATCH", url: `/api/platform/users/${root.id}`, headers, payload: { phone: "+998909999999" } }),
+      app.inject({ method: "POST", url: `/api/platform/users/${root.id}/status`, headers, payload: { isActive: false } }),
+    ];
+    for (const res of await Promise.all(attempts)) {
+      expect(res.statusCode).toBe(403);
+      expect(res.json().message).toBe("Bootstrap admin faqat .env orqali boshqariladi");
     }
-    const res = await bootstrap(valid);
-    expect(res.statusCode).toBe(429);
-    expect(await countUsers()).toBe(0);
-  });
-
-  it("qisqa parol va noto'g'ri raqamni 400 bilan rad etadi", async () => {
-    expect((await bootstrap({ ...valid, password: "1234567" })).statusCode).toBe(400);
-    expect((await bootstrap({ ...valid, phone: "abc" })).statusCode).toBe(400);
-    expect(await countUsers()).toBe(0);
-  });
-
-  it("band raqam: egasining paroli bo'lmasa rad etadi, bo'lsa admin qiladi", async () => {
-    const { user, phone, password } = await createUser({ name: "Mavjud" });
-
-    const wrong = await bootstrap({ ...valid, phone, password: "boshqa-parol-99" });
-    expect(wrong.statusCode).toBe(401);
-    const [stillRegular] = await db.select().from(users).where(eq(users.id, user.id));
-    expect(stillRegular!.isPlatformAdmin).toBe(false);
-
-    const ok = await bootstrap({ ...valid, phone, password });
-    expect(ok.statusCode).toBe(200);
-    expect(ok.json().user).toMatchObject({ id: user.id, name: "Mavjud", isPlatformAdmin: true });
-    expect(await countUsers()).toBe(1);
+    expect((await login(app, ROOT.phone, ROOT.password)).res.statusCode).toBe(200);
   });
 });
 
@@ -138,14 +177,5 @@ describe("Global rollar", () => {
       .from(roles)
       .where(and(isNull(roles.companyId), eq(roles.name, "Sinov roli")));
     expect(rows[0]!.n).toBe(1);
-  });
-});
-
-describe("bootstrapKeyMatches", () => {
-  it("kalit sozlanmagan bo'lsa hech qachon mos kelmaydi", () => {
-    expect(bootstrapKeyMatches("", undefined)).toBe(false);
-    expect(bootstrapKeyMatches("har-qanday", undefined)).toBe(false);
-    expect(bootstrapKeyMatches("a", "b")).toBe(false);
-    expect(bootstrapKeyMatches("bir-xil", "bir-xil")).toBe(true);
   });
 });
