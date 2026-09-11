@@ -27,6 +27,7 @@ import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
 import { unitFactorToBase } from "../catalog/conversions.js";
+import { assertProductsInScope, categoryScope, productScopeCondition } from "../catalog/category-scope.js";
 import type { TenantContext } from "../company/tenant.js";
 import { allowedWarehouses, assertWarehouseAccess } from "./warehouses.service.js";
 
@@ -187,6 +188,7 @@ export async function listStock(
         eq(stockLevels.companyId, tenant.company.id),
         eq(stockLevels.warehouseId, options.warehouseId),
         eq(products.isActive, true),
+        productScopeCondition(await categoryScope(conn, tenant)),
         options.lowStockOnly ? sql`${stockLevels.quantity} <= ${products.minStock}` : undefined,
         pattern
           ? or(ilike(products.name, pattern), ilike(products.sku, pattern), ilike(products.barcode, pattern))
@@ -200,7 +202,13 @@ export async function productStock(conn: DbOrTx, tenant: TenantContext, productI
   const [product] = await conn
     .select({ id: products.id })
     .from(products)
-    .where(and(eq(products.id, productId), eq(products.companyId, tenant.company.id)))
+    .where(
+      and(
+        eq(products.id, productId),
+        eq(products.companyId, tenant.company.id),
+        productScopeCondition(await categoryScope(conn, tenant)),
+      ),
+    )
     .limit(1);
   if (!product) throw notFound("Mahsulot topilmadi");
 
@@ -241,6 +249,7 @@ export async function warehouseStats(conn: DbOrTx, tenant: TenantContext, wareho
         eq(stockLevels.companyId, tenant.company.id),
         eq(stockLevels.warehouseId, warehouseId),
         eq(products.isActive, true),
+        productScopeCondition(await categoryScope(conn, tenant)),
       ),
     );
   return stats!;
@@ -280,6 +289,7 @@ export async function listMovements(
         options.warehouseId ? eq(stockMovements.warehouseId, options.warehouseId) : undefined,
         allowed ? inArray(stockMovements.warehouseId, allowed) : undefined,
         options.productId ? eq(stockMovements.productId, options.productId) : undefined,
+        productScopeCondition(await categoryScope(conn, tenant)),
         options.type ? eq(stockMovements.type, options.type) : undefined,
         after
           ? or(
@@ -347,6 +357,7 @@ export async function recordManualMovement(
   meta: RequestMeta,
 ) {
   assertWarehouseAccess(tenant, input.warehouseId);
+  await assertProductsInScope(tx, tenant, [input.productId]);
   const { unitId, ...move } = input;
   const base = await toBaseUnit(tx, tenant.company.id, input);
   const result = await moveStock(tx, tenant.company.id, tenant.user.id, {
@@ -395,6 +406,7 @@ export async function transferStock(
   if (input.fromWarehouseId === input.toWarehouseId) throw badRequest("Bir xil ombor tanlandi");
   assertWarehouseAccess(tenant, input.fromWarehouseId);
   assertWarehouseAccess(tenant, input.toWarehouseId);
+  await assertProductsInScope(tx, tenant, [input.productId]);
 
   // Ikki qarama-qarshi o'tkazma deadlock bermasligi uchun qulflar doim bir xil tartibda
   await tx

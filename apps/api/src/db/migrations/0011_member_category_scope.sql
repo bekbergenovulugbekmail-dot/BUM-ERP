@@ -1,0 +1,1 @@
+ALTER TABLE "company_members" ADD COLUMN "allowed_category_ids" uuid[] DEFAULT '{}' NOT NULL;

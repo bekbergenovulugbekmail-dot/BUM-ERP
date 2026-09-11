@@ -12,6 +12,7 @@ import { brands, categories, products } from "../../db/schema/catalog.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import type { TenantContext } from "../company/tenant.js";
+import { assertCategoryInScope, categoryScope } from "./category-scope.js";
 
 const MAX_CATEGORY_DEPTH = 50;
 
@@ -51,7 +52,9 @@ export async function listCategories(conn: DbOrTx, tenant: TenantContext, includ
       ),
     )
     .orderBy(categories.sortOrder, categories.name);
-  return rows.map(withoutLegacy);
+  // Cheklangan xodim faqat o'z kategoriyalarini (ichkilari bilan) ko'radi
+  const scope = await categoryScope(conn, tenant);
+  return (scope === null ? rows : rows.filter((c) => scope.includes(c.id))).map(withoutLegacy);
 }
 
 async function loadCategory(conn: DbOrTx, tenant: TenantContext, id: string) {
@@ -87,6 +90,9 @@ export type CategoryInput = {
 };
 
 export async function createCategory(tx: Tx, tenant: TenantContext, input: CategoryInput, meta: RequestMeta) {
+  // Cheklangan xodim faqat o'z kategoriyasi ichida yangi kategoriya ochadi
+  const scope = await categoryScope(tx, tenant);
+  if (scope !== null) assertCategoryInScope(scope, input.parentId);
   if (input.parentId) await assertValidParent(tx, tenant, input.parentId);
 
   const [category] = await tx
@@ -118,6 +124,9 @@ export async function updateCategory(
 ) {
   const category = await loadCategory(tx, tenant, id);
   if (!category) throw notFound("Kategoriya topilmadi");
+  const scope = await categoryScope(tx, tenant);
+  assertCategoryInScope(scope, id);
+  if (patch.parentId !== undefined) assertCategoryInScope(scope, patch.parentId);
   if (patch.parentId) await assertValidParent(tx, tenant, patch.parentId, id);
 
   const [updated] = await tx
@@ -138,6 +147,8 @@ export async function updateCategory(
 export async function deleteCategory(tx: Tx, tenant: TenantContext, id: string, meta: RequestMeta) {
   const category = await loadCategory(tx, tenant, id);
   if (!category) throw notFound("Kategoriya topilmadi");
+
+  assertCategoryInScope(await categoryScope(tx, tenant), id);
 
   const [[usedByProducts], [children]] = await Promise.all([
     tx

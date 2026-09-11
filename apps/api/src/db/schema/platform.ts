@@ -281,6 +281,8 @@ export const companyMembers = pgTable(
     branchId: uuid("branch_id").references(() => branches.id, { onDelete: "set null" }),
     /** Bo'sh massiv = barcha omborlarga ruxsat. */
     allowedWarehouseIds: uuid("allowed_warehouse_ids").array().notNull().default([]),
+    /** Mas'ul kategoriyalar (ichki kategoriyalari bilan). Bo'sh massiv = barcha kategoriyalar. */
+    allowedCategoryIds: uuid("allowed_category_ids").array().notNull().default([]),
 
     isActive: boolean("is_active").notNull().default(true),
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull(),

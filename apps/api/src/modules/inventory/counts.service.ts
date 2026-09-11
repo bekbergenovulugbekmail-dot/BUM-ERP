@@ -18,6 +18,7 @@ import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import type { TenantContext } from "../company/tenant.js";
 import { moveStock } from "./stock.service.js";
+import { assertProductsInScope, categoryScope, productScopeCondition } from "../catalog/category-scope.js";
 import { allowedWarehouses, assertWarehouseAccess } from "./warehouses.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...countFields } = getTableColumns(inventoryCounts);
@@ -96,7 +97,13 @@ export async function getCount(conn: DbOrTx, tenant: TenantContext, countId: str
     .from(inventoryCountItems)
     .innerJoin(products, eq(products.id, inventoryCountItems.productId))
     .innerJoin(units, eq(units.id, products.baseUnitId))
-    .where(and(eq(inventoryCountItems.countId, countId), eq(inventoryCountItems.companyId, tenant.company.id)))
+    .where(
+      and(
+        eq(inventoryCountItems.countId, countId),
+        eq(inventoryCountItems.companyId, tenant.company.id),
+        productScopeCondition(await categoryScope(conn, tenant)),
+      ),
+    )
     .orderBy(products.name);
   return { ...count, warehouseName: warehouse?.name ?? null, items };
 }
@@ -136,6 +143,8 @@ export async function createCount(
         eq(stockLevels.companyId, tenant.company.id),
         eq(stockLevels.warehouseId, warehouse.id),
         eq(products.isActive, true),
+        // Cheklangan xodimning hisobiga faqat uning kategoriyalaridagi mahsulotlar kiradi
+        productScopeCondition(await categoryScope(tx, tenant)),
       ),
     );
   if (levels.length > 0) {
@@ -163,6 +172,7 @@ export async function addCountItem(tx: Tx, tenant: TenantContext, countId: strin
     .where(and(eq(products.id, productId), eq(products.companyId, tenant.company.id)))
     .limit(1);
   if (!product) throw badRequest("Mahsulot topilmadi");
+  await assertProductsInScope(tx, tenant, [product.id]);
 
   const [level] = await tx
     .select({ quantity: stockLevels.quantity })
@@ -194,6 +204,13 @@ export async function updateCountItem(
 ) {
   const count = await loadCount(tx, tenant, countId, true);
   assertEditable(count);
+
+  const [existing] = await tx
+    .select({ productId: inventoryCountItems.productId })
+    .from(inventoryCountItems)
+    .where(and(eq(inventoryCountItems.id, itemId), eq(inventoryCountItems.countId, countId)))
+    .limit(1);
+  if (existing) await assertProductsInScope(tx, tenant, [existing.productId]);
 
   const [item] = await tx
     .update(inventoryCountItems)
@@ -255,6 +272,8 @@ export async function applyCount(tx: Tx, tenant: TenantContext, countId: string,
     .select({ productId: inventoryCountItems.productId, countedQty: inventoryCountItems.countedQty })
     .from(inventoryCountItems)
     .where(and(eq(inventoryCountItems.countId, countId), isNotNull(inventoryCountItems.countedQty)));
+  // Cheklangan xodim boshqa kategoriyadagi sanalgan qatorlari bor hisobni qo'llay olmaydi
+  await assertProductsInScope(tx, tenant, items.map((i) => i.productId));
 
   let adjusted = 0;
   for (const item of items) {

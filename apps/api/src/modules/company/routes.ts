@@ -107,9 +107,13 @@ const employeeBody = z.object({
   role: z.string().min(1).max(100).optional(),
 });
 const memberPatchBody = z.strictObject({
+  name: z.string().trim().max(200).nullable().optional(),
+  phone: z.string().min(1).max(32).optional(),
   role: z.string().min(1).max(100).optional(),
   branchId: z.uuid().nullable().optional(),
   allowedWarehouseIds: z.array(z.uuid()).max(500).optional(),
+  /** Mas'ul kategoriyalar; bo'sh — barcha kategoriyalar. */
+  allowedCategoryIds: z.array(z.uuid()).max(500).optional(),
   isActive: z.boolean().optional(),
 });
 const userParams = z.object({ userId: z.uuid() });
@@ -162,6 +166,7 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
         companyRole: tenant.membership.companyRole,
         branchId: tenant.membership.branchId,
         allowedWarehouseIds: tenant.membership.allowedWarehouseIds,
+        allowedCategoryIds: tenant.membership.allowedCategoryIds,
       },
       permissions: await effectivePermissions(db, tenant),
     };
@@ -254,6 +259,7 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
         companyRole: member.companyRole,
         branchId: member.branchId,
         allowedWarehouseIds: member.allowedWarehouseIds,
+        allowedCategoryIds: member.allowedCategoryIds,
         isActive: member.isActive,
       },
     };

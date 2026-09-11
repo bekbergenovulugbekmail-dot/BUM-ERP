@@ -63,7 +63,7 @@ export async function loadUserForUpdate(tx: Tx, userId: string): Promise<Session
   return user;
 }
 
-async function assertPhoneFree(conn: DbOrTx, phone: string, exceptUserId?: string): Promise<void> {
+export async function assertPhoneFree(conn: DbOrTx, phone: string, exceptUserId?: string): Promise<void> {
   const condition = exceptUserId
     ? and(eq(users.phone, phone), ne(users.id, exceptUserId))
     : eq(users.phone, phone);
@@ -280,15 +280,15 @@ export async function resolveOwnedCompany(conn: DbOrTx, user: SessionUser): Prom
 
 /**
  * Ega shu foydalanuvchini boshqara oladimi.
- * `password` — hisob darajasidagi amal: xodim boshqa kompaniyaga ham a'zo
- * bo'lsa taqiqlanadi. `membership` — faqat shu kompaniyadagi a'zolik.
+ * `password` va `account` (ism, telefon) — hisob darajasidagi amal: xodim boshqa
+ * kompaniyaga ham a'zo bo'lsa taqiqlanadi. `membership` — faqat shu kompaniyadagi a'zolik.
  */
 export async function assertOwnerMayManage(
   tx: Tx,
   company: OwnedCompany,
   owner: SessionUser,
   target: SessionUser,
-  purpose: "password" | "membership",
+  purpose: "password" | "account" | "membership",
 ): Promise<void> {
   const memberships = await tx
     .select({ companyId: companyMembers.companyId, companyRole: companyMembers.companyRole })
@@ -305,15 +305,21 @@ export async function assertOwnerMayManage(
     throw forbidden(
       purpose === "password"
         ? "O'z parolingizni /api/auth/password orqali o'zgartiring"
-        : "O'z a'zoligingizni o'zgartirib bo'lmaydi",
+        : purpose === "account"
+          ? "O'z ism va telefoningizni bu yerda o'zgartirib bo'lmaydi"
+          : "O'z a'zoligingizni o'zgartirib bo'lmaydi",
     );
   }
   if (isFullAccessRole(here.companyRole)) {
     throw forbidden("Egalik rolidagi foydalanuvchini faqat platforma admini boshqaradi");
   }
-  // Parol butun hisobga tegishli — boshqa kompaniyaga ham ta'sir qilmasligi uchun
-  if (purpose === "password" && memberships.some((m) => m.companyId !== company.id)) {
-    throw forbidden("Xodim boshqa kompaniyaga ham a'zo — parolini faqat platforma admini tiklaydi");
+  // Parol, ism va telefon butun hisobga tegishli — boshqa kompaniyaga ham ta'sir qilmasligi uchun
+  if (purpose !== "membership" && memberships.some((m) => m.companyId !== company.id)) {
+    throw forbidden(
+      purpose === "password"
+        ? "Xodim boshqa kompaniyaga ham a'zo — parolini faqat platforma admini tiklaydi"
+        : "Xodim boshqa kompaniyaga ham a'zo — ism va telefonini faqat platforma admini o'zgartiradi",
+    );
   }
 }
 
@@ -410,6 +416,7 @@ export async function listCompanyMembers(conn: DbOrTx, companyId: string) {
       branchId: companyMembers.branchId,
       branchName: branches.name,
       allowedWarehouseIds: companyMembers.allowedWarehouseIds,
+      allowedCategoryIds: companyMembers.allowedCategoryIds,
       membershipActive: companyMembers.isActive,
       joinedAt: companyMembers.joinedAt,
       lastSeenAt: users.lastSeenAt,

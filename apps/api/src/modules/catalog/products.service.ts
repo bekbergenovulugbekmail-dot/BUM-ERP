@@ -26,6 +26,12 @@ import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import { priceSchema, qtySchema } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
 import { assertUnitsActive, listUnits } from "./units.service.js";
+import {
+  assertCategoryInScope,
+  assertProductCategoryInScope,
+  categoryScope,
+  productScopeCondition,
+} from "./category-scope.js";
 
 const { legacyId: _productLegacy, companyId: _productCompany, ...productFields } = getTableColumns(products);
 const { legacyId: _batchLegacy, companyId: _batchCompany, ...batchFields } = getTableColumns(batches);
@@ -61,10 +67,11 @@ export type ProductFilters = {
   isActive?: boolean;
 };
 
-function productWhere(tenant: TenantContext, f: ProductFilters) {
+function productWhere(tenant: TenantContext, f: ProductFilters, scope: string[] | null) {
   const pattern = f.search ? likePattern(f.search) : null;
   return and(
     eq(products.companyId, tenant.company.id),
+    productScopeCondition(scope),
     f.categoryId ? eq(products.categoryId, f.categoryId) : undefined,
     f.brandId ? eq(products.brandId, f.brandId) : undefined,
     f.isActive === undefined ? undefined : eq(products.isActive, f.isActive),
@@ -100,7 +107,7 @@ export async function listProducts(
     .innerJoin(units, eq(units.id, products.baseUnitId))
     .where(
       and(
-        productWhere(tenant, options),
+        productWhere(tenant, options, await categoryScope(conn, tenant)),
         after
           ? or(gt(products.name, after.name), and(eq(products.name, after.name), gt(products.id, after.id)))
           : undefined,
@@ -133,7 +140,13 @@ export async function getProduct(conn: DbOrTx, tenant: TenantContext, productId:
     .innerJoin(units, eq(units.id, products.baseUnitId))
     .leftJoin(purchaseUnit, eq(purchaseUnit.id, products.purchaseUnitId))
     .leftJoin(salesUnit, eq(salesUnit.id, products.salesUnitId))
-    .where(and(eq(products.id, productId), eq(products.companyId, tenant.company.id)))
+    .where(
+      and(
+        eq(products.id, productId),
+        eq(products.companyId, tenant.company.id),
+        productScopeCondition(await categoryScope(conn, tenant)),
+      ),
+    )
     .limit(1);
   if (!row) throw notFound("Mahsulot topilmadi");
 
@@ -151,7 +164,13 @@ export async function getProductByBarcode(conn: DbOrTx, tenant: TenantContext, b
     .select({ ...productFields, baseUnitName: units.shortName })
     .from(products)
     .innerJoin(units, eq(units.id, products.baseUnitId))
-    .where(and(eq(products.companyId, tenant.company.id), eq(products.barcode, barcode)))
+    .where(
+      and(
+        eq(products.companyId, tenant.company.id),
+        eq(products.barcode, barcode),
+        productScopeCondition(await categoryScope(conn, tenant)),
+      ),
+    )
     .orderBy(asc(products.createdAt))
     .limit(1);
   if (!row) throw notFound("Mahsulot topilmadi");
@@ -225,18 +244,27 @@ async function assertReferences(tx: Tx, tenant: TenantContext, input: Partial<Pr
 
 async function loadProductForUpdate(tx: Tx, tenant: TenantContext, productId: string) {
   const [product] = await tx
-    .select({ id: products.id, name: products.name, sku: products.sku, isActive: products.isActive })
+    .select({
+      id: products.id,
+      name: products.name,
+      sku: products.sku,
+      isActive: products.isActive,
+      categoryId: products.categoryId,
+    })
     .from(products)
     .where(and(eq(products.id, productId), eq(products.companyId, tenant.company.id)))
     .limit(1)
     .for("update");
   if (!product) throw notFound("Mahsulot topilmadi");
+  assertProductCategoryInScope(await categoryScope(tx, tenant), product.categoryId);
   return product;
 }
 
 export async function createProduct(tx: Tx, tenant: TenantContext, input: ProductInput, meta: RequestMeta) {
   assertCostingMethod(input.costingMethod);
   await assertReferences(tx, tenant, input);
+  // Cheklangan xodim mahsulotni faqat o'z kategoriyasida yaratadi (kategoriyasiz — yo'q)
+  assertCategoryInScope(await categoryScope(tx, tenant), input.categoryId);
 
   const [product] = await tx
     .insert(products)
@@ -262,6 +290,7 @@ export async function updateProduct(
   const current = await loadProductForUpdate(tx, tenant, productId);
   assertCostingMethod(patch.costingMethod);
   await assertReferences(tx, tenant, patch);
+  if (patch.categoryId !== undefined) assertCategoryInScope(await categoryScope(tx, tenant), patch.categoryId);
 
   const { costingMethod: _costing, ...fields } = patch;
   const [updated] = await tx
@@ -410,6 +439,8 @@ export async function importProducts(tx: Tx, tenant: TenantContext, rows: Import
       .map((b) => [b.name.toLowerCase(), b.id]),
   );
 
+  const scope = await categoryScope(tx, tenant);
+
   const fileSkus = [...new Set(rows.map((r) => r.sku?.trim()).filter((s): s is string => Boolean(s)))];
   const taken = new Set(
     fileSkus.length === 0
@@ -445,6 +476,11 @@ export async function importProducts(tx: Tx, tenant: TenantContext, rows: Import
       return fail("Narx yoki qoldiq noto'g'ri son");
     }
 
+    const categoryId = row.category ? (categoryIndex.get(row.category.trim().toLowerCase()) ?? null) : null;
+    if (scope !== null && (!categoryId || !scope.includes(categoryId))) {
+      return fail("Kategoriya ko'rsatilmagan yoki sizga biriktirilmagan");
+    }
+
     const barcode = row.barcode?.trim();
     taken.add(sku);
     values.push({
@@ -456,7 +492,7 @@ export async function importProducts(tx: Tx, tenant: TenantContext, rows: Import
       purchasePrice: purchasePrice.data,
       salesPrice: salesPrice.data,
       minStock: minStock.data,
-      categoryId: row.category ? (categoryIndex.get(row.category.trim().toLowerCase()) ?? null) : null,
+      categoryId,
       brandId: row.brand ? (brandIndex.get(row.brand.trim().toLowerCase()) ?? null) : null,
     });
   });
@@ -501,7 +537,7 @@ export async function exportProductsCsv(conn: DbOrTx, tenant: TenantContext, fil
     .leftJoin(categories, eq(categories.id, products.categoryId))
     .leftJoin(brands, eq(brands.id, products.brandId))
     .innerJoin(units, eq(units.id, products.baseUnitId))
-    .where(productWhere(tenant, filters))
+    .where(productWhere(tenant, filters, await categoryScope(conn, tenant)))
     .orderBy(asc(products.name), asc(products.id))
     .limit(MAX_EXPORT_ROWS);
 

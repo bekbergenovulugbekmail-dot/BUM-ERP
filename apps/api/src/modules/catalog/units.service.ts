@@ -15,6 +15,7 @@ import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import type { SessionUser } from "../auth/session.js";
 import type { TenantContext } from "../company/tenant.js";
+import { assertConversionInScope } from "./category-scope.js";
 
 /** Convex'dagi seedDefaultUnits bilan bir xil ro'yxat. */
 export const DEFAULT_UNITS = [
@@ -141,6 +142,7 @@ export async function createConversion(tx: Tx, tenant: TenantContext, input: Con
       .limit(1);
     if (!product) throw badRequest("Mahsulot topilmadi");
   }
+  await assertConversionInScope(tx, tenant, input.productId ?? null);
 
   const [conversion] = await tx
     .insert(unitConversions)
@@ -164,6 +166,13 @@ export async function createConversion(tx: Tx, tenant: TenantContext, input: Con
 }
 
 export async function deleteConversion(tx: Tx, tenant: TenantContext, conversionId: string, meta: RequestMeta) {
+  const [existing] = await tx
+    .select({ productId: unitConversions.productId })
+    .from(unitConversions)
+    .where(and(eq(unitConversions.id, conversionId), eq(unitConversions.companyId, tenant.company.id)))
+    .limit(1);
+  if (existing) await assertConversionInScope(tx, tenant, existing.productId);
+
   const [deleted] = await tx
     .delete(unitConversions)
     .where(and(eq(unitConversions.id, conversionId), eq(unitConversions.companyId, tenant.company.id)))

@@ -38,6 +38,8 @@ export type TenantContext = {
     roleId: string | null;
     branchId: string | null;
     allowedWarehouseIds: string[];
+    /** Mas'ul kategoriyalar; bo'sh — cheklov yo'q (catalog/category-scope.ts). */
+    allowedCategoryIds: string[];
   };
 };
 
@@ -64,6 +66,7 @@ export async function requireTenant(conn: DbOrTx, user: SessionUser): Promise<Te
       roleId: companyMembers.roleId,
       branchId: companyMembers.branchId,
       allowedWarehouseIds: companyMembers.allowedWarehouseIds,
+      allowedCategoryIds: companyMembers.allowedCategoryIds,
       membershipActive: companyMembers.isActive,
     })
     .from(companyMembers)
@@ -89,6 +92,7 @@ export async function requireTenant(conn: DbOrTx, user: SessionUser): Promise<Te
       roleId: row.roleId,
       branchId: row.branchId,
       allowedWarehouseIds: row.allowedWarehouseIds,
+      allowedCategoryIds: row.allowedCategoryIds,
     },
   };
 }

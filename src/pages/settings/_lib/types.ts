@@ -25,6 +25,8 @@ export type Employee = {
   branchId: string | null;
   branchName: string | null;
   allowedWarehouseIds: string[];
+  /** Mas'ul kategoriyalar (ichkilari bilan); bo'sh — barcha kategoriyalar. */
+  allowedCategoryIds: string[];
   membershipActive: boolean;
   joinedAt: string;
   lastSeenAt: string | null;

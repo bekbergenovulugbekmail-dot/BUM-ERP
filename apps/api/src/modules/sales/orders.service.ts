@@ -49,6 +49,7 @@ import {
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { moveStock } from "../inventory/stock.service.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
+import { assertProductsInScope, categoryScope, documentHasScopedItem } from "../catalog/category-scope.js";
 import { salesAudit } from "./customers.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...orderFields } = getTableColumns(salesOrders);
@@ -92,6 +93,8 @@ export type DispatchableOrder = {
 
 export async function prepareSalesItems(tx: Tx, tenant: TenantContext, items: SalesItemInput[], customerDiscount: string) {
   if (items.length === 0) throw badRequest("Kamida bitta mahsulot bo'lishi kerak");
+  // Savdo buyurtmasi va POS cheki: cheklangan xodim faqat o'z kategoriyalaridagi mahsulotni sotadi
+  await assertProductsInScope(tx, tenant, items.map((i) => i.productId));
   const companyId = tenant.company.id;
 
   const rows = await tx
@@ -214,6 +217,15 @@ async function lockOrder(tx: Tx, tenant: TenantContext, orderId: string) {
   return order;
 }
 
+/** Cheklangan xodim: buyurtmadagi barcha mahsulotlar uning kategoriyalarida bo'lishi kerak. */
+async function assertOrderInScope(tx: Tx, tenant: TenantContext, orderId: string) {
+  const rows = await tx
+    .select({ productId: salesOrderItems.productId })
+    .from(salesOrderItems)
+    .where(eq(salesOrderItems.orderId, orderId));
+  await assertProductsInScope(tx, tenant, rows.map((r) => r.productId));
+}
+
 // ─── O'qish ──────────────────────────────────────────────────────────────────
 
 const balanceSql = sql<string>`(${salesOrders.totalAmount} - ${salesOrders.paidAmount})::numeric(18,2)`;
@@ -235,12 +247,24 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
   if (!order) throw notFound("Buyurtma topilmadi");
 
   const items = await conn
-    .select({ ...itemFields, productName: products.name, productSku: products.sku, unitName: units.shortName })
+    .select({
+      ...itemFields,
+      productName: products.name,
+      productSku: products.sku,
+      productCategoryId: products.categoryId,
+      unitName: units.shortName,
+    })
     .from(salesOrderItems)
     .innerJoin(products, eq(products.id, salesOrderItems.productId))
     .innerJoin(units, eq(units.id, salesOrderItems.unitId))
     .where(eq(salesOrderItems.orderId, orderId))
     .orderBy(asc(products.name), asc(salesOrderItems.id));
+
+  // Cheklangan xodim o'z kategoriyasidagi mahsulot qatnashmagan buyurtmani ko'rmaydi
+  const scope = await categoryScope(conn, tenant);
+  if (scope !== null && items.length > 0 && !items.some((i) => i.productCategoryId && scope.includes(i.productCategoryId))) {
+    throw notFound("Buyurtma topilmadi");
+  }
 
   const payments = await conn
     .select(paymentFields)
@@ -274,6 +298,7 @@ export async function listOrders(
     after = { date, id };
   }
   const pattern = options.search ? `%${options.search.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
+  const scope = await categoryScope(conn, tenant);
 
   const rows = await conn
     .select({
@@ -297,6 +322,13 @@ export async function listOrders(
         options.dateFrom ? gte(salesOrders.orderDate, options.dateFrom) : undefined,
         options.dateTo ? lte(salesOrders.orderDate, options.dateTo) : undefined,
         pattern ? or(ilike(salesOrders.number, pattern), ilike(customers.name, pattern)) : undefined,
+        documentHasScopedItem(
+          scope,
+          sql`${salesOrderItems}`,
+          sql`${salesOrderItems.orderId}`,
+          sql`${salesOrderItems.productId}`,
+          sql`${salesOrders.id}`,
+        ),
         after
           ? or(lt(salesOrders.orderDate, after.date), and(eq(salesOrders.orderDate, after.date), lt(salesOrders.id, after.id)))
           : undefined,
@@ -382,6 +414,7 @@ export async function updateOrder(
   const companyId = tenant.company.id;
   const order = await lockOrder(tx, tenant, orderId);
   if (order.status !== "draft" || order.isPos) throw badRequest("Faqat qoralama buyurtmani tahrirlash mumkin");
+  await assertOrderInScope(tx, tenant, orderId);
 
   const customerId = patch.customerId !== undefined ? patch.customerId : order.customerId;
   const warehouseId = patch.warehouseId ?? order.warehouseId;
@@ -421,6 +454,7 @@ export async function updateOrder(
 export async function confirmOrder(tx: Tx, tenant: TenantContext, orderId: string, meta: RequestMeta) {
   const order = await lockOrder(tx, tenant, orderId);
   if (order.status !== "draft") throw badRequest("Faqat qoralama buyurtmani tasdiqlash mumkin");
+  await assertOrderInScope(tx, tenant, orderId);
 
   await tx.update(salesOrders).set({ status: "confirmed", updatedAt: new Date() }).where(eq(salesOrders.id, orderId));
   await salesAudit(tx, tenant, meta, {
@@ -438,6 +472,7 @@ export async function cancelOrder(tx: Tx, tenant: TenantContext, orderId: string
     throw badRequest("Jo'natilgan buyurtma bekor qilinmaydi — qaytarish orqali");
   }
   if (toMinor(order.paidAmount) > 0n) throw badRequest("To'lov qilingan buyurtmani bekor qilib bo'lmaydi");
+  await assertOrderInScope(tx, tenant, orderId);
 
   await tx
     .update(salesOrders)
@@ -557,6 +592,7 @@ export async function shipOrder(tx: Tx, tenant: TenantContext, orderId: string, 
   const order = await lockOrder(tx, tenant, orderId);
   if (order.status !== "confirmed" || order.isPos) throw badRequest("Faqat tasdiqlangan buyurtma jo'natiladi");
   assertWarehouseAccess(tenant, order.warehouseId);
+  await assertOrderInScope(tx, tenant, orderId);
 
   const { cogs } = await dispatchOrder(tx, tenant, order, todayIso());
   const status: SalesOrderStatus = toMinor(order.paidAmount) >= toMinor(order.totalAmount) ? "delivered" : "shipped";
@@ -582,6 +618,7 @@ export async function returnOrder(
   const order = await lockOrder(tx, tenant, orderId);
   if (order.status !== "shipped" && order.status !== "delivered") throw badRequest("Faqat jo'natilgan buyurtma qaytariladi");
   assertWarehouseAccess(tenant, order.warehouseId);
+  await assertOrderInScope(tx, tenant, orderId);
 
   const refund = input.refund ?? true;
   const paid = toMinor(order.paidAmount);

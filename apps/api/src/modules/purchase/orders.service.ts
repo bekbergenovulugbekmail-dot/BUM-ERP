@@ -43,6 +43,7 @@ import { todayIso } from "../finance/cash.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { moveStock } from "../inventory/stock.service.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
+import { assertProductsInScope, categoryScope, documentHasScopedItem } from "../catalog/category-scope.js";
 import { purchaseAudit } from "./suppliers.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...orderFields } = getTableColumns(purchaseOrders);
@@ -169,6 +170,15 @@ async function lockOrder(tx: Tx, tenant: TenantContext, orderId: string) {
   return order;
 }
 
+/** Cheklangan xodim: buyurtmadagi barcha mahsulotlar uning kategoriyalarida bo'lishi kerak. */
+async function assertOrderInScope(tx: Tx, tenant: TenantContext, orderId: string) {
+  const rows = await tx
+    .select({ productId: purchaseOrderItems.productId })
+    .from(purchaseOrderItems)
+    .where(eq(purchaseOrderItems.orderId, orderId));
+  await assertProductsInScope(tx, tenant, rows.map((r) => r.productId));
+}
+
 // ─── O'qish ──────────────────────────────────────────────────────────────────
 
 const balanceSql = sql<string>`(${purchaseOrders.totalAmount} - ${purchaseOrders.paidAmount})::numeric(18,2)`;
@@ -194,6 +204,7 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
       ...itemFields,
       productName: products.name,
       productSku: products.sku,
+      productCategoryId: products.categoryId,
       unitName: units.shortName,
       pendingQty: sql<string>`(${purchaseOrderItems.orderedQty} - ${purchaseOrderItems.receivedQty})::numeric(18,4)`,
     })
@@ -202,6 +213,12 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
     .innerJoin(units, eq(units.id, purchaseOrderItems.unitId))
     .where(eq(purchaseOrderItems.orderId, orderId))
     .orderBy(asc(products.name), asc(purchaseOrderItems.id));
+
+  // Cheklangan xodim o'z kategoriyasidagi mahsulot qatnashmagan buyurtmani ko'rmaydi
+  const scope = await categoryScope(conn, tenant);
+  if (scope !== null && items.length > 0 && !items.some((i) => i.productCategoryId && scope.includes(i.productCategoryId))) {
+    throw notFound("Buyurtma topilmadi");
+  }
 
   const receipts = await conn
     .select(receiptFields)
@@ -249,6 +266,7 @@ export async function listOrders(
     after = { date, id };
   }
   const pattern = options.search ? `%${options.search.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
+  const scope = await categoryScope(conn, tenant);
 
   const rows = await conn
     .select({
@@ -269,6 +287,13 @@ export async function listOrders(
         options.dateFrom ? gte(purchaseOrders.orderDate, options.dateFrom) : undefined,
         options.dateTo ? lte(purchaseOrders.orderDate, options.dateTo) : undefined,
         pattern ? or(ilike(purchaseOrders.number, pattern), ilike(suppliers.name, pattern)) : undefined,
+        documentHasScopedItem(
+          scope,
+          sql`${purchaseOrderItems}`,
+          sql`${purchaseOrderItems.orderId}`,
+          sql`${purchaseOrderItems.productId}`,
+          sql`${purchaseOrders.id}`,
+        ),
         after
           ? or(
               lt(purchaseOrders.orderDate, after.date),
@@ -293,6 +318,7 @@ export async function listOrders(
 export async function createOrder(tx: Tx, tenant: TenantContext, input: OrderInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
   await assertSupplierAndWarehouse(tx, tenant, input.supplierId, input.warehouseId);
+  await assertProductsInScope(tx, tenant, input.items.map((i) => i.productId));
   const { items, totals } = await prepareItems(tx, companyId, input.items);
 
   const number = await nextDocumentNumber(tx, {
@@ -340,6 +366,8 @@ export async function updateOrder(
   const companyId = tenant.company.id;
   const order = await lockOrder(tx, tenant, orderId);
   if (order.status !== "draft") throw badRequest("Faqat qoralama buyurtmani tahrirlash mumkin");
+  await assertOrderInScope(tx, tenant, orderId);
+  if (patch.items) await assertProductsInScope(tx, tenant, patch.items.map((i) => i.productId));
 
   const supplierId = patch.supplierId ?? order.supplierId;
   const warehouseId = patch.warehouseId ?? order.warehouseId;
@@ -378,6 +406,7 @@ export async function updateOrder(
 export async function confirmOrder(tx: Tx, tenant: TenantContext, orderId: string, meta: RequestMeta) {
   const order = await lockOrder(tx, tenant, orderId);
   if (order.status !== "draft") throw badRequest("Faqat qoralama buyurtmani tasdiqlash mumkin");
+  await assertOrderInScope(tx, tenant, orderId);
 
   await tx
     .update(purchaseOrders)
@@ -398,6 +427,7 @@ export async function cancelOrder(tx: Tx, tenant: TenantContext, orderId: string
     throw badRequest("Tovar qabul qilingan yoki yakunlangan buyurtmani bekor qilib bo'lmaydi");
   }
   if (toMinor(order.paidAmount) > 0n) throw badRequest("To'lov qilingan buyurtmani bekor qilib bo'lmaydi");
+  await assertOrderInScope(tx, tenant, orderId);
 
   await tx
     .update(purchaseOrders)
@@ -434,6 +464,11 @@ export async function receiveGoods(tx: Tx, tenant: TenantContext, orderId: strin
     .where(eq(purchaseOrderItems.orderId, orderId))
     .for("update");
   const itemById = new Map(orderItems.map((i) => [i.id, i]));
+  await assertProductsInScope(
+    tx,
+    tenant,
+    input.items.map((line) => itemById.get(line.orderItemId)?.productId).filter((id): id is string => Boolean(id)),
+  );
   if (new Set(input.items.map((i) => i.orderItemId)).size !== input.items.length) {
     throw badRequest("Bir qator ikki marta kiritilgan");
   }
