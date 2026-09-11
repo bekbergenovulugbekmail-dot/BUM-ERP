@@ -30,6 +30,7 @@ export type TenantContext = {
     status: string;
     isActive: boolean;
     ownerId: string | null;
+    trialEndsAt: Date | null;
   };
   membership: {
     id: string;
@@ -57,6 +58,7 @@ export async function requireTenant(conn: DbOrTx, user: SessionUser): Promise<Te
       status: companies.status,
       isActive: companies.isActive,
       ownerId: companies.ownerId,
+      trialEndsAt: companies.trialEndsAt,
       membershipId: companyMembers.id,
       companyRole: companyMembers.companyRole,
       roleId: companyMembers.roleId,
@@ -79,6 +81,7 @@ export async function requireTenant(conn: DbOrTx, user: SessionUser): Promise<Te
       status: row.status,
       isActive: row.isActive,
       ownerId: row.ownerId,
+      trialEndsAt: row.trialEndsAt,
     },
     membership: {
       id: row.membershipId,
@@ -90,14 +93,28 @@ export async function requireTenant(conn: DbOrTx, user: SessionUser): Promise<Te
   };
 }
 
-/** Yozish amallari uchun: to'xtatilgan yoki tugatilgan kompaniyada taqiqlanadi. */
-export async function requireTenantForWrite(conn: DbOrTx, user: SessionUser): Promise<TenantContext> {
-  const tenant = await requireTenant(conn, user);
-  const { status, isActive } = tenant.company;
-  if (status === "cancelled") throw forbidden("Kompaniya tugatilgan");
-  if (status === "suspended" || !isActive) {
+/**
+ * Kompaniyada yozish mumkinmi: tugatilgan, to'xtatilgan yoki sinov muddati
+ * o'tgan bo'lsa — yo'q. Kompaniya egasining xodim amallari ham shuni ishlatadi.
+ */
+export function assertCompanyWritable(company: {
+  status: string;
+  isActive: boolean;
+  trialEndsAt: Date | null;
+}): void {
+  if (company.status === "cancelled") throw forbidden("Kompaniya tugatilgan");
+  if (company.status === "suspended" || !company.isActive) {
     throw forbidden("Kompaniya to'xtatilgan. Platforma admini bilan bog'laning.");
   }
+  if (company.status === "trial" && company.trialEndsAt && company.trialEndsAt.getTime() < Date.now()) {
+    throw forbidden("Sinov muddati tugagan. Platforma admini bilan bog'laning.");
+  }
+}
+
+/** Yozish amallari uchun: `assertCompanyWritable` bilan. */
+export async function requireTenantForWrite(conn: DbOrTx, user: SessionUser): Promise<TenantContext> {
+  const tenant = await requireTenant(conn, user);
+  assertCompanyWritable(tenant.company);
   return tenant;
 }
 

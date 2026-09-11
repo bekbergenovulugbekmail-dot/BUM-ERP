@@ -1,10 +1,11 @@
 /**
- * Platforma admini: kompaniyalar.
+ * Kompaniyalar: yaratish (platforma admini yoki o'zi ro'yxatdan o'tish),
+ * ro'yxat, tafsilot, holat.
  *
- *  - createCompanyWithOwner — Convex'dagi platformCreateCompany: kompaniya
- *    (status active), "Asosiy filial" (BR-001), kompaniyaning standart rollari,
- *    "Asosiy ombor" (WH-001) va egasining "Business Owner" a'zoligi. Farq: egasi
- *    shu yerda yangi hisob sifatida yaratiladi. Hammasi bitta tranzaksiyada.
+ *  - createCompanyWithOwner — Convex'dagi platformCreateCompany / registerCompany:
+ *    kompaniya, "Asosiy filial" (BR-001), kompaniyaning standart rollari,
+ *    "Asosiy ombor" (WH-001) va egasining "Business Owner" a'zoligi. Egasi shu
+ *    yerda yangi hisob sifatida yaratiladi. Hammasi bitta tranzaksiyada.
  *  - listCompanies / getCompanyDetails — platformListCompanies / platformGetCompany
  *  - setCompanyStatus — platformUpdateCompanyStatus; to'xtatilgan va tugatilgan
  *    kompaniyada yozish amallari company/tenant.ts da yopiladi
@@ -80,14 +81,25 @@ export type NewCompanyInput = {
   owner: NewAccount;
 };
 
+export type CreateCompanyOptions = {
+  status?: CompanyStatus;
+  trialEndsAt?: Date | null;
+  auditAction?: "COMPANY_CREATED" | "COMPANY_REGISTERED";
+};
+
+/**
+ * @param actor platforma admini; `null` — o'zi ro'yxatdan o'tish (audit egasi nomidan).
+ */
 export async function createCompanyWithOwner(
   tx: Tx,
-  actor: SessionUser,
+  actor: SessionUser | null,
   input: NewCompanyInput,
   meta: RequestMeta,
+  options: CreateCompanyOptions = {},
 ) {
   // Egasi birinchi — raqam band bo'lsa shu yerda to'xtaydi
   const owner = await insertUser(tx, input.owner);
+  const auditActor = actor ?? owner;
   const slug = await generateUniqueSlug(tx, input.name);
 
   const [company] = await tx
@@ -104,11 +116,18 @@ export async function createCompanyWithOwner(
       currency: input.currency ?? "UZS",
       language: input.language ?? "uz",
       ownerId: owner.id,
-      status: "active",
+      status: options.status ?? "active",
+      trialEndsAt: options.trialEndsAt ?? null,
       isActive: true,
       slug,
     })
-    .returning({ id: companies.id, name: companies.name, slug: companies.slug });
+    .returning({
+      id: companies.id,
+      name: companies.name,
+      slug: companies.slug,
+      status: companies.status,
+      trialEndsAt: companies.trialEndsAt,
+    });
   const companyId = company!.id;
 
   const [branch] = await tx
@@ -161,18 +180,18 @@ export async function createCompanyWithOwner(
 
   await writeAuditLog(
     {
-      userId: actor.id,
-      userName: actor.name,
+      userId: auditActor.id,
+      userName: auditActor.name,
       companyId,
-      action: "COMPANY_CREATED",
+      action: options.auditAction ?? "COMPANY_CREATED",
       resource: "companies",
       resourceId: companyId,
-      details: { name: company!.name, slug, ownerId: owner.id },
+      details: { name: company!.name, slug, ownerId: owner.id, status: company!.status },
       ...meta,
     },
     tx,
   );
-  await auditUserAction(tx, actor, meta, {
+  await auditUserAction(tx, auditActor, meta, {
     action: "USER_CREATED",
     targetId: owner.id,
     companyId,
@@ -193,6 +212,7 @@ export async function listCompanies(conn: DbOrTx, filter: { status?: CompanyStat
       slug: companies.slug,
       status: companies.status,
       isActive: companies.isActive,
+      trialEndsAt: companies.trialEndsAt,
       createdAt: companies.createdAt,
       memberCount: sql<number>`(select count(*)::int from ${companyMembers} where ${companyMembers.companyId} = ${companies.id})`,
       ownerId: users.id,

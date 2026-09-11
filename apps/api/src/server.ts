@@ -15,6 +15,8 @@ import { closeDb, pool } from "./db/client.js";
 import { authRoutes } from "./modules/auth/routes.js";
 import { companyRoutes } from "./modules/company/routes.js";
 import { platformRoutes } from "./modules/platform/routes.js";
+import { publicRoutes } from "./modules/public/routes.js";
+import { registrationRoutes } from "./modules/registration/routes.js";
 
 export async function buildServer() {
   const app = Fastify({
@@ -63,9 +65,10 @@ export async function buildServer() {
 
   // Modul marshrutlari
   await app.register(authRoutes, { prefix: "/api/auth" });
+  await app.register(registrationRoutes, { prefix: "/api/registration" });
+  await app.register(publicRoutes, { prefix: "/api/public" });
   await app.register(platformRoutes, { prefix: "/api/platform" });
   await app.register(companyRoutes, { prefix: "/api/company" });
-  // await app.register(productsRoutes, { prefix: "/api/products" });
 
   return app;
 }

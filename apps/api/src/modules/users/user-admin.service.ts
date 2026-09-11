@@ -30,7 +30,7 @@ import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { assertNotLimited, recordHit } from "../../shared/rate-limit.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { revokeUserSessions, type SessionUser } from "../auth/session.js";
-import { isFullAccessRole } from "../company/tenant.js";
+import { assertCompanyWritable, isFullAccessRole } from "../company/tenant.js";
 
 /** Convex'dagi userAdmin.MIN_PASSWORD bilan bir xil. */
 export const MIN_PASSWORD_LENGTH = 8;
@@ -220,6 +220,37 @@ export async function platformSetActive(
 
 // ─── Kompaniya egasi ─────────────────────────────────────────────────────────
 
+/**
+ * Qo'shimcha platforma adminini tayinlash / olib tashlash.
+ * Qaror: buni FAQAT bootstrap admin qiladi. Bootstrap adminning o'ziga tegmaydi.
+ * Olib tashlash darhol amal qiladi — har so'rovda foydalanuvchi bazadan o'qiladi.
+ */
+export async function setPlatformAdmin(
+  tx: Tx,
+  actor: SessionUser,
+  userId: string,
+  isPlatformAdmin: boolean,
+  meta: RequestMeta,
+): Promise<void> {
+  if (!actor.isBootstrapAdmin) {
+    throw forbidden("Platforma adminini faqat bootstrap admin tayinlaydi");
+  }
+  const target = await loadUserForUpdate(tx, userId);
+  if (target.isBootstrapAdmin) throw forbidden(BOOTSTRAP_PROTECTED);
+  if (isPlatformAdmin && !target.isActive) {
+    throw badRequest("Faol bo'lmagan foydalanuvchini platforma admini qilib bo'lmaydi");
+  }
+  if (target.isPlatformAdmin === isPlatformAdmin) return;
+
+  await tx.update(users).set({ isPlatformAdmin }).where(eq(users.id, target.id));
+  await auditUserAction(tx, actor, meta, {
+    action: isPlatformAdmin ? "PLATFORM_ADMIN_GRANTED" : "PLATFORM_ADMIN_REVOKED",
+    targetId: target.id,
+    severity: "warning",
+    details: { phone: target.phone },
+  });
+}
+
 export type OwnedCompany = { id: string; name: string };
 
 /** Joriy foydalanuvchi aktiv kompaniyasining egasi bo'lmasa — FORBIDDEN. */
@@ -233,6 +264,7 @@ export async function resolveOwnedCompany(conn: DbOrTx, user: SessionUser): Prom
       ownerId: companies.ownerId,
       isActive: companies.isActive,
       status: companies.status,
+      trialEndsAt: companies.trialEndsAt,
     })
     .from(companies)
     .where(eq(companies.id, user.activeCompanyId))
@@ -241,9 +273,8 @@ export async function resolveOwnedCompany(conn: DbOrTx, user: SessionUser): Prom
   if (!company || company.ownerId !== user.id) {
     throw forbidden("Xodimlarni faqat kompaniya egasi boshqaradi");
   }
-  if (!company.isActive || company.status === "suspended" || company.status === "cancelled") {
-    throw forbidden("Kompaniya faol emas");
-  }
+  // To'xtatilgan, tugatilgan yoki sinov muddati o'tgan kompaniyada ham yopiq
+  assertCompanyWritable(company);
   return { id: company.id, name: company.name };
 }
 

@@ -6,12 +6,13 @@
  *   GET   /companies/:companyId          tafsilot: egasi, a'zolar, filiallar
  *   POST  /companies/:companyId/status   holat (to'xtatish sababi bilan)
  *   GET   /stats                         statistika
- *   GET   /audit-logs                    audit jurnali (?companyId=&limit=&cursor=)
+ *   GET   /audit-logs                    audit jurnali (?companyId=&resource=&limit=&cursor=)
  *   GET   /users                         foydalanuvchilar (?search=&limit=&offset=)
  *   PATCH /users/:userId                 telefon raqamini o'zgartirish
  *   POST  /users/:userId/password        parolni tiklash — sessiyalar bekor
  *   POST  /users/:userId/status          faollashtirish / bloklash
- *   GET   /settings, PUT /settings       platforma sozlamalari
+ *   POST  /users/:userId/platform-admin  platforma adminini tayinlash (faqat bootstrap admin)
+ *   GET   /settings, PUT /settings       platforma sozlamalari (ro'yxatdan o'tish ham)
  *
  * Bootstrap admin va boshqa platforma adminlariga foydalanuvchi amallari ta'sir
  * qilmaydi (users/user-admin.service.ts). Bootstrap admin `db:seed` orqali yaratiladi.
@@ -21,11 +22,13 @@ import { z } from "zod";
 import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
+import { listAuditLogs } from "../audit/audit-log.service.js";
 import { authOf, requirePlatformAdmin } from "../auth/guard.js";
 import {
   platformChangePhone,
   platformResetPassword,
   platformSetActive,
+  setPlatformAdmin,
 } from "../users/user-admin.service.js";
 import {
   COMPANY_STATUSES,
@@ -34,7 +37,6 @@ import {
   listCompanies,
   setCompanyStatus,
 } from "./company.service.js";
-import { listAuditLogs } from "../audit/audit-log.service.js";
 import {
   getPlatformSettings,
   listUsers,
@@ -72,6 +74,7 @@ const companyStatusBody = z.strictObject({
 const auditQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(100),
   companyId: z.uuid().optional(),
+  resource: z.string().trim().min(1).max(100).optional(),
   cursor: z.string().max(200).optional(),
 });
 const usersQuery = z.object({
@@ -84,6 +87,7 @@ const userParams = z.object({ userId: z.uuid() });
 const updateUserBody = z.object({ phone: z.string().min(1).max(32) });
 const resetPasswordBody = z.object({ newPassword: z.string().min(1).max(256) });
 const userStatusBody = z.object({ isActive: z.boolean() });
+const platformAdminBody = z.strictObject({ isPlatformAdmin: z.boolean() });
 
 const settingsBody = z.strictObject({
   registrationEnabled: z.boolean().optional(),
@@ -160,6 +164,14 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
     const { isActive } = userStatusBody.parse(req.body);
     const { user } = authOf(req);
     await withTransaction((tx) => platformSetActive(tx, user, userId, isActive, requestMeta(req)));
+    return { ok: true };
+  });
+
+  app.post("/users/:userId/platform-admin", async (req) => {
+    const { userId } = userParams.parse(req.params);
+    const { isPlatformAdmin } = platformAdminBody.parse(req.body);
+    const { user } = authOf(req);
+    await withTransaction((tx) => setPlatformAdmin(tx, user, userId, isPlatformAdmin, requestMeta(req)));
     return { ok: true };
   });
 

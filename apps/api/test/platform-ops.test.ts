@@ -183,24 +183,25 @@ describe("Foydalanuvchilar", () => {
 
 describe("Sozlamalar", () => {
   it("standart qiymatlar, saqlash, audit; takroriy saqlash dublikat qator yaratmaydi", async () => {
+    // Ro'yxatdan o'tish standart holatda yopiq
     expect((await asAdmin("GET", "/settings")).json().settings).toEqual({
-      registrationEnabled: true,
+      registrationEnabled: false,
       defaultTrialDays: 14,
       platformName: "BUM ERP",
       supportEmail: "",
     });
 
     const saved = await asAdmin("PUT", "/settings", {
-      registrationEnabled: false,
+      registrationEnabled: true,
       defaultTrialDays: 30,
       supportEmail: "help@bum.uz",
     });
     expect(saved.statusCode).toBe(200);
-    expect(saved.json().settings).toMatchObject({ registrationEnabled: false, defaultTrialDays: 30 });
+    expect(saved.json().settings).toMatchObject({ registrationEnabled: true, defaultTrialDays: 30 });
 
     expect((await asAdmin("PUT", "/settings", { defaultTrialDays: 7 })).statusCode).toBe(200);
     expect((await asAdmin("GET", "/settings")).json().settings).toEqual({
-      registrationEnabled: false,
+      registrationEnabled: true,
       defaultTrialDays: 7,
       platformName: "BUM ERP",
       supportEmail: "help@bum.uz",

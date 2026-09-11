@@ -84,7 +84,8 @@ export type PlatformSettings = {
 const PLATFORM_GROUP = "platform";
 
 const DEFAULTS: PlatformSettings = {
-  registrationEnabled: true,
+  // Qaror: o'zi ro'yxatdan o'tish standart holatda YOPIQ — platforma admini yoqadi
+  registrationEnabled: false,
   defaultTrialDays: 14,
   platformName: "BUM ERP",
   supportEmail: "",
