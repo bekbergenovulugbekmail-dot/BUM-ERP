@@ -99,6 +99,13 @@
       "when": 1789154722362,
       "tag": "0013_customer_cashback",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1789155945301,
+      "tag": "0014_currencies",
+      "breakpoints": true
     }
   ]
 }

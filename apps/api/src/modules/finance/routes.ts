@@ -16,10 +16,13 @@
  *   GET    /expenses (?status=&category=&dateFrom=&dateTo=&limit=&cursor=), /expenses/stats   finance.view
  *   POST   /expenses, PATCH / DELETE /expenses/:expenseId      finance.manage
  *   POST   /expenses/:expenseId/status                         finance.approve (paid — kassa chiqimi + jurnal)
+ *   GET    /currencies                                         a'zo (valyutalar va kurslar; CBU kursi kunda bir yangilanadi)
+ *   GET    /currencies/cbu                                     a'zo (Markaziy bank kurslari; 503 — olib bo'lmasa)
+ *   PUT    /currencies, POST /currencies/refresh               settings.manage
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { Permission } from "@bum/shared";
+import { MAX_COMPANY_CURRENCIES, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
@@ -52,6 +55,13 @@ import {
   setExpenseStatus,
   updateExpense,
 } from "./expenses.service.js";
+import {
+  getCbuRates,
+  getCurrencySettings,
+  refreshCbuRates,
+  refreshStaleCbuRates,
+  saveCurrencySettings,
+} from "./currencies.service.js";
 import { createManualEntry, getJournalEntry, listJournal, voidManualEntry } from "./journal.service.js";
 
 const nullableText = (max: number) =>
@@ -173,6 +183,20 @@ const expenseStatusBody = z.strictObject({
   status: z.enum(expenseStatuses),
   cashAccountId: z.uuid().nullable().optional(),
   paidDate: isoDate.optional(),
+});
+
+const currenciesBody = z.strictObject({
+  cbuEnabled: z.boolean(),
+  currencies: z
+    .array(
+      z.strictObject({
+        code: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Valyuta kodi 3 harf (ISO 4217)"),
+        rate: decimalSchema({ scale: 4, positive: true }).optional(),
+        source: z.enum(["manual", "cbu"]),
+        isActive: z.boolean(),
+      }),
+    )
+    .max(MAX_COMPANY_CURRENCIES),
 });
 
 const accountParams = z.object({ accountId: z.uuid() });
@@ -322,6 +346,32 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
     reply.status(201);
     return result;
   });
+
+  // ─── Valyutalar va kurslar ───────────────────────────────────────────────
+
+  app.get("/currencies", async (req) => {
+    const tenant = await requireTenant(db, authOf(req).user);
+    await refreshStaleCbuRates(tenant.company.id);
+    return getCurrencySettings(db, tenant.company.id);
+  });
+
+  app.get("/currencies/cbu", async (req, reply) => {
+    await requireTenant(db, authOf(req).user);
+    try {
+      return { rates: await getCbuRates() };
+    } catch {
+      return reply.status(503).send({ code: "SERVICE_UNAVAILABLE", message: "Markaziy bank kurslarini olib bo'lmadi" });
+    }
+  });
+
+  app.put("/currencies", async (req) => {
+    const body = currenciesBody.parse(req.body);
+    return writeInTenant(req, "settings.manage", (tx, tenant) => saveCurrencySettings(tx, tenant, body, requestMeta(req)));
+  });
+
+  app.post("/currencies/refresh", async (req) =>
+    writeInTenant(req, "settings.manage", (tx, tenant) => refreshCbuRates(tx, tenant, requestMeta(req))),
+  );
 
   // ─── Xarajatlar ──────────────────────────────────────────────────────────
 

@@ -620,8 +620,14 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - qaytarishda ishlatilgan keshbek qaytadi, berilgani bekor qilinadi (sarflangan bo'lsa — qolgani miqdorida)
   - buxgalteriya: 2400 "Keshbek majburiyati", 5600 "Keshbek xarajatlari"; hisoblash DR 5600 / CR 2400, ishlatish DR 2400 / CR 1100
   - hozircha faqat POS cheklarida (oddiy savdo buyurtmalarida keshbek hisoblanmaydi)
-- **Navbatda** (foydalanuvchi 8 ta talabidan): ko'p valyuta (xarid/sotuv, kurslar, Markaziy bank kursi yoqib-o'chiriladi)
-- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2); API jami 216 (40 fayl)
+- **Keshbek** commit `fe8ae98`
+- **Ko'p valyuta — 1-qism: valyutalar va kurslar** (migratsiya 0014):
+  - Sozlamalar → "Valyutalar": asosiy valyuta (kompaniya valyutasi, kursi 1) + 10 tagacha qo'shimcha valyuta; kurs qo'lda yoki Markaziy bankdan
+  - Markaziy bank (cbu.uz) kurslari yoqib-o'chiriladi: yoqilganda bank kursi yonma-yon ko'rinadi ("Qo'llash"), manbasi "Markaziy bank" valyuta kursi har kuni birinchi o'qishda yangilanadi, "Hozir yangilash" tugmasi; bank ishlamasa eski kurs qoladi
+  - `company_currencies`, kurs tarixi `exchange_rates`; `GET /api/finance/currencies` (har bir a'zo), `GET /currencies/cbu` (503 — bank javob bermasa), `PUT /currencies` va `POST /currencies/refresh` (`settings.manage`); olib tashlangan valyuta nofaol bo'ladi
+  - env: `CBU_RATES_URL` (standart cbu.uz JSON)
+- **Navbatda — ko'p valyuta davomi:** mahsulot xarid/sotuv narxi valyutada; xarid qatorlari valyutada (yetkazuvchi qarzi o'z valyutasida, tannarx va buxgalteriya so'mda qabul sanasidagi kurs bilan, kurs farqi); POS/sotuvda valyuta tanlash, bitta valyutada — kurs bilan hisoblash, bir nechtasida — chekda har valyuta bo'yicha jami
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2); API jami 218 (41 fayl)
 
 ---
 

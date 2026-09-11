@@ -33,6 +33,9 @@ const schema = z.object({
   ESKIZ_BASE_URL: z.string().url().default("https://notify.eskiz.uz/api"),
   ESKIZ_SENDER: z.string().default("4546"),
 
+  /** Markaziy bank valyuta kurslari (JSON). */
+  CBU_RATES_URL: z.string().url().default("https://cbu.uz/uz/arkhiv-kursov-valyut/json/"),
+
   ANTHROPIC_API_KEY: z.string().optional(),
   /** AI yordamchi modeli — standart: eng so'nggi Sonnet. */
   ANTHROPIC_MODEL: z.string().min(1).default("claude-sonnet-5"),

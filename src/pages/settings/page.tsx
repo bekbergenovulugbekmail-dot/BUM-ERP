@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import {
-  Settings, Shield, Users, Building2, ListChecks, Puzzle, Bell, MapPin, Lock, ReceiptText, Tag, Gift,
+  Settings, Shield, Users, Building2, ListChecks, Puzzle, Bell, MapPin, Lock, ReceiptText, Tag, Gift, Coins,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import { useTranslation } from "react-i18next";
@@ -16,17 +16,19 @@ import SecuritySection from "./_components/security-section.tsx";
 import ReceiptSection from "./_components/receipt-section.tsx";
 import LabelsSection from "./_components/labels-section.tsx";
 import CashbackSection from "./_components/cashback-section.tsx";
+import CurrenciesSection from "./_components/currencies-section.tsx";
 
 // Takliflar (invitations) bo'limi yo'q — yakuniy qaror: xodim loginini kompaniya egasi o'zi ochadi
 export default function SettingsPage() {
   const { t } = useTranslation("modules");
   const [tab, setTab] = useState<
-    | "company" | "branches" | "receipt" | "labels" | "cashback" | "modules" | "roles" | "users" | "audit"
+    | "company" | "currencies" | "branches" | "receipt" | "labels" | "cashback" | "modules" | "roles" | "users" | "audit"
     | "notifications" | "security"
   >("company");
 
   const TABS = [
     { key: "company"       as const, label: t("settings.tab.company"),  icon: Building2 },
+    { key: "currencies"    as const, label: "Valyutalar",                icon: Coins },
     { key: "branches"      as const, label: "Filiallar",                 icon: MapPin },
     { key: "receipt"       as const, label: "Chek",                      icon: ReceiptText },
     { key: "labels"        as const, label: "Etiketka",                  icon: Tag },
@@ -73,6 +75,7 @@ export default function SettingsPage() {
 
       <motion.div key={tab} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }}>
         {tab === "company"       && <CompanySection />}
+        {tab === "currencies"    && <CurrenciesSection />}
         {tab === "branches"      && <BranchesSection />}
         {tab === "receipt"       && <ReceiptSection />}
         {tab === "labels"        && <LabelsSection />}

@@ -24,7 +24,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { companies, users } from "./platform.js";
-import { legacyId, money, pk, timestamps } from "./_shared.js";
+import { legacyId, money, pk, price, timestamps } from "./_shared.js";
 
 export const accountType = pgEnum("account_type", [
   "asset",
@@ -242,6 +242,54 @@ export const expenses = pgTable(
     index("expenses_company_status_idx").on(t.companyId, t.status),
     index("expenses_company_date_idx").on(t.companyId, t.expenseDate),
     check("expenses_amount_positive", sql`${t.amount} > 0`),
+  ],
+);
+
+// ─── valyutalar va kurslar ───────────────────────────────────────────────────
+
+export const currencyRateSource = pgEnum("currency_rate_source", ["manual", "cbu"]);
+
+/** Kompaniya ishlatadigan valyutalar (asosiy valyutadan tashqari) va joriy kurs. */
+export const companyCurrencies = pgTable(
+  "company_currencies",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    code: varchar("code", { length: 3 }).notNull(),
+    /** 1 birlik valyuta = `rate` asosiy valyuta. */
+    rate: price("rate").notNull(),
+    source: currencyRateSource("source").notNull().default("manual"),
+    rateDate: date("rate_date").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("cc_company_code_key").on(t.companyId, t.code),
+    check("cc_rate_positive", sql`${t.rate} > 0`),
+  ],
+);
+
+/** Kurs tarixi — har o'zgarish. Hujjatlar o'z kursini o'zida saqlaydi. */
+export const exchangeRates = pgTable(
+  "exchange_rates",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    code: varchar("code", { length: 3 }).notNull(),
+    rate: price("rate").notNull(),
+    source: currencyRateSource("source").notNull(),
+    rateDate: date("rate_date").notNull(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamps().createdAt,
+  },
+  (t) => [
+    index("er_company_code_date_idx").on(t.companyId, t.code, t.rateDate),
+    check("er_rate_positive", sql`${t.rate} > 0`),
   ],
 );
 
