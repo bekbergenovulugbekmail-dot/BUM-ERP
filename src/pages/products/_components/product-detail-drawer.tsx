@@ -1,20 +1,26 @@
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { motion, AnimatePresence } from "motion/react";
-import {
-  X, Edit, Package, Tag, Boxes, AlertTriangle, CheckCircle,
-  ScanBarcode, Calendar, DollarSign, TrendingUp, Hash,
-} from "lucide-react";
+import { X, Edit, Package, AlertTriangle, ScanBarcode, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
 import { cn } from "@/lib/utils.ts";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { errorMessage } from "@/lib/api.ts";
+import { useApiQuery } from "@/lib/query.ts";
+import { ProductImage } from "../_lib/product-image.tsx";
+import { formatQty, formatSom, toNumber, type CostingMethod, type ProductDetail } from "../_lib/types.ts";
 
 type Props = {
-  productId: Id<"products">;
+  productId: string;
+  canEdit: boolean;
   onClose: () => void;
-  onEdit: (id: Id<"products">) => void;
+  onEdit: (id: string) => void;
+};
+
+const COSTING_LABELS: Record<CostingMethod, string> = {
+  average: "O'rtacha narx (AVCO)",
+  fifo: "FIFO",
+  fefo: "FEFO",
+  manual: "Qo'lda",
 };
 
 function InfoRow({ label, value, className }: { label: string; value: React.ReactNode; className?: string }) {
@@ -26,19 +32,20 @@ function InfoRow({ label, value, className }: { label: string; value: React.Reac
   );
 }
 
-export default function ProductDetailDrawer({ productId, onClose, onEdit }: Props) {
-  const product = useQuery(api.products.products.getById, { id: productId });
+export default function ProductDetailDrawer({ productId, canEdit, onClose, onEdit }: Props) {
+  const query = useApiQuery<{ product: ProductDetail }>(`/api/catalog/products/${productId}`);
+  const product = query.data?.product;
 
-  const formatPrice = (n: number) => new Intl.NumberFormat("uz-UZ").format(n) + " so'm";
+  const margin = (() => {
+    if (!product) return "0";
+    const sales = toNumber(product.salesPrice);
+    const purchase = toNumber(product.purchasePrice);
+    return sales > 0 ? (((sales - purchase) / sales) * 100).toFixed(1) : "0.0";
+  })();
 
-  const margin = product
-    ? (((product.salesPrice - product.purchasePrice) / product.salesPrice) * 100).toFixed(1)
-    : "0";
-
-  const daysUntilExpiry = (date: string) => {
-    const diff = Math.ceil((new Date(date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-    return diff;
-  };
+  // Ma'lumot olingan vaqtga nisbatan (render toza bo'lishi uchun Date.now() emas)
+  const daysUntilExpiry = (date: string) =>
+    Math.ceil((new Date(date).getTime() - query.dataUpdatedAt) / (1000 * 60 * 60 * 24));
 
   return (
     <AnimatePresence>
@@ -61,7 +68,7 @@ export default function ProductDetailDrawer({ productId, onClose, onEdit }: Prop
           <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
             <h2 className="font-semibold text-sm">Mahsulot tafsilotlari</h2>
             <div className="flex items-center gap-2">
-              {product && (
+              {product && canEdit && (
                 <Button size="sm" onClick={() => onEdit(productId)}>
                   <Edit className="h-3.5 w-3.5 mr-1" /> Tahrirlash
                 </Button>
@@ -74,7 +81,9 @@ export default function ProductDetailDrawer({ productId, onClose, onEdit }: Prop
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto">
-            {!product ? (
+            {query.isError ? (
+              <div className="p-5 text-sm text-destructive">{errorMessage(query.error)}</div>
+            ) : !product ? (
               <div className="p-5 space-y-3">
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div key={i} className="h-8 bg-muted animate-pulse rounded" />
@@ -84,13 +93,17 @@ export default function ProductDetailDrawer({ productId, onClose, onEdit }: Prop
               <div>
                 {/* Hero */}
                 <div className="p-5 flex gap-4">
-                  {product.imageUrl ? (
-                    <img src={product.imageUrl} alt={product.name} className="h-20 w-20 rounded-xl object-cover border border-border shrink-0" />
-                  ) : (
-                    <div className="h-20 w-20 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                      <Package className="h-9 w-9 text-primary" />
-                    </div>
-                  )}
+                  <ProductImage
+                    productId={product.id}
+                    imageKey={product.imageKey}
+                    alt={product.name}
+                    className="h-20 w-20 rounded-xl border border-border shrink-0"
+                    fallback={
+                      <div className="h-20 w-20 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                        <Package className="h-9 w-9 text-primary" />
+                      </div>
+                    }
+                  />
                   <div className="flex-1 min-w-0">
                     <h3 className="font-bold text-base leading-tight">{product.name}</h3>
                     {product.brandName && (
@@ -130,13 +143,13 @@ export default function ProductDetailDrawer({ productId, onClose, onEdit }: Prop
                 {/* Pricing */}
                 <div className="px-5 py-3">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Narxlar</p>
-                  <InfoRow label="Xarid narxi" value={formatPrice(product.purchasePrice)} />
-                  <InfoRow label="Sotuv narxi" value={<span className="font-bold text-primary">{formatPrice(product.salesPrice)}</span>} />
-                  {product.wholesalePrice && <InfoRow label="Ulgurji narx" value={formatPrice(product.wholesalePrice)} />}
-                  {product.retailPrice && <InfoRow label="Chakana narx" value={formatPrice(product.retailPrice)} />}
-                  {product.promoPrice && <InfoRow label="Aksiya narxi" value={<span className="text-destructive">{formatPrice(product.promoPrice)}</span>} />}
+                  <InfoRow label="Xarid narxi" value={formatSom(product.purchasePrice)} />
+                  <InfoRow label="Sotuv narxi" value={<span className="font-bold text-primary">{formatSom(product.salesPrice)}</span>} />
+                  {product.wholesalePrice !== null && <InfoRow label="Ulgurji narx" value={formatSom(product.wholesalePrice)} />}
+                  {product.retailPrice !== null && <InfoRow label="Chakana narx" value={formatSom(product.retailPrice)} />}
+                  {product.promoPrice !== null && <InfoRow label="Aksiya narxi" value={<span className="text-destructive">{formatSom(product.promoPrice)}</span>} />}
                   <InfoRow label="Marja" value={<span className="text-green-600 font-bold">{margin}%</span>} />
-                  <InfoRow label="Soliq" value={`${product.taxRate}% ${product.taxIncluded ? "(narxga kiritilgan)" : ""}`} />
+                  <InfoRow label="Soliq" value={`${formatQty(product.taxRate)}% ${product.taxIncluded ? "(narxga kiritilgan)" : ""}`} />
                 </div>
 
                 <Separator />
@@ -144,10 +157,12 @@ export default function ProductDetailDrawer({ productId, onClose, onEdit }: Prop
                 {/* Stock info */}
                 <div className="px-5 py-3">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Zaxira sozlamalari</p>
-                  <InfoRow label="Minimal zaxira" value={`${product.minStock} ${product.baseUnitName ?? ""}`} />
-                  {product.maxStock && <InfoRow label="Maksimal zaxira" value={`${product.maxStock} ${product.baseUnitName ?? ""}`} />}
-                  <InfoRow label="Tannarx usuli" value={product.costingMethod.toUpperCase()} />
-                  <InfoRow label="Asosiy o'lchov" value={product.baseUnitName ?? "—"} />
+                  <InfoRow label="Minimal zaxira" value={`${formatQty(product.minStock)} ${product.baseUnitName}`} />
+                  {product.maxStock !== null && <InfoRow label="Maksimal zaxira" value={`${formatQty(product.maxStock)} ${product.baseUnitName}`} />}
+                  <InfoRow label="Tannarx usuli" value={COSTING_LABELS[product.costingMethod] ?? product.costingMethod} />
+                  <InfoRow label="Asosiy o'lchov" value={product.baseUnitName} />
+                  {product.purchaseUnitName && <InfoRow label="Xarid o'lchovi" value={product.purchaseUnitName} />}
+                  {product.salesUnitName && <InfoRow label="Sotuv o'lchovi" value={product.salesUnitName} />}
                 </div>
 
                 {/* Batches */}
@@ -162,10 +177,10 @@ export default function ProductDetailDrawer({ productId, onClose, onEdit }: Prop
                         {product.batches.map((b) => {
                           const days = b.expiryDate ? daysUntilExpiry(b.expiryDate) : null;
                           return (
-                            <div key={b._id} className="border border-border rounded-lg p-3">
+                            <div key={b.id} className="border border-border rounded-lg p-3">
                               <div className="flex items-center justify-between mb-1">
                                 <span className="text-xs font-mono font-medium">{b.batchNumber}</span>
-                                <span className="text-xs font-bold">{b.quantity} {product.baseUnitName}</span>
+                                <span className="text-xs font-bold">{formatQty(b.quantity)} {product.baseUnitName}</span>
                               </div>
                               {b.expiryDate && (
                                 <div className={cn(
@@ -179,7 +194,7 @@ export default function ProductDetailDrawer({ productId, onClose, onEdit }: Prop
                                 </div>
                               )}
                               <div className="text-[11px] text-muted-foreground mt-0.5">
-                                Narx: {formatPrice(b.costPrice)}
+                                Narx: {formatSom(b.costPrice)}
                               </div>
                             </div>
                           );

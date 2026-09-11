@@ -10,6 +10,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth.ts";
 import { errorMessage } from "@/lib/api.ts";
+import { toast } from "sonner";
+import { PasswordResetForm } from "./_components/password-reset-form.tsx";
 import { motion } from "motion/react";
 import {
   Phone, Lock, ArrowRight, Shield, Building2,
@@ -26,6 +28,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<"login" | "reset">("login");
 
   // If already authenticated, redirect to dashboard
   useEffect(() => {
@@ -126,6 +129,19 @@ export default function LoginPage() {
             <p className="font-bold text-white text-lg">BUM ERP</p>
           </div>
 
+          {mode === "reset" ? (
+            <PasswordResetForm
+              initialPhone={phone}
+              onCancel={() => setMode("login")}
+              onDone={(resetPhone) => {
+                setPhone(resetPhone);
+                setPassword("");
+                setMode("login");
+                toast.success("Parol yangilandi. Yangi parol bilan kiring");
+              }}
+            />
+          ) : (
+          <>
           {/* Heading */}
           <div>
             <h2 className="text-2xl font-bold text-white">Tizimga kirish</h2>
@@ -193,7 +209,20 @@ export default function LoginPage() {
                 <>Tizimga kirish <ArrowRight className="h-4 w-4 ml-auto" /></>
               )}
             </Button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode("reset");
+                setError(null);
+              }}
+              className="w-full text-center text-xs text-white/40 hover:text-white/70 transition-colors cursor-pointer"
+            >
+              Parolni unutdingizmi?
+            </button>
           </form>
+          </>
+          )}
 
           {/* Help section */}
           <div className="space-y-2 border-t border-white/5 pt-5">

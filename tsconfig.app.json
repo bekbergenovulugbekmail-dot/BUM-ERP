@@ -21,7 +21,6 @@
 
     "paths": {
       "@bum/shared": ["./packages/shared/src/index.ts"],
-      "@/convex/*": ["./convex/*"],
       "@/*": ["./src/*"]
     }
   },

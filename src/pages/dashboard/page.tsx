@@ -1,29 +1,59 @@
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import {
   TrendingUp, ShoppingCart, DollarSign, Package,
-  AlertTriangle, Users, BarChart3, ArrowUpRight,
-  Clock, Wallet, Building2,
+  AlertTriangle, Wallet, Building2, ShieldAlert,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
-import { Badge } from "@/components/ui/badge.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
+import { errorMessage } from "@/lib/api.ts";
+import { useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 
-const fmt = (n: number) =>
-  n >= 1_000_000
+/** `GET /api/analytics/dashboard` javobi — summalar numeric satr. */
+type DashboardKpi = {
+  todaySalesCount: number;
+  todaySalesTotal: string;
+  todayReceipts: string;
+  monthRevenue: string;
+  cogs: string;
+  grossProfit: string;
+  stockValue: string;
+  lowStockCount: number;
+  supplierDebt: string;
+  customerDebt: string;
+  cashBalance: string;
+  bankBalance: string;
+  recentSales: {
+    id: string; number: string; customerName: string | null; amount: string;
+    paidAmount: string; status: string; orderDate: string; isPos: boolean;
+  }[];
+  recentPurchases: { id: string; number: string; supplierName: string; amount: string; status: string; orderDate: string }[];
+  lowStockItems: { productId: string; productName: string; warehouseName: string; quantity: string; minStock: string; unit: string }[];
+  weeklyRevenue: { date: string; revenue: string }[];
+};
+
+const num = (value: string | number | null | undefined) => Number(value ?? 0) || 0;
+
+const fmt = (value: string | number) => {
+  const n = num(value);
+  return Math.abs(n) >= 1_000_000
     ? (n / 1_000_000).toFixed(1) + " mln"
-    : n >= 1_000
+    : Math.abs(n) >= 1_000
     ? (n / 1_000).toFixed(0) + " ming"
     : String(Math.round(n));
+};
 
 const fmtFull = (n: number) =>
   new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
+
+/** "2026-09-11" → "Pay" (hafta kuni, mahalliy). */
+const weekdayLabel = (date: string) =>
+  new Date(`${date}T00:00:00`).toLocaleDateString("uz-UZ", { weekday: "short" });
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-muted text-muted-foreground",
@@ -32,10 +62,15 @@ const STATUS_COLORS: Record<string, string> = {
   delivered: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
   cancelled: "bg-destructive/10 text-destructive",
   returned: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300",
+  partial: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+  received: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+  invoiced: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
+  paid: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
 };
 const STATUS_LABELS: Record<string, string> = {
   draft: "Qoralama", confirmed: "Tasdiqlangan", shipped: "Jo'natildi",
   delivered: "Yetkazildi", cancelled: "Bekor", returned: "Qaytarildi",
+  partial: "Qisman qabul", received: "Qabul qilindi", invoiced: "Hisob-faktura", paid: "To'langan",
 };
 
 function StatCard({
@@ -68,26 +103,60 @@ function StatCard({
 
 export default function DashboardPage() {
   const { t } = useTranslation(["dashboard", "common"]);
-  const kpi = useQuery(api.dashboard.getKPIs, {});
+  const { can, isLoading: permissionsLoading } = usePermissions();
+  // Moliyaviy ko'rsatkichlar (foyda, kassa, qarzlar) faqat `analytics.view` bilan
+  const canView = can("analytics.view");
+  const query = useApiQuery<DashboardKpi>(canView ? "/api/analytics/dashboard" : null);
+  const kpi = query.data;
   const loading = kpi === undefined;
+
+  const header = (
+    <motion.div
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex items-center justify-between"
+    >
+      <div>
+        <h1 className="text-2xl font-bold">{t("title")}</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          {new Date().toLocaleDateString("uz-UZ", {
+            weekday: "long", year: "numeric", month: "long", day: "numeric",
+          })}
+        </p>
+      </div>
+    </motion.div>
+  );
+
+  if ((!permissionsLoading && !canView) || query.isError) {
+    return (
+      <div className="p-4 md:p-6 space-y-6">
+        {header}
+        <Card>
+          <CardContent className="py-10 flex flex-col items-center text-center gap-2">
+            <ShieldAlert className="h-8 w-8 text-muted-foreground" />
+            <p className="text-sm font-medium">
+              {query.isError ? "Ko'rsatkichlarni yuklab bo'lmadi" : "Moliyaviy ko'rsatkichlarni ko'rish uchun ruxsat yo'q"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {query.isError
+                ? errorMessage(query.error)
+                : "Chap menyudagi bo'limlardan foydalaning yoki administratordan \"Tahlil\" ruxsatini so'rang."}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const weekly = (kpi?.weeklyRevenue ?? []).map((d) => ({
+    day: weekdayLabel(d.date),
+    date: d.date,
+    revenue: num(d.revenue),
+  }));
 
   return (
     <div className="p-4 md:p-6 space-y-6">
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between"
-      >
-        <div>
-          <h1 className="text-2xl font-bold">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {new Date().toLocaleDateString("uz-UZ", {
-              weekday: "long", year: "numeric", month: "long", day: "numeric",
-            })}
-          </p>
-        </div>
-      </motion.div>
+      {header}
 
       {/* KPI cards */}
       {loading ? (
@@ -99,14 +168,14 @@ export default function DashboardPage() {
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           <StatCard index={0} title="Bugungi sotuv" value={`${kpi.todaySalesCount} ta`}
-            sub={fmt(kpi.todaySalesTotal) + " so'm"}
+            sub={`${fmt(kpi.todaySalesTotal)} so'm · tushgan: ${fmt(kpi.todayReceipts)}`}
             icon={<ShoppingCart className="h-5 w-5 text-blue-600" />}
             color="bg-blue-50 dark:bg-blue-900/30" />
           <StatCard index={1} title="Bu oy tushum" value={fmt(kpi.monthRevenue) + " so'm"}
             icon={<DollarSign className="h-5 w-5 text-green-600" />}
             color="bg-green-50 dark:bg-green-900/30" />
           <StatCard index={2} title="Yalpi foyda" value={fmt(kpi.grossProfit) + " so'm"}
-            sub={kpi.monthRevenue > 0 ? `${((kpi.grossProfit / kpi.monthRevenue) * 100).toFixed(1)}%` : "—"}
+            sub={num(kpi.monthRevenue) > 0 ? `${((num(kpi.grossProfit) / num(kpi.monthRevenue)) * 100).toFixed(1)}%` : "—"}
             icon={<TrendingUp className="h-5 w-5 text-violet-600" />}
             color="bg-violet-50 dark:bg-violet-900/30" />
           <StatCard index={3} title="Stok qiymati" value={fmt(kpi.stockValue) + " so'm"}
@@ -118,9 +187,9 @@ export default function DashboardPage() {
             icon={<Wallet className="h-5 w-5 text-cyan-600" />}
             color="bg-cyan-50 dark:bg-cyan-900/30" />
           <StatCard index={5} title="Yetkazuvchi qarzi" value={fmt(kpi.supplierDebt) + " so'm"}
-            sub={kpi.customerDebt > 0 ? `Mijoz: ${fmt(kpi.customerDebt)}` : "Mijoz qarzi yo'q"}
+            sub={num(kpi.customerDebt) > 0 ? `Mijoz: ${fmt(kpi.customerDebt)}` : "Mijoz qarzi yo'q"}
             icon={<Building2 className="h-5 w-5 text-rose-600" />}
-            color={cn("bg-rose-50 dark:bg-rose-900/30", kpi.supplierDebt > 0 && "ring-1 ring-rose-400/50")} />
+            color={cn("bg-rose-50 dark:bg-rose-900/30", num(kpi.supplierDebt) > 0 && "ring-1 ring-rose-400/50")} />
         </div>
       )}
 
@@ -137,7 +206,7 @@ export default function DashboardPage() {
                 <Skeleton className="h-[220px] w-full rounded-lg" />
               ) : (
                 <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart data={kpi.weeklyRevenue} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <AreaChart data={weekly} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                     <defs>
                       <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="oklch(0.55 0.18 260)" stopOpacity={0.3} />
@@ -147,7 +216,10 @@ export default function DashboardPage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.88 0.01 240)" />
                     <XAxis dataKey="day" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000000).toFixed(0)}M`} />
-                    <Tooltip formatter={(v) => fmtFull(Number(v))} labelFormatter={(l) => `${l}`} />
+                    <Tooltip
+                      formatter={(v) => fmtFull(Number(v))}
+                      labelFormatter={(_, payload) => String(payload?.[0]?.payload?.date ?? "")}
+                    />
                     <Area type="monotone" dataKey="revenue" stroke="oklch(0.55 0.18 260)" fill="url(#revGrad)" strokeWidth={2} name="Sotuv" />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -173,20 +245,21 @@ export default function DashboardPage() {
               ) : (
                 <div className="space-y-3">
                   {kpi.lowStockItems.map((item) => (
-                    <div key={item.name} className="flex items-center gap-3">
+                    <div key={`${item.productId}-${item.warehouseName}`} className="flex items-center gap-3">
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium truncate">{item.name}</p>
+                        <p className="text-xs font-medium truncate">{item.productName}</p>
+                        <p className="text-[10px] text-muted-foreground truncate">{item.warehouseName}</p>
                         <div className="mt-0.5">
                           <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
                             <div
                               className="h-full rounded-full bg-amber-500"
-                              style={{ width: `${Math.min((item.qty / Math.max(item.minStock, 1)) * 100, 100)}%` }}
+                              style={{ width: `${Math.min((num(item.quantity) / Math.max(num(item.minStock), 1)) * 100, 100)}%` }}
                             />
                           </div>
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-xs font-bold text-amber-600">{item.qty}</p>
+                        <p className="text-xs font-bold text-amber-600">{num(item.quantity)}</p>
                         <p className="text-[10px] text-muted-foreground">{item.unit}</p>
                       </div>
                     </div>
@@ -210,7 +283,7 @@ export default function DashboardPage() {
                     </div>
                     <div className="flex justify-between border-t pt-1">
                       <span className="font-medium">Jami</span>
-                      <span className="font-bold">{fmt(kpi.cashBalance + kpi.bankBalance)} so'm</span>
+                      <span className="font-bold">{fmt(num(kpi.cashBalance) + num(kpi.bankBalance))} so'm</span>
                     </div>
                   </div>
                 )}
@@ -236,12 +309,12 @@ export default function DashboardPage() {
               ) : (
                 <div className="space-y-2">
                   {kpi.recentSales.map((tx) => (
-                    <div key={tx._id} className="flex items-center gap-3 py-1.5 border-b border-border/50 last:border-0">
+                    <div key={tx.id} className="flex items-center gap-3 py-1.5 border-b border-border/50 last:border-0">
                       <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                         <ShoppingCart className="h-3.5 w-3.5 text-primary" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium truncate">{tx.customerName}</p>
+                        <p className="text-xs font-medium truncate">{tx.customerName ?? (tx.isPos ? "Chakana (POS)" : "—")}</p>
                         <p className="text-[10px] text-muted-foreground">{tx.number} · {tx.orderDate}</p>
                       </div>
                       <div className="text-right shrink-0">
@@ -272,7 +345,7 @@ export default function DashboardPage() {
               ) : (
                 <div className="space-y-2">
                   {kpi.recentPurchases.map((po) => (
-                    <div key={po._id} className="flex items-center gap-3 py-1.5 border-b border-border/50 last:border-0">
+                    <div key={po.id} className="flex items-center gap-3 py-1.5 border-b border-border/50 last:border-0">
                       <div className="h-7 w-7 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
                         <Package className="h-3.5 w-3.5 text-green-600" />
                       </div>
@@ -305,8 +378,8 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex justify-between border-t pt-1">
                     <span className="font-semibold">Yalpi foyda</span>
-                    <span className={cn("font-bold", kpi.grossProfit >= 0 ? "text-green-600" : "text-red-500")}>
-                      {kpi.grossProfit >= 0 ? "+" : ""}{fmt(kpi.grossProfit)} so'm
+                    <span className={cn("font-bold", num(kpi.grossProfit) >= 0 ? "text-green-600" : "text-red-500")}>
+                      {num(kpi.grossProfit) >= 0 ? "+" : ""}{fmt(kpi.grossProfit)} so'm
                     </span>
                   </div>
                 </div>

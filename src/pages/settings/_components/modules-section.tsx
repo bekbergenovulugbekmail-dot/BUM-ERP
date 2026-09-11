@@ -1,11 +1,11 @@
-import { useState } from "react";
-import { useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils.ts";
 import { Switch } from "@/components/ui/switch.tsx";
 import { ERP_MODULES, MODULE_GROUPS } from "@/lib/modules.ts";
 import { useModules } from "@/components/providers/module-provider.tsx";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
 import {
   LayoutDashboard, ShoppingCart, Monitor, Package, Warehouse,
   ShoppingBag, Factory, Users, Truck, DollarSign, UserCheck,
@@ -18,21 +18,33 @@ const ICON_MAP: Record<string, React.ElementType> = {
   FileBarChart, BarChart3, BrainCircuit, Settings,
 };
 
+type ModuleId = Parameters<ReturnType<typeof useModules>["toggleModule"]>[0];
+
 export default function ModulesSection() {
   const { enabledModules, toggleModule } = useModules();
-  const upsertSetting = useMutation(api.admin.upsertSetting);
+  const { can } = usePermissions();
+  const canManage = can("modules.manage");
 
-  const handleToggle = async (moduleId: string) => {
-    toggleModule(moduleId as Parameters<typeof toggleModule>[0]);
-    try {
-      await upsertSetting({
-        key: `module.${moduleId}`,
-        value: String(!enabledModules.includes(moduleId as Parameters<typeof toggleModule>[0])),
+  // `PUT /api/company/settings/module.<id>` — `modules` guruhi uchun `modules.manage`
+  const saveModule = useApiMutation(
+    ({ moduleId, enabled }: { moduleId: string; enabled: boolean }) =>
+      api.put(`/api/company/settings/module.${moduleId}`, {
+        value: String(enabled),
         group: "modules",
         description: `Module ${moduleId} enabled state`,
-      });
-    } catch {
-      // Non-critical
+      }),
+    { invalidate: ["/api/company/settings"] },
+  );
+
+  const handleToggle = async (moduleId: ModuleId) => {
+    const enabled = !enabledModules.includes(moduleId);
+    toggleModule(moduleId);
+    try {
+      await saveModule.mutateAsync({ moduleId, enabled });
+    } catch (err) {
+      // Server rad etdi — mahalliy holat qaytariladi
+      toggleModule(moduleId);
+      toast.error(errorMessage(err));
     }
   };
 
@@ -46,7 +58,11 @@ export default function ModulesSection() {
     <div className="space-y-5">
       <div>
         <p className="text-sm font-semibold">Modullarni boshqarish</p>
-        <p className="text-xs text-muted-foreground">Keraksiz modullarni o'chirib qo'ying — ular menyudan yashiriladi</p>
+        <p className="text-xs text-muted-foreground">
+          {canManage
+            ? "Keraksiz modullarni o'chirib qo'ying — ular menyudan yashiriladi"
+            : "Modullarni o'zgartirish uchun ruxsat yo'q"}
+        </p>
       </div>
 
       {grouped.map(({ key, label, modules }) => (
@@ -74,8 +90,8 @@ export default function ModulesSection() {
                   </div>
                   <Switch
                     checked={isEnabled}
-                    onCheckedChange={() => !isCore && handleToggle(mod.id)}
-                    disabled={isCore}
+                    onCheckedChange={() => { if (!isCore) void handleToggle(mod.id); }}
+                    disabled={isCore || !canManage || saveModule.isPending}
                     className="cursor-pointer"
                   />
                 </div>

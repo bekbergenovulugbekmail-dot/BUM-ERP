@@ -2,25 +2,11 @@ import { ShoppingCart, ChevronRight, Truck, CheckCircle, Clock, Ban } from "luci
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty.tsx";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
-
-type Order = {
-  _id: Id<"purchaseOrders">;
-  number: string;
-  supplierName: string;
-  warehouseName: string;
-  status: string;
-  orderDate: string;
-  totalAmount: number;
-  paidAmount: number;
-  balance: number;
-  itemCount: number;
-  currency: string;
-};
+import { num, type PurchaseOrderRow } from "../_lib/types.ts";
 
 type Props = {
-  orders: Order[] | undefined;
-  onSelect: (id: Id<"purchaseOrders">) => void;
+  orders: PurchaseOrderRow[] | undefined;
+  onSelect: (id: string) => void;
 };
 
 const STATUS_META: Record<string, { label: string; icon: React.ReactNode; cls: string }> = {
@@ -70,11 +56,12 @@ export default function OrdersTable({ orders, onSelect }: Props) {
           <tbody className="divide-y divide-border">
             {orders.map((o) => {
               const meta = STATUS_META[o.status] ?? STATUS_META.draft;
+              const balance = num(o.balance);
               return (
                 <tr
-                  key={o._id}
+                  key={o.id}
                   className="hover:bg-muted/30 transition-colors cursor-pointer"
-                  onClick={() => onSelect(o._id)}
+                  onClick={() => onSelect(o.id)}
                 >
                   <td className="px-4 py-3 font-mono font-medium text-sm">{o.number}</td>
                   <td className="px-4 py-3">
@@ -89,10 +76,10 @@ export default function OrdersTable({ orders, onSelect }: Props) {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-sm whitespace-nowrap">
-                    {fmt(o.totalAmount)} so'm
+                    {fmt(num(o.totalAmount))} so'm
                   </td>
-                  <td className={cn("px-4 py-3 text-right text-sm font-bold whitespace-nowrap", o.balance > 0 ? "text-amber-600" : "text-green-600")}>
-                    {o.balance > 0 ? fmt(o.balance) + " so'm" : "—"}
+                  <td className={cn("px-4 py-3 text-right text-sm font-bold whitespace-nowrap", balance > 0 ? "text-amber-600" : "text-green-600")}>
+                    {balance > 0 ? fmt(balance) + " so'm" : "—"}
                   </td>
                   <td className="px-4 py-3">
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />

@@ -1,4 +1,3 @@
-import convexPlugin from "@convex-dev/eslint-plugin";
 import js from "@eslint/js";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
@@ -8,7 +7,7 @@ import tseslint from "typescript-eslint";
 import { defineConfig } from "eslint/config";
 
 export default defineConfig([
-  globalIgnores(["dist", "**/_generated/*"]),
+  globalIgnores(["dist", "apps/api/dist"]),
   {
     files: ["**/*.{ts,tsx}"],
     extends: [
@@ -16,7 +15,6 @@ export default defineConfig([
       tseslint.configs.recommended,
       reactHooks.configs.flat["recommended-latest"],
       reactRefresh.configs.vite,
-      convexPlugin.configs.recommended,
     ],
     rules: {
       "@typescript-eslint/ban-ts-comment": [

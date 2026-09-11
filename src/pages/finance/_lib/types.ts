@@ -1,0 +1,114 @@
+/**
+ * Moliya API javoblari (`/api/finance/*`). Summalar — aniq o'nlik satr ("12500.00"),
+ * `Number()` faqat ko'rsatish uchun.
+ */
+
+export type AccountType = "asset" | "liability" | "equity" | "income" | "expense";
+
+export type Account = {
+  id: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  subtype: string | null;
+  parentId: string | null;
+  currency: string;
+  balance: string;
+  description: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CashAccount = {
+  id: string;
+  name: string;
+  type: "cash" | "bank";
+  currency: string;
+  bankName: string | null;
+  accountNumber: string | null;
+  balance: string;
+  isDefault: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CashTransaction = {
+  id: string;
+  cashAccountId: string;
+  type: "in" | "out" | "transfer";
+  amount: string;
+  currency: string;
+  txDate: string;
+  description: string;
+  category: string | null;
+  referenceType: string | null;
+  referenceId: string | null;
+  balanceAfter: string;
+  createdBy: string | null;
+  createdAt: string;
+};
+
+export type FinanceDashboard = {
+  totalCash: string;
+  totalBank: string;
+  totalBalance: string;
+  monthIncome: string;
+  monthExpense: string;
+  monthNetCash: string;
+  monthSalesTotal: string;
+  monthPurchaseTotal: string;
+  accounts: CashAccount[];
+};
+
+export type ExpenseStatus = "pending" | "approved" | "paid";
+
+export type Expense = {
+  id: string;
+  number: string;
+  category: string;
+  description: string;
+  amount: string;
+  currency: string;
+  expenseDate: string;
+  accountId: string | null;
+  paidBy: string | null;
+  attachmentKey: string | null;
+  status: ExpenseStatus;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ExpenseStats = {
+  totalThisMonth: string;
+  countThisMonth: number;
+  pendingCount: number;
+  pendingAmount: string;
+  /** Bu oy, summa bo'yicha kamayish tartibida. */
+  byCategory: { category: string; total: string }[];
+};
+
+export type ProfitLossLine = { accountId: string; code: string; name: string; amount: string };
+
+export type ProfitLoss = {
+  income: ProfitLossLine[];
+  expenses: ProfitLossLine[];
+  totalIncome: string;
+  totalExpense: string;
+  netProfit: string;
+};
+
+export const toNum = (value: string | number | null | undefined) => Number(value ?? 0) || 0;
+
+export const fmt = (value: string | number | null | undefined) =>
+  new Intl.NumberFormat("uz-UZ").format(Math.round(toNum(value)));
+
+/** Mahalliy sana (UTC emas) — "YYYY-MM-DD". */
+export function localIsoDate(date = new Date()) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}

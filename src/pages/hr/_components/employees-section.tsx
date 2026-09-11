@@ -1,11 +1,6 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
-import {
-  Plus, Search, Users, Phone, Mail, Building2,
-  Pencil, Trash2, ChevronDown, User, UserCheck, UserX, Clock,
-} from "lucide-react";
+import { Plus, Search, Users, Phone, Building2, Pencil, Trash2, User } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -13,109 +8,133 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
+import {
+  fmt, localIsoDate,
+  type Department, type Employee, type EmployeeStatus, type Position, type SalaryType,
+} from "../_lib/types.ts";
 
-const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
-
-const STATUS_MAP = {
+const STATUS_MAP: Record<EmployeeStatus, { label: string; color: string; dot: string }> = {
   active: { label: "Faol", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400", dot: "bg-emerald-400" },
   on_leave: { label: "Ta'tilda", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400", dot: "bg-amber-400" },
   terminated: { label: "Ishdan bo'shatilgan", color: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400", dot: "bg-rose-400" },
 };
 
-const SALARY_TYPES = { monthly: "Oylik", hourly: "Soatlik", daily: "Kunlik" };
+type FormState = {
+  name: string; phone: string; email: string;
+  departmentId: string; positionId: string;
+  hireDate: string; baseSalary: string;
+  salaryType: SalaryType;
+  birthDate: string; gender: "" | "male" | "female";
+  address: string; bankAccount: string; notes: string;
+  status: EmployeeStatus;
+};
+
+const emptyForm = (): FormState => ({
+  name: "", phone: "", email: "", departmentId: "", positionId: "",
+  hireDate: localIsoDate(), baseSalary: "",
+  salaryType: "monthly", birthDate: "",
+  gender: "", address: "", bankAccount: "", notes: "", status: "active",
+});
+
+/** Bo'sh maydon `null` — tahrirda ma'lumotni tozalash mumkin. */
+function toBody(form: FormState, includeSensitive: boolean) {
+  return {
+    name: form.name.trim(),
+    phone: form.phone.trim() || null,
+    email: form.email.trim() || null,
+    departmentId: form.departmentId || null,
+    positionId: form.positionId || null,
+    hireDate: form.hireDate,
+    birthDate: form.birthDate || null,
+    gender: form.gender || null,
+    address: form.address.trim() || null,
+    baseSalary: form.baseSalary || "0",
+    salaryType: form.salaryType,
+    notes: form.notes.trim() || null,
+    ...(includeSensitive ? { bankAccount: form.bankAccount.trim() || null } : {}),
+  };
+}
+
+type EmployeeBody = ReturnType<typeof toBody>;
 
 export default function EmployeesSection() {
-  const [search, setSearch] = useState("");
-  const [deptFilter, setDeptFilter] = useState<Id<"departments"> | "all">("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "on_leave" | "terminated">("all");
-  const [createOpen, setCreateOpen] = useState(false);
-  const [editEmployee, setEditEmployee] = useState<Id<"employees"> | null>(null);
-  const [loading, setLoading] = useState(false);
+  const { can } = usePermissions();
+  const canManage = can("hr.manage");
 
-  const employees = useQuery(api.hr.employees.listEmployees, {
-    search: search.length > 1 ? search : undefined,
+  const [search, setSearch] = useState("");
+  const [deptFilter, setDeptFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | EmployeeStatus>("all");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editEmployee, setEditEmployee] = useState<string | null>(null);
+
+  const employees = useApiQuery<{ employees: Employee[] }>("/api/hr/employees", {
+    search: search.trim().length > 1 ? search.trim() : undefined,
     departmentId: deptFilter !== "all" ? deptFilter : undefined,
     status: statusFilter !== "all" ? statusFilter : undefined,
-  });
-  const departments = useQuery(api.hr.employees.listDepartments, {});
-  const positions = useQuery(api.hr.employees.listPositions, {});
-  const editData = useQuery(api.hr.employees.getEmployee, editEmployee ? { id: editEmployee } : "skip");
+  }).data?.employees;
+  const departments = useApiQuery<{ departments: Department[] }>("/api/hr/departments").data?.departments;
+  const positions = useApiQuery<{ positions: Position[] }>("/api/hr/positions").data?.positions;
 
-  const createEmployee = useMutation(api.hr.employees.createEmployee);
-  const updateEmployee = useMutation(api.hr.employees.updateEmployee);
-  const deleteEmployee = useMutation(api.hr.employees.deleteEmployee);
+  const createEmployee = useApiMutation((body: EmployeeBody) => api.post("/api/hr/employees", body));
+  const updateEmployee = useApiMutation(({ id, ...body }: EmployeeBody & { id: string; status: EmployeeStatus }) =>
+    api.patch(`/api/hr/employees/${id}`, body),
+  );
+  const deleteEmployee = useApiMutation((id: string) => api.delete(`/api/hr/employees/${id}`));
 
-  const emptyForm = {
-    name: "", phone: "", email: "", departmentId: "", positionId: "",
-    hireDate: new Date().toISOString().slice(0, 10), baseSalary: "",
-    salaryType: "monthly" as "monthly" | "hourly" | "daily", birthDate: "",
-    gender: "" as "" | "male" | "female", address: "", bankAccount: "", notes: "",
+  const [form, setForm] = useState<FormState>(emptyForm);
+  const [localEditForm, setLocalEditForm] = useState<FormState>(emptyForm);
+
+  const openCreate = () => { setForm(emptyForm()); setCreateOpen(true); };
+
+  const openEdit = (emp: Employee) => {
+    setEditEmployee(emp.id);
+    setLocalEditForm({
+      name: emp.name, phone: emp.phone ?? "", email: emp.email ?? "",
+      departmentId: emp.departmentId ?? "", positionId: emp.positionId ?? "",
+      hireDate: emp.hireDate, baseSalary: emp.baseSalary,
+      salaryType: emp.salaryType, birthDate: emp.birthDate ?? "",
+      gender: emp.gender ?? "",
+      address: emp.address ?? "", bankAccount: emp.bankAccount ?? "", notes: emp.notes ?? "",
+      status: emp.status,
+    });
   };
-  const [form, setForm] = useState(emptyForm);
-
-  const openCreate = () => { setForm(emptyForm); setCreateOpen(true); };
-  const openEdit = (id: Id<"employees">) => { setEditEmployee(id); };
-
-  // Sync edit form when data loads
-  const editForm = editData ? {
-    name: editData.name, phone: editData.phone ?? "", email: editData.email ?? "",
-    departmentId: editData.departmentId ?? "", positionId: editData.positionId ?? "",
-    hireDate: editData.hireDate, baseSalary: String(editData.baseSalary),
-    salaryType: editData.salaryType, birthDate: editData.birthDate ?? "",
-    gender: (editData.gender ?? "") as "" | "male" | "female",
-    address: editData.address ?? "", bankAccount: editData.bankAccount ?? "", notes: editData.notes ?? "",
-  } : null;
-
-  const [localEditForm, setLocalEditForm] = useState(emptyForm);
 
   const handleCreate = async () => {
-    if (!form.name) { toast.error("Ism kiritilishi shart"); return; }
-    setLoading(true);
+    if (!form.name.trim()) { toast.error("Ism kiritilishi shart"); return; }
     try {
-      await createEmployee({
-        name: form.name,
-        phone: form.phone || undefined,
-        email: form.email || undefined,
-        departmentId: form.departmentId ? form.departmentId as Id<"departments"> : undefined,
-        positionId: form.positionId ? form.positionId as Id<"positions"> : undefined,
-        hireDate: form.hireDate,
-        birthDate: form.birthDate || undefined,
-        gender: form.gender || undefined,
-        address: form.address || undefined,
-        baseSalary: parseFloat(form.baseSalary) || 0,
-        salaryType: form.salaryType,
-        bankAccount: form.bankAccount || undefined,
-        notes: form.notes || undefined,
-      });
+      await createEmployee.mutateAsync(toBody(form, canManage));
       toast.success("Xodim qo'shildi");
       setCreateOpen(false);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
-    finally { setLoading(false); }
+    } catch (e) { toast.error(errorMessage(e)); }
   };
 
   const handleUpdate = async () => {
     if (!editEmployee) return;
-    setLoading(true);
+    if (!localEditForm.name.trim()) { toast.error("Ism kiritilishi shart"); return; }
     try {
-      await updateEmployee({
+      await updateEmployee.mutateAsync({
         id: editEmployee,
-        name: localEditForm.name || undefined,
-        phone: localEditForm.phone || undefined,
-        email: localEditForm.email || undefined,
-        departmentId: localEditForm.departmentId ? localEditForm.departmentId as Id<"departments"> : undefined,
-        positionId: localEditForm.positionId ? localEditForm.positionId as Id<"positions"> : undefined,
-        baseSalary: parseFloat(localEditForm.baseSalary) || undefined,
-        salaryType: localEditForm.salaryType,
-        address: localEditForm.address || undefined,
-        bankAccount: localEditForm.bankAccount || undefined,
-        notes: localEditForm.notes || undefined,
+        ...toBody(localEditForm, canManage),
+        status: localEditForm.status,
       });
       toast.success("Xodim yangilandi");
       setEditEmployee(null);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
-    finally { setLoading(false); }
+    } catch (e) { toast.error(errorMessage(e)); }
   };
+
+  // Davomat/maosh tarixi bor xodim o'chirilmaydi — server rad etadi, holatni "ishdan bo'shatilgan" qilish kerak
+  const handleDelete = async (id: string) => {
+    if (!confirm("O'chirishni tasdiqlaysizmi?")) return;
+    try {
+      await deleteEmployee.mutateAsync(id);
+      toast.success("Xodim o'chirildi");
+    } catch (e) { toast.error(errorMessage(e)); }
+  };
+
+  const loading = createEmployee.isPending || updateEmployee.isPending;
 
   return (
     <div className="space-y-4">
@@ -125,11 +144,11 @@ export default function EmployeesSection() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input className="pl-9" placeholder="Xodim qidirish..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <Select value={deptFilter as string} onValueChange={(v) => setDeptFilter(v === "all" ? "all" : v as Id<"departments">)}>
+        <Select value={deptFilter} onValueChange={setDeptFilter}>
           <SelectTrigger className="w-48"><SelectValue placeholder="Bo'lim" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Barcha bo'limlar</SelectItem>
-            {departments?.map((d) => <SelectItem key={d._id} value={d._id}>{d.name}</SelectItem>)}
+            {departments?.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
@@ -141,9 +160,11 @@ export default function EmployeesSection() {
             <SelectItem value="terminated">Ishdan ketgan</SelectItem>
           </SelectContent>
         </Select>
-        <Button size="sm" onClick={openCreate}>
-          <Plus className="h-3.5 w-3.5 mr-1" /> Xodim qo'shish
-        </Button>
+        {canManage && (
+          <Button size="sm" onClick={openCreate}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> Xodim qo'shish
+          </Button>
+        )}
       </div>
 
       {/* List */}
@@ -155,14 +176,16 @@ export default function EmployeesSection() {
         <div className="text-center py-16">
           <Users className="h-12 w-12 mx-auto mb-3 text-muted-foreground/20" />
           <p className="text-muted-foreground">Xodimlar topilmadi</p>
-          <Button size="sm" className="mt-3" onClick={openCreate}><Plus className="h-4 w-4 mr-1" /> Xodim qo'shish</Button>
+          {canManage && (
+            <Button size="sm" className="mt-3" onClick={openCreate}><Plus className="h-4 w-4 mr-1" /> Xodim qo'shish</Button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {employees.map((emp) => {
             const st = STATUS_MAP[emp.status];
             return (
-              <div key={emp._id} className="bg-card border border-border rounded-2xl p-4 group hover:border-primary/30 transition-all">
+              <div key={emp.id} className="bg-card border border-border rounded-2xl p-4 group hover:border-primary/30 transition-all">
                 <div className="flex items-start gap-3">
                   <div className="h-11 w-11 rounded-xl bg-primary/10 flex items-center justify-center text-primary font-bold text-lg flex-shrink-0">
                     {emp.name.charAt(0).toUpperCase()}
@@ -199,25 +222,17 @@ export default function EmployeesSection() {
                     <p className="text-xs text-muted-foreground">Oylik maosh</p>
                     <p className="font-bold">{fmt(emp.baseSalary)} so'm</p>
                   </div>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => {
-                      setEditEmployee(emp._id);
-                      setLocalEditForm({
-                        name: emp.name, phone: emp.phone ?? "", email: emp.email ?? "",
-                        departmentId: emp.departmentId ?? "", positionId: emp.positionId ?? "",
-                        hireDate: emp.hireDate, baseSalary: String(emp.baseSalary),
-                        salaryType: emp.salaryType, birthDate: emp.birthDate ?? "",
-                        gender: (emp.gender ?? "") as "" | "male" | "female",
-                        address: emp.address ?? "", bankAccount: emp.bankAccount ?? "", notes: emp.notes ?? "",
-                      });
-                    }}>
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive"
-                      onClick={() => { if (confirm("O'chirishni tasdiqlaysizmi?")) deleteEmployee({ id: emp._id }); }}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
+                  {canManage && (
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => openEdit(emp)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive"
+                        onClick={() => handleDelete(emp.id)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -234,6 +249,7 @@ export default function EmployeesSection() {
               form={form} setForm={setForm}
               departments={departments ?? []}
               positions={positions ?? []}
+              showSensitive={canManage}
             />
             <DialogFooter>
               <Button variant="secondary" onClick={() => setCreateOpen(false)}>Bekor</Button>
@@ -252,6 +268,8 @@ export default function EmployeesSection() {
               form={localEditForm} setForm={setLocalEditForm}
               departments={departments ?? []}
               positions={positions ?? []}
+              showSensitive={canManage}
+              showStatus
             />
             <DialogFooter>
               <Button variant="secondary" onClick={() => setEditEmployee(null)}>Bekor</Button>
@@ -264,20 +282,13 @@ export default function EmployeesSection() {
   );
 }
 
-type FormState = {
-  name: string; phone: string; email: string;
-  departmentId: string; positionId: string;
-  hireDate: string; baseSalary: string;
-  salaryType: "monthly" | "hourly" | "daily";
-  birthDate: string; gender: "" | "male" | "female";
-  address: string; bankAccount: string; notes: string;
-};
-
-function EmployeeForm({ form, setForm, departments, positions }: {
+function EmployeeForm({ form, setForm, departments, positions, showSensitive, showStatus }: {
   form: FormState;
   setForm: (f: FormState) => void;
-  departments: { _id: string; name: string }[];
-  positions: { _id: string; name: string; departmentId: string; departmentName?: string }[];
+  departments: { id: string; name: string }[];
+  positions: { id: string; name: string; departmentId: string }[];
+  showSensitive: boolean;
+  showStatus?: boolean;
 }) {
   const filteredPositions = form.departmentId
     ? positions.filter((p) => p.departmentId === form.departmentId)
@@ -303,7 +314,7 @@ function EmployeeForm({ form, setForm, departments, positions }: {
           <SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="none">— Bo'limsiz —</SelectItem>
-            {departments.map((d) => <SelectItem key={d._id} value={d._id}>{d.name}</SelectItem>)}
+            {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
@@ -313,7 +324,7 @@ function EmployeeForm({ form, setForm, departments, positions }: {
           <SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="none">— Lavozimisiz —</SelectItem>
-            {filteredPositions.map((p) => <SelectItem key={p._id} value={p._id}>{p.name}</SelectItem>)}
+            {filteredPositions.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
@@ -338,7 +349,7 @@ function EmployeeForm({ form, setForm, departments, positions }: {
       </div>
       <div>
         <Label>Ish haqi turi</Label>
-        <Select value={form.salaryType} onValueChange={(v) => setForm({ ...form, salaryType: v as "monthly" | "hourly" | "daily" })}>
+        <Select value={form.salaryType} onValueChange={(v) => setForm({ ...form, salaryType: v as SalaryType })}>
           <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="monthly">Oylik</SelectItem>
@@ -351,14 +362,29 @@ function EmployeeForm({ form, setForm, departments, positions }: {
         <Label>Asosiy maosh (so'm) *</Label>
         <Input type="number" min="0" value={form.baseSalary} onChange={(e) => setForm({ ...form, baseSalary: e.target.value })} placeholder="3000000" />
       </div>
+      {showStatus && (
+        <div>
+          <Label>Holat</Label>
+          <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as EmployeeStatus })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Faol</SelectItem>
+              <SelectItem value="on_leave">Ta'tilda</SelectItem>
+              <SelectItem value="terminated">Ishdan bo'shatilgan</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <div className="col-span-2">
         <Label>Manzil</Label>
         <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Toshkent, Chilonzor tumani..." />
       </div>
-      <div className="col-span-2">
-        <Label>Bank hisob raqami</Label>
-        <Input value={form.bankAccount} onChange={(e) => setForm({ ...form, bankAccount: e.target.value })} placeholder="20208000000000000000" />
-      </div>
+      {showSensitive && (
+        <div className="col-span-2">
+          <Label>Bank hisob raqami</Label>
+          <Input value={form.bankAccount} onChange={(e) => setForm({ ...form, bankAccount: e.target.value })} placeholder="20208000000000000000" />
+        </div>
+      )}
       <div className="col-span-2">
         <Label>Izoh</Label>
         <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Ixtiyoriy..." />

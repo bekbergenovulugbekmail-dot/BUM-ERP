@@ -1,6 +1,4 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
 import { Plus, Trash2, ShoppingBag } from "lucide-react";
 import {
@@ -12,102 +10,131 @@ import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
+import { computeLine, minorToNumber } from "../_lib/line-amounts.ts";
+import {
+  num, todayLocal,
+  type Customer, type ProductOption, type WarehouseOption,
+} from "../_lib/types.ts";
 
 type LineItem = {
   productId: string;
   unitId: string;
-  qty: number;
+  quantity: number;
   unitPrice: number;
-  taxRate: number;
-  discountPercent: number;
+  /** Prays-list narxi — o'zgarmagan bo'lsa narx yuborilmaydi (server o'zi qo'yadi). */
+  listPrice: number;
+  /** null — mijoz chegirmasi (server qo'yadi). */
+  discountPercent: number | null;
+  taxRate: string;
+  taxIncluded: boolean;
 };
 
 type Props = {
   onClose: () => void;
-  onCreated: (id: Id<"salesOrders">) => void;
+  onCreated: (id: string) => void;
 };
+
+const ANONYMOUS = "anon";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
-export default function CreateOrderDialog({ onClose, onCreated }: Props) {
-  const customers = useQuery(api.sales.customers.list, {});
-  const warehouses = useQuery(api.warehouse.warehouses.list, {});
-  const products = useQuery(api.products.products.list, { paginationOpts: { cursor: null, numItems: 300 } });
-  const units = useQuery(api.products.units.list, {});
-  const createOrder = useMutation(api.sales.orders.create);
+const emptyLine = (): LineItem => ({
+  productId: "", unitId: "", quantity: 1, unitPrice: 0, listPrice: 0, discountPercent: null, taxRate: "0", taxIncluded: true,
+});
 
-  const today = new Date().toISOString().slice(0, 10);
+export default function CreateOrderDialog({ onClose, onCreated }: Props) {
+  const { can } = usePermissions();
+  // Narx va chegirmani o'zgartirish — faqat sales.edit (aks holda server rad etadi)
+  const canOverride = can("sales.edit");
+  const customers = useApiQuery<{ customers: Customer[] }>("/api/sales/customers").data?.customers;
+  const warehouses = useApiQuery<{ warehouses: WarehouseOption[] }>("/api/inventory/warehouses").data?.warehouses;
+  // API chegarasi: 200 ta faol mahsulot
+  const products = useApiQuery<{ products: ProductOption[] }>("/api/catalog/products", { limit: 200, isActive: true })
+    .data?.products.filter((p) => p.isSaleable);
+  const createOrder = useApiMutation((body: object) => api.post<{ order: { id: string } }>("/api/sales/orders", body));
+
   const [customerId, setCustomerId] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
-  const [orderDate, setOrderDate] = useState(today);
+  const [orderDate, setOrderDate] = useState(todayLocal);
   const [deliveryDate, setDeliveryDate] = useState("");
   const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState<LineItem[]>([
-    { productId: "", unitId: "", qty: 1, unitPrice: 0, taxRate: 12, discountPercent: 0 },
-  ]);
+  const [lines, setLines] = useState<LineItem[]>([emptyLine()]);
   const [loading, setLoading] = useState(false);
 
   if (!warehouseId && warehouses?.length) {
     const def = warehouses.find((w) => w.isDefault) ?? warehouses[0];
-    setWarehouseId(def._id);
+    setWarehouseId(def.id);
   }
 
-  const addLine = () =>
-    setLines((p) => [...p, { productId: "", unitId: "", qty: 1, unitPrice: 0, taxRate: 12, discountPercent: 0 }]);
+  const customer = customers?.find((c) => c.id === customerId);
+  const customerDiscount = num(customer?.discountPercent);
+
+  const addLine = () => setLines((p) => [...p, emptyLine()]);
   const removeLine = (i: number) => setLines((p) => p.filter((_, idx) => idx !== i));
 
-  const updateLine = (i: number, field: keyof LineItem, value: string | number) => {
+  const updateLine = (i: number, patch: Partial<LineItem>) => {
     setLines((p) => {
       const next = [...p];
-      const line = { ...next[i] } as Record<string, string | number>;
-      line[field] = value;
-      if (field === "productId" && typeof value === "string") {
-        const prod = products?.page.find((p) => p._id === value);
+      const line = { ...next[i], ...patch };
+      if (patch.productId !== undefined) {
+        const prod = products?.find((p) => p.id === patch.productId);
         if (prod) {
+          const price = num(prod.salesPrice);
           line.unitId = prod.baseUnitId;
-          line.unitPrice = prod.salesPrice;
+          line.unitPrice = price;
+          line.listPrice = price;
           line.taxRate = prod.taxRate;
+          line.taxIncluded = prod.taxIncluded;
         }
       }
-      next[i] = line as unknown as LineItem;
+      next[i] = line;
       return next;
     });
   };
 
-  const subtotal = lines.reduce((s, l) => s + l.qty * l.unitPrice * (1 - l.discountPercent / 100), 0);
-  const taxTotal = lines.reduce((s, l) => {
-    const net = l.qty * l.unitPrice * (1 - l.discountPercent / 100);
-    return s + net * (l.taxRate / 100);
-  }, 0);
-  const total = subtotal + taxTotal;
+  // Oldindan ko'rish serverdagi hisob bilan bir xil (soliq mahsulotdan, `taxIncluded` bo'yicha)
+  const amounts = lines.map((l) =>
+    computeLine({
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      discountPercent: l.discountPercent ?? customerDiscount,
+      taxRate: l.taxRate,
+      taxIncluded: l.taxIncluded,
+    }),
+  );
+  const subtotal = minorToNumber(amounts.reduce((s, a) => s + a.net, 0n));
+  const taxTotal = minorToNumber(amounts.reduce((s, a) => s + a.tax, 0n));
+  const total = minorToNumber(amounts.reduce((s, a) => s + a.lineTotal, 0n));
 
   const handleSubmit = async () => {
     if (!warehouseId) { toast.error("Ombor tanlang"); return; }
-    const validLines = lines.filter((l) => l.productId && l.qty > 0);
+    const validLines = lines.filter((l) => l.productId && l.quantity > 0);
     if (!validLines.length) { toast.error("Kamida bitta mahsulot qo'shing"); return; }
 
     setLoading(true);
     try {
-      const id = await createOrder({
-        customerId: customerId ? customerId as Id<"customers"> : undefined,
-        warehouseId: warehouseId as Id<"warehouses">,
+      const { order } = await createOrder.mutateAsync({
+        customerId: customerId && customerId !== ANONYMOUS ? customerId : null,
+        warehouseId,
         orderDate,
-        deliveryDate: deliveryDate || undefined,
-        notes: notes || undefined,
+        deliveryDate: deliveryDate || null,
+        notes: notes || null,
+        // Soliq stavkasi yuborilmaydi — serverda mahsulotdan
         items: validLines.map((l) => ({
-          productId: l.productId as Id<"products">,
-          unitId: l.unitId as Id<"units">,
-          qty: l.qty,
-          unitPrice: l.unitPrice,
-          taxRate: l.taxRate,
-          discountPercent: l.discountPercent,
+          productId: l.productId,
+          unitId: l.unitId,
+          quantity: l.quantity,
+          ...(l.unitPrice !== l.listPrice ? { unitPrice: l.unitPrice } : {}),
+          ...(l.discountPercent !== null ? { discountPercent: l.discountPercent } : {}),
         })),
       });
       toast.success("Sotuv buyurtmasi yaratildi");
-      onCreated(id);
+      onCreated(order.id);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Xatolik");
+      toast.error(errorMessage(err));
     } finally { setLoading(false); }
   };
 
@@ -128,12 +155,15 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
               <Select value={customerId} onValueChange={setCustomerId}>
                 <SelectTrigger><SelectValue placeholder="Anonim mijoz" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="anon">Anonim</SelectItem>
+                  <SelectItem value={ANONYMOUS}>Anonim</SelectItem>
                   {customers?.map((c) => (
-                    <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {customerDiscount > 0 && (
+                <p className="text-[11px] text-muted-foreground mt-1">Mijoz chegirmasi: {customerDiscount}%</p>
+              )}
             </div>
             <div>
               <Label>Ombor *</Label>
@@ -141,7 +171,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                 <SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger>
                 <SelectContent>
                   {warehouses?.map((w) => (
-                    <SelectItem key={w._id} value={w._id}>{w.name}</SelectItem>
+                    <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -178,53 +208,54 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {lines.map((line, i) => {
-                    const net = line.qty * line.unitPrice * (1 - line.discountPercent / 100);
-                    const tax = net * (line.taxRate / 100);
-                    const lineTotal = net + tax;
-                    return (
-                      <tr key={i}>
-                        <td className="px-2 py-2">
-                          <Select value={line.productId} onValueChange={(v) => updateLine(i, "productId", v)}>
-                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Mahsulot" /></SelectTrigger>
-                            <SelectContent>
-                              {products?.page.map((p) => (
-                                <SelectItem key={p._id} value={p._id}>
-                                  <span className="font-mono text-[11px] mr-1 text-muted-foreground">{p.sku}</span>
-                                  {p.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </td>
-                        <td className="px-2 py-2">
-                          <Input type="number" min="0.001" step="0.001" className="h-8 text-xs text-right"
-                            value={line.qty}
-                            onChange={(e) => updateLine(i, "qty", e.target.valueAsNumber || 0)} />
-                        </td>
-                        <td className="px-2 py-2">
-                          <Input type="number" min="0" className="h-8 text-xs text-right"
-                            value={line.unitPrice}
-                            onChange={(e) => updateLine(i, "unitPrice", e.target.valueAsNumber || 0)} />
-                        </td>
-                        <td className="px-2 py-2">
-                          <Input type="number" min="0" max="100" className="h-8 text-xs text-right"
-                            value={line.discountPercent}
-                            onChange={(e) => updateLine(i, "discountPercent", e.target.valueAsNumber || 0)} />
-                        </td>
-                        <td className="px-3 py-2 text-right font-medium text-xs whitespace-nowrap">
-                          {fmt(lineTotal)} so'm
-                        </td>
-                        <td className="px-2 py-2">
-                          {lines.length > 1 && (
-                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removeLine(i)}>
-                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {lines.map((line, i) => (
+                    <tr key={i}>
+                      <td className="px-2 py-2">
+                        <Select value={line.productId} onValueChange={(v) => updateLine(i, { productId: v })}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Mahsulot" /></SelectTrigger>
+                          <SelectContent>
+                            {products?.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                <span className="font-mono text-[11px] mr-1 text-muted-foreground">{p.sku}</span>
+                                {p.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-2 py-2">
+                        <Input type="number" min="0.001" step="0.001" className="h-8 text-xs text-right"
+                          value={line.quantity}
+                          onChange={(e) => updateLine(i, { quantity: e.target.valueAsNumber || 0 })} />
+                      </td>
+                      <td className="px-2 py-2">
+                        <Input type="number" min="0" className="h-8 text-xs text-right"
+                          value={line.unitPrice}
+                          disabled={!canOverride}
+                          title={canOverride ? undefined : "Narxni o'zgartirish uchun ruxsat yo'q"}
+                          onChange={(e) => updateLine(i, { unitPrice: e.target.valueAsNumber || 0 })} />
+                      </td>
+                      <td className="px-2 py-2">
+                        <Input type="number" min="0" max="100" className="h-8 text-xs text-right"
+                          value={line.discountPercent ?? ""}
+                          placeholder={String(customerDiscount)}
+                          disabled={!canOverride}
+                          onChange={(e) => updateLine(i, {
+                            discountPercent: e.target.value === "" ? null : e.target.valueAsNumber || 0,
+                          })} />
+                      </td>
+                      <td className="px-3 py-2 text-right font-medium text-xs whitespace-nowrap">
+                        {fmt(minorToNumber(amounts[i]!.lineTotal))} so'm
+                      </td>
+                      <td className="px-2 py-2">
+                        {lines.length > 1 && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removeLine(i)}>
+                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -233,7 +264,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
           <div className="flex justify-end">
             <div className="w-64 space-y-1 text-sm">
               <div className="flex justify-between text-muted-foreground">
-                <span>Mahsulotlar jami</span><span>{fmt(subtotal)} so'm</span>
+                <span>Soliqsiz summa</span><span>{fmt(subtotal)} so'm</span>
               </div>
               <div className="flex justify-between text-muted-foreground">
                 <span>QQS</span><span>{fmt(taxTotal)} so'm</span>

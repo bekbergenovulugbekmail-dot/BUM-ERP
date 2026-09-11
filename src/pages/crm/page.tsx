@@ -1,16 +1,16 @@
-import { useState, useEffect } from "react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
+import { useState } from "react";
 import { motion } from "motion/react";
 import {
   Users, TrendingUp, Route, Activity,
   Target, Trophy, Phone,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
+import { useApiQuery } from "@/lib/query.ts";
 import LeadsPipeline from "./_components/leads-pipeline.tsx";
 import SalesRepsSection from "./_components/sales-reps-section.tsx";
 import DistributionSection from "./_components/distribution-section.tsx";
 import ActivitiesSection from "./_components/activities-section.tsx";
+import { num, type DistributionRoute, type LeadStats, type SalesRep } from "./_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
@@ -24,24 +24,25 @@ const TABS = [
 export default function CRMPage() {
   const [tab, setTab] = useState<typeof TABS[number]["key"]>("pipeline");
 
-  const leadStats = useQuery(api.crm.leads.getStats, {});
-  const reps = useQuery(api.crm.salesReps.list, { onlyActive: true });
-  const routes = useQuery(api.crm.distribution.listRoutes, { onlyActive: true });
-  const recentActivities = useQuery(api.crm.activities.listRecent, { limit: 5 });
+  const leadStats = useApiQuery<LeadStats>("/api/crm/leads/stats").data;
+  const reps = useApiQuery<{ salesReps: SalesRep[] }>("/api/crm/sales-reps").data?.salesReps;
+  const routes = useApiQuery<{ routes: DistributionRoute[] }>("/api/crm/routes").data?.routes;
+
+  const wonCount = leadStats?.byStage.find((s) => s.stage === "won")?.count ?? 0;
 
   const statsCards = [
     {
       label: "Jami leadlar",
       value: leadStats?.total ?? 0,
-      sub: `${leadStats?.byStage?.["won"] ?? 0} ta yutilgan`,
+      sub: `${wonCount} ta yutilgan`,
       icon: Target,
       color: "text-indigo-500",
       bg: "bg-indigo-500/10",
     },
     {
       label: "Taxminiy qiymat",
-      value: fmt(leadStats?.totalValue ?? 0) + " so'm",
-      sub: `Pipeline: ${leadStats?.total ?? 0}`,
+      value: fmt(num(leadStats?.openValue)) + " so'm",
+      sub: `Yutilgan: ${fmt(num(leadStats?.wonValue))} so'm`,
       icon: Trophy,
       color: "text-amber-500",
       bg: "bg-amber-500/10",

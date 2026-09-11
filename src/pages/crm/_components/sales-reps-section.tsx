@@ -1,6 +1,4 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
 import { Plus, Target, Percent, Phone, Mail, MapPin, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
@@ -9,76 +7,83 @@ import { Label } from "@/components/ui/label.tsx";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { num, type SalesRep } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
+const emptyForm = () => ({ name: "", phone: "", email: "", region: "", monthlyTarget: "", commission: "" });
+
 export default function SalesRepsSection() {
-  const reps = useQuery(api.crm.salesReps.list, {});
-  const createRep = useMutation(api.crm.salesReps.create);
-  const updateRep = useMutation(api.crm.salesReps.update);
-  const removeRep = useMutation(api.crm.salesReps.remove);
+  const reps = useApiQuery<{ salesReps: SalesRep[] }>("/api/crm/sales-reps", { includeInactive: true }).data?.salesReps;
+  const createRep = useApiMutation((body: Record<string, unknown>) => api.post("/api/crm/sales-reps", body));
+  const updateRep = useApiMutation(({ id, ...body }: { id: string } & Record<string, unknown>) =>
+    api.patch(`/api/crm/sales-reps/${id}`, body));
+  const removeRep = useApiMutation((id: string) => api.delete(`/api/crm/sales-reps/${id}`));
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [editRep, setEditRep] = useState<Id<"salesReps"> | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [editRep, setEditRep] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
 
-  const [form, setForm] = useState({
-    name: "", phone: "", email: "", region: "",
-    monthlyTarget: "", commission: "",
-  });
-
-  const resetForm = () => setForm({ name: "", phone: "", email: "", region: "", monthlyTarget: "", commission: "" });
+  const resetForm = () => setForm(emptyForm());
+  const saving = createRep.isPending || updateRep.isPending;
 
   const handleCreate = async () => {
-    if (!form.name) { toast.error("Ism kiritilishi shart"); return; }
-    setLoading(true);
+    if (!form.name.trim()) { toast.error("Ism kiritilishi shart"); return; }
     try {
-      await createRep({
+      await createRep.mutateAsync({
         name: form.name,
-        phone: form.phone || undefined,
-        email: form.email || undefined,
-        region: form.region || undefined,
-        monthlyTarget: parseFloat(form.monthlyTarget) || 0,
-        commission: parseFloat(form.commission) || 0,
+        phone: form.phone || null,
+        email: form.email || null,
+        region: form.region || null,
+        monthlyTarget: form.monthlyTarget || "0",
+        commission: form.commission || "0",
       });
       toast.success("Savdo vakili qo'shildi");
       setCreateOpen(false); resetForm();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
-    finally { setLoading(false); }
+    } catch (e) { toast.error(errorMessage(e)); }
   };
 
   const handleUpdate = async () => {
     if (!editRep) return;
-    setLoading(true);
+    if (!form.name.trim()) { toast.error("Ism kiritilishi shart"); return; }
     try {
-      await updateRep({
+      // Forma joriy qiymatlar bilan to'ldiriladi — bo'sh maydon ma'lumotni tozalaydi
+      await updateRep.mutateAsync({
         id: editRep,
-        name: form.name || undefined,
-        phone: form.phone || undefined,
-        email: form.email || undefined,
-        region: form.region || undefined,
-        monthlyTarget: form.monthlyTarget ? parseFloat(form.monthlyTarget) : undefined,
-        commission: form.commission ? parseFloat(form.commission) : undefined,
+        name: form.name,
+        phone: form.phone || null,
+        email: form.email || null,
+        region: form.region || null,
+        ...(form.monthlyTarget ? { monthlyTarget: form.monthlyTarget } : {}),
+        ...(form.commission ? { commission: form.commission } : {}),
       });
       toast.success("Yangilandi");
       setEditRep(null); resetForm();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
-    finally { setLoading(false); }
+    } catch (e) { toast.error(errorMessage(e)); }
   };
 
-  const openEdit = (rep: NonNullable<typeof reps>[number]) => {
+  const openEdit = (rep: SalesRep) => {
     setForm({
       name: rep.name, phone: rep.phone ?? "", email: rep.email ?? "",
-      region: rep.region ?? "", monthlyTarget: String(rep.monthlyTarget),
-      commission: String(rep.commission),
+      region: rep.region ?? "", monthlyTarget: String(num(rep.monthlyTarget)),
+      commission: String(num(rep.commission)),
     });
-    setEditRep(rep._id);
+    setEditRep(rep.id);
   };
 
-  const handleDelete = async (id: Id<"salesReps">) => {
-    try { await removeRep({ id }); toast.success("O'chirildi"); }
-    catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
+  const handleDelete = async (id: string) => {
+    // Lid, marshrut yoki tashrifi bor agent o'chirilmaydi — server sababini qaytaradi
+    try { await removeRep.mutateAsync(id); toast.success("O'chirildi"); }
+    catch (e) { toast.error(errorMessage(e)); }
+  };
+
+  const toggleActive = async (rep: SalesRep) => {
+    try {
+      await updateRep.mutateAsync({ id: rep.id, isActive: !rep.isActive });
+      toast.success(rep.isActive ? "Faolsizlantirildi" : "Faollashtirildi");
+    } catch (e) { toast.error(errorMessage(e)); }
   };
 
   return (
@@ -102,7 +107,7 @@ export default function SalesRepsSection() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {reps.map((rep) => (
-            <div key={rep._id} className="bg-card border border-border rounded-2xl p-4 space-y-3">
+            <div key={rep.id} className="bg-card border border-border rounded-2xl p-4 space-y-3">
               <div className="flex items-start justify-between">
                 <div>
                   <p className="font-semibold">{rep.name}</p>
@@ -112,7 +117,7 @@ export default function SalesRepsSection() {
                   <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => openEdit(rep)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
-                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleDelete(rep._id)}>
+                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => void handleDelete(rep.id)}>
                     <Trash2 className="h-3.5 w-3.5 text-destructive" />
                   </Button>
                 </div>
@@ -141,22 +146,27 @@ export default function SalesRepsSection() {
                   <div className="flex items-center gap-1 text-xs text-muted-foreground mb-0.5">
                     <Target className="h-3 w-3" /> Oylik maqsad
                   </div>
-                  <p className="text-sm font-semibold">{fmt(rep.monthlyTarget)} so'm</p>
+                  <p className="text-sm font-semibold">{fmt(num(rep.monthlyTarget))} so'm</p>
                 </div>
                 <div>
                   <div className="flex items-center gap-1 text-xs text-muted-foreground mb-0.5">
                     <Percent className="h-3 w-3" /> Komissiya
                   </div>
-                  <p className="text-sm font-semibold">{rep.commission}%</p>
+                  <p className="text-sm font-semibold">{num(rep.commission)}%</p>
                 </div>
               </div>
 
-              <div className={cn(
-                "text-xs px-2 py-0.5 rounded-full w-fit",
-                rep.isActive ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-muted text-muted-foreground"
-              )}>
+              <button
+                type="button"
+                onClick={() => void toggleActive(rep)}
+                title={rep.isActive ? "Faolsizlantirish" : "Faollashtirish"}
+                className={cn(
+                  "text-xs px-2 py-0.5 rounded-full w-fit cursor-pointer",
+                  rep.isActive ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-muted text-muted-foreground"
+                )}
+              >
                 {rep.isActive ? "Faol" : "Nofaol"}
-              </div>
+              </button>
             </div>
           ))}
         </div>
@@ -199,8 +209,8 @@ export default function SalesRepsSection() {
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => { setCreateOpen(false); setEditRep(null); resetForm(); }}>Bekor</Button>
-              <Button onClick={editRep ? handleUpdate : handleCreate} disabled={loading}>
-                {loading ? "..." : editRep ? "Saqlash" : "Qo'shish"}
+              <Button onClick={editRep ? handleUpdate : handleCreate} disabled={saving}>
+                {saving ? "..." : editRep ? "Saqlash" : "Qo'shish"}
               </Button>
             </DialogFooter>
           </DialogContent>

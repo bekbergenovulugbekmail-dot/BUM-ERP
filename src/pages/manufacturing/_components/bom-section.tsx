@@ -1,66 +1,63 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
-import { Plus, Trash2, Pencil, Package, ChevronDown, ChevronRight, AlertCircle } from "lucide-react";
+import { Plus, Trash2, Package, ChevronDown, ChevronRight, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
-import { cn } from "@/lib/utils.ts";
-import type { Id, Doc } from "@/convex/_generated/dataModel.d.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { num, useActiveProducts, type Bom, type BomDetail, type UnitOption } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
-type Product = Doc<"products"> & { categoryName?: string; brandName?: string; baseUnitName?: string };
+const emptyForm = () => ({ productId: "", name: "", version: "v1.0", quantity: "1", unitId: "" });
+const emptyItemForm = () => ({ productId: "", quantity: "1", unitId: "", scrapPercent: "0" });
 
 export default function BOMSection() {
-  const boms = useQuery(api.manufacturing.boms.listBOMs, {});
-  const productsResult = useQuery(api.products.products.list, {
-    paginationOpts: { numItems: 500, cursor: null },
-  });
-  const units = useQuery(api.products.units.list, {});
+  const boms = useApiQuery<{ boms: Bom[] }>("/api/manufacturing/boms").data?.boms;
+  const productList = useActiveProducts().data ?? [];
+  const units = useApiQuery<{ units: UnitOption[] }>("/api/catalog/units").data?.units;
 
-  const createBOM = useMutation(api.manufacturing.boms.createBOM);
-  const deleteBOM = useMutation(api.manufacturing.boms.deleteBOM);
-  const addBOMItem = useMutation(api.manufacturing.boms.addBOMItem);
-  const deleteBOMItem = useMutation(api.manufacturing.boms.deleteBOMItem);
+  const createBOM = useApiMutation((body: Record<string, unknown>) =>
+    api.post<{ bom: BomDetail }>("/api/manufacturing/boms", body));
+  const deleteBOM = useApiMutation((id: string) => api.delete(`/api/manufacturing/boms/${id}`));
+  const addBOMItem = useApiMutation(({ bomId, ...body }: { bomId: string } & Record<string, unknown>) =>
+    api.post(`/api/manufacturing/boms/${bomId}/items`, body));
+  const deleteBOMItem = useApiMutation(({ bomId, itemId }: { bomId: string; itemId: string }) =>
+    api.delete(`/api/manufacturing/boms/${bomId}/items/${itemId}`));
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [expandedBom, setExpandedBom] = useState<Id<"boms"> | null>(null);
-  const [addItemBom, setAddItemBom] = useState<Id<"boms"> | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [expandedBom, setExpandedBom] = useState<string | null>(null);
+  const [addItemBom, setAddItemBom] = useState<string | null>(null);
 
-  const [form, setForm] = useState({ productId: "", name: "", version: "v1.0", quantity: "1", unitId: "" });
-  const [itemForm, setItemForm] = useState({ productId: "", quantity: "1", unitId: "", scrapPercent: "0" });
+  const [form, setForm] = useState(emptyForm);
+  const [itemForm, setItemForm] = useState(emptyItemForm);
 
-  const expandedBomData = useQuery(
-    api.manufacturing.boms.getBOM,
-    expandedBom ? { id: expandedBom } : "skip"
-  );
+  const expandedBomData = useApiQuery<{ bom: BomDetail }>(
+    expandedBom ? `/api/manufacturing/boms/${expandedBom}` : null,
+  ).data?.bom;
 
   const handleCreate = async () => {
-    if (!form.productId || form.productId === "none" || !form.name || !form.unitId || form.unitId === "none") {
+    if (!form.productId || form.productId === "none" || !form.name.trim() || !form.unitId || form.unitId === "none") {
       toast.error("Mahsulot, nom va o'lchov birligi kiritilishi shart");
       return;
     }
-    setLoading(true);
     try {
-      const bomId = await createBOM({
-        productId: form.productId as Id<"products">,
+      const { bom } = await createBOM.mutateAsync({
+        productId: form.productId,
         name: form.name,
-        version: form.version,
-        quantity: parseFloat(form.quantity) || 1,
-        unitId: form.unitId as Id<"units">,
+        version: form.version || undefined,
+        quantity: form.quantity || "1",
+        unitId: form.unitId,
       });
       toast.success("BOM yaratildi");
       setCreateOpen(false);
-      setForm({ productId: "", name: "", version: "v1.0", quantity: "1", unitId: "" });
-      setExpandedBom(bomId as Id<"boms">);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
-    finally { setLoading(false); }
+      setForm(emptyForm());
+      setExpandedBom(bom.id);
+    } catch (e) { toast.error(errorMessage(e)); }
   };
 
   const handleAddItem = async () => {
@@ -69,20 +66,32 @@ export default function BOMSection() {
       return;
     }
     try {
-      await addBOMItem({
+      await addBOMItem.mutateAsync({
         bomId: addItemBom,
-        productId: itemForm.productId as Id<"products">,
-        quantity: parseFloat(itemForm.quantity) || 1,
-        unitId: itemForm.unitId as Id<"units">,
-        scrapPercent: parseFloat(itemForm.scrapPercent) || 0,
+        productId: itemForm.productId,
+        quantity: itemForm.quantity || "1",
+        unitId: itemForm.unitId,
+        scrapPercent: itemForm.scrapPercent || "0",
       });
       toast.success("Komponent qo'shildi");
       setAddItemBom(null);
-      setItemForm({ productId: "", quantity: "1", unitId: "", scrapPercent: "0" });
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
+      setItemForm(emptyItemForm());
+    } catch (e) { toast.error(errorMessage(e)); }
   };
 
-  const productList: Product[] = productsResult?.page ?? [];
+  const handleDeleteBom = async (id: string) => {
+    // Buyurtmalari bor retsept o'chirilmaydi — server sababini qaytaradi
+    try {
+      await deleteBOM.mutateAsync(id);
+      if (expandedBom === id) setExpandedBom(null);
+      toast.success("BOM o'chirildi");
+    } catch (e) { toast.error(errorMessage(e)); }
+  };
+
+  const handleDeleteItem = async (bomId: string, itemId: string) => {
+    try { await deleteBOMItem.mutateAsync({ bomId, itemId }); }
+    catch (e) { toast.error(errorMessage(e)); }
+  };
 
   return (
     <div className="space-y-4">
@@ -104,10 +113,10 @@ export default function BOMSection() {
       ) : (
         <div className="space-y-2">
           {boms.map((bom) => (
-            <div key={bom._id} className="bg-card border border-border rounded-2xl overflow-hidden">
+            <div key={bom.id} className="bg-card border border-border rounded-2xl overflow-hidden">
               <div
                 className="flex items-center gap-3 p-4 cursor-pointer hover:bg-muted/20"
-                onClick={() => setExpandedBom(expandedBom === bom._id ? null : bom._id)}
+                onClick={() => setExpandedBom(expandedBom === bom.id ? null : bom.id)}
               >
                 <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                   <Package className="h-4 w-4 text-primary" />
@@ -115,27 +124,27 @@ export default function BOMSection() {
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold">{bom.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {bom.productName} · {bom.version} · {bom.quantity} {bom.unitName} · {bom.itemCount} ta komponent
+                    {bom.productName} · {bom.version} · {num(bom.quantity)} {bom.unitName} · {bom.itemCount} ta komponent
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={(e) => { e.stopPropagation(); deleteBOM({ id: bom._id }); }}>
+                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={(e) => { e.stopPropagation(); void handleDeleteBom(bom.id); }}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
-                  {expandedBom === bom._id ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                  {expandedBom === bom.id ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                 </div>
               </div>
 
-              {expandedBom === bom._id && (
+              {expandedBom === bom.id && (
                 <div className="border-t border-border p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium">Komponentlar</p>
-                    <Button size="sm" variant="secondary" onClick={() => setAddItemBom(bom._id)}>
+                    <Button size="sm" variant="secondary" onClick={() => setAddItemBom(bom.id)}>
                       <Plus className="h-3.5 w-3.5 mr-1" /> Komponent qo'shish
                     </Button>
                   </div>
 
-                  {!expandedBomData ? (
+                  {!expandedBomData || expandedBomData.id !== bom.id ? (
                     <div className="space-y-1">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-10 rounded-xl" />)}</div>
                   ) : expandedBomData.items.length === 0 ? (
                     <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
@@ -150,22 +159,22 @@ export default function BOMSection() {
                             <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium">Komponent</th>
                             <th className="text-right px-4 py-2.5 text-xs text-muted-foreground font-medium">Miqdor</th>
                             <th className="text-right px-4 py-2.5 text-xs text-muted-foreground font-medium">Chiqim %</th>
-                            <th className="text-right px-4 py-2.5 text-xs text-muted-foreground font-medium">Birlik narx</th>
+                            <th className="text-right px-4 py-2.5 text-xs text-muted-foreground font-medium">Xarid narxi</th>
                             <th className="w-10 px-2"></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
                           {expandedBomData.items.map((item) => (
-                            <tr key={item._id} className="hover:bg-muted/20">
+                            <tr key={item.id} className="hover:bg-muted/20">
                               <td className="px-4 py-2.5">
                                 <p className="font-medium">{item.componentName}</p>
                                 <p className="text-xs text-muted-foreground font-mono">{item.componentSku}</p>
                               </td>
-                              <td className="px-4 py-2.5 text-right">{item.quantity} {item.unitName}</td>
-                              <td className="px-4 py-2.5 text-right text-amber-600">{item.scrapPercent}%</td>
-                              <td className="px-4 py-2.5 text-right text-muted-foreground">{fmt(item.unitCost)} so'm</td>
+                              <td className="px-4 py-2.5 text-right">{num(item.quantity)} {item.unitName}</td>
+                              <td className="px-4 py-2.5 text-right text-amber-600">{num(item.scrapPercent)}%</td>
+                              <td className="px-4 py-2.5 text-right text-muted-foreground">{fmt(num(item.purchasePrice))} so'm</td>
                               <td className="px-2 py-2.5 text-right">
-                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => deleteBOMItem({ id: item._id })}>
+                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => void handleDeleteItem(bom.id, item.id)}>
                                   <Trash2 className="h-3 w-3 text-destructive" />
                                 </Button>
                               </td>
@@ -175,10 +184,10 @@ export default function BOMSection() {
                         <tfoot>
                           <tr className="bg-muted/20 border-t border-border">
                             <td className="px-4 py-2.5 text-xs font-semibold text-muted-foreground" colSpan={3}>
-                              Jami material narxi ({bom.quantity} {bom.unitName} uchun)
+                              Taxminiy material narxi ({num(bom.quantity)} {bom.unitName} uchun)
                             </td>
                             <td className="px-4 py-2.5 text-right font-bold">
-                              {fmt(expandedBomData.items.reduce((s, i) => s + i.quantity * i.unitCost, 0))} so'm
+                              {fmt(expandedBomData.items.reduce((s, i) => s + num(i.quantity) * num(i.purchasePrice), 0))} so'm
                             </td>
                             <td />
                           </tr>
@@ -202,16 +211,16 @@ export default function BOMSection() {
               <div>
                 <Label>Tayyor mahsulot *</Label>
                 <Select value={form.productId} onValueChange={(v) => {
-                  const p = productList.find((p) => p._id === v);
+                  const p = productList.find((p) => p.id === v);
                   setForm({ ...form, productId: v, name: p ? `${p.name} BOM` : form.name, unitId: p?.baseUnitId ?? form.unitId });
                 }}>
                   <SelectTrigger><SelectValue placeholder="Mahsulot tanlang" /></SelectTrigger>
                   <SelectContent>
                     {productList.filter((p) => p.isManufactured).map((p) => (
-                      <SelectItem key={p._id} value={p._id}>{p.name} ({p.sku})</SelectItem>
+                      <SelectItem key={p.id} value={p.id}>{p.name} ({p.sku})</SelectItem>
                     ))}
                     {productList.filter((p) => !p.isManufactured).map((p) => (
-                      <SelectItem key={p._id} value={p._id}>{p.name} ({p.sku})</SelectItem>
+                      <SelectItem key={p.id} value={p.id}>{p.name} ({p.sku})</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -235,7 +244,7 @@ export default function BOMSection() {
                   <Select value={form.unitId} onValueChange={(v) => setForm({ ...form, unitId: v })}>
                     <SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger>
                     <SelectContent>
-                      {units?.map((u) => <SelectItem key={u._id} value={u._id}>{u.name} ({u.shortName})</SelectItem>)}
+                      {units?.map((u) => <SelectItem key={u.id} value={u.id}>{u.name} ({u.shortName})</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -243,7 +252,7 @@ export default function BOMSection() {
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => setCreateOpen(false)}>Bekor</Button>
-              <Button onClick={handleCreate} disabled={loading}>{loading ? "..." : "Yaratish"}</Button>
+              <Button onClick={handleCreate} disabled={createBOM.isPending}>{createBOM.isPending ? "..." : "Yaratish"}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -258,12 +267,12 @@ export default function BOMSection() {
               <div>
                 <Label>Komponent mahsulot *</Label>
                 <Select value={itemForm.productId} onValueChange={(v) => {
-                  const p = productList.find((p) => p._id === v);
+                  const p = productList.find((p) => p.id === v);
                   setItemForm({ ...itemForm, productId: v, unitId: p?.baseUnitId ?? itemForm.unitId });
                 }}>
                   <SelectTrigger><SelectValue placeholder="Xom ashyo tanlang" /></SelectTrigger>
                   <SelectContent>
-                    {productList.map((p) => <SelectItem key={p._id} value={p._id}>{p.name} ({p.sku})</SelectItem>)}
+                    {productList.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} ({p.sku})</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -278,7 +287,7 @@ export default function BOMSection() {
                   <Select value={itemForm.unitId} onValueChange={(v) => setItemForm({ ...itemForm, unitId: v })}>
                     <SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger>
                     <SelectContent>
-                      {units?.map((u) => <SelectItem key={u._id} value={u._id}>{u.shortName}</SelectItem>)}
+                      {units?.map((u) => <SelectItem key={u.id} value={u.id}>{u.shortName}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -291,7 +300,7 @@ export default function BOMSection() {
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => setAddItemBom(null)}>Bekor</Button>
-              <Button onClick={handleAddItem}>Qo'shish</Button>
+              <Button onClick={handleAddItem} disabled={addBOMItem.isPending}>Qo'shish</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

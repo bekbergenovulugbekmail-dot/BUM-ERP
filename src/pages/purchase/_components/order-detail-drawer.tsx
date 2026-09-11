@@ -1,29 +1,32 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  X, CheckCircle, Truck, CreditCard, Package, FileText,
-  Phone, Ban, ChevronDown, ChevronUp, FileDown,
+  X, CheckCircle, Truck, CreditCard,
+  Ban, ChevronDown, ChevronUp, FileDown,
 } from "lucide-react";
 import { generatePurchaseOrderPDF } from "@/lib/pdf/purchase-order-pdf.ts";
-import { useQuery as useAdminQuery } from "convex/react";
-import { api as adminApi } from "@/convex/_generated/api.js";
 import { Button } from "@/components/ui/button.tsx";
-import { Badge } from "@/components/ui/badge.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
+import {
+  PAYMENT_LABELS, newReference, num, todayLocal,
+  type PaymentMethod, type PurchaseOrderDetail,
+} from "../_lib/types.ts";
 
 type Props = {
-  orderId: Id<"purchaseOrders">;
+  orderId: string;
   onClose: () => void;
 };
+
+type ReceiveLine = { qty: number; batchNumber: string; expiryDate: string };
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-muted text-muted-foreground",
@@ -41,52 +44,68 @@ const STATUS_LABELS: Record<string, string> = {
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
 
 export default function OrderDetailDrawer({ orderId, onClose }: Props) {
-  const order = useQuery(api.purchase.orders.getById, { id: orderId });
-  const company = useAdminQuery(adminApi.admin.getCompany, {});
-  const confirmOrder = useMutation(api.purchase.orders.confirm);
-  const cancelOrder = useMutation(api.purchase.orders.cancel);
-  const receiveGoods = useMutation(api.purchase.orders.receiveGoods);
-  const recordPayment = useMutation(api.purchase.orders.recordPayment);
+  const { can } = usePermissions();
+  const orderQuery = useApiQuery<{ order: PurchaseOrderDetail }>(`/api/purchase/orders/${orderId}`);
+  const order = orderQuery.data?.order;
+  const company = useActiveCompany().data?.company;
+
+  const confirmOrder = useApiMutation(() => api.post(`/api/purchase/orders/${orderId}/confirm`));
+  const cancelOrder = useApiMutation(() => api.post(`/api/purchase/orders/${orderId}/cancel`));
+  const receiveGoods = useApiMutation((body: object) =>
+    api.post<{ total: string; status: string }>(`/api/purchase/orders/${orderId}/receipts`, body),
+  );
+  const recordPayment = useApiMutation((body: object) =>
+    api.post<{ created: boolean }>("/api/purchase/payments", body),
+  );
 
   const [showReceive, setShowReceive] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
-  const [receiveQtys, setReceiveQtys] = useState<Record<string, number>>({});
+  const [receiveLines, setReceiveLines] = useState<Record<string, ReceiveLine>>({});
   const [payAmount, setPayAmount] = useState("");
-  const [payMethod, setPayMethod] = useState<"cash" | "bank" | "card" | "transfer">("cash");
-  const [payRef, setPayRef] = useState("");
+  const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
+  const [payNote, setPayNote] = useState("");
+  // Bitta to'lov formasi — bitta reference (ikki marta bosilsa server takrorlamaydi)
+  const [payReference, setPayReference] = useState(() => newReference("SP"));
   const [loading, setLoading] = useState(false);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const updateReceive = (itemId: string, patch: Partial<ReceiveLine>) =>
+    setReceiveLines((p) => {
+      const current: ReceiveLine = p[itemId] ?? { qty: 0, batchNumber: "", expiryDate: "" };
+      return { ...p, [itemId]: { ...current, ...patch } };
+    });
 
   const handleConfirm = async () => {
-    try { await confirmOrder({ id: orderId }); toast.success("Tasdiqlandi"); }
-    catch (err) { toast.error(err instanceof Error ? err.message : "Xatolik"); }
+    try { await confirmOrder.mutateAsync(); toast.success("Tasdiqlandi"); }
+    catch (err) { toast.error(errorMessage(err)); }
   };
 
   const handleCancel = async () => {
-    try { await cancelOrder({ id: orderId }); toast.success("Bekor qilindi"); }
-    catch (err) { toast.error(err instanceof Error ? err.message : "Xatolik"); }
+    try { await cancelOrder.mutateAsync(); toast.success("Bekor qilindi"); }
+    catch (err) { toast.error(errorMessage(err)); }
   };
 
   const handleReceive = async () => {
     if (!order) return;
+    // Faqat qator, miqdor va partiya — mahsulot, birlik va narx serverda buyurtma qatoridan olinadi
     const items = order.items
-      .filter((item) => (receiveQtys[item._id] ?? 0) > 0)
-      .map((item) => ({
-        orderItemId: item._id,
-        productId: item.productId,
-        unitId: item.unitId,
-        receivedQty: receiveQtys[item._id] ?? 0,
-        unitPrice: item.unitPrice,
-      }));
+      .filter((item) => (receiveLines[item.id]?.qty ?? 0) > 0)
+      .map((item) => {
+        const line = receiveLines[item.id]!;
+        return {
+          orderItemId: item.id,
+          receivedQty: line.qty,
+          batchNumber: line.batchNumber.trim() || null,
+          expiryDate: line.expiryDate || null,
+        };
+      });
     if (!items.length) { toast.error("Kamida bitta miqdor kiriting"); return; }
     setLoading(true);
     try {
-      await receiveGoods({ orderId, receiptDate: today, items });
+      await receiveGoods.mutateAsync({ receiptDate: todayLocal(), items });
       toast.success("Tovar qabul qilindi va ombor yangilandi");
       setShowReceive(false);
-      setReceiveQtys({});
-    } catch (err) { toast.error(err instanceof Error ? err.message : "Xatolik"); }
+      setReceiveLines({});
+    } catch (err) { toast.error(errorMessage(err)); }
     finally { setLoading(false); }
   };
 
@@ -94,21 +113,23 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
     if (!order || !payAmount) return;
     setLoading(true);
     try {
-      await recordPayment({
+      const result = await recordPayment.mutateAsync({
         supplierId: order.supplierId,
         orderId,
-        amount: parseFloat(payAmount),
-        currency: order.currency,
-        exchangeRate: order.exchangeRate,
-        paymentDate: today,
+        amount: payAmount.trim(),
+        paymentDate: todayLocal(),
         method: payMethod,
-        reference: payRef || undefined,
-        // cashAccountId omitted → auto-resolves to default cash account
+        reference: payReference,
+        notes: payNote.trim() || null,
+        // cashAccountId yuborilmaydi → naqdda asosiy kassa, karta/bank/o'tkazmada bank hisobi
       });
-      toast.success("To'lov qayd etildi va kassadan chiqim amalga oshdi");
+      if (result.created) toast.success("To'lov qayd etildi va kassadan chiqim amalga oshdi");
+      else toast.info("Bu to'lov allaqachon qayd etilgan");
       setShowPayment(false);
       setPayAmount("");
-    } catch (err) { toast.error(err instanceof Error ? err.message : "Xatolik"); }
+      setPayNote("");
+      setPayReference(newReference("SP"));
+    } catch (err) { toast.error(errorMessage(err)); }
     finally { setLoading(false); }
   };
 
@@ -117,36 +138,39 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
     generatePurchaseOrderPDF({
       company: {
         name: company?.name ?? "BUM ERP",
-        legalName: company?.legalName,
-        taxId: company?.taxId,
-        address: company?.address,
-        phone: company?.phone,
-        email: company?.email,
-        website: company?.website,
+        legalName: company?.legalName ?? undefined,
+        taxId: company?.taxId ?? undefined,
+        address: company?.address ?? undefined,
+        phone: company?.phone ?? undefined,
+        email: company?.email ?? undefined,
+        website: company?.website ?? undefined,
       },
       number: order.number,
       orderDate: order.orderDate,
-      expectedDate: order.expectedDate,
+      expectedDate: order.expectedDate ?? undefined,
       supplierName: order.supplierName,
+      supplierPhone: order.supplierPhone ?? undefined,
       warehouseName: order.warehouseName,
       items: order.items.map((item) => ({
         productName: item.productName,
         productSku: item.productSku,
-        orderedQty: item.orderedQty,
-        receivedQty: item.receivedQty,
+        orderedQty: num(item.orderedQty),
+        receivedQty: num(item.receivedQty),
         unitName: item.unitName,
-        unitPrice: item.unitPrice,
-        lineTotal: item.lineTotal,
+        unitPrice: num(item.unitPrice),
+        lineTotal: num(item.lineTotal),
       })),
-      totalAmount: order.totalAmount,
-      paidAmount: order.paidAmount,
-      balance: order.balance,
+      totalAmount: num(order.totalAmount),
+      paidAmount: num(order.paidAmount),
+      balance: num(order.balance),
       currency: order.currency,
-      notes: order.notes,
+      notes: order.notes ?? undefined,
       status: order.status,
       paymentTerms: undefined,
     });
   };
+
+  const balance = order ? num(order.balance) : 0;
 
   return (
     <AnimatePresence>
@@ -178,7 +202,9 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
 
           {/* Body */}
           <div className="flex-1 overflow-y-auto p-5 space-y-5">
-            {!order ? (
+            {orderQuery.isError ? (
+              <p className="text-sm text-destructive">{errorMessage(orderQuery.error)}</p>
+            ) : !order ? (
               <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
             ) : (
               <>
@@ -187,9 +213,9 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                   {[
                     { label: "Ombor", value: order.warehouseName },
                     { label: "Sana", value: order.orderDate },
-                    { label: "Jami", value: fmt(order.totalAmount) },
-                    { label: "To'langan", value: fmt(order.paidAmount) },
-                    { label: "Qoldi", value: fmt(order.balance) },
+                    { label: "Jami", value: fmt(num(order.totalAmount)) },
+                    { label: "To'langan", value: fmt(num(order.paidAmount)) },
+                    { label: "Qoldi", value: fmt(balance) },
                     { label: "Valyuta", value: order.currency },
                   ].map(({ label, value }) => (
                     <div key={label} className="bg-muted/40 rounded-lg px-3 py-2">
@@ -201,29 +227,29 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
 
                 {/* Action buttons */}
                 <div className="flex flex-wrap gap-2">
-                  {order.status === "draft" && (
-                    <Button size="sm" onClick={handleConfirm}>
+                  {order.status === "draft" && can("purchase.approve") && (
+                    <Button size="sm" onClick={handleConfirm} disabled={confirmOrder.isPending}>
                       <CheckCircle className="h-4 w-4 mr-1" /> Tasdiqlash
                     </Button>
                   )}
-                  {["confirmed", "partial"].includes(order.status) && (
+                  {["confirmed", "partial"].includes(order.status) && can("warehouse.receive") && (
                     <Button size="sm" variant="secondary" onClick={() => setShowReceive((p) => !p)}>
                       <Truck className="h-4 w-4 mr-1" /> Tovar qabul qilish
                       {showReceive ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
                     </Button>
                   )}
-                  {["received", "partial", "confirmed"].includes(order.status) && order.balance > 0 && (
+                  {["confirmed", "partial", "received", "invoiced"].includes(order.status) && balance > 0 && can("purchase.approve") && (
                     <Button size="sm" variant="secondary" onClick={() => setShowPayment((p) => !p)}>
                       <CreditCard className="h-4 w-4 mr-1" /> To'lov qilish
                       {showPayment ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
                     </Button>
                   )}
-                  {["draft", "confirmed"].includes(order.status) && (
-                    <Button size="sm" variant="ghost" className="text-destructive" onClick={handleCancel}>
+                  {["draft", "confirmed"].includes(order.status) && num(order.paidAmount) === 0 && can("purchase.cancel") && (
+                    <Button size="sm" variant="ghost" className="text-destructive" onClick={handleCancel} disabled={cancelOrder.isPending}>
                       <Ban className="h-4 w-4 mr-1" /> Bekor qilish
                     </Button>
                   )}
-                  <Button size="sm" variant="secondary" onClick={handlePrintPO} disabled={!order}>
+                  <Button size="sm" variant="secondary" onClick={handlePrintPO}>
                     <FileDown className="h-4 w-4 mr-1" /> PDF
                   </Button>
                 </div>
@@ -232,24 +258,46 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                 {showReceive && (
                   <div className="border border-border rounded-xl p-4 space-y-3 bg-muted/20">
                     <p className="text-sm font-semibold">Tovar qabul qilish</p>
-                    {order.items.map((item) => (
-                      <div key={item._id} className="flex items-center gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium truncate">{item.productName}</p>
-                          <p className="text-[11px] text-muted-foreground">
-                            Buyurtma: {item.orderedQty} | Qabul: {item.receivedQty} | Qoldi: {item.pendingQty} {item.unitName}
-                          </p>
+                    {order.items.filter((item) => num(item.pendingQty) > 0).map((item) => {
+                      const line = receiveLines[item.id];
+                      return (
+                        <div key={item.id} className="space-y-1.5">
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium truncate">{item.productName}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                Buyurtma: {num(item.orderedQty)} | Qabul: {num(item.receivedQty)} | Qoldi: {num(item.pendingQty)} {item.unitName}
+                              </p>
+                            </div>
+                            <Input
+                              type="number" min="0" step="0.001" max={num(item.pendingQty)}
+                              className="h-8 w-24 text-xs text-right"
+                              placeholder="0"
+                              value={line?.qty || ""}
+                              onChange={(e) => updateReceive(item.id, { qty: e.target.valueAsNumber || 0 })}
+                            />
+                            <span className="text-xs text-muted-foreground w-8">{item.unitName}</span>
+                          </div>
+                          {(line?.qty ?? 0) > 0 && (
+                            <div className="flex gap-2 pl-1">
+                              <Input
+                                className="h-7 text-xs"
+                                placeholder="Partiya raqami"
+                                value={line?.batchNumber ?? ""}
+                                onChange={(e) => updateReceive(item.id, { batchNumber: e.target.value })}
+                              />
+                              <Input
+                                type="date"
+                                className="h-7 text-xs w-36"
+                                title="Yaroqlilik muddati"
+                                value={line?.expiryDate ?? ""}
+                                onChange={(e) => updateReceive(item.id, { expiryDate: e.target.value })}
+                              />
+                            </div>
+                          )}
                         </div>
-                        <Input
-                          type="number" min="0" step="0.001" max={item.pendingQty}
-                          className="h-8 w-24 text-xs text-right"
-                          placeholder="0"
-                          value={receiveQtys[item._id] ?? ""}
-                          onChange={(e) => setReceiveQtys((p) => ({ ...p, [item._id]: e.target.valueAsNumber || 0 }))}
-                        />
-                        <span className="text-xs text-muted-foreground w-8">{item.unitName}</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                     <Button size="sm" onClick={handleReceive} disabled={loading} className="w-full">
                       {loading ? "..." : "Qabul qilish va omborni yangilash"}
                     </Button>
@@ -265,11 +313,11 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                         <Label className="text-xs">Summa (so'm)</Label>
                         <Input type="number" min="0" value={payAmount}
                           onChange={(e) => setPayAmount(e.target.value)}
-                          placeholder={String(Math.round(order.balance))} />
+                          placeholder={String(balance)} />
                       </div>
                       <div>
                         <Label className="text-xs">Usul</Label>
-                        <Select value={payMethod} onValueChange={(v) => setPayMethod(v as typeof payMethod)}>
+                        <Select value={payMethod} onValueChange={(v) => setPayMethod(v as PaymentMethod)}>
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="cash">Naqd</SelectItem>
@@ -281,8 +329,8 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                       </div>
                     </div>
                     <div>
-                      <Label className="text-xs">Havola / izoh</Label>
-                      <Input value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="Chek raqami..." />
+                      <Label className="text-xs">Izoh</Label>
+                      <Input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Chek raqami..." />
                     </div>
                     <Button size="sm" onClick={handlePayment} disabled={loading} className="w-full">
                       {loading ? "..." : "To'lovni qayd etish"}
@@ -297,16 +345,16 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Mahsulotlar</p>
                   <div className="space-y-2">
                     {order.items.map((item) => (
-                      <div key={item._id} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
+                      <div key={item.id} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium truncate">{item.productName}</p>
                           <p className="text-xs text-muted-foreground font-mono">{item.productSku}</p>
                         </div>
                         <div className="text-right ml-4 shrink-0">
                           <p className="text-xs text-muted-foreground">
-                            {item.receivedQty}/{item.orderedQty} {item.unitName}
+                            {num(item.receivedQty)}/{num(item.orderedQty)} {item.unitName}
                           </p>
-                          <p className="text-sm font-semibold">{fmt(item.lineTotal)}</p>
+                          <p className="text-sm font-semibold">{fmt(num(item.lineTotal))}</p>
                         </div>
                       </div>
                     ))}
@@ -322,7 +370,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                         Qabul qilishlar ({order.receipts.length})
                       </p>
                       {order.receipts.map((r) => (
-                        <div key={r._id} className="flex justify-between py-1.5 text-sm border-b border-border/40 last:border-0">
+                        <div key={r.id} className="flex justify-between py-1.5 text-sm border-b border-border/40 last:border-0">
                           <span className="text-muted-foreground">{r.receiptDate}</span>
                           <span className="text-xs text-muted-foreground">{r.notes ?? "—"}</span>
                         </div>
@@ -340,10 +388,10 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                         To'lovlar ({order.payments.length})
                       </p>
                       {order.payments.map((p) => (
-                        <div key={p._id} className="flex justify-between py-1.5 text-sm border-b border-border/40 last:border-0">
+                        <div key={p.id} className="flex justify-between py-1.5 text-sm border-b border-border/40 last:border-0">
                           <div>
-                            <span className="font-medium">{fmt(p.amount)}</span>
-                            <span className="text-xs text-muted-foreground ml-2">{p.method}</span>
+                            <span className="font-medium">{fmt(num(p.amount))}</span>
+                            <span className="text-xs text-muted-foreground ml-2">{PAYMENT_LABELS[p.method] ?? p.method}</span>
                           </div>
                           <span className="text-muted-foreground text-xs">{p.paymentDate}</span>
                         </div>

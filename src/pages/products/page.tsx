@@ -1,20 +1,18 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery, useMutation, usePaginatedQuery, useConvexAuth } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import Papa from "papaparse";
 import { motion } from "motion/react";
 import {
-  Plus, Search, Filter, Download, Upload, MoreHorizontal,
-  Package, Edit, Trash2, Eye, Tag, BarChart2, AlertTriangle,
-  ChevronDown, CheckCircle, XCircle, Grid3X3, List,
-  ScanBarcode, Boxes,
+  Plus, Search, Download, Upload, MoreHorizontal,
+  Package, Edit, Trash2, Eye, Tag, CheckCircle, XCircle, Grid3X3, List,
+  ScanBarcode,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
+import { Card, CardContent } from "@/components/ui/card.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -24,97 +22,113 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select.tsx";
 import { cn } from "@/lib/utils.ts";
+import { api, errorMessage, type ApiError } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import ProductFormDialog from "./_components/product-form-dialog.tsx";
 import ProductDetailDrawer from "./_components/product-detail-drawer.tsx";
+import { ProductImage } from "./_lib/product-image.tsx";
+import {
+  formatQty, formatSom, toNumber,
+  type Category, type ImportResult, type ProductListItem, type ProductListResponse,
+} from "./_lib/types.ts";
 import BarcodeLabelPrint from "@/components/barcode-label-print.tsx";
 import BarcodeScanner from "@/components/barcode-scanner.tsx";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
 
 type ViewMode = "table" | "grid";
 
+const PAGE_SIZE = 20;
+/** API bitta so'rovda ko'pi bilan 1000 qator qabul qiladi. */
+const IMPORT_BATCH = 1000;
+
+type ImportRow = {
+  name?: string;
+  sku?: string;
+  barcode?: string;
+  unit?: string;
+  purchasePrice?: string;
+  salesPrice?: string;
+  minStock?: string;
+  category?: string;
+  brand?: string;
+};
+
+type LabelProduct = { _id: string; name: string; sku: string; barcode?: string; salesPrice: number };
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 export default function ProductsPage() {
   const { t } = useTranslation("common");
+  const { can } = usePermissions();
   const [search, setSearch] = useState("");
   const [debouncedSearch] = useDebounce(search, 300);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [formOpen, setFormOpen] = useState(false);
-  const [editId, setEditId] = useState<Id<"products"> | null>(null);
-  const [detailId, setDetailId] = useState<Id<"products"> | null>(null);
-  const [labelProduct, setLabelProduct] = useState<{ _id: string; name: string; sku: string; barcode?: string; salesPrice: number } | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [labelProduct, setLabelProduct] = useState<LabelProduct | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
-
-  const categories = useQuery(api.products.categories.list, {});
-  const seedUnits = useMutation(api.products.units.seedDefaultUnits);
-  const removeProduct = useMutation(api.products.products.remove);
-  const createProduct = useMutation(api.products.products.create);
-  const units = useQuery(api.products.units.list, {});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
-  // Seed units once on first authenticated mount
-  const { isAuthenticated } = useConvexAuth();
-  const unitSeededRef = useRef(false);
-  useEffect(() => {
-    if (!isAuthenticated || unitSeededRef.current) return;
-    unitSeededRef.current = true;
-    void seedUnits({}).catch(() => {/* already seeded */});
-  }, [isAuthenticated, seedUnits]);
-
-  const { results, status, loadMore } = usePaginatedQuery(
-    api.products.products.list,
-    {
-      search: debouncedSearch || undefined,
-      categoryId: (categoryFilter !== "all" ? categoryFilter : undefined) as Id<"categories"> | undefined,
-      isActive: statusFilter === "active" ? true : statusFilter === "inactive" ? false : undefined,
-    },
-    { initialNumItems: 20 }
+  const categories = useApiQuery<{ categories: Category[] }>("/api/catalog/categories").data?.categories;
+  const removeProduct = useApiMutation((id: string) => api.delete(`/api/catalog/products/${id}`));
+  const importProducts = useApiMutation((rows: ImportRow[]) =>
+    api.post<ImportResult>("/api/catalog/products/import", { rows }),
   );
 
-  // ── CSV export: joriy filtrga mos yuklangan mahsulotlar ──
-  const handleExport = () => {
-    if (!results || results.length === 0) {
-      toast.error("Eksport uchun mahsulot yo'q");
-      return;
-    }
-    const rows = results.map((p) => ({
-      "Nomi": p.name,
-      "SKU": p.sku,
-      "Shtrix-kod": p.barcode ?? "",
-      "Kategoriya": p.categoryName ?? "",
-      "Brend": p.brandName ?? "",
-      "O'lchov birligi": p.baseUnitName ?? "",
-      "Kirim narxi": p.purchasePrice,
-      "Sotuv narxi": p.salesPrice,
-      "Min. qoldiq": p.minStock,
-      "Faol": p.isActive ? "ha" : "yo'q",
-    }));
-    const csv = Papa.unparse(rows);
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `mahsulotlar-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    toast.success(`${rows.length} ta mahsulot eksport qilindi`);
+  const filters = {
+    search: debouncedSearch.trim() || undefined,
+    categoryId: categoryFilter !== "all" ? categoryFilter : undefined,
+    isActive: statusFilter === "active" ? true : statusFilter === "inactive" ? false : undefined,
   };
 
-  // ── CSV import ──
+  // Kursorli sahifalash; kalit prefiksi `/api/catalog/products` — mutatsiyalardan keyin yangilanadi
+  const productsQuery = useInfiniteQuery<ProductListResponse, ApiError>({
+    queryKey: ["/api/catalog/products", { ...filters, pageSize: PAGE_SIZE, paged: true }],
+    queryFn: ({ pageParam, signal }) =>
+      api.get<ProductListResponse>(
+        "/api/catalog/products",
+        { ...filters, limit: PAGE_SIZE, cursor: pageParam as string | undefined },
+        signal,
+      ),
+    initialPageParam: undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+  const results = productsQuery.data?.pages.flatMap((page) => page.products) ?? [];
+
+  // ── CSV export: server joriy filtrga mos barcha mahsulotlarni beradi ──
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const blob = await api.blob("/api/catalog/products/export", filters);
+      downloadBlob(blob, `mahsulotlar-${new Date().toISOString().slice(0, 10)}.csv`);
+      toast.success("Mahsulotlar eksport qilindi");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // ── CSV import: fayl brauzerda o'qiladi, tekshiruv va yozish serverda ──
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // bir xil faylni qayta tanlash mumkin bo'lsin
     if (!file) return;
-
-    const unitList = units ?? [];
-    if (unitList.length === 0) {
-      toast.error("O'lchov birliklari yuklanmagan — biroz kuting va qayta urining");
-      return;
-    }
 
     setImporting(true);
     Papa.parse<Record<string, string>>(file, {
@@ -122,69 +136,56 @@ export default function ProductsPage() {
       skipEmptyLines: true,
       complete: (parsed) => {
         void (async () => {
-          const rows = parsed.data;
-          let ok = 0;
+          const pick = (row: Record<string, string>, ...keys: string[]) => {
+            for (const key of keys) {
+              const value = row[key]?.toString().trim();
+              if (value) return value;
+            }
+            return undefined;
+          };
+          const rows: ImportRow[] = parsed.data.map((row) => ({
+            name: pick(row, "Nomi", "name"),
+            sku: pick(row, "SKU", "sku"),
+            barcode: pick(row, "Shtrix-kod", "barcode"),
+            // Eksport `shortName` yozadi ("d"); to'liq nom ("Dona") ham qabul qilinadi
+            unit: pick(row, "O'lchov birligi", "unit"),
+            purchasePrice: pick(row, "Kirim narxi", "purchasePrice"),
+            salesPrice: pick(row, "Sotuv narxi", "salesPrice"),
+            minStock: pick(row, "Min. qoldiq", "minStock"),
+            category: pick(row, "Kategoriya", "category"),
+            brand: pick(row, "Brend", "brand"),
+          }));
+
+          if (rows.length === 0) {
+            setImporting(false);
+            toast.error("Faylda qator topilmadi");
+            return;
+          }
+
+          let created = 0;
           const errors: string[] = [];
-
-          for (const [i, row] of rows.entries()) {
-            const name = (row["Nomi"] ?? row["name"] ?? "").trim();
-            const sku = (row["SKU"] ?? row["sku"] ?? "").trim();
-            if (!name || !sku) {
-              errors.push(`${i + 2}-qator: "Nomi" va "SKU" majburiy`);
-              continue;
+          try {
+            for (let offset = 0; offset < rows.length; offset += IMPORT_BATCH) {
+              const result = await importProducts.mutateAsync(rows.slice(offset, offset + IMPORT_BATCH));
+              created += result.created;
+              for (const error of result.errors) {
+                // Faylda: sarlavha 1-qator, ma'lumot 2-qatordan
+                const line = offset + error.row + 1;
+                errors.push(`${line}-qator${error.sku ? ` (${error.sku})` : ""}: ${error.message}`);
+              }
             }
-            // Eksport `shortName` yozadi ("d"), foydalanuvchi to'liq nom yozishi
-            // mumkin ("Dona") — ikkalasini ham qabul qilamiz.
-            const unitName = (row["O'lchov birligi"] ?? row["unit"] ?? "").trim().toLowerCase();
-            const unit =
-              unitList.find(
-                (u) =>
-                  u.shortName.toLowerCase() === unitName ||
-                  u.name.toLowerCase() === unitName,
-              ) ?? unitList[0];
-            const num = (key: string, alt: string) => {
-              const v = (row[key] ?? row[alt] ?? "").toString().replace(/\s/g, "").replace(",", ".");
-              const n = Number(v);
-              return Number.isFinite(n) ? n : 0;
-            };
-
-            try {
-              await createProduct({
-                name,
-                sku,
-                barcode: (row["Shtrix-kod"] ?? row["barcode"] ?? "").trim() || undefined,
-                baseUnitId: unit._id,
-                purchasePrice: num("Kirim narxi", "purchasePrice"),
-                salesPrice: num("Sotuv narxi", "salesPrice"),
-                taxRate: 0,
-                taxIncluded: true,
-                minStock: num("Min. qoldiq", "minStock"),
-                trackBatch: false,
-                trackExpiry: false,
-                costingMethod: "average",
-                isSaleable: true,
-                isPurchaseable: true,
-                isManufactured: false,
-              });
-              ok++;
-            } catch (err) {
-              const msg =
-                err && typeof err === "object" && "data" in err
-                  ? String((err as { data?: { message?: string } }).data?.message ?? "xatolik")
-                  : "xatolik";
-              errors.push(`${i + 2}-qator (${sku}): ${msg}`);
-            }
+          } catch (err) {
+            errors.push(errorMessage(err));
           }
 
           setImporting(false);
-          if (ok > 0) toast.success(`${ok} ta mahsulot import qilindi`);
+          if (created > 0) toast.success(`${created} ta mahsulot import qilindi`);
           if (errors.length > 0) {
             toast.error(`${errors.length} ta qator o'tmadi`, {
               description: errors.slice(0, 3).join("; "),
               duration: 8000,
             });
           }
-          if (ok === 0 && errors.length === 0) toast.error("Faylda qator topilmadi");
         })();
       },
       error: () => {
@@ -194,17 +195,30 @@ export default function ProductsPage() {
     });
   };
 
-  const handleDelete = async (id: Id<"products">) => {
+  const handleDelete = async (id: string) => {
     try {
-      await removeProduct({ id });
+      await removeProduct.mutateAsync(id);
       toast.success(t("msg.delete_success"));
-    } catch {
-      toast.error(t("msg.error"));
+    } catch (err) {
+      toast.error(errorMessage(err, t("msg.error")));
     }
   };
 
-  const formatPrice = (n: number) =>
-    new Intl.NumberFormat("uz-UZ").format(n) + " so'm";
+  const perms = {
+    create: can("products.create"),
+    edit: can("products.edit"),
+    delete: can("products.delete"),
+  };
+
+  const openCreate = () => { setEditId(null); setFormOpen(true); };
+  const openEdit = (id: string) => { setEditId(id); setFormOpen(true); };
+  const toLabel = (p: ProductListItem): LabelProduct => ({
+    _id: p.id,
+    name: p.name,
+    sku: p.sku,
+    barcode: p.barcode ?? undefined,
+    salesPrice: toNumber(p.salesPrice),
+  });
 
   return (
     <div className="flex flex-col h-full">
@@ -231,20 +245,24 @@ export default function ProductsPage() {
               className="hidden"
               onChange={handleImportFile}
             />
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={importing}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Upload className="h-4 w-4 mr-1" /> {importing ? "Import..." : "Import"}
+            {perms.create && (
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={importing}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload className="h-4 w-4 mr-1" /> {importing ? "Import..." : "Import"}
+              </Button>
+            )}
+            <Button size="sm" variant="secondary" disabled={exporting} onClick={() => { void handleExport(); }}>
+              <Download className="h-4 w-4 mr-1" /> {exporting ? "Export..." : "Export"}
             </Button>
-            <Button size="sm" variant="secondary" onClick={handleExport}>
-              <Download className="h-4 w-4 mr-1" /> Export
-            </Button>
-            <Button size="sm" onClick={() => { setEditId(null); setFormOpen(true); }}>
-              <Plus className="h-4 w-4 mr-1" /> Mahsulot qo'shish
-            </Button>
+            {perms.create && (
+              <Button size="sm" onClick={openCreate}>
+                <Plus className="h-4 w-4 mr-1" /> Mahsulot qo'shish
+              </Button>
+            )}
           </div>
         </div>
 
@@ -267,7 +285,7 @@ export default function ProductsPage() {
             <SelectContent>
               <SelectItem value="all">Barcha kategoriya</SelectItem>
               {categories?.map((c) => (
-                <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
+                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -302,11 +320,16 @@ export default function ProductsPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-6">
-        {status === "LoadingFirstPage" ? (
+        {productsQuery.isPending ? (
           <div className="space-y-2">
             {Array.from({ length: 8 }).map((_, i) => (
               <Skeleton key={i} className="h-14 w-full" />
             ))}
+          </div>
+        ) : productsQuery.isError ? (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <h3 className="font-semibold">Mahsulotlarni yuklab bo'lmadi</h3>
+            <p className="text-sm text-muted-foreground mt-1">{errorMessage(productsQuery.error)}</p>
           </div>
         ) : results.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-center">
@@ -317,34 +340,41 @@ export default function ProductsPage() {
             <p className="text-sm text-muted-foreground mt-1 mb-4">
               Filtrni o'zgartiring yoki yangi mahsulot qo'shing
             </p>
-            <Button size="sm" onClick={() => { setEditId(null); setFormOpen(true); }}>
-              <Plus className="h-4 w-4 mr-1" /> Mahsulot qo'shish
-            </Button>
+            {perms.create && (
+              <Button size="sm" onClick={openCreate}>
+                <Plus className="h-4 w-4 mr-1" /> Mahsulot qo'shish
+              </Button>
+            )}
           </div>
         ) : viewMode === "table" ? (
           <ProductTable
             products={results}
+            perms={perms}
             onView={(id) => setDetailId(id)}
-            onEdit={(id) => { setEditId(id); setFormOpen(true); }}
+            onEdit={openEdit}
             onDelete={handleDelete}
-            onLabel={(p) => setLabelProduct(p)}
-            formatPrice={formatPrice}
+            onLabel={(p) => setLabelProduct(toLabel(p))}
           />
         ) : (
           <ProductGrid
             products={results}
+            perms={perms}
             onView={(id) => setDetailId(id)}
-            onEdit={(id) => { setEditId(id); setFormOpen(true); }}
+            onEdit={openEdit}
             onDelete={handleDelete}
-            onLabel={(p) => setLabelProduct(p)}
-            formatPrice={formatPrice}
+            onLabel={(p) => setLabelProduct(toLabel(p))}
           />
         )}
 
-        {status === "CanLoadMore" && (
+        {productsQuery.hasNextPage && (
           <div className="flex justify-center mt-6">
-            <Button variant="secondary" size="sm" onClick={() => loadMore(20)}>
-              Ko'proq yuklash
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={productsQuery.isFetchingNextPage}
+              onClick={() => { void productsQuery.fetchNextPage(); }}
+            >
+              {productsQuery.isFetchingNextPage ? "Yuklanmoqda..." : "Ko'proq yuklash"}
             </Button>
           </div>
         )}
@@ -361,8 +391,9 @@ export default function ProductsPage() {
       {detailId && (
         <ProductDetailDrawer
           productId={detailId}
+          canEdit={perms.edit}
           onClose={() => setDetailId(null)}
-          onEdit={(id) => { setDetailId(null); setEditId(id); setFormOpen(true); }}
+          onEdit={(id) => { setDetailId(null); openEdit(id); }}
         />
       )}
 
@@ -390,35 +421,18 @@ export default function ProductsPage() {
   );
 }
 
-type Product = {
-  _id: Id<"products">;
-  name: string;
-  sku: string;
-  barcode?: string;
-  salesPrice: number;
-  purchasePrice: number;
-  minStock: number;
-  isActive: boolean;
-  trackBatch: boolean;
-  trackExpiry: boolean;
-  imageUrl?: string;
-  categoryName?: string;
-  brandName?: string;
-  baseUnitName?: string;
-  costingMethod: string;
-};
-
-type LabelProduct = { _id: string; name: string; sku: string; barcode?: string; salesPrice: number };
+type Perms = { create: boolean; edit: boolean; delete: boolean };
 
 type ProductActionsProps = {
-  product: Product;
-  onView: (id: Id<"products">) => void;
-  onEdit: (id: Id<"products">) => void;
-  onDelete: (id: Id<"products">) => void;
-  onLabel: (p: LabelProduct) => void;
+  product: ProductListItem;
+  perms: Perms;
+  onView: (id: string) => void;
+  onEdit: (id: string) => void;
+  onDelete: (id: string) => void;
+  onLabel: (p: ProductListItem) => void;
 };
 
-function ProductActions({ product, onView, onEdit, onDelete, onLabel }: ProductActionsProps) {
+function ProductActions({ product, perms, onView, onEdit, onDelete, onLabel }: ProductActionsProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -427,35 +441,44 @@ function ProductActions({ product, onView, onEdit, onDelete, onLabel }: ProductA
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => onView(product._id)} className="cursor-pointer">
+        <DropdownMenuItem onClick={() => onView(product.id)} className="cursor-pointer">
           <Eye className="mr-2 h-4 w-4" /> Ko'rish
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onEdit(product._id)} className="cursor-pointer">
-          <Edit className="mr-2 h-4 w-4" /> Tahrirlash
-        </DropdownMenuItem>
+        {perms.edit && (
+          <DropdownMenuItem onClick={() => onEdit(product.id)} className="cursor-pointer">
+            <Edit className="mr-2 h-4 w-4" /> Tahrirlash
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onClick={() => onLabel(product)} className="cursor-pointer">
           <Tag className="mr-2 h-4 w-4" /> Yorliq chop etish
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={() => onDelete(product._id)}
-          className="cursor-pointer text-destructive focus:text-destructive"
-        >
-          <Trash2 className="mr-2 h-4 w-4" /> O'chirish
-        </DropdownMenuItem>
+        {perms.delete && product.isActive && (
+          <>
+            <DropdownMenuSeparator />
+            {/* Server o'chirmaydi — faolsizlantiradi (tarix saqlanadi) */}
+            <DropdownMenuItem
+              onClick={() => onDelete(product.id)}
+              className="cursor-pointer text-destructive focus:text-destructive"
+            >
+              <Trash2 className="mr-2 h-4 w-4" /> O'chirish
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-function ProductTable({ products, onView, onEdit, onDelete, onLabel, formatPrice }: {
-  products: Product[];
-  onView: (id: Id<"products">) => void;
-  onEdit: (id: Id<"products">) => void;
-  onDelete: (id: Id<"products">) => void;
-  onLabel: (p: LabelProduct) => void;
-  formatPrice: (n: number) => string;
-}) {
+type ListProps = {
+  products: ProductListItem[];
+  perms: Perms;
+  onView: (id: string) => void;
+  onEdit: (id: string) => void;
+  onDelete: (id: string) => void;
+  onLabel: (p: ProductListItem) => void;
+};
+
+function ProductTable({ products, perms, onView, onEdit, onDelete, onLabel }: ListProps) {
   return (
     <div className="border border-border rounded-lg overflow-hidden">
       <table className="w-full text-sm">
@@ -474,22 +497,26 @@ function ProductTable({ products, onView, onEdit, onDelete, onLabel, formatPrice
         <tbody className="divide-y divide-border">
           {products.map((p, i) => (
             <motion.tr
-              key={p._id}
+              key={p.id}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ delay: i * 0.02 }}
+              transition={{ delay: Math.min(i, 20) * 0.02 }}
               className="hover:bg-muted/30 cursor-pointer"
-              onClick={() => onView(p._id)}
+              onClick={() => onView(p.id)}
             >
               <td className="px-4 py-3">
                 <div className="flex items-center gap-3">
-                  {p.imageUrl ? (
-                    <img src={p.imageUrl} alt={p.name} className="h-9 w-9 rounded-md object-cover border border-border shrink-0" />
-                  ) : (
-                    <div className="h-9 w-9 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-                      <Package className="h-4 w-4 text-primary" />
-                    </div>
-                  )}
+                  <ProductImage
+                    productId={p.id}
+                    imageKey={p.imageKey}
+                    alt={p.name}
+                    className="h-9 w-9 rounded-md border border-border shrink-0"
+                    fallback={
+                      <div className="h-9 w-9 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
+                        <Package className="h-4 w-4 text-primary" />
+                      </div>
+                    }
+                  />
                   <div>
                     <p className="font-medium text-sm leading-tight">{p.name}</p>
                     <div className="flex items-center gap-1 mt-0.5">
@@ -517,13 +544,13 @@ function ProductTable({ products, onView, onEdit, onDelete, onLabel, formatPrice
                 )}
               </td>
               <td className="px-4 py-3 text-right">
-                <span className="text-xs font-medium">{formatPrice(p.purchasePrice)}</span>
+                <span className="text-xs font-medium">{formatSom(p.purchasePrice)}</span>
               </td>
               <td className="px-4 py-3 text-right">
-                <span className="text-sm font-bold text-primary">{formatPrice(p.salesPrice)}</span>
+                <span className="text-sm font-bold text-primary">{formatSom(p.salesPrice)}</span>
               </td>
               <td className="px-4 py-3 text-center hidden lg:table-cell">
-                <span className="text-xs">{p.minStock} {p.baseUnitName}</span>
+                <span className="text-xs">{formatQty(p.minStock)} {p.baseUnitName}</span>
               </td>
               <td className="px-4 py-3 text-center">
                 {p.isActive ? (
@@ -537,7 +564,7 @@ function ProductTable({ products, onView, onEdit, onDelete, onLabel, formatPrice
                 )}
               </td>
               <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                <ProductActions product={p} onView={onView} onEdit={onEdit} onDelete={onDelete} onLabel={onLabel} />
+                <ProductActions product={p} perms={perms} onView={onView} onEdit={onEdit} onDelete={onDelete} onLabel={onLabel} />
               </td>
             </motion.tr>
           ))}
@@ -547,40 +574,35 @@ function ProductTable({ products, onView, onEdit, onDelete, onLabel, formatPrice
   );
 }
 
-function ProductGrid({ products, onView, onEdit, onDelete, onLabel, formatPrice }: {
-  products: Product[];
-  onView: (id: Id<"products">) => void;
-  onEdit: (id: Id<"products">) => void;
-  onDelete: (id: Id<"products">) => void;
-  onLabel: (p: LabelProduct) => void;
-  formatPrice: (n: number) => string;
-}) {
+function ProductGrid({ products, perms, onView, onEdit, onDelete, onLabel }: ListProps) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
       {products.map((p, i) => (
         <motion.div
-          key={p._id}
+          key={p.id}
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: i * 0.03 }}
+          transition={{ delay: Math.min(i, 20) * 0.03 }}
         >
           <Card
             className="hover:shadow-md transition-shadow cursor-pointer pt-0 overflow-hidden"
-            onClick={() => onView(p._id)}
+            onClick={() => onView(p.id)}
           >
             <div className="bg-muted/50 flex items-center justify-center h-32">
-              {p.imageUrl ? (
-                <img src={p.imageUrl} alt={p.name} className="h-full w-full object-cover" />
-              ) : (
-                <Package className="h-10 w-10 text-muted-foreground/40" />
-              )}
+              <ProductImage
+                productId={p.id}
+                imageKey={p.imageKey}
+                alt={p.name}
+                className="h-full w-full"
+                fallback={<Package className="h-10 w-10 text-muted-foreground/40" />}
+              />
             </div>
             <CardContent className="p-3">
               <p className="font-medium text-xs leading-tight line-clamp-2 mb-1">{p.name}</p>
               {p.categoryName && (
                 <p className="text-[10px] text-muted-foreground mb-2">{p.categoryName}</p>
               )}
-              <p className="text-sm font-bold text-primary">{formatPrice(p.salesPrice)}</p>
+              <p className="text-sm font-bold text-primary">{formatSom(p.salesPrice)}</p>
               <div className="flex items-center justify-between mt-2" onClick={(e) => e.stopPropagation()}>
                 <span className={cn(
                   "text-[10px] px-1.5 py-0.5 rounded-full font-medium",
@@ -588,7 +610,7 @@ function ProductGrid({ products, onView, onEdit, onDelete, onLabel, formatPrice 
                 )}>
                   {p.isActive ? "Faol" : "Nofaol"}
                 </span>
-                <ProductActions product={p} onView={onView} onEdit={onEdit} onDelete={onDelete} onLabel={onLabel} />
+                <ProductActions product={p} perms={perms} onView={onView} onEdit={onEdit} onDelete={onDelete} onLabel={onLabel} />
               </div>
             </CardContent>
           </Card>

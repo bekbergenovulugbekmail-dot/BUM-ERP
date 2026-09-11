@@ -1,19 +1,13 @@
 /**
- * Security Settings Section — PIN setup, change, remove; auto-lock timeout
+ * Security Settings Section — o'z paroli, PIN (o'rnatish, o'zgartirish, o'chirish), auto-lock
  *
  * Located: Settings → Xavfsizlik
  *
- * Features:
- *  - Set PIN (4-8 digits)
- *  - Change PIN (requires old PIN)
- *  - Remove PIN (requires old PIN)
- *  - Auto-lock timeout selector (0 = disabled, 30s, 60s, 120s, 300s)
- *  - Manual lock button
+ * API: `/api/auth/password`, `/api/auth/pin`, `/pin/change`, `/pin/remove`, `/auto-lock`, `GET /security`.
+ * PIN/auto-lock o'zgarsa (xato urinishda ham — bloklash holati) `/api/auth/security` qayta olinadi.
  */
 import { useState } from "react";
-import { useMutation, useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
-import { ConvexError } from "convex/values";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Shield, Lock, Eye, EyeOff, Check, X,
@@ -27,9 +21,13 @@ import { Label } from "@/components/ui/label.tsx";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select.tsx";
-import { lockScreen } from "@/hooks/use-lock-screen.ts";
+import { lockScreen, useSecuritySettings } from "@/hooks/use-lock-screen.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation } from "@/lib/query.ts";
 
 type PinMode = "idle" | "set" | "change" | "remove";
+
+const SECURITY = ["/api/auth/security"];
 
 const TIMEOUT_OPTIONS = [
   { value: "0",   label: "O'chirilgan (lock yo'q)" },
@@ -77,14 +75,23 @@ function PinInput({
 }
 
 export default function SecuritySection() {
-  const securitySettings = useQuery(api.pin.getSecuritySettings);
-  const setPinMutation = useMutation(api.pin.setPin);
-  const changePinMutation = useMutation(api.pin.changePin);
-  const removePinMutation = useMutation(api.pin.removePin);
-  const setAutoLockTimeoutMutation = useMutation(api.pin.setAutoLockTimeout);
+  const queryClient = useQueryClient();
+  const securitySettings = useSecuritySettings();
+  const setPinMutation = useApiMutation((pin: string) => api.post("/api/auth/pin", { pin }), { invalidate: SECURITY });
+  const changePinMutation = useApiMutation(
+    (body: { oldPin: string; newPin: string }) => api.post("/api/auth/pin/change", body),
+    { invalidate: SECURITY },
+  );
+  const removePinMutation = useApiMutation(
+    (currentPin: string) => api.post("/api/auth/pin/remove", { currentPin }),
+    { invalidate: SECURITY },
+  );
+  const setAutoLockTimeoutMutation = useApiMutation(
+    (seconds: number) => api.put("/api/auth/auto-lock", { seconds }),
+    { invalidate: SECURITY },
+  );
 
   const [mode, setMode] = useState<PinMode>("idle");
-  const [busy, setBusy] = useState(false);
 
   // Form state
   const [newPin, setNewPin] = useState("");
@@ -93,25 +100,28 @@ export default function SecuritySection() {
 
   const hasPIN = securitySettings?.hasPIN ?? false;
   const timeout = securitySettings?.autoLockTimeoutSeconds ?? 30;
+  const busy = setPinMutation.isPending || changePinMutation.isPending || removePinMutation.isPending;
 
   const resetForm = () => {
     setNewPin(""); setConfirmPin(""); setOldPin("");
     setMode("idle");
   };
 
+  /** Xato PIN urinishi ham serverda hisoblanadi — bloklash holati yangilansin. */
+  const failed = (err: unknown) => {
+    toast.error(errorMessage(err));
+    void queryClient.invalidateQueries({ queryKey: SECURITY });
+  };
+
   const handleSetPin = async () => {
     if (newPin.length < 4) return toast.error("PIN kamida 4 ta raqam bo'lishi kerak");
     if (newPin !== confirmPin) return toast.error("PIN kodlar mos emas");
-    setBusy(true);
     try {
-      await setPinMutation({ pin: newPin });
+      await setPinMutation.mutateAsync(newPin);
       toast.success("PIN muvaffaqiyatli o'rnatildi");
       resetForm();
     } catch (err) {
-      const msg = err instanceof ConvexError ? (err.data as { message?: string }).message ?? "Xatolik" : "Xatolik";
-      toast.error(msg);
-    } finally {
-      setBusy(false);
+      failed(err);
     }
   };
 
@@ -119,40 +129,32 @@ export default function SecuritySection() {
     if (!oldPin) return toast.error("Eski PINni kiriting");
     if (newPin.length < 4) return toast.error("Yangi PIN kamida 4 ta raqam bo'lishi kerak");
     if (newPin !== confirmPin) return toast.error("Yangi PIN kodlar mos emas");
-    setBusy(true);
     try {
-      await changePinMutation({ oldPin, newPin });
+      await changePinMutation.mutateAsync({ oldPin, newPin });
       toast.success("PIN muvaffaqiyatli o'zgartirildi");
       resetForm();
     } catch (err) {
-      const msg = err instanceof ConvexError ? (err.data as { message?: string }).message ?? "Xatolik" : "Xatolik";
-      toast.error(msg);
-    } finally {
-      setBusy(false);
+      failed(err);
     }
   };
 
   const handleRemovePin = async () => {
     if (!oldPin) return toast.error("Amalni tasdiqlash uchun PIN kiriting");
-    setBusy(true);
     try {
-      await removePinMutation({ currentPin: oldPin });
+      await removePinMutation.mutateAsync(oldPin);
       toast.success("PIN o'chirildi");
       resetForm();
     } catch (err) {
-      const msg = err instanceof ConvexError ? (err.data as { message?: string }).message ?? "Xatolik" : "Xatolik";
-      toast.error(msg);
-    } finally {
-      setBusy(false);
+      failed(err);
     }
   };
 
   const handleTimeoutChange = async (val: string) => {
     try {
-      await setAutoLockTimeoutMutation({ seconds: parseInt(val, 10) });
+      await setAutoLockTimeoutMutation.mutateAsync(parseInt(val, 10));
       toast.success("Auto-lock sozlama saqlandi");
-    } catch {
-      toast.error("Saqlashda xatolik");
+    } catch (err) {
+      toast.error(errorMessage(err, "Saqlashda xatolik"));
     }
   };
 
@@ -164,9 +166,11 @@ export default function SecuritySection() {
         </div>
         <div>
           <h2 className="text-lg font-bold">Xavfsizlik</h2>
-          <p className="text-sm text-muted-foreground">PIN kod va avtomatik bloklash sozlamalari</p>
+          <p className="text-sm text-muted-foreground">Parol, PIN kod va avtomatik bloklash sozlamalari</p>
         </div>
       </div>
+
+      <PasswordCard />
 
       {/* Info banner */}
       <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-500/8 border border-blue-500/20">
@@ -176,7 +180,7 @@ export default function SecuritySection() {
           <p>
             PIN — bu tezkor bloklash ekranini ochish uchun qisqa raqamli kod.
             U to'liq parolni almashtirolmaydi — faqat mavjud sessiyani ochadi.
-            30 soniya faolsizlikdan keyin ekran avtomatik bloklanadi.
+            Belgilangan vaqt faolsizlikdan keyin ekran avtomatik bloklanadi.
           </p>
         </div>
       </div>
@@ -203,6 +207,12 @@ export default function SecuritySection() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {securitySettings?.isPinLocked && securitySettings.pinLockedUntil && (
+            <p className="text-xs text-destructive">
+              PIN vaqtincha bloklangan: {new Date(securitySettings.pinLockedUntil).toLocaleTimeString("uz-UZ")} gacha
+            </p>
+          )}
+
           {/* Action buttons */}
           {mode === "idle" && (
             <div className="flex flex-wrap gap-2">
@@ -299,7 +309,8 @@ export default function SecuritySection() {
           <div className="flex items-center gap-3">
             <Select
               value={String(timeout)}
-              onValueChange={handleTimeoutChange}
+              onValueChange={(val) => { void handleTimeoutChange(val); }}
+              disabled={securitySettings === undefined || setAutoLockTimeoutMutation.isPending}
             >
               <SelectTrigger className="w-56">
                 <SelectValue />
@@ -349,13 +360,91 @@ export default function SecuritySection() {
       <div className="text-xs text-muted-foreground space-y-1.5 p-4 rounded-xl border border-border bg-muted/20">
         <p className="font-medium text-foreground">Xavfsizlik ma'lumotlari</p>
         <ul className="space-y-1 list-disc list-inside">
-          <li>PIN server tomonida bcrypt bilan shifrlangan holda saqlanadi</li>
+          <li>Parol va PIN serverda argon2id xeshi sifatida saqlanadi</li>
           <li>5 marta noto'g'ri PIN → 5 daqiqa bloklash</li>
           <li>PIN boshqa kompaniya yoki foydalanuvchi uchun ishlamaydi</li>
+          <li>Parol almashtirilsa boshqa qurilmalardagi sessiyalar yopiladi</li>
           <li>Tizimdan chiqish PIN ni bekor qiladi — qayta parol bilan kirish kerak</li>
-          <li>SMS orqali PIN tiklash mavjud emas — parol bilan authentication talab qilinadi</li>
         </ul>
       </div>
     </div>
+  );
+}
+
+// ─── O'z parolini almashtirish ────────────────────────────────────────────────
+
+function PasswordCard() {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [show, setShow] = useState(false);
+
+  // Server boshqa sessiyalarni yopib, shu qurilma uchun yangi cookie beradi — kesh o'zgarmaydi
+  const changePassword = useApiMutation(
+    (body: { currentPassword: string; newPassword: string }) => api.post("/api/auth/password", body),
+    { invalidate: false },
+  );
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) return toast.error("Yangi parollar mos emas");
+    if (newPassword === currentPassword) return toast.error("Yangi parol joriy paroldan farq qilishi kerak");
+    try {
+      await changePassword.mutateAsync({ currentPassword, newPassword });
+      toast.success("Parol almashtirildi. Boshqa qurilmalardagi sessiyalar yopildi.");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
+  const type = show ? "text" : "password";
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Lock className="h-4 w-4 text-primary" />
+            Parolni almashtirish
+          </CardTitle>
+          <button
+            type="button"
+            onClick={() => setShow(!show)}
+            className="text-muted-foreground hover:text-foreground cursor-pointer"
+          >
+            {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-3">
+          <div className="space-y-1.5">
+            <Label className="text-sm">Joriy parol</Label>
+            <Input type={type} autoComplete="current-password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-sm">Yangi parol</Label>
+              <Input type={type} autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm">Yangi parolni tasdiqlang</Label>
+              <Input type={type} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+            </div>
+          </div>
+          <Button
+            type="submit"
+            className="gap-2"
+            disabled={changePassword.isPending || !currentPassword || !newPassword || newPassword !== confirmPassword}
+          >
+            <Check className="h-4 w-4" />
+            {changePassword.isPending ? "Saqlanmoqda..." : "Parolni almashtirish"}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
   );
 }

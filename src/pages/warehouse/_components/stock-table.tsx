@@ -1,40 +1,39 @@
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
-import { AlertTriangle, TrendingDown, Package, PackagePlus, PackageMinus, SlidersHorizontal } from "lucide-react";
-import { Badge } from "@/components/ui/badge.tsx";
+import { Package, PackagePlus, PackageMinus, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
+import { errorMessage } from "@/lib/api.ts";
+import { useApiQuery } from "@/lib/query.ts";
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty.tsx";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { formatQty, toNumber } from "@/pages/products/_lib/types.ts";
+import type { StockRow } from "../_lib/types.ts";
 
 type Props = {
-  warehouseId: Id<"warehouses">;
+  warehouseId: string;
   search: string;
   lowStockOnly: boolean;
+  canReceive: boolean;
+  canManage: boolean;
   onReceive: () => void;
   onIssue: () => void;
   onAdjust: () => void;
 };
 
-const MOVE_TYPE_LABELS: Record<string, { label: string; color: string }> = {
-  receive: { label: "Qabul", color: "text-green-600" },
-  issue: { label: "Chiqarish", color: "text-amber-600" },
-  transfer_out: { label: "Chiqim transfer", color: "text-blue-600" },
-  transfer_in: { label: "Kirish transfer", color: "text-blue-600" },
-  adjust: { label: "Tuzatish", color: "text-purple-600" },
-  writeoff: { label: "Hisobdan chiqarish", color: "text-destructive" },
-  return_in: { label: "Qaytish (kirish)", color: "text-teal-600" },
-  return_out: { label: "Qaytish (chiqish)", color: "text-orange-600" },
-  count: { label: "Inventarizatsiya", color: "text-indigo-600" },
-};
-
-export default function StockTable({ warehouseId, search, lowStockOnly, onReceive, onIssue, onAdjust }: Props) {
-  const stockLevels = useQuery(api.warehouse.stock.getWarehouseStock, {
+export default function StockTable({ warehouseId, search, lowStockOnly, canReceive, canManage, onReceive, onIssue, onAdjust }: Props) {
+  const query = useApiQuery<{ stock: StockRow[] }>("/api/inventory/stock", {
     warehouseId,
-    searchQuery: search || undefined,
+    search: search || undefined,
     lowStockOnly: lowStockOnly || undefined,
   });
+  const stockLevels = query.data?.stock;
+
+  if (query.isError) {
+    return (
+      <div className="h-40 flex items-center justify-center text-sm text-destructive">
+        {errorMessage(query.error)}
+      </div>
+    );
+  }
 
   if (stockLevels === undefined) {
     return (
@@ -58,7 +57,7 @@ export default function StockTable({ warehouseId, search, lowStockOnly, onReceiv
               : "Mahsulot qabul qilib, ombor to'ldiring"}
           </EmptyDescription>
         </EmptyHeader>
-        {!lowStockOnly && !search && (
+        {!lowStockOnly && !search && canReceive && (
           <div className="flex gap-2 justify-center mt-2">
             <Button size="sm" onClick={onReceive}>
               <PackagePlus className="h-4 w-4 mr-1" /> Qabul qilish
@@ -87,8 +86,11 @@ export default function StockTable({ warehouseId, search, lowStockOnly, onReceiv
           </thead>
           <tbody className="divide-y divide-border">
             {stockLevels.map((row) => {
-              const value = row.quantity * row.avgCostPrice;
-              const statusLabel = row.quantity === 0
+              const quantity = toNumber(row.quantity);
+              const available = toNumber(row.availableQty);
+              const avgCost = toNumber(row.avgCostPrice);
+              const value = quantity * avgCost;
+              const statusLabel = quantity === 0
                 ? { text: "Tugagan", cls: "bg-destructive/10 text-destructive" }
                 : row.isLow
                 ? { text: "Kam", cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400" }
@@ -97,16 +99,13 @@ export default function StockTable({ warehouseId, search, lowStockOnly, onReceiv
                 : { text: "Yaxshi", cls: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400" };
 
               return (
-                <tr key={row._id} className="hover:bg-muted/30 transition-colors">
+                <tr key={row.id} className="hover:bg-muted/30 transition-colors">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      {row.productImage ? (
-                        <img src={row.productImage} alt="" className="h-8 w-8 rounded-lg object-cover border border-border shrink-0" />
-                      ) : (
-                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                          <Package className="h-4 w-4 text-primary" />
-                        </div>
-                      )}
+                      {/* API'da yo'q: zaxira ro'yxatida mahsulot rasmi — belgi ko'rsatiladi */}
+                      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                        <Package className="h-4 w-4 text-primary" />
+                      </div>
                       <div className="min-w-0">
                         <p className="font-medium truncate max-w-[200px]">{row.productName}</p>
                         <p className="text-xs text-muted-foreground font-mono">{row.productSku}</p>
@@ -114,22 +113,22 @@ export default function StockTable({ warehouseId, search, lowStockOnly, onReceiv
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right font-mono font-medium whitespace-nowrap">
-                    {row.quantity} <span className="text-xs text-muted-foreground">{row.unitName}</span>
+                    {formatQty(row.quantity)} <span className="text-xs text-muted-foreground">{row.unitName}</span>
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-muted-foreground whitespace-nowrap">
-                    {row.reservedQty} <span className="text-xs">{row.unitName}</span>
+                    {formatQty(row.reservedQty)} <span className="text-xs">{row.unitName}</span>
                   </td>
                   <td className="px-4 py-3 text-right font-mono font-bold whitespace-nowrap">
                     <span className={cn(
-                      row.availableQty === 0 ? "text-destructive" :
+                      available <= 0 ? "text-destructive" :
                       row.isLow ? "text-amber-600" : "text-foreground"
                     )}>
-                      {row.availableQty}
+                      {formatQty(row.availableQty)}
                     </span>
                     <span className="text-xs text-muted-foreground ml-1">{row.unitName}</span>
                   </td>
                   <td className="px-4 py-3 text-right text-muted-foreground whitespace-nowrap text-xs">
-                    {new Intl.NumberFormat("uz-UZ").format(Math.round(row.avgCostPrice))} so'm
+                    {new Intl.NumberFormat("uz-UZ").format(Math.round(avgCost))} so'm
                   </td>
                   <td className="px-4 py-3 text-right font-medium whitespace-nowrap text-xs">
                     {new Intl.NumberFormat("uz-UZ", { notation: "compact" }).format(value)} so'm
@@ -141,15 +140,21 @@ export default function StockTable({ warehouseId, search, lowStockOnly, onReceiv
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 justify-end">
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onReceive} title="Qabul">
-                        <PackagePlus className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onIssue} title="Chiqarish">
-                        <PackageMinus className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onAdjust} title="Tuzatish">
-                        <SlidersHorizontal className="h-3.5 w-3.5" />
-                      </Button>
+                      {canReceive && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onReceive} title="Qabul">
+                          <PackagePlus className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      {canManage && (
+                        <>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onIssue} title="Chiqarish">
+                            <PackageMinus className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onAdjust} title="Tuzatish">
+                            <SlidersHorizontal className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>

@@ -1,7 +1,4 @@
-import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
+import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -18,80 +15,75 @@ import {
 import { ArrowLeftRight } from "lucide-react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import type { ProductListResponse } from "@/pages/products/_lib/types.ts";
+import { formatQty } from "@/pages/products/_lib/types.ts";
+import type { WarehouseItem } from "../_lib/types.ts";
+import { localIsoDate, occurredAtFor } from "../_lib/dates.ts";
+import { useProductUnits } from "../_lib/use-product-units.ts";
 
 const schema = z.object({
   productId: z.string().min(1, "Mahsulot tanlang"),
+  unitId: z.string(),
   toWarehouseId: z.string().min(1, "Manzil ombor tanlang"),
-  quantity: z.number().min(0.001),
-  unitId: z.string().min(1),
-  costPrice: z.number().min(0),
-  notes: z.string().optional(),
+  quantity: z.number().gt(0, "Miqdor 0 dan katta bo'lishi kerak"),
   date: z.string().min(1),
+  notes: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
 
 type Props = {
-  fromWarehouseId: Id<"warehouses">;
-  warehouses: { _id: Id<"warehouses">; name: string }[];
+  fromWarehouseId: string;
+  warehouses: WarehouseItem[];
   onClose: () => void;
 };
 
 export default function TransferDialog({ fromWarehouseId, warehouses, onClose }: Props) {
-  const products = useQuery(api.products.products.list, {
-    paginationOpts: { cursor: null, numItems: 200 },
-  });
-  const units = useQuery(api.products.units.list, {});
-  const transferStock = useMutation(api.warehouse.stock.transferStock);
-  const [loading, setLoading] = useState(false);
+  const products = useApiQuery<ProductListResponse>("/api/catalog/products", { isActive: true, limit: 200 }).data
+    ?.products;
 
-  const today = new Date().toISOString().slice(0, 10);
-
+  const today = localIsoDate();
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
       productId: "",
+      unitId: "",
       toWarehouseId: "",
       quantity: 0,
-      unitId: "",
-      costPrice: 0,
-      notes: "",
       date: today,
+      notes: "",
     },
   });
 
-  const otherWarehouses = warehouses.filter((w) => w._id !== fromWarehouseId);
-  const fromWarehouse = warehouses.find((w) => w._id === fromWarehouseId);
+  const otherWarehouses = warehouses.filter((w) => w.id !== fromWarehouseId);
+  const fromWarehouse = warehouses.find((w) => w.id === fromWarehouseId);
+  const selectedProductId = useWatch({ control: form.control, name: "productId" });
+  const toWarehouseId = useWatch({ control: form.control, name: "toWarehouseId" });
+  const selectedProduct = products?.find((p) => p.id === selectedProductId);
+  const unitOptions = useProductUnits(selectedProduct);
 
-  const handleProductChange = (productId: string) => {
-    form.setValue("productId", productId);
-    const product = products?.page.find((p) => p._id === productId);
-    if (product) {
-      form.setValue("costPrice", product.purchasePrice);
-      form.setValue("unitId", product.baseUnitId);
-    }
-  };
+  // Tannarx serverda: qabul qiluvchi ombor manbadagi o'rtacha tannarxni oladi
+  const transfer = useApiMutation((values: FormValues) =>
+    api.post("/api/inventory/stock/transfers", {
+      productId: values.productId,
+      fromWarehouseId,
+      toWarehouseId: values.toWarehouseId,
+      quantity: values.quantity,
+      ...(selectedProduct && values.unitId && values.unitId !== selectedProduct.baseUnitId ? { unitId: values.unitId } : {}),
+      occurredAt: occurredAtFor(values.date),
+      notes: values.notes?.trim() || null,
+    }),
+  );
 
   const onSubmit = async (values: FormValues) => {
-    setLoading(true);
     try {
-      await transferStock({
-        productId: values.productId as Id<"products">,
-        fromWarehouseId,
-        toWarehouseId: values.toWarehouseId as Id<"warehouses">,
-        quantity: values.quantity,
-        unitId: values.unitId as Id<"units">,
-        costPrice: values.costPrice,
-        notes: values.notes || undefined,
-        date: values.date,
-      });
+      await transfer.mutateAsync(values);
       toast.success("Ko'chirish amalga oshirildi");
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Xatolik yuz berdi");
-    } finally {
-      setLoading(false);
+      toast.error(errorMessage(err));
     }
   };
 
@@ -117,8 +109,8 @@ export default function TransferDialog({ fromWarehouseId, warehouses, onClose }:
               <div className="flex-1 text-center">
                 <p className="text-xs text-muted-foreground">Qayerga</p>
                 <p className="font-semibold text-primary">
-                  {form.watch("toWarehouseId")
-                    ? warehouses.find((w) => w._id === form.watch("toWarehouseId"))?.name ?? "—"
+                  {toWarehouseId
+                    ? warehouses.find((w) => w.id === toWarehouseId)?.name ?? "—"
                     : "Tanlang..."}
                 </p>
               </div>
@@ -131,7 +123,7 @@ export default function TransferDialog({ fromWarehouseId, warehouses, onClose }:
                   <FormControl><SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger></FormControl>
                   <SelectContent>
                     {otherWarehouses.map((w) => (
-                      <SelectItem key={w._id} value={w._id}>{w.name}</SelectItem>
+                      <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -142,11 +134,17 @@ export default function TransferDialog({ fromWarehouseId, warehouses, onClose }:
             <FormField control={form.control} name="productId" render={({ field }) => (
               <FormItem>
                 <FormLabel>Mahsulot *</FormLabel>
-                <Select value={field.value} onValueChange={handleProductChange}>
+                <Select
+                  value={field.value}
+                  onValueChange={(productId) => {
+                    field.onChange(productId);
+                    form.setValue("unitId", products?.find((p) => p.id === productId)?.baseUnitId ?? "");
+                  }}
+                >
                   <FormControl><SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger></FormControl>
                   <SelectContent>
-                    {products?.page.map((p) => (
-                      <SelectItem key={p._id} value={p._id}>
+                    {products?.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
                         <span className="font-mono text-xs mr-2 text-muted-foreground">{p.sku}</span>
                         {p.name}
                       </SelectItem>
@@ -162,7 +160,7 @@ export default function TransferDialog({ fromWarehouseId, warehouses, onClose }:
                 <FormItem>
                   <FormLabel>Miqdor *</FormLabel>
                   <FormControl>
-                    <Input type="number" min="0" step="0.001" {...field}
+                    <Input type="number" min="0" step="any" {...field}
                       onChange={(e) => field.onChange(e.target.valueAsNumber)} />
                   </FormControl>
                   <FormMessage />
@@ -172,11 +170,16 @@ export default function TransferDialog({ fromWarehouseId, warehouses, onClose }:
               <FormField control={form.control} name="unitId" render={({ field }) => (
                 <FormItem>
                   <FormLabel>O'lchov</FormLabel>
-                  <Select value={field.value} onValueChange={field.onChange}>
-                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                  <Select value={field.value} onValueChange={field.onChange} disabled={!selectedProduct}>
+                    <FormControl>
+                      <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                    </FormControl>
                     <SelectContent>
-                      {units?.map((u) => (
-                        <SelectItem key={u._id} value={u._id}>{u.name}</SelectItem>
+                      {unitOptions.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.label}
+                          {u.factor !== "1" ? ` (= ${formatQty(u.factor)} ${selectedProduct?.baseUnitName ?? ""})` : ""}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -187,7 +190,7 @@ export default function TransferDialog({ fromWarehouseId, warehouses, onClose }:
             <FormField control={form.control} name="date" render={({ field }) => (
               <FormItem>
                 <FormLabel>Sana</FormLabel>
-                <FormControl><Input type="date" {...field} /></FormControl>
+                <FormControl><Input type="date" max={today} {...field} /></FormControl>
               </FormItem>
             )} />
 
@@ -200,8 +203,8 @@ export default function TransferDialog({ fromWarehouseId, warehouses, onClose }:
 
             <DialogFooter>
               <Button type="button" variant="secondary" onClick={onClose}>Bekor</Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? "..." : "Ko'chirish"}
+              <Button type="submit" disabled={transfer.isPending}>
+                {transfer.isPending ? "..." : "Ko'chirish"}
               </Button>
             </DialogFooter>
           </form>

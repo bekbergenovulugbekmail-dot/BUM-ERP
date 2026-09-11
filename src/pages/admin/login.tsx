@@ -2,47 +2,31 @@
  * Platform Admin Login Page
  * Route: admin.bum-erp.uz (entry point before auth)
  *
- * Uses the OIDC auth adapter (@/hooks/use-auth) — auth is always through the OIDC provider.
- * After sign-in, checks isPlatformAdmin:
- *   - true  → onAuthorized()
- *   - false AND no admins exist → onNeedBootstrap()
- *   - false AND admins exist    → "Access denied"
+ * Telefon + parol (`useAuth().signInWithPassword`). Kirgandan keyin `isPlatformAdmin` tekshiriladi:
+ *   - true  → AdminPage paneli ochadi (/me keshi yangilanadi)
+ *   - false → "Kirish taqiqlangan"
+ *
+ * Bootstrap jarayoni yo'q: birinchi admin serverda `.env` (BOOTSTRAP_ADMIN_*) + `db:seed` orqali yaratiladi.
  */
-import { useEffect, useState } from "react";
-import { useAuth } from "@/hooks/use-auth.ts";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
-import { AuthLoading, Authenticated, Unauthenticated } from "convex/react";
+import { useState } from "react";
+import { useAuth, useCurrentUser } from "@/hooks/use-auth.ts";
+import { AuthLoading, Authenticated, Unauthenticated } from "@/components/auth-gates.tsx";
+import { errorMessage } from "@/lib/api.ts";
 import { motion } from "motion/react";
-import { Shield, Layers, Lock, LogOut, AlertTriangle, Loader2, KeyRound, Phone } from "lucide-react";
-
-// ─── Props ────────────────────────────────────────────────────────────────────
-interface AdminLoginPageProps {
-  onAuthorized: () => void;
-  onNeedBootstrap: () => void;
-  /** If false, a "setup first admin" button is shown */
-  hasExistingAdmins: boolean;
-}
+import { Shield, Layers, Lock, LogOut, AlertTriangle, Loader2, Phone } from "lucide-react";
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export default function AdminLoginPage({ onAuthorized, onNeedBootstrap, hasExistingAdmins }: AdminLoginPageProps) {
+export default function AdminLoginPage() {
   return (
     <div className="min-h-screen bg-[oklch(0.09_0.02_255)] flex flex-col">
       <AuthLoading>
         <AdminLoadingScreen label="Yuklanmoqda..." />
       </AuthLoading>
       <Unauthenticated>
-        <AdminSignInScreen
-          onNeedBootstrap={onNeedBootstrap}
-          hasExistingAdmins={hasExistingAdmins}
-        />
+        <AdminSignInScreen />
       </Unauthenticated>
       <Authenticated>
-        <AdminAuthCheck
-          onAuthorized={onAuthorized}
-          onNeedBootstrap={onNeedBootstrap}
-          hasExistingAdmins={hasExistingAdmins}
-        />
+        <AdminAuthCheck />
       </Authenticated>
     </div>
   );
@@ -64,14 +48,8 @@ function AdminLoadingScreen({ label }: { label: string }) {
 }
 
 // ─── Not signed in ─────────────────────────────────────────────────────────────
-function AdminSignInScreen({
-  onNeedBootstrap,
-  hasExistingAdmins,
-}: {
-  onNeedBootstrap: () => void;
-  hasExistingAdmins: boolean;
-}) {
-  const { signInWithPassword, isLoading } = useAuth();
+function AdminSignInScreen() {
+  const { signInWithPassword } = useAuth();
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -84,8 +62,8 @@ function AdminSignInScreen({
     setError(null);
     try {
       await signInWithPassword(phone.trim(), password);
-    } catch {
-      setError("Telefon raqam yoki parol noto'g'ri");
+    } catch (err) {
+      setError(errorMessage(err, "Telefon raqam yoki parol noto'g'ri"));
     } finally {
       setSubmitting(false);
     }
@@ -162,10 +140,10 @@ function AdminSignInScreen({
 
             <button
               type="submit"
-              disabled={isLoading || submitting || !phone.trim() || !password}
+              disabled={submitting || !phone.trim() || !password}
               className="w-full h-11 rounded-xl bg-primary hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-sm transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-primary/20"
             >
-              {isLoading || submitting ? (
+              {submitting ? (
                 <><Loader2 className="h-4 w-4 animate-spin" /> Yuklanmoqda...</>
               ) : (
                 <><Shield className="h-4 w-4" /> Tizimga kirish</>
@@ -173,20 +151,10 @@ function AdminSignInScreen({
             </button>
           </form>
 
-          {/* Bootstrap link (only if no admins yet) */}
-          {!hasExistingAdmins && (
-            <button
-              type="button"
-              onClick={onNeedBootstrap}
-              className="w-full h-9 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-400 text-xs font-medium flex items-center justify-center gap-2 transition-all cursor-pointer"
-            >
-              <KeyRound className="h-3.5 w-3.5" />
-              Birinchi adminni sozlash (bootstrap)
-            </button>
-          )}
-
           <p className="text-center text-xs text-white/25 mt-4 leading-relaxed">
-            Telefon raqamingiz va parolingiz bilan kiring
+            Telefon raqamingiz va parolingiz bilan kiring.
+            Birinchi (bootstrap) admin serverda <span className="font-mono">.env</span> va{" "}
+            <span className="font-mono">db:seed</span> orqali yaratiladi.
           </p>
         </div>
 
@@ -199,71 +167,21 @@ function AdminSignInScreen({
 }
 
 // ─── Signed in → role check ───────────────────────────────────────────────────
-function AdminAuthCheck({
-  onAuthorized,
-  onNeedBootstrap,
-  hasExistingAdmins,
-}: {
-  onAuthorized: () => void;
-  onNeedBootstrap: () => void;
-  hasExistingAdmins: boolean;
-}) {
-  const currentUser = useQuery(api.users.getCurrentUser);
+function AdminAuthCheck() {
+  const currentUser = useCurrentUser();
   const { signout } = useAuth();
-
-  useEffect(() => {
-    if (currentUser?.isPlatformAdmin) {
-      onAuthorized();
-    }
-  }, [currentUser?.isPlatformAdmin, onAuthorized]);
 
   // Still loading
   if (currentUser === undefined) {
     return <AdminLoadingScreen label="Rol tekshirilmoqda..." />;
   }
 
-  // Authorized — redirect happening via useEffect
+  // Admin — AdminPage panelni ko'rsatadi
   if (currentUser?.isPlatformAdmin) {
     return <AdminLoadingScreen label="Admin paneliga o'tilmoqda..." />;
   }
 
-  // Not admin, but bootstrap needed
-  if (!hasExistingAdmins) {
-    return (
-      <div className="flex-1 flex items-center justify-center px-4">
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="w-full max-w-sm text-center space-y-4"
-        >
-          <div className="h-14 w-14 rounded-2xl bg-amber-500/15 border border-amber-500/25 flex items-center justify-center mx-auto">
-            <KeyRound className="h-7 w-7 text-amber-400" />
-          </div>
-          <div>
-            <p className="text-white font-semibold">Admin sozlash kerak</p>
-            <p className="text-sm text-white/50 mt-1">
-              Hali birorta platform admin yo'q. Bootstrap jarayonini boshlang.
-            </p>
-          </div>
-          <button
-            onClick={onNeedBootstrap}
-            className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm flex items-center gap-2 mx-auto cursor-pointer transition-all"
-          >
-            <KeyRound className="h-4 w-4" />
-            Bootstrap boshlash
-          </button>
-          <button
-            onClick={() => { void signout(); }}
-            className="text-xs text-white/30 hover:text-white/60 transition-colors cursor-pointer"
-          >
-            Boshqa akkaunt bilan kiring
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
-
-  // Not admin, admins exist → access denied
+  // Not admin → access denied
   return (
     <div className="flex-1 flex items-center justify-center px-4">
       <motion.div
@@ -281,19 +199,19 @@ function AdminAuthCheck({
             Sizning akkauntingizda{" "}
             <span className="text-white/70 font-medium">Platform Admin</span> huquqlari yo'q.
           </p>
-          {currentUser?.email && (
-            <p className="text-xs text-white/30 mt-2 font-mono">{currentUser.email}</p>
+          {currentUser?.phone && (
+            <p className="text-xs text-white/30 mt-2 font-mono">{currentUser.phone}</p>
           )}
         </div>
         <button
-          onClick={() => { void signout(); }}
+          onClick={() => signout()}
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-white/8 hover:bg-white/12 text-white/70 hover:text-white text-sm font-medium transition-all cursor-pointer border border-white/10"
         >
           <LogOut className="h-4 w-4" />
           Boshqa akkaunt bilan kiring
         </button>
         <p className="text-xs text-white/25">
-          Agar bu xato bo'lsa, platforma administratori bilan bog'laning.
+          Platforma adminini faqat bootstrap admin tayinlaydi.
         </p>
       </motion.div>
     </div>

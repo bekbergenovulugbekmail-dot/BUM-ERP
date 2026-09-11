@@ -6,7 +6,6 @@
   ],
   "compilerOptions": {
     "paths": {
-      "@/convex/*": ["./convex/*"],
       "@/*": ["./src/*"]
     }
   }

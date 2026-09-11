@@ -1,16 +1,11 @@
-<!-- convex-ai-start -->
+# BUM ERP
 
-This project uses [Convex](https://convex.dev) as its backend.
-
-When working on Convex code, **always read
-`convex/_generated/ai/guidelines.md` first** for important guidelines on
-how to correctly use Convex APIs and patterns. The file contains rules that
-override what you may have learned about Convex from training data.
-
-Convex agent skills for common tasks can be installed by running
-`npx convex ai-files install`.
-
-<!-- convex-ai-end -->
+- **Backend:** `apps/api` — Fastify 5 + Drizzle + PostgreSQL 18 (migratsiyalar `apps/api/src/db/migrations`)
+- **Umumiy kod:** `packages/shared` — ruxsatlar, telefon formati, xato kodlari. Production'da build'siz,
+  Node type stripping bilan yuklanadi: faqat o'chiriladigan TS sintaksisi va `.ts` import kengaytmalari
+- **Frontend:** `src/` — Vite + React; API'ga faqat `@/lib/api.ts` va `@/lib/query.ts` orqali,
+  auth `@/hooks/use-auth.ts`, kompaniya va ruxsatlar `@/hooks/use-company.ts`
+- **Deploy:** `apps/api/Dockerfile` (API), `Dockerfile.web` (SPA + nginx, `/api` proksi)
 
 ## PostgreSQL migratsiyasi
 

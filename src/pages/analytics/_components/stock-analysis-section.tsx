@@ -1,10 +1,10 @@
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import Papa from "papaparse";
+import { useApiQuery } from "@/lib/query.ts";
+import { num, type StockSummary, type StockVelocityRow } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
@@ -21,17 +21,17 @@ const ABC_MAP = {
 };
 
 export default function StockAnalysisSection({ days }: { days: number }) {
-  const stockSummary = useQuery(api.analytics.reports.getStockSummary, {});
-  const velocity = useQuery(api.analytics.reports.getStockVelocity, { days });
+  const stockSummary = useApiQuery<StockSummary>("/api/analytics/reports/stock").data;
+  const velocity = useApiQuery<{ products: StockVelocityRow[] }>("/api/analytics/reports/stock-velocity", { days }).data?.products;
 
   const handleExport = () => {
     if (!velocity) return;
     const data = velocity.map((v) => ({
       "Mahsulot": v.name,
-      "SKU": v.sku,
+      "SKU": v.sku ?? "",
       "Qoldiq": v.stock,
       "Sotilgan (period)": v.soldQty,
-      "Kun qoldiq": v.daysOfStock,
+      "Kun qoldiq": v.daysOfStock ?? "∞",
       "Harakatlilik": v.velocity,
       "Qoldiq qiymati": v.value,
     }));
@@ -58,7 +58,7 @@ export default function StockAnalysisSection({ days }: { days: number }) {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
             { label: "Jami SKU", value: stockSummary.totalProducts, sub: "Noyob mahsulotlar" },
-            { label: "Ombor qiymati", value: fmt(stockSummary.totalValue) + " so'm", sub: "Joriy baholash" },
+            { label: "Ombor qiymati", value: fmt(num(stockSummary.totalValue)) + " so'm", sub: "Joriy baholash" },
             { label: "Kam qoldiq", value: stockSummary.lowStock, sub: "Min miqdordan kam", danger: stockSummary.lowStock > 0 },
             { label: "Tugagan", value: stockSummary.outOfStock, sub: "Zaxira yo'q", danger: stockSummary.outOfStock > 0 },
           ].map((s) => (
@@ -101,10 +101,10 @@ export default function StockAnalysisSection({ days }: { days: number }) {
               </thead>
               <tbody className="divide-y divide-border">
                 {velocity.slice(0, 50).map((item) => {
-                  // Find ABC from stock summary
-                  const abcItem = stockSummary?.abcData.find((a) => a.productId === item.productId);
-                  const abc = abcItem?.abc as "A" | "B" | "C" | undefined;
+                  // ABC faqat qiymati bo'yicha eng yirik 50 ta mahsulot uchun keladi
+                  const abc = stockSummary?.abcData.find((a) => a.productId === item.productId)?.abc;
                   const vel = VELOCITY_MAP[item.velocity];
+                  const daysLeft = item.daysOfStock;
                   return (
                     <tr key={item.productId} className="hover:bg-muted/20">
                       <td className="px-4 py-2.5 font-medium max-w-[200px] truncate">{item.name}</td>
@@ -114,12 +114,12 @@ export default function StockAnalysisSection({ days }: { days: number }) {
                           <span className={cn("text-xs font-bold px-2 py-0.5 rounded-full", ABC_MAP[abc])}>{abc}</span>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-right">{item.stock.toFixed(1)}</td>
-                      <td className="px-3 py-2.5 text-right font-medium">{item.soldQty.toFixed(1)}</td>
-                      <td className={cn("px-3 py-2.5 text-right", item.daysOfStock < 7 ? "text-rose-500 font-semibold" : item.daysOfStock < 30 ? "text-amber-600" : "")}>
-                        {item.daysOfStock === 999 ? "∞" : item.daysOfStock + "d"}
+                      <td className="px-3 py-2.5 text-right">{num(item.stock).toFixed(1)}</td>
+                      <td className="px-3 py-2.5 text-right font-medium">{num(item.soldQty).toFixed(1)}</td>
+                      <td className={cn("px-3 py-2.5 text-right", daysLeft !== null && daysLeft < 7 ? "text-rose-500 font-semibold" : daysLeft !== null && daysLeft < 30 ? "text-amber-600" : "")}>
+                        {daysLeft === null ? "∞" : daysLeft + "d"}
                       </td>
-                      <td className="px-3 py-2.5 text-right">{fmt(item.value)}</td>
+                      <td className="px-3 py-2.5 text-right">{fmt(num(item.value))}</td>
                       <td className="px-3 py-2.5 text-center">
                         <span className={cn("text-xs px-2 py-0.5 rounded-full", vel.color)}>{vel.label}</span>
                       </td>

@@ -1,6 +1,4 @@
-import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Plus, Play, CheckCircle, ClipboardList, ChevronRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
@@ -8,11 +6,15 @@ import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog.tsx";
 import { cn } from "@/lib/utils.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from "@/components/ui/empty.tsx";
-import type { Id, Doc } from "@/convex/_generated/dataModel.d.ts";
+import { formatQty, toNumber } from "@/pages/products/_lib/types.ts";
+import type { InventoryCountDetail, InventoryCountListItem } from "../_lib/types.ts";
 
 type Props = {
-  warehouseId: Id<"warehouses">;
+  warehouseId: string;
 };
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
@@ -23,65 +25,112 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
 };
 
 export default function InventoryCountSection({ warehouseId }: Props) {
+  const { can } = usePermissions();
+  const canCount = can("warehouse.count");
+  // Qo'llash serverda ikkala ruxsatni talab qiladi
+  const canApply = canCount && can("warehouse.manage");
+
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
-  const [activeCountId, setActiveCountId] = useState<Id<"inventoryCounts"> | null>(null);
-
-  const counts = useQuery(api.warehouse.inventoryCounts.list, { warehouseId });
-  const activeCount = useQuery(
-    api.warehouse.inventoryCounts.getById,
-    activeCountId ? { id: activeCountId } : "skip"
-  );
-
-  const createCount = useMutation(api.warehouse.inventoryCounts.create);
-  const updateStatus = useMutation(api.warehouse.inventoryCounts.updateStatus);
-  const updateItem = useMutation(api.warehouse.inventoryCounts.updateItem);
-  const applyAdjustments = useMutation(api.warehouse.inventoryCounts.applyAdjustments);
-
+  const [activeCountId, setActiveCountId] = useState<string | null>(null);
   const [countInputs, setCountInputs] = useState<Record<string, string>>({});
+
+  // Ombor almashtirilganda boshqa omborning hisobi ochiq qolmasin (render paytida moslash)
+  const [shownWarehouseId, setShownWarehouseId] = useState(warehouseId);
+  if (shownWarehouseId !== warehouseId) {
+    setShownWarehouseId(warehouseId);
+    setActiveCountId(null);
+    setCountInputs({});
+  }
+
+  const countsQuery = useApiQuery<{ counts: InventoryCountListItem[] }>("/api/inventory/counts", { warehouseId });
+  const counts = countsQuery.data?.counts;
+  const activeCount = useApiQuery<{ count: InventoryCountDetail }>(
+    activeCountId ? `/api/inventory/counts/${activeCountId}` : null,
+  ).data?.count;
+
+  const createCount = useApiMutation((name: string) =>
+    api.post<{ count: { id: string } }>("/api/inventory/counts", { warehouseId, name }),
+  );
+  const updateStatus = useApiMutation((input: { id: string; status: "in_progress" | "cancelled" }) =>
+    api.post(`/api/inventory/counts/${input.id}/status`, { status: input.status }),
+  );
+  const updateItem = useApiMutation((input: { countId: string; itemId: string; countedQty: number }) =>
+    api.patch(`/api/inventory/counts/${input.countId}/items/${input.itemId}`, { countedQty: input.countedQty }),
+  );
+  const applyAdjustments = useApiMutation((id: string) =>
+    api.post<{ adjusted: number }>(`/api/inventory/counts/${id}/apply`),
+  );
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
     try {
-      const id = await createCount({ warehouseId, name: newName.trim() });
+      const { count } = await createCount.mutateAsync(newName.trim());
       toast.success("Inventarizatsiya yaratildi");
-      setActiveCountId(id as Id<"inventoryCounts">);
+      setActiveCountId(count.id);
       setCreateOpen(false);
       setNewName("");
-    } catch {
-      toast.error("Xatolik yuz berdi");
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
   };
 
-  const handleStart = async (id: Id<"inventoryCounts">) => {
-    await updateStatus({ id, status: "in_progress" });
-    setActiveCountId(id);
-  };
-
-  const handleSaveItem = async (itemId: Id<"inventoryCountItems">) => {
-    const val = parseFloat(countInputs[itemId] ?? "");
-    if (isNaN(val)) return;
-    await updateItem({ itemId, countedQty: val });
-    toast.success("Saqlandi");
-  };
-
-  const handleApply = async (id: Id<"inventoryCounts">) => {
+  const handleStart = async (id: string) => {
     try {
-      await applyAdjustments({ id });
-      toast.success("Tuzatmalar qo'llanildi");
+      await updateStatus.mutateAsync({ id, status: "in_progress" });
+      setActiveCountId(id);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
+  const handleSaveItem = async (countId: string, itemId: string) => {
+    const raw = countInputs[itemId];
+    if (raw === undefined || raw.trim() === "") return;
+    const value = Number(raw.replace(",", "."));
+    if (!Number.isFinite(value) || value < 0) {
+      toast.error("Miqdor noto'g'ri");
+      return;
+    }
+    try {
+      await updateItem.mutateAsync({ countId, itemId, countedQty: value });
+      // Saqlangan qiymat serverdan keladi
+      setCountInputs((prev) => {
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+      toast.success("Saqlandi");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
+  const handleApply = async (id: string) => {
+    try {
+      const { adjusted } = await applyAdjustments.mutateAsync(id);
+      toast.success(`Tuzatmalar qo'llanildi (${adjusted} ta mahsulot)`);
       setActiveCountId(null);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Xatolik");
+      toast.error(errorMessage(err));
     }
   };
+
+  const editable =
+    activeCount !== undefined &&
+    !activeCount.adjustmentsMade &&
+    activeCount.status !== "completed" &&
+    activeCount.status !== "cancelled";
 
   return (
     <div className="flex flex-col gap-4 h-full">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">Inventarizatsiya seanslari</p>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4 mr-1" /> Yangi seansni boshlash
-        </Button>
+        {canCount && (
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4 mr-1" /> Yangi seansni boshlash
+          </Button>
+        )}
       </div>
 
       {/* Create dialog */}
@@ -103,7 +152,7 @@ export default function InventoryCountSection({ warehouseId }: Props) {
           </div>
           <DialogFooter>
             <Button variant="secondary" onClick={() => setCreateOpen(false)}>Bekor</Button>
-            <Button onClick={handleCreate} disabled={!newName.trim()}>Yaratish</Button>
+            <Button onClick={handleCreate} disabled={!newName.trim() || createCount.isPending}>Yaratish</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -115,15 +164,15 @@ export default function InventoryCountSection({ warehouseId }: Props) {
             <div>
               <p className="font-semibold text-sm">{activeCount.name}</p>
               <p className="text-xs text-muted-foreground">
-                {activeCount.items.filter((i) => i.countedQty !== undefined).length} / {activeCount.items.length} ta mahsulot sanalib bo'ldi
+                {activeCount.items.filter((i) => i.countedQty !== null).length} / {activeCount.items.length} ta mahsulot sanalib bo'ldi
               </p>
             </div>
             <div className="flex gap-2">
               <Button variant="secondary" size="sm" onClick={() => setActiveCountId(null)}>
                 Yopish
               </Button>
-              {activeCount.status === "in_progress" && !activeCount.adjustmentsMade && (
-                <Button size="sm" onClick={() => handleApply(activeCountId)}>
+              {editable && activeCount.status === "in_progress" && canApply && (
+                <Button size="sm" disabled={applyAdjustments.isPending} onClick={() => handleApply(activeCount.id)}>
                   <CheckCircle className="h-4 w-4 mr-1" /> Tuzatmalarni qo'llash
                 </Button>
               )}
@@ -142,35 +191,36 @@ export default function InventoryCountSection({ warehouseId }: Props) {
               </thead>
               <tbody className="divide-y divide-border">
                 {activeCount.items.map((item) => {
-                  const diff = item.difference;
+                  const diff = item.difference === null ? null : toNumber(item.difference);
                   return (
-                    <tr key={item._id} className="hover:bg-muted/30">
+                    <tr key={item.id} className="hover:bg-muted/30">
                       <td className="px-4 py-2">
                         <p className="font-medium text-xs truncate max-w-[160px]">{item.productName}</p>
                         <p className="text-[11px] text-muted-foreground font-mono">{item.productSku}</p>
                       </td>
                       <td className="px-4 py-2 text-right text-xs font-mono">
-                        {item.expectedQty} {item.unitName}
+                        {formatQty(item.expectedQty)} {item.unitName}
                       </td>
                       <td className="px-4 py-2">
                         <div className="flex items-center gap-1 justify-center">
                           <Input
                             type="number"
                             min="0"
-                            step="0.001"
+                            step="any"
                             className="h-7 w-20 text-xs text-center"
-                            value={countInputs[item._id] ?? (item.countedQty?.toString() ?? "")}
+                            value={countInputs[item.id] ?? (item.countedQty !== null ? String(toNumber(item.countedQty)) : "")}
                             onChange={(e) =>
-                              setCountInputs((p) => ({ ...p, [item._id]: e.target.value }))
+                              setCountInputs((p) => ({ ...p, [item.id]: e.target.value }))
                             }
-                            disabled={activeCount.adjustmentsMade}
+                            disabled={!editable || !canCount}
                           />
-                          {!activeCount.adjustmentsMade && (
+                          {editable && canCount && (
                             <Button
                               variant="ghost"
                               size="icon"
                               className="h-7 w-7"
-                              onClick={() => handleSaveItem(item._id as Id<"inventoryCountItems">)}
+                              disabled={updateItem.isPending}
+                              onClick={() => handleSaveItem(activeCount.id, item.id)}
                             >
                               <Check className="h-3.5 w-3.5 text-green-600" />
                             </Button>
@@ -178,15 +228,15 @@ export default function InventoryCountSection({ warehouseId }: Props) {
                         </div>
                       </td>
                       <td className="px-4 py-2 text-right">
-                        {diff !== undefined && diff !== 0 && (
+                        {diff !== null && diff !== 0 && (
                           <span className={cn(
                             "text-xs font-bold font-mono",
                             diff > 0 ? "text-green-600" : "text-destructive"
                           )}>
-                            {diff > 0 ? "+" : ""}{diff}
+                            {diff > 0 ? "+" : ""}{formatQty(diff)}
                           </span>
                         )}
-                        {diff === 0 && item.countedQty !== undefined && (
+                        {diff === 0 && item.countedQty !== null && (
                           <CheckCircle className="h-3.5 w-3.5 text-green-600 ml-auto" />
                         )}
                       </td>
@@ -201,7 +251,9 @@ export default function InventoryCountSection({ warehouseId }: Props) {
       )}
 
       {/* Sessions list */}
-      {counts === undefined ? (
+      {countsQuery.isError ? (
+        <p className="text-sm text-destructive">{errorMessage(countsQuery.error)}</p>
+      ) : counts === undefined ? (
         <div className="space-y-2">
           {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
         </div>
@@ -212,11 +264,13 @@ export default function InventoryCountSection({ warehouseId }: Props) {
             <EmptyTitle>Inventarizatsiya yo'q</EmptyTitle>
             <EmptyDescription>Birinchi inventarizatsiyani boshlang</EmptyDescription>
           </EmptyHeader>
-          <EmptyContent>
-            <Button size="sm" onClick={() => setCreateOpen(true)}>
-              <Plus className="h-4 w-4 mr-1" /> Yaratish
-            </Button>
-          </EmptyContent>
+          {canCount && (
+            <EmptyContent>
+              <Button size="sm" onClick={() => setCreateOpen(true)}>
+                <Plus className="h-4 w-4 mr-1" /> Yaratish
+              </Button>
+            </EmptyContent>
+          )}
         </Empty>
       ) : (
         <div className="space-y-2">
@@ -224,9 +278,9 @@ export default function InventoryCountSection({ warehouseId }: Props) {
             const meta = STATUS_META[c.status] ?? STATUS_META.draft;
             return (
               <div
-                key={c._id}
+                key={c.id}
                 className="flex items-center justify-between p-4 border border-border rounded-xl hover:bg-muted/30 transition-colors cursor-pointer"
-                onClick={() => setActiveCountId(c._id)}
+                onClick={() => setActiveCountId(c.id)}
               >
                 <div className="flex items-center gap-3">
                   <ClipboardList className="h-5 w-5 text-muted-foreground" />
@@ -242,11 +296,11 @@ export default function InventoryCountSection({ warehouseId }: Props) {
                   <span className={cn("text-[11px] px-2 py-0.5 rounded-full font-medium", meta.color)}>
                     {meta.label}
                   </span>
-                  {c.status === "draft" && (
+                  {c.status === "draft" && canCount && (
                     <Button
                       size="sm"
                       variant="secondary"
-                      onClick={(e) => { e.stopPropagation(); handleStart(c._id); }}
+                      onClick={(e) => { e.stopPropagation(); void handleStart(c.id); }}
                     >
                       <Play className="h-3.5 w-3.5 mr-1" /> Boshlash
                     </Button>

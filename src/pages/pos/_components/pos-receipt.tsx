@@ -1,57 +1,55 @@
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { motion } from "motion/react";
-import { CheckCircle, Printer, X, FileDown } from "lucide-react";
+import { CheckCircle, Printer, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
 import { generateReceiptPDF } from "@/lib/pdf/receipt-pdf.ts";
+import { useActiveCompany } from "@/hooks/use-company.ts";
+import { PAYMENT_LABELS, num, type PaymentMethod, type SalesOrderDetail } from "@/pages/sales/_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
 type Props = {
-  orderId: Id<"salesOrders">;
-  change: number;
-  total: number;
-  payMethod: string;
+  /** `POST /api/sales/pos/sales` javobidagi buyurtma — summalar serverniki. */
+  order: SalesOrderDetail;
+  /** Chekka yozilgan to'lov (chek summasidan oshmaydi). */
+  paid: string;
+  change: string;
+  payMethod: PaymentMethod;
   onClose: () => void;
   cashierName?: string;
 };
 
-const PAY_LABELS: Record<string, string> = {
-  cash: "Naqd", card: "Karta", bank: "Bank", transfer: "O'tkazma",
-};
-
-export default function POSReceipt({ orderId, change, total, payMethod, onClose, cashierName }: Props) {
-  const order = useQuery(api.sales.orders.getById, { id: orderId });
-  const company = useQuery(api.admin.getCompany, {});
+export default function POSReceipt({ order, paid, change, payMethod, onClose, cashierName }: Props) {
+  const company = useActiveCompany().data?.company;
+  const total = num(order.totalAmount);
+  const changeAmount = num(change);
 
   const handlePrint = () => window.print();
 
   const handleDownloadPDF = () => {
-    if (!order) return;
     generateReceiptPDF({
       company: {
         name: company?.name ?? "BUM ERP",
-        address: company?.address,
-        phone: company?.phone,
-        taxId: company?.taxId,
+        address: company?.address ?? undefined,
+        phone: company?.phone ?? undefined,
+        taxId: company?.taxId ?? undefined,
       },
       orderNumber: order.number,
-      date: new Date().toLocaleString("uz-UZ"),
-      cashierName: cashierName,
+      date: new Date(order.createdAt).toLocaleString("uz-UZ"),
+      cashierName,
       items: order.items.map((item) => ({
         name: item.productName,
-        qty: item.qty,
-        unitPrice: item.unitPrice,
-        lineTotal: item.lineTotal,
+        qty: num(item.quantity),
+        unitPrice: num(item.unitPrice),
+        lineTotal: num(item.lineTotal),
       })),
-      subtotal: order.totalAmount,
-      taxTotal: 0,
-      discountTotal: 0,
-      totalAmount: order.totalAmount,
-      paidAmount: total,
-      change,
+      subtotal: num(order.subtotal),
+      taxTotal: num(order.taxAmount),
+      discountTotal: num(order.discountAmount),
+      totalAmount: total,
+      // Mijoz bergan summa = chekka yozilgan to'lov + qaytim
+      paidAmount: num(paid) + changeAmount,
+      change: changeAmount,
       paymentMethod: payMethod,
     });
   };
@@ -70,48 +68,52 @@ export default function POSReceipt({ orderId, change, total, payMethod, onClose,
             <CheckCircle className="h-8 w-8 text-emerald-500" />
           </div>
           <h3 className="font-bold text-lg">Sotuv amalga oshdi!</h3>
-          <p className="text-xs text-muted-foreground font-mono">{order?.number}</p>
+          <p className="text-xs text-muted-foreground font-mono">{order.number}</p>
         </div>
 
         <Separator />
 
         {/* Items */}
-        {order && (
-          <div className="my-3 space-y-1.5 max-h-40 overflow-y-auto">
-            {order.items.map((item) => (
-              <div key={item._id} className="flex justify-between text-sm">
-                <span className="text-muted-foreground truncate max-w-[60%]">
-                  {item.productName} × {item.qty}
-                </span>
-                <span className="font-medium">{fmt(item.lineTotal)} so'm</span>
-              </div>
-            ))}
-          </div>
-        )}
+        <div className="my-3 space-y-1.5 max-h-40 overflow-y-auto">
+          {order.items.map((item) => (
+            <div key={item.id} className="flex justify-between text-sm">
+              <span className="text-muted-foreground truncate max-w-[60%]">
+                {item.productName} × {num(item.quantity)}
+              </span>
+              <span className="font-medium">{fmt(num(item.lineTotal))} so'm</span>
+            </div>
+          ))}
+        </div>
 
         <Separator />
 
         {/* Totals */}
         <div className="mt-3 space-y-1 text-sm">
+          {num(order.taxAmount) > 0 && (
+            <div className="flex justify-between text-muted-foreground">
+              <span>shu jumladan QQS</span>
+              <span>{fmt(num(order.taxAmount))} so'm</span>
+            </div>
+          )}
           <div className="flex justify-between font-bold text-base">
             <span>Jami to'lov</span>
             <span className="text-primary">{fmt(total)} so'm</span>
           </div>
           <div className="flex justify-between text-muted-foreground">
             <span>To'lov usuli</span>
-            <span>{PAY_LABELS[payMethod] ?? payMethod}</span>
+            <span>{PAYMENT_LABELS[payMethod] ?? payMethod}</span>
           </div>
-          {change > 0 && (
+          {changeAmount > 0 && (
             <div className="flex justify-between font-bold text-emerald-600 dark:text-emerald-400">
               <span>Qaytim</span>
-              <span>{fmt(change)} so'm</span>
+              <span>{fmt(changeAmount)} so'm</span>
             </div>
           )}
         </div>
 
         {/* Date */}
         <p className="text-center text-xs text-muted-foreground mt-3">
-          {new Date().toLocaleString("uz-UZ")}
+          {new Date(order.createdAt).toLocaleString("uz-UZ")}
         </p>
 
         {/* Actions */}
@@ -119,7 +121,7 @@ export default function POSReceipt({ orderId, change, total, payMethod, onClose,
           <Button variant="secondary" size="sm" className="flex-1" onClick={handlePrint}>
             <Printer className="h-4 w-4 mr-1" /> Chop
           </Button>
-          <Button variant="secondary" size="sm" className="flex-1" onClick={handleDownloadPDF} disabled={!order}>
+          <Button variant="secondary" size="sm" className="flex-1" onClick={handleDownloadPDF}>
             <FileDown className="h-4 w-4 mr-1" /> PDF
           </Button>
           <Button size="sm" className="flex-1" onClick={onClose}>

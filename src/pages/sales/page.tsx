@@ -1,23 +1,24 @@
 import { useState } from "react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { motion } from "motion/react";
 import {
   ShoppingBag, TrendingUp, Clock, Plus, Search,
-  Users, ChevronRight, DollarSign, Loader2,
+  Users, ChevronRight, DollarSign,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { useApiQuery } from "@/lib/query.ts";
+import { useDebounce } from "@/hooks/use-debounce.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
 import OrderDetailDrawer from "./_components/order-detail-drawer.tsx";
 import CreateOrderDialog from "./_components/create-order-dialog.tsx";
 import CustomersSection from "./_components/customers-section.tsx";
-
-type SalesStatus = "draft" | "confirmed" | "shipped" | "delivered" | "returned" | "cancelled";
+import { num, type SalesOrderRow, type SalesOrderStatus, type SalesStats } from "./_lib/types.ts";
 
 const PAGE_SIZE = 30;
+/** API chegarasi (`limit` ≤ 200). */
+const MAX_LIMIT = 200;
 
 const STATUS_TABS = [
   { label: "Barchasi", value: "all" },
@@ -25,6 +26,7 @@ const STATUS_TABS = [
   { label: "Tasdiqlangan", value: "confirmed" },
   { label: "Jo'natilgan", value: "shipped" },
   { label: "Yetkazilgan", value: "delivered" },
+  { label: "Qaytarilgan", value: "returned" },
   { label: "Bekor", value: "cancelled" },
 ] as const;
 
@@ -44,19 +46,28 @@ const STATUS_LABELS: Record<string, string> = {
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
 export default function SalesPage() {
+  const { can } = usePermissions();
   const [tab, setTab] = useState("orders");
   const [statusFilter, setStatusFilter] = useState<SalesStatus | "all">("all");
   const [search, setSearch] = useState("");
+  const [debouncedSearch] = useDebounce(search.trim(), 300);
   const [createOpen, setCreateOpen] = useState(false);
-  const [selectedOrderId, setSelectedOrderId] = useState<Id<"salesOrders"> | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [visibleLimit, setVisibleLimit] = useState(PAGE_SIZE);
 
-  const stats = useQuery(api.sales.orders.getStats, {});
-  const orders = useQuery(api.sales.orders.list, {
-    status: statusFilter !== "all" ? statusFilter : undefined,
-    isPOS: false,
-    limit: visibleLimit,
-  });
+  const stats = useApiQuery<SalesStats>("/api/sales/orders/stats").data;
+  // Qidiruv serverda (raqam yoki mijoz nomi)
+  const ordersData = useApiQuery<{ orders: SalesOrderRow[]; nextCursor: string | null }>(
+    "/api/sales/orders",
+    {
+      status: statusFilter !== "all" ? statusFilter : undefined,
+      isPos: false,
+      limit: visibleLimit,
+      search: debouncedSearch || undefined,
+    },
+    { placeholderData: (previous) => previous },
+  ).data;
+  const orders = ordersData?.orders;
 
   // Reset pagination when filter changes
   const handleStatusFilter = (val: SalesStatus | "all") => {
@@ -64,20 +75,16 @@ export default function SalesPage() {
     setVisibleLimit(PAGE_SIZE);
   };
 
-  const filtered = orders?.filter((o) =>
-    !search || o.number.toLowerCase().includes(search.toLowerCase()) ||
-    o.customerName.toLowerCase().includes(search.toLowerCase())
-  );
-
-  // Can load more if the backend returned exactly the requested limit
-  const canLoadMore = orders !== undefined && orders.length >= visibleLimit;
+  const canLoadMore = Boolean(ordersData?.nextCursor) && visibleLimit < MAX_LIMIT;
 
   const statCards = [
-    { label: "Bu oy sotuv", value: fmt(stats?.totalThisMonth ?? 0) + " so'm", icon: TrendingUp, color: "text-emerald-500" },
-    { label: "Kutilayotgan to'lov", value: fmt(stats?.totalDebt ?? 0) + " so'm", icon: Clock, color: "text-amber-500" },
+    { label: "Bu oy sotuv", value: fmt(num(stats?.totalThisMonth)) + " so'm", icon: TrendingUp, color: "text-emerald-500" },
+    { label: "Kutilayotgan to'lov", value: fmt(num(stats?.totalDebt)) + " so'm", icon: Clock, color: "text-amber-500" },
     { label: "Bu oy buyurtmalar", value: String(stats?.countThisMonth ?? 0), icon: ShoppingBag, color: "text-blue-500" },
     { label: "Bugun", value: String(stats?.todayCount ?? 0), icon: DollarSign, color: "text-purple-500" },
   ];
+
+  const canCreate = can("sales.create");
 
   return (
     <div className="p-6 space-y-6">
@@ -92,9 +99,11 @@ export default function SalesPage() {
             <p className="text-sm text-muted-foreground">Buyurtmalar, mijozlar va to'lovlar</p>
           </div>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4 mr-1.5" /> Sotuv buyurtmasi
-        </Button>
+        {canCreate && (
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4 mr-1.5" /> Sotuv buyurtmasi
+          </Button>
+        )}
       </div>
 
       {/* Stats */}
@@ -168,23 +177,25 @@ export default function SalesPage() {
           <div className="relative max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input className="pl-9" placeholder="Buyurtma raqami yoki mijoz..." value={search}
-              onChange={(e) => setSearch(e.target.value)} />
+              onChange={(e) => { setSearch(e.target.value); setVisibleLimit(PAGE_SIZE); }} />
           </div>
 
           {/* Orders table */}
-          {!filtered ? (
+          {!orders ? (
             <div className="space-y-2">
               {Array.from({ length: 5 }).map((_, i) => (
                 <Skeleton key={i} className="h-16 w-full rounded-xl" />
               ))}
             </div>
-          ) : filtered.length === 0 ? (
+          ) : orders.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <ShoppingBag className="h-12 w-12 text-muted-foreground/30 mb-3" />
               <p className="text-muted-foreground">Buyurtmalar yo'q</p>
-              <Button className="mt-4" onClick={() => setCreateOpen(true)}>
-                <Plus className="h-4 w-4 mr-1" /> Yangi buyurtma
-              </Button>
+              {canCreate && (
+                <Button className="mt-4" onClick={() => setCreateOpen(true)}>
+                  <Plus className="h-4 w-4 mr-1" /> Yangi buyurtma
+                </Button>
+              )}
             </div>
           ) : (
             <div className="rounded-2xl border border-border overflow-hidden">
@@ -201,53 +212,56 @@ export default function SalesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {filtered.map((order) => (
-                    <tr
-                      key={order._id}
-                      onClick={() => setSelectedOrderId(order._id)}
-                      className="hover:bg-muted/30 cursor-pointer transition-colors"
-                    >
-                      <td className="px-4 py-3 font-mono text-xs font-semibold">{order.number}</td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium">{order.customerName}</p>
-                        <p className="text-xs text-muted-foreground">{order.warehouseName}</p>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{order.orderDate}</td>
-                      <td className="px-4 py-3 text-right font-semibold">
-                        {fmt(order.totalAmount)} so'm
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className={cn(
-                          "text-sm",
-                          order.paidAmount >= order.totalAmount ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
-                        )}>
-                          {fmt(order.paidAmount)} so'm
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", STATUS_COLORS[order.status] ?? "")}>
-                          {STATUS_LABELS[order.status] ?? order.status}
-                        </span>
-                      </td>
-                      <td className="px-2 py-3">
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      </td>
-                    </tr>
-                  ))}
+                  {orders.map((order) => {
+                    const total = num(order.totalAmount);
+                    const paid = num(order.paidAmount);
+                    return (
+                      <tr
+                        key={order.id}
+                        onClick={() => setSelectedOrderId(order.id)}
+                        className="hover:bg-muted/30 cursor-pointer transition-colors"
+                      >
+                        <td className="px-4 py-3 font-mono text-xs font-semibold">{order.number}</td>
+                        <td className="px-4 py-3">
+                          <p className="font-medium">{order.customerName ?? "Anonim mijoz"}</p>
+                          <p className="text-xs text-muted-foreground">{order.warehouseName}</p>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">{order.orderDate}</td>
+                        <td className="px-4 py-3 text-right font-semibold">
+                          {fmt(total)} so'm
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className={cn(
+                            "text-sm",
+                            paid >= total ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
+                          )}>
+                            {fmt(paid)} so'm
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", STATUS_COLORS[order.status] ?? "")}>
+                            {STATUS_LABELS[order.status] ?? order.status}
+                          </span>
+                        </td>
+                        <td className="px-2 py-3">
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
 
           {/* Load more */}
-          {canLoadMore && filtered && filtered.length > 0 && (
+          {canLoadMore && orders && orders.length > 0 && (
             <div className="flex justify-center pt-2">
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => setVisibleLimit((prev) => prev + PAGE_SIZE)}
+                onClick={() => setVisibleLimit((prev) => Math.min(MAX_LIMIT, prev + PAGE_SIZE))}
               >
-                <Loader2 className="h-4 w-4 mr-1.5 animate-spin hidden" />
                 Ko'proq yuklash
               </Button>
             </div>
@@ -271,3 +285,5 @@ export default function SalesPage() {
     </div>
   );
 }
+
+type SalesStatus = SalesOrderStatus;

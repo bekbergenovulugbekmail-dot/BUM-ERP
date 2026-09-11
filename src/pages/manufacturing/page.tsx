@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { motion } from "motion/react";
 import { Factory, Package, Cog, TrendingUp, Layers } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
+import { useApiQuery } from "@/lib/query.ts";
 import BOMSection from "./_components/bom-section.tsx";
 import OrdersSection from "./_components/orders-section.tsx";
 import WorkCentersSection from "./_components/work-centers-section.tsx";
+import { num, type Bom, type ProductionStats, type ProductionStatus } from "./_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
@@ -18,22 +18,24 @@ const TABS = [
 
 export default function ManufacturingPage() {
   const [tab, setTab] = useState<typeof TABS[number]["key"]>("orders");
-  const stats = useQuery(api.manufacturing.orders.getStats, {});
-  const boms = useQuery(api.manufacturing.boms.listBOMs, {});
+  const stats = useApiQuery<ProductionStats>("/api/manufacturing/orders/stats").data;
+  const boms = useApiQuery<{ boms: Bom[] }>("/api/manufacturing/boms").data?.boms;
+
+  const countOf = (status: ProductionStatus) => stats?.byStatus.find((s) => s.status === status)?.count ?? 0;
 
   const statCards = [
     {
       label: "Jami buyurtmalar",
       value: stats?.total ?? 0,
-      sub: `${stats?.byStatus?.["completed"] ?? 0} ta yakunlangan`,
+      sub: `${countOf("completed")} ta yakunlangan`,
       icon: Factory,
       color: "text-indigo-500",
       bg: "bg-indigo-500/10",
     },
     {
       label: "Jarayonda",
-      value: (stats?.byStatus?.["in_progress"] ?? 0) + (stats?.byStatus?.["confirmed"] ?? 0),
-      sub: `${stats?.byStatus?.["draft"] ?? 0} ta qoralama`,
+      value: countOf("in_progress") + countOf("confirmed"),
+      sub: `${countOf("draft")} ta qoralama`,
       icon: TrendingUp,
       color: "text-amber-500",
       bg: "bg-amber-500/10",
@@ -48,7 +50,7 @@ export default function ManufacturingPage() {
     },
     {
       label: "Jami ishlab chiqarish narxi",
-      value: fmt(stats?.totalCost ?? 0) + " so'm",
+      value: fmt(num(stats?.completedCost)) + " so'm",
       sub: "Yakunlangan buyurtmalar bo'yicha",
       icon: Package,
       color: "text-emerald-500",

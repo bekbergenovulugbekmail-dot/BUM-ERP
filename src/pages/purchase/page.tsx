@@ -1,9 +1,7 @@
 import { useState } from "react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { motion } from "motion/react";
 import {
-  ShoppingCart, Plus, TrendingUp, Clock, CheckCircle,
+  ShoppingCart, Plus, TrendingUp,
   Truck, CreditCard, Users, FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
@@ -11,11 +9,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.t
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Card, CardContent } from "@/components/ui/card.tsx";
 import { cn } from "@/lib/utils.ts";
+import { useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
 import OrdersTable from "./_components/orders-table.tsx";
 import SuppliersTable from "./_components/suppliers-table.tsx";
 import CreateOrderDialog from "./_components/create-order-dialog.tsx";
 import OrderDetailDrawer from "./_components/order-detail-drawer.tsx";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { num, todayLocal, type PurchaseOrderRow, type PurchaseOrderStatus, type Supplier } from "./_lib/types.ts";
 
 const STATUS_TABS = [
   { value: "all", label: "Barchasi" },
@@ -26,27 +26,30 @@ const STATUS_TABS = [
   { value: "paid", label: "To'langan" },
 ];
 
-type OrderStatus = "draft" | "confirmed" | "partial" | "received" | "invoiced" | "paid" | "cancelled";
-
 export default function PurchasePage() {
+  const { can } = usePermissions();
   const [mainTab, setMainTab] = useState("orders");
-  const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<PurchaseOrderStatus | "all">("all");
   const [createOpen, setCreateOpen] = useState(false);
-  const [selectedOrderId, setSelectedOrderId] = useState<Id<"purchaseOrders"> | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
-  // Single query — used for stats and derived client-side filtering to avoid double API calls
-  const allOrders = useQuery(api.purchase.orders.list, { limit: 200 });
+  // Bitta so'rov — statistika va holat filtri shu ro'yxatdan (API chegarasi: 200 ta eng yangi buyurtma)
+  const allOrders = useApiQuery<{ orders: PurchaseOrderRow[]; nextCursor: string | null }>(
+    "/api/purchase/orders",
+    { limit: 200 },
+  ).data?.orders;
   const orders = statusFilter === "all"
     ? allOrders
     : allOrders?.filter((o) => o.status === statusFilter);
 
-  const suppliers = useQuery(api.purchase.suppliers.list, {});
-  const totalDebt = suppliers?.reduce((s, sup) => s + sup.totalDebt, 0) ?? 0;
+  const suppliers = useApiQuery<{ suppliers: Supplier[] }>("/api/purchase/suppliers").data?.suppliers;
+  const totalDebt = suppliers?.reduce((s, sup) => s + num(sup.totalDebt), 0) ?? 0;
   const pendingOrders = allOrders?.filter((o) => ["confirmed", "partial"].includes(o.status)).length ?? 0;
   const draftOrders = allOrders?.filter((o) => o.status === "draft").length ?? 0;
+  const monthStart = `${todayLocal().slice(0, 7)}-01`;
   const monthTotal = allOrders
-    ?.filter((o) => o.orderDate >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10))
-    .reduce((s, o) => s + o.totalAmount, 0) ?? 0;
+    ?.filter((o) => o.orderDate >= monthStart && o.status !== "cancelled")
+    .reduce((s, o) => s + num(o.totalAmount), 0) ?? 0;
 
   const STATS = [
     { label: "Bu oy xarid", value: formatMoney(monthTotal), icon: <TrendingUp className="h-5 w-5" />, color: "text-green-600" },
@@ -68,9 +71,11 @@ export default function PurchasePage() {
             <p className="text-xs text-muted-foreground">Yetkazuvchilar, buyurtmalar va to'lovlar</p>
           </div>
         </div>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4 mr-1.5" /> Xarid buyurtmasi
-        </Button>
+        {can("purchase.create") && (
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4 mr-1.5" /> Xarid buyurtmasi
+          </Button>
+        )}
       </div>
 
       {/* Stats */}
@@ -112,7 +117,7 @@ export default function PurchasePage() {
               {STATUS_TABS.map((tab) => (
                 <button
                   key={tab.value}
-                  onClick={() => setStatusFilter(tab.value as OrderStatus | "all")}
+                  onClick={() => setStatusFilter(tab.value as PurchaseOrderStatus | "all")}
                   className={cn(
                     "px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer",
                     statusFilter === tab.value

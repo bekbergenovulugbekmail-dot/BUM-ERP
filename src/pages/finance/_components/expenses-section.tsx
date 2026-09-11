@@ -1,8 +1,6 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
-import { Plus, Trash2, CheckCircle, Receipt } from "lucide-react";
+import { Plus, Trash2, CheckCircle, Receipt, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -10,10 +8,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
-
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
-
-const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
+import {
+  fmt, localIsoDate, toNum,
+  type CashAccount, type Expense, type ExpenseStats, type ExpenseStatus,
+} from "../_lib/types.ts";
 
 const CATEGORIES = [
   "ijara", "maosh", "kommunal", "transport", "oziq-ovqat",
@@ -29,52 +30,99 @@ const STATUS_COLORS: Record<string, string> = {
   paid: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
 };
 
+type ExpenseBody = {
+  category: string;
+  description: string;
+  amount: string;
+  expenseDate: string;
+  paidBy: string | null;
+  notes: string | null;
+};
+
+type StatusBody = { id: string; status: ExpenseStatus; cashAccountId?: string | null; paidDate?: string };
+
+const DEFAULT_CASH = "default";
+
 export default function ExpensesSection() {
-  const [statusFilter, setStatusFilter] = useState("all");
+  const { can } = usePermissions();
+  const canManage = can("finance.manage");
+  const canApprove = can("finance.approve");
+
+  const [statusFilter, setStatusFilter] = useState<"all" | ExpenseStatus>("all");
   const [createOpen, setCreateOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
 
   const [category, setCategory] = useState("boshqa");
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [paidBy, setPaidBy] = useState("cash");
+  const [date, setDate] = useState(localIsoDate());
+  const [paidBy, setPaidBy] = useState("");
   const [notes, setNotes] = useState("");
 
-  const expenses = useQuery(api.finance.expenses.list, {
-    status: statusFilter !== "all" ? statusFilter as "pending" | "approved" | "paid" : undefined,
+  const [payExpense, setPayExpense] = useState<Expense | null>(null);
+  const [payCashAccount, setPayCashAccount] = useState(DEFAULT_CASH);
+  const [payDate, setPayDate] = useState(localIsoDate());
+
+  const expenses = useApiQuery<{ expenses: Expense[]; nextCursor: string | null }>("/api/finance/expenses", {
+    status: statusFilter !== "all" ? statusFilter : undefined,
     limit: 100,
-  });
-  const createExpense = useMutation(api.finance.expenses.create);
-  const updateStatus = useMutation(api.finance.expenses.updateStatus);
-  const removeExpense = useMutation(api.finance.expenses.remove);
-  const expStats = useQuery(api.finance.expenses.getStats, {});
+  }).data?.expenses;
+  const expStats = useApiQuery<ExpenseStats>("/api/finance/expenses/stats").data;
+  const cashAccounts = useApiQuery<{ cashAccounts: CashAccount[] }>(
+    payExpense ? "/api/finance/cash-accounts" : null,
+  ).data?.cashAccounts;
+
+  const createExpense = useApiMutation((body: ExpenseBody) => api.post("/api/finance/expenses", body));
+  const updateStatus = useApiMutation(({ id, ...body }: StatusBody) => api.post(`/api/finance/expenses/${id}/status`, body));
+  const removeExpense = useApiMutation((id: string) => api.delete(`/api/finance/expenses/${id}`));
 
   const handleCreate = async () => {
-    if (!description || !amount) { toast.error("Tavsif va summa kiritilishi shart"); return; }
-    setLoading(true);
+    if (!description.trim()) { toast.error("Tavsif kiritilishi shart"); return; }
+    if (!(toNum(amount) > 0)) { toast.error("Summa musbat bo'lishi kerak"); return; }
     try {
-      await createExpense({ category, description, amount: parseFloat(amount), date, paidBy, notes: notes || undefined });
+      await createExpense.mutateAsync({
+        category,
+        description: description.trim(),
+        amount,
+        expenseDate: date,
+        paidBy: paidBy.trim() || null,
+        notes: notes.trim() || null,
+      });
       toast.success("Xarajat qo'shildi");
       setCreateOpen(false);
-      setDescription(""); setAmount(""); setNotes("");
-    } catch (err) { toast.error(err instanceof Error ? err.message : "Xatolik"); }
-    finally { setLoading(false); }
+      setDescription(""); setAmount(""); setNotes(""); setPaidBy("");
+    } catch (err) { toast.error(errorMessage(err)); }
   };
 
-  const handleApprove = async (id: Id<"expenses">) => {
-    try { await updateStatus({ id, status: "approved" }); toast.success("Tasdiqlandi"); }
-    catch (err) { toast.error(err instanceof Error ? err.message : "Xatolik"); }
+  const handleStatus = async (id: string, status: ExpenseStatus, message: string) => {
+    try { await updateStatus.mutateAsync({ id, status }); toast.success(message); }
+    catch (err) { toast.error(errorMessage(err)); }
   };
 
-  const handlePay = async (id: Id<"expenses">) => {
-    try { await updateStatus({ id, status: "paid" }); toast.success("To'langan deb belgilandi"); }
-    catch (err) { toast.error(err instanceof Error ? err.message : "Xatolik"); }
+  const openPay = (exp: Expense) => {
+    setPayExpense(exp);
+    setPayCashAccount(DEFAULT_CASH);
+    setPayDate(localIsoDate());
   };
 
-  const handleDelete = async (id: Id<"expenses">) => {
-    try { await removeExpense({ id }); toast.success("O'chirildi"); }
-    catch (err) { toast.error(err instanceof Error ? err.message : "Xatolik"); }
+  // To'lov: kassa chiqimi + jurnal yozuvi serverda bitta tranzaksiyada
+  const handlePay = async () => {
+    if (!payExpense) return;
+    try {
+      await updateStatus.mutateAsync({
+        id: payExpense.id,
+        status: "paid",
+        cashAccountId: payCashAccount === DEFAULT_CASH ? null : payCashAccount,
+        paidDate: payDate,
+      });
+      toast.success("Xarajat to'landi");
+      setPayExpense(null);
+    } catch (err) { toast.error(errorMessage(err)); }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Xarajatni o'chirishni tasdiqlaysizmi?")) return;
+    try { await removeExpense.mutateAsync(id); toast.success("O'chirildi"); }
+    catch (err) { toast.error(errorMessage(err)); }
   };
 
   return (
@@ -98,7 +146,7 @@ export default function ExpensesSection() {
 
       <div className="flex items-center justify-between">
         <div className="flex gap-2">
-          {["all", "pending", "approved", "paid"].map((s) => (
+          {(["all", "pending", "approved", "paid"] as const).map((s) => (
             <button key={s} onClick={() => setStatusFilter(s)}
               className={cn(
                 "px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer",
@@ -108,9 +156,11 @@ export default function ExpensesSection() {
             </button>
           ))}
         </div>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-3.5 w-3.5 mr-1" /> Xarajat qo'shish
-        </Button>
+        {canManage && (
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> Xarajat qo'shish
+          </Button>
+        )}
       </div>
 
       {!expenses ? (
@@ -119,9 +169,11 @@ export default function ExpensesSection() {
         <div className="flex flex-col items-center py-12 text-center">
           <Receipt className="h-12 w-12 text-muted-foreground/20 mb-3" />
           <p className="text-muted-foreground">Xarajatlar yo'q</p>
-          <Button className="mt-3" size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4 mr-1" /> Xarajat qo'shish
-          </Button>
+          {canManage && (
+            <Button className="mt-3" size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4 mr-1" /> Xarajat qo'shish
+            </Button>
+          )}
         </div>
       ) : (
         <div className="rounded-2xl border border-border overflow-hidden">
@@ -139,11 +191,14 @@ export default function ExpensesSection() {
             </thead>
             <tbody className="divide-y divide-border">
               {expenses.map((exp) => (
-                <tr key={exp._id} className="hover:bg-muted/20">
+                <tr key={exp.id} className="hover:bg-muted/20">
                   <td className="px-4 py-3 font-mono text-xs">{exp.number}</td>
-                  <td className="px-4 py-3">{exp.description}</td>
+                  <td className="px-4 py-3">
+                    <p>{exp.description}</p>
+                    {exp.paidBy && <p className="text-xs text-muted-foreground">{exp.paidBy}</p>}
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground capitalize">{exp.category}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{exp.date}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{exp.expenseDate}</td>
                   <td className="px-4 py-3 text-right font-semibold text-rose-600 dark:text-rose-400">
                     {fmt(exp.amount)} so'm
                   </td>
@@ -154,18 +209,25 @@ export default function ExpensesSection() {
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex gap-1 justify-end">
-                      {exp.status === "pending" && (
-                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => handleApprove(exp._id)}>
+                      {exp.status === "pending" && canApprove && (
+                        <Button size="sm" variant="ghost" className="h-7 text-xs"
+                          onClick={() => handleStatus(exp.id, "approved", "Tasdiqlandi")}>
                           <CheckCircle className="h-3 w-3 mr-0.5" /> Tasdiqlash
                         </Button>
                       )}
-                      {exp.status === "approved" && (
-                        <Button size="sm" variant="ghost" className="h-7 text-xs text-emerald-600" onClick={() => handlePay(exp._id)}>
-                          To'lash
-                        </Button>
+                      {exp.status === "approved" && canApprove && (
+                        <>
+                          <Button size="sm" variant="ghost" className="h-7 text-xs text-emerald-600" onClick={() => openPay(exp)}>
+                            To'landi
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="Kutilayotganga qaytarish"
+                            onClick={() => handleStatus(exp.id, "pending", "Kutilayotganga qaytarildi")}>
+                            <Undo2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          </Button>
+                        </>
                       )}
-                      {exp.status !== "paid" && (
-                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleDelete(exp._id)}>
+                      {exp.status !== "paid" && canManage && (
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleDelete(exp.id)}>
                           <Trash2 className="h-3.5 w-3.5 text-destructive" />
                         </Button>
                       )}
@@ -200,7 +262,7 @@ export default function ExpensesSection() {
                 </div>
                 <div>
                   <Label>Summa (so'm) *</Label>
-                  <Input type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" />
+                  <Input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -209,15 +271,9 @@ export default function ExpensesSection() {
                   <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
                 </div>
                 <div>
-                  <Label>To'lov usuli</Label>
-                  <Select value={paidBy} onValueChange={setPaidBy}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="cash">Naqd</SelectItem>
-                      <SelectItem value="bank">Bank</SelectItem>
-                      <SelectItem value="card">Karta</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {/* Kassa to'lov paytida tanlanadi — bu yerda kim to'lagani */}
+                  <Label>To'lovchi</Label>
+                  <Input value={paidBy} onChange={(e) => setPaidBy(e.target.value)} placeholder="Ixtiyoriy..." />
                 </div>
               </div>
               <div>
@@ -227,7 +283,46 @@ export default function ExpensesSection() {
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => setCreateOpen(false)}>Bekor</Button>
-              <Button onClick={handleCreate} disabled={loading}>{loading ? "..." : "Qo'shish"}</Button>
+              <Button onClick={handleCreate} disabled={createExpense.isPending}>{createExpense.isPending ? "..." : "Qo'shish"}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Pay dialog */}
+      {payExpense && (
+        <Dialog open onOpenChange={(o) => !o && setPayExpense(null)}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Xarajatni to'lash</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                {payExpense.number} · {payExpense.description} —{" "}
+                <span className="font-semibold text-foreground">{fmt(payExpense.amount)} so'm</span>
+              </p>
+              <div>
+                <Label>Kassa / bank</Label>
+                <Select value={payCashAccount} onValueChange={setPayCashAccount}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={DEFAULT_CASH}>Asosiy kassa</SelectItem>
+                    {cashAccounts?.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name} ({fmt(a.balance)} so'm)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>To'lov sanasi</Label>
+                <Input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => setPayExpense(null)}>Bekor</Button>
+              <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={handlePay} disabled={updateStatus.isPending}>
+                {updateStatus.isPending ? "..." : "To'lash"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

@@ -1,6 +1,4 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
 import { Plus, Phone, Users, Mail, FileText, CheckSquare, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
@@ -11,6 +9,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Textarea } from "@/components/ui/textarea.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import type { Activity, ActivityType, CustomerOption } from "../_lib/types.ts";
 
 const ACTIVITY_TYPES = [
   { key: "call", label: "Qo'ng'iroq", icon: Phone, color: "text-blue-500 bg-blue-500/10" },
@@ -22,41 +23,45 @@ const ACTIVITY_TYPES = [
 
 const typeMap = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, t]));
 
+const today = () => new Date().toISOString().slice(0, 10);
+const emptyForm = () => ({
+  type: "call" as ActivityType,
+  title: "", description: "",
+  customerId: "none",
+  activityDate: today(),
+  outcome: "",
+});
+
 export default function ActivitiesSection() {
-  const recent = useQuery(api.crm.activities.listRecent, { limit: 30 });
-  const customers = useQuery(api.sales.customers.list, { limit: 200 });
-  const leads = useQuery(api.crm.leads.list, { limit: 100 });
-  const createActivity = useMutation(api.crm.activities.create);
-  const removeActivity = useMutation(api.crm.activities.remove);
+  const recent = useApiQuery<{ activities: Activity[] }>("/api/crm/activities", { limit: 30 }).data?.activities;
+  const customers = useApiQuery<{ customers: CustomerOption[] }>("/api/sales/customers", { limit: 500 }).data?.customers;
+
+  const createActivity = useApiMutation((body: Record<string, unknown>) => api.post("/api/crm/activities", body));
+  const removeActivity = useApiMutation((id: string) => api.delete(`/api/crm/activities/${id}`));
 
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
-    type: "call" as typeof ACTIVITY_TYPES[number]["key"],
-    title: "", description: "",
-    customerId: "none", leadId: "none",
-    date: new Date().toISOString().slice(0, 10),
-    outcome: "",
-  });
+  const [form, setForm] = useState(emptyForm);
 
   const handleCreate = async () => {
-    if (!form.title) { toast.error("Sarlavha kiritilishi shart"); return; }
-    setLoading(true);
+    if (!form.title.trim()) { toast.error("Sarlavha kiritilishi shart"); return; }
     try {
-      await createActivity({
+      await createActivity.mutateAsync({
         type: form.type,
         title: form.title,
-        description: form.description || undefined,
-        customerId: form.customerId !== "none" ? form.customerId as never : undefined,
-        leadId: form.leadId !== "none" ? form.leadId as never : undefined,
-        date: form.date,
-        outcome: form.outcome || undefined,
+        description: form.description || null,
+        customerId: form.customerId !== "none" ? form.customerId : null,
+        activityDate: form.activityDate,
+        outcome: form.outcome || null,
       });
       toast.success("Faoliyat qo'shildi");
       setOpen(false);
-      setForm({ type: "call", title: "", description: "", customerId: "none", leadId: "none", date: new Date().toISOString().slice(0, 10), outcome: "" });
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
-    finally { setLoading(false); }
+      setForm(emptyForm());
+    } catch (e) { toast.error(errorMessage(e)); }
+  };
+
+  const handleRemove = async (id: string) => {
+    try { await removeActivity.mutateAsync(id); }
+    catch (e) { toast.error(errorMessage(e)); }
   };
 
   return (
@@ -92,19 +97,22 @@ export default function ActivitiesSection() {
             const typeInfo = typeMap[act.type];
             const Icon = typeInfo?.icon ?? FileText;
             return (
-              <div key={act._id} className="flex items-start gap-3 bg-card border border-border rounded-xl p-3">
+              <div key={act.id} className="flex items-start gap-3 bg-card border border-border rounded-xl p-3">
                 <div className={cn("h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5", typeInfo?.color ?? "bg-muted text-muted-foreground")}>
                   <Icon className="h-3.5 w-3.5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2">
+                  <div className="flex items-baseline gap-2 flex-wrap">
                     <p className="text-sm font-medium">{act.title}</p>
-                    <span className="text-xs text-muted-foreground">{act.date}</span>
+                    <span className="text-xs text-muted-foreground">{act.activityDate}</span>
+                    {(act.customerName ?? act.leadName) && (
+                      <span className="text-xs text-muted-foreground">· {act.customerName ?? act.leadName}</span>
+                    )}
                   </div>
                   {act.description && <p className="text-xs text-muted-foreground mt-0.5">{act.description}</p>}
                   {act.outcome && <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">Natija: {act.outcome}</p>}
                 </div>
-                <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => removeActivity({ id: act._id })}>
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleRemove(act.id)}>
                   <Trash2 className="h-3.5 w-3.5 text-destructive" />
                 </Button>
               </div>
@@ -146,13 +154,13 @@ export default function ActivitiesSection() {
                     <SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">—</SelectItem>
-                      {customers?.map((c) => <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>)}
+                      {customers?.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
                   <Label>Sana</Label>
-                  <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+                  <Input type="date" value={form.activityDate} onChange={(e) => setForm({ ...form, activityDate: e.target.value })} />
                 </div>
               </div>
               <div>
@@ -166,7 +174,7 @@ export default function ActivitiesSection() {
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => setOpen(false)}>Bekor</Button>
-              <Button onClick={handleCreate} disabled={loading}>{loading ? "..." : "Saqlash"}</Button>
+              <Button onClick={handleCreate} disabled={createActivity.isPending}>{createActivity.isPending ? "..." : "Saqlash"}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

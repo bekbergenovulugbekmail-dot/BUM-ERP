@@ -1,8 +1,6 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
-import { Plus, GripVertical, User, Phone, Building2, ChevronRight, Star } from "lucide-react";
+import { Plus, GripVertical, User, Phone, Building2, Star } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -11,7 +9,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Textarea } from "@/components/ui/textarea.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { num, type Lead, type LeadSource, type LeadStage, type LeadStats, type SalesRep } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
@@ -22,68 +22,105 @@ const STAGES = [
   { key: "proposal", label: "Taklif yuborildi", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300", dot: "bg-amber-400" },
   { key: "won", label: "Yutildi", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400", dot: "bg-emerald-400" },
   { key: "lost", label: "Yo'qotildi", color: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400", dot: "bg-rose-400" },
-] as const;
+] as const satisfies readonly { key: LeadStage; label: string; color: string; dot: string }[];
 
-const SOURCES = ["website", "referral", "social", "cold_call", "exhibition", "other"] as const;
-const SOURCE_LABELS: Record<string, string> = {
+const SOURCES = ["website", "referral", "social", "cold_call", "exhibition", "other"] as const satisfies readonly LeadSource[];
+const SOURCE_LABELS: Record<LeadSource, string> = {
   website: "Veb-sayt", referral: "Tavsiya", social: "Ijtimoiy tarmoq",
   cold_call: "Sovuq qo'ng'iroq", exhibition: "Ko'rgazma", other: "Boshqa",
 };
 
+const emptyForm = () => ({
+  name: "", companyName: "", phone: "", email: "",
+  source: "website" as LeadSource,
+  estimatedValue: "", salesRepId: "", expectedCloseDate: "", notes: "",
+});
+
+type StageChangeInput = { id: string; stage: LeadStage; lostReason?: string; convertToCustomer?: boolean };
+
 export default function LeadsPipeline() {
-  const allLeads = useQuery(api.crm.leads.list, { limit: 200 });
-  const stats = useQuery(api.crm.leads.getStats, {});
-  const salesReps = useQuery(api.crm.salesReps.list, { onlyActive: true });
-  const createLead = useMutation(api.crm.leads.create);
-  const updateStage = useMutation(api.crm.leads.updateStage);
-  const removeLead = useMutation(api.crm.leads.remove);
+  const allLeads = useApiQuery<{ leads: Lead[] }>("/api/crm/leads", { limit: 200 }).data?.leads;
+  const stats = useApiQuery<LeadStats>("/api/crm/leads/stats").data;
+  const salesReps = useApiQuery<{ salesReps: SalesRep[] }>("/api/crm/sales-reps").data?.salesReps;
+
+  const createLead = useApiMutation((body: Record<string, unknown>) => api.post("/api/crm/leads", body));
+  const changeStage = useApiMutation(({ id, ...body }: StageChangeInput) => api.post(`/api/crm/leads/${id}/stage`, body));
+  const removeLead = useApiMutation((id: string) => api.delete(`/api/crm/leads/${id}`));
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [draggedId, setDraggedId] = useState<Id<"leads"> | null>(null);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
   const [hoveredStage, setHoveredStage] = useState<string | null>(null);
-  const [selectedLead, setSelectedLead] = useState<NonNullable<typeof allLeads>[number] | null>(null);
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  // "Yutildi" va "Yo'qotildi" alohida tasdiqlanadi: mijozga aylantirish / yo'qotish sababi
+  const [stageChange, setStageChange] = useState<{ lead: Lead; stage: "won" | "lost" } | null>(null);
+  const [lostReason, setLostReason] = useState("");
+  const [convertToCustomer, setConvertToCustomer] = useState(true);
+  const [form, setForm] = useState(emptyForm);
 
-  const [form, setForm] = useState({
-    name: "", company: "", phone: "", email: "",
-    source: "website" as typeof SOURCES[number],
-    estimatedValue: "", salesRepId: "", expectedCloseDate: "", notes: "",
-  });
+  const selectedLead = allLeads?.find((l) => l.id === selectedLeadId) ?? null;
+  const stageCount = (stage: LeadStage) => stats?.byStage.find((s) => s.stage === stage)?.count ?? 0;
 
   const handleCreate = async () => {
-    if (!form.name) { toast.error("Ism kiritilishi shart"); return; }
-    setLoading(true);
+    if (!form.name.trim()) { toast.error("Ism kiritilishi shart"); return; }
     try {
-      await createLead({
+      await createLead.mutateAsync({
         name: form.name,
-        company: form.company || undefined,
-        phone: form.phone || undefined,
-        email: form.email || undefined,
+        companyName: form.companyName || null,
+        phone: form.phone || null,
+        email: form.email || null,
         source: form.source,
-        estimatedValue: form.estimatedValue ? parseFloat(form.estimatedValue) : undefined,
-        salesRepId: form.salesRepId ? form.salesRepId as Id<"salesReps"> : undefined,
-        expectedCloseDate: form.expectedCloseDate || undefined,
-        notes: form.notes || undefined,
+        estimatedValue: form.estimatedValue || null,
+        salesRepId: form.salesRepId && form.salesRepId !== "none" ? form.salesRepId : null,
+        expectedCloseDate: form.expectedCloseDate || null,
+        notes: form.notes || null,
       });
       toast.success("Lead qo'shildi");
       setCreateOpen(false);
-      setForm({ name: "", company: "", phone: "", email: "", source: "website", estimatedValue: "", salesRepId: "", expectedCloseDate: "", notes: "" });
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
-    finally { setLoading(false); }
+      setForm(emptyForm());
+    } catch (e) { toast.error(errorMessage(e)); }
   };
 
-  const handleDrop = async (stage: string) => {
-    if (!draggedId || !hoveredStage) return;
+  const requestStage = async (lead: Lead, stage: LeadStage) => {
+    if (lead.stage === stage) return;
+    if (stage === "won" || stage === "lost") {
+      setLostReason("");
+      setConvertToCustomer(!lead.customerId);
+      setSelectedLeadId(null);
+      setStageChange({ lead, stage });
+      return;
+    }
+    try { await changeStage.mutateAsync({ id: lead.id, stage }); }
+    catch (e) { toast.error(errorMessage(e)); }
+  };
+
+  const confirmStageChange = async () => {
+    if (!stageChange) return;
+    const { lead, stage } = stageChange;
+    if (stage === "lost" && !lostReason.trim()) { toast.error("Yo'qotish sababini kiriting"); return; }
     try {
-      await updateStage({ id: draggedId, stage: stage as Parameters<typeof updateStage>[0]["stage"] });
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
+      await changeStage.mutateAsync(
+        stage === "won"
+          ? { id: lead.id, stage, convertToCustomer: convertToCustomer && !lead.customerId }
+          : { id: lead.id, stage, lostReason: lostReason.trim() },
+      );
+      toast.success(stage === "won" ? "Lead yutildi" : "Lead yo'qotildi deb belgilandi");
+      setStageChange(null);
+    } catch (e) { toast.error(errorMessage(e)); }
+  };
+
+  const handleDrop = (stage: LeadStage) => {
+    const lead = allLeads?.find((l) => l.id === draggedId);
     setDraggedId(null);
     setHoveredStage(null);
+    if (lead) void requestStage(lead, stage);
   };
 
-  const handleQuickStage = async (id: Id<"leads">, stage: typeof STAGES[number]["key"]) => {
-    try { await updateStage({ id, stage }); }
-    catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
+  const handleRemove = async (id: string) => {
+    try {
+      await removeLead.mutateAsync(id);
+      setSelectedLeadId(null);
+      toast.success("O'chirildi");
+    } catch (e) { toast.error(errorMessage(e)); }
   };
 
   if (!allLeads) {
@@ -97,9 +134,9 @@ export default function LeadsPipeline() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
             { label: "Jami leadlar", value: stats.total },
-            { label: "Faol", value: (stats.byStage["new"] ?? 0) + (stats.byStage["contacted"] ?? 0) + (stats.byStage["qualified"] ?? 0) + (stats.byStage["proposal"] ?? 0) },
-            { label: "Yutilgan", value: stats.byStage["won"] ?? 0 },
-            { label: "Taxminiy qiymat", value: fmt(stats.totalValue) + " so'm" },
+            { label: "Faol", value: stageCount("new") + stageCount("contacted") + stageCount("qualified") + stageCount("proposal") },
+            { label: "Yutilgan", value: stageCount("won") },
+            { label: "Taxminiy qiymat", value: fmt(num(stats.openValue)) + " so'm" },
           ].map((s) => (
             <div key={s.label} className="bg-card border border-border rounded-xl p-3">
               <p className="text-xs text-muted-foreground">{s.label}</p>
@@ -120,7 +157,7 @@ export default function LeadsPipeline() {
       <div className="flex gap-3 overflow-x-auto pb-2">
         {STAGES.map((stage) => {
           const stageLeads = allLeads.filter((l) => l.stage === stage.key);
-          const stageValue = stageLeads.reduce((s, l) => s + (l.estimatedValue ?? 0), 0);
+          const stageValue = stageLeads.reduce((s, l) => s + num(l.estimatedValue), 0);
           return (
             <div
               key={stage.key}
@@ -143,26 +180,27 @@ export default function LeadsPipeline() {
               <div className="space-y-2 min-h-[100px]">
                 {stageLeads.map((lead) => (
                   <div
-                    key={lead._id}
+                    key={lead.id}
                     draggable
-                    onDragStart={() => setDraggedId(lead._id)}
+                    onDragStart={() => setDraggedId(lead.id)}
                     onDragEnd={() => { setDraggedId(null); setHoveredStage(null); }}
-                    onClick={() => setSelectedLead(lead)}
+                    onClick={() => setSelectedLeadId(lead.id)}
                     className={cn(
                       "bg-card border border-border rounded-xl p-3 cursor-grab active:cursor-grabbing hover:border-primary/30 transition-all",
-                      draggedId === lead._id && "opacity-50"
+                      draggedId === lead.id && "opacity-50"
                     )}
                   >
                     <div className="flex items-start gap-2">
                       <GripVertical className="h-3.5 w-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{lead.name}</p>
-                        {lead.company && <p className="text-xs text-muted-foreground truncate">{lead.company}</p>}
-                        {lead.estimatedValue && (
-                          <p className="text-xs font-semibold text-primary mt-1">{fmt(lead.estimatedValue)} so'm</p>
+                        {lead.companyName && <p className="text-xs text-muted-foreground truncate">{lead.companyName}</p>}
+                        {num(lead.estimatedValue) > 0 && (
+                          <p className="text-xs font-semibold text-primary mt-1">{fmt(num(lead.estimatedValue))} so'm</p>
                         )}
                         <div className="flex items-center gap-1 mt-1.5">
                           <span className="text-[10px] bg-muted rounded px-1 py-0.5">{SOURCE_LABELS[lead.source]}</span>
+                          {lead.salesRepName && <span className="text-[10px] text-muted-foreground truncate">{lead.salesRepName}</span>}
                         </div>
                       </div>
                     </div>
@@ -176,7 +214,7 @@ export default function LeadsPipeline() {
 
       {/* Lead detail panel */}
       {selectedLead && (
-        <Dialog open onOpenChange={(o) => !o && setSelectedLead(null)}>
+        <Dialog open onOpenChange={(o) => !o && setSelectedLeadId(null)}>
           <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -185,10 +223,10 @@ export default function LeadsPipeline() {
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-3 text-sm">
-              {selectedLead.company && (
+              {selectedLead.companyName && (
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Building2 className="h-3.5 w-3.5" />
-                  {selectedLead.company}
+                  {selectedLead.companyName}
                 </div>
               )}
               {selectedLead.phone && (
@@ -197,10 +235,10 @@ export default function LeadsPipeline() {
                   {selectedLead.phone}
                 </div>
               )}
-              {selectedLead.estimatedValue && (
+              {num(selectedLead.estimatedValue) > 0 && (
                 <div className="flex items-center gap-2">
                   <Star className="h-3.5 w-3.5 text-amber-500" />
-                  <span className="font-semibold">{fmt(selectedLead.estimatedValue)} so'm</span>
+                  <span className="font-semibold">{fmt(num(selectedLead.estimatedValue))} so'm</span>
                 </div>
               )}
               <div>
@@ -209,7 +247,8 @@ export default function LeadsPipeline() {
                   {STAGES.map((s) => (
                     <button
                       key={s.key}
-                      onClick={() => handleQuickStage(selectedLead._id, s.key)}
+                      onClick={() => void requestStage(selectedLead, s.key)}
+                      disabled={changeStage.isPending}
                       className={cn(
                         "text-xs px-2 py-1 rounded-lg border transition-all cursor-pointer",
                         selectedLead.stage === s.key
@@ -222,17 +261,53 @@ export default function LeadsPipeline() {
                   ))}
                 </div>
               </div>
+              {selectedLead.stage === "lost" && selectedLead.lostReason && (
+                <p className="text-rose-600 dark:text-rose-400 bg-rose-500/10 rounded-lg p-2">Sabab: {selectedLead.lostReason}</p>
+              )}
               {selectedLead.notes && (
                 <p className="text-muted-foreground bg-muted/40 rounded-lg p-2">{selectedLead.notes}</p>
               )}
             </div>
             <DialogFooter>
-              <Button variant="secondary" className="text-destructive" onClick={async () => {
-                await removeLead({ id: selectedLead._id });
-                setSelectedLead(null);
-                toast.success("O'chirildi");
-              }}>O'chirish</Button>
-              <Button onClick={() => setSelectedLead(null)}>Yopish</Button>
+              <Button variant="secondary" className="text-destructive" onClick={() => void handleRemove(selectedLead.id)}>O'chirish</Button>
+              <Button onClick={() => setSelectedLeadId(null)}>Yopish</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Won / lost confirmation */}
+      {stageChange && (
+        <Dialog open onOpenChange={(o) => !o && setStageChange(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{stageChange.stage === "won" ? "Lead yutildi" : "Lead yo'qotildi"}: {stageChange.lead.name}</DialogTitle>
+            </DialogHeader>
+            {stageChange.stage === "won" ? (
+              stageChange.lead.customerId ? (
+                <p className="text-sm text-muted-foreground">Lead allaqachon mijozga bog'langan.</p>
+              ) : (
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-primary"
+                    checked={convertToCustomer}
+                    onChange={(e) => setConvertToCustomer(e.target.checked)}
+                  />
+                  Leaddan yangi mijoz yaratish
+                </label>
+              )
+            ) : (
+              <div>
+                <Label>Yo'qotish sababi *</Label>
+                <Textarea rows={3} value={lostReason} onChange={(e) => setLostReason(e.target.value)} placeholder="Narx to'g'ri kelmadi..." />
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => setStageChange(null)}>Bekor</Button>
+              <Button onClick={() => void confirmStageChange()} disabled={changeStage.isPending}>
+                {changeStage.isPending ? "..." : "Tasdiqlash"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -251,7 +326,7 @@ export default function LeadsPipeline() {
                 </div>
                 <div>
                   <Label>Kompaniya</Label>
-                  <Input value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} placeholder="OOO Fayz" />
+                  <Input value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} placeholder="OOO Fayz" />
                 </div>
                 <div>
                   <Label>Telefon</Label>
@@ -263,7 +338,7 @@ export default function LeadsPipeline() {
                 </div>
                 <div>
                   <Label>Manba</Label>
-                  <Select value={form.source} onValueChange={(v) => setForm({ ...form, source: v as typeof form.source })}>
+                  <Select value={form.source} onValueChange={(v) => setForm({ ...form, source: v as LeadSource })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {SOURCES.map((s) => <SelectItem key={s} value={s}>{SOURCE_LABELS[s]}</SelectItem>)}
@@ -280,7 +355,7 @@ export default function LeadsPipeline() {
                     <SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">—</SelectItem>
-                      {salesReps?.map((r) => <SelectItem key={r._id} value={r._id}>{r.name}</SelectItem>)}
+                      {salesReps?.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -296,7 +371,7 @@ export default function LeadsPipeline() {
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => setCreateOpen(false)}>Bekor</Button>
-              <Button onClick={handleCreate} disabled={loading}>{loading ? "..." : "Qo'shish"}</Button>
+              <Button onClick={handleCreate} disabled={createLead.isPending}>{createLead.isPending ? "..." : "Qo'shish"}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

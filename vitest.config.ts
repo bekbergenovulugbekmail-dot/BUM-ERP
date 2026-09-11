@@ -2,43 +2,25 @@ import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
-// Unit-test config for this app. Two projects run in one command:
-//   - "convex"   backend functions, run in the edge-runtime via convex-test
-//   - "frontend" React components and logic, run in jsdom via Testing Library
+// Frontend unit testlari: jsdom + Testing Library. API testlari `apps/api` da (o'z konfiguratsiyasi,
+// PostgreSQL test bazasi bilan) — `pnpm --filter @bum/api test`.
 //
-// Keep tests hermetic: use convex-test and mocks instead of real deployments,
-// network calls, or environment-dependent behavior.
+// Testlar germetik: tarmoq o'rniga `fetch` mock qilinadi.
 export default defineConfig({
+  plugins: [react()],
   resolve: {
     alias: {
       "@bum/shared": path.resolve(import.meta.dirname, "./packages/shared/src/index.ts"),
-      "@/convex": path.resolve(import.meta.dirname, "./convex"),
       "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
   test: {
+    name: "frontend",
     passWithNoTests: true,
     // Restore Vitest mocks before each test to reduce state leakage.
     restoreMocks: true,
-    projects: [
-      {
-        extends: true,
-        test: {
-          name: "convex",
-          environment: "edge-runtime",
-          include: ["convex/**/*.test.{ts,js}"],
-        },
-      },
-      {
-        extends: true,
-        plugins: [react()],
-        test: {
-          name: "frontend",
-          environment: "jsdom",
-          include: ["src/**/*.test.{ts,tsx}"],
-          setupFiles: ["./src/vitest.setup.ts"],
-        },
-      },
-    ],
+    environment: "jsdom",
+    include: ["src/**/*.test.{ts,tsx}"],
+    setupFiles: ["./src/vitest.setup.ts"],
   },
 });

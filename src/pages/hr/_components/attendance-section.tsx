@@ -1,8 +1,6 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
-import { CalendarDays, CheckCircle, XCircle, Clock, Plus } from "lucide-react";
+import { CalendarDays, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -10,9 +8,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
+import {
+  localIsoDate, toNum, trimQty,
+  type AttendanceRecord, type AttendanceStats, type AttendanceStatus, type Employee,
+} from "../_lib/types.ts";
 
-const ATTENDANCE_STATUS = {
+const ATTENDANCE_STATUS: Record<AttendanceStatus, { label: string; color: string }> = {
   present: { label: "Keldi", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
   absent: { label: "Kelmadi", color: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400" },
   late: { label: "Kechikdi", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
@@ -21,41 +25,52 @@ const ATTENDANCE_STATUS = {
   on_leave: { label: "Ta'tilda", color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" },
 };
 
+type BulkBody = { date: string; records: { employeeId: string; status: AttendanceStatus }[] };
+
 export default function AttendanceSection() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localIsoDate();
   const thisMonth = today.slice(0, 7);
+  const { can } = usePermissions();
+  const canRecord = can("hr.attendance");
 
   const [selectedDate, setSelectedDate] = useState(today);
   const [month, setMonth] = useState(thisMonth);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
 
-  const attendance = useQuery(api.hr.attendance.listAttendance, { date: selectedDate });
-  const monthStats = useQuery(api.hr.attendance.getMonthlyStats, { month });
-  const employees = useQuery(api.hr.employees.listEmployees, { status: "active" });
+  const attendance = useApiQuery<{ attendance: AttendanceRecord[] }>(
+    selectedDate ? "/api/hr/attendance" : null,
+    { date: selectedDate },
+  ).data?.attendance;
+  const monthStats = useApiQuery<AttendanceStats>(
+    /^\d{4}-\d{2}$/.test(month) ? "/api/hr/attendance/stats" : null,
+    { month },
+  ).data;
+  const employees = useApiQuery<{ employees: Employee[] }>("/api/hr/employees", { status: "active" }).data?.employees;
 
-  const bulkRecord = useMutation(api.hr.attendance.bulkRecordAttendance);
+  const bulkRecord = useApiMutation((body: BulkBody) => api.put<{ processed: number }>("/api/hr/attendance/bulk", body));
 
   // For bulk attendance form
-  const [bulkStatuses, setBulkStatuses] = useState<Record<string, string>>({});
+  const [bulkStatuses, setBulkStatuses] = useState<Record<string, AttendanceStatus>>({});
   const [bulkDate, setBulkDate] = useState(today);
+
+  const openBulk = (date: string) => {
+    setBulkDate(date);
+    setBulkStatuses(Object.fromEntries((employees ?? []).map((e) => [e.id, "present" as const])));
+    setBulkOpen(true);
+  };
 
   const handleBulkSave = async () => {
     if (!employees || employees.length === 0) { toast.error("Xodimlar topilmadi"); return; }
-    setLoading(true);
     try {
-      const records = employees.map((emp) => ({
-        employeeId: emp._id,
-        status: (bulkStatuses[emp._id] || "present") as "present" | "absent" | "late" | "half_day" | "holiday" | "on_leave",
-        workHours: (bulkStatuses[emp._id] === "absent" || bulkStatuses[emp._id] === "holiday") ? 0 :
-          bulkStatuses[emp._id] === "half_day" ? 4 : 8,
-      }));
-      const count = await bulkRecord({ date: bulkDate, records });
-      toast.success(`${count} ta xodim davomati qayd etildi`);
+      // Soatlar serverda holatdan: to'liq kun 8, yarim kun 4, kelmagan/dam/ta'til 0
+      const { processed } = await bulkRecord.mutateAsync({
+        date: bulkDate,
+        records: employees.map((emp) => ({ employeeId: emp.id, status: bulkStatuses[emp.id] ?? "present" })),
+      });
+      toast.success(`${processed} ta xodim davomati qayd etildi`);
       setBulkOpen(false);
       setSelectedDate(bulkDate);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
-    finally { setLoading(false); }
+    } catch (e) { toast.error(errorMessage(e)); }
   };
 
   return (
@@ -63,10 +78,10 @@ export default function AttendanceSection() {
       {/* Month stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: "Keldi", value: monthStats?.present ?? 0, color: "text-emerald-500 bg-emerald-500/10" },
-          { label: "Kelmadi", value: monthStats?.absent ?? 0, color: "text-rose-500 bg-rose-500/10" },
-          { label: "Kechikdi", value: monthStats?.late ?? 0, color: "text-amber-500 bg-amber-500/10" },
-          { label: "Jami soat", value: `${Math.round(monthStats?.totalHours ?? 0)}`, color: "text-blue-500 bg-blue-500/10" },
+          { label: "Keldi", value: monthStats?.present ?? 0 },
+          { label: "Kelmadi", value: monthStats?.absent ?? 0 },
+          { label: "Kechikdi", value: monthStats?.late ?? 0 },
+          { label: "Jami soat", value: `${Math.round(toNum(monthStats?.totalHours))}` },
         ].map((s) => (
           <div key={s.label} className="bg-card border border-border rounded-xl p-3">
             <p className="text-xs text-muted-foreground">{s.label}</p>
@@ -87,15 +102,13 @@ export default function AttendanceSection() {
           <Input type="month" className="w-36 h-8 text-sm" value={month}
             onChange={(e) => setMonth(e.target.value)} />
         </div>
-        <div className="ml-auto">
-          <Button size="sm" onClick={() => {
-            setBulkDate(today);
-            setBulkStatuses(Object.fromEntries((employees ?? []).map((e) => [e._id, "present"])));
-            setBulkOpen(true);
-          }}>
-            <CalendarDays className="h-3.5 w-3.5 mr-1" /> Davomat belgilash
-          </Button>
-        </div>
+        {canRecord && (
+          <div className="ml-auto">
+            <Button size="sm" onClick={() => openBulk(today)}>
+              <CalendarDays className="h-3.5 w-3.5 mr-1" /> Davomat belgilash
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Daily attendance list */}
@@ -105,13 +118,11 @@ export default function AttendanceSection() {
         <div className="text-center py-10 text-muted-foreground">
           <CalendarDays className="h-10 w-10 mx-auto mb-2 opacity-20" />
           <p className="text-sm">{selectedDate} kuni uchun davomat ma'lumoti yo'q</p>
-          <Button size="sm" className="mt-3" variant="secondary" onClick={() => {
-            setBulkDate(selectedDate);
-            setBulkStatuses(Object.fromEntries((employees ?? []).map((e) => [e._id, "present"])));
-            setBulkOpen(true);
-          }}>
-            <Plus className="h-4 w-4 mr-1" /> Davomat kiritish
-          </Button>
+          {canRecord && (
+            <Button size="sm" className="mt-3" variant="secondary" onClick={() => openBulk(selectedDate)}>
+              <Plus className="h-4 w-4 mr-1" /> Davomat kiritish
+            </Button>
+          )}
         </div>
       ) : (
         <div className="rounded-xl border border-border overflow-hidden">
@@ -131,16 +142,16 @@ export default function AttendanceSection() {
               {attendance.map((rec) => {
                 const st = ATTENDANCE_STATUS[rec.status];
                 return (
-                  <tr key={rec._id} className="hover:bg-muted/20">
-                    <td className="px-4 py-2.5 font-medium">{rec.employeeName ?? "—"}</td>
+                  <tr key={rec.id} className="hover:bg-muted/20">
+                    <td className="px-4 py-2.5 font-medium">{rec.employeeName}</td>
                     <td className="px-4 py-2.5 text-muted-foreground">{rec.departmentName ?? "—"}</td>
                     <td className="px-4 py-2.5">
                       <span className={cn("text-xs px-2 py-0.5 rounded-full", st.color)}>{st.label}</span>
                     </td>
-                    <td className="px-4 py-2.5 text-right text-muted-foreground">{rec.checkIn ?? "—"}</td>
-                    <td className="px-4 py-2.5 text-right text-muted-foreground">{rec.checkOut ?? "—"}</td>
-                    <td className="px-4 py-2.5 text-right">{rec.workHours}h</td>
-                    <td className="px-4 py-2.5 text-right text-amber-600">{rec.overtime > 0 ? `+${rec.overtime}h` : "—"}</td>
+                    <td className="px-4 py-2.5 text-right text-muted-foreground">{rec.checkIn?.slice(0, 5) ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-right text-muted-foreground">{rec.checkOut?.slice(0, 5) ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-right">{trimQty(rec.workHours)}h</td>
+                    <td className="px-4 py-2.5 text-right text-amber-600">{toNum(rec.overtime) > 0 ? `+${trimQty(rec.overtime)}h` : "—"}</td>
                   </tr>
                 );
               })}
@@ -163,14 +174,14 @@ export default function AttendanceSection() {
               </div>
               <div className="space-y-1">
                 {(employees ?? []).map((emp) => (
-                  <div key={emp._id} className="flex items-center gap-3 py-1.5">
+                  <div key={emp.id} className="flex items-center gap-3 py-1.5">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{emp.name}</p>
                       <p className="text-xs text-muted-foreground">{emp.departmentName ?? "—"}</p>
                     </div>
                     <Select
-                      value={bulkStatuses[emp._id] || "present"}
-                      onValueChange={(v) => setBulkStatuses({ ...bulkStatuses, [emp._id]: v })}
+                      value={bulkStatuses[emp.id] ?? "present"}
+                      onValueChange={(v) => setBulkStatuses({ ...bulkStatuses, [emp.id]: v as AttendanceStatus })}
                     >
                       <SelectTrigger className="w-36 h-7 text-xs">
                         <SelectValue />
@@ -187,7 +198,7 @@ export default function AttendanceSection() {
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => setBulkOpen(false)}>Bekor</Button>
-              <Button onClick={handleBulkSave} disabled={loading}>{loading ? "..." : "Saqlash"}</Button>
+              <Button onClick={handleBulkSave} disabled={bulkRecord.isPending}>{bulkRecord.isPending ? "..." : "Saqlash"}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

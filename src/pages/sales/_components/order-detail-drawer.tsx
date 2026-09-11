@@ -1,14 +1,10 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  X, CheckCircle, Truck, CreditCard, Ban, ChevronDown, ChevronUp, FileDown,
+  X, CheckCircle, Truck, CreditCard, Ban, ChevronDown, ChevronUp, FileDown, Undo2,
 } from "lucide-react";
 import { generateSalesInvoicePDF } from "@/lib/pdf/invoice-pdf.ts";
-import { useQuery as useConvexQuery } from "convex/react";
-import { api as convexApi } from "@/convex/_generated/api.js";
 import { Button } from "@/components/ui/button.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -16,10 +12,16 @@ import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
+import {
+  PAYMENT_LABELS, companyInfo, newReference, num, todayLocal,
+  type PaymentMethod, type SalesOrderDetail,
+} from "../_lib/types.ts";
 
 type Props = {
-  orderId: Id<"salesOrders">;
+  orderId: string;
   onClose: () => void;
 };
 
@@ -39,88 +41,123 @@ const STATUS_LABELS: Record<string, string> = {
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
 
 export default function OrderDetailDrawer({ orderId, onClose }: Props) {
-  const order = useQuery(api.sales.orders.getById, { id: orderId });
-  const company = useConvexQuery(convexApi.admin.getCompany, {});
-  const confirmOrder = useMutation(api.sales.orders.confirm);
-  const shipOrder = useMutation(api.sales.orders.ship);
-  const cancelOrder = useMutation(api.sales.orders.cancel);
-  const recordPayment = useMutation(api.sales.orders.recordPayment);
+  const { can } = usePermissions();
+  const orderQuery = useApiQuery<{ order: SalesOrderDetail }>(`/api/sales/orders/${orderId}`);
+  const order = orderQuery.data?.order;
+  const company = useActiveCompany().data?.company;
+
+  const confirmOrder = useApiMutation(() => api.post(`/api/sales/orders/${orderId}/confirm`));
+  const shipOrder = useApiMutation(() => api.post(`/api/sales/orders/${orderId}/ship`));
+  const cancelOrder = useApiMutation(() => api.post(`/api/sales/orders/${orderId}/cancel`));
+  const returnOrder = useApiMutation((body: object) =>
+    api.post<{ refunded: string }>(`/api/sales/orders/${orderId}/return`, body),
+  );
+  const recordPayment = useApiMutation((body: object) =>
+    api.post<{ created: boolean }>("/api/sales/payments", body),
+  );
 
   const [showPayment, setShowPayment] = useState(false);
   const [payAmount, setPayAmount] = useState("");
-  const [payMethod, setPayMethod] = useState<"cash" | "card" | "bank" | "transfer">("cash");
-  const [payRef, setPayRef] = useState("");
+  const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
+  const [payNote, setPayNote] = useState("");
+  // Bitta to'lov formasi — bitta reference (ikki marta bosilsa server takrorlamaydi)
+  const [payReference, setPayReference] = useState(() => newReference("CP"));
+  const [showReturn, setShowReturn] = useState(false);
+  const [returnReason, setReturnReason] = useState("");
+  const [refund, setRefund] = useState(true);
+  const [refundMethod, setRefundMethod] = useState<PaymentMethod>("cash");
   const [loading, setLoading] = useState(false);
 
   const handleConfirm = async () => {
-    try { await confirmOrder({ id: orderId }); toast.success("Tasdiqlandi"); }
-    catch (err) { toast.error(err instanceof Error ? err.message : "Xatolik"); }
+    try { await confirmOrder.mutateAsync(); toast.success("Tasdiqlandi"); }
+    catch (err) { toast.error(errorMessage(err)); }
   };
   const handleShip = async () => {
     setLoading(true);
-    try { await shipOrder({ id: orderId }); toast.success("Jo'natildi, ombor yangilandi"); }
-    catch (err) { toast.error(err instanceof Error ? err.message : "Xatolik"); }
+    try { await shipOrder.mutateAsync(); toast.success("Jo'natildi, ombor yangilandi"); }
+    catch (err) { toast.error(errorMessage(err)); }
     finally { setLoading(false); }
   };
   const handleCancel = async () => {
-    try { await cancelOrder({ id: orderId }); toast.success("Bekor qilindi"); }
-    catch (err) { toast.error(err instanceof Error ? err.message : "Xatolik"); }
+    try { await cancelOrder.mutateAsync(); toast.success("Bekor qilindi"); }
+    catch (err) { toast.error(errorMessage(err)); }
   };
 
   const handlePayment = async () => {
     if (!order || !payAmount) return;
     setLoading(true);
     try {
-      await recordPayment({
+      const result = await recordPayment.mutateAsync({
         orderId,
-        amount: parseFloat(payAmount),
+        amount: payAmount.trim(),
+        paymentDate: todayLocal(),
         method: payMethod,
-        reference: payRef || undefined,
+        reference: payReference,
+        notes: payNote.trim() || null,
       });
-      toast.success("To'lov qayd etildi");
+      if (result.created) toast.success("To'lov qayd etildi");
+      else toast.info("Bu to'lov allaqachon qayd etilgan");
       setShowPayment(false);
       setPayAmount("");
-    } catch (err) { toast.error(err instanceof Error ? err.message : "Xatolik"); }
+      setPayNote("");
+      setPayReference(newReference("CP"));
+    } catch (err) { toast.error(errorMessage(err)); }
+    finally { setLoading(false); }
+  };
+
+  const handleReturn = async () => {
+    if (!order) return;
+    setLoading(true);
+    try {
+      const result = await returnOrder.mutateAsync({
+        reason: returnReason.trim() || null,
+        refund,
+        method: refundMethod,
+      });
+      const refunded = num(result.refunded);
+      toast.success(refunded > 0
+        ? `Qaytarildi, ${fmt(refunded)} mijozga qaytarildi`
+        : "Qaytarildi, tovar omborga qaytdi");
+      setShowReturn(false);
+      setReturnReason("");
+    } catch (err) { toast.error(errorMessage(err)); }
     finally { setLoading(false); }
   };
 
   const handlePrintInvoice = () => {
     if (!order) return;
     generateSalesInvoicePDF({
-      company: {
-        name: company?.name ?? "BUM ERP",
-        legalName: company?.legalName,
-        taxId: company?.taxId,
-        address: company?.address,
-        phone: company?.phone,
-        email: company?.email,
-        website: company?.website,
-      },
+      company: companyInfo(company),
       number: order.number,
       date: order.orderDate,
-      deliveryDate: order.deliveryDate,
-      customerName: order.customerName,
+      deliveryDate: order.deliveryDate ?? undefined,
+      customerName: order.customerName ?? "Anonim mijoz",
+      customerPhone: order.customerPhone ?? undefined,
       warehouseName: order.warehouseName,
       items: order.items.map((item) => ({
         name: item.productName,
         sku: item.productSku ?? "",
-        qty: item.qty,
+        qty: num(item.quantity),
         unit: item.unitName ?? "dona",
-        unitPrice: item.unitPrice,
-        discount: item.discountPercent ?? 0,
-        taxRate: item.taxRate ?? 0,
-        lineTotal: item.lineTotal,
+        unitPrice: num(item.unitPrice),
+        discount: num(item.discountPercent),
+        taxRate: num(item.taxRate),
+        lineTotal: num(item.lineTotal),
       })),
-      subtotal: order.totalAmount,
-      taxTotal: 0,
-      discountTotal: 0,
-      totalAmount: order.totalAmount,
-      paidAmount: order.paidAmount,
-      balance: order.balance,
-      notes: order.notes,
+      subtotal: num(order.subtotal),
+      taxTotal: num(order.taxAmount),
+      discountTotal: num(order.discountAmount),
+      totalAmount: num(order.totalAmount),
+      paidAmount: num(order.paidAmount),
+      balance: num(order.balance),
+      currency: order.currency,
+      notes: order.notes ?? undefined,
       status: order.status,
     });
   };
+
+  const balance = order ? num(order.balance) : 0;
+  const paid = order ? num(order.paidAmount) : 0;
 
   return (
     <AnimatePresence>
@@ -135,7 +172,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
           <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
             <div>
               <p className="font-bold text-base">{order?.number ?? "..."}</p>
-              <p className="text-xs text-muted-foreground">{order?.customerName}</p>
+              <p className="text-xs text-muted-foreground">{order ? (order.customerName ?? "Anonim mijoz") : ""}</p>
             </div>
             <div className="flex items-center gap-2">
               {order && (
@@ -150,7 +187,9 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
           </div>
 
           <div className="flex-1 overflow-y-auto p-5 space-y-5">
-            {!order ? (
+            {orderQuery.isError ? (
+              <p className="text-sm text-destructive">{errorMessage(orderQuery.error)}</p>
+            ) : !order ? (
               <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
             ) : (
               <>
@@ -158,9 +197,9 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                   {[
                     { label: "Ombor", value: order.warehouseName },
                     { label: "Sana", value: order.orderDate },
-                    { label: "Jami", value: fmt(order.totalAmount) },
-                    { label: "To'langan", value: fmt(order.paidAmount) },
-                    { label: "Qoldi", value: fmt(order.balance) },
+                    { label: "Jami", value: fmt(num(order.totalAmount)) },
+                    { label: "To'langan", value: fmt(paid) },
+                    { label: "Qoldi", value: fmt(balance) },
                     { label: "Mahsulotlar", value: String(order.items.length) + " ta" },
                   ].map(({ label, value }) => (
                     <div key={label} className="bg-muted/40 rounded-lg px-3 py-2">
@@ -172,28 +211,34 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
 
                 {/* Actions */}
                 <div className="flex flex-wrap gap-2">
-                  {order.status === "draft" && (
-                    <Button size="sm" onClick={handleConfirm}>
+                  {order.status === "draft" && can("sales.approve") && (
+                    <Button size="sm" onClick={handleConfirm} disabled={confirmOrder.isPending}>
                       <CheckCircle className="h-4 w-4 mr-1" /> Tasdiqlash
                     </Button>
                   )}
-                  {order.status === "confirmed" && (
+                  {order.status === "confirmed" && !order.isPos && can("sales.approve") && (
                     <Button size="sm" variant="secondary" onClick={handleShip} disabled={loading}>
                       <Truck className="h-4 w-4 mr-1" /> Jo'natish
                     </Button>
                   )}
-                  {["shipped", "delivered"].includes(order.status) && order.balance > 0 && (
+                  {["confirmed", "shipped", "delivered"].includes(order.status) && balance > 0 && can("finance.manage") && (
                     <Button size="sm" variant="secondary" onClick={() => setShowPayment((p) => !p)}>
                       <CreditCard className="h-4 w-4 mr-1" /> To'lov
                       {showPayment ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
                     </Button>
                   )}
-                  {["draft", "confirmed"].includes(order.status) && (
-                    <Button size="sm" variant="ghost" className="text-destructive" onClick={handleCancel}>
+                  {["shipped", "delivered"].includes(order.status) && can("sales.refund") && (
+                    <Button size="sm" variant="secondary" onClick={() => setShowReturn((p) => !p)}>
+                      <Undo2 className="h-4 w-4 mr-1" /> Qaytarish
+                      {showReturn ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
+                    </Button>
+                  )}
+                  {["draft", "confirmed"].includes(order.status) && paid === 0 && can("sales.cancel") && (
+                    <Button size="sm" variant="ghost" className="text-destructive" onClick={handleCancel} disabled={cancelOrder.isPending}>
                       <Ban className="h-4 w-4 mr-1" /> Bekor
                     </Button>
                   )}
-                  <Button size="sm" variant="secondary" onClick={handlePrintInvoice} disabled={!order}>
+                  <Button size="sm" variant="secondary" onClick={handlePrintInvoice}>
                     <FileDown className="h-4 w-4 mr-1" /> PDF
                   </Button>
                 </div>
@@ -207,11 +252,11 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                         <Label className="text-xs">Summa (so'm)</Label>
                         <Input type="number" min="0" value={payAmount}
                           onChange={(e) => setPayAmount(e.target.value)}
-                          placeholder={String(Math.round(order.balance))} />
+                          placeholder={String(balance)} />
                       </div>
                       <div>
                         <Label className="text-xs">Usul</Label>
-                        <Select value={payMethod} onValueChange={(v) => setPayMethod(v as typeof payMethod)}>
+                        <Select value={payMethod} onValueChange={(v) => setPayMethod(v as PaymentMethod)}>
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="cash">Naqd</SelectItem>
@@ -223,11 +268,47 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                       </div>
                     </div>
                     <div>
-                      <Label className="text-xs">Havola</Label>
-                      <Input value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="Chek raqami..." />
+                      <Label className="text-xs">Izoh</Label>
+                      <Input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Chek raqami..." />
                     </div>
                     <Button size="sm" onClick={handlePayment} disabled={loading} className="w-full">
                       {loading ? "..." : "To'lovni qayd etish"}
+                    </Button>
+                  </div>
+                )}
+
+                {/* Return form */}
+                {showReturn && (
+                  <div className="border border-destructive/30 rounded-xl p-4 space-y-3 bg-destructive/5">
+                    <p className="text-sm font-semibold">Buyurtmani qaytarish</p>
+                    <p className="text-xs text-muted-foreground">
+                      Barcha tovar omborga qaytadi, sotuv va tannarx yozuvlari teskari o'tkaziladi.
+                    </p>
+                    <div>
+                      <Label className="text-xs">Sabab</Label>
+                      <Input value={returnReason} onChange={(e) => setReturnReason(e.target.value)} placeholder="Ixtiyoriy..." />
+                    </div>
+                    {paid > 0 && (
+                      <div className="grid grid-cols-2 gap-3 items-end">
+                        <label className="flex items-center gap-2 text-xs cursor-pointer">
+                          <input type="checkbox" checked={refund} onChange={(e) => setRefund(e.target.checked)} />
+                          {fmt(paid)} pulni qaytarish
+                        </label>
+                        {refund && (
+                          <Select value={refundMethod} onValueChange={(v) => setRefundMethod(v as PaymentMethod)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="cash">Naqd</SelectItem>
+                              <SelectItem value="card">Karta</SelectItem>
+                              <SelectItem value="bank">Bank</SelectItem>
+                              <SelectItem value="transfer">O'tkazma</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+                    )}
+                    <Button size="sm" variant="destructive" onClick={handleReturn} disabled={loading} className="w-full">
+                      {loading ? "..." : "Qaytarishni tasdiqlash"}
                     </Button>
                   </div>
                 )}
@@ -239,14 +320,14 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Mahsulotlar</p>
                   <div className="space-y-2">
                     {order.items.map((item) => (
-                      <div key={item._id} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
+                      <div key={item.id} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium truncate">{item.productName}</p>
-                          <p className="text-xs text-muted-foreground font-mono">{item.productSku} · {item.qty} {item.unitName}</p>
+                          <p className="text-xs text-muted-foreground font-mono">{item.productSku} · {num(item.quantity)} {item.unitName}</p>
                         </div>
                         <div className="text-right ml-4">
-                          <p className="text-xs text-muted-foreground">{new Intl.NumberFormat("uz-UZ").format(item.unitPrice)} × {item.qty}</p>
-                          <p className="text-sm font-semibold">{fmt(item.lineTotal)}</p>
+                          <p className="text-xs text-muted-foreground">{new Intl.NumberFormat("uz-UZ").format(num(item.unitPrice))} × {num(item.quantity)}</p>
+                          <p className="text-sm font-semibold">{fmt(num(item.lineTotal))}</p>
                         </div>
                       </div>
                     ))}
@@ -260,14 +341,24 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                     <div>
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">To'lovlar</p>
                       {order.payments.map((p) => (
-                        <div key={p._id} className="flex justify-between py-1.5 text-sm border-b border-border/40 last:border-0">
+                        <div key={p.id} className="flex justify-between py-1.5 text-sm border-b border-border/40 last:border-0">
                           <div>
-                            <span className="font-medium">{fmt(p.amount)}</span>
-                            <span className="text-xs text-muted-foreground ml-2">{p.method}</span>
+                            <span className="font-medium">{fmt(num(p.amount))}</span>
+                            <span className="text-xs text-muted-foreground ml-2">{PAYMENT_LABELS[p.method] ?? p.method}</span>
                           </div>
                           <span className="text-xs text-muted-foreground">{p.paymentDate}</span>
                         </div>
                       ))}
+                    </div>
+                  </>
+                )}
+
+                {order.notes && (
+                  <>
+                    <Separator />
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Izoh</p>
+                      <p className="text-sm text-muted-foreground">{order.notes}</p>
                     </div>
                   </>
                 )}

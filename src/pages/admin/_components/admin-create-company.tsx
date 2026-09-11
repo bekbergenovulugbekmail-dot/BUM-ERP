@@ -1,55 +1,54 @@
 /**
- * Admin Create Company — platform admins can provision a new company (tenant)
- * and assign a Business Owner by phone number (login identifikatori).
+ * Admin Create Company — platform admini yangi kompaniya (tenant) va uning egasi uchun
+ * kirish akkauntini BIR amalda ochadi: `POST /api/platform/companies`.
  *
- * Majburiy maydonlar:
- *   1. Kompaniya nomi
- *   2. Biznes egasining telefon raqami (username sifatida)
- *   3. Dastlabki parol
- *
- * MUHIM: kirish akkauntlari Admin panel -> Foydalanuvchilar -> "Yangi
- * foydalanuvchi" orqali yaratiladi. Bu forma kompaniya yozuvini yaratadi va
- * biznes egasi uchun kerakli ma'lumotlarni ko'rsatadi.
+ * Server bitta tranzaksiyada yaratadi: kompaniya, "Asosiy filial", standart rollar,
+ * "Asosiy ombor", hisoblar rejasi va egasining "Business Owner" a'zoligi.
+ * Telefon raqami band bo'lsa — 409 (xabar ko'rsatiladi).
  */
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useMutation, useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
-import type { Id } from "@/convex/_generated/dataModel";
-import { ConvexError } from "convex/values";
 import { toast } from "sonner";
 import {
   Building2, PlusCircle, Phone, Lock, Eye, EyeOff,
-  Info, Copy, Check, AlertCircle,
+  Info, Copy, Check, AlertCircle, User,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Button } from "@/components/ui/button.tsx";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select.tsx";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation } from "@/lib/query.ts";
 
 const schema = z.object({
-  companyName:   z.string().min(2, "Kompaniya nomi kamida 2 ta belgi"),
-  ownerPhone:    z.string().min(9, "Telefon raqam majburiy").regex(/^\+?[0-9]{9,15}$/, "Telefon raqam noto'g'ri"),
-  ownerPassword: z.string().min(6, "Parol kamida 6 ta belgi"),
-  country:       z.string().min(1, "Davlat majburiy"),
-  currency:      z.string().min(1, "Valyuta majburiy"),
-  legalName:     z.string().optional(),
-  taxId:         z.string().optional(),
-  email:         z.string().optional(),
-  address:       z.string().optional(),
-  city:          z.string().optional(),
-  ownerUserId:   z.string().optional(),
+  companyName:   z.string().trim().min(2, "Kompaniya nomi kamida 2 ta belgi").max(200),
+  ownerName:     z.string().max(200).optional(),
+  ownerPhone:    z.string().trim().min(9, "Telefon raqam majburiy").regex(/^\+?[0-9\s-]{9,20}$/, "Telefon raqam noto'g'ri"),
+  ownerPassword: z.string().min(8, "Parol kamida 8 ta belgi").max(256),
+  country:       z.string().trim().regex(/^[A-Za-z]{2}$/, "2 harfli kod, masalan UZ"),
+  currency:      z.string().trim().regex(/^[A-Za-z]{3}$/, "3 harfli kod, masalan UZS"),
+  legalName:     z.string().max(300).optional(),
+  taxId:         z.string().max(32).optional(),
+  address:       z.string().max(500).optional(),
+  city:          z.string().max(100).optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
 
+type CreatedCompany = {
+  company: { id: string; name: string; slug: string | null; status: string; trialEndsAt: string | null };
+  owner: { id: string; phone: string; name: string | null };
+};
+
+const DEFAULTS: Partial<FormValues> = { country: "UZ", currency: "UZS" };
+
 const inputClass = "bg-white/5 border-white/10 text-white placeholder:text-white/30 focus-visible:ring-primary/40";
 const labelClass = "text-xs text-white/50";
+
+/** Bo'sh ixtiyoriy maydon yuborilmaydi (API `min(1)` talab qiladi). */
+const optional = (value?: string) => value?.trim() || undefined;
 
 function CopyBtn({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -69,58 +68,47 @@ function CopyBtn({ text }: { text: string }) {
 }
 
 export default function AdminCreateCompany() {
-  const createCompany = useMutation(api.companies.platformCreateCompany);
-  const users = useQuery(api.companies.platformListAllUsers);
-  const [submitting, setSubmitting] = useState(false);
+  const createCompany = useApiMutation(
+    (body: Record<string, unknown>) => api.post<CreatedCompany>("/api/platform/companies", body),
+    { invalidate: ["/api/platform"] },
+  );
   const [showPw, setShowPw] = useState(false);
   const [created, setCreated] = useState<{ companyName: string; phone: string; password: string; slug: string } | null>(null);
 
   const {
-    register, handleSubmit, reset, setValue, watch,
+    register, handleSubmit, reset,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { country: "UZ", currency: "UZS", ownerUserId: "none" },
+    defaultValues: DEFAULTS,
   });
 
-  const ownerUserId = watch("ownerUserId");
-  const watchPhone  = watch("ownerPhone");
-  const watchPw     = watch("ownerPassword");
-
   const onSubmit = async (values: FormValues) => {
-    setSubmitting(true);
     try {
-      const result = await createCompany({
-        companyName: values.companyName,
-        country:     values.country,
-        currency:    values.currency,
-        legalName:   values.legalName || undefined,
-        taxId:       values.taxId || undefined,
-        email:       values.email || undefined,
-        phone:       values.ownerPhone || undefined,
-        address:     values.address || undefined,
-        city:        values.city || undefined,
-        ownerUserId:
-          values.ownerUserId && values.ownerUserId !== "none"
-            ? (values.ownerUserId as Id<"users">)
-            : undefined,
+      const result = await createCompany.mutateAsync({
+        name:      values.companyName.trim(),
+        country:   values.country.trim().toUpperCase(),
+        currency:  values.currency.trim().toUpperCase(),
+        legalName: optional(values.legalName),
+        taxId:     optional(values.taxId),
+        address:   optional(values.address),
+        city:      optional(values.city),
+        owner: {
+          phone:    values.ownerPhone.trim(),
+          password: values.ownerPassword,
+          name:     optional(values.ownerName),
+        },
       });
       setCreated({
-        companyName: values.companyName,
-        phone: values.ownerPhone,
+        companyName: result.company.name,
+        phone: result.owner.phone,
         password: values.ownerPassword,
-        slug: result?.slug ?? "",
+        slug: result.company.slug ?? "",
       });
-      toast.success("Kompaniya yaratildi");
-      reset({ country: "UZ", currency: "UZS", ownerUserId: "none" });
+      toast.success("Kompaniya va egasining akkaunti yaratildi");
+      reset(DEFAULTS);
     } catch (err) {
-      const message =
-        err instanceof ConvexError
-          ? (err.data as { message?: string }).message ?? "Xatolik yuz berdi"
-          : "Xatolik yuz berdi";
-      toast.error(message);
-    } finally {
-      setSubmitting(false);
+      toast.error(errorMessage(err));
     }
   };
 
@@ -132,20 +120,18 @@ export default function AdminCreateCompany() {
           Kompaniya yaratish
         </h1>
         <p className="text-sm text-white/40 mt-0.5">
-          Platforma nomidan yangi kompaniya (tenant) yarating
+          Yangi kompaniya (tenant) va biznes egasining kirish akkaunti
         </p>
       </div>
 
-      {/* OIDC akkaunt eslatmasi */}
       <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-500/8 border border-blue-500/20">
         <Info className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
         <div className="text-xs text-blue-300/80 space-y-1">
-          <p className="font-semibold text-blue-300">Muhim: kirish akkauntini ham yaratish kerak</p>
+          <p className="font-semibold text-blue-300">Egasi akkaunti shu yerda ochiladi</p>
           <p>
-            Bu forma faqat kompaniya yozuvini yaratadi. Biznes egasi tizimga kirishi uchun
-            <strong>{" "}Foydalanuvchilar{" "}</strong> bo'limidagi{" "}
-            <strong>"Yangi foydalanuvchi"</strong> tugmasi orqali telefon raqam va
-            parol bilan akkaunt oching.
+            Telefon raqam — login, parol — dastlabki parol. Biznes egasi kirgach
+            Sozlamalar → Xavfsizlik bo'limida parolni almashtiradi va
+            Sozlamalar → Foydalanuvchilar bo'limida xodimlar loginini o'zi ochadi.
           </p>
         </div>
       </div>
@@ -160,18 +146,18 @@ export default function AdminCreateCompany() {
             </p>
           </div>
           <p className="text-xs text-green-300/70">
-            Quyidagi ma'lumotlarni biznes egasiga bering va Foydalanuvchilar bo'limida akkaunt oching:
+            Quyidagi ma'lumotlarni biznes egasiga xavfsiz kanal orqali bering:
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <CredBox label="Telefon / Username" value={created.phone} />
+            <CredBox label="Telefon / Login" value={created.phone} />
             <CredBox label="Dastlabki parol" value={created.password} secret />
             {created.slug && <CredBox label="Portal URL" value={`app.bum-erp.uz/t/${created.slug}`} />}
           </div>
           <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
             <AlertCircle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
             <p className="text-xs text-amber-300/80">
-              Parolni xavfsiz saqlang. Keyinroq ko'rish imkoni yo'q.
-              Biznes egasi kirganidan keyin parolni o'zgartirishi mumkin.
+              Parol serverda ochiq saqlanmaydi — bu oynadan keyin uni ko'rib bo'lmaydi.
+              Unutilsa, Foydalanuvchilar bo'limida yangi parol o'rnatiladi.
             </p>
           </div>
           <Button
@@ -217,9 +203,6 @@ export default function AdminCreateCompany() {
                     className={inputClass}
                     type="tel"
                   />
-                  <p className="text-[11px] text-white/25">
-                    Bu telefon raqam tizimga kirishda login sifatida ishlatiladi
-                  </p>
                   {errors.ownerPhone && <p className="text-xs text-red-400">{errors.ownerPhone.message}</p>}
                 </div>
 
@@ -232,8 +215,9 @@ export default function AdminCreateCompany() {
                     <Input
                       {...register("ownerPassword")}
                       type={showPw ? "text" : "password"}
-                      placeholder="kamida 6 ta belgi"
+                      placeholder="kamida 8 ta belgi"
                       className={`${inputClass} pr-10`}
+                      autoComplete="new-password"
                     />
                     <button
                       type="button"
@@ -243,10 +227,15 @@ export default function AdminCreateCompany() {
                       {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
-                  <p className="text-[11px] text-white/25">
-                    Biznes egasi kirganidan keyin o'zgartirishi mumkin. Parolni xavfsiz saqlang.
-                  </p>
                   {errors.ownerPassword && <p className="text-xs text-red-400">{errors.ownerPassword.message}</p>}
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className={`${labelClass} flex items-center gap-1.5`}>
+                    <User className="h-3 w-3" />
+                    Biznes egasining ismi
+                  </Label>
+                  <Input {...register("ownerName")} placeholder="Aziz Karimov" className={inputClass} />
                 </div>
               </div>
 
@@ -254,13 +243,13 @@ export default function AdminCreateCompany() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label className={labelClass}>Davlat *</Label>
-                  <Input {...register("country")} placeholder="UZ" className={inputClass} />
+                  <Input {...register("country")} placeholder="UZ" className={inputClass} maxLength={2} />
                   {errors.country && <p className="text-xs text-red-400">{errors.country.message}</p>}
                 </div>
 
                 <div className="space-y-1.5">
                   <Label className={labelClass}>Valyuta *</Label>
-                  <Input {...register("currency")} placeholder="UZS" className={inputClass} />
+                  <Input {...register("currency")} placeholder="UZS" className={inputClass} maxLength={3} />
                   {errors.currency && <p className="text-xs text-red-400">{errors.currency.message}</p>}
                 </div>
 
@@ -275,49 +264,20 @@ export default function AdminCreateCompany() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className={labelClass}>Email</Label>
-                  <Input {...register("email")} placeholder="company@example.com" className={inputClass} />
-                </div>
-
-                <div className="space-y-1.5">
                   <Label className={labelClass}>Shahar</Label>
                   <Input {...register("city")} placeholder="Toshkent" className={inputClass} />
                 </div>
 
-                <div className="space-y-1.5 sm:col-span-2">
+                <div className="space-y-1.5">
                   <Label className={labelClass}>Manzil</Label>
                   <Input {...register("address")} placeholder="Ko'cha, uy" className={inputClass} />
                 </div>
-
-                {/* Optional: link to existing user */}
-                <div className="space-y-1.5 sm:col-span-2">
-                  <Label className={labelClass}>Mavjud foydalanuvchiga biriktirish (ixtiyoriy)</Label>
-                  <Select
-                    value={ownerUserId ?? "none"}
-                    onValueChange={(val) => setValue("ownerUserId", val)}
-                  >
-                    <SelectTrigger className={inputClass}>
-                      <SelectValue placeholder="Foydalanuvchi tanlang" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Egasiz (keyinroq biriktiriladi)</SelectItem>
-                      {(users ?? []).map((u) => (
-                        <SelectItem key={u._id} value={u._id}>
-                          {u.name ?? u.email ?? u._id}
-                          {u.email ? ` (${u.email})` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-white/30">
-                    Tanlangan foydalanuvchi "Business Owner" sifatida biriktiriladi
-                  </p>
-                </div>
+                {/* API'da yo'q: mavjud foydalanuvchini egasi qilib biriktirish — egasi har doim yangi akkaunt */}
               </div>
 
               <div className="flex justify-end pt-1">
-                <Button type="submit" disabled={submitting} className="gap-2">
-                  {submitting ? (
+                <Button type="submit" disabled={createCompany.isPending} className="gap-2">
+                  {createCompany.isPending ? (
                     <><span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Yaratilmoqda...</>
                   ) : (
                     <><PlusCircle className="h-4 w-4" />Kompaniya yaratish</>
@@ -328,37 +288,6 @@ export default function AdminCreateCompany() {
           </CardContent>
         </Card>
       )}
-
-      {/* Akkaunt yaratish bo'yicha qadamlar */}
-      <Card className="bg-white/5 border-white/8">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm text-white/80 flex items-center gap-2">
-            <Info className="h-4 w-4 text-blue-400" />
-            Kirish akkaunti yaratish tartibi
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ol className="space-y-2.5 text-xs text-white/50">
-            {[
-              ["Admin panel -> Foydalanuvchilar", "Chap menyudagi Foydalanuvchilar bo'limi"],
-              ["\"Yangi foydalanuvchi\" tugmasini bosing", "O'ng yuqoridagi tugma"],
-              ["Telefon raqamni kiriting", "Masalan: +998901234567 — bu login bo'ladi"],
-              ["Parol o'ylab toping", "Kamida 8 ta belgi"],
-              ["Yarating va biznes egasiga yuboring", "Endi biznes egasi shu ma'lumotlar bilan tizimga kira oladi"],
-            ].map(([title, desc], i) => (
-              <li key={i} className="flex items-start gap-2.5">
-                <span className="h-5 w-5 rounded-full bg-white/10 text-white/50 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
-                  {i + 1}
-                </span>
-                <div>
-                  <p className="text-white/70 font-medium">{title}</p>
-                  <p className="text-white/35 mt-0.5">{desc}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </CardContent>
-      </Card>
     </div>
   );
 }

@@ -1,29 +1,29 @@
 /**
- * Onboarding / Company Registration page.
+ * Onboarding — o'zi ro'yxatdan o'tish (`/api/registration`).
  *
- * Two code paths:
- *   A. New user → 5-step wizard → registerCompany → dashboard
- *   B. Platform admin with pre-existing data → Quick Setup card (1-click)
+ *   - `GET /api/registration` → `{ enabled }`; o'chiq bo'lsa "yopiq" ekrani (standart holat)
+ *   - `POST /api/registration` yangi kompaniya VA yangi ega akkauntini ochadi (telefon + parol);
+ *     201 da sessiya cookie'si allaqachon o'rnatilgan — /me keshi yangilanib dashboard'ga o'tiladi
+ *   - Kirgan foydalanuvchi bu yerda kompaniya ocholmaydi (API ro'yxatdan o'tish yangi akkaunt yaratadi):
+ *     platforma admini — Admin panel → Yangi kompaniya, boshqalar — platforma adminiga murojaat
  *
- * Collected data (as per spec):
- *   USER: name/email/phone are already on the user record from the OIDC provider
- *   COMPANY: legalName, displayName, taxId, country, region, city, address, phone, email, currency, language
- *   BRANCH: name, address, phone, city
+ * API faqat quyidagilarni qabul qiladi: kompaniya nomi, ega ismi, telefon, parol, shahar, manzil,
+ * davlat, valyuta, til. Yuridik nom, STIR va boshqalar keyin Sozlamalar → Kompaniya bo'limida.
+ * Asosiy filial, ombor, rollar va hisoblar rejasi serverda avtomatik yaratiladi.
  */
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { useNavigate, useParams, Navigate } from "react-router-dom";
-import { useMutation, useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
-import { isAdminSubdomain } from "@/lib/subdomain.ts";
+import { useNavigate, useParams, Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { toast } from "sonner";
+import { format } from "date-fns";
 import {
-  Building2, MapPin, Globe, ArrowRight, ArrowLeft,
-  CheckCircle, Layers, Sparkles, DatabaseZap, Loader2,
-  User, GitBranch, Settings2,
+  Building2, MapPin, ArrowRight, ArrowLeft,
+  CheckCircle, Layers, Sparkles, Loader2,
+  Settings2, User, Shield, LogOut,
 } from "lucide-react";
 import {
   Select,
@@ -32,15 +32,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select.tsx";
+import { api, errorMessage } from "@/lib/api.ts";
+import { AUTH_ME_KEY, useApiQuery } from "@/lib/query.ts";
+import { useAuth, useCurrentUser, type Me } from "@/hooks/use-auth.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STEPS = [
-  { id: "welcome",    title: "Xush kelibsiz!",              icon: Layers,    subtitle: "BUM ERP — O'zbekiston biznesiga mo'ljallangan SaaS ERP" },
-  { id: "company",    title: "Kompaniya ma'lumotlari",      icon: Building2, subtitle: "Yuridik va ko'rsatma nomini kiriting" },
-  { id: "location",   title: "Joylashuv va sozlamalar",     icon: MapPin,    subtitle: "Manzil, valyuta va til" },
-  { id: "branch",     title: "Birinchi filial",             icon: GitBranch, subtitle: "Kompaniyangizning birinchi filialni sozlang" },
-  { id: "finish",     title: "Tayyor!",                     icon: CheckCircle, subtitle: "Hamma narsa sozlandi, ERP'ni ishga tushiramiz" },
+  { id: "welcome",  title: "Xush kelibsiz!",            icon: Layers,      subtitle: "BUM ERP — O'zbekiston biznesiga mo'ljallangan SaaS ERP" },
+  { id: "company",  title: "Kompaniya va hisob",        icon: Building2,   subtitle: "Kompaniya nomi va kirish ma'lumotlaringiz" },
+  { id: "location", title: "Joylashuv va sozlamalar",   icon: MapPin,      subtitle: "Manzil, valyuta va til" },
+  { id: "finish",   title: "Tayyor!",                   icon: CheckCircle, subtitle: "Ma'lumotlarni tekshiring va ERP'ni ishga tushiring" },
 ];
 
 const COUNTRIES = [
@@ -57,18 +59,13 @@ const CURRENCIES = [
   { code: "RUB", symbol: "₽",   name: "Rossiya rubli" },
   { code: "KZT", symbol: "₸",   name: "Qozog'iston tengesi" },
   { code: "EUR", symbol: "€",   name: "Yevro" },
+  { code: "TRY", symbol: "₺",   name: "Turk lirasi" },
 ];
 
 const LANGUAGES = [
   { code: "uz", name: "O'zbekcha",  flag: "🇺🇿" },
   { code: "ru", name: "Русский",    flag: "🇷🇺" },
   { code: "kk", name: "Қазақша",   flag: "🇰🇿" },
-];
-
-const UZ_REGIONS = [
-  "Toshkent shahri", "Toshkent viloyati", "Samarqand", "Buxoro", "Farg'ona",
-  "Andijon", "Namangan", "Xorazm", "Qashqadaryo", "Surxondaryo",
-  "Sirdaryo", "Jizzax", "Navoiy", "Qoraqalpog'iston",
 ];
 
 const FEATURES = [
@@ -81,120 +78,29 @@ const FEATURES = [
 ];
 
 type FormState = {
-  companyName: string; legalName: string; taxId: string; phone: string;
-  email: string; website: string;
-  address: string; city: string; region: string; country: string;
+  companyName: string; ownerName: string; phone: string; password: string; confirmPassword: string;
+  address: string; city: string; country: string;
   currency: string; language: string;
-  branchName: string; branchAddress: string; branchPhone: string; branchCity: string;
 };
 
 const INITIAL_FORM: FormState = {
-  companyName: "", legalName: "", taxId: "", phone: "",
-  email: "", website: "",
-  address: "", city: "", region: "", country: "UZ",
+  companyName: "", ownerName: "", phone: "", password: "", confirmPassword: "",
+  address: "", city: "", country: "UZ",
   currency: "UZS", language: "uz",
-  branchName: "Asosiy filial", branchAddress: "", branchPhone: "", branchCity: "",
 };
 
+type RegistrationResult = {
+  company: { id: string; name: string; slug: string | null; status: string; trialEndsAt: string | null };
+  user: Me;
+};
+
+const inputDark = "bg-white/8 border-white/15 text-white placeholder:text-white/30 focus:border-primary/60";
+
 export default function OnboardingPage() {
-  const { lng = "uz" } = useParams<{ lng: string }>();
-  const navigate  = useNavigate();
-  const register  = useMutation(api.companies.registerCompany);
-  const migrate   = useMutation(api.companies.migrateExistingDataToTenant);
-  const currentUser = useQuery(api.users.getCurrentUser);
-  const platformSettings = useQuery(api.companies.platformGetSettings, {});
-  const registrationEnabled = useQuery(api.companies.isRegistrationEnabled, {});
+  const currentUser = useCurrentUser();
+  const registration = useApiQuery<{ enabled: boolean }>("/api/registration");
 
-  const [step,    setStep]    = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState<FormState>(INITIAL_FORM);
-
-  const upd = (key: keyof FormState, value: string) => {
-    setForm((p) => {
-      const next = { ...p, [key]: value };
-      // Auto-fill currency when country changes
-      if (key === "country") {
-        const found = COUNTRIES.find((c) => c.code === value);
-        if (found) next.currency = found.currency;
-      }
-      return next;
-    });
-  };
-
-  const canProceed = (): boolean => {
-    if (step === 1) return form.companyName.trim().length >= 2;
-    if (step === 2) return !!form.country && !!form.currency;
-    if (step === 3) return form.branchName.trim().length >= 2;
-    return true;
-  };
-
-  const handleFinish = async () => {
-    setLoading(true);
-    try {
-      const result = await register({
-        companyName:   form.companyName,
-        legalName:     form.legalName     || undefined,
-        taxId:         form.taxId         || undefined,
-        phone:         form.phone         || undefined,
-        email:         form.email         || undefined,
-        website:       form.website       || undefined,
-        address:       form.address       || undefined,
-        city:          form.city          || undefined,
-        region:        form.region        || undefined,
-        country:       form.country,
-        currency:      form.currency,
-        language:      form.language,
-        branchName:    form.branchName,
-        branchAddress: form.branchAddress || undefined,
-        branchPhone:   form.branchPhone   || undefined,
-        branchCity:    form.branchCity    || form.city || undefined,
-      });
-      toast.success("Kompaniya muvaffaqiyatli yaratildi!");
-      // Redirect to tenant portal URL if slug was generated, otherwise dashboard
-      if (result.slug) {
-        navigate(`/t/${result.slug}`, { replace: true });
-      } else {
-        navigate(`/${lng}/dashboard`, { replace: true });
-      }
-    } catch {
-      toast.error("Xatolik yuz berdi. Qayta urinib ko'ring.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleQuickSetup = async () => {
-    if (!form.companyName.trim() || form.companyName.trim().length < 2) {
-      toast.error("Kompaniya nomini kiriting");
-      return;
-    }
-    setLoading(true);
-    try {
-      await register({
-        companyName: form.companyName,
-        country:     form.country,
-        currency:    form.currency,
-        language:    form.language,
-        branchName:  "Asosiy filial",
-      });
-      const result = await migrate({});
-      toast.success(
-        result.migrated > 0
-          ? `Kompaniya yaratildi. ${result.migrated} ta yozuv ko'chirildi!`
-          : "Kompaniya muvaffaqiyatli yaratildi!",
-      );
-      navigate(`/${lng}/dashboard`, { replace: true });
-    } catch {
-      toast.error("Xatolik yuz berdi. Qayta urinib ko'ring.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const [showWizard, setShowWizard] = useState(false);
-  const isPlatformAdmin = currentUser?.isPlatformAdmin === true;
-  const isLoading       = currentUser === undefined || registrationEnabled === undefined;
-  const trialDays       = platformSettings?.defaultTrialDays ?? 14;
+  const isLoading = currentUser === undefined || registration.isLoading;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[oklch(0.11_0.025_255)] via-[oklch(0.14_0.03_260)] to-[oklch(0.18_0.04_270)] flex items-center justify-center p-4">
@@ -225,157 +131,203 @@ export default function OnboardingPage() {
           </div>
         </motion.div>
 
-        {/* Loading */}
-        {isLoading && (
+        {isLoading ? (
           <div className="bg-white/5 backdrop-blur border border-white/10 rounded-2xl p-10 shadow-2xl flex items-center justify-center gap-3 text-white/60">
             <Loader2 className="h-5 w-5 animate-spin" />
             <span className="text-sm">Yuklanmoqda...</span>
           </div>
-        )}
-
-        {/* Platform admin quick-setup */}
-        {!isLoading && isPlatformAdmin && !showWizard && (
-          <QuickSetupCard
-            form={form}
-            upd={upd}
-            loading={loading}
-            onSetup={handleQuickSetup}
-            onShowWizard={() => setShowWizard(true)}
-          />
-        )}
-
-        {/* Registration disabled screen — only for non-admin users */}
-        {!isLoading && !isPlatformAdmin && registrationEnabled === false && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white/[0.06] backdrop-blur-md border border-white/10 rounded-2xl p-10 shadow-2xl text-center space-y-4"
-          >
-            <div className="h-16 w-16 rounded-2xl bg-amber-500/15 border border-amber-500/20 flex items-center justify-center mx-auto">
-              <Settings2 className="h-8 w-8 text-amber-400" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-white">Ro'yxatdan o'tish yopiq</h2>
-              <p className="text-sm text-white/50 mt-2">
-                Hozirda yangi kompaniya ro'yxatdan o'tishi to'xtatilgan.
-                Platforma admini bilan bog'laning.
-              </p>
-            </div>
-            <p className="text-xs text-white/30">support@bum-erp.uz</p>
-          </motion.div>
-        )}
-
-        {/* Normal wizard (new user OR admin who clicked "full wizard") */}
-        {!isLoading && (isPlatformAdmin || registrationEnabled !== false) && (!isPlatformAdmin || showWizard) && (
-          <>
-            {/* Progress dots */}
-            <div className="flex items-center justify-center gap-1.5 mb-6">
-              {STEPS.map((s, i) => (
-                <div key={s.id} className="flex items-center gap-1.5">
-                  <div className={[
-                    "flex items-center justify-center rounded-full text-[11px] font-semibold transition-all duration-300",
-                    i < step
-                      ? "h-7 w-7 bg-green-500 text-white shadow shadow-green-500/40"
-                      : i === step
-                        ? "h-8 w-8 bg-primary text-white shadow-lg shadow-primary/40 ring-2 ring-primary/30"
-                        : "h-7 w-7 bg-white/10 text-white/40",
-                  ].join(" ")}>
-                    {i < step ? <CheckCircle className="h-3.5 w-3.5" /> : i + 1}
-                  </div>
-                  {i < STEPS.length - 1 && (
-                    <div className={`h-px w-6 transition-all ${i < step ? "bg-green-500" : "bg-white/15"}`} />
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={step}
-                initial={{ opacity: 0, x: 24 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -24 }}
-                transition={{ duration: 0.2 }}
-                className="bg-white/[0.06] backdrop-blur-md border border-white/10 rounded-2xl p-7 shadow-2xl"
-              >
-                {/* Step header */}
-                <div className="flex items-center gap-3 mb-6">
-                  {(() => { const Icon = STEPS[step].icon; return (
-                    <div className="h-10 w-10 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center shrink-0">
-                      <Icon className="h-5 w-5 text-primary" />
-                    </div>
-                  ); })()}
-                  <div>
-                    <h2 className="text-lg font-bold text-white leading-none">{STEPS[step].title}</h2>
-                    <p className="text-xs text-white/45 mt-1">{STEPS[step].subtitle}</p>
-                  </div>
-                </div>
-
-                {/* Step body */}
-                <StepContent step={step} form={form} upd={upd} trialDays={trialDays} />
-
-                {/* Navigation */}
-                <div className="flex gap-3 mt-7">
-                  {step > 0 && step < STEPS.length - 1 && (
-                    <Button variant="secondary" onClick={() => setStep((s) => s - 1)} disabled={loading}>
-                      <ArrowLeft className="h-4 w-4 mr-1" />
-                      Orqaga
-                    </Button>
-                  )}
-                  <div className="flex-1" />
-                  {step === 0 && (
-                    <Button onClick={() => setStep(1)} className="gap-1.5">
-                      Boshlash
-                      <ArrowRight className="h-4 w-4" />
-                    </Button>
-                  )}
-                  {step > 0 && step < STEPS.length - 2 && (
-                    <Button onClick={() => setStep((s) => s + 1)} disabled={!canProceed()} className="gap-1.5">
-                      Davom etish
-                      <ArrowRight className="h-4 w-4" />
-                    </Button>
-                  )}
-                  {step === STEPS.length - 2 && (
-                    <Button onClick={() => { if (canProceed()) setStep(STEPS.length - 1); }} disabled={!canProceed()} className="gap-1.5">
-                      Ko'rib chiqish
-                      <ArrowRight className="h-4 w-4" />
-                    </Button>
-                  )}
-                  {step === STEPS.length - 1 && (
-                    <Button onClick={handleFinish} disabled={loading} className="gap-1.5 min-w-[160px]">
-                      {loading
-                        ? <><Loader2 className="h-4 w-4 animate-spin" />Yaratilmoqda...</>
-                        : <><CheckCircle className="h-4 w-4" />ERP'ni ishga tushirish</>
-                      }
-                    </Button>
-                  )}
-                </div>
-              </motion.div>
-            </AnimatePresence>
-
-            {/* Sign out link */}
-            <p className="text-center text-xs text-white/30 mt-4">
-              Allaqachon kompaniyangiz bormi?{" "}
-              <a href="/uz/select-company" className="text-primary/80 underline cursor-pointer hover:text-primary">
-                Kompaniyani tanlash
-              </a>
-            </p>
-          </>
+        ) : currentUser ? (
+          <SignedInCard user={currentUser} />
+        ) : registration.data?.enabled !== true ? (
+          <ClosedCard failed={Boolean(registration.error)} />
+        ) : (
+          <RegistrationWizard />
         )}
       </div>
     </div>
   );
 }
 
+// ─── Registration wizard ──────────────────────────────────────────────────────
+
+function RegistrationWizard() {
+  const { lng = "uz" } = useParams<{ lng: string }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const [step,    setStep]    = useState(0);
+  const [form, setForm] = useState<FormState>(INITIAL_FORM);
+  const register = useApiMutation();
+
+  const upd = (key: keyof FormState, value: string) => {
+    setForm((p) => {
+      const next = { ...p, [key]: value };
+      // Auto-fill currency when country changes
+      if (key === "country") {
+        const found = COUNTRIES.find((c) => c.code === value);
+        if (found) next.currency = found.currency;
+      }
+      return next;
+    });
+  };
+
+  const canProceed = (): boolean => {
+    if (step === 1) {
+      return (
+        form.companyName.trim().length >= 2 &&
+        form.phone.trim().length >= 9 &&
+        form.password.length > 0 &&
+        form.password === form.confirmPassword
+      );
+    }
+    if (step === 2) return !!form.country && !!form.currency;
+    return true;
+  };
+
+  const handleFinish = async () => {
+    try {
+      const result = await register.mutateAsync({
+        companyName: form.companyName.trim(),
+        ownerName:   form.ownerName.trim() || undefined,
+        phone:       form.phone.trim(),
+        password:    form.password,
+        city:        form.city.trim() || undefined,
+        address:     form.address.trim() || undefined,
+        country:     form.country,
+        currency:    form.currency,
+        language:    form.language,
+      });
+      // Sessiya cookie'si serverda o'rnatildi — boshqa keshlar tozalanib, joriy foydalanuvchi yoziladi
+      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== AUTH_ME_KEY[0] });
+      queryClient.setQueryData(AUTH_ME_KEY, result.user);
+      toast.success("Kompaniya muvaffaqiyatli yaratildi!", {
+        description: result.company.trialEndsAt
+          ? `Sinov muddati: ${format(new Date(result.company.trialEndsAt), "dd.MM.yyyy")} gacha`
+          : undefined,
+      });
+      navigate(`/${lng}/dashboard`, { replace: true });
+    } catch (err) {
+      toast.error(errorMessage(err, "Xatolik yuz berdi. Qayta urinib ko'ring."));
+      // Telefon band / parol talabi — ma'lumot kiritish qadamiga qaytiladi
+      if (err instanceof Error) setStep(1);
+    }
+  };
+
+  const StepIcon = STEPS[step]!.icon;
+
+  return (
+    <>
+      {/* Progress dots */}
+      <div className="flex items-center justify-center gap-1.5 mb-6">
+        {STEPS.map((s, i) => (
+          <div key={s.id} className="flex items-center gap-1.5">
+            <div className={[
+              "flex items-center justify-center rounded-full text-[11px] font-semibold transition-all duration-300",
+              i < step
+                ? "h-7 w-7 bg-green-500 text-white shadow shadow-green-500/40"
+                : i === step
+                  ? "h-8 w-8 bg-primary text-white shadow-lg shadow-primary/40 ring-2 ring-primary/30"
+                  : "h-7 w-7 bg-white/10 text-white/40",
+            ].join(" ")}>
+              {i < step ? <CheckCircle className="h-3.5 w-3.5" /> : i + 1}
+            </div>
+            {i < STEPS.length - 1 && (
+              <div className={`h-px w-6 transition-all ${i < step ? "bg-green-500" : "bg-white/15"}`} />
+            )}
+          </div>
+        ))}
+      </div>
+
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={step}
+          initial={{ opacity: 0, x: 24 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -24 }}
+          transition={{ duration: 0.2 }}
+          className="bg-white/[0.06] backdrop-blur-md border border-white/10 rounded-2xl p-7 shadow-2xl"
+        >
+          {/* Step header */}
+          <div className="flex items-center gap-3 mb-6">
+            <div className="h-10 w-10 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center shrink-0">
+              <StepIcon className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white leading-none">{STEPS[step]!.title}</h2>
+              <p className="text-xs text-white/45 mt-1">{STEPS[step]!.subtitle}</p>
+            </div>
+          </div>
+
+          {/* Step body */}
+          <StepContent step={step} form={form} upd={upd} />
+
+          {/* Navigation */}
+          <div className="flex gap-3 mt-7">
+            {step > 0 && (
+              <Button variant="secondary" onClick={() => setStep((s) => s - 1)} disabled={register.isPending}>
+                <ArrowLeft className="h-4 w-4 mr-1" />
+                Orqaga
+              </Button>
+            )}
+            <div className="flex-1" />
+            {step === 0 && (
+              <Button onClick={() => setStep(1)} className="gap-1.5">
+                Boshlash
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            )}
+            {step > 0 && step < STEPS.length - 1 && (
+              <Button onClick={() => setStep((s) => s + 1)} disabled={!canProceed()} className="gap-1.5">
+                {step === STEPS.length - 2 ? "Ko'rib chiqish" : "Davom etish"}
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            )}
+            {step === STEPS.length - 1 && (
+              <Button onClick={() => { void handleFinish(); }} disabled={register.isPending} className="gap-1.5 min-w-[160px]">
+                {register.isPending
+                  ? <><Loader2 className="h-4 w-4 animate-spin" />Yaratilmoqda...</>
+                  : <><CheckCircle className="h-4 w-4" />ERP'ni ishga tushirish</>
+                }
+              </Button>
+            )}
+          </div>
+        </motion.div>
+      </AnimatePresence>
+
+      <p className="text-center text-xs text-white/30 mt-4">
+        Hisobingiz bormi?{" "}
+        <Link to={`/${lng}/login`} className="text-primary/80 underline cursor-pointer hover:text-primary">
+          Tizimga kirish
+        </Link>
+      </p>
+    </>
+  );
+}
+
+/** `POST /api/registration` — onboarding ichida alohida hook (kesh qo'lda yangilanadi). */
+function useApiMutation() {
+  const [isPending, setPending] = useState(false);
+  return {
+    isPending,
+    mutateAsync: async (body: Record<string, unknown>) => {
+      setPending(true);
+      try {
+        return await api.post<RegistrationResult>("/api/registration", body);
+      } finally {
+        setPending(false);
+      }
+    },
+  };
+}
+
 // ─── Step Content ─────────────────────────────────────────────────────────────
 
 function StepContent({
-  step, form, upd, trialDays,
+  step, form, upd,
 }: {
   step: number;
   form: FormState;
   upd: (k: keyof FormState, v: string) => void;
-  trialDays: number;
 }) {
 
   // Step 0 — Welcome / features overview
@@ -394,63 +346,61 @@ function StepContent({
     </div>
   );
 
-  // Step 1 — Company info
+  // Step 1 — Company + owner account
   if (step === 1) return (
     <div className="space-y-4">
-      <Field label="Kompaniya nomi (ko'rsatma)" required dark>
+      <Field label="Kompaniya nomi" required dark>
         <Input
           placeholder="Aziz Savdo"
           value={form.companyName}
           onChange={(e) => upd("companyName", e.target.value)}
           autoFocus
-          className="bg-white/8 border-white/15 text-white placeholder:text-white/30 focus:border-primary/60"
+          maxLength={200}
+          className={inputDark}
         />
       </Field>
-      <Field label="Yuridik nom (to'liq)" dark>
+      <Field label="Ismingiz" dark>
         <Input
-          placeholder={'MChJ "Aziz Savdo"'}
-          value={form.legalName}
-          onChange={(e) => upd("legalName", e.target.value)}
-          className="bg-white/8 border-white/15 text-white placeholder:text-white/30 focus:border-primary/60"
+          placeholder="Aziz Karimov"
+          value={form.ownerName}
+          onChange={(e) => upd("ownerName", e.target.value)}
+          maxLength={200}
+          className={inputDark}
+        />
+      </Field>
+      <Field label="Telefon raqam (login)" required dark>
+        <Input
+          type="tel"
+          autoComplete="username"
+          placeholder="+998901234567"
+          value={form.phone}
+          onChange={(e) => upd("phone", e.target.value)}
+          className={inputDark}
         />
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="STIR / Soliq ID" dark>
+        <Field label="Parol" required dark>
           <Input
-            placeholder="123456789"
-            value={form.taxId}
-            onChange={(e) => upd("taxId", e.target.value)}
-            className="bg-white/8 border-white/15 text-white placeholder:text-white/30 focus:border-primary/60"
+            type="password"
+            autoComplete="new-password"
+            value={form.password}
+            onChange={(e) => upd("password", e.target.value)}
+            className={inputDark}
           />
         </Field>
-        <Field label="Telefon" dark>
+        <Field label="Parolni tasdiqlang" required dark>
           <Input
-            placeholder="+998 90 123 45 67"
-            value={form.phone}
-            onChange={(e) => upd("phone", e.target.value)}
-            className="bg-white/8 border-white/15 text-white placeholder:text-white/30 focus:border-primary/60"
-          />
-        </Field>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Email" dark>
-          <Input
-            type="email"
-            placeholder="info@company.uz"
-            value={form.email}
-            onChange={(e) => upd("email", e.target.value)}
-            className="bg-white/8 border-white/15 text-white placeholder:text-white/30 focus:border-primary/60"
-          />
-        </Field>
-        <Field label="Veb-sayt" dark>
-          <Input
-            placeholder="www.company.uz"
-            value={form.website}
-            onChange={(e) => upd("website", e.target.value)}
-            className="bg-white/8 border-white/15 text-white placeholder:text-white/30 focus:border-primary/60"
+            type="password"
+            autoComplete="new-password"
+            value={form.confirmPassword}
+            onChange={(e) => upd("confirmPassword", e.target.value)}
+            className={inputDark}
           />
         </Field>
       </div>
+      {form.confirmPassword && form.password !== form.confirmPassword && (
+        <p className="text-xs text-red-400">Parollar mos emas</p>
+      )}
     </div>
   );
 
@@ -470,37 +420,25 @@ function StepContent({
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Viloyat / Region" dark>
-          <Select value={form.region} onValueChange={(v) => upd("region", v)}>
-            <SelectTrigger className="bg-white/8 border-white/15 text-white">
-              <SelectValue placeholder="Tanlang" />
-            </SelectTrigger>
-            <SelectContent>
-              {UZ_REGIONS.map((r) => (
-                <SelectItem key={r} value={r}>{r}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
         <Field label="Shahar" dark>
           <Input
             placeholder="Toshkent"
             value={form.city}
             onChange={(e) => upd("city", e.target.value)}
-            className="bg-white/8 border-white/15 text-white placeholder:text-white/30 focus:border-primary/60"
-          />
-        </Field>
-        <Field label="Manzil" dark>
-          <Input
-            placeholder="Chilonzor, 1-uy"
-            value={form.address}
-            onChange={(e) => upd("address", e.target.value)}
-            className="bg-white/8 border-white/15 text-white placeholder:text-white/30 focus:border-primary/60"
+            maxLength={100}
+            className={inputDark}
           />
         </Field>
       </div>
+      <Field label="Manzil" dark>
+        <Input
+          placeholder="Chilonzor, 1-uy"
+          value={form.address}
+          onChange={(e) => upd("address", e.target.value)}
+          maxLength={500}
+          className={inputDark}
+        />
+      </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Asosiy valyuta" required dark>
           <Select value={form.currency} onValueChange={(v) => upd("currency", v)}>
@@ -530,194 +468,124 @@ function StepContent({
     </div>
   );
 
-  // Step 3 — First branch
+  // Step 3 — Review & finish
   if (step === 3) return (
-    <div className="space-y-4">
-      <div className="p-3 rounded-xl bg-primary/10 border border-primary/20 text-xs text-primary/90 flex items-start gap-2">
-        <GitBranch className="h-4 w-4 shrink-0 mt-0.5" />
-        <span>Keyinchalik Settings → Filiallar bo'limida qo'shimcha filiallar qo'shishingiz mumkin.</span>
-      </div>
-      <Field label="Filial nomi" required dark>
-        <Input
-          placeholder="Asosiy filial"
-          value={form.branchName}
-          onChange={(e) => upd("branchName", e.target.value)}
-          autoFocus
-          className="bg-white/8 border-white/15 text-white placeholder:text-white/30 focus:border-primary/60"
-        />
-      </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Filial shahri" dark>
-          <Input
-            placeholder={form.city || "Toshkent"}
-            value={form.branchCity}
-            onChange={(e) => upd("branchCity", e.target.value)}
-            className="bg-white/8 border-white/15 text-white placeholder:text-white/30 focus:border-primary/60"
-          />
-        </Field>
-        <Field label="Filial telefoni" dark>
-          <Input
-            placeholder="+998 71 123 45 67"
-            value={form.branchPhone}
-            onChange={(e) => upd("branchPhone", e.target.value)}
-            className="bg-white/8 border-white/15 text-white placeholder:text-white/30 focus:border-primary/60"
-          />
-        </Field>
-      </div>
-      <Field label="Filial manzili" dark>
-        <Input
-          placeholder="Ko'cha, bino"
-          value={form.branchAddress}
-          onChange={(e) => upd("branchAddress", e.target.value)}
-          className="bg-white/8 border-white/15 text-white placeholder:text-white/30 focus:border-primary/60"
-        />
-      </Field>
-    </div>
-  );
-
-  // Step 4 — Review & finish
-  if (step === 4) return (
     <div className="space-y-3">
-      <SummarySection title="Kompaniya" icon={Building2}>
+      <SummarySection title="Kompaniya va hisob" icon={Building2}>
         {[
-          ["Ko'rsatma nomi", form.companyName],
-          ["Yuridik nom",    form.legalName    || "—"],
-          ["STIR",           form.taxId         || "—"],
-          ["Telefon",        form.phone         || "—"],
-          ["Email",          form.email         || "—"],
+          ["Kompaniya nomi", form.companyName],
+          ["Ism",            form.ownerName || "—"],
+          ["Telefon (login)", form.phone],
         ]}
       </SummarySection>
       <SummarySection title="Joylashuv" icon={MapPin}>
         {[
           ["Davlat",  `${COUNTRIES.find((c) => c.code === form.country)?.flag ?? ""} ${COUNTRIES.find((c) => c.code === form.country)?.name ?? form.country}`],
-          ["Viloyat", form.region    || "—"],
           ["Shahar",  form.city      || "—"],
           ["Manzil",  form.address   || "—"],
           ["Valyuta", form.currency],
           ["Til",     LANGUAGES.find((l) => l.code === form.language)?.name ?? form.language],
         ]}
       </SummarySection>
-      <SummarySection title="Birinchi filial" icon={GitBranch}>
-        {[
-          ["Filial nomi",    form.branchName],
-          ["Filial shahri",  form.branchCity    || form.city || "—"],
-          ["Filial telefoni",form.branchPhone   || "—"],
-        ]}
-      </SummarySection>
-      {/* Trial period notice */}
-      {trialDays > 0 && (
-        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5">
-          <Sparkles className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
-          <div className="text-xs text-amber-300/90">
-            <span className="font-semibold">Sinov muddati:</span>{" "}
-            Kompaniya yaratilgandan keyin <span className="font-bold">{trialDays} kun</span> bepul sinov rejimida ishlaydi.
-            Sinov tugagach platforma admini bilan bog'laning.
-          </div>
+      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5">
+        <Sparkles className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+        <div className="text-xs text-amber-300/90">
+          Asosiy filial, ombor, rollar va hisoblar rejasi avtomatik yaratiladi.
+          Platforma sozlamasiga ko'ra kompaniya sinov rejimida ochilishi mumkin —
+          muddat tugagach platforma admini bilan bog'laning.
         </div>
-      )}
-      {trialDays === 0 && (
-        <div className="p-3 rounded-xl bg-green-500/10 border border-green-500/20 flex items-start gap-2.5">
-          <CheckCircle className="h-4 w-4 text-green-400 shrink-0 mt-0.5" />
-          <div className="text-xs text-green-300/90">
-            Kompaniya <span className="font-semibold">sinov muddatisiz</span> aktiv rejimda yaratiladi.
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 
   return null;
 }
 
-// ─── Quick Setup Card ─────────────────────────────────────────────────────────
+// ─── Kirgan foydalanuvchi ─────────────────────────────────────────────────────
 
-function QuickSetupCard({
-  form, upd, loading, onSetup, onShowWizard,
-}: {
-  form: FormState;
-  upd: (k: keyof FormState, v: string) => void;
-  loading: boolean;
-  onSetup: () => void;
-  onShowWizard: () => void;
-}) {
+function SignedInCard({ user }: { user: Me }) {
+  const { lng = "uz" } = useParams<{ lng: string }>();
+  const { signout } = useAuth();
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/[0.06] backdrop-blur-md border border-white/10 rounded-2xl p-7 shadow-2xl space-y-5"
+      className="bg-white/[0.06] backdrop-blur-md border border-white/10 rounded-2xl p-8 shadow-2xl text-center space-y-5"
     >
-      <div className="flex items-center gap-3">
-        <div className="h-10 w-10 rounded-xl bg-amber-500/15 border border-amber-500/25 flex items-center justify-center">
-          <Sparkles className="h-5 w-5 text-amber-400" />
-        </div>
-        <div>
-          <h2 className="text-lg font-bold text-white leading-none">Platform Admin — Tezkor sozlash</h2>
-          <p className="text-xs text-white/45 mt-1">Siz birinchi foydalanuvchisiz — kompaniyani yarating va mavjud ma'lumotlarni ko'chiring</p>
-        </div>
+      <div className="h-16 w-16 rounded-2xl bg-primary/15 border border-primary/25 flex items-center justify-center mx-auto">
+        {user.isPlatformAdmin ? <Shield className="h-8 w-8 text-primary" /> : <User className="h-8 w-8 text-primary" />}
       </div>
 
-      <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300">
-        <DatabaseZap className="h-4 w-4 shrink-0 mt-0.5" />
-        <span>Barcha mavjud mahsulotlar, buyurtmalar, xodimlar va boshqa ma'lumotlar yangi kompaniyaga avtomatik ko'chiriladi.</span>
-      </div>
-
-      <div className="space-y-3">
-        <Field label="Kompaniya nomi" required dark>
-          <Input
-            placeholder="Aziz Savdo MChJ"
-            value={form.companyName}
-            onChange={(e) => upd("companyName", e.target.value)}
-            autoFocus
-            className="bg-white/8 border-white/15 text-white placeholder:text-white/30"
-          />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Davlat" dark>
-            <Select value={form.country} onValueChange={(v) => upd("country", v)}>
-              <SelectTrigger className="bg-white/8 border-white/15 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {COUNTRIES.map((c) => (
-                  <SelectItem key={c.code} value={c.code}>{c.flag} {c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Valyuta" dark>
-            <Select value={form.currency} onValueChange={(v) => upd("currency", v)}>
-              <SelectTrigger className="bg-white/8 border-white/15 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CURRENCIES.map((c) => (
-                  <SelectItem key={c.code} value={c.code}>{c.symbol} {c.code}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
+      {/* API'da yo'q: mavjud akkaunt uchun o'zi ikkinchi kompaniya ochish — ro'yxatdan o'tish yangi akkaunt yaratadi */}
+      {user.isPlatformAdmin ? (
+        <div className="space-y-2">
+          <h2 className="text-xl font-bold text-white">Yangi kompaniya</h2>
+          <p className="text-sm text-white/50">
+            Platforma admini kompaniyani va uning egasi loginini Admin paneldan ochadi.
+          </p>
+          <Button asChild className="mt-2">
+            <Link to={`/${lng}/admin`}>Admin paneliga o'tish</Link>
+          </Button>
         </div>
-      </div>
+      ) : user.hasCompany ? (
+        <div className="space-y-2">
+          <h2 className="text-xl font-bold text-white">Yangi kompaniya ochish</h2>
+          <p className="text-sm text-white/50">
+            Qo'shimcha kompaniyani platforma admini ochadi — support@bum-erp.uz ga murojaat qiling.
+          </p>
+          <Button asChild variant="secondary" className="mt-2">
+            <Link to={`/${lng}/dashboard`}>Dashboardga qaytish</Link>
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <h2 className="text-xl font-bold text-white">Kompaniya biriktirilmagan</h2>
+          <p className="text-sm text-white/50">
+            Hisobingiz ({user.phone}) hech bir faol kompaniyaga biriktirilmagan.
+            Kompaniya egasi yoki platforma admini bilan bog'laning.
+          </p>
+        </div>
+      )}
 
-      <Button
-        className="w-full"
-        size="lg"
-        onClick={onSetup}
-        disabled={loading || form.companyName.trim().length < 2}
+      <button
+        onClick={() => signout()}
+        className="inline-flex items-center gap-2 text-xs text-white/40 hover:text-white/70 transition-colors cursor-pointer"
       >
-        {loading
-          ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Sozlanmoqda...</>
-          : <><DatabaseZap className="h-4 w-4 mr-2" />Kompaniyani yaratish va ma'lumotlarni ko'chirish</>
-        }
-      </Button>
+        <LogOut className="h-3.5 w-3.5" />
+        Boshqa akkaunt bilan kirish
+      </button>
+    </motion.div>
+  );
+}
 
-      <p className="text-center text-xs text-white/30">
-        Yoki{" "}
-        <button onClick={onShowWizard} className="text-primary/80 underline cursor-pointer hover:text-primary">
-          to'liq wizardni oching
-        </button>
-        {" "}(qo'shimcha ma'lumotlar kiriting)
-      </p>
+// ─── Ro'yxatdan o'tish yopiq ─────────────────────────────────────────────────
+
+function ClosedCard({ failed }: { failed: boolean }) {
+  const { lng = "uz" } = useParams<{ lng: string }>();
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white/[0.06] backdrop-blur-md border border-white/10 rounded-2xl p-10 shadow-2xl text-center space-y-4"
+    >
+      <div className="h-16 w-16 rounded-2xl bg-amber-500/15 border border-amber-500/20 flex items-center justify-center mx-auto">
+        <Settings2 className="h-8 w-8 text-amber-400" />
+      </div>
+      <div>
+        <h2 className="text-xl font-bold text-white">
+          {failed ? "Server bilan aloqa yo'q" : "Ro'yxatdan o'tish yopiq"}
+        </h2>
+        <p className="text-sm text-white/50 mt-2">
+          {failed
+            ? "Keyinroq qayta urinib ko'ring."
+            : "Yangi kompaniya platforma admini tomonidan ochiladi. Platforma admini bilan bog'laning."}
+        </p>
+      </div>
+      <p className="text-xs text-white/30">support@bum-erp.uz</p>
+      <Link to={`/${lng}/login`} className="inline-block text-xs text-primary/80 underline hover:text-primary">
+        Tizimga kirish
+      </Link>
     </motion.div>
   );
 }

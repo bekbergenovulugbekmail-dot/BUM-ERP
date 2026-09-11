@@ -5,22 +5,23 @@
  * URL pattern: app.bum-erp.uz/t/alkon → ALKON company ERP
  *
  * Flow:
- *   1. Resolve slug → company (public query, safe fields only)
- *   2. If company not found / deleted → 404
+ *   1. Resolve slug → company (`GET /api/public/companies/:slug`, safe fields only)
+ *   2. If company not found → 404
  *   3. If company suspended → suspended screen
  *   4. If user not authenticated → show login button
  *   5. If user is authenticated:
- *      - verify membership (server-side, NOT client-side)
+ *      - verify membership server-side (`GET /api/public/companies/:slug/access`)
  *      - member → switch active company → redirect to /:lng/dashboard
  *      - not member → "Access Denied"
  *      - platform admin → allowed (admin can view any company)
  */
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery, useMutation } from "convex/react";
-import { AuthLoading, Authenticated, Unauthenticated } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
-import { useAuth } from "@/hooks/use-auth.ts";
+import { AuthLoading, Authenticated, Unauthenticated } from "@/components/auth-gates.tsx";
+import { useAuth, useCurrentUser } from "@/hooks/use-auth.ts";
+import { useSwitchCompany } from "@/hooks/use-company.ts";
+import { errorMessage } from "@/lib/api.ts";
+import { useApiQuery } from "@/lib/query.ts";
 import { motion } from "motion/react";
 import {
   Building2, Layers, Shield, AlertTriangle,
@@ -28,19 +29,46 @@ import {
 } from "lucide-react";
 import { SAVED_OR_DEFAULT_LOCALE } from "@/i18n.ts";
 
+type CompanyPublic = {
+  id: string;
+  name: string;
+  legalName: string | null;
+  logoUrl: string | null;
+  country: string;
+  currency: string;
+  language: string;
+  slug: string | null;
+  status: string;
+  city: string | null;
+};
+
+type TenantAccess = {
+  allowed: boolean;
+  companyId: string | null;
+  reason: "ok" | "platform_admin" | "company_not_found" | "company_inactive" | "not_member";
+};
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function TenantPortalPage() {
   const { slug = "" } = useParams<{ slug: string }>();
 
-  const company = useQuery(api.companies.getCompanyBySlug, { slug });
+  const companyQuery = useApiQuery<{ company: CompanyPublic }>(
+    slug ? `/api/public/companies/${encodeURIComponent(slug)}` : null,
+  );
+  const company = companyQuery.data?.company;
 
   // Still loading
-  if (company === undefined) {
+  if (companyQuery.isLoading) {
     return <PortalScreen><LoadingView label="Yuklanmoqda..." /></PortalScreen>;
   }
 
+  // Server/aloqa xatosi (404/400 — "topilmadi")
+  if (companyQuery.error && companyQuery.error.status !== 404 && companyQuery.error.status !== 400) {
+    return <PortalScreen><ErrorView message={errorMessage(companyQuery.error)} /></PortalScreen>;
+  }
+
   // Not found
-  if (company === null) {
+  if (!company) {
     return <PortalScreen><NotFoundView slug={slug} /></PortalScreen>;
   }
 
@@ -65,41 +93,36 @@ export default function TenantPortalPage() {
 }
 
 // ─── Authorized: check membership server-side ─────────────────────────────────
-type CompanyPublic = {
-  _id: string;
-  name: string;
-  legalName?: string;
-  logoUrl?: string;
-  country: string;
-  currency: string;
-  language?: string;
-  slug?: string;
-  status?: string;
-  city?: string;
-};
-
 function AuthorizedView({ company }: { company: CompanyPublic }) {
   const { slug = "" } = useParams<{ slug: string }>();
   const navigate = useNavigate();
-  const access = useQuery(api.companies.verifyTenantAccess, { slug });
-  const switchCompany = useMutation(api.companies.switchCompany);
+  const accessQuery = useApiQuery<TenantAccess>(`/api/public/companies/${encodeURIComponent(slug)}/access`);
+  const access = accessQuery.data;
+  const switchCompany = useSwitchCompany();
   const lng = SAVED_OR_DEFAULT_LOCALE;
+  // Almashtirish keshni qayta o'rnatadi — effekt ikkinchi marta ishlamasin
+  const started = useRef(false);
 
   useEffect(() => {
-    if (!access) return;
-    if (!access.allowed) return;
+    if (!access?.allowed || started.current) return;
+    started.current = true;
 
     const doSwitch = async () => {
-      if (!access.companyId) return;
-      try {
-        await switchCompany({ companyId: access.companyId as Parameters<typeof switchCompany>[0]["companyId"] });
-      } catch {
-        // might already be active
+      if (access.companyId) {
+        try {
+          await switchCompany.mutateAsync(access.companyId);
+        } catch {
+          // allaqachon aktiv yoki platforma admini a'zo emas
+        }
       }
       navigate(`/${lng}/dashboard`, { replace: true });
     };
     void doSwitch();
   }, [access, switchCompany, navigate, lng]);
+
+  if (accessQuery.error) {
+    return <ErrorView message={errorMessage(accessQuery.error)} />;
+  }
 
   if (access === undefined) {
     return <LoadingView label="Huquqlar tekshirilmoqda..." />;
@@ -120,7 +143,7 @@ function SignInView({ company }: { company: CompanyPublic }) {
 
   return (
     <div className="flex flex-col items-center gap-6 text-center">
-      <CompanyAvatar name={company.name} logoUrl={company.logoUrl} />
+      <CompanyAvatar name={company.name} logoUrl={company.logoUrl ?? undefined} />
 
       <div>
         <h1 className="text-2xl font-bold text-white">{company.name}</h1>
@@ -148,9 +171,9 @@ function SignInView({ company }: { company: CompanyPublic }) {
 }
 
 // ─── Access denied ─────────────────────────────────────────────────────────────
-function AccessDeniedView({ company, reason }: { company: CompanyPublic; reason: string }) {
+function AccessDeniedView({ company, reason }: { company: CompanyPublic; reason: TenantAccess["reason"] }) {
   const { signout } = useAuth();
-  const currentUser = useQuery(api.users.getCurrentUser);
+  const currentUser = useCurrentUser();
 
   const message =
     reason === "not_member"
@@ -167,13 +190,13 @@ function AccessDeniedView({ company, reason }: { company: CompanyPublic; reason:
       <div>
         <h2 className="text-lg font-bold text-white">Kirish taqiqlangan</h2>
         <p className="text-sm text-white/50 mt-1 max-w-xs">{message}</p>
-        {currentUser?.email && (
-          <p className="text-xs text-white/30 mt-2 font-mono">{currentUser.email}</p>
+        {currentUser?.phone && (
+          <p className="text-xs text-white/30 mt-2 font-mono">{currentUser.phone}</p>
         )}
       </div>
       <div className="flex flex-col gap-2 w-full max-w-xs">
         <button
-          onClick={() => { void signout(); }}
+          onClick={() => signout()}
           className="w-full h-10 rounded-xl bg-white/8 hover:bg-white/12 border border-white/10 text-white/70 hover:text-white text-sm font-medium flex items-center justify-center gap-2 cursor-pointer transition-all"
         >
           <LogIn className="h-4 w-4" />
@@ -211,6 +234,21 @@ function NotFoundView({ slug }: { slug: string }) {
         <ExternalLink className="h-4 w-4" />
         app.bum-erp.uz ga o'tish
       </a>
+    </div>
+  );
+}
+
+// ─── Error ────────────────────────────────────────────────────────────────────
+function ErrorView({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center gap-5 text-center">
+      <div className="h-16 w-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+        <AlertTriangle className="h-8 w-8 text-amber-400" />
+      </div>
+      <div>
+        <h2 className="text-lg font-bold text-white">Xatolik</h2>
+        <p className="text-sm text-white/40 mt-1">{message}</p>
+      </div>
     </div>
   );
 }
@@ -268,7 +306,7 @@ function CompanyAvatar({
 
 // ─── Portal Shell ─────────────────────────────────────────────────────────────
 function PortalScreen({
-  children, companyName, logoUrl,
+  children, companyName, logoUrl: _logoUrl,
 }: {
   children: React.ReactNode;
   companyName?: string;

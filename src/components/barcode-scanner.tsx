@@ -106,6 +106,8 @@ export default function BarcodeScanner({ onScan, onClose, title = "Barkod skaner
   // Start camera when mode = camera
   useEffect(() => {
     if (mode === "camera") {
+      // Tashqi tizim (kamera oqimi) bilan sinxronlash — effektning aynan vazifasi
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       startCamera();
     } else {
       stopCamera();

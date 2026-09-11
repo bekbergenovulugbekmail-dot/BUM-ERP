@@ -59,6 +59,8 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// Provayder va uning hook'i bir faylda — shadcn/ui provayderlaridagi kabi
+// eslint-disable-next-line react-refresh/only-export-components
 export function useModules() {
   return useContext(ModuleContext);
 }

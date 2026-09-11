@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
-import { DollarSign, Play, CheckCircle, CreditCard, Plus, FileDown } from "lucide-react";
+import { DollarSign, Play, CreditCard, FileDown, Undo2 } from "lucide-react";
+import { FULL_ACCESS_ROLES } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -10,10 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { generatePayslipPDF } from "@/lib/pdf/payslip-pdf.ts";
-
-const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
+import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
+import { useCurrentUser } from "@/hooks/use-auth.ts";
+import { fmt, localIsoDate, toNum, trimQty, type SalaryPayment, type SalarySummary } from "../_lib/types.ts";
 
 const STATUS_MAP = {
   draft: { label: "Qoralama", color: "bg-muted text-muted-foreground" },
@@ -21,89 +22,131 @@ const STATUS_MAP = {
   paid: { label: "To'landi", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
 };
 
+type PaymentMethod = "cash" | "bank" | "card" | "transfer";
+const METHOD_LABELS: Record<PaymentMethod, string> = { cash: "Naqd", bank: "Bank", card: "Karta", transfer: "O'tkazma" };
+const AUTO_ACCOUNT = "auto";
+
+type CashAccountOption = { id: string; name: string; type: "cash" | "bank"; balance: string };
+type SalaryPatch = { id: string; bonus: string; deductions: string; notes: string | null };
+type PayBody = { id: string; method: PaymentMethod; cashAccountId: string | null; paidDate: string };
+
 export default function SalarySection() {
-  const thisMonth = new Date().toISOString().slice(0, 7);
+  const thisMonth = localIsoDate().slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
-  const [loading, setLoading] = useState(false);
-  const [payDialog, setPayDialog] = useState<Id<"salaryPayments"> | null>(null);
-  const [editDialog, setEditDialog] = useState<Id<"salaryPayments"> | null>(null);
-  const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10));
+  const [payDialog, setPayDialog] = useState<SalaryPayment | null>(null);
+  const [editDialog, setEditDialog] = useState<string | null>(null);
+  const [payDate, setPayDate] = useState(localIsoDate());
+  const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
+  const [payAccount, setPayAccount] = useState(AUTO_ACCOUNT);
   const [editForm, setEditForm] = useState({ bonus: "0", deductions: "0", notes: "" });
 
-  const payments = useQuery(api.hr.salary.listSalaryPayments, { month });
-  const summary = useQuery(api.hr.salary.getMonthSummary, { month });
-  const company = useQuery(api.admin.getCompany, {});
+  const currentUser = useCurrentUser();
+  const { can } = usePermissions();
+  const activeCompany = useActiveCompany().data;
+  const company = activeCompany?.company;
+  const canPrepare = can("hr.salary");
+  const canApprove = can("hr.approve");
+  // Tayyorlagan foydalanuvchi o'zi tasdiqlay olmaydi (kompaniya egasi va superadmindan tashqari) — server ham tekshiradi
+  const isFullAccess = (FULL_ACCESS_ROLES as readonly string[]).includes(activeCompany?.membership.companyRole ?? "");
 
-  const generateSalary = useMutation(api.hr.salary.generateMonthlySalary);
-  const approvePayment = useMutation(api.hr.salary.approveSalaryPayment);
-  const markPaid = useMutation(api.hr.salary.markSalaryPaid);
-  const updatePayment = useMutation(api.hr.salary.updateSalaryPayment);
+  const validMonth = /^\d{4}-\d{2}$/.test(month);
+  const payments = useApiQuery<{ salaries: SalaryPayment[] }>(validMonth ? "/api/hr/salaries" : null, { month }).data?.salaries;
+  const summary = useApiQuery<SalarySummary>(validMonth ? "/api/hr/salaries/summary" : null, { month }).data;
+  // Kassa ro'yxati moliya ruxsatini talab qiladi — bo'lmasa to'lov usuli bo'yicha avtomatik tanlanadi
+  const cashAccounts = useApiQuery<{ cashAccounts: CashAccountOption[] }>(
+    payDialog ? "/api/finance/cash-accounts" : null,
+  ).data?.cashAccounts;
+
+  const generateSalary = useApiMutation((body: { month: string }) =>
+    api.post<{ created: number; attendanceBased: boolean }>("/api/hr/salaries/generate", body),
+  );
+  const updatePayment = useApiMutation(({ id, ...body }: SalaryPatch) => api.patch(`/api/hr/salaries/${id}`, body));
+  const approvePayment = useApiMutation((id: string) => api.post(`/api/hr/salaries/${id}/approve`));
+  const revertPayment = useApiMutation((id: string) => api.post(`/api/hr/salaries/${id}/revert`));
+  const markPaid = useApiMutation(({ id, ...body }: PayBody) => api.post(`/api/hr/salaries/${id}/pay`, body));
 
   const handleGenerate = async () => {
-    setLoading(true);
+    if (!validMonth) { toast.error("Oyni tanlang"); return; }
     try {
-      const count = await generateSalary({ month });
-      if (count === 0) toast.info("Bu oy uchun maosh allaqachon yaratilgan");
-      else toast.success(`${count} ta xodim uchun maosh hisoblandi`);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
-    finally { setLoading(false); }
+      const { created, attendanceBased } = await generateSalary.mutateAsync({ month });
+      if (created === 0) toast.info("Bu oy uchun maosh allaqachon yaratilgan");
+      else toast.success(`${created} ta xodim uchun maosh hisoblandi${attendanceBased ? " (davomat bo'yicha)" : " (to'liq oy)"}`);
+    } catch (e) { toast.error(errorMessage(e)); }
   };
 
   const handleEdit = async () => {
     if (!editDialog) return;
     try {
-      await updatePayment({
+      await updatePayment.mutateAsync({
         id: editDialog,
-        bonus: parseFloat(editForm.bonus) || 0,
-        deductions: parseFloat(editForm.deductions) || 0,
-        notes: editForm.notes || undefined,
+        bonus: editForm.bonus || "0",
+        deductions: editForm.deductions || "0",
+        notes: editForm.notes.trim() || null,
       });
       toast.success("Maosh yangilandi");
       setEditDialog(null);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
+    } catch (e) { toast.error(errorMessage(e)); }
   };
 
-  const handlePrintPayslip = (p: typeof payments extends (infer T)[] | undefined ? T : never) => {
-    if (!p) return;
+  const handleAction = async (action: () => Promise<unknown>, message: string) => {
+    try { await action(); toast.success(message); }
+    catch (e) { toast.error(errorMessage(e)); }
+  };
+
+  const handlePrintPayslip = (p: SalaryPayment) => {
     generatePayslipPDF({
       company: {
         name: company?.name ?? "BUM ERP",
-        legalName: company?.legalName,
-        taxId: company?.taxId,
-        address: company?.address,
-        phone: company?.phone,
-        email: company?.email,
+        legalName: company?.legalName ?? undefined,
+        taxId: company?.taxId ?? undefined,
+        address: company?.address ?? undefined,
+        phone: company?.phone ?? undefined,
+        email: company?.email ?? undefined,
       },
-      employeeName: p.employeeName ?? "—",
-      employeeCode: String(p.employeeId).slice(-6),
+      employeeName: p.employeeName,
+      employeeCode: p.employeeCode,
       department: p.departmentName ?? "—",
       position: p.positionName ?? "—",
-      period: month,
-      workingDays: p.workDays,
-      presentDays: p.actualDays,
+      period: p.month,
+      workingDays: toNum(p.workDays),
+      presentDays: toNum(p.actualDays),
       absentDays: 0,
       lateDays: 0,
       halfDays: 0,
-      baseSalary: p.baseSalary,
-      overtimePay: p.overtimePay ?? 0,
-      bonuses: p.bonus,
-      grossSalary: p.baseSalary + (p.overtimePay ?? 0) + p.bonus,
-      inpsTax: p.tax,
-      otherDeductions: p.deductions,
-      totalDeductions: p.tax + p.deductions,
-      netSalary: p.netSalary,
+      baseSalary: toNum(p.baseSalary),
+      overtimePay: toNum(p.overtimePay),
+      bonuses: toNum(p.bonus),
+      grossSalary: toNum(p.grossSalary),
+      inpsTax: toNum(p.tax),
+      otherDeductions: toNum(p.deductions),
+      totalDeductions: toNum(p.tax) + toNum(p.deductions),
+      netSalary: toNum(p.netSalary),
+      currency: company?.currency,
       status: p.status,
-      notes: p.notes,
+      notes: p.notes ?? undefined,
     });
   };
 
+  const openPay = (p: SalaryPayment) => {
+    setPayDialog(p);
+    setPayDate(localIsoDate());
+    setPayMethod("cash");
+    setPayAccount(AUTO_ACCOUNT);
+  };
+
+  // To'lov: kassa/bank chiqimi va jurnal yozuvi serverda bitta tranzaksiyada
   const handlePay = async () => {
     if (!payDialog) return;
     try {
-      await markPaid({ id: payDialog, paidDate: payDate });
-      toast.success("Maosh to'landi deb belgilandi");
+      await markPaid.mutateAsync({
+        id: payDialog.id,
+        method: payMethod,
+        cashAccountId: payAccount === AUTO_ACCOUNT ? null : payAccount,
+        paidDate: payDate,
+      });
+      toast.success("Maosh to'landi");
       setPayDialog(null);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
+    } catch (e) { toast.error(errorMessage(e)); }
   };
 
   return (
@@ -114,9 +157,11 @@ export default function SalarySection() {
           <Label className="text-xs text-muted-foreground whitespace-nowrap">Oy:</Label>
           <Input type="month" className="w-36 h-8 text-sm" value={month} onChange={(e) => setMonth(e.target.value)} />
         </div>
-        <Button size="sm" onClick={handleGenerate} disabled={loading} variant="secondary">
-          <Play className="h-3.5 w-3.5 mr-1" /> {loading ? "Hisoblanmoqda..." : "Maosh hisoblash"}
-        </Button>
+        {canPrepare && (
+          <Button size="sm" onClick={handleGenerate} disabled={generateSalary.isPending} variant="secondary">
+            <Play className="h-3.5 w-3.5 mr-1" /> {generateSalary.isPending ? "Hisoblanmoqda..." : "Maosh hisoblash"}
+          </Button>
+        )}
       </div>
 
       {/* Summary cards */}
@@ -143,9 +188,11 @@ export default function SalarySection() {
         <div className="text-center py-12 text-muted-foreground">
           <DollarSign className="h-12 w-12 mx-auto mb-3 opacity-20" />
           <p>Bu oy uchun maosh hisoblari yo'q</p>
-          <Button size="sm" className="mt-3" onClick={handleGenerate} disabled={loading}>
-            <Play className="h-4 w-4 mr-1" /> Maosh hisoblash
-          </Button>
+          {canPrepare && (
+            <Button size="sm" className="mt-3" onClick={handleGenerate} disabled={generateSalary.isPending}>
+              <Play className="h-4 w-4 mr-1" /> Maosh hisoblash
+            </Button>
+          )}
         </div>
       ) : (
         <div className="rounded-xl border border-border overflow-hidden">
@@ -165,12 +212,14 @@ export default function SalarySection() {
             <tbody className="divide-y divide-border">
               {payments.map((p) => {
                 const st = STATUS_MAP[p.status];
+                const preparedByMe = p.createdBy !== null && p.createdBy === currentUser?.id;
+                const mayApprove = canApprove && (!preparedByMe || isFullAccess);
                 return (
-                  <tr key={p._id} className="hover:bg-muted/20">
-                    <td className="px-4 py-2.5 font-medium">{p.employeeName ?? "—"}</td>
+                  <tr key={p.id} className="hover:bg-muted/20">
+                    <td className="px-4 py-2.5 font-medium">{p.employeeName}</td>
                     <td className="px-4 py-2.5 text-muted-foreground text-xs">{p.positionName ?? "—"}</td>
-                    <td className="px-3 py-2.5 text-right text-muted-foreground">{p.actualDays}/{p.workDays}</td>
-                    <td className="px-3 py-2.5 text-right text-emerald-600">{p.bonus > 0 ? `+${fmt(p.bonus)}` : "—"}</td>
+                    <td className="px-3 py-2.5 text-right text-muted-foreground">{trimQty(p.actualDays)}/{trimQty(p.workDays)}</td>
+                    <td className="px-3 py-2.5 text-right text-emerald-600">{toNum(p.bonus) > 0 ? `+${fmt(p.bonus)}` : "—"}</td>
                     <td className="px-3 py-2.5 text-right text-rose-600">{fmt(p.tax)}</td>
                     <td className="px-3 py-2.5 text-right font-bold">{fmt(p.netSalary)} so'm</td>
                     <td className="px-3 py-2.5">
@@ -178,23 +227,31 @@ export default function SalarySection() {
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex gap-1 justify-end">
-                        {p.status === "draft" && (
+                        {p.status === "draft" && canPrepare && (
+                          <Button size="sm" variant="ghost" className="h-6 px-2 text-xs"
+                            onClick={() => { setEditDialog(p.id); setEditForm({ bonus: trimQty(p.bonus), deductions: trimQty(p.deductions), notes: p.notes ?? "" }); }}>
+                            Tahrirlash
+                          </Button>
+                        )}
+                        {p.status === "draft" && mayApprove && (
+                          <Button size="sm" className="h-6 px-2 text-xs bg-blue-600 hover:bg-blue-700"
+                            disabled={approvePayment.isPending}
+                            onClick={() => handleAction(() => approvePayment.mutateAsync(p.id), "Maosh tasdiqlandi")}>
+                            Tasdiqlash
+                          </Button>
+                        )}
+                        {p.status === "approved" && canApprove && (
                           <>
-                            <Button size="sm" variant="ghost" className="h-6 px-2 text-xs"
-                              onClick={() => { setEditDialog(p._id); setEditForm({ bonus: String(p.bonus), deductions: String(p.deductions), notes: p.notes ?? "" }); }}>
-                              Tahrirlash
+                            <Button size="sm" className="h-6 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
+                              onClick={() => openPay(p)}>
+                              <CreditCard className="h-3 w-3 mr-1" /> To'lash
                             </Button>
-                            <Button size="sm" className="h-6 px-2 text-xs bg-blue-600 hover:bg-blue-700"
-                              onClick={() => approvePayment({ id: p._id })}>
-                              Tasdiqlash
+                            <Button size="icon" variant="ghost" className="h-6 w-6" title="Qoralamaga qaytarish"
+                              disabled={revertPayment.isPending}
+                              onClick={() => handleAction(() => revertPayment.mutateAsync(p.id), "Qoralamaga qaytarildi")}>
+                              <Undo2 className="h-3.5 w-3.5 text-muted-foreground" />
                             </Button>
                           </>
-                        )}
-                        {p.status === "approved" && (
-                          <Button size="sm" className="h-6 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
-                            onClick={() => { setPayDialog(p._id); setPayDate(new Date().toISOString().slice(0, 10)); }}>
-                            <CreditCard className="h-3 w-3 mr-1" /> To'lash
-                          </Button>
                         )}
                         <Button size="icon" variant="ghost" className="h-6 w-6"
                           title="PDF yuklash"
@@ -223,7 +280,7 @@ export default function SalarySection() {
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => setEditDialog(null)}>Bekor</Button>
-              <Button onClick={handleEdit}>Saqlash</Button>
+              <Button onClick={handleEdit} disabled={updatePayment.isPending}>Saqlash</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -234,13 +291,48 @@ export default function SalarySection() {
         <Dialog open onOpenChange={(o) => !o && setPayDialog(null)}>
           <DialogContent>
             <DialogHeader><DialogTitle>Maoshni to'lash</DialogTitle></DialogHeader>
-            <div className="space-y-2">
-              <Label>To'lov sanasi</Label>
-              <Input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                {payDialog.employeeName} · {payDialog.month} —{" "}
+                <span className="font-semibold text-foreground">{fmt(payDialog.netSalary)} so'm</span>
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>To'lov usuli</Label>
+                  <Select value={payMethod} onValueChange={(v) => setPayMethod(v as PaymentMethod)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(METHOD_LABELS) as PaymentMethod[]).map((m) => (
+                        <SelectItem key={m} value={m}>{METHOD_LABELS[m]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>To'lov sanasi</Label>
+                  <Input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+                </div>
+              </div>
+              {cashAccounts && cashAccounts.length > 0 && (
+                <div>
+                  <Label>Kassa / bank</Label>
+                  <Select value={payAccount} onValueChange={setPayAccount}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={AUTO_ACCOUNT}>Avtomatik (naqd — asosiy kassa, boshqasi — bank)</SelectItem>
+                      {cashAccounts.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>{a.name} ({fmt(a.balance)} so'm)</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => setPayDialog(null)}>Bekor</Button>
-              <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={handlePay}>To'landi deb belgilash</Button>
+              <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={handlePay} disabled={markPaid.isPending}>
+                {markPaid.isPending ? "..." : "To'lash"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

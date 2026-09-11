@@ -1,16 +1,25 @@
+/**
+ * Kompaniya rollari — `/api/company/roles` (boshqarish: `roles.manage`).
+ *
+ * Server qoidalari UI'da ham aks etadi:
+ *  - Superadmin / Business Owner — to'liq huquqli, tahrirlanmaydi
+ *  - tizim rolining nomi o'zgarmaydi va o'chirilmaydi
+ *  - faqat o'zingizda bor ruxsatni bera olasiz (aks holda server xabari)
+ * Standart rollar kompaniya yaratilganda serverda qo'shiladi — "Standart rollar" tugmasi kerak emas.
+ */
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
-import { Plus, Edit2, Trash2, Shield, Check } from "lucide-react";
+import { Plus, Edit2, Trash2, Shield, Check, Lock } from "lucide-react";
+import { ALL_PERMISSIONS, FULL_ACCESS_ROLES, PERMISSIONS, isPermission, type Permission } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
-import { PERMISSIONS, ALL_PERMISSIONS } from "@/lib/permissions.ts";
-import type { Permission } from "@/lib/permissions.ts";
 import { cn } from "@/lib/utils.ts";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
+import type { CompanyRole } from "../_lib/types.ts";
 
 type RoleFormData = {
   name: string;
@@ -19,7 +28,16 @@ type RoleFormData = {
   permissions: Permission[];
 };
 
+type RoleBody = {
+  name?: string;
+  description: string | null;
+  color: string | null;
+  permissions: Permission[];
+};
+
 const COLORS = ["#6366f1", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#ef4444", "#94a3b8"];
+const FULL_ACCESS = new Set<string>(FULL_ACCESS_ROLES);
+const COMPANY = ["/api/company"];
 
 const groupedPermissions = ALL_PERMISSIONS.reduce<Record<string, Permission[]>>((acc, p) => {
   const group = PERMISSIONS[p].group;
@@ -28,24 +46,37 @@ const groupedPermissions = ALL_PERMISSIONS.reduce<Record<string, Permission[]>>(
   return acc;
 }, {});
 
+const EMPTY_FORM: RoleFormData = { name: "", description: "", color: "#6366f1", permissions: [] };
+
 export default function RolesSection() {
-  const roles = useQuery(api.admin.listRoles);
-  const seedDefaultRoles = useMutation(api.admin.seedDefaultRoles);
-  const createRole = useMutation(api.admin.createRole);
-  const updateRole = useMutation(api.admin.updateRole);
-  const deleteRole = useMutation(api.admin.deleteRole);
+  const { data, error } = useApiQuery<{ roles: CompanyRole[] }>("/api/company/roles");
+  const roles = data?.roles;
+  const { can } = usePermissions();
+  const canManage = can("roles.manage");
+
+  const createRole = useApiMutation((body: RoleBody) => api.post("/api/company/roles", body), { invalidate: COMPANY });
+  const updateRole = useApiMutation(
+    ({ id, body }: { id: string; body: RoleBody }) => api.patch(`/api/company/roles/${id}`, body),
+    { invalidate: COMPANY },
+  );
+  const deleteRole = useApiMutation((id: string) => api.delete(`/api/company/roles/${id}`), { invalidate: COMPANY });
 
   const [open, setOpen] = useState(false);
-  const [editId, setEditId] = useState<Id<"roles"> | null>(null);
-  const [form, setForm] = useState<RoleFormData>({ name: "", description: "", color: "#6366f1", permissions: [] });
+  const [editing, setEditing] = useState<CompanyRole | null>(null);
+  const [form, setForm] = useState<RoleFormData>(EMPTY_FORM);
 
-  const handleOpen = (role?: { _id: Id<"roles">; name: string; description?: string; color?: string; permissions: string[] }) => {
+  const handleOpen = (role?: CompanyRole) => {
     if (role) {
-      setEditId(role._id);
-      setForm({ name: role.name, description: role.description ?? "", color: role.color ?? "#6366f1", permissions: role.permissions as Permission[] });
+      setEditing(role);
+      setForm({
+        name: role.name,
+        description: role.description ?? "",
+        color: role.color ?? "#6366f1",
+        permissions: role.permissions.filter(isPermission),
+      });
     } else {
-      setEditId(null);
-      setForm({ name: "", description: "", color: "#6366f1", permissions: [] });
+      setEditing(null);
+      setForm(EMPTY_FORM);
     }
     setOpen(true);
   };
@@ -70,29 +101,42 @@ export default function RolesSection() {
 
   const handleSave = async () => {
     if (!form.name.trim()) return toast.error("Rol nomi kiritilishi shart");
+    if (form.permissions.length === 0) return toast.error("Kamida bitta ruxsat tanlang");
+    const body: RoleBody = {
+      description: form.description.trim() || null,
+      color: form.color || null,
+      permissions: form.permissions,
+    };
     try {
-      if (editId) {
-        await updateRole({ id: editId, ...form });
+      if (editing) {
+        // Tizim rolining nomini server o'zgartirmaydi — yuborilmaydi
+        await updateRole.mutateAsync({
+          id: editing.id,
+          body: editing.isSystem ? body : { ...body, name: form.name.trim() },
+        });
         toast.success("Rol yangilandi");
       } else {
-        await createRole(form);
+        await createRole.mutateAsync({ ...body, name: form.name.trim() });
         toast.success("Rol yaratildi");
       }
       setOpen(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Xatolik");
+      toast.error(errorMessage(e));
     }
   };
 
-  const handleDelete = async (id: Id<"roles">, isSystem: boolean) => {
-    if (isSystem) return toast.error("Tizim rollarini o'chirish mumkin emas");
+  const handleDelete = async (role: CompanyRole) => {
+    if (role.isSystem) return toast.error("Tizim rollarini o'chirish mumkin emas");
+    if (!window.confirm(`"${role.name}" rolini o'chirasizmi?`)) return;
     try {
-      await deleteRole({ id });
+      await deleteRole.mutateAsync(role.id);
       toast.success("Rol o'chirildi");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Xatolik");
+      toast.error(errorMessage(e));
     }
   };
+
+  const saving = createRole.isPending || updateRole.isPending;
 
   return (
     <div className="space-y-4">
@@ -101,59 +145,69 @@ export default function RolesSection() {
           <p className="text-sm font-semibold">Rollar va ruxsatlar</p>
           <p className="text-xs text-muted-foreground">Har bir rol uchun granular ruxsatlar sozlang</p>
         </div>
-        <div className="flex gap-2">
-          <Button size="sm" variant="secondary" onClick={() => seedDefaultRoles()}>
-            Standart rollar
-          </Button>
+        {canManage && (
           <Button size="sm" onClick={() => handleOpen()}>
             <Plus className="h-4 w-4 mr-1" /> Yangi rol
           </Button>
-        </div>
+        )}
       </div>
 
-      {!roles ? (
+      {error ? (
+        <div className="bg-card border border-border rounded-2xl p-8 text-center text-muted-foreground text-sm">
+          {errorMessage(error)}
+        </div>
+      ) : !roles ? (
         <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-2xl" />)}</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {roles.map((role) => (
-            <div key={role._id} className="bg-card border border-border rounded-2xl p-4 space-y-3">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: (role.color ?? "#6366f1") + "20" }}>
-                    <Shield className="h-4 w-4" style={{ color: role.color ?? "#6366f1" }} />
+          {roles.map((role) => {
+            const fullAccess = FULL_ACCESS.has(role.name);
+            return (
+              <div key={role.id} className="bg-card border border-border rounded-2xl p-4 space-y-3">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: (role.color ?? "#6366f1") + "20" }}>
+                      <Shield className="h-4 w-4" style={{ color: role.color ?? "#6366f1" }} />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-sm">{role.name}</p>
+                      <p className="text-xs text-muted-foreground">{role.description}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-semibold text-sm">{role.name}</p>
-                    <p className="text-xs text-muted-foreground">{role.description}</p>
-                  </div>
+                  {canManage && !fullAccess && (
+                    <div className="flex gap-1">
+                      <button onClick={() => handleOpen(role)} className="p-1.5 rounded-lg hover:bg-accent cursor-pointer">
+                        <Edit2 className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
+                      {!role.isSystem && (
+                        <button onClick={() => { void handleDelete(role); }} className="p-1.5 rounded-lg hover:bg-destructive/10 cursor-pointer">
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {fullAccess && <Lock className="h-3.5 w-3.5 text-muted-foreground" />}
                 </div>
-                <div className="flex gap-1">
-                  <button onClick={() => handleOpen(role)} className="p-1.5 rounded-lg hover:bg-accent cursor-pointer">
-                    <Edit2 className="h-3.5 w-3.5 text-muted-foreground" />
-                  </button>
-                  {!role.isSystem && (
-                    <button onClick={() => handleDelete(role._id, role.isSystem)} className="p-1.5 rounded-lg hover:bg-destructive/10 cursor-pointer">
-                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                    </button>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+                  <span className="bg-muted px-2 py-0.5 rounded-full">
+                    {fullAccess ? "To'liq huquq" : `${role.permissions.length} ruxsat`}
+                  </span>
+                  <span className="bg-muted px-2 py-0.5 rounded-full">{role.memberCount} foydalanuvchi</span>
+                  {role.isSystem && <span className="bg-primary/10 text-primary px-2 py-0.5 rounded-full">Tizim</span>}
+                  {!role.isActive && <span className="bg-destructive/10 text-destructive px-2 py-0.5 rounded-full">Nofaol</span>}
+                </div>
+                {/* Permission preview chips */}
+                <div className="flex flex-wrap gap-1">
+                  {role.permissions.slice(0, 5).map((p) => (
+                    <span key={p} className="text-[10px] px-1.5 py-0.5 bg-muted rounded-full text-muted-foreground">{p}</span>
+                  ))}
+                  {role.permissions.length > 5 && (
+                    <span className="text-[10px] px-1.5 py-0.5 bg-muted rounded-full text-muted-foreground">+{role.permissions.length - 5}</span>
                   )}
                 </div>
               </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="bg-muted px-2 py-0.5 rounded-full">{role.permissions.length} ruxsat</span>
-                <span className="bg-muted px-2 py-0.5 rounded-full">{role.memberCount} foydalanuvchi</span>
-                {role.isSystem && <span className="bg-primary/10 text-primary px-2 py-0.5 rounded-full">Tizim</span>}
-              </div>
-              {/* Permission preview chips */}
-              <div className="flex flex-wrap gap-1">
-                {role.permissions.slice(0, 5).map((p) => (
-                  <span key={p} className="text-[10px] px-1.5 py-0.5 bg-muted rounded-full text-muted-foreground">{p}</span>
-                ))}
-                {role.permissions.length > 5 && (
-                  <span className="text-[10px] px-1.5 py-0.5 bg-muted rounded-full text-muted-foreground">+{role.permissions.length - 5}</span>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -161,13 +215,18 @@ export default function RolesSection() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editId ? "Rolni tahrirlash" : "Yangi rol yaratish"}</DialogTitle>
+            <DialogTitle>{editing ? "Rolni tahrirlash" : "Yangi rol yaratish"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-xs font-medium">Rol nomi *</label>
-                <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Menejer" />
+                <Input
+                  value={form.name}
+                  disabled={editing?.isSystem}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="Menejer"
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium">Tavsif</label>
@@ -198,6 +257,9 @@ export default function RolesSection() {
                   <button className="text-xs text-muted-foreground cursor-pointer" onClick={() => setForm((f) => ({ ...f, permissions: [] }))}>Tozalash</button>
                 </div>
               </div>
+              <p className="text-[11px] text-muted-foreground">
+                Faqat o'zingizda bor ruxsatlarni boshqa rolga bera olasiz.
+              </p>
               {Object.entries(groupedPermissions).map(([group, perms]) => {
                 const allSelected = perms.every((p) => form.permissions.includes(p));
                 const someSelected = perms.some((p) => form.permissions.includes(p));
@@ -236,7 +298,9 @@ export default function RolesSection() {
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="secondary" onClick={() => setOpen(false)}>Bekor qilish</Button>
-              <Button onClick={handleSave}>Saqlash</Button>
+              <Button onClick={() => { void handleSave(); }} disabled={saving}>
+                {saving ? "Saqlanmoqda..." : "Saqlash"}
+              </Button>
             </div>
           </div>
         </DialogContent>

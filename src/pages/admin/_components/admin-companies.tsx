@@ -1,13 +1,11 @@
 /**
  * Admin Companies — full company list with search, filter, status change, detail drawer
+ * API: `GET /api/platform/companies`, `GET /companies/:id`, `POST /companies/:id/status`.
  */
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
 import {
   Building2, Search, ChevronDown, Users, MapPin, Mail,
-  Phone, Globe, Calendar, X, RefreshCw, Link2, Copy, Check,
+  Phone, Globe, Calendar, X, RefreshCw, Link2, Copy, Check, AlertTriangle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input.tsx";
 import { Button } from "@/components/ui/button.tsx";
@@ -17,12 +15,13 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.tsx";
 import { toast } from "sonner";
-import { StatusBadge } from "./admin-overview.tsx";
 import { format } from "date-fns";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { StatusBadge } from "./admin-overview.tsx";
+import type { CompanyStatus, PlatformCompany, PlatformCompanyDetails } from "../_lib/types.ts";
 
-type Status = "active" | "trial" | "pending" | "suspended" | "cancelled";
-
-const STATUS_ACTIONS: { label: string; value: Status; danger?: boolean }[] = [
+const STATUS_ACTIONS: { label: string; value: CompanyStatus; danger?: boolean }[] = [
   { label: "Aktivlashtirish",  value: "active" },
   { label: "Sinov rejimi",     value: "trial" },
   { label: "Kutilmoqda",       value: "pending" },
@@ -53,30 +52,44 @@ function CopyButton({ text }: { text: string }) {
 export default function AdminCompanies() {
   const [search, setSearch]         = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [selectedId, setSelectedId] = useState<Id<"companies"> | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const companies = useQuery(api.companies.platformListCompanies, {});
-  const detail    = useQuery(
-    api.companies.platformGetCompany,
-    selectedId ? { companyId: selectedId } : "skip",
+  const companiesQuery = useApiQuery<{ companies: PlatformCompany[] }>("/api/platform/companies");
+  const companies = companiesQuery.data?.companies;
+  const detail = useApiQuery<PlatformCompanyDetails>(
+    selectedId ? `/api/platform/companies/${selectedId}` : null,
+  ).data;
+  const updateStatus = useApiMutation(
+    ({ companyId, status, reason }: { companyId: string; status: CompanyStatus; reason?: string }) =>
+      api.post(`/api/platform/companies/${companyId}/status`, { status, reason }),
+    { invalidate: ["/api/platform"] },
   );
-  const updateStatus = useMutation(api.companies.platformUpdateCompanyStatus);
 
+  const q = search.trim().toLowerCase();
   const filtered = (companies ?? []).filter((c) => {
     const matchSearch =
-      !search ||
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      (c.ownerEmail ?? "").toLowerCase().includes(search.toLowerCase());
+      !q ||
+      c.name.toLowerCase().includes(q) ||
+      (c.slug ?? "").toLowerCase().includes(q) ||
+      (c.owner?.phone ?? "").includes(q) ||
+      (c.owner?.name ?? "").toLowerCase().includes(q);
     const matchStatus = statusFilter === "all" || c.status === statusFilter;
     return matchSearch && matchStatus;
   });
 
-  const handleStatusChange = async (companyId: Id<"companies">, status: Status) => {
+  const handleStatusChange = async (companyId: string, status: CompanyStatus) => {
+    let reason: string | undefined;
+    if (status === "suspended") {
+      // Sabab kompaniya foydalanuvchilariga to'xtatilgan ekranida ko'rsatiladi
+      const input = window.prompt("To'xtatish sababi (ixtiyoriy):");
+      if (input === null) return;
+      reason = input.trim().slice(0, 500) || undefined;
+    }
     try {
-      await updateStatus({ companyId, status });
+      await updateStatus.mutateAsync({ companyId, status, reason });
       toast.success("Holat yangilandi");
-    } catch {
-      toast.error("Xatolik yuz berdi");
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
   };
 
@@ -93,18 +106,18 @@ export default function AdminCompanies() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Kompaniya yoki email..."
+            placeholder="Kompaniya, slug yoki egasi..."
             className="pl-9 bg-white/5 border-white/10 text-white placeholder:text-white/30 focus-visible:ring-primary/50"
           />
         </div>
-        <div className="flex gap-1.5">
-          {["all", "active", "trial", "suspended", "cancelled"].map((s) => (
+        <div className="flex gap-1.5 flex-wrap">
+          {["all", "active", "trial", "pending", "suspended", "cancelled"].map((s) => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
@@ -117,6 +130,7 @@ export default function AdminCompanies() {
               {s === "all" ? "Barchasi" :
                s === "active" ? "Aktiv" :
                s === "trial" ? "Sinov" :
+               s === "pending" ? "Kutilmoqda" :
                s === "suspended" ? "To'xtatilgan" : "Bekor"}
             </button>
           ))}
@@ -136,7 +150,13 @@ export default function AdminCompanies() {
             </tr>
           </thead>
           <tbody>
-            {companies === undefined ? (
+            {companiesQuery.error ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-12 text-center text-white/40 text-sm">
+                  {errorMessage(companiesQuery.error)}
+                </td>
+              </tr>
+            ) : companies === undefined ? (
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={i} className="border-b border-white/5">
                   {Array.from({ length: 6 }).map((_, j) => (
@@ -155,9 +175,9 @@ export default function AdminCompanies() {
             ) : (
               filtered.map((c) => (
                 <tr
-                  key={c._id}
+                  key={c.id}
                   className="border-b border-white/5 hover:bg-white/4 transition-colors cursor-pointer"
-                  onClick={() => setSelectedId(c._id as Id<"companies">)}
+                  onClick={() => setSelectedId(c.id)}
                 >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2.5">
@@ -166,13 +186,13 @@ export default function AdminCompanies() {
                       </div>
                       <div>
                         <p className="font-medium text-white">{c.name}</p>
-                        {c.legalName && <p className="text-xs text-white/40">{c.legalName}</p>}
+                        <p className="text-xs text-white/40">{format(new Date(c.createdAt), "dd.MM.yyyy")}</p>
                       </div>
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <p className="text-white/80">{c.ownerName ?? "—"}</p>
-                    <p className="text-xs text-white/40">{c.ownerEmail ?? ""}</p>
+                    <p className="text-white/80">{c.owner?.name ?? "—"}</p>
+                    <p className="text-xs text-white/40 font-mono">{c.owner?.phone ?? ""}</p>
                   </td>
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     {c.slug ? (
@@ -208,7 +228,7 @@ export default function AdminCompanies() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <StatusBadge status={c.status ?? "trial"} />
+                    <StatusBadge status={c.status} />
                     {c.trialEndsAt && c.status === "trial" && (
                       <p className="text-[10px] text-amber-400/70 mt-0.5">
                         {format(new Date(c.trialEndsAt), "dd.MM.yyyy")} gacha
@@ -221,6 +241,7 @@ export default function AdminCompanies() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          disabled={updateStatus.isPending}
                           className="h-7 px-2 text-white/50 hover:text-white hover:bg-white/10"
                         >
                           Holat
@@ -231,8 +252,9 @@ export default function AdminCompanies() {
                         {STATUS_ACTIONS.map((a) => (
                           <DropdownMenuItem
                             key={a.value}
-                            onClick={() => handleStatusChange(c._id as Id<"companies">, a.value)}
-                            className={a.danger ? "text-destructive focus:text-destructive" : "cursor-pointer"}
+                            disabled={a.value === c.status}
+                            onClick={() => { void handleStatusChange(c.id, a.value); }}
+                            className={a.danger ? "text-destructive focus:text-destructive cursor-pointer" : "cursor-pointer"}
                           >
                             {a.label}
                           </DropdownMenuItem>
@@ -250,10 +272,9 @@ export default function AdminCompanies() {
       {/* Detail drawer */}
       {selectedId && (
         <CompanyDetailDrawer
-          companyId={selectedId}
           detail={detail}
           onClose={() => setSelectedId(null)}
-          onStatusChange={handleStatusChange}
+          onStatusChange={(id, status) => { void handleStatusChange(id, status); }}
         />
       )}
     </div>
@@ -265,11 +286,11 @@ export default function AdminCompanies() {
 function CompanyDetailDrawer({
   detail, onClose, onStatusChange,
 }: {
-  companyId: Id<"companies">;
-  detail: ReturnType<typeof useQuery<typeof api.companies.platformGetCompany>>;
+  detail: PlatformCompanyDetails | undefined;
   onClose: () => void;
-  onStatusChange: (id: Id<"companies">, s: Status) => void;
+  onStatusChange: (id: string, s: CompanyStatus) => void;
 }) {
+  const company = detail?.company;
   return (
     <>
       {/* Backdrop */}
@@ -284,7 +305,7 @@ function CompanyDetailDrawer({
           {/* Header */}
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-white">
-              {detail?.name ?? "Yuklanmoqda..."}
+              {company?.name ?? "Yuklanmoqda..."}
             </h2>
             <button
               onClick={onClose}
@@ -294,7 +315,7 @@ function CompanyDetailDrawer({
             </button>
           </div>
 
-          {!detail ? (
+          {!detail || !company ? (
             <div className="space-y-3">
               {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-8 bg-white/5" />)}
             </div>
@@ -302,7 +323,7 @@ function CompanyDetailDrawer({
             <>
               {/* Status */}
               <div className="flex items-center gap-3">
-                <StatusBadge status={detail.status ?? "trial"} />
+                <StatusBadge status={company.status} />
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button size="sm" variant="secondary" className="h-7 text-xs">
@@ -314,7 +335,8 @@ function CompanyDetailDrawer({
                     {STATUS_ACTIONS.map((a) => (
                       <DropdownMenuItem
                         key={a.value}
-                        onClick={() => onStatusChange(detail._id as Id<"companies">, a.value)}
+                        disabled={a.value === company.status}
+                        onClick={() => onStatusChange(company.id, a.value)}
                         className={a.danger ? "text-destructive focus:text-destructive cursor-pointer" : "cursor-pointer"}
                       >
                         {a.label}
@@ -324,40 +346,47 @@ function CompanyDetailDrawer({
                 </DropdownMenu>
               </div>
 
+              {company.status === "suspended" && company.suspendReason && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  <span>{company.suspendReason}</span>
+                </div>
+              )}
+
               {/* Info */}
               <InfoSection title="Asosiy ma'lumotlar">
-                <InfoRow icon={Building2} label="Yuridik nom" value={detail.legalName} />
-                <InfoRow icon={Building2} label="STIR"        value={detail.taxId} />
-                <InfoRow icon={Mail}      label="Email"        value={detail.email} />
-                <InfoRow icon={Phone}     label="Telefon"      value={detail.phone} />
-                <InfoRow icon={Globe}     label="Davlat"       value={`${detail.country} / ${detail.currency}`} />
-                <InfoRow icon={MapPin}    label="Shahar"        value={detail.city} />
-                <InfoRow icon={Building2} label="Egasi"         value={`${detail.ownerName ?? "—"} (${detail.ownerEmail ?? ""})`} />
-                {detail.slug && (
+                <InfoRow icon={Building2} label="Yuridik nom" value={company.legalName} />
+                <InfoRow icon={Building2} label="STIR"        value={company.taxId} />
+                <InfoRow icon={Mail}      label="Email"        value={company.email} />
+                <InfoRow icon={Phone}     label="Telefon"      value={company.phone} />
+                <InfoRow icon={Globe}     label="Davlat"       value={`${company.country} / ${company.currency}`} />
+                <InfoRow icon={MapPin}    label="Shahar"        value={company.city} />
+                <InfoRow
+                  icon={Building2}
+                  label="Egasi"
+                  value={detail.owner ? `${detail.owner.name ?? "—"} (${detail.owner.phone})` : "Egasiz"}
+                />
+                {company.slug && (
                   <div className="flex items-center gap-2 text-sm">
                     <Link2 className="h-3.5 w-3.5 text-white/30 shrink-0" />
                     <span className="text-white/40 text-xs w-24 shrink-0">Tenant URL</span>
                     <div className="flex items-center gap-1.5 min-w-0">
                       <a
-                        href={`${BASE_URL}/t/${detail.slug}`}
+                        href={`${BASE_URL}/t/${company.slug}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-primary text-xs hover:underline truncate"
                       >
-                        {BASE_URL}/t/{detail.slug}
+                        {BASE_URL}/t/{company.slug}
                       </a>
-                      <CopyButton text={`${BASE_URL}/t/${detail.slug}`} />
+                      <CopyButton text={`${BASE_URL}/t/${company.slug}`} />
                     </div>
                   </div>
                 )}
-                <InfoRow icon={Calendar}  label="Yaratilgan"    value={
-                  detail._creationTime
-                    ? format(new Date(detail._creationTime), "dd.MM.yyyy HH:mm")
-                    : undefined
-                } />
-                {detail.trialEndsAt && (
+                <InfoRow icon={Calendar}  label="Yaratilgan"    value={format(new Date(company.createdAt), "dd.MM.yyyy HH:mm")} />
+                {company.trialEndsAt && (
                   <InfoRow icon={Calendar} label="Sinov tugaydi" value={
-                    format(new Date(detail.trialEndsAt), "dd.MM.yyyy")
+                    format(new Date(company.trialEndsAt), "dd.MM.yyyy")
                   } />
                 )}
               </InfoSection>
@@ -369,16 +398,21 @@ function CompanyDetailDrawer({
                 ) : (
                   <div className="space-y-2">
                     {detail.members.map((m) => (
-                      <div key={m._id} className="flex items-center gap-2.5 p-2 rounded-lg bg-white/4">
+                      <div key={m.userId} className="flex items-center gap-2.5 p-2 rounded-lg bg-white/4">
                         <div className="h-7 w-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
                           <span className="text-xs font-bold text-primary">
-                            {(m.userName ?? m.userEmail ?? "?")[0].toUpperCase()}
+                            {(m.name ?? m.phone)[0]?.toUpperCase()}
                           </span>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-white truncate">{m.userName ?? "—"}</p>
-                          <p className="text-[11px] text-white/40 truncate">{m.userEmail}</p>
+                          <p className="text-xs font-medium text-white truncate">{m.name ?? "—"}</p>
+                          <p className="text-[11px] text-white/40 truncate font-mono">{m.phone}</p>
                         </div>
+                        {!(m.membershipActive && m.userActive) && (
+                          <Badge variant="outline" className="text-[10px] shrink-0 border-red-500/30 text-red-400">
+                            Bloklangan
+                          </Badge>
+                        )}
                         <Badge variant="outline" className="text-[10px] shrink-0 border-white/15 text-white/50">
                           {m.companyRole}
                         </Badge>
@@ -395,7 +429,7 @@ function CompanyDetailDrawer({
                 ) : (
                   <div className="space-y-1.5">
                     {detail.branches.map((b) => (
-                      <div key={b._id} className="flex items-center justify-between p-2 rounded-lg bg-white/4 text-xs">
+                      <div key={b.id} className="flex items-center justify-between p-2 rounded-lg bg-white/4 text-xs">
                         <span className="text-white/70">{b.name}</span>
                         <div className="flex items-center gap-1.5">
                           <span className="font-mono text-white/40">{b.code}</span>

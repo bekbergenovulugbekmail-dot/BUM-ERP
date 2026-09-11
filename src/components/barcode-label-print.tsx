@@ -128,7 +128,7 @@ export default function BarcodeLabelPrint({ product, onClose }: Props) {
       </head>
       <body>
         <div class="labels">${labelHtml}</div>
-        <script>window.onload = () => window.print();<\/script>
+        <script>window.onload = () => window.print();</${"script"}>
       </body>
       </html>
     `);

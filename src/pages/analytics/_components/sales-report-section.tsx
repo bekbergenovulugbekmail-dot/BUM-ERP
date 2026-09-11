@@ -1,5 +1,3 @@
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
@@ -7,6 +5,8 @@ import Papa from "papaparse";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
+import { useApiQuery } from "@/lib/query.ts";
+import { num, type PurchaseSummary, type SalesSummary, type TopCustomer } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
@@ -24,9 +24,11 @@ function downloadCsv(data: Record<string, unknown>[], filename: string) {
 }
 
 export default function SalesReportSection({ days }: { days: number }) {
-  const sales = useQuery(api.analytics.reports.getSalesSummary, { days });
-  const topCustomers = useQuery(api.analytics.reports.getTopCustomers, { days, limit: 20 });
-  const purchase = useQuery(api.analytics.reports.getPurchaseSummary, { days });
+  const sales = useApiQuery<SalesSummary>("/api/analytics/reports/sales", { days }).data;
+  const topCustomers = useApiQuery<{ customers: TopCustomer[] }>("/api/analytics/reports/top-customers", { days, limit: 20 }).data?.customers;
+  const purchase = useApiQuery<PurchaseSummary>("/api/analytics/reports/purchases", { days }).data;
+
+  const topProducts = (sales?.topProducts ?? []).map((p) => ({ name: p.name, qty: num(p.quantity) }));
 
   return (
     <div className="space-y-4">
@@ -36,9 +38,9 @@ export default function SalesReportSection({ days }: { days: number }) {
           Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-2xl" />)
         ) : [
           { label: "Jami buyurtmalar", value: sales.totalOrders },
-          { label: "Jami daromad", value: fmt(sales.totalRevenue) + " so'm" },
-          { label: "To'langan", value: fmt(sales.paidRevenue) + " so'm" },
-          { label: "Qarzdorlik", value: fmt(sales.totalRevenue - sales.paidRevenue) + " so'm" },
+          { label: "Jami daromad", value: fmt(num(sales.totalRevenue)) + " so'm" },
+          { label: "To'langan", value: fmt(num(sales.paidRevenue)) + " so'm" },
+          { label: "Qarzdorlik", value: fmt(num(sales.totalRevenue) - num(sales.paidRevenue)) + " so'm" },
         ].map((s) => (
           <div key={s.label} className="bg-card border border-border rounded-2xl p-4">
             <p className="text-xl font-bold">{s.value}</p>
@@ -51,15 +53,15 @@ export default function SalesReportSection({ days }: { days: number }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-card border border-border rounded-2xl p-5">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-semibold">Top mahsulotlar (sotilgan dona)</p>
+            <p className="text-sm font-semibold">Top mahsulotlar (sotilgan miqdor)</p>
           </div>
           {!sales ? <Skeleton className="h-52 rounded-xl" /> : (
             <ResponsiveContainer width="100%" height={210}>
-              <BarChart data={sales.topProducts} layout="vertical">
+              <BarChart data={topProducts} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
                 <XAxis type="number" tick={{ fontSize: 11 }} />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
-                <Tooltip formatter={(v) => [v + " dona", "Sotildi"]} />
+                <Tooltip formatter={(v) => [String(v), "Sotildi"]} />
                 <Bar dataKey="qty" fill="#6366f1" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -71,12 +73,12 @@ export default function SalesReportSection({ days }: { days: number }) {
           {!purchase || !sales ? <Skeleton className="h-52 rounded-xl" /> : (
             <div className="space-y-3">
               {[
-                { label: "Sotuvdan daromad", value: sales.totalRevenue, color: "bg-emerald-500" },
-                { label: "Xarid summasi", value: purchase.totalAmount, color: "bg-indigo-500" },
-                { label: "Xarid to'langan", value: purchase.paidAmount, color: "bg-blue-400" },
-                { label: "Xarid qarzdorligi", value: purchase.debtAmount, color: "bg-rose-500" },
+                { label: "Sotuvdan daromad", value: num(sales.totalRevenue), color: "bg-emerald-500" },
+                { label: "Xarid summasi", value: num(purchase.totalAmount), color: "bg-indigo-500" },
+                { label: "Xarid to'langan", value: num(purchase.paidAmount), color: "bg-blue-400" },
+                { label: "Xarid qarzdorligi", value: num(purchase.debtAmount), color: "bg-rose-500" },
               ].map((item) => {
-                const max = Math.max(sales.totalRevenue, purchase.totalAmount, 1);
+                const max = Math.max(num(sales.totalRevenue), num(purchase.totalAmount), 1);
                 return (
                   <div key={item.label} className="space-y-1">
                     <div className="flex items-center justify-between text-sm">
@@ -84,7 +86,7 @@ export default function SalesReportSection({ days }: { days: number }) {
                       <span className="font-medium">{fmt(item.value)} so'm</span>
                     </div>
                     <div className="h-2 bg-muted rounded-full">
-                      <div className={`h-full ${item.color} rounded-full`} style={{ width: `${Math.min(100, (item.value / max) * 100)}%` }} />
+                      <div className={`h-full ${item.color} rounded-full`} style={{ width: `${Math.min(100, Math.max(0, (item.value / max) * 100))}%` }} />
                     </div>
                   </div>
                 );
@@ -120,11 +122,11 @@ export default function SalesReportSection({ days }: { days: number }) {
             </thead>
             <tbody className="divide-y divide-border">
               {topCustomers.map((c, i) => (
-                <tr key={i} className="hover:bg-muted/20">
+                <tr key={c.customerId} className="hover:bg-muted/20">
                   <td className="px-4 py-2.5 text-muted-foreground">{i + 1}</td>
                   <td className="px-4 py-2.5 font-medium">{c.name}</td>
                   <td className="px-4 py-2.5 text-right text-muted-foreground">{c.orders}</td>
-                  <td className="px-4 py-2.5 text-right font-bold">{fmt(c.amount)} so'm</td>
+                  <td className="px-4 py-2.5 text-right font-bold">{fmt(num(c.amount))} so'm</td>
                 </tr>
               ))}
             </tbody>

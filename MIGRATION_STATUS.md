@@ -7,8 +7,8 @@
 |---|---|
 | Branch | `feat/postgres-migration` |
 | Oxirgi yangilanish | 2026-09-11 |
-| Umumiy holat | 15 / 16 PHASE tugallandi, keyingi — PHASE 16 (frontend) |
-| Ishlab turgan ilova | Hali to'liq Convex'da — frontend yangi API'ga ulanmagan |
+| Umumiy holat | 16 / 16 PHASE — kod tayyor; qolgan: brauzerda qo'lda sinov, production deploy va ma'lumot importi |
+| Ishlab turgan ilova | Production hali Convex'da (`main`). Bu branch'da frontend to'liq API'da, Convex kodi olib tashlangan |
 
 **Holat belgilari:** ✅ tugallandi · 🟡 jarayonda · ⬜ boshlanmagan
 
@@ -35,7 +35,7 @@
 | 13 | HR | ✅ tugallandi |
 | 14 | Dashboard, hisobot, AI, bildirishnoma, fayl | ✅ tugallandi (takliflar — qaror bo'yicha yozilmadi) |
 | 15 | Ma'lumotni Convex'dan ko'chirish | ✅ tugallandi (vosita; haqiqiy import production eksportini kutadi) |
-| 16 | Frontend'ni API'ga o'tkazish, deploy, Convex'ni o'chirish | ⬜ boshlanmagan |
+| 16 | Frontend'ni API'ga o'tkazish, deploy, Convex'ni o'chirish | ✅ tugallandi (kod va deploy fayllari; production deploy va import foydalanuvchi kalitini kutadi) |
 
 ## Yakuniy qarorlar (2026-09-11)
 
@@ -323,8 +323,10 @@ Kompaniyaning faol a'zosi; yuborish — `company.manage`.
 - **Migratsiya:** `pnpm --filter @bum/api db:migrate`
 - **Seed:** `.env` ga `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_PASSWORD` — `pnpm --filter @bum/api db:seed` (bootstrap admin + 14 global rol + 9 standart o'lchov birligi; idempotent)
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
+- **Frontend:** `pnpm dev` → `http://localhost:5173` (`/api` Vite proxy orqali API'ga, `VITE_API_URL` bo'sh)
+- **Docker (production'dagidek):** `docker build -f apps/api/Dockerfile -t bum-erp-api .`, `docker build -f Dockerfile.web -t bum-erp-web .`
 - **Convex'dan import:** `pnpm --filter @bum/api db:import-convex <ochilgan-eksport-papkasi> [--dry-run] [--report fayl.json]` (PHASE 15)
-- **Testlar:** `pnpm --filter @bum/api test` — 204 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
+- **Testlar:** API — `pnpm --filter @bum/api test` — 205 ta; frontend — `pnpm test` — 5 ta; lint — `pnpm lint`
 
 ---
 
@@ -539,10 +541,42 @@ Vosita tayyor va sinovdan o'tgan; **haqiqiy ma'lumot hali ko'chirilmagan** — p
   - scrypt parol bilan kirish va argon2id ga o'tish, havolalar, yaxlitlash, dublikat kod/asosiy belgi, yetim yozuvlar, tashqi URL'lar, balanslanmagan yozuv, hisoblar rejasini to'ldirish, solishtirish
   - quruq ishga tushirish hech narsa yozmasligi, qayta import dublikatsizligi va o'zgargan parolni saqlashi
 
-## PHASE 16 — Frontend'ni API'ga o'tkazish, deploy, Convex'ni o'chirish ⬜
+## PHASE 16 — Frontend'ni API'ga o'tkazish, deploy, Convex'ni o'chirish ✅
 
-- **Manba:** `src/` (barcha sahifalar Convex hook'larini ishlatadi); auth kirish nuqtasi `src/hooks/use-auth.ts`
-- **E'tibor:**
+Kod tomoni tugadi. Brauzerda qo'lda sinov, production deploy va ma'lumot importi hali qilinmagan (quyida "Keyingi qadam").
+
+- **Poydevor** (`src/lib`, `src/hooks`):
+  - `api.ts` — cookie sessiyali fetch, `ApiError { status, code, message }`; himoyalangan so'rov 401 qaytarsa login sahifasiga
+  - `query.ts` — `useApiQuery(path | null, params)`, `useApiMutation(fn, { invalidate })`: muvaffaqiyatli mutatsiyadan keyin ko'rinib turgan so'rovlar qayta olinadi (Convex reaktivligi o'rniga)
+  - `use-auth.ts` (`/api/auth/*`, kirish/chiqishda boshqa foydalanuvchi keshi tozalanadi), `use-company.ts` (kompaniyalar, almashtirish — kesh to'liq qayta o'rnatiladi, `can()` ruxsatlar), `auth-gates.tsx`
+  - bildirishnomalar har daqiqada va oyna fokusida yangilanadi; qulf ekrani `/api/auth/pin/verify`
+  - kirish sahifasida SMS orqali parol tiklash
+- **Sahifalar:** hammasi API'da — mahsulot, ombor, xarid, savdo, POS, moliya, HR, CRM, ishlab chiqarish, dashboard, tahlil va AI, sozlamalar, admin panel, onboarding, tenant portal. Har modulda `_lib/types.ts` — javob turlari
+- **Yakuniy qarorlar bo'yicha olib tashlandi:** takliflar bo'limi; `admin/bootstrap.tsx` (bootstrap admin faqat `.env` + `db:seed`); standart rol, birlik va hisob "seed" tugmalari; platforma adminining alohida foydalanuvchi yaratishi (ega kompaniya bilan birga ochiladi, xodimlarni ega qo'shadi)
+- **Asosiy xatti-harakat o'zgarishlari:**
+  - pul va miqdor — satr, hisob-kitob serverda; POS va savdoning oldindan ko'rish summasi serverdagi `computeLine` nusxasi bilan tiyinigacha bir xil
+  - tugmalar ruxsatlar bo'yicha yashiriladi (asosiy himoya serverda)
+  - mahsulot rasmi — fayl yuklash oqimi (imzolangan URL); CSV import/eksport serverda
+  - ombor: `adjust` — ishorali farq; qo'lda harakat va o'tkazma boshqa o'lchov birligida (konversiya bilan) va o'tgan sana bilan
+  - to'lovlarda `reference` — ikki marta bosishdan himoya
+  - sanalar foydalanuvchining mahalliy kuni bo'yicha (UTC emas)
+- **PHASE 16 davomidagi API qo'shimchalari:**
+  - `/me` — amaldagi kompaniya holati va sababi (to'xtatilgan yoki sinovi tugagan kompaniyada tenant so'rovlari 403, ekran `/me` dan)
+  - `/company/mine` — valyuta va sinov muddati
+  - ombor harakati va o'tkazmada `unitId`, o'tkazmada `occurredAt`
+  - importer marshrut kunlarini to'g'rilaydi (Convex UI'da 0 = dushanba, API'da 0 = yakshanba)
+- **Convex olib tashlandi:** `convex/`, `convex.json`, provider, `convex` / `@convex-dev/*` / `@auth/core` / `@anthropic-ai/sdk` / `bcryptjs` / `convex-test` / `@edge-runtime/vm` paketlari, ESLint plagini, `@/convex` aliaslari. Production Convex `main` branch'da qoladi — eksport va RBAC deploy o'sha yerdan
+- **Deploy fayllari:**
+  - `apps/api/Dockerfile` — workspace tuzilishi saqlanadi (`@bum/shared` build'siz, Node ≥ 22.18 type stripping). Migratsiya: `node dist/db/migrate.js`. Lokal tekshirildi: image build, `/health`, 401/200 javoblar, konteyner ichida migratsiya
+  - `Dockerfile.web` + `deploy/nginx/default.conf.template` — SPA; `/api` shu domenda proksi (`API_UPSTREAM`), Railway `PORT`. Cookie va CORS app.* va admin.* da bir xil ishlaydi
+  - API build tuzatildi: TS 6 `rootDir`; `@bum/shared` ichida `.ts` importlari; `AppError` parametr-xossalarisiz
+- **Ma'lum cheklovlar (keyingi yaxshilashlar):**
+  - 200 ta chegarasi: mahsulot tanlagichlari, xarid statistikasi (oxirgi 200 buyurtma bo'yicha); ABC tahlili — top 50
+  - `warehouse.view` ruxsati yo'q kassir POS'da qoldiqni ko'rmaydi (server baribir tekshiradi) — POS uchun alohida qoldiq endpointi kerak
+  - ombor qoldiq ro'yxatida mahsulot rasmi yo'q; xodimlar ro'yxatida server qidiruvi yo'q
+  - kirgan foydalanuvchi ikkinchi kompaniyani o'zi ocha olmaydi (platforma admini ochadi)
+  - `trustProxy: true` — API faqat proksi ortida ochiq bo'lishi kerak (aks holda `X-Forwarded-For` bilan IP limitini aylanib o'tish mumkin)
+- **Sahifama-sahifa talablar (bajarildi):**
   - `admin/bootstrap.tsx` keraksiz (`db:seed`); `onboarding` → `/api/registration` (yoqilgan bo'lsa)
   - `users-section.tsx` → `PATCH /api/company/employees/:userId`; `roles-section.tsx` `seedDefaultRoles` tugmasi keraksiz
   - `products/product-form-dialog.tsx`: standart `costingMethod: "fifo"` → `"average"` bo'lishi kerak; `imageUrl` maydoni olib tashlanadi (PHASE 14 gacha); `products/page.tsx` `seedDefaultUnits` chaqiruvi keraksiz; CSV import → `POST /api/catalog/products/import`, export → `GET /api/catalog/products/export`
@@ -563,8 +597,13 @@ Vosita tayyor va sinovdan o'tgan; **haqiqiy ma'lumot hali ko'chirilmagan** — p
 
 ## Keyingi qadam
 
-1. **PHASE 16 (Frontend'ni API'ga o'tkazish)** — yuqoridagi "E'tibor" ro'yxati bo'yicha sahifama-sahifa; avval auth (`use-auth.ts`), keyin katalog va ombor
+1. **Brauzerda sinov (lokal):**
+   - `docker compose up -d` → `pnpm --filter @bum/api db:migrate`
+   - `.env` ga `BOOTSTRAP_ADMIN_*` → `pnpm --filter @bum/api db:seed`
+   - `pnpm --filter @bum/api dev` va `pnpm dev`
+   - admin bilan kompaniya va egasini ochish → egasi bilan asosiy oqim: mahsulot → kirim → sotuv / POS → to'lov → hisobotlar
 2. **Production (foydalanuvchi kaliti kerak):**
    - Convex tuzatishini (`main` `3f958f1`) deploy qilish
-   - `npx convex export` → `db:import-convex --dry-run` → hisobotni ko'rib chiqish → import
-3. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_*` qo'shib `db:seed`
+   - Railway: PostgreSQL; API (`apps/api/Dockerfile`, pre-deploy `node dist/db/migrate.js`); web (`Dockerfile.web`, `API_UPSTREAM`); S3 bucket; env `.env.example` bo'yicha; app.* va admin.* domenlari web xizmatiga
+   - `main` checkout'da `npx convex export` → `db:import-convex --dry-run` → hisobotni ko'rib chiqish → import → foydalanuvchilarga PIN qayta o'rnatilishi haqida xabar
+3. **PR:** `feat/postgres-migration` → `main` — production'ga o'tish kuni kelishilgach

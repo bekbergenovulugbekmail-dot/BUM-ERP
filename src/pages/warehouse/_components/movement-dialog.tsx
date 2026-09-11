@@ -1,7 +1,5 @@
-import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
+import { useMemo } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -16,64 +14,77 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select.tsx";
 import { PackagePlus, PackageMinus, SlidersHorizontal, Trash2 } from "lucide-react";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { formatQty, toNumber, type ProductListResponse } from "@/pages/products/_lib/types.ts";
+import { localIsoDate, occurredAtFor, round4 } from "../_lib/dates.ts";
+import { useProductUnits } from "../_lib/use-product-units.ts";
 
-const MOVEMENT_INFO = {
+type MovementKind = "receive" | "issue" | "adjust" | "writeoff";
+
+const MOVEMENT_INFO: Record<MovementKind, { title: string; icon: React.ReactNode; qtyLabel: string }> = {
   receive: {
     title: "Tovar qabul qilish",
     icon: <PackagePlus className="h-5 w-5 text-green-600" />,
-    color: "text-green-600",
     qtyLabel: "Qabul miqdori",
   },
   issue: {
     title: "Tovar chiqarish",
     icon: <PackageMinus className="h-5 w-5 text-amber-600" />,
-    color: "text-amber-600",
     qtyLabel: "Chiqarish miqdori",
   },
   adjust: {
     title: "Zaxirani tuzatish",
     icon: <SlidersHorizontal className="h-5 w-5 text-purple-600" />,
-    color: "text-purple-600",
-    qtyLabel: "Yangi miqdor (faktik)",
+    // Server `adjust` ni ishorali farq sifatida qabul qiladi (yangi qoldiq emas)
+    qtyLabel: "Farq (+ ko'paytirish / − kamaytirish)",
   },
   writeoff: {
     title: "Hisobdan chiqarish",
     icon: <Trash2 className="h-5 w-5 text-destructive" />,
-    color: "text-destructive",
     qtyLabel: "Chiqariladigan miqdor",
   },
 };
 
-const schema = z.object({
-  productId: z.string().min(1, "Mahsulot tanlang"),
-  unitId: z.string().min(1),
-  quantity: z.number().min(0.001, "Miqdor 0 dan katta bo'lishi kerak"),
-  costPrice: z.number().min(0),
-  notes: z.string().optional(),
-  date: z.string().min(1),
-});
+type FormValues = {
+  productId: string;
+  unitId: string;
+  quantity: number;
+  costPrice: number;
+  notes?: string;
+  date: string;
+};
 
-type FormValues = z.infer<typeof schema>;
+function schemaFor(type: MovementKind) {
+  return z.object({
+    productId: z.string().min(1, "Mahsulot tanlang"),
+    unitId: z.string(),
+    quantity:
+      type === "adjust"
+        ? z.number().refine((v) => v !== 0, "Farq 0 bo'lmasligi kerak")
+        : z.number().gt(0, "Miqdor 0 dan katta bo'lishi kerak"),
+    costPrice: z.number().min(0),
+    notes: z.string().optional(),
+    date: z.string().min(1),
+  });
+}
 
 type Props = {
-  type: "receive" | "issue" | "adjust" | "writeoff";
-  warehouseId: Id<"warehouses">;
+  type: MovementKind;
+  warehouseId: string;
   onClose: () => void;
 };
 
 export default function MovementDialog({ type, warehouseId, onClose }: Props) {
   const info = MOVEMENT_INFO[type];
-  const products = useQuery(api.products.products.list, {
-    paginationOpts: { cursor: null, numItems: 200 },
-  });
-  const units = useQuery(api.products.units.list, {});
-  const recordMovement = useMutation(api.warehouse.stock.recordMovement);
-  const [loading, setLoading] = useState(false);
+  // Tanlash ro'yxati: faol mahsulotlar, API chegarasi 200 ta
+  const products = useApiQuery<ProductListResponse>("/api/catalog/products", { isActive: true, limit: 200 }).data
+    ?.products;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localIsoDate();
+  const schema = useMemo(() => schemaFor(type), [type]);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -87,35 +98,50 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
     },
   });
 
-  const selectedProductId = form.watch("productId");
-  const selectedProduct = products?.page.find((p) => p._id === selectedProductId);
+  const selectedProductId = useWatch({ control: form.control, name: "productId" });
+  const selectedUnitId = useWatch({ control: form.control, name: "unitId" });
+  const selectedProduct = products?.find((p) => p.id === selectedProductId);
+  const unitOptions = useProductUnits(selectedProduct);
+  const selectedUnit = unitOptions.find((u) => u.id === selectedUnitId);
 
-  // Auto-fill cost price and unit when product selected
+  // Mahsulot tanlanganda: asosiy birlik va kirim narxi
   const handleProductChange = (productId: string) => {
-    form.setValue("productId", productId);
-    const product = products?.page.find((p) => p._id === productId);
+    form.setValue("productId", productId, { shouldValidate: true });
+    const product = products?.find((p) => p.id === productId);
     if (product) {
-      form.setValue("costPrice", product.purchasePrice);
       form.setValue("unitId", product.baseUnitId);
+      form.setValue("costPrice", toNumber(product.purchasePrice));
     }
   };
 
-  const onSubmit = async (values: FormValues) => {
-    setLoading(true);
-    try {
-      // For "adjust" type, we need to figure out the delta
-      // We record it as "adjust" type; the backend treats positive qty as "in"
-      await recordMovement({
-        type: type === "adjust" ? "adjust" : type === "writeoff" ? "writeoff" : type,
-        productId: values.productId as Id<"products">,
-        warehouseId,
-        quantity: values.quantity,
-        unitId: values.unitId as Id<"units">,
-        costPrice: values.costPrice,
-        notes: values.notes || undefined,
-        date: values.date,
-      });
+  // Narx tanlangan birlik uchun: 1 quti narxi = dona narxi × koeffitsient
+  const handleUnitChange = (unitId: string) => {
+    form.setValue("unitId", unitId);
+    const option = unitOptions.find((u) => u.id === unitId);
+    if (selectedProduct && option) {
+      form.setValue("costPrice", round4(toNumber(selectedProduct.purchasePrice) * Number(option.factor)));
+    }
+  };
 
+  const record = useApiMutation((values: FormValues) =>
+    api.post("/api/inventory/stock/movements", {
+      type,
+      productId: values.productId,
+      warehouseId,
+      quantity: values.quantity,
+      // Asosiy birlikdan boshqasi — server konversiya bilan asosiy birlikka o'tkazadi (narx ham shu birlik uchun)
+      ...(selectedProduct && values.unitId && values.unitId !== selectedProduct.baseUnitId ? { unitId: values.unitId } : {}),
+      // Tannarx faqat kirimda o'rtachani o'zgartiradi; chiqim joriy o'rtacha tannarxda yoziladi
+      ...(type === "receive" ? { costPrice: values.costPrice } : {}),
+      notes: values.notes?.trim() || null,
+      // Bugungi sana — server vaqti; o'tgan sana tanlansa shu kun yoziladi
+      occurredAt: occurredAtFor(values.date),
+    }),
+  );
+
+  const onSubmit = async (values: FormValues) => {
+    try {
+      await record.mutateAsync(values);
       toast.success(
         type === "receive" ? "Tovar qabul qilindi" :
         type === "issue" ? "Tovar chiqarildi" :
@@ -123,9 +149,7 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
       );
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Xatolik yuz berdi");
-    } finally {
-      setLoading(false);
+      toast.error(errorMessage(err));
     }
   };
 
@@ -151,8 +175,8 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    {products?.page.map((p) => (
-                      <SelectItem key={p._id} value={p._id}>
+                    {products?.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
                         <span className="font-mono text-xs mr-2 text-muted-foreground">{p.sku}</span>
                         {p.name}
                       </SelectItem>
@@ -170,8 +194,8 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
                   <FormControl>
                     <Input
                       type="number"
-                      min="0"
-                      step="0.001"
+                      {...(type === "adjust" ? {} : { min: "0" })}
+                      step="any"
                       {...field}
                       onChange={(e) => field.onChange(e.target.valueAsNumber)}
                     />
@@ -183,11 +207,16 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
               <FormField control={form.control} name="unitId" render={({ field }) => (
                 <FormItem>
                   <FormLabel>O'lchov</FormLabel>
-                  <Select value={field.value} onValueChange={field.onChange}>
-                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                  <Select value={field.value} onValueChange={handleUnitChange} disabled={!selectedProduct}>
+                    <FormControl>
+                      <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                    </FormControl>
                     <SelectContent>
-                      {units?.map((u) => (
-                        <SelectItem key={u._id} value={u._id}>{u.name}</SelectItem>
+                      {unitOptions.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.label}
+                          {u.factor !== "1" ? ` (= ${formatQty(u.factor)} ${selectedProduct?.baseUnitName ?? ""})` : ""}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -195,24 +224,34 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
               )} />
             </div>
 
-            <FormField control={form.control} name="costPrice" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Narx (so'm)</FormLabel>
-                <FormControl>
-                  <Input
-                    type="number"
-                    min="0"
-                    {...field}
-                    onChange={(e) => field.onChange(e.target.valueAsNumber)}
-                  />
-                </FormControl>
-              </FormItem>
-            )} />
+            {type === "receive" ? (
+              <FormField control={form.control} name="costPrice" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    Narx (so'm{selectedUnit && selectedUnit.factor !== "1" ? `, 1 ${selectedUnit.label} uchun` : ""})
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="any"
+                      {...field}
+                      onChange={(e) => field.onChange(e.target.valueAsNumber)}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Tannarx omborning joriy o'rtacha narxi bo'yicha yoziladi.
+              </p>
+            )}
 
             <FormField control={form.control} name="date" render={({ field }) => (
               <FormItem>
                 <FormLabel>Sana</FormLabel>
-                <FormControl><Input type="date" {...field} /></FormControl>
+                <FormControl><Input type="date" max={today} {...field} /></FormControl>
               </FormItem>
             )} />
 
@@ -225,8 +264,8 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
 
             <DialogFooter>
               <Button type="button" variant="secondary" onClick={onClose}>Bekor</Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? "..." : info.title}
+              <Button type="submit" disabled={record.isPending}>
+                {record.isPending ? "..." : info.title}
               </Button>
             </DialogFooter>
           </form>

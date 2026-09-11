@@ -1,15 +1,13 @@
 import { useState } from "react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { motion } from "motion/react";
-import { Users, UserCheck, DollarSign, Building2, CalendarDays, TrendingUp } from "lucide-react";
+import { Users, DollarSign, Building2, CalendarDays, TrendingUp, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
+import { useApiQuery } from "@/lib/query.ts";
 import EmployeesSection from "./_components/employees-section.tsx";
 import DepartmentsSection from "./_components/departments-section.tsx";
 import AttendanceSection from "./_components/attendance-section.tsx";
 import SalarySection from "./_components/salary-section.tsx";
-
-const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
+import { fmt, toNum, type EmployeeStats } from "./_lib/types.ts";
 
 const TABS = [
   { key: "employees", label: "Xodimlar", icon: Users },
@@ -20,7 +18,21 @@ const TABS = [
 
 export default function HRPage() {
   const [tab, setTab] = useState<typeof TABS[number]["key"]>("employees");
-  const stats = useQuery(api.hr.employees.getStats, {});
+  const statsQuery = useApiQuery<EmployeeStats>("/api/hr/employees/stats");
+  const stats = statsQuery.data;
+
+  if (statsQuery.error?.status === 403) {
+    return (
+      <div className="p-6">
+        <div className="flex flex-col items-center py-16 text-center text-muted-foreground">
+          <ShieldAlert className="h-10 w-10 mb-3 opacity-40" />
+          <p>HR bo'limini ko'rish uchun ruxsat yo'q</p>
+        </div>
+      </div>
+    );
+  }
+
+  const totalSalary = toNum(stats?.totalSalary);
 
   const statCards = [
     {
@@ -41,15 +53,15 @@ export default function HRPage() {
     },
     {
       label: "Oylik maosh fondi",
-      value: fmt(stats?.totalSalary ?? 0) + " so'm",
-      sub: "Faol xodimlar bo'yicha",
+      value: fmt(totalSalary) + " so'm",
+      sub: "Oylik maoshli xodimlar bo'yicha",
       icon: DollarSign,
       color: "text-emerald-500",
       bg: "bg-emerald-500/10",
     },
     {
       label: "O'rtacha maosh",
-      value: stats?.active ? fmt((stats.totalSalary ?? 0) / stats.active) + " so'm" : "—",
+      value: stats?.active ? fmt(totalSalary / stats.active) + " so'm" : "—",
       sub: "Bir xodimga",
       icon: TrendingUp,
       color: "text-blue-500",

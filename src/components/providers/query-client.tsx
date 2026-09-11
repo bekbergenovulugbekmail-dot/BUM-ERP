@@ -5,7 +5,7 @@ import {
 import { ApiError, UNAUTHENTICATED_EVENT } from "@/lib/api.ts";
 import { AUTH_ME_KEY } from "@/lib/query.ts";
 
-export const queryClient = new QueryClient({
+const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 15_000,

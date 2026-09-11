@@ -1,0 +1,19 @@
+**/node_modules
+**/dist
+dist-ssr
+.git
+.github
+.vscode
+.idea
+.claude
+.agents
+*.log
+coverage
+
+# Maxfiy qiymatlar image'ga tushmasin — muhit o'zgaruvchilari orqali beriladi
+.env*
+!.env.example
+
+# Convex eksportlari va import hisobotlari
+convex-export*
+convex-import-report-*.json

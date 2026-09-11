@@ -1,18 +1,48 @@
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
+/**
+ * Daromad va zarar — buxgalteriya jurnalidan (`GET /api/finance/reports/profit-loss`).
+ * Convex'da sotuv − xarid − xarajat ro'yxatlardan (500 ta chegara bilan) hisoblanardi;
+ * endi o'tkazilgan yozuvlar bo'yicha: xarid emas, sotilgan tovar tannarxi xarajatga kiradi.
+ */
+import { useQueries } from "@tanstack/react-query";
 import { TrendingUp, TrendingDown, DollarSign } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
+import { api, type ApiError } from "@/lib/api.ts";
+import { fmt, toNum, type ProfitLoss, type ProfitLossLine } from "../_lib/types.ts";
 
-const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 const MONTHS = ["Yan", "Fev", "Mar", "Apr", "May", "Iyun", "Iyul", "Avg", "Sen", "Okt", "Noy", "Dek"];
+const PATH = "/api/finance/reports/profit-loss";
+
+/** So'nggi 6 oy — mahalliy sana bo'yicha (UTC siljishisiz). */
+function lastMonths(count: number) {
+  const now = new Date();
+  return Array.from({ length: count }).map((_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (count - 1 - i), 1);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const lastDay = String(new Date(year, d.getMonth() + 1, 0).getDate()).padStart(2, "0");
+    return {
+      key: `${year}-${month}`,
+      label: `${MONTHS[d.getMonth()]} ${year}`,
+      params: { dateFrom: `${year}-${month}-01`, dateTo: `${year}-${month}-${lastDay}` },
+    };
+  });
+}
 
 export default function ProfitLossSection() {
-  const sales = useQuery(api.sales.orders.list, { limit: 500 });
-  const purchases = useQuery(api.purchase.orders.list, { limit: 500 });
-  const expenses = useQuery(api.finance.expenses.list, { limit: 500 });
+  const months = lastMonths(6);
+  const results = useQueries({
+    queries: months.map(({ params }) => ({
+      queryKey: [PATH, params],
+      queryFn: ({ signal }: { signal: AbortSignal }) => api.get<ProfitLoss>(PATH, params, signal),
+    })),
+  });
 
-  if (!sales || !purchases || !expenses) {
+  const failed = results.find((r) => r.isError)?.error as ApiError | undefined;
+  if (failed) {
+    return <div className="py-12 text-center text-sm text-muted-foreground">{failed.message}</div>;
+  }
+  if (results.some((r) => !r.data)) {
     return (
       <div className="space-y-4">
         {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 w-full rounded-2xl" />)}
@@ -20,31 +50,20 @@ export default function ProfitLossSection() {
     );
   }
 
-  // Build monthly P&L for last 6 months
-  const now = new Date();
-  const months = Array.from({ length: 6 }).map((_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-    const key = d.toISOString().slice(0, 7); // YYYY-MM
-    return { key, label: `${MONTHS[d.getMonth()]} ${d.getFullYear()}` };
+  const monthlyData = months.map(({ key, label }, i) => {
+    const report = results[i]!.data!;
+    return {
+      key,
+      label,
+      income: toNum(report.totalIncome),
+      expense: toNum(report.totalExpense),
+      netProfit: toNum(report.netProfit),
+      report,
+    };
   });
 
-  const monthlyData = months.map(({ key, label }) => {
-    const monthSales = sales
-      .filter((o) => o.orderDate.startsWith(key) && !["cancelled"].includes(o.status))
-      .reduce((s, o) => s + o.totalAmount, 0);
-    const monthPurchases = purchases
-      .filter((o) => o.orderDate.startsWith(key) && !["cancelled"].includes(o.status))
-      .reduce((s, o) => s + o.totalAmount, 0);
-    const monthExpenses = expenses
-      .filter((e) => e.date.startsWith(key))
-      .reduce((s, e) => s + e.amount, 0);
-    const grossProfit = monthSales - monthPurchases;
-    const netProfit = grossProfit - monthExpenses;
-    return { key, label, monthSales, monthPurchases, monthExpenses, grossProfit, netProfit };
-  });
-
-  const current = monthlyData[monthlyData.length - 1];
-  const maxVal = Math.max(...monthlyData.map((m) => Math.max(m.monthSales, m.monthPurchases + m.monthExpenses)));
+  const current = monthlyData[monthlyData.length - 1]!;
+  const maxVal = Math.max(...monthlyData.map((m) => Math.max(m.income, m.expense)));
 
   return (
     <div className="space-y-6">
@@ -53,20 +72,20 @@ export default function ProfitLossSection() {
         {[
           {
             label: "Bu oy daromad",
-            value: fmt(current?.monthSales ?? 0) + " so'm",
+            value: fmt(current.income) + " so'm",
             icon: TrendingUp, color: "text-emerald-500", bg: "bg-emerald-500/10",
           },
           {
             label: "Bu oy xarajatlar jami",
-            value: fmt((current?.monthPurchases ?? 0) + (current?.monthExpenses ?? 0)) + " so'm",
+            value: fmt(current.expense) + " so'm",
             icon: TrendingDown, color: "text-rose-500", bg: "bg-rose-500/10",
           },
           {
             label: "Sof foyda",
-            value: fmt(current?.netProfit ?? 0) + " so'm",
+            value: fmt(current.netProfit) + " so'm",
             icon: DollarSign,
-            color: (current?.netProfit ?? 0) >= 0 ? "text-blue-500" : "text-orange-500",
-            bg: (current?.netProfit ?? 0) >= 0 ? "bg-blue-500/10" : "bg-orange-500/10",
+            color: current.netProfit >= 0 ? "text-blue-500" : "text-orange-500",
+            bg: current.netProfit >= 0 ? "bg-blue-500/10" : "bg-orange-500/10",
           },
         ].map((card) => (
           <div key={card.label} className="bg-card border border-border rounded-2xl p-4">
@@ -86,20 +105,20 @@ export default function ProfitLossSection() {
         <h3 className="text-sm font-semibold mb-4">Oylik P&L (so'nggi 6 oy)</h3>
         <div className="flex items-end gap-3 h-40">
           {monthlyData.map((m) => {
-            const salesH = maxVal > 0 ? (m.monthSales / maxVal) * 100 : 0;
-            const costH = maxVal > 0 ? ((m.monthPurchases + m.monthExpenses) / maxVal) * 100 : 0;
+            const incomeH = maxVal > 0 ? (m.income / maxVal) * 100 : 0;
+            const costH = maxVal > 0 ? (m.expense / maxVal) * 100 : 0;
             return (
               <div key={m.key} className="flex-1 flex flex-col items-center gap-1">
                 <div className="w-full flex items-end gap-0.5 h-32 justify-center">
                   <div
                     className="flex-1 bg-emerald-500/70 rounded-t-sm transition-all"
-                    style={{ height: `${salesH}%` }}
-                    title={`Daromad: ${fmt(m.monthSales)}`}
+                    style={{ height: `${incomeH}%` }}
+                    title={`Daromad: ${fmt(m.income)}`}
                   />
                   <div
                     className="flex-1 bg-rose-500/60 rounded-t-sm transition-all"
                     style={{ height: `${costH}%` }}
-                    title={`Xarajat: ${fmt(m.monthPurchases + m.monthExpenses)}`}
+                    title={`Xarajat: ${fmt(m.expense)}`}
                   />
                 </div>
                 <p className="text-[10px] text-muted-foreground text-center leading-tight">{m.label}</p>
@@ -107,7 +126,7 @@ export default function ProfitLossSection() {
                   "text-[10px] font-bold",
                   m.netProfit >= 0 ? "text-emerald-500" : "text-rose-500"
                 )}>
-                  {m.netProfit >= 0 ? "+" : ""}{fmt(m.netProfit / 1_000_000).replace(".", ",")} M
+                  {m.netProfit >= 0 ? "+" : ""}{(m.netProfit / 1_000_000).toFixed(1).replace(".", ",")} M
                 </p>
               </div>
             );
@@ -118,7 +137,7 @@ export default function ProfitLossSection() {
             <div className="h-2.5 w-2.5 rounded-sm bg-emerald-500/70" /> Daromad
           </div>
           <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-sm bg-rose-500/60" /> Xarajatlar
+            <div className="h-2.5 w-2.5 rounded-sm bg-rose-500/60" /> Xarajatlar (tannarx bilan)
           </div>
         </div>
       </div>
@@ -129,8 +148,7 @@ export default function ProfitLossSection() {
           <thead>
             <tr className="bg-muted/30 border-b border-border">
               <th className="text-left px-4 py-3 text-xs text-muted-foreground font-medium">Oy</th>
-              <th className="text-right px-4 py-3 text-xs text-muted-foreground font-medium">Sotuv</th>
-              <th className="text-right px-4 py-3 text-xs text-muted-foreground font-medium">Xarid</th>
+              <th className="text-right px-4 py-3 text-xs text-muted-foreground font-medium">Daromad</th>
               <th className="text-right px-4 py-3 text-xs text-muted-foreground font-medium">Xarajat</th>
               <th className="text-right px-4 py-3 text-xs text-muted-foreground font-medium">Foyda</th>
               <th className="text-right px-4 py-3 text-xs text-muted-foreground font-medium">Marj %</th>
@@ -138,13 +156,12 @@ export default function ProfitLossSection() {
           </thead>
           <tbody className="divide-y divide-border">
             {[...monthlyData].reverse().map((m) => {
-              const margin = m.monthSales > 0 ? (m.netProfit / m.monthSales) * 100 : 0;
+              const margin = m.income > 0 ? (m.netProfit / m.income) * 100 : 0;
               return (
                 <tr key={m.key} className="hover:bg-muted/20">
                   <td className="px-4 py-3 font-medium">{m.label}</td>
-                  <td className="px-4 py-3 text-right text-emerald-600 dark:text-emerald-400 font-medium">{fmt(m.monthSales)} so'm</td>
-                  <td className="px-4 py-3 text-right text-muted-foreground">{fmt(m.monthPurchases)} so'm</td>
-                  <td className="px-4 py-3 text-right text-rose-500">{fmt(m.monthExpenses)} so'm</td>
+                  <td className="px-4 py-3 text-right text-emerald-600 dark:text-emerald-400 font-medium">{fmt(m.income)} so'm</td>
+                  <td className="px-4 py-3 text-right text-rose-500">{fmt(m.expense)} so'm</td>
                   <td className={cn(
                     "px-4 py-3 text-right font-bold",
                     m.netProfit >= 0 ? "text-blue-600 dark:text-blue-400" : "text-orange-600 dark:text-orange-400"
@@ -163,6 +180,35 @@ export default function ProfitLossSection() {
           </tbody>
         </table>
       </div>
+
+      {/* Current month breakdown */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <BreakdownCard title={`Daromadlar — ${current.label}`} lines={current.report.income} tone="text-emerald-600 dark:text-emerald-400" />
+        <BreakdownCard title={`Xarajatlar — ${current.label}`} lines={current.report.expenses} tone="text-rose-500" />
+      </div>
+    </div>
+  );
+}
+
+function BreakdownCard({ title, lines, tone }: { title: string; lines: ProfitLossLine[]; tone: string }) {
+  return (
+    <div className="bg-card border border-border rounded-2xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-border text-sm font-semibold">{title}</div>
+      {lines.length === 0 ? (
+        <div className="p-6 text-center text-sm text-muted-foreground">Yozuvlar yo'q</div>
+      ) : (
+        <table className="w-full text-sm">
+          <tbody className="divide-y divide-border">
+            {lines.map((line) => (
+              <tr key={line.accountId}>
+                <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground w-16">{line.code}</td>
+                <td className="px-4 py-2.5">{line.name}</td>
+                <td className={cn("px-4 py-2.5 text-right font-semibold", tone)}>{fmt(line.amount)} so'm</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

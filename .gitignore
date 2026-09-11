@@ -30,6 +30,6 @@ tsconfig.tsbuildinfo
 .env*
 !.env.example
 
-# Convex AI skills — `npx convex ai-files install` bilan tiklanadi
+# Mahalliy AI yordamchi fayllari
 .agents/
 .claude/

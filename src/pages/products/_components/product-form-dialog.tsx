@@ -1,10 +1,9 @@
-import { useState, useEffect } from "react";
-import { useForm } from "react-hook-form";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
+import { ImageIcon } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog.tsx";
@@ -21,14 +20,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.t
 import { Switch } from "@/components/ui/switch.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import {
+  removeProductImage, uploadProductImage, useProductImageUrl, validateProductImage,
+} from "../_lib/product-files.ts";
+import type { Brand, Category, ProductDetail, Unit } from "../_lib/types.ts";
 
 const schema = z.object({
   name: z.string().min(1, "Nomi kiritilishi shart"),
   sku: z.string().min(1, "SKU kiritilishi shart"),
   barcode: z.string().optional(),
   description: z.string().optional(),
-  imageUrl: z.string().optional(),
   categoryId: z.string().optional(),
   brandId: z.string().optional(),
   manufacturer: z.string().optional(),
@@ -46,8 +49,7 @@ const schema = z.object({
   maxStock: z.number().optional(),
   trackBatch: z.boolean(),
   trackExpiry: z.boolean(),
-  shelfLifeDays: z.number().optional(),
-  costingMethod: z.enum(["fifo", "fefo", "average", "manual"]),
+  shelfLifeDays: z.number().int().optional(),
   isSaleable: z.boolean(),
   isPurchaseable: z.boolean(),
   isManufactured: z.boolean(),
@@ -59,143 +61,183 @@ type FormValues = z.infer<typeof schema>;
 type Props = {
   open: boolean;
   onClose: () => void;
-  editId: Id<"products"> | null;
+  editId: string | null;
 };
 
-const COSTING_METHODS = [
-  { value: "fifo", label: "FIFO (Birinchi kirgan — birinchi chiqadi)" },
-  { value: "fefo", label: "FEFO (Muddati avval tugagan — birinchi chiqadi)" },
-  { value: "average", label: "O'rtacha narx" },
-  { value: "manual", label: "Qo'lda" },
-];
+const EMPTY_VALUES: FormValues = {
+  name: "", sku: "", barcode: "", description: "",
+  manufacturer: "", baseUnitId: "",
+  purchasePrice: 0, salesPrice: 0,
+  taxRate: 12, taxIncluded: false,
+  minStock: 0,
+  trackBatch: false, trackExpiry: false,
+  isSaleable: true, isPurchaseable: true, isManufactured: false,
+};
+
+/** Bo'sh qiymat — `null`: tahrirlashda maydonni tozalash ham shu yo'l bilan. */
+const idOrNull = (value?: string) => (value && value !== "none" ? value : null);
+const textOrNull = (value?: string) => (value?.trim() ? value.trim() : null);
+const numOrNull = (value?: number) => (value === undefined || Number.isNaN(value) ? null : value);
+const optionalNumber = (value: string | null) => (value === null ? undefined : Number(value));
+
+function toPayload(values: FormValues) {
+  return {
+    name: values.name.trim(),
+    sku: values.sku.trim(),
+    barcode: textOrNull(values.barcode),
+    description: textOrNull(values.description),
+    categoryId: idOrNull(values.categoryId),
+    brandId: idOrNull(values.brandId),
+    manufacturer: textOrNull(values.manufacturer),
+    baseUnitId: values.baseUnitId,
+    purchaseUnitId: idOrNull(values.purchaseUnitId),
+    salesUnitId: idOrNull(values.salesUnitId),
+    purchasePrice: values.purchasePrice,
+    salesPrice: values.salesPrice,
+    wholesalePrice: numOrNull(values.wholesalePrice),
+    retailPrice: numOrNull(values.retailPrice),
+    promoPrice: numOrNull(values.promoPrice),
+    taxRate: values.taxRate,
+    taxIncluded: values.taxIncluded,
+    minStock: values.minStock,
+    maxStock: numOrNull(values.maxStock),
+    trackBatch: values.trackBatch,
+    trackExpiry: values.trackExpiry,
+    shelfLifeDays: numOrNull(values.shelfLifeDays),
+    // costingMethod yuborilmaydi — server faqat o'rtacha tannarxni (AVCO) qo'llaydi
+    isSaleable: values.isSaleable,
+    isPurchaseable: values.isPurchaseable,
+    isManufactured: values.isManufactured,
+    weight: numOrNull(values.weight),
+  };
+}
 
 export default function ProductFormDialog({ open, onClose, editId }: Props) {
-  const categories = useQuery(api.products.categories.list, {});
-  const brands = useQuery(api.products.brands.list, {});
-  const units = useQuery(api.products.units.list, {});
-  const existingProduct = useQuery(
-    api.products.products.getById,
-    editId ? { id: editId } : "skip"
-  );
+  const categories = useApiQuery<{ categories: Category[] }>(open ? "/api/catalog/categories" : null).data?.categories;
+  const brands = useApiQuery<{ brands: Brand[] }>(open ? "/api/catalog/brands" : null, { isActive: true }).data?.brands;
+  const units = useApiQuery<{ units: Unit[] }>(open ? "/api/catalog/units" : null).data?.units;
+  const existingProduct = useApiQuery<{ product: ProductDetail }>(
+    open && editId ? `/api/catalog/products/${editId}` : null,
+  ).data?.product;
 
-  const createProduct = useMutation(api.products.products.create);
-  const updateProduct = useMutation(api.products.products.update);
-  const [loading, setLoading] = useState(false);
+  // Rasm: yangi fayl tanlangan yoki mavjud rasm olib tashlanadi — mahsulot saqlangach bajariladi
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [removeImage, setRemoveImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const currentImageUrl = useProductImageUrl(editId, existingProduct?.imageKey);
+  const previewUrl = useMemo(() => (imageFile ? URL.createObjectURL(imageFile) : null), [imageFile]);
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      name: "", sku: "", barcode: "", description: "",
-      imageUrl: "", manufacturer: "",
-      purchasePrice: 0, salesPrice: 0,
-      taxRate: 12, taxIncluded: false,
-      minStock: 0,
-      trackBatch: false, trackExpiry: false,
-      costingMethod: "fifo",
-      isSaleable: true, isPurchaseable: true, isManufactured: false,
-    },
+    defaultValues: EMPTY_VALUES,
   });
 
+  // Dialog ochilganda yoki boshqa mahsulot tahrirlanganda rasm tanlovi tozalanadi (render paytida moslash)
+  const imageScope = open ? `open:${editId ?? "new"}` : "closed";
+  const [imageStateScope, setImageStateScope] = useState(imageScope);
+  if (imageStateScope !== imageScope) {
+    setImageStateScope(imageScope);
+    if (open) {
+      setImageFile(null);
+      setRemoveImage(false);
+    }
+  }
+  // Fayl maydonining o'zi (DOM) — effektda
   useEffect(() => {
+    if (open && fileInputRef.current) fileInputRef.current.value = "";
+  }, [open, editId]);
+
+  useEffect(() => {
+    if (!open) return;
     if (existingProduct && editId) {
       form.reset({
         name: existingProduct.name,
         sku: existingProduct.sku,
         barcode: existingProduct.barcode ?? "",
         description: existingProduct.description ?? "",
-        imageUrl: existingProduct.imageUrl ?? "",
         categoryId: existingProduct.categoryId ?? "",
         brandId: existingProduct.brandId ?? "",
         manufacturer: existingProduct.manufacturer ?? "",
         baseUnitId: existingProduct.baseUnitId,
         purchaseUnitId: existingProduct.purchaseUnitId ?? "",
         salesUnitId: existingProduct.salesUnitId ?? "",
-        purchasePrice: existingProduct.purchasePrice,
-        salesPrice: existingProduct.salesPrice,
-        wholesalePrice: existingProduct.wholesalePrice,
-        retailPrice: existingProduct.retailPrice,
-        promoPrice: existingProduct.promoPrice,
-        taxRate: existingProduct.taxRate,
+        purchasePrice: Number(existingProduct.purchasePrice),
+        salesPrice: Number(existingProduct.salesPrice),
+        wholesalePrice: optionalNumber(existingProduct.wholesalePrice),
+        retailPrice: optionalNumber(existingProduct.retailPrice),
+        promoPrice: optionalNumber(existingProduct.promoPrice),
+        taxRate: Number(existingProduct.taxRate),
         taxIncluded: existingProduct.taxIncluded,
-        minStock: existingProduct.minStock,
-        maxStock: existingProduct.maxStock,
+        minStock: Number(existingProduct.minStock),
+        maxStock: optionalNumber(existingProduct.maxStock),
         trackBatch: existingProduct.trackBatch,
         trackExpiry: existingProduct.trackExpiry,
-        shelfLifeDays: existingProduct.shelfLifeDays,
-        costingMethod: existingProduct.costingMethod,
+        shelfLifeDays: existingProduct.shelfLifeDays ?? undefined,
         isSaleable: existingProduct.isSaleable,
         isPurchaseable: existingProduct.isPurchaseable,
         isManufactured: existingProduct.isManufactured,
-        weight: existingProduct.weight,
+        weight: optionalNumber(existingProduct.weight),
       });
     } else if (!editId) {
-      form.reset({
-        name: "", sku: "", barcode: "", description: "",
-        imageUrl: "", manufacturer: "",
-        purchasePrice: 0, salesPrice: 0,
-        taxRate: 12, taxIncluded: false,
-        minStock: 0,
-        trackBatch: false, trackExpiry: false,
-        costingMethod: "fifo",
-        isSaleable: true, isPurchaseable: true, isManufactured: false,
-      });
+      form.reset(EMPTY_VALUES);
     }
-  }, [existingProduct, editId, form]);
+  }, [open, existingProduct, editId, form]);
+
+  const save = useApiMutation(async (values: FormValues) => {
+    const payload = toPayload(values);
+    const { product } = editId
+      ? await api.patch<{ product: { id: string } }>(`/api/catalog/products/${editId}`, payload)
+      : await api.post<{ product: { id: string } }>("/api/catalog/products", payload);
+
+    // Mahsulot saqlandi; rasm xatosi alohida ko'rsatiladi (masalan saqlash sozlanmagan — 503)
+    let imageError: string | null = null;
+    try {
+      if (imageFile) await uploadProductImage(product.id, imageFile);
+      else if (removeImage && existingProduct?.imageKey) await removeProductImage(product.id);
+    } catch (err) {
+      imageError = errorMessage(err);
+    }
+    return { imageError };
+  });
 
   const onSubmit = async (values: FormValues) => {
-    setLoading(true);
     try {
-      const payload = {
-        name: values.name,
-        sku: values.sku,
-        barcode: values.barcode || undefined,
-        description: values.description || undefined,
-        imageUrl: values.imageUrl || undefined,
-        categoryId: values.categoryId ? (values.categoryId as Id<"categories">) : undefined,
-        brandId: values.brandId ? (values.brandId as Id<"brands">) : undefined,
-        manufacturer: values.manufacturer || undefined,
-        baseUnitId: values.baseUnitId as Id<"units">,
-        purchaseUnitId: values.purchaseUnitId ? (values.purchaseUnitId as Id<"units">) : undefined,
-        salesUnitId: values.salesUnitId ? (values.salesUnitId as Id<"units">) : undefined,
-        purchasePrice: values.purchasePrice,
-        salesPrice: values.salesPrice,
-        wholesalePrice: values.wholesalePrice,
-        retailPrice: values.retailPrice,
-        promoPrice: values.promoPrice,
-        taxRate: values.taxRate,
-        taxIncluded: values.taxIncluded,
-        minStock: values.minStock,
-        maxStock: values.maxStock,
-        trackBatch: values.trackBatch,
-        trackExpiry: values.trackExpiry,
-        shelfLifeDays: values.shelfLifeDays,
-        costingMethod: values.costingMethod,
-        isSaleable: values.isSaleable,
-        isPurchaseable: values.isPurchaseable,
-        isManufactured: values.isManufactured,
-        weight: values.weight,
-      };
-
-      if (editId) {
-        await updateProduct({ id: editId, ...payload });
-      } else {
-        await createProduct(payload);
-      }
+      const { imageError } = await save.mutateAsync(values);
       toast.success(editId ? "Mahsulot yangilandi" : "Mahsulot qo'shildi");
+      if (imageError) toast.error(`Rasm saqlanmadi: ${imageError}`);
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Xatolik yuz berdi");
-    } finally {
-      setLoading(false);
+      toast.error(errorMessage(err));
     }
   };
 
-  const margin = (() => {
-    const sp = form.watch("salesPrice");
-    const pp = form.watch("purchasePrice");
-    if (pp > 0 && sp > 0) return (((sp - pp) / sp) * 100).toFixed(1);
-    return "0.0";
-  })();
+  const handleImagePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    if (!file) return;
+    const problem = validateProductImage(file);
+    if (problem) {
+      toast.error(problem);
+      e.target.value = "";
+      return;
+    }
+    setImageFile(file);
+    setRemoveImage(false);
+  };
+
+  const clearImage = () => {
+    setImageFile(null);
+    setRemoveImage(Boolean(existingProduct?.imageKey));
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const shownImage = previewUrl ?? (removeImage ? null : currentImageUrl ?? null);
+  const hasImage = Boolean(imageFile) || (Boolean(existingProduct?.imageKey) && !removeImage);
+
+  const sp = useWatch({ control: form.control, name: "salesPrice" });
+  const pp = useWatch({ control: form.control, name: "purchasePrice" });
+  const trackExpiry = useWatch({ control: form.control, name: "trackExpiry" });
+  const margin = pp > 0 && sp > 0 ? (((sp - pp) / sp) * 100).toFixed(1) : "0.0";
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -250,7 +292,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                         <SelectContent>
                           <SelectItem value="none">—</SelectItem>
                           {categories?.map((c) => (
-                            <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
+                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -265,7 +307,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                         <SelectContent>
                           <SelectItem value="none">—</SelectItem>
                           {brands?.map((b) => (
-                            <SelectItem key={b._id} value={b._id}>{b.name}</SelectItem>
+                            <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -279,12 +321,40 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                     </FormItem>
                   )} />
 
-                  <FormField control={form.control} name="imageUrl" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Rasm URL</FormLabel>
-                      <FormControl><Input placeholder="https://..." {...field} /></FormControl>
-                    </FormItem>
-                  )} />
+                  {/* Rasm — tashqi URL emas, fayl saqlashga yuklanadi (JPG/PNG/WEBP, 5 MB) */}
+                  <div className="space-y-2">
+                    <Label>Rasm</Label>
+                    <div className="flex items-center gap-3">
+                      {shownImage ? (
+                        <img src={shownImage} alt="" className="h-14 w-14 rounded-md object-cover border border-border shrink-0" />
+                      ) : (
+                        <div className="h-14 w-14 rounded-md bg-muted flex items-center justify-center shrink-0">
+                          <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="flex flex-col gap-1 min-w-0">
+                        <Input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          className="text-xs h-9"
+                          onChange={handleImagePick}
+                        />
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-muted-foreground">JPG, PNG yoki WEBP, 5 MB gacha</span>
+                          {hasImage && (
+                            <button
+                              type="button"
+                              onClick={clearImage}
+                              className="text-[11px] text-destructive hover:underline cursor-pointer"
+                            >
+                              Olib tashlash
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
 
                   <FormField control={form.control} name="description" render={({ field }) => (
                     <FormItem className="md:col-span-2">
@@ -301,7 +371,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                   <FormField control={form.control} name="purchasePrice" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Xarid narxi (so'm) *</FormLabel>
-                      <FormControl><Input type="number" min="0" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} /></FormControl>
+                      <FormControl><Input type="number" min="0" step="any" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -309,7 +379,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                   <FormField control={form.control} name="salesPrice" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Sotuv narxi (so'm) *</FormLabel>
-                      <FormControl><Input type="number" min="0" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} /></FormControl>
+                      <FormControl><Input type="number" min="0" step="any" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -317,21 +387,21 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                   <FormField control={form.control} name="wholesalePrice" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Ulgurji narx</FormLabel>
-                      <FormControl><Input type="number" min="0" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.valueAsNumber || undefined)} /></FormControl>
+                      <FormControl><Input type="number" min="0" step="any" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.valueAsNumber || undefined)} /></FormControl>
                     </FormItem>
                   )} />
 
                   <FormField control={form.control} name="retailPrice" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Chakana narx</FormLabel>
-                      <FormControl><Input type="number" min="0" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.valueAsNumber || undefined)} /></FormControl>
+                      <FormControl><Input type="number" min="0" step="any" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.valueAsNumber || undefined)} /></FormControl>
                     </FormItem>
                   )} />
 
                   <FormField control={form.control} name="promoPrice" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Aksiya narxi</FormLabel>
-                      <FormControl><Input type="number" min="0" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.valueAsNumber || undefined)} /></FormControl>
+                      <FormControl><Input type="number" min="0" step="any" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.valueAsNumber || undefined)} /></FormControl>
                     </FormItem>
                   )} />
 
@@ -345,7 +415,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                   <FormField control={form.control} name="taxRate" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Soliq stavkasi (%)</FormLabel>
-                      <FormControl><Input type="number" min="0" max="100" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} /></FormControl>
+                      <FormControl><Input type="number" min="0" max="100" step="any" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} /></FormControl>
                     </FormItem>
                   )} />
 
@@ -370,7 +440,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                         <FormControl><SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger></FormControl>
                         <SelectContent>
                           {units?.map((u) => (
-                            <SelectItem key={u._id} value={u._id}>{u.name} ({u.shortName})</SelectItem>
+                            <SelectItem key={u.id} value={u.id}>{u.name} ({u.shortName})</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -386,7 +456,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                         <SelectContent>
                           <SelectItem value="none">—</SelectItem>
                           {units?.map((u) => (
-                            <SelectItem key={u._id} value={u._id}>{u.name} ({u.shortName})</SelectItem>
+                            <SelectItem key={u.id} value={u.id}>{u.name} ({u.shortName})</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -401,7 +471,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                         <SelectContent>
                           <SelectItem value="none">—</SelectItem>
                           {units?.map((u) => (
-                            <SelectItem key={u._id} value={u._id}>{u.name} ({u.shortName})</SelectItem>
+                            <SelectItem key={u.id} value={u.id}>{u.name} ({u.shortName})</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -424,30 +494,22 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                   <FormField control={form.control} name="minStock" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Minimal zaxira *</FormLabel>
-                      <FormControl><Input type="number" min="0" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} /></FormControl>
+                      <FormControl><Input type="number" min="0" step="any" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} /></FormControl>
                     </FormItem>
                   )} />
 
                   <FormField control={form.control} name="maxStock" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Maksimal zaxira</FormLabel>
-                      <FormControl><Input type="number" min="0" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.valueAsNumber || undefined)} /></FormControl>
+                      <FormControl><Input type="number" min="0" step="any" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.valueAsNumber || undefined)} /></FormControl>
                     </FormItem>
                   )} />
 
-                  <FormField control={form.control} name="costingMethod" render={({ field }) => (
-                    <FormItem className="col-span-2">
-                      <FormLabel>Tannarx hisobi usuli</FormLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                        <SelectContent>
-                          {COSTING_METHODS.map((m) => (
-                            <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </FormItem>
-                  )} />
+                  {/* Tannarx usuli: API hozircha faqat o'rtacha tannarxni (AVCO) qo'llaydi — tanlov olib tashlandi */}
+                  <div className="col-span-2 rounded-md border border-border px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Tannarx hisobi usuli</p>
+                    <p className="text-sm font-medium">O'rtacha narx (AVCO)</p>
+                  </div>
 
                   <FormField control={form.control} name="trackBatch" render={({ field }) => (
                     <FormItem className="flex items-center gap-3 col-span-2">
@@ -473,11 +535,12 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                     </FormItem>
                   )} />
 
-                  {form.watch("trackExpiry") && (
+                  {trackExpiry && (
                     <FormField control={form.control} name="shelfLifeDays" render={({ field }) => (
                       <FormItem>
                         <FormLabel>Saqlash muddati (kun)</FormLabel>
-                        <FormControl><Input type="number" min="1" placeholder="365" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.valueAsNumber || undefined)} /></FormControl>
+                        <FormControl><Input type="number" min="1" step="1" placeholder="365" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.valueAsNumber || undefined)} /></FormControl>
+                        <FormMessage />
                       </FormItem>
                     )} />
                   )}
@@ -523,8 +586,8 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
 
             <DialogFooter className="mt-6 pt-4 border-t">
               <Button type="button" variant="secondary" onClick={onClose}>Bekor qilish</Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? "Saqlanmoqda..." : editId ? "Yangilash" : "Saqlash"}
+              <Button type="submit" disabled={save.isPending}>
+                {save.isPending ? "Saqlanmoqda..." : editId ? "Yangilash" : "Saqlash"}
               </Button>
             </DialogFooter>
           </form>

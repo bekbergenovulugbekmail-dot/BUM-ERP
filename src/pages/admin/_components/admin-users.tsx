@@ -1,15 +1,17 @@
 /**
- * Admin Users — all registered platform users
+ * Admin Users — platformadagi barcha foydalanuvchilar — `GET /api/platform/users`.
+ *
+ * Qoidalar (server tekshiradi, UI ham aks ettiradi):
+ *  - platforma adminini tayinlash/olib tashlash — FAQAT bootstrap admin
+ *  - bootstrap admin va boshqa platforma adminlarining paroli/holatiga tegilmaydi
+ *  - parol tiklansa yoki bloklansa foydalanuvchining barcha sessiyalari yopiladi
+ * Alohida "Yangi foydalanuvchi" yo'q: egasi akkaunti "Yangi kompaniya" bilan, xodimlarniki — kompaniya egasi tomonidan ochiladi.
  */
 import { useState } from "react";
-import { useQuery, useMutation, useAction } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
-import type { Id } from "@/convex/_generated/dataModel";
-import { ConvexError } from "convex/values";
 import { toast } from "sonner";
 import {
   Search, Shield, ShieldOff, User, Building2,
-  Phone, KeyRound, Info, UserPlus, Loader2, AlertTriangle,
+  Phone, KeyRound, Info, Loader2, AlertTriangle, Crown, Ban, CheckCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -22,92 +24,73 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog.tsx";
 import { format } from "date-fns";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { useCurrentUser } from "@/hooks/use-auth.ts";
+import { useDebounce } from "@/hooks/use-debounce.ts";
+import type { PlatformUser } from "../_lib/types.ts";
+
+const PLATFORM = ["/api/platform"];
+const LIMIT = 200;
 
 export default function AdminUsers() {
   const [search, setSearch] = useState("");
-  const [revokeTarget, setRevokeTarget] = useState<{ id: Id<"users">; name: string } | null>(null);
-  const [busyId, setBusyId] = useState<Id<"users"> | null>(null);
+  const [debouncedSearch] = useDebounce(search, 300);
+  const [revokeTarget, setRevokeTarget] = useState<PlatformUser | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-  const users = useQuery(api.companies.platformListAllUsers);
-  const currentUser = useQuery(api.users.getCurrentUser);
-  const grantAdmin = useMutation(api.companies.platformGrantAdmin);
-  const revokeAdmin = useMutation(api.companies.platformRevokeAdmin);
-  const createUserAccount = useAction(api.userAdmin.createUserAccount);
-  const resetUserPassword = useAction(api.userAdmin.resetUserPassword);
+  const currentUser = useCurrentUser();
+  const usersQuery = useApiQuery<{ users: PlatformUser[]; total: number }>("/api/platform/users", {
+    search: debouncedSearch.trim() || undefined,
+    limit: LIMIT,
+  });
+  const users = usersQuery.data?.users;
 
-  // Yangi foydalanuvchi dialogi
-  const [createOpen, setCreateOpen] = useState(false);
-  const [newPhone, setNewPhone] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [formBusy, setFormBusy] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
+  // Joriy admin bootstrap adminmi — ro'yxatdagi o'z qatoridan (/me da bu maydon yo'q)
+  const selfRow = users?.find((u) => u.id === currentUser?.id);
+  const canAppointAdmins = selfRow?.isBootstrapAdmin === true;
+
+  const setPlatformAdmin = useApiMutation(
+    ({ userId, isPlatformAdmin }: { userId: string; isPlatformAdmin: boolean }) =>
+      api.post(`/api/platform/users/${userId}/platform-admin`, { isPlatformAdmin }),
+    { invalidate: PLATFORM },
+  );
+  const setStatus = useApiMutation(
+    ({ userId, isActive }: { userId: string; isActive: boolean }) =>
+      api.post(`/api/platform/users/${userId}/status`, { isActive }),
+    { invalidate: PLATFORM },
+  );
+  const resetPassword = useApiMutation(
+    ({ userId, newPassword }: { userId: string; newPassword: string }) =>
+      api.post(`/api/platform/users/${userId}/password`, { newPassword }),
+    { invalidate: false },
+  );
 
   // Parol tiklash dialogi
-  const [resetTarget, setResetTarget] = useState<{ phone: string; name: string } | null>(null);
-  const [resetPassword, setResetPassword] = useState("");
-
-  const errMessage = (err: unknown) =>
-    err instanceof ConvexError
-      ? (err.data as { message?: string }).message ?? "Xatolik yuz berdi"
-      : "Xatolik yuz berdi";
-
-  const handleCreate = async () => {
-    setFormBusy(true);
-    setFormError(null);
-    try {
-      const res = await createUserAccount({
-        phone: newPhone.trim(),
-        password: newPassword,
-        name: newName.trim() || undefined,
-      });
-      toast.success(`Foydalanuvchi yaratildi: ${res.phone}`);
-      setCreateOpen(false);
-      setNewPhone("");
-      setNewName("");
-      setNewPassword("");
-    } catch (err) {
-      setFormError(errMessage(err));
-    } finally {
-      setFormBusy(false);
-    }
-  };
+  const [resetTarget, setResetTarget] = useState<PlatformUser | null>(null);
+  const [resetValue, setResetValue] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleReset = async () => {
     if (!resetTarget) return;
-    setFormBusy(true);
     setFormError(null);
     try {
-      await resetUserPassword({ phone: resetTarget.phone, newPassword: resetPassword });
+      await resetPassword.mutateAsync({ userId: resetTarget.id, newPassword: resetValue });
       toast.success("Parol almashtirildi. Foydalanuvchi qayta kirishi kerak.");
       setResetTarget(null);
-      setResetPassword("");
+      setResetValue("");
     } catch (err) {
-      setFormError(errMessage(err));
-    } finally {
-      setFormBusy(false);
+      setFormError(errorMessage(err));
     }
   };
 
-  const filtered = (users ?? []).filter((u) => {
-    if (!search) return true;
-    return (
-      (u.name ?? "").toLowerCase().includes(search.toLowerCase()) ||
-      (u.email ?? "").toLowerCase().includes(search.toLowerCase())
-    );
-  });
-
-  const handleGrant = async (userId: Id<"users">) => {
-    setBusyId(userId);
+  const handleGrant = async (user: PlatformUser) => {
+    setBusyId(user.id);
     try {
-      await grantAdmin({ userId });
-      toast.success("Admin huquqlari berildi");
+      await setPlatformAdmin.mutateAsync({ userId: user.id, isPlatformAdmin: true });
+      toast.success("Platforma admini huquqlari berildi");
     } catch (err) {
-      const message =
-        err instanceof ConvexError
-          ? (err.data as { message?: string }).message ?? "Xatolik yuz berdi"
-          : "Xatolik yuz berdi";
-      toast.error(message);
+      toast.error(errorMessage(err));
     } finally {
       setBusyId(null);
     }
@@ -117,17 +100,25 @@ export default function AdminUsers() {
     if (!revokeTarget) return;
     setBusyId(revokeTarget.id);
     try {
-      await revokeAdmin({ userId: revokeTarget.id });
+      await setPlatformAdmin.mutateAsync({ userId: revokeTarget.id, isPlatformAdmin: false });
       toast.success("Admin huquqlari olindi");
     } catch (err) {
-      const message =
-        err instanceof ConvexError
-          ? (err.data as { message?: string }).message ?? "Xatolik yuz berdi"
-          : "Xatolik yuz berdi";
-      toast.error(message);
+      toast.error(errorMessage(err));
     } finally {
       setBusyId(null);
       setRevokeTarget(null);
+    }
+  };
+
+  const handleToggleActive = async (user: PlatformUser) => {
+    setBusyId(user.id);
+    try {
+      await setStatus.mutateAsync({ userId: user.id, isActive: !user.isActive });
+      toast.success(user.isActive ? "Foydalanuvchi bloklandi, sessiyalari yopildi" : "Foydalanuvchi faollashtirildi");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -137,28 +128,21 @@ export default function AdminUsers() {
         <div>
           <h1 className="text-2xl font-bold text-white">Foydalanuvchilar</h1>
           <p className="text-sm text-white/40 mt-0.5">
-            {users ? `${users.length} ta ro'yxatdan o'tgan` : "Yuklanmoqda..."}
+            {usersQuery.data ? `${usersQuery.data.total} ta foydalanuvchi` : "Yuklanmoqda..."}
+            {usersQuery.data && usersQuery.data.total > LIMIT && ` (birinchi ${LIMIT} tasi — qidiruvdan foydalaning)`}
           </p>
         </div>
-        <Button
-          size="sm"
-          onClick={() => { setFormError(null); setCreateOpen(true); }}
-          className="shrink-0"
-        >
-          <UserPlus className="h-4 w-4 mr-1.5" /> Yangi foydalanuvchi
-        </Button>
       </div>
 
-      {/* Password reset notice */}
+      {/* Qoidalar */}
       <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-500/8 border border-blue-500/20">
         <Info className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
         <div className="text-xs text-blue-300/80 space-y-1">
-          <p className="font-semibold text-blue-300">Parol tiklash haqida</p>
+          <p className="font-semibold text-blue-300">Akkauntlar qanday ochiladi</p>
           <p>
-            Foydalanuvchi parolini unutsa, admin shu sahifadagi{" "}
-            <strong>Parol</strong> tugmasi orqali yangi parol o'rnatadi.
-            Almashtirilgach foydalanuvchining barcha sessiyalari bekor
-            qilinadi. Foydalanuvchi o'zi tiklay olmaydi.
+            Biznes egasining loginini <strong>Yangi kompaniya</strong> bo'limi ochadi, xodimlar loginini
+            kompaniya egasi o'zi ochadi. Platforma adminini faqat bootstrap admin tayinlaydi.
+            Parol almashtirilsa yoki foydalanuvchi bloklansa, uning barcha sessiyalari yopiladi.
           </p>
         </div>
       </div>
@@ -168,7 +152,7 @@ export default function AdminUsers() {
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Ism, email yoki telefon..."
+          placeholder="Ism yoki telefon..."
           className="pl-9 bg-white/5 border-white/10 text-white placeholder:text-white/30"
         />
       </div>
@@ -185,7 +169,13 @@ export default function AdminUsers() {
             </tr>
           </thead>
           <tbody>
-            {users === undefined ? (
+            {usersQuery.error ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-12 text-center text-white/40 text-sm">
+                  {errorMessage(usersQuery.error)}
+                </td>
+              </tr>
+            ) : users === undefined ? (
               Array.from({ length: 8 }).map((_, i) => (
                 <tr key={i} className="border-b border-white/5">
                   {Array.from({ length: 6 }).map((_, j) => (
@@ -195,37 +185,40 @@ export default function AdminUsers() {
                   ))}
                 </tr>
               ))
-            ) : filtered.length === 0 ? (
+            ) : users.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-12 text-center text-white/30 text-sm">
                   Foydalanuvchilar topilmadi
                 </td>
               </tr>
             ) : (
-              filtered.map((u) => {
-                const isSelf = currentUser?._id === u._id;
+              users.map((u) => {
+                const isSelf = currentUser?.id === u.id;
+                // Server: bootstrap va platforma adminlariga oddiy admin amallari ta'sir qilmaydi
+                const manageable = !u.isBootstrapAdmin && !u.isPlatformAdmin && !isSelf;
                 return (
-                  <tr key={u._id} className="border-b border-white/5 hover:bg-white/4 transition-colors">
+                  <tr key={u.id} className="border-b border-white/5 hover:bg-white/4 transition-colors">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
                         <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0 font-bold text-primary text-sm">
-                          {(u.name ?? u.email ?? "?")[0].toUpperCase()}
+                          {(u.name ?? u.phone)[0]?.toUpperCase()}
                         </div>
                         <div>
-                          <p className="font-medium text-white">{u.name ?? "—"}</p>
-                          <p className="text-xs text-white/40">{u.email ?? ""}</p>
+                          <p className="font-medium text-white">
+                            {u.name ?? "—"}
+                            {isSelf && <span className="ml-1.5 text-xs text-white/30">(siz)</span>}
+                          </p>
+                          {!u.isActive && (
+                            <span className="text-[10px] font-medium text-red-400">Bloklangan</span>
+                          )}
                         </div>
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      {u.phone ? (
-                        <div className="flex items-center gap-1.5 text-xs text-white/60 font-mono">
-                          <Phone className="h-3 w-3 text-white/30" />
-                          {u.phone}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-white/25">—</span>
-                      )}
+                      <div className="flex items-center gap-1.5 text-xs text-white/60 font-mono">
+                        <Phone className="h-3 w-3 text-white/30" />
+                        {u.phone}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       {u.activeCompanyName ? (
@@ -238,7 +231,12 @@ export default function AdminUsers() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {u.isPlatformAdmin ? (
+                      {u.isBootstrapAdmin ? (
+                        <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-400 w-fit">
+                          <Crown className="h-3 w-3" />
+                          Bootstrap admin
+                        </span>
+                      ) : u.isPlatformAdmin ? (
                         <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-purple-500/15 border border-purple-500/30 text-purple-400 w-fit">
                           <Shield className="h-3 w-3" />
                           Platform Admin
@@ -246,58 +244,71 @@ export default function AdminUsers() {
                       ) : (
                         <span className="flex items-center gap-1 text-xs text-white/50">
                           <User className="h-3 w-3" />
-                          {u.role ?? "Foydalanuvchi"}
+                          Foydalanuvchi
                         </span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs text-white/40 tabular-nums">
-                      {u.lastSeen
-                        ? format(new Date(u.lastSeen), "dd.MM.yyyy HH:mm")
+                      {u.lastSeenAt
+                        ? format(new Date(u.lastSeenAt), "dd.MM.yyyy HH:mm")
                         : "—"}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        {!u.isPlatformAdmin ? (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={busyId === u._id}
-                            onClick={() => handleGrant(u._id)}
-                            className="bg-purple-500/15 border-purple-500/30 text-purple-300 hover:bg-purple-500/25 h-7 text-xs"
-                          >
-                            <Shield className="h-3 w-3 mr-1" />
-                            Admin
-                          </Button>
-                        ) : !isSelf ? (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={busyId === u._id}
-                            onClick={() => setRevokeTarget({ id: u._id, name: u.name ?? u.email ?? "foydalanuvchi" })}
-                            className="bg-red-500/10 border-red-500/30 text-red-300 hover:bg-red-500/20 h-7 text-xs"
-                          >
-                            <ShieldOff className="h-3 w-3 mr-1" />
-                            Adminlikni olish
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-white/30">Siz</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {canAppointAdmins && !u.isBootstrapAdmin && !isSelf && (
+                          !u.isPlatformAdmin ? (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={busyId === u.id || !u.isActive}
+                              onClick={() => { void handleGrant(u); }}
+                              className="bg-purple-500/15 border-purple-500/30 text-purple-300 hover:bg-purple-500/25 h-7 text-xs"
+                            >
+                              <Shield className="h-3 w-3 mr-1" />
+                              Admin
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={busyId === u.id}
+                              onClick={() => setRevokeTarget(u)}
+                              className="bg-red-500/10 border-red-500/30 text-red-300 hover:bg-red-500/20 h-7 text-xs"
+                            >
+                              <ShieldOff className="h-3 w-3 mr-1" />
+                              Adminlikni olish
+                            </Button>
+                          )
                         )}
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => {
-                            setFormError(null);
-                            setResetPassword("");
-                            setResetTarget({
-                              phone: u.email ?? u.phone ?? "",
-                              name: u.name ?? u.email ?? "",
-                            });
-                          }}
-                          className="bg-white/5 border-white/10 text-white/40 hover:text-white/70 h-7 text-xs"
-                        >
-                          <KeyRound className="h-3 w-3 mr-1" />
-                          Parol
-                        </Button>
+                        {manageable && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={busyId === u.id}
+                              onClick={() => { void handleToggleActive(u); }}
+                              className="bg-white/5 border-white/10 text-white/40 hover:text-white/70 h-7 text-xs"
+                            >
+                              {u.isActive
+                                ? <><Ban className="h-3 w-3 mr-1" />Bloklash</>
+                                : <><CheckCircle className="h-3 w-3 mr-1" />Faollashtirish</>}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                setFormError(null);
+                                setResetValue("");
+                                setResetTarget(u);
+                              }}
+                              className="bg-white/5 border-white/10 text-white/40 hover:text-white/70 h-7 text-xs"
+                            >
+                              <KeyRound className="h-3 w-3 mr-1" />
+                              Parol
+                            </Button>
+                          </>
+                        )}
+                        {isSelf && <span className="text-xs text-white/30">Siz</span>}
                       </div>
                     </td>
                   </tr>
@@ -313,14 +324,14 @@ export default function AdminUsers() {
           <AlertDialogHeader>
             <AlertDialogTitle>Adminlikni olishni tasdiqlang</AlertDialogTitle>
             <AlertDialogDescription>
-              {revokeTarget?.name} foydalanuvchisidan platforma admin huquqlarini olib
+              {revokeTarget?.name ?? revokeTarget?.phone} foydalanuvchisidan platforma admin huquqlarini olib
               tashlamoqchimisiz? Bu amalni keyinroq qaytarish mumkin.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Bekor qilish</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleRevoke}
+              onClick={() => { void handleRevoke(); }}
               className="bg-red-600 text-white hover:bg-red-700"
             >
               Adminlikni olish
@@ -329,68 +340,22 @@ export default function AdminUsers() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Yangi foydalanuvchi */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Yangi foydalanuvchi</DialogTitle>
-            <DialogDescription>
-              Telefon raqam login sifatida ishlatiladi. Parolni foydalanuvchiga
-              o'zingiz yetkazasiz.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Input
-              placeholder="+998901234567"
-              value={newPhone}
-              onChange={(e) => { setNewPhone(e.target.value); setFormError(null); }}
-            />
-            <Input
-              placeholder="Ism (ixtiyoriy)"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-            />
-            <Input
-              type="password"
-              placeholder="Parol (kamida 8 belgi)"
-              value={newPassword}
-              onChange={(e) => { setNewPassword(e.target.value); setFormError(null); }}
-            />
-            {formError && (
-              <div className="flex items-center gap-2 text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2.5">
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                {formError}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setCreateOpen(false)}>Bekor</Button>
-            <Button
-              onClick={() => { void handleCreate(); }}
-              disabled={formBusy || !newPhone.trim() || newPassword.length < 8}
-            >
-              {formBusy ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Yaratilmoqda</> : "Yaratish"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Parolni almashtirish */}
       <Dialog open={resetTarget !== null} onOpenChange={(o) => { if (!o) setResetTarget(null); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Parolni almashtirish</DialogTitle>
             <DialogDescription>
-              {resetTarget?.name} ({resetTarget?.phone}) uchun yangi parol.
+              {resetTarget?.name ?? "Foydalanuvchi"} ({resetTarget?.phone}) uchun yangi parol.
               Almashtirilgach barcha sessiyalari bekor qilinadi.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <Input
               type="password"
-              placeholder="Yangi parol (kamida 8 belgi)"
-              value={resetPassword}
-              onChange={(e) => { setResetPassword(e.target.value); setFormError(null); }}
+              placeholder="Yangi parol"
+              value={resetValue}
+              onChange={(e) => { setResetValue(e.target.value); setFormError(null); }}
             />
             {formError && (
               <div className="flex items-center gap-2 text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2.5">
@@ -403,9 +368,9 @@ export default function AdminUsers() {
             <Button variant="secondary" onClick={() => setResetTarget(null)}>Bekor</Button>
             <Button
               onClick={() => { void handleReset(); }}
-              disabled={formBusy || resetPassword.length < 8}
+              disabled={resetPassword.isPending || !resetValue}
             >
-              {formBusy ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Saqlanmoqda</> : "Almashtirish"}
+              {resetPassword.isPending ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Saqlanmoqda</> : "Almashtirish"}
             </Button>
           </DialogFooter>
         </DialogContent>

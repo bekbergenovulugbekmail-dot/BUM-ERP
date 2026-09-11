@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import { useApiQuery } from "@/lib/query.ts";
@@ -28,10 +28,12 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
   const [query, setQuery] = useState("");
   const [debouncedQuery] = useDebounce(query, 300);
 
-  // Reset search when dialog closes
-  useEffect(() => {
+  // Dialog yopilganda qidiruv tozalanadi (effekt emas — render paytida holatni moslash)
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (!open) setQuery("");
-  }, [open]);
+  }
 
   // Hammasi server tomonida qidiriladi; ruxsat bo'lmagan bo'lim (403) shunchaki bo'sh chiqadi
   const active = open && debouncedQuery.length >= 2;

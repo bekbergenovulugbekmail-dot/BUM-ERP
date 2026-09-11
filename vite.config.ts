@@ -22,7 +22,6 @@ export default defineConfig({
     alias: {
       // API bilan umumiy: ruxsatlar katalogi, telefon formati, xato kodlari
       "@bum/shared": path.resolve(import.meta.dirname, "./packages/shared/src/index.ts"),
-      "@/convex": path.resolve(import.meta.dirname, "./convex"),
       "@": path.resolve(import.meta.dirname, "./src"),
     },
     dedupe: [

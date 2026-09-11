@@ -4,25 +4,16 @@ import {
 } from "@/components/ui/dropdown-menu.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
-
-type WarehouseItem = {
-  _id: Id<"warehouses">;
-  name: string;
-  code: string;
-  isDefault: boolean;
-  isActive: boolean;
-  city?: string;
-};
+import type { WarehouseItem } from "../_lib/types.ts";
 
 type Props = {
   warehouses: WarehouseItem[];
-  selectedId: Id<"warehouses"> | null;
-  onChange: (id: Id<"warehouses">) => void;
+  selectedId: string | null;
+  onChange: (id: string) => void;
 };
 
 export default function WarehouseSelector({ warehouses, selectedId, onChange }: Props) {
-  const selected = warehouses.find((w) => w._id === selectedId);
+  const selected = warehouses.find((w) => w.id === selectedId);
 
   return (
     <DropdownMenu>
@@ -32,7 +23,9 @@ export default function WarehouseSelector({ warehouses, selectedId, onChange }: 
           {selected ? (
             <span className="font-medium">{selected.name}</span>
           ) : (
-            <span className="text-muted-foreground">Ombor tanlang</span>
+            <span className="text-muted-foreground">
+              {warehouses.length === 0 ? "Ruxsat etilgan ombor yo'q" : "Ombor tanlang"}
+            </span>
           )}
           {selected?.isDefault && (
             <Badge variant="secondary" className="text-[10px] h-4 px-1">Asosiy</Badge>
@@ -43,8 +36,8 @@ export default function WarehouseSelector({ warehouses, selectedId, onChange }: 
       <DropdownMenuContent align="start" className="w-72">
         {warehouses.map((w) => (
           <DropdownMenuItem
-            key={w._id}
-            onClick={() => onChange(w._id)}
+            key={w.id}
+            onClick={() => onChange(w.id)}
             className="flex items-center justify-between gap-3 cursor-pointer"
           >
             <div className="flex items-center gap-2">

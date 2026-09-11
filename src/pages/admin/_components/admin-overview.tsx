@@ -1,16 +1,15 @@
 /**
  * Admin Overview — stat cards + recent companies + quick chart
+ * API: `GET /api/platform/stats`, `GET /api/platform/companies`.
  */
-import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
-import { Building2, Users, Activity, TrendingUp, CheckCircle, Clock, PauseCircle, XCircle, ShieldAlert } from "lucide-react";
+import { Building2, Users, Activity, TrendingUp, CheckCircle, Clock, PauseCircle, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
-import { Button } from "@/components/ui/button.tsx";
-import { toast } from "sonner";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import { errorMessage } from "@/lib/api.ts";
+import { useApiQuery } from "@/lib/query.ts";
+import type { PlatformCompany, PlatformStats } from "../_lib/types.ts";
 
 const STATUS_META: Record<string, { label: string; color: string; icon: React.FC<{ className?: string }>; hex: string }> = {
   active:    { label: "Aktiv",       color: "text-green-400",  icon: CheckCircle,  hex: "#22c55e" },
@@ -21,28 +20,14 @@ const STATUS_META: Record<string, { label: string; color: string; icon: React.FC
 };
 
 export default function AdminOverview() {
-  const stats    = useQuery(api.companies.platformGetStats);
-  const companies = useQuery(api.companies.platformListCompanies, {});
-  const markLegacy = useMutation(api.companies.platformMarkOrphanedDataAsLegacy);
-  const [migrating, setMigrating] = useState(false);
+  const statsQuery = useApiQuery<PlatformStats>("/api/platform/stats");
+  const companies = useApiQuery<{ companies: PlatformCompany[] }>("/api/platform/companies").data?.companies;
+  const stats = statsQuery.data;
 
+  if (statsQuery.error) {
+    return <div className="text-center text-white/40 py-20">{errorMessage(statsQuery.error)}</div>;
+  }
   if (stats === undefined) return <OverviewSkeleton />;
-
-  if (!stats) return (
-    <div className="text-center text-white/40 py-20">Ma'lumot topilmadi</div>
-  );
-
-  const handleMarkLegacy = async () => {
-    setMigrating(true);
-    try {
-      const result = await markLegacy({});
-      toast.success(`${result.marked} ta eskirgan yozuv belgilandi`);
-    } catch (err) {
-      toast.error("Xatolik yuz berdi");
-    } finally {
-      setMigrating(false);
-    }
-  };
 
   const pieData = Object.entries(stats.byStatus)
     .filter(([, v]) => v > 0)
@@ -63,7 +48,7 @@ export default function AdminOverview() {
         {[
           { label: "Jami kompaniyalar",   value: stats.totalCompanies,  icon: Building2,  color: "from-blue-600/20 to-blue-600/5",  iconColor: "text-blue-400" },
           { label: "Jami foydalanuvchilar",value: stats.totalUsers,     icon: Users,      color: "from-green-600/20 to-green-600/5", iconColor: "text-green-400" },
-          { label: "Aktiv a'zolar",        value: stats.totalMembers,   icon: Activity,   color: "from-purple-600/20 to-purple-600/5",iconColor: "text-purple-400" },
+          { label: "A'zoliklar",           value: stats.totalMembers,   icon: Activity,   color: "from-purple-600/20 to-purple-600/5",iconColor: "text-purple-400" },
           { label: "Aktiv kompaniyalar",   value: stats.byStatus.active, icon: TrendingUp, color: "from-amber-600/20 to-amber-600/5", iconColor: "text-amber-400" },
         ].map((s) => (
           <Card key={s.label} className="bg-white/5 border-white/8 overflow-hidden relative">
@@ -130,22 +115,28 @@ export default function AdminOverview() {
             <CardTitle className="text-sm text-white/80">So'nggi kompaniyalar</CardTitle>
           </CardHeader>
           <CardContent>
-            {recentCompanies.length === 0 ? (
+            {companies === undefined ? (
+              <div className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12 bg-white/5" />)}
+              </div>
+            ) : recentCompanies.length === 0 ? (
               <div className="text-center text-white/30 text-sm py-8">Hali kompaniyalar yo'q</div>
             ) : (
               <div className="space-y-2">
                 {recentCompanies.map((c) => (
-                  <div key={c._id} className="flex items-center gap-3 p-2.5 rounded-lg bg-white/4 hover:bg-white/8 transition-colors">
+                  <div key={c.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-white/4 hover:bg-white/8 transition-colors">
                     <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center shrink-0">
                       <Building2 className="h-4 w-4 text-primary" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-white truncate">{c.name}</p>
-                      <p className="text-xs text-white/40 truncate">{c.ownerEmail ?? c.ownerName ?? "—"}</p>
+                      <p className="text-xs text-white/40 truncate">
+                        {c.owner ? `${c.owner.name ?? "—"} · ${c.owner.phone}` : "Egasiz"}
+                      </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="text-xs text-white/40">{c.memberCount} a'zo</span>
-                      <StatusBadge status={c.status ?? "trial"} />
+                      <StatusBadge status={c.status} />
                     </div>
                   </div>
                 ))}
@@ -156,7 +147,7 @@ export default function AdminOverview() {
       </div>
 
       {/* Status breakdown row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {Object.entries(STATUS_META).map(([key, meta]) => {
           const count = stats.byStatus[key as keyof typeof stats.byStatus] ?? 0;
           return (
@@ -170,27 +161,7 @@ export default function AdminOverview() {
           );
         })}
       </div>
-
-      {/* Security maintenance panel */}
-      <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/25">
-        <ShieldAlert className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-amber-300">Xavfsizlik: Eskirgan ma'lumotlar</p>
-          <p className="text-xs text-amber-400/70 mt-0.5">
-            Multi-tenant tizimga o'tishdan oldin yaratilgan companyId-siz yozuvlar mavjud bo'lishi mumkin.
-            Ularni sentinel belgisi bilan belgilash kerak — bu yozuvlar hech bir tenant uchun ko'rinmaydi.
-          </p>
-        </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="bg-amber-500/20 border-amber-500/30 text-amber-300 hover:bg-amber-500/30 shrink-0"
-          onClick={handleMarkLegacy}
-          disabled={migrating}
-        >
-          {migrating ? "Bajarilmoqda..." : "Belgilash"}
-        </Button>
-      </div>
+      {/* Eski "eskirgan ma'lumotlarni belgilash" paneli olib tashlandi — PostgreSQL'da kompaniyasiz yozuv bo'lmaydi */}
     </div>
   );
 }

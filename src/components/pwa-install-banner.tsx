@@ -19,7 +19,9 @@ export default function PWAInstallBanner() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showIOSGuide, setShowIOSGuide] = useState(false);
   const [visible, setVisible] = useState(false);
-  const [installed, setInstalled] = useState(false);
+  const [installed, setInstalled] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches,
+  );
 
   useEffect(() => {
     // Never show inside the App Builder iframe
@@ -28,11 +30,8 @@ export default function PWAInstallBanner() {
     // Already dismissed?
     if (localStorage.getItem(DISMISSED_KEY)) return;
 
-    // Already installed as PWA?
-    if (window.matchMedia("(display-mode: standalone)").matches) {
-      setInstalled(true);
-      return;
-    }
+    // Already installed as PWA? (boshlang'ich holatda aniqlangan)
+    if (window.matchMedia("(display-mode: standalone)").matches) return;
 
     const isIOS =
       /iphone|ipad|ipod/i.test(navigator.userAgent) &&

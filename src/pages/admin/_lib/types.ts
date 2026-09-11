@@ -1,0 +1,118 @@
+/**
+ * `/api/platform/*` javob tiplari — manba: apps/api/src/modules/platform/{company,platform}.service.ts,
+ * audit/audit-log.service.ts.
+ */
+
+export type CompanyStatus = "active" | "trial" | "pending" | "suspended" | "cancelled";
+
+export const COMPANY_STATUSES: CompanyStatus[] = ["active", "trial", "pending", "suspended", "cancelled"];
+
+export type PlatformCompany = {
+  id: string;
+  name: string;
+  slug: string | null;
+  status: CompanyStatus;
+  isActive: boolean;
+  trialEndsAt: string | null;
+  createdAt: string;
+  memberCount: number;
+  owner: { id: string; phone: string; name: string | null; isActive: boolean } | null;
+};
+
+export type PlatformCompanyDetails = {
+  company: {
+    id: string;
+    name: string;
+    legalName: string | null;
+    taxId: string | null;
+    phone: string | null;
+    email: string | null;
+    website: string | null;
+    address: string | null;
+    city: string | null;
+    region: string | null;
+    country: string;
+    currency: string;
+    language: string;
+    slug: string | null;
+    status: CompanyStatus;
+    isActive: boolean;
+    suspendedAt: string | null;
+    suspendReason: string | null;
+    trialEndsAt: string | null;
+    createdAt: string;
+  };
+  owner: { id: string; phone: string; name: string | null; isActive: boolean } | null;
+  members: {
+    userId: string;
+    phone: string;
+    name: string | null;
+    userActive: boolean;
+    companyRole: string;
+    branchId: string | null;
+    membershipActive: boolean;
+    joinedAt: string;
+  }[];
+  branches: {
+    id: string;
+    name: string;
+    code: string;
+    city: string | null;
+    isDefault: boolean;
+    isActive: boolean;
+  }[];
+};
+
+export type PlatformStats = {
+  totalCompanies: number;
+  totalUsers: number;
+  totalMembers: number;
+  byStatus: Record<CompanyStatus, number>;
+};
+
+export type PlatformUser = {
+  id: string;
+  phone: string;
+  name: string | null;
+  email: string | null;
+  isActive: boolean;
+  isPlatformAdmin: boolean;
+  isBootstrapAdmin: boolean;
+  activeCompanyId: string | null;
+  activeCompanyName: string | null;
+  lastSeenAt: string | null;
+  createdAt: string;
+};
+
+export type PlatformAuditLog = {
+  id: string;
+  occurredAt: string;
+  action: string;
+  resource: string;
+  resourceId: string | null;
+  severity: "info" | "warning" | "error";
+  details: unknown;
+  userId: string | null;
+  userName: string | null;
+  ipAddress: string | null;
+  companyId: string | null;
+  companyName: string;
+};
+
+export type PlatformSettings = {
+  registrationEnabled: boolean;
+  defaultTrialDays: number;
+  platformName: string;
+  supportEmail: string;
+};
+
+/** Audit `details` — jsonb; ro'yxatda bir qatorli matn. */
+export function formatDetails(details: unknown): string | null {
+  if (details === null || details === undefined) return null;
+  if (typeof details === "string") return details;
+  try {
+    return JSON.stringify(details);
+  } catch {
+    return null;
+  }
+}

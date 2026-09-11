@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { Settings, Shield, Users, Building2, ListChecks, Puzzle, Bell, MapPin, UserPlus, Lock } from "lucide-react";
+import { Settings, Shield, Users, Building2, ListChecks, Puzzle, Bell, MapPin, Lock } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import { useTranslation } from "react-i18next";
 import CompanySection from "./_components/company-section.tsx";
@@ -10,13 +10,13 @@ import AuditLogSection from "./_components/audit-log-section.tsx";
 import ModulesSection from "./_components/modules-section.tsx";
 import NotificationsSection from "./_components/notifications-section.tsx";
 import BranchesSection from "./_components/branches-section.tsx";
-import InvitationsSection from "./_components/invitations-section.tsx";
 import SecuritySection from "./_components/security-section.tsx";
 
+// Takliflar (invitations) bo'limi yo'q — yakuniy qaror: xodim loginini kompaniya egasi o'zi ochadi
 export default function SettingsPage() {
   const { t } = useTranslation("modules");
   const [tab, setTab] = useState<
-    "company" | "branches" | "modules" | "roles" | "users" | "invitations" | "audit" | "notifications" | "security"
+    "company" | "branches" | "modules" | "roles" | "users" | "audit" | "notifications" | "security"
   >("company");
 
   const TABS = [
@@ -25,7 +25,6 @@ export default function SettingsPage() {
     { key: "modules"       as const, label: t("settings.tab.modules"),   icon: Puzzle },
     { key: "roles"         as const, label: t("settings.tab.roles"),     icon: Shield },
     { key: "users"         as const, label: t("settings.tab.users"),     icon: Users },
-    { key: "invitations"   as const, label: "Takliflar",                 icon: UserPlus },
     { key: "notifications" as const, label: "Bildirishnomalar",          icon: Bell },
     { key: "security"      as const, label: "Xavfsizlik",                icon: Lock },
     { key: "audit"         as const, label: t("settings.tab.audit"),     icon: ListChecks },
@@ -69,7 +68,6 @@ export default function SettingsPage() {
         {tab === "modules"       && <ModulesSection />}
         {tab === "roles"         && <RolesSection />}
         {tab === "users"         && <UsersSection />}
-        {tab === "invitations"   && <InvitationsSection />}
         {tab === "notifications" && <NotificationsSection />}
         {tab === "security"      && <SecuritySection />}
         {tab === "audit"         && <AuditLogSection />}

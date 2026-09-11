@@ -1,21 +1,22 @@
-import { useState, useEffect, useRef } from "react";
-import { useQuery, useMutation, useConvexAuth } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
+import { useState } from "react";
 import { motion } from "motion/react";
+import { toast } from "sonner";
 import {
   DollarSign, TrendingUp, TrendingDown, Wallet,
   BarChart3, BookOpen,
-  Receipt, Building2,
+  Receipt, Building2, ShieldAlert, Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
 import CashAccountsSection from "./_components/cash-accounts-section.tsx";
 import ExpensesSection from "./_components/expenses-section.tsx";
 import ProfitLossSection from "./_components/profit-loss-section.tsx";
 import AccountsSection from "./_components/accounts-section.tsx";
-
-const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
+import { fmt, toNum, type Account, type Expense, type ExpenseStats, type FinanceDashboard } from "./_lib/types.ts";
 
 const TABS = [
   { key: "overview", label: "Umumiy ko'rinish", icon: BarChart3 },
@@ -27,32 +28,52 @@ const TABS = [
 
 export default function FinancePage() {
   const [tab, setTab] = useState("overview");
-  const stats = useQuery(api.finance.cashAccounts.getDashboardStats, {});
-  const expStats = useQuery(api.finance.expenses.getStats, {});
-  const seedAccounts = useMutation(api.finance.accounts.seedDefaultAccounts);
-  const { isAuthenticated } = useConvexAuth();
-  const seededRef = useRef(false);
+  const { can } = usePermissions();
+  const statsQuery = useApiQuery<FinanceDashboard>("/api/finance/dashboard");
+  const stats = statsQuery.data;
+  const expStats = useApiQuery<ExpenseStats>("/api/finance/expenses/stats").data;
+  const accounts = useApiQuery<{ accounts: Account[] }>("/api/finance/accounts").data?.accounts;
+  // Hisoblar rejasi kompaniya yaratilganda avtomatik; eski kompaniyalar uchun qo'lda (idempotent)
+  const setup = useApiMutation(() =>
+    api.post<{ accountsCreated: number; cashAccountsCreated: number }>("/api/finance/setup"),
+  );
 
-  // Seed default accounts once — faqat Convex auth tasdiqlangach. Aks holda
-  // sahifa login'ga yo'naltirilgunicha UNAUTHENTICATED xatosi konsolga tushadi.
-  useEffect(() => {
-    if (!isAuthenticated || seededRef.current) return;
-    seededRef.current = true;
-    seedAccounts().catch(() => {/* already seeded */});
-  }, [isAuthenticated, seedAccounts]);
+  const handleSetup = async () => {
+    try {
+      const result = await setup.mutateAsync();
+      toast.success(`Standart hisoblar yaratildi: ${result.accountsCreated} ta hisob, ${result.cashAccountsCreated} ta kassa`);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
+  if (statsQuery.error?.status === 403) {
+    return (
+      <div className="p-6">
+        <div className="flex flex-col items-center py-16 text-center text-muted-foreground">
+          <ShieldAlert className="h-10 w-10 mb-3 opacity-40" />
+          <p>Moliya bo'limini ko'rish uchun ruxsat yo'q</p>
+        </div>
+      </div>
+    );
+  }
+
+  const monthSales = toNum(stats?.monthSalesTotal);
+  const monthPurchases = toNum(stats?.monthPurchaseTotal);
+  const monthExpenses = toNum(expStats?.totalThisMonth);
 
   const statCards = [
     {
       label: "Umumiy balans",
-      value: fmt(stats?.totalBalance ?? 0) + " so'm",
+      value: fmt(stats?.totalBalance) + " so'm",
       icon: Wallet,
       color: "text-blue-500",
       bg: "bg-blue-500/10",
-      sub: `Naqd: ${fmt(stats?.totalCash ?? 0)} · Bank: ${fmt(stats?.totalBank ?? 0)}`,
+      sub: `Naqd: ${fmt(stats?.totalCash)} · Bank: ${fmt(stats?.totalBank)}`,
     },
     {
       label: "Bu oy kirim",
-      value: fmt(stats?.monthSalesTotal ?? 0) + " so'm",
+      value: fmt(monthSales) + " so'm",
       icon: TrendingUp,
       color: "text-emerald-500",
       bg: "bg-emerald-500/10",
@@ -60,7 +81,7 @@ export default function FinancePage() {
     },
     {
       label: "Bu oy chiqim",
-      value: fmt((stats?.monthPurchaseTotal ?? 0) + (expStats?.totalThisMonth ?? 0)) + " so'm",
+      value: fmt(monthPurchases + monthExpenses) + " so'm",
       icon: TrendingDown,
       color: "text-rose-500",
       bg: "bg-rose-500/10",
@@ -68,9 +89,7 @@ export default function FinancePage() {
     },
     {
       label: "Sof foyda",
-      value: fmt(
-        (stats?.monthSalesTotal ?? 0) - (stats?.monthPurchaseTotal ?? 0) - (expStats?.totalThisMonth ?? 0)
-      ) + " so'm",
+      value: fmt(monthSales - monthPurchases - monthExpenses) + " so'm",
       icon: DollarSign,
       color: "text-purple-500",
       bg: "bg-purple-500/10",
@@ -92,6 +111,22 @@ export default function FinancePage() {
           </div>
         </div>
       </div>
+
+      {/* Hisoblar rejasi yo'q (eski kompaniya) */}
+      {accounts && accounts.length === 0 && can("finance.manage") && (
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+          <div className="flex-1">
+            <p className="text-sm font-semibold">Hisoblar rejasi hali yaratilmagan</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Xarajat to'lash, maosh va jurnal yozuvlari uchun standart hisoblar va kassa kerak.
+            </p>
+          </div>
+          <Button size="sm" onClick={handleSetup} disabled={setup.isPending}>
+            <Sparkles className="h-3.5 w-3.5 mr-1" />
+            {setup.isPending ? "Yaratilmoqda..." : "Standart hisoblarni yaratish"}
+          </Button>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -152,24 +187,20 @@ export default function FinancePage() {
 
 // ── Overview Tab ─────────────────────────────────────────────────────────────
 
-type StatsType = {
-  totalCash: number; totalBank: number; totalBalance: number;
-  monthIncome: number; monthExpense: number; monthNetCash: number;
-  monthSalesTotal: number; monthPurchaseTotal: number;
-  accounts: Array<{ _id: string; name: string; type: string; balance: number; currency: string }>;
-} | undefined;
+type RecentSale = {
+  id: string;
+  number: string;
+  customerName: string | null;
+  totalAmount: string;
+  paidAmount: string;
+};
 
-type ExpStatsType = {
-  totalThisMonth: number; countThisMonth: number;
-  pendingCount: number; pendingAmount: number;
-  byCategory: Record<string, number>;
-} | undefined;
+function OverviewTab({ stats, expStats }: { stats: FinanceDashboard | undefined; expStats: ExpenseStats | undefined }) {
+  const salesQuery = useApiQuery<{ orders: RecentSale[] }>("/api/sales/orders", { limit: 8, isPos: false });
+  const recentSales = salesQuery.data?.orders;
+  const recentExpenses = useApiQuery<{ expenses: Expense[] }>("/api/finance/expenses", { limit: 8 }).data?.expenses;
 
-function OverviewTab({ stats, expStats }: { stats: StatsType; expStats: ExpStatsType }) {
-  const recentSales = useQuery(api.sales.orders.list, { limit: 8, isPOS: false });
-  const recentExpenses = useQuery(api.finance.expenses.list, { limit: 8 });
-
-  const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
+  const monthTotal = toNum(expStats?.totalThisMonth) || 1;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -178,7 +209,7 @@ function OverviewTab({ stats, expStats }: { stats: StatsType; expStats: ExpStats
         <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Kassa & Bank</h3>
         <div className="space-y-2">
           {stats?.accounts.map((acct) => (
-            <div key={acct._id} className="bg-card border border-border rounded-xl p-3 flex items-center justify-between">
+            <div key={acct.id} className="bg-card border border-border rounded-xl p-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className={cn(
                   "h-8 w-8 rounded-lg flex items-center justify-center",
@@ -199,30 +230,26 @@ function OverviewTab({ stats, expStats }: { stats: StatsType; expStats: ExpStats
         </div>
 
         {/* Expense by category */}
-        {expStats && Object.keys(expStats.byCategory).length > 0 && (
+        {expStats && expStats.byCategory.length > 0 && (
           <div className="bg-card border border-border rounded-2xl p-4">
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
               Bu oy xarajatlar
             </h4>
             <div className="space-y-2">
-              {Object.entries(expStats.byCategory)
-                .sort(([, a], [, b]) => b - a)
-                .slice(0, 6)
-                .map(([cat, amount]) => {
-                  const total = expStats.totalThisMonth || 1;
-                  const pct = (amount / total) * 100;
-                  return (
-                    <div key={cat}>
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="text-muted-foreground capitalize">{cat}</span>
-                        <span className="font-medium">{fmt(amount)} so'm</span>
-                      </div>
-                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className="h-full bg-primary rounded-full" style={{ width: `${pct}%` }} />
-                      </div>
+              {expStats.byCategory.slice(0, 6).map(({ category, total }) => {
+                const pct = (toNum(total) / monthTotal) * 100;
+                return (
+                  <div key={category}>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-muted-foreground capitalize">{category}</span>
+                      <span className="font-medium">{fmt(total)} so'm</span>
                     </div>
-                  );
-                })}
+                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div className="h-full bg-primary rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -232,7 +259,9 @@ function OverviewTab({ stats, expStats }: { stats: StatsType; expStats: ExpStats
       <div className="lg:col-span-2 space-y-4">
         <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">So'nggi sotuvlar</h3>
         <div className="bg-card border border-border rounded-2xl overflow-hidden">
-          {!recentSales ? (
+          {salesQuery.isError ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">Sotuvlarni ko'rish uchun ruxsat yo'q</div>
+          ) : !recentSales ? (
             <div className="p-4 space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
           ) : recentSales.length === 0 ? (
             <div className="p-8 text-center text-sm text-muted-foreground">Sotuvlar yo'q</div>
@@ -247,23 +276,26 @@ function OverviewTab({ stats, expStats }: { stats: StatsType; expStats: ExpStats
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {recentSales.map((order) => (
-                  <tr key={order._id} className="hover:bg-muted/20">
-                    <td className="px-4 py-2.5 font-mono text-xs">{order.number}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{order.customerName}</td>
-                    <td className="px-4 py-2.5 text-right font-semibold">{fmt(order.totalAmount)} so'm</td>
-                    <td className="px-4 py-2.5 text-center">
-                      <span className={cn(
-                        "text-xs px-2 py-0.5 rounded-full",
-                        order.paidAmount >= order.totalAmount
-                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                          : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                      )}>
-                        {order.paidAmount >= order.totalAmount ? "To'langan" : "Kutilmoqda"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {recentSales.map((order) => {
+                  const paid = toNum(order.paidAmount) >= toNum(order.totalAmount);
+                  return (
+                    <tr key={order.id} className="hover:bg-muted/20">
+                      <td className="px-4 py-2.5 font-mono text-xs">{order.number}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground">{order.customerName ?? "—"}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold">{fmt(order.totalAmount)} so'm</td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span className={cn(
+                          "text-xs px-2 py-0.5 rounded-full",
+                          paid
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                            : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                        )}>
+                          {paid ? "To'langan" : "Kutilmoqda"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -287,7 +319,7 @@ function OverviewTab({ stats, expStats }: { stats: StatsType; expStats: ExpStats
               </thead>
               <tbody className="divide-y divide-border">
                 {recentExpenses.map((exp) => (
-                  <tr key={exp._id} className="hover:bg-muted/20">
+                  <tr key={exp.id} className="hover:bg-muted/20">
                     <td className="px-4 py-2.5">{exp.description}</td>
                     <td className="px-4 py-2.5 text-muted-foreground capitalize">{exp.category}</td>
                     <td className="px-4 py-2.5 text-right font-semibold text-rose-600 dark:text-rose-400">

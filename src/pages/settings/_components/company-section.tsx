@@ -1,42 +1,64 @@
-import { useEffect, useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
+/**
+ * Kompaniya ma'lumotlari — `GET /api/company`, `PATCH /api/company` (`company.manage`).
+ * Davlat — ISO 2 harfli kod (API talabi), bo'sh maydonlar serverda NULL bo'ladi.
+ */
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Building2, Save, DatabaseZap } from "lucide-react";
+import { Building2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
-import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form.tsx";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card.tsx";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form.tsx";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation } from "@/lib/query.ts";
+import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
 
 const schema = z.object({
-  name: z.string().min(1, "Kompaniya nomi shart"),
-  legalName: z.string().optional(),
-  taxId: z.string().optional(),
-  phone: z.string().optional(),
-  email: z.string().optional(),
-  website: z.string().optional(),
-  address: z.string().optional(),
-  city: z.string().optional(),
-  country: z.string().min(1),
-  currency: z.string().min(1),
+  name: z.string().trim().min(1, "Kompaniya nomi shart").max(200),
+  legalName: z.string().max(300),
+  taxId: z.string().max(32),
+  phone: z.string().max(20),
+  email: z.union([z.literal(""), z.email("Email noto'g'ri")]),
+  website: z.string().max(255),
+  address: z.string().max(1000),
+  city: z.string().max(100),
+  country: z.string().length(2),
+  currency: z.string().length(3),
 });
 type FormData = z.infer<typeof schema>;
 
 const CURRENCIES = ["UZS", "USD", "EUR", "RUB", "KZT"];
-const COUNTRIES = ["Uzbekiston", "Rossiya", "Qozog'iston", "Qirg'iziston", "Tojikiston", "Turkmaniston"];
+const COUNTRIES = [
+  { code: "UZ", name: "O'zbekiston" },
+  { code: "RU", name: "Rossiya" },
+  { code: "KZ", name: "Qozog'iston" },
+  { code: "KG", name: "Qirg'iziston" },
+  { code: "TJ", name: "Tojikiston" },
+  { code: "TM", name: "Turkmaniston" },
+];
+
+const EMPTY: FormData = {
+  name: "", legalName: "", taxId: "", phone: "", email: "", website: "", address: "", city: "", country: "UZ", currency: "UZS",
+};
 
 export default function CompanySection() {
-  const company = useQuery(api.admin.getCompany);
-  const upsertCompany = useMutation(api.admin.upsertCompany);
+  const { data, error } = useActiveCompany();
+  const company = data?.company;
+  const { can } = usePermissions();
+  const canManage = can("company.manage");
+
+  // Standart: barcha ko'rinib turgan so'rovlar yangilanadi (/me dagi kompaniya nomi ham)
+  const updateCompany = useApiMutation((patch: Omit<FormData, "email"> & { email: string | null }) =>
+    api.patch("/api/company", patch),
+  );
 
   const form = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { name: "", legalName: "", taxId: "", phone: "", email: "", website: "", address: "", city: "", country: "Uzbekiston", currency: "UZS" },
+    defaultValues: EMPTY,
   });
 
   useEffect(() => {
@@ -56,16 +78,23 @@ export default function CompanySection() {
     }
   }, [company, form]);
 
-  const onSubmit = async (data: FormData) => {
+  const onSubmit = async (values: FormData) => {
     try {
-      await upsertCompany(data);
+      await updateCompany.mutateAsync({ ...values, email: values.email.trim() || null });
       toast.success("Kompaniya ma'lumotlari saqlandi");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Xatolik");
+      toast.error(errorMessage(e));
     }
   };
 
-  if (company === undefined) return <Skeleton className="h-96 rounded-2xl" />;
+  if (error) {
+    return <div className="text-sm text-muted-foreground p-8 text-center">{errorMessage(error)}</div>;
+  }
+  if (!company) return <Skeleton className="h-96 rounded-2xl" />;
+
+  const countries = COUNTRIES.some((c) => c.code === company.country)
+    ? COUNTRIES
+    : [...COUNTRIES, { code: company.country, name: company.country }];
 
   return (
     <div className="space-y-4 max-w-2xl">
@@ -75,17 +104,20 @@ export default function CompanySection() {
         </div>
         <div>
           <p className="font-semibold">Kompaniya ma'lumotlari</p>
-          <p className="text-xs text-muted-foreground">ERP tizimida ko'rsatiladigan asosiy ma'lumotlar</p>
+          <p className="text-xs text-muted-foreground">
+            {canManage ? "ERP tizimida ko'rsatiladigan asosiy ma'lumotlar" : "Faqat ko'rish — o'zgartirish uchun ruxsat yo'q"}
+          </p>
         </div>
       </div>
 
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <fieldset disabled={!canManage} className="grid grid-cols-2 gap-4">
             <FormField control={form.control} name="name" render={({ field }) => (
               <FormItem>
                 <FormLabel>Kompaniya nomi *</FormLabel>
                 <FormControl><Input {...field} placeholder="Mening Kompaniyam LLC" /></FormControl>
+                <FormMessage />
               </FormItem>
             )} />
             <FormField control={form.control} name="legalName" render={({ field }) => (
@@ -103,13 +135,15 @@ export default function CompanySection() {
             <FormField control={form.control} name="phone" render={({ field }) => (
               <FormItem>
                 <FormLabel>Telefon</FormLabel>
-                <FormControl><Input {...field} placeholder="+998 90 123 45 67" /></FormControl>
+                <FormControl><Input {...field} placeholder="+998901234567" /></FormControl>
+                <FormMessage />
               </FormItem>
             )} />
             <FormField control={form.control} name="email" render={({ field }) => (
               <FormItem>
                 <FormLabel>Email</FormLabel>
                 <FormControl><Input {...field} placeholder="info@company.com" /></FormControl>
+                <FormMessage />
               </FormItem>
             )} />
             <FormField control={form.control} name="website" render={({ field }) => (
@@ -133,80 +167,31 @@ export default function CompanySection() {
             <FormField control={form.control} name="country" render={({ field }) => (
               <FormItem>
                 <FormLabel>Davlat</FormLabel>
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select value={field.value} onValueChange={field.onChange} disabled={!canManage}>
                   <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                  <SelectContent>{COUNTRIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  <SelectContent>{countries.map((c) => <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>)}</SelectContent>
                 </Select>
               </FormItem>
             )} />
             <FormField control={form.control} name="currency" render={({ field }) => (
               <FormItem>
                 <FormLabel>Asosiy valyuta</FormLabel>
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select value={field.value} onValueChange={field.onChange} disabled={!canManage}>
                   <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                   <SelectContent>{CURRENCIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
                 </Select>
               </FormItem>
             )} />
-          </div>
-          <Button type="submit" disabled={form.formState.isSubmitting}>
-            <Save className="h-4 w-4 mr-2" />
-            {form.formState.isSubmitting ? "Saqlanmoqda..." : "Saqlash"}
-          </Button>
+          </fieldset>
+          {canManage && (
+            <Button type="submit" disabled={updateCompany.isPending}>
+              <Save className="h-4 w-4 mr-2" />
+              {updateCompany.isPending ? "Saqlanmoqda..." : "Saqlash"}
+            </Button>
+          )}
         </form>
       </Form>
-
-      {/* One-time migration card */}
-      <MigrationCard />
+      {/* Eski "Ko'p tenantli migratsiya" kartasi olib tashlandi — ma'lumot ko'chirish server CLI orqali (PHASE 15) */}
     </div>
-  );
-}
-
-function MigrationCard() {
-  const [loading, setLoading] = useState(false);
-  const [done, setDone] = useState(false);
-  const migrate = useMutation(api.companies.migrateExistingDataToTenant);
-
-  const handleMigrate = async () => {
-    setLoading(true);
-    try {
-      const result = await migrate({});
-      if (result.companyId) {
-        toast.success(`Migratsiya tugadi: ${result.migrated} yozuv yangilandi`);
-        setDone(true);
-      } else {
-        toast.error("Kompaniya topilmadi. Avval kompaniya ma'lumotlarini saqlang.");
-      }
-    } catch {
-      toast.error("Migratsiya xatosi");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Card className="border-dashed border-warning/50 bg-warning/5">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm flex items-center gap-2">
-          <DatabaseZap className="h-4 w-4 text-orange-500" />
-          Ko'p tenantli migratsiya
-        </CardTitle>
-        <CardDescription className="text-xs">
-          Mavjud barcha ma'lumotlarni joriy kompaniyaga biriktirish uchun bir marta ishga tushiring.
-          Bu operatsiya xavfsiz va qayta-qayta ishlatilishi mumkin.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleMigrate}
-          disabled={loading || done}
-        >
-          <DatabaseZap className="h-4 w-4 mr-1.5" />
-          {done ? "Migratsiya bajarildi ✓" : loading ? "Bajarilmoqda..." : "Migratsiyani boshlash"}
-        </Button>
-      </CardContent>
-    </Card>
   );
 }

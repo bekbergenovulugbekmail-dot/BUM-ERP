@@ -1,6 +1,4 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { toast } from "sonner";
 import { Plus, Cog, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
@@ -10,34 +8,42 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { num, type WorkCenter, type WorkCenterType } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
-const TYPE_LABELS: Record<string, { label: string; color: string }> = {
+const TYPE_LABELS: Record<WorkCenterType, { label: string; color: string }> = {
   machine: { label: "Mashina", color: "text-blue-600 bg-blue-500/10" },
   labor: { label: "Mehnat", color: "text-emerald-600 bg-emerald-500/10" },
   subcontract: { label: "Subpudrat", color: "text-orange-600 bg-orange-500/10" },
 };
 
+const emptyForm = () => ({ name: "", type: "machine" as WorkCenterType, costPerHour: "" });
+
 export default function WorkCentersSection() {
-  const workCenters = useQuery(api.manufacturing.orders.listWorkCenters, {});
-  const createWC = useMutation(api.manufacturing.orders.createWorkCenter);
-  const deleteWC = useMutation(api.manufacturing.orders.deleteWorkCenter);
+  const workCenters = useApiQuery<{ workCenters: WorkCenter[] }>("/api/manufacturing/work-centers").data?.workCenters;
+  const createWC = useApiMutation((body: Record<string, unknown>) => api.post("/api/manufacturing/work-centers", body));
+  const deleteWC = useApiMutation((id: string) => api.delete(`/api/manufacturing/work-centers/${id}`));
 
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ name: "", type: "machine" as "machine" | "labor" | "subcontract", costPerHour: "" });
+  const [form, setForm] = useState(emptyForm);
 
   const handleCreate = async () => {
-    if (!form.name) { toast.error("Nom kiritilishi shart"); return; }
-    setLoading(true);
+    if (!form.name.trim()) { toast.error("Nom kiritilishi shart"); return; }
     try {
-      await createWC({ name: form.name, type: form.type, costPerHour: parseFloat(form.costPerHour) || 0 });
+      await createWC.mutateAsync({ name: form.name, type: form.type, costPerHour: form.costPerHour || "0" });
       toast.success("Ish markazi qo'shildi");
       setOpen(false);
-      setForm({ name: "", type: "machine", costPerHour: "" });
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Xatolik"); }
-    finally { setLoading(false); }
+      setForm(emptyForm());
+    } catch (e) { toast.error(errorMessage(e)); }
+  };
+
+  const handleDelete = async (id: string) => {
+    // Vaqt yozuvlari bor markaz o'chirilmaydi — server sababini qaytaradi
+    try { await deleteWC.mutateAsync(id); toast.success("O'chirildi"); }
+    catch (e) { toast.error(errorMessage(e)); }
   };
 
   return (
@@ -64,7 +70,7 @@ export default function WorkCentersSection() {
           {workCenters.map((wc) => {
             const typeInfo = TYPE_LABELS[wc.type];
             return (
-              <div key={wc._id} className="bg-card border border-border rounded-2xl p-4">
+              <div key={wc.id} className="bg-card border border-border rounded-2xl p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <div className={cn("h-8 w-8 rounded-lg flex items-center justify-center", typeInfo?.color ?? "bg-muted")}>
@@ -75,7 +81,7 @@ export default function WorkCentersSection() {
                       <p className="text-xs font-mono text-muted-foreground">{wc.code}</p>
                     </div>
                   </div>
-                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => deleteWC({ id: wc._id })}>
+                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => void handleDelete(wc.id)}>
                     <Trash2 className="h-3.5 w-3.5 text-destructive" />
                   </Button>
                 </div>
@@ -83,7 +89,7 @@ export default function WorkCentersSection() {
                   <span className={cn("text-xs px-2 py-0.5 rounded-full", typeInfo?.color ?? "bg-muted text-muted-foreground")}>
                     {typeInfo?.label ?? wc.type}
                   </span>
-                  <span className="text-sm font-bold">{fmt(wc.costPerHour)} so'm/soat</span>
+                  <span className="text-sm font-bold">{fmt(num(wc.costPerHour))} so'm/soat</span>
                 </div>
               </div>
             );
@@ -103,7 +109,7 @@ export default function WorkCentersSection() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Turi</Label>
-                  <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as typeof form.type })}>
+                  <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as WorkCenterType })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="machine">Mashina</SelectItem>
@@ -121,7 +127,7 @@ export default function WorkCentersSection() {
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => setOpen(false)}>Bekor</Button>
-              <Button onClick={handleCreate} disabled={loading}>{loading ? "..." : "Qo'shish"}</Button>
+              <Button onClick={handleCreate} disabled={createWC.isPending}>{createWC.isPending ? "..." : "Qo'shish"}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

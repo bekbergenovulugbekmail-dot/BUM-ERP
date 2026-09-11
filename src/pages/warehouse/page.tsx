@@ -1,19 +1,20 @@
-import { useState, useEffect, useRef } from "react";
-import { useQuery, useMutation, useConvexAuth } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
+import { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import {
   Warehouse, PackagePlus, PackageMinus, ArrowLeftRight,
   ClipboardList, TrendingUp, TrendingDown, AlertTriangle,
-  BarChart3, Search, Plus, SlidersHorizontal, History, ScanLine,
+  BarChart3, Search, SlidersHorizontal, History, ScanLine,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
+import { Card, CardContent } from "@/components/ui/card.tsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
+import { useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
+import { useDebounce } from "@/hooks/use-debounce.ts";
 import WarehouseSelector from "./_components/warehouse-selector.tsx";
 import StockTable from "./_components/stock-table.tsx";
 import MovementDialog from "./_components/movement-dialog.tsx";
@@ -21,11 +22,14 @@ import TransferDialog from "./_components/transfer-dialog.tsx";
 import MovementHistory from "./_components/movement-history.tsx";
 import InventoryCountSection from "./_components/inventory-count-section.tsx";
 import BarcodeScanner from "@/components/barcode-scanner.tsx";
-import type { Id } from "@/convex/_generated/dataModel.d.ts";
+import { toNumber } from "@/pages/products/_lib/types.ts";
+import type { WarehouseItem, WarehouseStats } from "./_lib/types.ts";
 
 export default function WarehousePage() {
-  const [selectedWarehouseId, setSelectedWarehouseId] = useState<Id<"warehouses"> | null>(null);
+  const { can } = usePermissions();
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [debouncedSearch] = useDebounce(search, 300);
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [activeTab, setActiveTab] = useState("stock");
   const [movementDialog, setMovementDialog] = useState<{
@@ -35,30 +39,27 @@ export default function WarehousePage() {
   const [transferOpen, setTransferOpen] = useState(false);
   const [warehouseScannerOpen, setWarehouseScannerOpen] = useState(false);
 
-  const { isAuthenticated } = useConvexAuth();
-  const warehouses = useQuery(api.warehouse.warehouses.list, {});
-  const seedDefault = useMutation(api.warehouse.warehouses.seedDefault);
-  const seededRef = useRef(false);
+  // Asosiy ombor kompaniya yaratilganda serverda ochiladi (seedDefault kerak emas);
+  // ro'yxat a'zoning ruxsat etilgan omborlari bilan cheklangan
+  const warehousesQuery = useApiQuery<{ warehouses: WarehouseItem[] }>("/api/inventory/warehouses");
+  const warehouses = warehousesQuery.data?.warehouses;
 
-  // Seed default warehouse once — faqat Convex auth tasdiqlangach. Aks holda
-  // sahifa login'ga yo'naltirilgunicha UNAUTHENTICATED xatosi konsolga tushadi.
-  useEffect(() => {
-    if (!isAuthenticated || seededRef.current) return;
-    seededRef.current = true;
-    seedDefault().catch(() => {/* already seeded */});
-  }, [isAuthenticated, seedDefault]);
+  // Asosiy omborni tanlash (kompaniya almashsa yoki ombor ro'yxatdan chiqsa — qayta); render paytida moslash
+  if (warehouses && !(selectedWarehouseId && warehouses.some((w) => w.id === selectedWarehouseId))) {
+    const fallback = (warehouses.find((w) => w.isDefault) ?? warehouses[0])?.id ?? null;
+    if (fallback !== selectedWarehouseId) setSelectedWarehouseId(fallback);
+  }
 
-  // Auto-select default warehouse
-  useEffect(() => {
-    if (!warehouses || selectedWarehouseId) return;
-    const def = warehouses.find((w) => w.isDefault) ?? warehouses[0];
-    if (def) setSelectedWarehouseId(def._id);
-  }, [warehouses, selectedWarehouseId]);
-
-  const stats = useQuery(
-    api.warehouse.stock.getWarehouseStats,
-    selectedWarehouseId ? { warehouseId: selectedWarehouseId } : "skip"
+  const statsQuery = useApiQuery<WarehouseStats>(
+    selectedWarehouseId ? "/api/inventory/stock/stats" : null,
+    { warehouseId: selectedWarehouseId },
   );
+  const stats = statsQuery.data;
+  const statsLoading = Boolean(selectedWarehouseId) && statsQuery.isPending;
+
+  const canReceive = can("warehouse.receive");
+  const canManage = can("warehouse.manage");
+  const canTransfer = can("warehouse.transfer");
 
   const formatMoney = (n: number) =>
     new Intl.NumberFormat("uz-UZ", { notation: "compact" }).format(n) + " so'm";
@@ -72,7 +73,7 @@ export default function WarehousePage() {
     },
     {
       label: "Ombor qiymati",
-      value: stats ? formatMoney(stats.totalValue) : "—",
+      value: stats ? formatMoney(toNumber(stats.totalValue)) : "—",
       icon: <TrendingUp className="h-5 w-5" />,
       color: "text-green-600",
     },
@@ -106,22 +107,32 @@ export default function WarehousePage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={() => setTransferOpen(true)}>
-            <ArrowLeftRight className="h-4 w-4 mr-1.5" /> Ko'chirish
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => setMovementDialog({ open: true, type: "issue" })}>
-            <PackageMinus className="h-4 w-4 mr-1.5" /> Chiqarish
-          </Button>
-          <Button size="sm" onClick={() => setMovementDialog({ open: true, type: "receive" })}>
-            <PackagePlus className="h-4 w-4 mr-1.5" /> Qabul qilish
-          </Button>
+          {canTransfer && (warehouses?.length ?? 0) > 1 && (
+            <Button variant="secondary" size="sm" disabled={!selectedWarehouseId} onClick={() => setTransferOpen(true)}>
+              <ArrowLeftRight className="h-4 w-4 mr-1.5" /> Ko'chirish
+            </Button>
+          )}
+          {canManage && (
+            <Button variant="secondary" size="sm" disabled={!selectedWarehouseId} onClick={() => setMovementDialog({ open: true, type: "issue" })}>
+              <PackageMinus className="h-4 w-4 mr-1.5" /> Chiqarish
+            </Button>
+          )}
+          {canReceive && (
+            <Button size="sm" disabled={!selectedWarehouseId} onClick={() => setMovementDialog({ open: true, type: "receive" })}>
+              <PackagePlus className="h-4 w-4 mr-1.5" /> Qabul qilish
+            </Button>
+          )}
         </div>
       </div>
 
       {/* Warehouse selector */}
       <div className="px-6 py-3 border-b border-border shrink-0 bg-muted/30">
         {!warehouses ? (
-          <Skeleton className="h-9 w-64" />
+          warehousesQuery.isError ? (
+            <p className="text-sm text-destructive">Omborlarni yuklab bo'lmadi</p>
+          ) : (
+            <Skeleton className="h-9 w-64" />
+          )
         ) : (
           <WarehouseSelector
             warehouses={warehouses}
@@ -145,7 +156,7 @@ export default function WarehousePage() {
                 <div className={cn("shrink-0", card.color)}>{card.icon}</div>
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground truncate">{card.label}</p>
-                  {stats === undefined ? (
+                  {statsLoading ? (
                     <Skeleton className="h-5 w-16 mt-0.5" />
                   ) : (
                     <p className={cn("text-lg font-bold", card.color)}>{card.value}</p>
@@ -204,13 +215,16 @@ export default function WarehousePage() {
                     <Badge className="ml-1.5 h-4 px-1 text-[10px]">{stats?.lowStockCount}</Badge>
                   )}
                 </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setMovementDialog({ open: true, type: "adjust" })}
-                >
-                  <SlidersHorizontal className="h-4 w-4 mr-1.5" /> Tuzatish
-                </Button>
+                {canManage && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!selectedWarehouseId}
+                    onClick={() => setMovementDialog({ open: true, type: "adjust" })}
+                  >
+                    <SlidersHorizontal className="h-4 w-4 mr-1.5" /> Tuzatish
+                  </Button>
+                )}
               </div>
             )}
           </div>
@@ -219,8 +233,10 @@ export default function WarehousePage() {
             {selectedWarehouseId ? (
               <StockTable
                 warehouseId={selectedWarehouseId}
-                search={search}
+                search={debouncedSearch.trim()}
                 lowStockOnly={lowStockOnly}
+                canReceive={canReceive}
+                canManage={canManage}
                 onReceive={() => setMovementDialog({ open: true, type: "receive" })}
                 onIssue={() => setMovementDialog({ open: true, type: "issue" })}
                 onAdjust={() => setMovementDialog({ open: true, type: "adjust" })}

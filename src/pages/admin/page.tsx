@@ -2,22 +2,22 @@
  * Platform Admin Panel
  * Route: /:lng/admin   AND   admin.bum-erp.uz (any path)
  *
- * On admin subdomain: wraps AdminLoginPage → AdminBootstrapPage → AdminDashboard
+ * On admin subdomain: AdminLoginPage → AdminDashboard (faqat isPlatformAdmin)
  * On app subdomain: simple isPlatformAdmin guard (direct link to /admin)
+ *
+ * Bootstrap sahifasi yo'q: birinchi (bootstrap) admin serverda `.env` + `db:seed` orqali yaratiladi.
  */
 import { useState } from "react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
-import { AuthLoading, Authenticated, Unauthenticated } from "convex/react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, Navigate } from "react-router-dom";
 import { motion } from "motion/react";
 import {
   LayoutDashboard, Building2, Users, ListChecks,
-  Shield, Layers, ArrowLeft, Settings, PlusCircle, ExternalLink, Loader2,
+  Shield, Layers, ArrowLeft, Settings, PlusCircle, ExternalLink, LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import { isAdminSubdomain } from "@/lib/subdomain.ts";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
+import { useAuth, useCurrentUser } from "@/hooks/use-auth.ts";
 import AdminOverview         from "./_components/admin-overview.tsx";
 import AdminCompanies        from "./_components/admin-companies.tsx";
 import AdminAuditLog         from "./_components/admin-audit-log.tsx";
@@ -25,7 +25,6 @@ import AdminUsers            from "./_components/admin-users.tsx";
 import AdminCreateCompany    from "./_components/admin-create-company.tsx";
 import AdminPlatformSettings from "./_components/admin-platform-settings.tsx";
 import AdminLoginPage        from "./login.tsx";
-import AdminBootstrapPage    from "./bootstrap.tsx";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Tab = "overview" | "companies" | "create-company" | "users" | "audit" | "settings";
@@ -52,49 +51,26 @@ export default function AdminPage() {
   return <AdminDashboardGuarded />;
 }
 
-// ─── Admin subdomain: full login → bootstrap → dashboard ─────────────────────
-type AdminSurfaceState = "login" | "bootstrap" | "dashboard";
-
+// ─── Admin subdomain: login → dashboard ──────────────────────────────────────
 function AdminSurface() {
-  const currentUser = useQuery(api.users.getCurrentUser);
-  const platformAdminCount = useQuery(api.companies.platformAdminCount);
-  const [state, setState] = useState<AdminSurfaceState>("login");
+  const currentUser = useCurrentUser();
 
-  // If user is already confirmed admin, skip login
-  if (currentUser?.isPlatformAdmin && state === "login") {
+  // Kirish muvaffaqiyatli bo'lsa /me keshi yangilanadi va shu yerda panel ochiladi
+  if (currentUser?.isPlatformAdmin) {
     return <AdminDashboard />;
   }
-
-  if (state === "login") {
-    return (
-      <AdminLoginPage
-        onAuthorized={() => setState("dashboard")}
-        onNeedBootstrap={() => setState("bootstrap")}
-        hasExistingAdmins={(platformAdminCount ?? 0) > 0}
-      />
-    );
-  }
-
-  if (state === "bootstrap") {
-    return (
-      <AdminBootstrapPage
-        userEmail={currentUser?.email}
-        onBootstrapped={() => setState("dashboard")}
-      />
-    );
-  }
-
-  return <AdminDashboard />;
+  return <AdminLoginPage />;
 }
 
 // ─── App subdomain: /admin route with simple guard ───────────────────────────
 function AdminDashboardGuarded() {
-  const currentUser = useQuery(api.users.getCurrentUser);
+  const { lng = "uz" } = useParams<{ lng: string }>();
+  const currentUser = useCurrentUser();
 
   if (currentUser === undefined) return <AdminSkeleton />;
+  if (currentUser === null) return <Navigate to={`/${lng}/login`} replace />;
 
-  if (!currentUser?.isPlatformAdmin) {
-    const { lng = "uz" } = { lng: "uz" };
+  if (!currentUser.isPlatformAdmin) {
     return <AccessDenied lng={lng} showBack />;
   }
 
@@ -105,6 +81,7 @@ function AdminDashboardGuarded() {
 function AdminDashboard() {
   const { lng = "uz" } = useParams<{ lng: string }>();
   const onAdminSurface = isAdminSubdomain();
+  const { signout } = useAuth();
   const [tab, setTab] = useState<Tab>("overview");
 
   return (
@@ -147,15 +124,24 @@ function AdminDashboard() {
 
           {/* Right action */}
           {onAdminSurface ? (
-            <a
-              href="https://app.bum-erp.uz"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-xs text-white/50 hover:text-white transition-colors shrink-0 ml-auto"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">app.bum-erp.uz</span>
-            </a>
+            <div className="flex items-center gap-3 shrink-0 ml-auto">
+              <a
+                href="https://app.bum-erp.uz"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-xs text-white/50 hover:text-white transition-colors"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">app.bum-erp.uz</span>
+              </a>
+              <button
+                onClick={() => signout()}
+                className="flex items-center gap-1.5 text-xs text-white/50 hover:text-white transition-colors cursor-pointer"
+                title="Chiqish"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            </div>
           ) : (
             <Link
               to={`/${lng}/dashboard`}
