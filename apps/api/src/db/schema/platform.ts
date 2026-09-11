@@ -221,6 +221,10 @@ export const branches = pgTable(
   (t) => [
     index("branches_company_idx").on(t.companyId),
     uniqueIndex("branches_company_code_key").on(t.companyId, t.code),
+    /** Har kompaniyada bitta asosiy filial (Convex'da ikkitasi bo'lib qolishi mumkin edi). */
+    uniqueIndex("branches_one_default_per_company_key")
+      .on(t.companyId)
+      .where(sql`${t.isDefault}`),
   ],
 );
 

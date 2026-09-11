@@ -5,7 +5,8 @@
  *                      API orqali o'zgartirilmaydi, bloklanmaydi, o'chirilmaydi
  *   platforma admini — kompaniya egalarini yaratadi; oddiy foydalanuvchilarning
  *                      telefon/parolini o'zgartiradi, faollashtiradi/bloklaydi
- *   kompaniya egasi  — faqat o'z kompaniyasiga xodim qo'shadi va parolini tiklaydi
+ *   kompaniya egasi  — faqat o'z kompaniyasiga xodim qo'shadi, parolini tiklaydi
+ *                      va a'zoligini yangilaydi (company/member.service.ts)
  *   xodim            — o'z parolini eski parolni bilgan holda o'zgartiradi
  *
  * Har amal audit jurnaliga yoziladi. Parol almashsa — o'sha foydalanuvchining
@@ -16,7 +17,6 @@
  */
 import { and, eq, isNull, ne, or, sql } from "drizzle-orm";
 import {
-  FULL_ACCESS_ROLES,
   badRequest,
   conflict,
   forbidden,
@@ -30,6 +30,7 @@ import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { assertNotLimited, recordHit } from "../../shared/rate-limit.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { revokeUserSessions, type SessionUser } from "../auth/session.js";
+import { isFullAccessRole } from "../company/tenant.js";
 
 /** Convex'dagi userAdmin.MIN_PASSWORD bilan bir xil. */
 export const MIN_PASSWORD_LENGTH = 8;
@@ -246,11 +247,17 @@ export async function resolveOwnedCompany(conn: DbOrTx, user: SessionUser): Prom
   return { id: company.id, name: company.name };
 }
 
-async function assertOwnerMayManage(
+/**
+ * Ega shu foydalanuvchini boshqara oladimi.
+ * `password` — hisob darajasidagi amal: xodim boshqa kompaniyaga ham a'zo
+ * bo'lsa taqiqlanadi. `membership` — faqat shu kompaniyadagi a'zolik.
+ */
+export async function assertOwnerMayManage(
   tx: Tx,
   company: OwnedCompany,
   owner: SessionUser,
   target: SessionUser,
+  purpose: "password" | "membership",
 ): Promise<void> {
   const memberships = await tx
     .select({ companyId: companyMembers.companyId, companyRole: companyMembers.companyRole })
@@ -264,19 +271,23 @@ async function assertOwnerMayManage(
   if (target.isBootstrapAdmin) throw forbidden(BOOTSTRAP_PROTECTED);
   if (target.isPlatformAdmin) throw forbidden("Platforma adminini kompaniya egasi boshqarmaydi");
   if (target.id === owner.id) {
-    throw forbidden("O'z parolingizni /api/auth/password orqali o'zgartiring");
+    throw forbidden(
+      purpose === "password"
+        ? "O'z parolingizni /api/auth/password orqali o'zgartiring"
+        : "O'z a'zoligingizni o'zgartirib bo'lmaydi",
+    );
   }
-  if ((FULL_ACCESS_ROLES as readonly string[]).includes(here.companyRole)) {
+  if (isFullAccessRole(here.companyRole)) {
     throw forbidden("Egalik rolidagi foydalanuvchini faqat platforma admini boshqaradi");
   }
   // Parol butun hisobga tegishli — boshqa kompaniyaga ham ta'sir qilmasligi uchun
-  if (memberships.some((m) => m.companyId !== company.id)) {
+  if (purpose === "password" && memberships.some((m) => m.companyId !== company.id)) {
     throw forbidden("Xodim boshqa kompaniyaga ham a'zo — parolini faqat platforma admini tiklaydi");
   }
 }
 
-async function findAssignableRole(tx: Tx, companyId: string, name: string) {
-  if ((FULL_ACCESS_ROLES as readonly string[]).includes(name)) {
+export async function findAssignableRole(tx: Tx, companyId: string, name: string) {
+  if (isFullAccessRole(name)) {
     throw forbidden(`"${name}" rolini xodimga berib bo'lmaydi`);
   }
 
@@ -346,7 +357,7 @@ export async function ownerResetEmployeePassword(
   meta: RequestMeta,
 ): Promise<void> {
   const target = await loadUserForUpdate(tx, userId);
-  await assertOwnerMayManage(tx, company, owner, target);
+  await assertOwnerMayManage(tx, company, owner, target, "password");
   await applyNewPassword(tx, target, newPassword);
   await auditUserAction(tx, owner, meta, {
     action: "USER_PASSWORD_RESET",
@@ -365,12 +376,16 @@ export async function listCompanyMembers(conn: DbOrTx, companyId: string) {
       name: users.name,
       isActive: users.isActive,
       companyRole: companyMembers.companyRole,
+      branchId: companyMembers.branchId,
+      branchName: branches.name,
+      allowedWarehouseIds: companyMembers.allowedWarehouseIds,
       membershipActive: companyMembers.isActive,
       joinedAt: companyMembers.joinedAt,
       lastSeenAt: users.lastSeenAt,
     })
     .from(companyMembers)
     .innerJoin(users, eq(users.id, companyMembers.userId))
+    .leftJoin(branches, eq(branches.id, companyMembers.branchId))
     .where(eq(companyMembers.companyId, companyId))
     .orderBy(companyMembers.joinedAt);
 }

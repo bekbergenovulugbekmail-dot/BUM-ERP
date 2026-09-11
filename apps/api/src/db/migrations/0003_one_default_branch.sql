@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "branches_one_default_per_company_key" ON "branches" USING btree ("company_id") WHERE "branches"."is_default";
