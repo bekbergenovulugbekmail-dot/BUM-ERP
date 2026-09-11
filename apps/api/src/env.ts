@@ -34,6 +34,8 @@ const schema = z.object({
   ESKIZ_SENDER: z.string().default("4546"),
 
   ANTHROPIC_API_KEY: z.string().optional(),
+  /** AI yordamchi modeli — standart: eng so'nggi Sonnet. */
+  ANTHROPIC_MODEL: z.string().min(1).default("claude-sonnet-5"),
 
   STORAGE_ENDPOINT: z.string().optional(),
   STORAGE_BUCKET: z.string().optional(),

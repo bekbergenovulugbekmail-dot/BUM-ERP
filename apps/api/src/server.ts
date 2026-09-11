@@ -12,6 +12,7 @@ import { env, features, isProd } from "./env.js";
 import { logger } from "./shared/logger.js";
 import { registerErrorHandler } from "./shared/errors.js";
 import { closeDb, pool } from "./db/client.js";
+import { aiRoutes } from "./modules/ai/routes.js";
 import { analyticsRoutes } from "./modules/analytics/routes.js";
 import { authRoutes } from "./modules/auth/routes.js";
 import { catalogRoutes } from "./modules/catalog/routes.js";
@@ -89,6 +90,7 @@ export async function buildServer() {
   await app.register(hrRoutes, { prefix: "/api/hr" });
   await app.register(analyticsRoutes, { prefix: "/api/analytics" });
   await app.register(notificationRoutes, { prefix: "/api/notifications" });
+  await app.register(aiRoutes, { prefix: "/api/ai" });
 
   return app;
 }

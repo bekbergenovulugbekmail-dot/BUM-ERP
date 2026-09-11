@@ -33,7 +33,7 @@
 | 11 | CRM | ✅ tugallandi |
 | 12 | Ishlab chiqarish | ✅ tugallandi |
 | 13 | HR | ✅ tugallandi |
-| 14 | Dashboard, hisobot, AI, bildirishnoma, fayl | 🟡 jarayonda (dashboard, hisobotlar, bildirishnomalar tayyor) |
+| 14 | Dashboard, hisobot, AI, bildirishnoma, fayl | 🟡 jarayonda (dashboard, hisobotlar, bildirishnomalar, AI tayyor) |
 | 15 | Ma'lumotni Convex'dan ko'chirish | ⬜ boshlanmagan |
 | 16 | Frontend'ni API'ga o'tkazish, deploy, Convex'ni o'chirish | ⬜ boshlanmagan |
 
@@ -101,6 +101,7 @@ Ko'chirish paytida topilgan. Yangi API'da hammasi yopilgan.
 | `notifications.create` | Istalgan a'zo butun kompaniyaga istalgan (tashqi) havola bilan bildirishnoma yuboradi |
 | `notifications.markRead`, `remove`, `clearRead` | Global bildirishnomani bir xodim o'qisa/o'chirsa — hammada o'qilgan/o'chirilgan |
 | `notifications.triggerSmartAlerts` | Istalgan foydalanuvchi cheksiz ishga tushiradi |
+| `analytics/ai.ts` `askAssistant` | Faqat autentifikatsiya — kassir foyda va maosh fondini so'rab oladi; so'rovlar soni va tarix uzunligi cheklanmagan (API kaliti hisobidan xarajat) |
 
 ## Foydalanuvchi boshqaruvi ierarxiyasi (yangi API)
 
@@ -296,6 +297,13 @@ Kompaniyaning faol a'zosi; yuborish — `company.manage`.
 | POST | `/refresh` (aqlli ogohlantirishlar, 5 daqiqada bir) | `triggerSmartAlerts` |
 | POST | `/` (havola faqat ichki yo'l) | `create` |
 
+### AI yordamchi (`/api/ai`)
+
+| Metod | Yo'l | Kim | Convex |
+|---|---|---|---|
+| GET | `/status` (`{ enabled }`) | sessiya | — |
+| POST | `/assistant` (`question`, `context`, `history` ≤ 20) — soatiga 20 ta; kalit yo'q — 503; AI xizmati xatosi — 502 | `analytics.view` | `analytics.ai.askAssistant` |
+
 ## Lokal muhit
 
 - **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432). `bumerp` — 10 ta migratsiya, ma'lumot yo'q; `bumerp_test` — testlar.
@@ -303,7 +311,7 @@ Kompaniyaning faol a'zosi; yuborish — `company.manage`.
 - **Migratsiya:** `pnpm --filter @bum/api db:migrate`
 - **Seed:** `.env` ga `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_PASSWORD` — `pnpm --filter @bum/api db:seed` (bootstrap admin + 14 global rol + 9 standart o'lchov birligi; idempotent)
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
-- **Testlar:** `pnpm --filter @bum/api test` — 193 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
+- **Testlar:** `pnpm --filter @bum/api test` — 194 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
 
 ---
 
@@ -461,8 +469,10 @@ DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, 
   - `modules/analytics/reports.service.ts` — sotuv, zaxira (ABC — mahsulotdan oldingi jamg'arma ulushi bo'yicha), xarajat (tasdiqlangan/to'langan), xarid, umumiy ko'rinish (yalpi marja), eng yaxshi mijozlar, aylanma tezligi (zaxira necha kunga yetadi). Hammasi SQL yig'indilari
   - `modules/notifications/` — global bildirishnomaning o'qilgan/yopilgan holati har foydalanuvchida (`notification_receipts`), shaxsiy bildirishnomalar, yuborish `company.manage` va faqat ichki havola, aqlli ogohlantirishlar (kam zaxira — ombor bilan, 30 kunda tugaydigan partiyalar, kechikkan xarid, to'lov muddati o'tgan savdo — buyurtma sanasi + mijoz muddati, ta'til so'rovlari, kutilayotgan xarajatlar; 6 soat ichida takrorlanmaydi; kompaniyaga 5 daqiqada bir)
   - **Testlar:** `analytics` (1 — to'liq biznes ssenariysi bo'yicha barcha ko'rsatkichlar), `notifications` (2 — har foydalanuvchi holati va izolyatsiya, aqlli ogohlantirishlar)
+- **14b ✅ AI yordamchi:**
+  - `modules/ai/assistant.service.ts` — tizim promptiga faqat shu kompaniyaning ko'rsatkichlari (sotuv, yalpi/sof foyda, xarajatlar, kassa va bank, qarzlar, ombor, xodimlar), Anthropic Messages API to'g'ridan-to'g'ri (`fetch`, SDK'siz), model `ANTHROPIC_MODEL` (standart `claude-sonnet-5`), foydalanuvchiga soatiga 20 ta, savol ≤ 2000, tarix ≤ 20 xabar; foydalanuvchi konteksti promptda "ko'rsatma emas, ma'lumot" deb belgilanadi
+  - **Testlar:** `ai` (1 — tenant izolyatsiyasi promptda, ruxsat, validatsiya, cheklov, 502/503; tashqi API chaqirilmaydi — mijoz almashtiriladi)
 - **Qolgan:**
-  - **14b** AI yordamchi (`askAssistant`) — `ANTHROPIC_API_KEY` bo'lsa
   - **14c** fayl saqlash (MinIO): mahsulot rasmi (`image_key`), xarajat cheki (`attachment_key`)
   - **14d** SMS (Eskiz): parol tiklash, takliflar — kalit bo'lsa
 
@@ -486,11 +496,12 @@ Poydevor: `legacy_id` ustunlari; login Convex Auth parol xeshlarini qabul qiladi
   - `hr/*`: `date` → `attendanceDate`; maosh holatini PATCH bilan emas, `/approve` va `/pay` bilan; tayyorlagan foydalanuvchiga "Tasdiqlash" tugmasini yashirish; xodim ro'yxatida maxfiy maydonlar faqat `hr.manage` bo'lsa
   - `dashboard/page.tsx`: `todayRevenue` → `todayReceipts`, `weeklyRevenue[].day` yo'q (sanadan frontendda); `analytics.view` bo'lmasa bosh sahifada moliyaviy kartochkalarni yashirish
   - `hooks/use-notifications.ts`: `/api/notifications` ga; havolalar tilsiz (`/warehouse`) — frontend `/uz` qo'shadi; `triggerSmartAlerts` → `POST /refresh` (javobda `throttled`)
+  - `analytics/ai-assistant-section.tsx`: `POST /api/ai/assistant`; `GET /api/ai/status` bo'yicha bo'limni yashirish; 429/502/503 xabarlarini ko'rsatish
 
 ---
 
 ## Keyingi qadam
 
-1. **PHASE 14b–d** — AI yordamchi, fayl saqlash (MinIO), SMS (Eskiz) va takliflar
+1. **PHASE 14c–d** — fayl saqlash (MinIO: mahsulot rasmi, xarajat cheki, xodim surati), SMS (Eskiz) parol tiklash va takliflar
 2. **Production:** Convex tuzatishini (`main` `3f958f1`) production kaliti bilan deploy qilish
 3. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_*` qo'shib `db:seed`
