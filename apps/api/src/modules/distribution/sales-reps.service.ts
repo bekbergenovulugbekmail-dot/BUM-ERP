@@ -7,7 +7,7 @@
  *    qaytarardi — endi agentning shu oydagi lidlari, yutilgan lidlar summasi, tashriflari va tashrif savdosi
  *  - lid/marshrut/tashrifga bog'langan agentni o'chirish tarixni yo'qotardi — endi faqat faolsizlantirish
  *  - `userId` kompaniya a'zosi ekani tekshiriladi; `update` / `remove` to'xtatilgan kompaniyada ham yozardi
- *  - o'qish `crm.view` talab qiladi
+ *  - o'qish `distribution.view` talab qiladi (CRM'dagi lidga agent tanlash — faqat id, nom, kod)
  */
 import { and, asc, eq, getTableColumns, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
@@ -21,7 +21,7 @@ import { todayIso } from "../finance/cash.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...repFields } = getTableColumns(salesReps);
 
-export function crmAudit(
+export function distributionAudit(
   tx: Tx,
   tenant: TenantContext,
   meta: RequestMeta,
@@ -107,7 +107,7 @@ export async function createSalesRep(tx: Tx, tenant: TenantContext, input: Sales
   });
 
   const [rep] = await tx.insert(salesReps).values({ ...input, code, companyId }).returning(repFields);
-  await crmAudit(tx, tenant, meta, {
+  await distributionAudit(tx, tenant, meta, {
     action: "SALES_REP_CREATED",
     resource: "sales_reps",
     resourceId: rep!.id,
@@ -133,7 +133,7 @@ export async function updateSalesRep(
     .returning(repFields);
   if (!rep) throw notFound("Savdo agenti topilmadi");
 
-  await crmAudit(tx, tenant, meta, {
+  await distributionAudit(tx, tenant, meta, {
     action: "SALES_REP_UPDATED",
     resource: "sales_reps",
     resourceId: salesRepId,
@@ -162,7 +162,7 @@ export async function deleteSalesRep(tx: Tx, tenant: TenantContext, salesRepId: 
   if (usage?.used) throw conflict("Agentga lid, marshrut yoki tashrif bog'langan — faolsizlantiring");
 
   await tx.delete(salesReps).where(eq(salesReps.id, rep.id));
-  await crmAudit(tx, tenant, meta, {
+  await distributionAudit(tx, tenant, meta, {
     action: "SALES_REP_DELETED",
     resource: "sales_reps",
     resourceId: rep.id,

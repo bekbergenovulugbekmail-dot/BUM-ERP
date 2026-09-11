@@ -8,7 +8,7 @@
   "nav.purchase": "Xarid",
   "nav.manufacturing": "Ishlab chiqarish",
   "nav.crm": "CRM",
-  "nav.distribution": "Distribyutsiya",
+  "nav.distribution": "Distributsiya",
   "nav.finance": "Moliya",
   "nav.hr": "Xodimlar",
   "nav.reports": "Hisobotlar",
@@ -87,5 +87,7 @@
   "notify.mark_read": "O'qilgan deb belgilash",
   "theme.light": "Yorug'",
   "theme.dark": "Qorong'u",
-  "theme.system": "Tizim"
+  "theme.system": "Tizim",
+  "access.denied.title": "Bu bo'limga kirish ruxsati yo'q",
+  "access.denied.message": "Administrator rolingizga kerakli ruxsatni berishi kerak."
 }

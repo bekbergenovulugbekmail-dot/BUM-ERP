@@ -240,7 +240,7 @@ O'qish — `crm.view`, yozish — `crm.manage`.
 
 | Metod | Yo'l | Convex |
 |---|---|---|
-| GET / POST / PATCH / DELETE | `/sales-reps` (`?includeInactive=`), `/sales-reps/stats`, `/sales-reps/:salesRepId` | `salesReps.*` |
+| GET | `/sales-reps` — lidga agent tanlash uchun (faqat faollar: id, nom, kod) | `salesReps.list` |
 | GET / POST / PATCH / DELETE | `/leads` (`?stage=&salesRepId=&search=`), `/leads/stats`, `/leads/:leadId` | `leads.list`, `getStats`, `create`, `update`, `remove` |
 | POST | `/leads/:leadId/stage` (`convertToCustomer` — yutilganda mijoz yaratish) | `leads.updateStage` |
 | GET / POST / PATCH / DELETE | `/activities` (`?customerId=&leadId=&status=&type=`), `/activities/:activityId` | `activities.*` |
@@ -643,7 +643,44 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - balans va keshbek faqat asosiy valyutadagi qismga; qaytarishda valyutadagi to'lov o'z kassasidan qaytadi
   - chek (ekran va termal shablon): qator o'z valyutasida, oxirida har valyuta bo'yicha jami, to'langan va qaytim
   - cheklovlar: POS smena naqd yig'indisi faqat asosiy valyutada; oddiy (POS bo'lmagan) sotuv buyurtmasi asosiy valyutada; PDF chek asosiy valyutada
-- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (2); API jami 223 (44 fayl)
+- **POS sotuv valyutalari** commit `4b9249f`
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (2), `distribution` (4); API jami 225 (45 fayl)
+
+## Sotuv agenti loyihasi (2026-09-12)
+
+Foydalanuvchi "MUHIM ARXITEKTURA" hujjatini (44 bosqichli Sales Agent spetsifikatsiyasi) yubordi. Faqat o'qish bilan audit o'tkazildi, reja tasdiqlandi:
+xarita — Yandex Maps (`MapProvider` orqasida, kalit env'da), lokatsiya — avval web ilova ochiq paytda, keyin Android (Capacitor).
+
+| # | Bosqich | Holat |
+|---|---|---|
+| A | CRM va Distributsiya alohida; `distribution.*` ruxsatlari; menyu ruxsat bo'yicha | ✅ |
+| L | Oldingi bosqichlar cheklovlarini bartaraf etish (valyuta, smena, PDF, dashboard, ombor kirimi jurnali) | navbatda |
+| B | Sotuv agenti va Supervayzer rollari; agent ish joyi (mobil, 5 bo'lim, uz/ru/kk) | |
+| C | Do'kon koordinatasi; sana bo'yicha hudud/marshrut; do'konlar, profil, qarzdorlar | |
+| D | Lokatsiya kuzatuvi, sifat tekshiruvi, saqlash muddati; supervayzer xaritasi | |
+| E | Tashrif: boshlash/yakunlash, buyurtmasiz sabab, rasm | |
+| F | Katalog, dona/blok, draft (idempotent), yetkazish kuni, nasiya, kredit limiti, geofence bilan buyurtma | |
+| G | Aksiyalar (serverda hisoblash) | |
+| H | Agent dashboardi, prospektlar, supervayzer tafsiloti va lokatsiya tarixi | |
+| I | Offline kesh, xavfsizlik testlari, E2E, yakuniy hisobot | |
+
+**A — CRM va Distributsiya ajratildi** (migratsiya 0018):
+- backend: `modules/distribution/` — `sales-reps.service.ts`, `distribution.service.ts`, `routes.ts` → `/api/distribution` (`distribution.view` / `distribution.manage`); `/api/crm` da faqat lidlar, faoliyatlar va lidga agent tanlash (`GET /sales-reps` — id, nom, kod)
+- ruxsatlar: `distribution.view`, `distribution.manage` ("Savdo menejeri"ga ham); migratsiya 0018 `crm.*` bor mavjud rollarga mos `distribution.*` qo'shadi (takror ishlasa o'zgarmaydi)
+- web: `/crm` — Pipeline va Faoliyatlar; `/distribution` — Marshrutlar va Savdo agentlari, o'z statistikasi bilan
+- menyu va mobil pastki navigatsiya ruxsat bo'yicha (`useVisibleModules`); ruxsatsiz bo'lim havolasi "kirish ruxsati yo'q" sahifasini ko'rsatadi (`ModuleGuard`, uz/ru/kk); "Distributsiya" standart yoqilgan (eski `localStorage` sozlamasi ko'chiriladi)
+- ishlatilmagan `src/lib/permissions.ts` nusxasi o'chirildi (yagona manba — `@bum/shared`)
+
+### Distributsiya (`/api/distribution`)
+
+O'qish — `distribution.view`, yozish — `distribution.manage`.
+
+| Metod | Yo'l |
+|---|---|
+| GET / POST / PATCH / DELETE | `/sales-reps` (`?includeInactive=`), `/sales-reps/stats`, `/sales-reps/:salesRepId` |
+| GET / POST / PATCH / DELETE | `/routes` (`?includeInactive=`), `/routes/:routeId` (mijozlar bilan) |
+| POST / PUT / DELETE | `/routes/:routeId/customers`, `/routes/:routeId/customers/order`, `/routes/:routeId/customers/:memberId` |
+| GET / POST / PATCH | `/visits` (`?routeId=&salesRepId=&status=&dateFrom=&dateTo=`), `/visits/:visitId` |
 
 ---
 

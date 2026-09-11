@@ -87,5 +87,7 @@
   "notify.mark_read": "Оқылды деп белгілеу",
   "theme.light": "Ашық",
   "theme.dark": "Қараңғы",
-  "theme.system": "Жүйелік"
+  "theme.system": "Жүйелік",
+  "access.denied.title": "Бұл бөлімге кіру рұқсаты жоқ",
+  "access.denied.message": "Әкімші рөліңізге қажетті рұқсатты беруі керек."
 }

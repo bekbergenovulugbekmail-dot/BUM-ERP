@@ -15,6 +15,22 @@ const defaultModules = ERP_MODULES.reduce((acc, mod) => {
   return acc;
 }, {} as ModuleSettings);
 
+const STORAGE_KEY = "erp_modules_v2";
+/** Eski kalitda "distribution" standart o'chiq saqlangan — endi CRM'dan alohida bo'lim, u qiymat olinmaydi. */
+const LEGACY_STORAGE_KEY = "erp_modules";
+
+function readStoredModules(): ModuleSettings {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored) return { ...defaultModules, ...(JSON.parse(stored) as Partial<ModuleSettings>) };
+  const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+  if (legacy) {
+    const parsed = JSON.parse(legacy) as Partial<ModuleSettings>;
+    delete parsed.distribution;
+    return { ...defaultModules, ...parsed };
+  }
+  return defaultModules;
+}
+
 const ModuleContext = createContext<ModuleContextType>({
   modules: defaultModules,
   isEnabled: () => true,
@@ -25,20 +41,15 @@ const ModuleContext = createContext<ModuleContextType>({
 export function ModuleProvider({ children }: { children: ReactNode }) {
   const [modules, setModules] = useState<ModuleSettings>(() => {
     try {
-      const stored = localStorage.getItem("erp_modules");
-      if (stored) {
-        const parsed = JSON.parse(stored) as Partial<ModuleSettings>;
-        return { ...defaultModules, ...parsed };
-      }
+      return readStoredModules();
     } catch {
-      // ignore
+      return defaultModules;
     }
-    return defaultModules;
   });
 
   useEffect(() => {
     try {
-      localStorage.setItem("erp_modules", JSON.stringify(modules));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(modules));
     } catch {
       // ignore
     }

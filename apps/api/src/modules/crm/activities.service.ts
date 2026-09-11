@@ -14,8 +14,7 @@ import { customers } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import type { TenantContext } from "../company/tenant.js";
-import { assertCustomer, assertLead } from "./leads.service.js";
-import { crmAudit } from "./sales-reps.service.js";
+import { assertCustomer, assertLead, crmAudit } from "./leads.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...activityFields } = getTableColumns(activities);
 

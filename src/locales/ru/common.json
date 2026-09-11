@@ -87,5 +87,7 @@
   "notify.mark_read": "Отметить как прочитанное",
   "theme.light": "Светлая",
   "theme.dark": "Тёмная",
-  "theme.system": "Системная"
+  "theme.system": "Системная",
+  "access.denied.title": "Нет доступа к этому разделу",
+  "access.denied.message": "Администратор должен выдать вашей роли нужное разрешение."
 }

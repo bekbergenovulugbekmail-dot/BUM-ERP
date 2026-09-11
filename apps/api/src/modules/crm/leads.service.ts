@@ -14,12 +14,24 @@ import { badRequest, notFound } from "@bum/shared";
 import { leads, salesReps } from "../../db/schema/crm.js";
 import { customers } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
-import type { RequestMeta } from "../../shared/audit.js";
+import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import type { TenantContext } from "../company/tenant.js";
+import { assertSalesRep } from "../distribution/sales-reps.service.js";
 import { createCustomer } from "../sales/customers.service.js";
-import { assertSalesRep, crmAudit } from "./sales-reps.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...leadFields } = getTableColumns(leads);
+
+export function crmAudit(
+  tx: Tx,
+  tenant: TenantContext,
+  meta: RequestMeta,
+  entry: { action: string; resource: string; resourceId: string; details: Record<string, unknown> },
+) {
+  return writeAuditLog(
+    { userId: tenant.user.id, userName: tenant.user.name, companyId: tenant.company.id, ...entry, ...meta },
+    tx,
+  );
+}
 
 export type LeadStage = (typeof leads.stage.enumValues)[number];
 export type LeadSource = (typeof leads.source.enumValues)[number];

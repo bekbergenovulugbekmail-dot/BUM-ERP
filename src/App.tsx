@@ -14,6 +14,8 @@ import SalesPage from "./pages/sales/page.tsx";
 import POSPage from "./pages/pos/page.tsx";
 import FinancePage from "./pages/finance/page.tsx";
 import CRMPage from "./pages/crm/page.tsx";
+import DistributionPage from "./pages/distribution/page.tsx";
+import ModuleGuard from "./components/module-guard.tsx";
 import ManufacturingPage from "./pages/manufacturing/page.tsx";
 import HRPage from "./pages/hr/page.tsx";
 import AnalyticsPage from "./pages/analytics/page.tsx";
@@ -118,19 +120,19 @@ function MainApp() {
           <Route element={<ERPApp />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
-            <Route path="sales" element={<SalesPage />} />
-            <Route path="pos" element={<POSPage />} />
-            <Route path="products" element={<ProductsPage />} />
-            <Route path="warehouse" element={<WarehousePage />} />
-            <Route path="purchase" element={<PurchasePage />} />
-            <Route path="manufacturing" element={<ManufacturingPage />} />
-            <Route path="crm" element={<CRMPage />} />
-            <Route path="distribution" element={<CRMPage />} />
-            <Route path="finance" element={<FinancePage />} />
-            <Route path="hr" element={<HRPage />} />
-            <Route path="reports" element={<AnalyticsPage />} />
-            <Route path="analytics" element={<AnalyticsPage />} />
-            <Route path="ai" element={<AnalyticsPage />} />
+            <Route path="sales" element={<ModuleGuard module="sales"><SalesPage /></ModuleGuard>} />
+            <Route path="pos" element={<ModuleGuard module="pos"><POSPage /></ModuleGuard>} />
+            <Route path="products" element={<ModuleGuard module="products"><ProductsPage /></ModuleGuard>} />
+            <Route path="warehouse" element={<ModuleGuard module="warehouse"><WarehousePage /></ModuleGuard>} />
+            <Route path="purchase" element={<ModuleGuard module="purchase"><PurchasePage /></ModuleGuard>} />
+            <Route path="manufacturing" element={<ModuleGuard module="manufacturing"><ManufacturingPage /></ModuleGuard>} />
+            <Route path="crm" element={<ModuleGuard module="crm"><CRMPage /></ModuleGuard>} />
+            <Route path="distribution" element={<ModuleGuard module="distribution"><DistributionPage /></ModuleGuard>} />
+            <Route path="finance" element={<ModuleGuard module="finance"><FinancePage /></ModuleGuard>} />
+            <Route path="hr" element={<ModuleGuard module="hr"><HRPage /></ModuleGuard>} />
+            <Route path="reports" element={<ModuleGuard module="reports"><AnalyticsPage /></ModuleGuard>} />
+            <Route path="analytics" element={<ModuleGuard module="analytics"><AnalyticsPage /></ModuleGuard>} />
+            <Route path="ai" element={<ModuleGuard module="ai"><AnalyticsPage /></ModuleGuard>} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFound />} />
           </Route>

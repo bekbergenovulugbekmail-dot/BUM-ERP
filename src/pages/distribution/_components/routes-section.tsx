@@ -37,21 +37,21 @@ const STATUS_COLORS: Record<VisitStatus, string> = {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export default function DistributionSection() {
-  const routes = useApiQuery<{ routes: DistributionRoute[] }>("/api/crm/routes").data?.routes;
-  const salesReps = useApiQuery<{ salesReps: SalesRep[] }>("/api/crm/sales-reps").data?.salesReps;
+export default function RoutesSection() {
+  const routes = useApiQuery<{ routes: DistributionRoute[] }>("/api/distribution/routes").data?.routes;
+  const salesReps = useApiQuery<{ salesReps: SalesRep[] }>("/api/distribution/sales-reps").data?.salesReps;
   const customers = useApiQuery<{ customers: CustomerOption[] }>("/api/sales/customers", { limit: 500 }).data?.customers;
-  const visits = useApiQuery<{ visits: RouteVisit[] }>("/api/crm/visits", { limit: 20 }).data?.visits;
+  const visits = useApiQuery<{ visits: RouteVisit[] }>("/api/distribution/visits", { limit: 20 }).data?.visits;
 
-  const createRoute = useApiMutation((body: Record<string, unknown>) => api.post("/api/crm/routes", body));
-  const deleteRoute = useApiMutation((id: string) => api.delete(`/api/crm/routes/${id}`));
+  const createRoute = useApiMutation((body: Record<string, unknown>) => api.post("/api/distribution/routes", body));
+  const deleteRoute = useApiMutation((id: string) => api.delete(`/api/distribution/routes/${id}`));
   const addCustomer = useApiMutation(({ routeId, customerId }: { routeId: string; customerId: string }) =>
-    api.post(`/api/crm/routes/${routeId}/customers`, { customerId }));
+    api.post(`/api/distribution/routes/${routeId}/customers`, { customerId }));
   const removeCustomer = useApiMutation(({ routeId, memberId }: { routeId: string; memberId: string }) =>
-    api.delete(`/api/crm/routes/${routeId}/customers/${memberId}`));
-  const createVisit = useApiMutation((body: Record<string, unknown>) => api.post("/api/crm/visits", body));
+    api.delete(`/api/distribution/routes/${routeId}/customers/${memberId}`));
+  const createVisit = useApiMutation((body: Record<string, unknown>) => api.post("/api/distribution/visits", body));
   const updateVisit = useApiMutation(({ id, status }: { id: string; status: VisitStatus }) =>
-    api.patch(`/api/crm/visits/${id}`, { status }));
+    api.patch(`/api/distribution/visits/${id}`, { status }));
 
   const [createOpen, setCreateOpen] = useState(false);
   const [expandedRoute, setExpandedRoute] = useState<string | null>(null);
@@ -65,7 +65,7 @@ export default function DistributionSection() {
   const [visitNotes, setVisitNotes] = useState("");
 
   const expandedRouteData = useApiQuery<{ route: RouteDetail }>(
-    expandedRoute ? `/api/crm/routes/${expandedRoute}` : null,
+    expandedRoute ? `/api/distribution/routes/${expandedRoute}` : null,
   ).data?.route;
 
   const run = async (action: () => Promise<unknown>, success?: string) => {

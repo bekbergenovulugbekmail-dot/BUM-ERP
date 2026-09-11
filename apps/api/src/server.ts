@@ -19,6 +19,7 @@ import { authRoutes } from "./modules/auth/routes.js";
 import { catalogRoutes } from "./modules/catalog/routes.js";
 import { companyRoutes } from "./modules/company/routes.js";
 import { crmRoutes } from "./modules/crm/routes.js";
+import { distributionRoutes } from "./modules/distribution/routes.js";
 import { fileRoutes } from "./modules/files/routes.js";
 import { financeRoutes } from "./modules/finance/routes.js";
 import { hrRoutes } from "./modules/hr/routes.js";
@@ -88,6 +89,7 @@ export async function buildServer() {
   await app.register(purchaseRoutes, { prefix: "/api/purchase" });
   await app.register(salesRoutes, { prefix: "/api/sales" });
   await app.register(crmRoutes, { prefix: "/api/crm" });
+  await app.register(distributionRoutes, { prefix: "/api/distribution" });
   await app.register(manufacturingRoutes, { prefix: "/api/manufacturing" });
   await app.register(hrRoutes, { prefix: "/api/hr" });
   await app.register(analyticsRoutes, { prefix: "/api/analytics" });

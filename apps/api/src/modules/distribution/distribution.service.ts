@@ -10,7 +10,7 @@
  *    o'zgarardi (yakunlangan tashrif ham), tashrif qilingan mijozlar marshrutdagidan ko'p bo'lishi mumkin edi
  *  - tashriflari bor marshrutni o'chirish tashriflarni yetim qoldirardi — endi faolsizlantirish
  *  - mijozlar tartibini o'zgartirish yo'q edi; o'chirilgan mijozdan keyin tartib raqami takrorlanardi
- *  - yozish amallari to'xtatilgan kompaniyada ham ishlardi; o'qish `crm.view`
+ *  - yozish amallari to'xtatilgan kompaniyada ham ishlardi; o'qish `distribution.view` (CRM'dan alohida)
  */
 import { and, asc, desc, eq, getTableColumns, gte, lte, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
@@ -19,8 +19,8 @@ import { customers } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import type { TenantContext } from "../company/tenant.js";
-import { assertCustomer } from "./leads.service.js";
-import { assertSalesRep, crmAudit } from "./sales-reps.service.js";
+import { assertCustomer } from "../crm/leads.service.js";
+import { assertSalesRep, distributionAudit } from "./sales-reps.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...routeFields } = getTableColumns(distributionRoutes);
 const { legacyId: _l2, companyId: _c2, ...routeCustomerFields } = getTableColumns(routeCustomers);
@@ -106,7 +106,7 @@ export async function createRoute(tx: Tx, tenant: TenantContext, input: RouteInp
     .insert(distributionRoutes)
     .values({ ...input, days: [...new Set(input.days)].sort(), companyId })
     .returning(routeFields);
-  await crmAudit(tx, tenant, meta, {
+  await distributionAudit(tx, tenant, meta, {
     action: "ROUTE_CREATED",
     resource: "distribution_routes",
     resourceId: route!.id,
@@ -130,7 +130,7 @@ export async function updateRoute(
     .set({ ...patch, ...(patch.days ? { days: [...new Set(patch.days)].sort() } : {}), updatedAt: new Date() })
     .where(eq(distributionRoutes.id, routeId))
     .returning(routeFields);
-  await crmAudit(tx, tenant, meta, {
+  await distributionAudit(tx, tenant, meta, {
     action: "ROUTE_UPDATED",
     resource: "distribution_routes",
     resourceId: routeId,
@@ -145,7 +145,7 @@ export async function deleteRoute(tx: Tx, tenant: TenantContext, routeId: string
   if (visit) throw conflict("Marshrutda tashriflar bor — o'chirish o'rniga faolsizlantiring");
 
   await tx.delete(distributionRoutes).where(eq(distributionRoutes.id, routeId));
-  await crmAudit(tx, tenant, meta, {
+  await distributionAudit(tx, tenant, meta, {
     action: "ROUTE_DELETED",
     resource: "distribution_routes",
     resourceId: routeId,
@@ -175,7 +175,7 @@ export async function addRouteCustomer(
     .values({ companyId, routeId, customerId: input.customerId, visitNotes: input.visitNotes ?? null, sortOrder: (last?.max ?? 0) + 1 })
     .returning(routeCustomerFields);
 
-  await crmAudit(tx, tenant, meta, {
+  await distributionAudit(tx, tenant, meta, {
     action: "ROUTE_CUSTOMER_ADDED",
     resource: "distribution_routes",
     resourceId: routeId,
@@ -192,7 +192,7 @@ export async function removeRouteCustomer(tx: Tx, tenant: TenantContext, routeId
     .returning({ customerId: routeCustomers.customerId });
   if (!deleted) throw notFound("Marshrutda bunday mijoz yo'q");
 
-  await crmAudit(tx, tenant, meta, {
+  await distributionAudit(tx, tenant, meta, {
     action: "ROUTE_CUSTOMER_REMOVED",
     resource: "distribution_routes",
     resourceId: routeId,
@@ -218,7 +218,7 @@ export async function reorderRouteCustomers(
   for (const [index, id] of memberIds.entries()) {
     await tx.update(routeCustomers).set({ sortOrder: index + 1, updatedAt: new Date() }).where(eq(routeCustomers.id, id));
   }
-  await crmAudit(tx, tenant, meta, {
+  await distributionAudit(tx, tenant, meta, {
     action: "ROUTE_CUSTOMERS_REORDERED",
     resource: "distribution_routes",
     resourceId: routeId,
@@ -269,7 +269,7 @@ export async function createVisit(
     .insert(routeVisits)
     .values({ companyId, routeId: route.id, salesRepId, visitDate: input.visitDate, notes: input.notes ?? null })
     .returning(visitFields);
-  await crmAudit(tx, tenant, meta, {
+  await distributionAudit(tx, tenant, meta, {
     action: "VISIT_CREATED",
     resource: "route_visits",
     resourceId: visit!.id,
@@ -314,7 +314,7 @@ export async function updateVisit(
     .set({ ...patch, updatedAt: new Date() })
     .where(eq(routeVisits.id, visitId))
     .returning(visitFields);
-  await crmAudit(tx, tenant, meta, {
+  await distributionAudit(tx, tenant, meta, {
     action: "VISIT_UPDATED",
     resource: "route_visits",
     resourceId: visitId,

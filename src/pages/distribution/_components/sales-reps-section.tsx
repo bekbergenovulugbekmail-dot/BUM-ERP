@@ -16,11 +16,11 @@ const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 const emptyForm = () => ({ name: "", phone: "", email: "", region: "", monthlyTarget: "", commission: "" });
 
 export default function SalesRepsSection() {
-  const reps = useApiQuery<{ salesReps: SalesRep[] }>("/api/crm/sales-reps", { includeInactive: true }).data?.salesReps;
-  const createRep = useApiMutation((body: Record<string, unknown>) => api.post("/api/crm/sales-reps", body));
+  const reps = useApiQuery<{ salesReps: SalesRep[] }>("/api/distribution/sales-reps", { includeInactive: true }).data?.salesReps;
+  const createRep = useApiMutation((body: Record<string, unknown>) => api.post("/api/distribution/sales-reps", body));
   const updateRep = useApiMutation(({ id, ...body }: { id: string } & Record<string, unknown>) =>
-    api.patch(`/api/crm/sales-reps/${id}`, body));
-  const removeRep = useApiMutation((id: string) => api.delete(`/api/crm/sales-reps/${id}`));
+    api.patch(`/api/distribution/sales-reps/${id}`, body));
+  const removeRep = useApiMutation((id: string) => api.delete(`/api/distribution/sales-reps/${id}`));
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editRep, setEditRep] = useState<string | null>(null);

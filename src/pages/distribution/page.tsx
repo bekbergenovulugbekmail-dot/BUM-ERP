@@ -1,66 +1,64 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import {
-  Users, TrendingUp, Activity,
-  Target, Trophy, CircleDollarSign, CalendarClock,
+  Truck, Route, Users,
+  MapPinned, UserCheck, CalendarCheck, CircleDollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import { useApiQuery } from "@/lib/query.ts";
-import LeadsPipeline from "./_components/leads-pipeline.tsx";
-import ActivitiesSection from "./_components/activities-section.tsx";
-import { num, type Activity as ActivityRow, type LeadStats } from "./_lib/types.ts";
+import RoutesSection from "./_components/routes-section.tsx";
+import SalesRepsSection from "./_components/sales-reps-section.tsx";
+import { num, type DistributionRoute, type SalesRepStats } from "./_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
 const TABS = [
-  { key: "pipeline", label: "Pipeline", icon: TrendingUp },
-  { key: "activities", label: "Faoliyatlar", icon: Activity },
+  { key: "routes", label: "Marshrutlar", icon: Route },
+  { key: "reps", label: "Savdo agentlari", icon: Users },
 ] as const;
 
-export default function CRMPage() {
-  const [tab, setTab] = useState<typeof TABS[number]["key"]>("pipeline");
+export default function DistributionPage() {
+  const [tab, setTab] = useState<typeof TABS[number]["key"]>("routes");
 
-  const leadStats = useApiQuery<LeadStats>("/api/crm/leads/stats").data;
-  const planned = useApiQuery<{ activities: ActivityRow[] }>("/api/crm/activities", { status: "planned", limit: 500 })
-    .data?.activities;
+  const routes = useApiQuery<{ routes: DistributionRoute[] }>("/api/distribution/routes").data?.routes;
+  const reps = useApiQuery<{ salesReps: SalesRepStats[] }>("/api/distribution/sales-reps/stats").data?.salesReps;
 
-  const wonCount = leadStats?.byStage.find((s) => s.stage === "won")?.count ?? 0;
-  const openCount = (leadStats?.byStage ?? [])
-    .filter((s) => s.stage !== "won" && s.stage !== "lost")
-    .reduce((sum, s) => sum + s.count, 0);
+  const storeCount = (routes ?? []).reduce((sum, r) => sum + r.customerCount, 0);
+  const visitsThisMonth = (reps ?? []).reduce((sum, r) => sum + r.visitsThisMonth, 0);
+  const visitSales = (reps ?? []).reduce((sum, r) => sum + num(r.visitSalesThisMonth), 0);
 
   const statsCards = [
     {
-      label: "Jami leadlar",
-      value: leadStats?.total ?? 0,
-      sub: `${openCount} ta ochiq`,
-      icon: Target,
-      color: "text-indigo-500",
-      bg: "bg-indigo-500/10",
+      label: "Faol marshrutlar",
+      value: routes?.length ?? 0,
+      sub: `${storeCount} ta do'kon`,
+      icon: MapPinned,
+      color: "text-emerald-500",
+      bg: "bg-emerald-500/10",
     },
     {
-      label: "Ochiq qiymat",
-      value: fmt(num(leadStats?.openValue)) + " so'm",
-      sub: "Pipeline'dagi lidlar",
-      icon: CircleDollarSign,
+      label: "Savdo agentlari",
+      value: reps?.length ?? 0,
+      sub: "Faol",
+      icon: UserCheck,
       color: "text-blue-500",
       bg: "bg-blue-500/10",
     },
     {
-      label: "Yutilgan",
-      value: fmt(num(leadStats?.wonValue)) + " so'm",
-      sub: `${wonCount} ta lid`,
-      icon: Trophy,
-      color: "text-amber-500",
-      bg: "bg-amber-500/10",
+      label: "Tashriflar",
+      value: visitsThisMonth,
+      sub: "Bu oy yakunlangan",
+      icon: CalendarCheck,
+      color: "text-indigo-500",
+      bg: "bg-indigo-500/10",
     },
     {
-      label: "Rejadagi faoliyatlar",
-      value: planned?.length ?? 0,
-      sub: "Qo'ng'iroq, uchrashuv, vazifa",
-      icon: CalendarClock,
-      color: "text-emerald-500",
-      bg: "bg-emerald-500/10",
+      label: "Tashrif savdosi",
+      value: fmt(visitSales) + " so'm",
+      sub: "Bu oy",
+      icon: CircleDollarSign,
+      color: "text-amber-500",
+      bg: "bg-amber-500/10",
     },
   ];
 
@@ -72,12 +70,12 @@ export default function CRMPage() {
         animate={{ opacity: 1, y: 0 }}
         className="flex items-center gap-3"
       >
-        <div className="h-10 w-10 rounded-xl bg-indigo-500/10 flex items-center justify-center">
-          <Users className="h-5 w-5 text-indigo-500" />
+        <div className="h-10 w-10 rounded-xl bg-emerald-500/10 flex items-center justify-center">
+          <Truck className="h-5 w-5 text-emerald-500" />
         </div>
         <div>
-          <h1 className="text-xl font-bold">CRM</h1>
-          <p className="text-sm text-muted-foreground">Lidlar, pipeline va mijozlar bilan faoliyat</p>
+          <h1 className="text-xl font-bold">Distributsiya</h1>
+          <p className="text-sm text-muted-foreground">Marshrutlar, savdo agentlari va tashriflar</p>
         </div>
       </motion.div>
 
@@ -136,8 +134,8 @@ export default function CRMPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.15 }}
       >
-        {tab === "pipeline" && <LeadsPipeline />}
-        {tab === "activities" && <ActivitiesSection />}
+        {tab === "routes" && <RoutesSection />}
+        {tab === "reps" && <SalesRepsSection />}
       </motion.div>
     </div>
   );

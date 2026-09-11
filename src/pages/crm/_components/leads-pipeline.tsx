@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
-import { num, type Lead, type LeadSource, type LeadStage, type LeadStats, type SalesRep } from "../_lib/types.ts";
+import { num, type Lead, type LeadSource, type LeadStage, type LeadStats, type SalesRepOption } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
@@ -41,7 +41,7 @@ type StageChangeInput = { id: string; stage: LeadStage; lostReason?: string; con
 export default function LeadsPipeline() {
   const allLeads = useApiQuery<{ leads: Lead[] }>("/api/crm/leads", { limit: 200 }).data?.leads;
   const stats = useApiQuery<LeadStats>("/api/crm/leads/stats").data;
-  const salesReps = useApiQuery<{ salesReps: SalesRep[] }>("/api/crm/sales-reps").data?.salesReps;
+  const salesReps = useApiQuery<{ salesReps: SalesRepOption[] }>("/api/crm/sales-reps").data?.salesReps;
 
   const createLead = useApiMutation((body: Record<string, unknown>) => api.post("/api/crm/leads", body));
   const changeStage = useApiMutation(({ id, ...body }: StageChangeInput) => api.post(`/api/crm/leads/${id}/stage`, body));

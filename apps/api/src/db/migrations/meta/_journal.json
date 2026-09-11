@@ -127,6 +127,13 @@
       "when": 1789159403676,
       "tag": "0017_pos_sale_currencies",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1789161570281,
+      "tag": "0018_distribution_permissions",
+      "breakpoints": true
     }
   ]
 }

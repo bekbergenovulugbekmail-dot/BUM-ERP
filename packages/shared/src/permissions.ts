@@ -52,6 +52,11 @@ export const PERMISSIONS = {
   "crm.view":             { label: "CRM ko'rish",                  group: "CRM" },
   "crm.manage":           { label: "CRM boshqarish",               group: "CRM" },
 
+  // ─── Distributsiya ─────────────────────────────────────────────────────────
+  /** Savdo agentlari, marshrutlar va tashriflar. */
+  "distribution.view":    { label: "Distributsiyani ko'rish",      group: "Distributsiya" },
+  "distribution.manage":  { label: "Distributsiyani boshqarish",   group: "Distributsiya" },
+
   // ─── Ishlab chiqarish ──────────────────────────────────────────────────────
   "manufacturing.view":   { label: "Ishlab chiqarishni ko'rish",    group: "Ishlab chiqarish" },
   "manufacturing.manage": { label: "Ishlab chiqarishni boshqarish", group: "Ishlab chiqarish" },
@@ -175,6 +180,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "warehouse.view",
       "finance.view",
       "crm.view", "crm.manage",
+      "distribution.view", "distribution.manage",
       "analytics.view",
       "settings.view",
     ],

@@ -41,8 +41,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.tsx";
-import { useModules } from "@/components/providers/module-provider.tsx";
-import { ERP_MODULES, MODULE_GROUPS } from "@/lib/modules.ts";
+import { useVisibleModules } from "@/hooks/use-visible-modules.ts";
+import { MODULE_GROUPS } from "@/lib/modules.ts";
 import {
   SUPPORTED_LOCALES,
   SUPPORTED_LOCALES_ARRAY,
@@ -90,7 +90,7 @@ type SidebarProps = {
 function SidebarNav({ collapsed, onToggle, onLinkClick }: SidebarProps) {
   const { t, i18n } = useTranslation("common");
   const { lng } = useParams<{ lng: string }>();
-  const { isEnabled } = useModules();
+  const visibleModules = useVisibleModules();
   const location = useLocation();
 
   const GROUP_LABELS: Record<string, Record<string, string>> = {
@@ -130,9 +130,7 @@ function SidebarNav({ collapsed, onToggle, onLinkClick }: SidebarProps) {
       <nav className="flex-1 overflow-y-auto py-2 space-y-4 px-2">
         <TooltipProvider delayDuration={0}>
           {groups.map(([groupId]) => {
-            const groupModules = ERP_MODULES.filter(
-              (m) => m.group === groupId && isEnabled(m.id)
-            );
+            const groupModules = visibleModules.filter((m) => m.group === groupId);
             if (groupModules.length === 0) return null;
             return (
               <div key={groupId}>
@@ -444,9 +442,8 @@ function MobileDrawerSidebar({ open, onClose }: { open: boolean; onClose: () => 
 function MobileBottomNav() {
   const { t } = useTranslation("common");
   const { lng } = useParams<{ lng: string }>();
-  const { isEnabled } = useModules();
   const location = useLocation();
-  const mainModules = ERP_MODULES.filter((m) => isEnabled(m.id)).slice(0, 5);
+  const mainModules = useVisibleModules().slice(0, 5);
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 flex justify-around border-t border-border bg-card md:hidden z-40 pb-safe">
