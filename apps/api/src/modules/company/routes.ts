@@ -4,23 +4,32 @@
  * Kompaniya har doim foydalanuvchining AKTIV kompaniyasi — so'rovda companyId
  * qabul qilinmaydi (faqat /switch da, a'zolik tekshiruvi bilan).
  *
- *   GET   /                          aktiv kompaniya + a'zolik + ruxsatlar    (a'zo)
- *   PATCH /                          kompaniya ma'lumotlari            (company.manage)
- *   GET   /mine                      a'zo bo'lgan kompaniyalar          (sessiya)
- *   POST  /switch                    aktiv kompaniyani almashtirish     (faol a'zo)
- *   GET   /branches                  filiallar                          (a'zo)
- *   POST  /branches                  filial yaratish                    (branches.manage)
- *   PATCH /branches/:branchId        filialni yangilash                 (branches.manage)
- *   GET   /employees                 a'zolar                            (users.view)
- *   POST  /employees                 xodim qo'shish                     (kompaniya egasi)
- *   PATCH /employees/:userId         rol, filial, ombor, holat          (kompaniya egasi)
- *   POST  /employees/:userId/password  parolni tiklash                  (kompaniya egasi)
+ *   GET    /                            aktiv kompaniya + a'zolik + ruxsatlar   (a'zo)
+ *   PATCH  /                            kompaniya ma'lumotlari           (company.manage)
+ *   GET    /mine                        a'zo bo'lgan kompaniyalar         (sessiya)
+ *   POST   /switch                      aktiv kompaniyani almashtirish    (faol a'zo)
+ *   GET    /branches                    filiallar                         (a'zo)
+ *   POST   /branches                    filial yaratish                   (branches.manage)
+ *   PATCH  /branches/:branchId          filialni yangilash                (branches.manage)
+ *   GET    /employees                   a'zolar                           (users.view)
+ *   POST   /employees                   xodim qo'shish                    (kompaniya egasi)
+ *   PATCH  /employees/:userId           rol, filial, ombor, holat         (kompaniya egasi)
+ *   POST   /employees/:userId/password  parolni tiklash                   (kompaniya egasi)
+ *   GET    /roles                       kompaniya rollari                 (a'zo)
+ *   POST   /roles                       rol yaratish                      (roles.manage)
+ *   PATCH  /roles/:roleId               rolni tahrirlash                  (roles.manage)
+ *   DELETE /roles/:roleId               rolni o'chirish                   (roles.manage)
+ *   GET    /audit-logs                  kompaniya audit jurnali           (audit.view)
+ *   GET    /settings                    sozlamalar (?group=)              (settings.view)
+ *   PUT    /settings/:key               sozlamani saqlash                 (settings.manage; modules → modules.manage)
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { isPermission, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
+import { listAuditLogs } from "../audit/audit-log.service.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 import {
   createEmployee,
@@ -38,6 +47,14 @@ import {
   updateCompany,
 } from "./company.service.js";
 import { ownerUpdateMember } from "./member.service.js";
+import {
+  assertPermissionsNotEmpty,
+  createRole,
+  deleteRole,
+  listRoles,
+  updateRole,
+} from "./role.service.js";
+import { listCompanySettings, upsertCompanySetting } from "./settings.service.js";
 import {
   effectivePermissions,
   requirePermission,
@@ -97,6 +114,40 @@ const memberPatchBody = z.strictObject({
 });
 const userParams = z.object({ userId: z.uuid() });
 const resetPasswordBody = z.object({ newPassword: z.string().min(1).max(256) });
+
+/** Faqat katalogdagi ruxsat nomlari — Convex'da ixtiyoriy satr qabul qilinardi. */
+const permissionList = z
+  .array(z.custom<Permission>((v) => typeof v === "string" && isPermission(v), "Noma'lum ruxsat"))
+  .max(200);
+const roleColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Rang #RRGGBB ko'rinishida").nullable().optional();
+const roleCreateBody = z.strictObject({
+  name: z.string().trim().min(1).max(100),
+  description: nullableText(500),
+  color: roleColor,
+  permissions: permissionList,
+});
+const rolePatchBody = z.strictObject({
+  name: z.string().trim().min(1).max(100).optional(),
+  description: nullableText(500),
+  color: roleColor,
+  permissions: permissionList.optional(),
+  isActive: z.boolean().optional(),
+});
+const roleParams = z.object({ roleId: z.uuid() });
+
+const auditQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+  resource: z.string().trim().min(1).max(100).optional(),
+  cursor: z.string().max(200).optional(),
+});
+
+const settingsQuery = z.object({ group: z.string().trim().min(1).max(50).optional() });
+const settingParams = z.object({ key: z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/, "Kalit noto'g'ri") });
+const settingBody = z.strictObject({
+  value: z.string().max(10_000),
+  group: z.string().trim().min(1).max(50),
+  description: z.string().trim().max(500).optional(),
+});
 
 export async function companyRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", requireAuth);
@@ -218,5 +269,79 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
       await ownerResetEmployeePassword(tx, user, company, userId, newPassword, requestMeta(req));
     });
     return { ok: true };
+  });
+
+  // ─── Rollar ──────────────────────────────────────────────────────────────
+
+  app.get("/roles", async (req) => {
+    const tenant = await requireTenant(db, authOf(req).user);
+    return { roles: await listRoles(db, tenant) };
+  });
+
+  app.post("/roles", async (req, reply) => {
+    const body = roleCreateBody.parse(req.body);
+    assertPermissionsNotEmpty(body.permissions);
+    const { user } = authOf(req);
+    const role = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, user);
+      await requirePermission(tx, tenant, "roles.manage");
+      return createRole(tx, tenant, body, requestMeta(req));
+    });
+    reply.status(201);
+    return { role };
+  });
+
+  app.patch("/roles/:roleId", async (req) => {
+    const { roleId } = roleParams.parse(req.params);
+    const patch = rolePatchBody.parse(req.body);
+    const { user } = authOf(req);
+    const role = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, user);
+      await requirePermission(tx, tenant, "roles.manage");
+      return updateRole(tx, tenant, roleId, patch, requestMeta(req));
+    });
+    return { role };
+  });
+
+  app.delete("/roles/:roleId", async (req) => {
+    const { roleId } = roleParams.parse(req.params);
+    const { user } = authOf(req);
+    await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, user);
+      await requirePermission(tx, tenant, "roles.manage");
+      await deleteRole(tx, tenant, roleId, requestMeta(req));
+    });
+    return { ok: true };
+  });
+
+  // ─── Audit jurnali ───────────────────────────────────────────────────────
+
+  app.get("/audit-logs", async (req) => {
+    const query = auditQuery.parse(req.query);
+    const tenant = await requireTenant(db, authOf(req).user);
+    await requirePermission(db, tenant, "audit.view");
+    // companyId har doim tenantdan — so'rovdan emas
+    return listAuditLogs(db, { ...query, companyId: tenant.company.id });
+  });
+
+  // ─── Sozlamalar ──────────────────────────────────────────────────────────
+
+  app.get("/settings", async (req) => {
+    const { group } = settingsQuery.parse(req.query);
+    const tenant = await requireTenant(db, authOf(req).user);
+    await requirePermission(db, tenant, "settings.view");
+    return { settings: await listCompanySettings(db, tenant, group) };
+  });
+
+  app.put("/settings/:key", async (req) => {
+    const { key } = settingParams.parse(req.params);
+    const body = settingBody.parse(req.body);
+    const { user } = authOf(req);
+    const setting = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, user);
+      await requirePermission(tx, tenant, body.group === "modules" ? "modules.manage" : "settings.manage");
+      return upsertCompanySetting(tx, tenant, { key, ...body }, requestMeta(req));
+    });
+    return { setting };
   });
 }

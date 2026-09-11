@@ -1,15 +1,14 @@
 /**
- * Platforma admini: statistika, audit jurnali, foydalanuvchilar, sozlamalar.
+ * Platforma admini: statistika, foydalanuvchilar, sozlamalar.
+ * Audit jurnali — modules/audit/audit-log.service.ts (kompaniya bilan umumiy).
  *
  * Convex'dan farqlar:
  *  - platformListAllUsers foydalanuvchi hujjatini to'liq qaytarardi (ichki
  *    maydonlar, PIN xeshi brauzerga yetib borardi) — endi ruxsat ro'yxati
  *  - platformGetSettings autentifikatsiyasiz ochiq edi — endi faqat platforma admini
- *  - platformListAuditLogs faqat `take(limit)` edi — endi kursor bilan sahifalash
  */
-import { and, count, desc, eq, ilike, isNull, lt, or } from "drizzle-orm";
-import { badRequest } from "@bum/shared";
-import { auditLogs, companies, companyMembers, settings, users } from "../../db/schema/platform.js";
+import { and, count, desc, eq, ilike, isNull, or } from "drizzle-orm";
+import { companies, companyMembers, settings, users } from "../../db/schema/platform.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import type { SessionUser } from "../auth/session.js";
@@ -33,67 +32,6 @@ export async function platformStats(conn: DbOrTx) {
     totalUsers: userCount?.n ?? 0,
     totalMembers: memberCount?.n ?? 0,
     byStatus,
-  };
-}
-
-// ─── Audit jurnali ───────────────────────────────────────────────────────────
-
-/** Kursor — (vaqt, id): bir millisekundda yozilgan yozuvlar ham tushib qolmaydi. */
-function encodeCursor(occurredAt: Date, id: string): string {
-  return Buffer.from(`${occurredAt.toISOString()}|${id}`).toString("base64url");
-}
-
-function decodeCursor(cursor: string): { occurredAt: Date; id: string } {
-  const [iso, id] = Buffer.from(cursor, "base64url").toString("utf8").split("|");
-  const occurredAt = new Date(iso ?? "");
-  if (!id || Number.isNaN(occurredAt.getTime()) || !/^[0-9a-f-]{36}$/i.test(id)) {
-    throw badRequest("Kursor noto'g'ri");
-  }
-  return { occurredAt, id };
-}
-
-export async function listAuditLogs(
-  conn: DbOrTx,
-  options: { limit: number; companyId?: string; cursor?: string },
-) {
-  const after = options.cursor ? decodeCursor(options.cursor) : null;
-
-  const rows = await conn
-    .select({
-      id: auditLogs.id,
-      occurredAt: auditLogs.occurredAt,
-      action: auditLogs.action,
-      resource: auditLogs.resource,
-      resourceId: auditLogs.resourceId,
-      severity: auditLogs.severity,
-      details: auditLogs.details,
-      userId: auditLogs.userId,
-      userName: auditLogs.userName,
-      ipAddress: auditLogs.ipAddress,
-      companyId: auditLogs.companyId,
-      companyName: companies.name,
-    })
-    .from(auditLogs)
-    .leftJoin(companies, eq(companies.id, auditLogs.companyId))
-    .where(
-      and(
-        options.companyId ? eq(auditLogs.companyId, options.companyId) : undefined,
-        after
-          ? or(
-              lt(auditLogs.occurredAt, after.occurredAt),
-              and(eq(auditLogs.occurredAt, after.occurredAt), lt(auditLogs.id, after.id)),
-            )
-          : undefined,
-      ),
-    )
-    .orderBy(desc(auditLogs.occurredAt), desc(auditLogs.id))
-    .limit(options.limit + 1);
-
-  const page = rows.slice(0, options.limit);
-  const last = page.at(-1);
-  return {
-    logs: page.map((log) => ({ ...log, companyName: log.companyName ?? "Platforma" })),
-    nextCursor: rows.length > options.limit && last ? encodeCursor(last.occurredAt, last.id) : null,
   };
 }
 

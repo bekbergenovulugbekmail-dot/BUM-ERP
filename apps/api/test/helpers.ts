@@ -90,6 +90,26 @@ export async function createCompany(
   };
 }
 
+/** Kompaniya egasi API orqali berilgan roldagi xodim qo'shadi; xodim tizimga kiradi. */
+export async function addEmployee(
+  app: FastifyInstance,
+  company: { ownerCookie: string },
+  role = "Kassir",
+) {
+  const payload = { phone: uniquePhone(), password: "xodim-parol-123", name: `${role} xodim`, role };
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/company/employees",
+    headers: { cookie: company.ownerCookie },
+    payload,
+  });
+  if (res.statusCode !== 201) throw new Error(`Xodim qo'shilmadi: ${res.statusCode} ${res.body}`);
+
+  const { cookie } = await login(app, payload.phone, payload.password);
+  if (!cookie) throw new Error("Xodim kira olmadi");
+  return { id: res.json().employee.id as string, phone: payload.phone, cookie };
+}
+
 let phoneSeq = 0;
 
 /** Testlar orasida takrorlanmaydigan telefon raqam. */

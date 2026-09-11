@@ -34,9 +34,9 @@ import {
   listCompanies,
   setCompanyStatus,
 } from "./company.service.js";
+import { listAuditLogs } from "../audit/audit-log.service.js";
 import {
   getPlatformSettings,
-  listAuditLogs,
   listUsers,
   platformStats,
   savePlatformSettings,
