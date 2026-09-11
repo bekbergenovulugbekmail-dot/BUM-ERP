@@ -11,6 +11,7 @@ import helmet from "@fastify/helmet";
 import { env, features, isProd } from "./env.js";
 import { logger } from "./shared/logger.js";
 import { registerErrorHandler } from "./shared/errors.js";
+import { startMaintenance } from "./shared/maintenance.js";
 import { closeDb, pool } from "./db/client.js";
 import { aiRoutes } from "./modules/ai/routes.js";
 import { analyticsRoutes } from "./modules/analytics/routes.js";
@@ -102,9 +103,11 @@ const isEntrypoint = entryPath !== "" && fileURLToPath(import.meta.url) === entr
 
 if (isEntrypoint) {
   const app = await buildServer();
+  let stopMaintenance = () => {};
 
   const shutdown = async (signal: string) => {
     app.log.info(`${signal} — to'xtatilmoqda`);
+    stopMaintenance();
     await app.close();
     await closeDb();
     process.exit(0);
@@ -114,6 +117,7 @@ if (isEntrypoint) {
 
   try {
     await app.listen({ port: env.PORT, host: env.HOST });
+    stopMaintenance = startMaintenance(app.log);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

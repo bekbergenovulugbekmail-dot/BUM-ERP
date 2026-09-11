@@ -7,7 +7,7 @@
 |---|---|
 | Branch | `feat/postgres-migration` |
 | Oxirgi yangilanish | 2026-09-11 |
-| Umumiy holat | 14 / 16 PHASE tugallandi, PHASE 4 jarayonda (faqat tozalash vazifasi), keyingi — PHASE 16 |
+| Umumiy holat | 15 / 16 PHASE tugallandi, keyingi — PHASE 16 (frontend) |
 | Ishlab turgan ilova | Hali to'liq Convex'da — frontend yangi API'ga ulanmagan |
 
 **Holat belgilari:** ✅ tugallandi · 🟡 jarayonda · ⬜ boshlanmagan
@@ -23,7 +23,7 @@
 | 1 | Monorepo skeleti | ✅ tugallandi |
 | 2 | PostgreSQL sxemasi | ✅ tugallandi |
 | 3 | API poydevori | ✅ tugallandi |
-| 4 | Auth va sessiyalar | 🟡 jarayonda (SMS tiklash tayyor; eskirgan sessiya/limit yozuvlarini tozalash qoldi) |
+| 4 | Auth va sessiyalar | ✅ tugallandi (SMS tiklash, davriy tozalash) |
 | 5 | Platforma: kompaniya, filial, rol, admin | ✅ tugallandi |
 | 6 | Katalog | ✅ tugallandi |
 | 7 | Ombor | ✅ tugallandi |
@@ -34,7 +34,7 @@
 | 12 | Ishlab chiqarish | ✅ tugallandi |
 | 13 | HR | ✅ tugallandi |
 | 14 | Dashboard, hisobot, AI, bildirishnoma, fayl | ✅ tugallandi (takliflar — qaror bo'yicha yozilmadi) |
-| 15 | Ma'lumotni Convex'dan ko'chirish | ⬜ boshlanmagan |
+| 15 | Ma'lumotni Convex'dan ko'chirish | ✅ tugallandi (vosita; haqiqiy import production eksportini kutadi) |
 | 16 | Frontend'ni API'ga o'tkazish, deploy, Convex'ni o'chirish | ⬜ boshlanmagan |
 
 ## Yakuniy qarorlar (2026-09-11)
@@ -324,7 +324,7 @@ Kompaniyaning faol a'zosi; yuborish — `company.manage`.
 - **Seed:** `.env` ga `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_PASSWORD` — `pnpm --filter @bum/api db:seed` (bootstrap admin + 14 global rol + 9 standart o'lchov birligi; idempotent)
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
 - **Convex'dan import:** `pnpm --filter @bum/api db:import-convex <ochilgan-eksport-papkasi> [--dry-run] [--report fayl.json]` (PHASE 15)
-- **Testlar:** `pnpm --filter @bum/api test` — 202 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
+- **Testlar:** `pnpm --filter @bum/api test` — 204 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
 
 ---
 
@@ -340,12 +340,15 @@ pnpm workspace; `packages/shared`; `apps/api`; `docker-compose.yml`; `.env.examp
 
 DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, dual-stack `HOST=::`. Umumiy yordamchilar: `shared/decimal.ts` (numeric satr validatsiyasi), `shared/cursor.ts` (keyset sahifalash), `shared/numbering.ts` (hujjat raqamlari, advisory lock), `shared/rate-limit.ts`, `shared/audit.ts`.
 
-## PHASE 4 — Auth va sessiyalar 🟡
+## PHASE 4 — Auth va sessiyalar ✅
 
 - **Ko'chirilgan:** `modules/auth/` — argon2id (+ Convex lucia Scrypt xeshlari), sessiya (httpOnly cookie, SHA-256, 30 kun / 12 soat), login (rate limit, audit), PIN (5 xato → 5 daqiqa, Convex `reason` kodlari), guard'lar.
-- **Testlar:** `auth` (17), `pin` (14), `password` (4)
+- **Testlar:** `auth` (17), `pin` (14), `password` (4), `maintenance` (2 — faqat 1 kundan eski yozuvlar, lock band bo'lsa o'tkazish)
 - **SMS orqali parol tiklash** — PHASE 14d da yozildi (`ESKIZ_EMAIL` / `ESKIZ_PASSWORD` bo'lsa yoqiladi)
-- **Qolgan:** eskirgan `rate_limits` / `sessions` / `password_reset_codes` yozuvlarini davriy tozalash
+- **Davriy tozalash** (`shared/maintenance.ts`):
+  - server ishga tushganda darhol, keyin har soatda
+  - 1 kundan oldin eskirgan yoki bekor qilingan sessiyalar, parol tiklash kodlari va rate limit oynalari o'chiriladi (eng uzun oyna 1 soat)
+  - bir nechta API nusxasida bir vaqtda bittasi bajaradi (`pg_try_advisory_xact_lock`)
 
 ## PHASE 5 — Platforma: kompaniya, filial, rol, admin ✅
 
@@ -561,8 +564,7 @@ Vosita tayyor va sinovdan o'tgan; **haqiqiy ma'lumot hali ko'chirilmagan** — p
 ## Keyingi qadam
 
 1. **PHASE 16 (Frontend'ni API'ga o'tkazish)** — yuqoridagi "E'tibor" ro'yxati bo'yicha sahifama-sahifa; avval auth (`use-auth.ts`), keyin katalog va ombor
-2. **PHASE 4 qoldig'i:** eskirgan `rate_limits` / `sessions` / `password_reset_codes` ni davriy tozalash
-3. **Production (foydalanuvchi kaliti kerak):**
+2. **Production (foydalanuvchi kaliti kerak):**
    - Convex tuzatishini (`main` `3f958f1`) deploy qilish
    - `npx convex export` → `db:import-convex --dry-run` → hisobotni ko'rib chiqish → import
-4. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_*` qo'shib `db:seed`
+3. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_*` qo'shib `db:seed`
