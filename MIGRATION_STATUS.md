@@ -7,7 +7,7 @@
 |---|---|
 | Branch | `feat/postgres-migration` |
 | Oxirgi yangilanish | 2026-09-11 |
-| Umumiy holat | 11 / 16 PHASE tugallandi, PHASE 4 jarayonda, keyingi — PHASE 13 |
+| Umumiy holat | 12 / 16 PHASE tugallandi, PHASE 4 jarayonda, keyingi — PHASE 14 |
 | Ishlab turgan ilova | Hali to'liq Convex'da — frontend yangi API'ga ulanmagan |
 
 **Holat belgilari:** ✅ tugallandi · 🟡 jarayonda · ⬜ boshlanmagan
@@ -32,7 +32,7 @@
 | 10 | Savdo va POS | ✅ tugallandi |
 | 11 | CRM | ✅ tugallandi |
 | 12 | Ishlab chiqarish | ✅ tugallandi |
-| 13 | HR | ⬜ boshlanmagan |
+| 13 | HR | ✅ tugallandi |
 | 14 | Dashboard, hisobot, AI, bildirishnoma, fayl | ⬜ boshlanmagan |
 | 15 | Ma'lumotni Convex'dan ko'chirish | ⬜ boshlanmagan |
 | 16 | Frontend'ni API'ga o'tkazish, deploy, Convex'ni o'chirish | ⬜ boshlanmagan |
@@ -91,6 +91,12 @@ Ko'chirish paytida topilgan. Yangi API'da hammasi yopilgan.
 | `manufacturing/boms.ts` `addBOMItem`, `deleteBOM` | Mahsulot o'z retseptiga tarkib; retseptlar sikli; buyurtmalari bor retsept o'chiriladi |
 | `manufacturing/orders.ts` `completeOrder` | Xomashyo tannarxi AVCO emas, yaratilgandagi xarid narxi; zaxira yetmasa jimgina 0 ga; boshqa buyurtma materiali qabul qilinadi; konversiyasiz; ishlab chiqarilgan miqdor 0 bo'lishi mumkin |
 | `manufacturing/orders.ts` `addTimeLine`, `createWorkCenter` | Yakunlangan buyurtmaga vaqt qo'shilib tannarx o'zgaradi; ish markazi kodi takrorlanadi |
+| `hr/employees.ts` `listEmployees`, `getEmployee` | Pasport, INN, bank hisobi ruxsatsiz hamma a'zolarga qaytariladi |
+| `hr/salary.ts` `updateSalaryPayment` | `hr.manage` bilan holatni "approved"/"paid" qilish — tasdiqlash ruxsati chetlab o'tiladi; tasdiqlangan/to'langan maosh tahrirlanadi |
+| `hr/salary.ts` `approveSalaryPayment`, `markSalaryPaid` | Tayyorlagan o'zi tasdiqlaydi; holat tekshirilmaydi; to'lov kassaga va jurnalga yozilmaydi |
+| `hr/salary.ts` `generateMonthlySalary` | Davomati yo'q xodimga to'liq oy (butun oy kelmagan bo'lsa ham); soatlik/kunlik stavka e'tiborsiz; parallel dublikat |
+| `hr/salary.ts` `updateLeaveStatus`, `createLeave` | `approvedBy` mijozdan; rad etilgan tasdiqlanadi; ta'tillar ustma-ust; kunlar tekshirilmaydi |
+| `hr/employees.ts` `createEmployee`, `updateEmployee`, `deleteEmployee`; `createDepartment` | Boshqa kompaniya bo'lim/lavozim/rahbari; o'ziga rahbar; tarixi bor xodim o'chiriladi; kod takrorlanadi |
 
 ## Foydalanuvchi boshqaruvi ierarxiyasi (yangi API)
 
@@ -249,14 +255,30 @@ O'qish — `manufacturing.view`, yozish — `manufacturing.manage`, tasdiqlash �
 | POST | `/orders`, `/orders/:orderId/confirm` (approve), `/start`, `/cancel`, `/complete` | `createOrder`, `confirmOrder`, `startOrder`, `cancelOrder`, `completeOrder` |
 | POST / DELETE | `/orders/:orderId/time-lines`, `/orders/:orderId/time-lines/:timeLineId` | `addTimeLine` |
 
+### HR (`/api/hr`)
+
+O'qish — `hr.view` (pasport, INN, bank hisobi — faqat `hr.manage`).
+
+| Metod | Yo'l | Kim | Convex |
+|---|---|---|---|
+| GET / POST / PATCH / DELETE | `/departments`, `/positions` (`?departmentId=`) | `hr.view` / `hr.manage` | `*Department`, `*Position` |
+| GET / POST / PATCH / DELETE | `/employees` (`?departmentId=&status=&search=`), `/employees/stats`, `/employees/:employeeId` | `hr.view` / `hr.manage` | `listEmployees`, `getStats`, `getEmployee`, `createEmployee`, `updateEmployee`, `deleteEmployee` |
+| GET | `/attendance` (`?employeeId=&month=&date=`), `/attendance/stats?month=` | `hr.view` | `listAttendance`, `getMonthlyStats` |
+| PUT | `/attendance`, `/attendance/bulk` | `hr.attendance` | `recordAttendance`, `bulkRecordAttendance` |
+| GET / POST / DELETE | `/leaves` (`?employeeId=&status=`), `/leaves/:leaveId` | `hr.view` / `hr.manage` | `listLeaves`, `createLeave` |
+| POST | `/leaves/:leaveId/decision` | `hr.approve` | `updateLeaveStatus` |
+| GET | `/salaries` (`?month=&employeeId=&status=`), `/salaries/summary?month=` | `hr.view` | `listSalaryPayments`, `getMonthSummary` |
+| POST / PATCH / DELETE | `/salaries/generate`, `/salaries/:salaryId` (faqat qoralama) | `hr.salary` | `generateMonthlySalary`, `updateSalaryPayment` |
+| POST | `/salaries/:salaryId/approve`, `/revert`, `/pay` (kassa + jurnal) | `hr.approve` (tayyorlagan o'zi emas) | `approveSalaryPayment`, `markSalaryPaid` |
+
 ## Lokal muhit
 
-- **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432). `bumerp` — 8 ta migratsiya, ma'lumot yo'q; `bumerp_test` — testlar.
+- **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432). `bumerp` — 9 ta migratsiya, ma'lumot yo'q; `bumerp_test` — testlar.
 - **MinIO** — 9000/9001; `bum-erp` bucket va `STORAGE_*` hali yo'q.
 - **Migratsiya:** `pnpm --filter @bum/api db:migrate`
 - **Seed:** `.env` ga `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_PASSWORD` — `pnpm --filter @bum/api db:seed` (bootstrap admin + 14 global rol + 9 standart o'lchov birligi; idempotent)
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
-- **Testlar:** `pnpm --filter @bum/api test` — 186 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
+- **Testlar:** `pnpm --filter @bum/api test` — 190 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
 
 ---
 
@@ -266,7 +288,7 @@ pnpm workspace; `packages/shared`; `apps/api`; `docker-compose.yml`; `.env.examp
 
 ## PHASE 2 — PostgreSQL sxemasi ✅
 
-61 jadval, 10 domen. Pul/miqdor `numeric`; `company_id NOT NULL`; `legacy_id` (API ga chiqmaydi); DB darajasidagi CHECK/unique. Migratsiyalar: `0000` sxema; `0001` NULLS NOT DISTINCT; `0002` bootstrap admin himoyasi; `0003` bitta asosiy filial; `0004` bitta asosiy ombor; `0005` moliya yaxlitligi (buxgalteriya yozuvi balansi — kechiktirilgan trigger, bitta asosiy kassa); `0006` xarid (qabul qatori qiymati, ta'minotchi ichida noyob to'lov reference); `0007` savdo (noyob mijoz to'lovi reference).
+61 jadval, 10 domen. Pul/miqdor `numeric`; `company_id NOT NULL`; `legacy_id` (API ga chiqmaydi); DB darajasidagi CHECK/unique. Migratsiyalar: `0000` sxema; `0001` NULLS NOT DISTINCT; `0002` bootstrap admin himoyasi; `0003` bitta asosiy filial; `0004` bitta asosiy ombor; `0005` moliya yaxlitligi (buxgalteriya yozuvi balansi — kechiktirilgan trigger, bitta asosiy kassa); `0006` xarid (qabul qatori qiymati, ta'minotchi ichida noyob to'lov reference); `0007` savdo (noyob mijoz to'lovi reference); `0008` maosh (hisoblangan summa va soliq stavkasi).
 
 ## PHASE 3 — API poydevori ✅
 
@@ -326,7 +348,7 @@ DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, 
 
 - **Convex manbasi:** `convex/finance/` — `accounts.ts`, `cashAccounts.ts`, `expenses.ts`, `journalHelper.ts`; sahifa `finance`
 - **Ko'chirilgan modullar** (`modules/finance/`):
-  - `accounts.service.ts` — hisoblar rejasi (15 ta standart hisob, `subtype` bo'yicha topiladi), kompaniya yaratilganda avtomatik seed (+ "Asosiy kassa", "Asosiy bank hisobi"), hisob yaratish/tahrirlash (ota hisob shu turda, siklsiz; balansli hisobni faolsizlantirib bo'lmaydi), aylanma-saldo va foyda-zarar — jurnal qatorlaridan
+  - `accounts.service.ts` — hisoblar rejasi (16 ta standart hisob — PHASE 13 da "2200 Ish haqidan soliq majburiyati" qo'shildi, eski kompaniyalarga `POST /api/finance/setup`; `subtype` bo'yicha topiladi), kompaniya yaratilganda avtomatik seed (+ "Asosiy kassa", "Asosiy bank hisobi"), hisob yaratish/tahrirlash (ota hisob shu turda, siklsiz; balansli hisobni faolsizlantirib bo'lmaydi), aylanma-saldo va foyda-zarar — jurnal qatorlaridan
   - `journal.service.ts` — **`postJournalEntry`: jurnalga yozishning yagona yo'li** (xarid, savdo, POS ham shuni chaqiradi): debet = kredit butun tiyinlarda aniq, har qatorda faqat debet yoki kredit, hisoblar shu kompaniyaniki va faol, bir hujjatga bitta amaldagi yozuv (idempotent), hisob balanslari normal tomonda va qulflar doimiy tartibda. Bekor qilish — `voided`, balanslar qaytariladi. Qo'lda yozuv va kursorli jurnal
   - `cash.service.ts` — **`recordCashTransaction`: kassa balansini o'zgartiradigan yagona yo'l** (`FOR UPDATE`, manfiy balans yo'q, bir hujjatga takroriy yozuv yo'q); kassalar (bitta asosiy — bazada ham), boshlang'ich qoldiq (kirim + DR kassa / CR ustav kapitali), qo'lda kirim/chiqim (qarshi hisob tanlansa jurnal yozuvi), kassalar orasida o'tkazma (kassa ↔ bank bo'lsa jurnal yozuvi), kursorli tranzaksiyalar, dashboard
   - `expenses.service.ts` — xarajatlar: `pending → approved → paid` (paid yakuniy; approved → pending qaytarish), to'lov = kassa chiqimi + DR xarajat hisobi (kategoriya bo'yicha: ijara, maosh, kommunal, transport, qolgani "Boshqa xarajatlar") / CR kassa yoki bank; faqat kutilayotganini tahrirlash, to'langanini o'chirib bo'lmaydi; statistika
@@ -392,9 +414,19 @@ DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, 
 - **Testlar:** `manufacturing` (3 — retsept sikli va ish markazlari, to'liq tannarx zanjiri, xomashyo yetmasligi va ruxsatlar)
 - **Eslatma:** xomashyo va tayyor mahsulot bitta "Tovar zaxirasi" hisobida — ular orasida jurnal yozuvi yo'q; mehnat tannarxi "Ish haqi xarajatlari" dan zaxiraga o'tkaziladi (maosh PHASE 13 da shu hisobga yoziladi)
 
-## PHASE 13 — HR ⬜
+## PHASE 13 — HR ✅
 
-`convex/hr/` (employees, attendance, salary); sahifa `hr`
+- **Convex manbasi:** `convex/hr/` — `employees.ts`, `attendance.ts`, `salary.ts` (ta'tillar ham shu yerda); sahifa `hr`
+- **Ko'chirilgan modullar** (`modules/hr/`):
+  - `org.service.ts` — bo'limlar (kod noyob, ota bo'lim sikli yo'q, boshliq — shu kompaniya xodimi) va lavozimlar (maosh oralig'i bazada CHECK); xodimi, lavozimi yoki ichki bo'limi bor bo'lim / xodimi bor lavozim faqat faolsizlantiriladi
+  - `employees.service.ts` — xodimlar (`EMP-0001`; bo'lim, lavozim (bo'limga mos), rahbar (siklsiz), foydalanuvchi (bittaga bitta) tekshiriladi; maxfiy maydonlar faqat `hr.manage` ga; tarixi bor xodim faqat ishdan bo'shatiladi)
+  - `attendance.service.ts` — davomat upsert (xodim+sana noyob), ommaviy yozish (bitta begona xodim — butun so'rov rad), vaqt formati va ketma-ketligi, ishdan bo'shatilgan va qabul qilinishidan oldingi sanalar taqiqlangan, oylik statistika
+  - `leaves.service.ts` — ta'tillar (kunlar sanalar oralig'idan, ustma-ust tushmaydi), qaror `pending → approved | rejected` bir marta, tasdiqlovchi — sessiyadagi foydalanuvchining xodim yozuvi
+  - `salary.service.ts` — maosh hisobi butun sonlarda (oylik/kunlik/soatlik; kelgan, kechikkan, bayram — 1 kun, yarim kun — 0,5, ta'til — 1, haq to'lanmaydigan tasdiqlangan ta'til — 0; ortiqcha ish × 1,5; davomat yuritilmagan oyda to'liq norma), tahrir faqat qoralamada, **vazifalar ajratimi**: tayyorlash `hr.salary`, tasdiqlash/to'lash `hr.approve`, tayyorlagan o'zi tasdiqlay olmaydi (kompaniya egasidan tashqari). To'lov: kassa/bank chiqimi + jurnal DR ish haqi xarajatlari / CR kassa + CR ish haqidan soliq majburiyati
+  - Audit: `DEPARTMENT_*`, `POSITION_*`, `EMPLOYEE_CREATED/UPDATED/TERMINATED/DELETED` (maosh va shaxsiy maydonlar qiymatsiz), `ATTENDANCE_RECORDED`, `ATTENDANCE_BULK_RECORDED`, `LEAVE_CREATED/APPROVED/REJECTED/DELETED`, `SALARY_GENERATED/UPDATED/APPROVED/REVERTED/DELETED/PAID`
+- **Convex'dan ataylab farqlar:** yuqoridagi "Convex'da hali ochiq" jadvalidagi HR qatorlari yopilgan. Diqqat — xatti-harakat o'zgarishi: davomat yuritiladigan oyda davomati yo'q xodimga maosh hisoblanmaydi (Convex to'liq oy yozardi)
+- **Testlar:** `hr` (2 — bog'liqliklar va maxfiylik, davomat va ta'tillar), `salary` (2 — to'liq hisob-tasdiq-to'lov zanjiri, davomatsiz kompaniya va haq to'lanmaydigan ta'til)
+- **Eslatma:** ta'til tugagach xodim holati avtomatik "active" ga qaytmaydi (Convex'da ham) — HR qo'lda o'zgartiradi; soliq to'lovi (2200 dan budjetga) moliya jurnalida qo'lda
 
 ## PHASE 14 — Dashboard, hisobot, AI, bildirishnoma, fayl ⬜
 
@@ -417,11 +449,12 @@ Poydevor: `legacy_id` ustunlari; login Convex Auth parol xeshlarini qabul qiladi
   - `sales/create-order-dialog.tsx`: `taxRate` yubormaslik, `qty` → `quantity`; `order-detail-drawer.tsx`: qaytarish tugmasi (`/return`), to'lovda `reference`
   - `crm/leads-pipeline.tsx`: `company` → `companyName`, "yutildi"da `convertToCustomer`, "yo'qotildi"da sabab; `activities-section.tsx`: `date` → `activityDate`, `listRecent` → `GET /api/crm/activities`; `distribution-section.tsx`: `date` → `visitDate`, tashrif holati ketma-ketligi
   - `manufacturing/*`: miqdor va narxlar satr; `completeOrder` da `actualMaterials` faqat shu buyurtma materiallari; yakunlash xatosida (zaxira yetmasa) xabarni ko'rsatish
+  - `hr/*`: `date` → `attendanceDate`; maosh holatini PATCH bilan emas, `/approve` va `/pay` bilan; tayyorlagan foydalanuvchiga "Tasdiqlash" tugmasini yashirish; xodim ro'yxatida maxfiy maydonlar faqat `hr.manage` bo'lsa
 
 ---
 
 ## Keyingi qadam
 
-1. **PHASE 13 (HR)** — bo'limlar, lavozimlar, xodimlar, davomat, ta'tillar, maosh (tayyorlash va tasdiqlash ajratilgan, to'lov — kassa + jurnal)
+1. **PHASE 14 (Dashboard, hisobot, bildirishnoma, fayl)** — umumiy dashboard va tahlil hisobotlari, bildirishnomalar, fayl saqlash (MinIO: mahsulot rasmi, xarajat cheki); takliflar va SMS (Eskiz) — kalit bo'lsa
 2. **Production:** Convex tuzatishini (`main` `3f958f1`) production kaliti bilan deploy qilish
 3. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_*` qo'shib `db:seed`

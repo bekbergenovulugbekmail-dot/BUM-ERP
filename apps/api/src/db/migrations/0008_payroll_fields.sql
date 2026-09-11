@@ -1,0 +1,2 @@
+ALTER TABLE "salary_payments" ADD COLUMN "gross_salary" numeric(18, 2) DEFAULT '0' NOT NULL;--> statement-breakpoint
+ALTER TABLE "salary_payments" ADD COLUMN "tax_rate" numeric(5, 2) DEFAULT '12' NOT NULL;

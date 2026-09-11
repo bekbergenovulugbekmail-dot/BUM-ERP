@@ -21,7 +21,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { companies, users } from "./platform.js";
-import { legacyId, money, pk, qty, timestamps } from "./_shared.js";
+import { legacyId, money, percent, pk, qty, timestamps } from "./_shared.js";
 
 export const employeeStatus = pgEnum("employee_status", [
   "active",
@@ -237,6 +237,10 @@ export const salaryPayments = pgTable(
     overtimePay: money("overtime_pay").notNull().default("0"),
     bonus: money("bonus").notNull().default("0"),
     deductions: money("deductions").notNull().default("0"),
+    /** Hisoblangan (ishlangan + ortiqcha ish + mukofot) — soliq shundan. */
+    grossSalary: money("gross_salary").notNull().default("0"),
+    /** Tayyorlashda tanlangan stavka — tahrirda qayta hisoblash uchun (Convex 12% ni qattiq yozgan edi). */
+    taxRate: percent("tax_rate").notNull().default("12"),
     tax: money("tax").notNull().default("0"),
     netSalary: money("net_salary").notNull().default("0"),
 
