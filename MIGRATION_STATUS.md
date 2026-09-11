@@ -33,7 +33,7 @@
 | 11 | CRM | ✅ tugallandi |
 | 12 | Ishlab chiqarish | ✅ tugallandi |
 | 13 | HR | ✅ tugallandi |
-| 14 | Dashboard, hisobot, AI, bildirishnoma, fayl | 🟡 jarayonda (dashboard, hisobotlar, bildirishnomalar, AI tayyor) |
+| 14 | Dashboard, hisobot, AI, bildirishnoma, fayl | 🟡 jarayonda (dashboard, hisobotlar, bildirishnomalar, AI, fayllar tayyor; SMS qoldi) |
 | 15 | Ma'lumotni Convex'dan ko'chirish | ⬜ boshlanmagan |
 | 16 | Frontend'ni API'ga o'tkazish, deploy, Convex'ni o'chirish | ⬜ boshlanmagan |
 
@@ -304,14 +304,25 @@ Kompaniyaning faol a'zosi; yuborish — `company.manage`.
 | GET | `/status` (`{ enabled }`) | sessiya | — |
 | POST | `/assistant` (`question`, `context`, `history` ≤ 20) — soatiga 20 ta; kalit yo'q — 503; AI xizmati xatosi — 502 | `analytics.view` | `analytics.ai.askAssistant` |
 
+### Fayllar (`/api/files`)
+
+`kind`: `product-image` (jpeg/png/webp ≤ 5 MB; `products.edit` / `products.view`), `expense-receipt` (+ pdf ≤ 10 MB; `finance.manage` / `finance.view`), `employee-photo` (≤ 5 MB; `hr.manage` / `hr.view`). Saqlash sozlanmagan bo'lsa — 503.
+
+| Metod | Yo'l | Nima qiladi |
+|---|---|---|
+| POST | `/uploads` (`kind`, `contentType`, `size`) | Kalit va imzolangan PUT URL (10 daqiqa) — brauzer faylni to'g'ridan-to'g'ri MinIO'ga yuklaydi |
+| POST | `/attach` (`kind`, `key`, `targetId`) | Fayl yuklangani, hajmi va turi tekshirilib yozuvga biriktiriladi; eski fayl o'chiriladi |
+| POST | `/detach` (`kind`, `targetId`) | Ajratish va faylni o'chirish |
+| GET | `/url` (`?kind=&targetId=`) | Ko'rish uchun imzolangan GET URL (5 daqiqa) |
+
 ## Lokal muhit
 
 - **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432). `bumerp` — 10 ta migratsiya, ma'lumot yo'q; `bumerp_test` — testlar.
-- **MinIO** — 9000/9001; `bum-erp` bucket va `STORAGE_*` hali yo'q.
+- **MinIO** — 9000/9001; `bum-erp` bucket yaratilgan (2026-09-11). Fayl endpointlari ishlashi uchun `.env` ga `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY` (qiymatlar `.env.example` da — lokal MinIO)
 - **Migratsiya:** `pnpm --filter @bum/api db:migrate`
 - **Seed:** `.env` ga `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_PASSWORD` — `pnpm --filter @bum/api db:seed` (bootstrap admin + 14 global rol + 9 standart o'lchov birligi; idempotent)
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
-- **Testlar:** `pnpm --filter @bum/api test` — 194 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
+- **Testlar:** `pnpm --filter @bum/api test` — 197 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
 
 ---
 
@@ -472,8 +483,12 @@ DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, 
 - **14b ✅ AI yordamchi:**
   - `modules/ai/assistant.service.ts` — tizim promptiga faqat shu kompaniyaning ko'rsatkichlari (sotuv, yalpi/sof foyda, xarajatlar, kassa va bank, qarzlar, ombor, xodimlar), Anthropic Messages API to'g'ridan-to'g'ri (`fetch`, SDK'siz), model `ANTHROPIC_MODEL` (standart `claude-sonnet-5`), foydalanuvchiga soatiga 20 ta, savol ≤ 2000, tarix ≤ 20 xabar; foydalanuvchi konteksti promptda "ko'rsatma emas, ma'lumot" deb belgilanadi
   - **Testlar:** `ai` (1 — tenant izolyatsiyasi promptda, ruxsat, validatsiya, cheklov, 502/503; tashqi API chaqirilmaydi — mijoz almashtiriladi)
+- **14c ✅ Fayl saqlash (MinIO / S3):**
+  - `shared/storage.ts` — AWS Signature V4 imzolangan URL'lar `node:crypto` bilan (SDK'siz): brauzer faylni saqlashga to'g'ridan-to'g'ri yuklaydi, API orqali o'tmaydi; saqlash ochiq emas — ko'rish ham imzolangan URL (5 daqiqa). Imzo AWS hujjatidagi rasmiy namuna bilan testda, haqiqiy lokal MinIO bilan qo'lda tekshirildi (to'g'ri yuklash 200; boshqa content-type va buzilgan imzo 403; HEAD, GET, DELETE)
+  - `modules/files/` — mahsulot rasmi (`image_key`), xarajat cheki (`attachment_key`), xodim surati (`photo_key`): yuklash → biriktirish (kalit shu kompaniya va turga tegishli, fayl haqiqatan yuklangan, hajm va MIME tur saqlashdagi haqiqiy qiymat bo'yicha) → almashtirishda eski fayl o'chadi; har amal auditda (`FILE_ATTACHED`, `FILE_DETACHED`)
+  - Convex'dagi `imageUrl` (foydalanuvchi kiritgan tashqi URL — saqlangan XSS va kuzatuv yo'li) o'rniga faqat o'z saqlashimizdagi kalit
+  - **Testlar:** `files` (3 — SigV4 rasmiy namuna, to'liq oqim va barcha rad etishlar, PDF chek va 503)
 - **Qolgan:**
-  - **14c** fayl saqlash (MinIO): mahsulot rasmi (`image_key`), xarajat cheki (`attachment_key`)
   - **14d** SMS (Eskiz): parol tiklash, takliflar — kalit bo'lsa
 
 ## PHASE 15 — Ma'lumotni Convex'dan ko'chirish ⬜
@@ -497,11 +512,12 @@ Poydevor: `legacy_id` ustunlari; login Convex Auth parol xeshlarini qabul qiladi
   - `dashboard/page.tsx`: `todayRevenue` → `todayReceipts`, `weeklyRevenue[].day` yo'q (sanadan frontendda); `analytics.view` bo'lmasa bosh sahifada moliyaviy kartochkalarni yashirish
   - `hooks/use-notifications.ts`: `/api/notifications` ga; havolalar tilsiz (`/warehouse`) — frontend `/uz` qo'shadi; `triggerSmartAlerts` → `POST /refresh` (javobda `throttled`)
   - `analytics/ai-assistant-section.tsx`: `POST /api/ai/assistant`; `GET /api/ai/status` bo'yicha bo'limni yashirish; 429/502/503 xabarlarini ko'rsatish
+  - Rasm/chek yuklash: `POST /api/files/uploads` → `PUT uploadUrl` (aynan `headers` bilan) → `POST /api/files/attach`; ko'rsatish `GET /api/files/url` (5 daqiqada eskiradi — sahifa ochilganda olinadi); `product-form-dialog.tsx` dagi `imageUrl` maydoni shu oqim bilan almashtiriladi
 
 ---
 
 ## Keyingi qadam
 
-1. **PHASE 14c–d** — fayl saqlash (MinIO: mahsulot rasmi, xarajat cheki, xodim surati), SMS (Eskiz) parol tiklash va takliflar
+1. **PHASE 14d** — SMS (Eskiz): parol tiklash va takliflar (kalit bo'lmasa o'chiq)
 2. **Production:** Convex tuzatishini (`main` `3f958f1`) production kaliti bilan deploy qilish
 3. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_*` qo'shib `db:seed`

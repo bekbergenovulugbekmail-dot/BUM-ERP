@@ -41,6 +41,10 @@ const schema = z.object({
   STORAGE_BUCKET: z.string().optional(),
   STORAGE_ACCESS_KEY: z.string().optional(),
   STORAGE_SECRET_KEY: z.string().optional(),
+  /** MinIO uchun ahamiyatsiz, lekin imzoga kiradi. */
+  STORAGE_REGION: z.string().min(1).default("us-east-1"),
+  /** Brauzer ko'radigan manzil (masalan https://files.example.uz); bo'lmasa STORAGE_ENDPOINT. */
+  STORAGE_PUBLIC_ENDPOINT: z.string().url().optional(),
 
   /**
    * Bootstrap (ildiz) platforma admini — `db:seed` shu qiymatlardan yaratadi

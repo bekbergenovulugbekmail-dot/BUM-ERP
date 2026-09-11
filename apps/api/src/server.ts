@@ -18,6 +18,7 @@ import { authRoutes } from "./modules/auth/routes.js";
 import { catalogRoutes } from "./modules/catalog/routes.js";
 import { companyRoutes } from "./modules/company/routes.js";
 import { crmRoutes } from "./modules/crm/routes.js";
+import { fileRoutes } from "./modules/files/routes.js";
 import { financeRoutes } from "./modules/finance/routes.js";
 import { hrRoutes } from "./modules/hr/routes.js";
 import { inventoryRoutes } from "./modules/inventory/routes.js";
@@ -91,6 +92,7 @@ export async function buildServer() {
   await app.register(analyticsRoutes, { prefix: "/api/analytics" });
   await app.register(notificationRoutes, { prefix: "/api/notifications" });
   await app.register(aiRoutes, { prefix: "/api/ai" });
+  await app.register(fileRoutes, { prefix: "/api/files" });
 
   return app;
 }
