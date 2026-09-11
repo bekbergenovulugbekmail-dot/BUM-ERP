@@ -4,7 +4,7 @@
  * Telefon raqam + parol formasi. Autentifikatsiya API sessiyasi orqali (httpOnly cookie) —
  * tashqi provayder sahifasiga yo'naltirish yo'q, hammasi shu sahifada.
  *
- * Platform Admin uchun admin.bum-erp.uz alohida.
+ * Platform Admin paneli — `/:lng/admin` (admin.bum-erp.uz subdomeni ham ishlaydi, agar ulangan bo'lsa).
  */
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -12,6 +12,7 @@ import { useAuth } from "@/hooks/use-auth.ts";
 import { errorMessage } from "@/lib/api.ts";
 import { toast } from "sonner";
 import { PasswordResetForm } from "./_components/password-reset-form.tsx";
+import { PasswordToggle } from "@/components/password-toggle.tsx";
 import { motion } from "motion/react";
 import {
   Phone, Lock, ArrowRight, Shield, Building2,
@@ -29,6 +30,7 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"login" | "reset">("login");
+  const [showPassword, setShowPassword] = useState(false);
 
   // If already authenticated, redirect to dashboard
   useEffect(() => {
@@ -180,13 +182,14 @@ export default function LoginPage() {
                 <input
                   id="password"
                   name="password"
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); setError(null); }}
                   placeholder="••••••••"
-                  className="w-full h-11 rounded-xl bg-white/5 border border-white/10 pl-9 pr-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 transition-all"
+                  className="w-full h-11 rounded-xl bg-white/5 border border-white/10 pl-9 pr-10 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 transition-all"
                 />
+                <PasswordToggle shown={showPassword} onToggle={() => setShowPassword((s) => !s)} />
               </div>
             </div>
 
@@ -248,12 +251,12 @@ export default function LoginPage() {
                   <span className="text-white/50">Platform Admin?</span>
                   {" "}
                   <a
-                    href="https://admin.bum-erp.uz"
+                    href={`/${lng ?? "uz"}/admin`}
                     className="text-primary/60 hover:text-primary underline"
                   >
-                    admin.bum-erp.uz
+                    Admin panel
                   </a>
-                  {" "}dan kiring
+                  {" "}orqali kiring
                 </span>
               </div>
             </div>

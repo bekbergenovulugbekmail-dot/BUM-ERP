@@ -12,6 +12,7 @@ import { useState } from "react";
 import { useAuth, useCurrentUser } from "@/hooks/use-auth.ts";
 import { AuthLoading, Authenticated, Unauthenticated } from "@/components/auth-gates.tsx";
 import { errorMessage } from "@/lib/api.ts";
+import { PasswordToggle } from "@/components/password-toggle.tsx";
 import { motion } from "motion/react";
 import { Shield, Layers, Lock, LogOut, AlertTriangle, Loader2, Phone } from "lucide-react";
 
@@ -52,6 +53,7 @@ function AdminSignInScreen() {
   const { signInWithPassword } = useAuth();
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -122,13 +124,14 @@ function AdminSignInScreen() {
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/25" />
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); setError(null); }}
                 placeholder="Parol"
-                className="w-full h-11 rounded-xl bg-white/5 border border-white/10 pl-9 pr-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 transition-all"
+                className="w-full h-11 rounded-xl bg-white/5 border border-white/10 pl-9 pr-10 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 transition-all"
               />
+              <PasswordToggle shown={showPassword} onToggle={() => setShowPassword((s) => !s)} />
             </div>
 
             {error && (

@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, ArrowLeft, KeyRound, Loader2, Lock, MessageSquare, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
+import { PasswordToggle } from "@/components/password-toggle.tsx";
 
 const RESEND_SECONDS = 60;
 
@@ -31,6 +32,7 @@ export function PasswordResetForm({ initialPhone, onDone, onCancel }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
+  const [showPasswords, setShowPasswords] = useState(false);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -157,15 +159,16 @@ export function PasswordResetForm({ initialPhone, onDone, onCancel }: Props) {
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/25" />
               <input
                 id="reset-password"
-                type="password"
+                type={showPasswords ? "text" : "password"}
                 autoComplete="new-password"
                 value={newPassword}
                 onChange={(e) => {
                   setNewPassword(e.target.value);
                   setError(null);
                 }}
-                className={inputClass}
+                className={`${inputClass} pr-10`}
               />
+              <PasswordToggle shown={showPasswords} onToggle={() => setShowPasswords((s) => !s)} />
             </div>
           </div>
 
@@ -177,15 +180,16 @@ export function PasswordResetForm({ initialPhone, onDone, onCancel }: Props) {
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/25" />
               <input
                 id="reset-password-repeat"
-                type="password"
+                type={showPasswords ? "text" : "password"}
                 autoComplete="new-password"
                 value={repeatPassword}
                 onChange={(e) => {
                   setRepeatPassword(e.target.value);
                   setError(null);
                 }}
-                className={inputClass}
+                className={`${inputClass} pr-10`}
               />
+              <PasswordToggle shown={showPasswords} onToggle={() => setShowPasswords((s) => !s)} />
             </div>
           </div>
 
