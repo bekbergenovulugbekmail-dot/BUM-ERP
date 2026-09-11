@@ -626,7 +626,11 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - Markaziy bank (cbu.uz) kurslari yoqib-o'chiriladi: yoqilganda bank kursi yonma-yon ko'rinadi ("Qo'llash"), manbasi "Markaziy bank" valyuta kursi har kuni birinchi o'qishda yangilanadi, "Hozir yangilash" tugmasi; bank ishlamasa eski kurs qoladi
   - `company_currencies`, kurs tarixi `exchange_rates`; `GET /api/finance/currencies` (har bir a'zo), `GET /currencies/cbu` (503 — bank javob bermasa), `PUT /currencies` va `POST /currencies/refresh` (`settings.manage`); olib tashlangan valyuta nofaol bo'ladi
   - env: `CBU_RATES_URL` (standart cbu.uz JSON)
-- **Navbatda — ko'p valyuta davomi:** mahsulot xarid/sotuv narxi valyutada; xarid qatorlari valyutada (yetkazuvchi qarzi o'z valyutasida, tannarx va buxgalteriya so'mda qabul sanasidagi kurs bilan, kurs farqi); POS/sotuvda valyuta tanlash, bitta valyutada — kurs bilan hisoblash, bir nechtasida — chekda har valyuta bo'yicha jami
+- **Ko'p valyuta — 2-qism: mahsulot narxi valyutada** (commit `8408b36` — 1-qism; migratsiya 0015):
+  - mahsulotda xarid va sotuv narxi valyutasi (`purchase_currency`, `sales_currency`; null — asosiy valyuta); faqat asosiy yoki yoqilgan valyuta
+  - savdo buyurtmasi va POS'da narxi boshqa valyutada belgilangan mahsulot joriy kurs bilan asosiy valyutada sotiladi; valyuta o'chirilsa sotib bo'lmaydi
+  - mahsulot formasida narx yonida valyuta, so'mdagi taxminiy qiymat va marja; ro'yxat, tafsilot, POS kartochkasi, savdo/xarid oynasi, ombor kirimi, etiketka — kurs bilan
+- **Navbatda — ko'p valyuta davomi:** xarid qatorlari valyutada (yetkazuvchi qarzi o'z valyutasida, tannarx va buxgalteriya so'mda qabul sanasidagi kurs bilan, kurs farqi); POS/sotuvda valyuta tanlash, bitta valyutada — kurs bilan hisoblash, bir nechtasida — chekda har valyuta bo'yicha jami
 - **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2); API jami 218 (41 fayl)
 
 ---

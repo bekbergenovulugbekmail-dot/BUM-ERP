@@ -137,6 +137,8 @@ export type ProductOption = {
   barcode: string | null;
   baseUnitId: string;
   salesPrice: string;
+  /** Narx valyutasi; null — asosiy valyuta. Sotuvda joriy kurs bilan hisoblanadi. */
+  salesCurrency: string | null;
   taxRate: string;
   taxIncluded: boolean;
   isActive: boolean;

@@ -161,6 +161,9 @@ export const products = pgTable(
     retailPrice: price("retail_price"),
     promoPrice: price("promo_price"),
     promoPriceEnd: date("promo_price_end"),
+    /** Narx valyutasi; null — kompaniya asosiy valyutasi. Ulgurji, chakana va aksiya narxi sotuv valyutasida. */
+    purchaseCurrency: varchar("purchase_currency", { length: 3 }),
+    salesCurrency: varchar("sales_currency", { length: 3 }),
 
     taxRate: percent("tax_rate").notNull().default("0"),
     taxIncluded: boolean("tax_included").notNull().default(true),

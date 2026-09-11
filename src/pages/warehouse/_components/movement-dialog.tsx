@@ -21,6 +21,7 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { formatQty, toNumber, type ProductListResponse } from "@/pages/products/_lib/types.ts";
 import { localIsoDate, occurredAtFor, round4 } from "../_lib/dates.ts";
 import { useProductUnits } from "../_lib/use-product-units.ts";
+import { useCurrencies } from "@/hooks/use-currencies.ts";
 
 type MovementKind = "receive" | "issue" | "adjust" | "writeoff";
 
@@ -79,6 +80,10 @@ type Props = {
 
 export default function MovementDialog({ type, warehouseId, onClose }: Props) {
   const info = MOVEMENT_INFO[type];
+  const currencies = useCurrencies();
+  // Kirim narxi boshqa valyutada bo'lsa — joriy kurs bilan asosiy valyutada (tannarx so'mda)
+  const baseCost = (product: { purchasePrice: string; purchaseCurrency: string | null }) =>
+    currencies.toBase(toNumber(product.purchasePrice), product.purchaseCurrency) || 0;
   // Tanlash ro'yxati: faol mahsulotlar, API chegarasi 200 ta
   const products = useApiQuery<ProductListResponse>("/api/catalog/products", { isActive: true, limit: 200 }).data
     ?.products;
@@ -110,7 +115,7 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
     const product = products?.find((p) => p.id === productId);
     if (product) {
       form.setValue("unitId", product.baseUnitId);
-      form.setValue("costPrice", toNumber(product.purchasePrice));
+      form.setValue("costPrice", round4(baseCost(product)));
     }
   };
 
@@ -119,7 +124,7 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
     form.setValue("unitId", unitId);
     const option = unitOptions.find((u) => u.id === unitId);
     if (selectedProduct && option) {
-      form.setValue("costPrice", round4(toNumber(selectedProduct.purchasePrice) * Number(option.factor)));
+      form.setValue("costPrice", round4(baseCost(selectedProduct) * Number(option.factor)));
     }
   };
 

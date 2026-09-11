@@ -7,7 +7,8 @@ import { cn } from "@/lib/utils.ts";
 import { errorMessage } from "@/lib/api.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { ProductImage } from "../_lib/product-image.tsx";
-import { formatQty, formatSom, toNumber, type CostingMethod, type ProductDetail } from "../_lib/types.ts";
+import { formatQty, type CostingMethod, type ProductDetail } from "../_lib/types.ts";
+import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 
 type Props = {
   productId: string;
@@ -36,12 +37,16 @@ export default function ProductDetailDrawer({ productId, canEdit, onClose, onEdi
   const query = useApiQuery<{ product: ProductDetail }>(`/api/catalog/products/${productId}`);
   const product = query.data?.product;
 
+  const currencies = useCurrencies();
+
+  // Marja asosiy valyutada (narxlar turli valyutada bo'lishi mumkin)
   const margin = (() => {
     if (!product) return "0";
-    const sales = toNumber(product.salesPrice);
-    const purchase = toNumber(product.purchasePrice);
-    return sales > 0 ? (((sales - purchase) / sales) * 100).toFixed(1) : "0.0";
+    const sales = currencies.toBase(product.salesPrice, product.salesCurrency);
+    const purchase = currencies.toBase(product.purchasePrice, product.purchaseCurrency);
+    return sales > 0 && Number.isFinite(purchase) ? (((sales - purchase) / sales) * 100).toFixed(1) : "0.0";
   })();
+  const salesMoney = (value: string) => formatMoney(value, product?.salesCurrency ?? currencies.base);
 
   // Ma'lumot olingan vaqtga nisbatan (render toza bo'lishi uchun Date.now() emas)
   const daysUntilExpiry = (date: string) =>
@@ -143,11 +148,17 @@ export default function ProductDetailDrawer({ productId, canEdit, onClose, onEdi
                 {/* Pricing */}
                 <div className="px-5 py-3">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Narxlar</p>
-                  <InfoRow label="Xarid narxi" value={formatSom(product.purchasePrice)} />
-                  <InfoRow label="Sotuv narxi" value={<span className="font-bold text-primary">{formatSom(product.salesPrice)}</span>} />
-                  {product.wholesalePrice !== null && <InfoRow label="Ulgurji narx" value={formatSom(product.wholesalePrice)} />}
-                  {product.retailPrice !== null && <InfoRow label="Chakana narx" value={formatSom(product.retailPrice)} />}
-                  {product.promoPrice !== null && <InfoRow label="Aksiya narxi" value={<span className="text-destructive">{formatSom(product.promoPrice)}</span>} />}
+                  <InfoRow label="Xarid narxi" value={formatMoney(product.purchasePrice, product.purchaseCurrency ?? currencies.base)} />
+                  <InfoRow label="Sotuv narxi" value={<span className="font-bold text-primary">{salesMoney(product.salesPrice)}</span>} />
+                  {product.salesCurrency && product.salesCurrency !== currencies.base && (
+                    <InfoRow
+                      label="Kassada (joriy kurs)"
+                      value={formatMoney(currencies.toBase(product.salesPrice, product.salesCurrency) || 0, currencies.base)}
+                    />
+                  )}
+                  {product.wholesalePrice !== null && <InfoRow label="Ulgurji narx" value={salesMoney(product.wholesalePrice)} />}
+                  {product.retailPrice !== null && <InfoRow label="Chakana narx" value={salesMoney(product.retailPrice)} />}
+                  {product.promoPrice !== null && <InfoRow label="Aksiya narxi" value={<span className="text-destructive">{salesMoney(product.promoPrice)}</span>} />}
                   <InfoRow label="Marja" value={<span className="text-green-600 font-bold">{margin}%</span>} />
                   <InfoRow label="Soliq" value={`${formatQty(product.taxRate)}% ${product.taxIncluded ? "(narxga kiritilgan)" : ""}`} />
                 </div>
@@ -194,7 +205,7 @@ export default function ProductDetailDrawer({ productId, canEdit, onClose, onEdi
                                 </div>
                               )}
                               <div className="text-[11px] text-muted-foreground mt-0.5">
-                                Narx: {formatSom(b.costPrice)}
+                                Tannarx: {formatMoney(b.costPrice, currencies.base)}
                               </div>
                             </div>
                           );

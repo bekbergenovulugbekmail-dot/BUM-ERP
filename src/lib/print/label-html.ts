@@ -25,19 +25,25 @@ const money = (n: number) => `${new Intl.NumberFormat("uz-UZ", { maximumFraction
 /** Etiketkadagi kod: shtrix-kod, bo'lmasa SKU. */
 export const labelCode = (product: LabelProduct) => product.barcode?.trim() || product.sku;
 
-export function toLabelProduct(product: {
-  id: string;
-  name: string;
-  sku: string;
-  barcode?: string | null;
-  salesPrice: string | number;
-}): LabelProduct {
+export function toLabelProduct(
+  product: {
+    id: string;
+    name: string;
+    sku: string;
+    barcode?: string | null;
+    salesPrice: string | number;
+    salesCurrency?: string | null;
+  },
+  /** Narxi boshqa valyutada bo'lsa — etiketkada asosiy valyutada (kassadagi narx). */
+  toBase?: (amount: string | number, currency: string | null | undefined) => number,
+): LabelProduct {
+  const price = toBase ? toBase(product.salesPrice, product.salesCurrency) : Number(product.salesPrice);
   return {
     id: product.id,
     name: product.name,
     sku: product.sku,
     barcode: product.barcode ?? null,
-    salesPrice: Number(product.salesPrice) || 0,
+    salesPrice: Number.isFinite(price) ? price : 0,
   };
 }
 

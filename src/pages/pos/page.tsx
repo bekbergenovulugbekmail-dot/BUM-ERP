@@ -16,6 +16,7 @@ import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
+import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import ShiftOpenDialog from "./_components/shift-open-dialog.tsx";
 import ShiftCloseDialog from "./_components/shift-close-dialog.tsx";
 import POSReceipt from "./_components/pos-receipt.tsx";
@@ -72,6 +73,7 @@ const minBigInt = (...values: bigint[]) => values.reduce((a, b) => (b < a ? b : 
 
 export default function POSPage() {
   const currentUser = useCurrentUser();
+  const currencies = useCurrencies();
   const warehouses = useApiQuery<{ warehouses: WarehouseOption[] }>("/api/inventory/warehouses").data?.warehouses;
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string | null>(null);
   const defaultWh = warehouses?.find((w) => w.isDefault) ?? warehouses?.[0];
@@ -181,9 +183,16 @@ export default function POSPage() {
   const debtAmount = Math.max(0, due - paid);
   const onCredit = debtAmount >= 0.01;
 
+  // Narxi boshqa valyutada belgilangan mahsulot — joriy kurs bilan (server ham shunday hisoblaydi)
+  const basePriceOf = (p: ProductOption) => currencies.toBase(p.salesPrice, p.salesCurrency);
+
   const addToCart = (p: ProductOption) => {
     const stock = stockOf(p.id);
     if (stock <= 0) { toast.error("Omborda mavjud emas"); return; }
+    if (!Number.isFinite(basePriceOf(p))) {
+      toast.error(`${p.salesCurrency} valyutasi yoqilmagan — Sozlamalar → Valyutalar`);
+      return;
+    }
     setCart((prev) => {
       const idx = prev.findIndex((i) => i.productId === p.id);
       if (idx >= 0) {
@@ -199,7 +208,7 @@ export default function POSPage() {
         name: p.name,
         sku: p.sku,
         qty: 1,
-        unitPrice: p.salesPrice,
+        unitPrice: String(basePriceOf(p)),
         taxRate: p.taxRate,
         taxIncluded: p.taxIncluded,
         stock,
@@ -455,7 +464,10 @@ export default function POSPage() {
                     <Package className="h-5 w-5 text-muted-foreground mb-2" />
                     <p className="text-xs font-medium leading-tight line-clamp-2">{p.name}</p>
                     <p className="text-[11px] text-muted-foreground font-mono mt-0.5">{p.sku}</p>
-                    <p className="text-sm font-bold mt-1 text-primary">{fmt(num(p.salesPrice))} so'm</p>
+                    <p className="text-sm font-bold mt-1 text-primary">{fmt(basePriceOf(p) || 0)} so'm</p>
+                    {p.salesCurrency && p.salesCurrency !== currencies.base && (
+                      <p className="text-[10px] text-muted-foreground">{formatMoney(p.salesPrice, p.salesCurrency)}</p>
+                    )}
                     {stockMap && <p className="text-[11px] text-muted-foreground">Qoldi: {fmt(stock)}</p>}
                   </motion.button>
                 );

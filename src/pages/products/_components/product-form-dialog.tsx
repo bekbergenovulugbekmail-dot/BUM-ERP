@@ -26,6 +26,20 @@ import {
   removeProductImage, uploadProductImage, useProductImageUrl, validateProductImage,
 } from "../_lib/product-files.ts";
 import type { Brand, Category, ProductDetail, Unit } from "../_lib/types.ts";
+import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
+
+function CurrencySelect({ value, codes, onChange }: { value: string; codes: string[]; onChange: (code: string) => void }) {
+  // Nofaol qilingan valyutada saqlangan narx ham ko'rinib tursin
+  const options = codes.includes(value) ? codes : [...codes, value];
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="w-24 shrink-0" aria-label="Valyuta"><SelectValue /></SelectTrigger>
+      <SelectContent position="popper">
+        {options.map((code) => <SelectItem key={code} value={code}>{code}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  );
+}
 
 const schema = z.object({
   name: z.string().min(1, "Nomi kiritilishi shart"),
@@ -41,6 +55,9 @@ const schema = z.object({
   salesUnitId: z.string().optional(),
   purchasePrice: z.number().min(0),
   salesPrice: z.number().min(0),
+  /** "" — asosiy valyuta. */
+  purchaseCurrency: z.string(),
+  salesCurrency: z.string(),
   wholesalePrice: z.number().optional(),
   retailPrice: z.number().optional(),
   promoPrice: z.number().optional(),
@@ -68,7 +85,7 @@ type Props = {
 const EMPTY_VALUES: FormValues = {
   name: "", sku: "", barcode: "", description: "",
   manufacturer: "", baseUnitId: "",
-  purchasePrice: 0, salesPrice: 0,
+  purchasePrice: 0, salesPrice: 0, purchaseCurrency: "", salesCurrency: "",
   taxRate: 12, taxIncluded: false,
   minStock: 0,
   trackBatch: false, trackExpiry: false,
@@ -95,6 +112,8 @@ function toPayload(values: FormValues) {
     salesUnitId: idOrNull(values.salesUnitId),
     purchasePrice: values.purchasePrice,
     salesPrice: values.salesPrice,
+    purchaseCurrency: values.purchaseCurrency || null,
+    salesCurrency: values.salesCurrency || null,
     wholesalePrice: numOrNull(values.wholesalePrice),
     retailPrice: numOrNull(values.retailPrice),
     promoPrice: numOrNull(values.promoPrice),
@@ -117,6 +136,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
   const categories = useApiQuery<{ categories: Category[] }>(open ? "/api/catalog/categories" : null).data?.categories;
   const brands = useApiQuery<{ brands: Brand[] }>(open ? "/api/catalog/brands" : null, { isActive: true }).data?.brands;
   const units = useApiQuery<{ units: Unit[] }>(open ? "/api/catalog/units" : null).data?.units;
+  const currencies = useCurrencies();
   const existingProduct = useApiQuery<{ product: ProductDetail }>(
     open && editId ? `/api/catalog/products/${editId}` : null,
   ).data?.product;
@@ -165,6 +185,8 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
         salesUnitId: existingProduct.salesUnitId ?? "",
         purchasePrice: Number(existingProduct.purchasePrice),
         salesPrice: Number(existingProduct.salesPrice),
+        purchaseCurrency: existingProduct.purchaseCurrency ?? "",
+        salesCurrency: existingProduct.salesCurrency ?? "",
         wholesalePrice: optionalNumber(existingProduct.wholesalePrice),
         retailPrice: optionalNumber(existingProduct.retailPrice),
         promoPrice: optionalNumber(existingProduct.promoPrice),
@@ -237,8 +259,17 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
 
   const sp = useWatch({ control: form.control, name: "salesPrice" });
   const pp = useWatch({ control: form.control, name: "purchasePrice" });
+  const salesCurrency = useWatch({ control: form.control, name: "salesCurrency" }) || currencies.base;
+  const purchaseCurrency = useWatch({ control: form.control, name: "purchaseCurrency" }) || currencies.base;
   const trackExpiry = useWatch({ control: form.control, name: "trackExpiry" });
-  const margin = pp > 0 && sp > 0 ? (((sp - pp) / sp) * 100).toFixed(1) : "0.0";
+  // Marja asosiy valyutada — xarid va sotuv narxi turli valyutada bo'lishi mumkin
+  const spBase = currencies.toBase(sp, salesCurrency);
+  const ppBase = currencies.toBase(pp, purchaseCurrency);
+  const margin =
+    ppBase > 0 && spBase > 0 && Number.isFinite(spBase + ppBase) ? (((spBase - ppBase) / spBase) * 100).toFixed(1) : "0.0";
+  const showCurrency = (code: string) => currencies.codes.length > 1 || code !== currencies.base;
+  const setCurrency = (name: "purchaseCurrency" | "salesCurrency", code: string) =>
+    form.setValue(name, code === currencies.base ? "" : code, { shouldDirty: true });
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -371,16 +402,46 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                 <div className="grid grid-cols-2 gap-4">
                   <FormField control={form.control} name="purchasePrice" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Xarid narxi (so'm) *</FormLabel>
-                      <FormControl><Input type="number" min="0" step="any" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} /></FormControl>
+                      <FormLabel>Xarid narxi ({purchaseCurrency}) *</FormLabel>
+                      <div className="flex gap-2">
+                        <FormControl>
+                          <Input className="flex-1" type="number" min="0" step="any" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} />
+                        </FormControl>
+                        {showCurrency(purchaseCurrency) && (
+                          <CurrencySelect
+                            value={purchaseCurrency}
+                            codes={currencies.codes}
+                            onChange={(code) => setCurrency("purchaseCurrency", code)}
+                          />
+                        )}
+                      </div>
+                      {purchaseCurrency !== currencies.base && pp > 0 && Number.isFinite(ppBase) && (
+                        <p className="text-[11px] text-muted-foreground">≈ {formatMoney(ppBase, currencies.base)} (joriy kurs)</p>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )} />
 
                   <FormField control={form.control} name="salesPrice" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Sotuv narxi (so'm) *</FormLabel>
-                      <FormControl><Input type="number" min="0" step="any" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} /></FormControl>
+                      <FormLabel>Sotuv narxi ({salesCurrency}) *</FormLabel>
+                      <div className="flex gap-2">
+                        <FormControl>
+                          <Input className="flex-1" type="number" min="0" step="any" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} />
+                        </FormControl>
+                        {showCurrency(salesCurrency) && (
+                          <CurrencySelect
+                            value={salesCurrency}
+                            codes={currencies.codes}
+                            onChange={(code) => setCurrency("salesCurrency", code)}
+                          />
+                        )}
+                      </div>
+                      {salesCurrency !== currencies.base && sp > 0 && Number.isFinite(spBase) && (
+                        <p className="text-[11px] text-muted-foreground">
+                          ≈ {formatMoney(spBase, currencies.base)} — kassada joriy kurs bilan sotiladi
+                        </p>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )} />

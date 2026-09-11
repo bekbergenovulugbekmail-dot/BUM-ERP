@@ -16,6 +16,7 @@ import { useApiQuery } from "@/lib/query.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import { useActiveCompany } from "@/hooks/use-company.ts";
 import { usePrintSettings } from "@/hooks/use-print-settings.ts";
+import { useCurrencies } from "@/hooks/use-currencies.ts";
 import { printHtml } from "@/lib/print/receipt-html.ts";
 import { buildLabelsHtml, labelCode, toLabelProduct, type LabelItem } from "@/lib/print/label-html.ts";
 import type { ProductListItem } from "@/pages/products/_lib/types.ts";
@@ -29,6 +30,7 @@ type Props = {
 
 export default function LabelPrintDialog({ initialItems, onClose }: Props) {
   const { labels } = usePrintSettings();
+  const { toBase } = useCurrencies();
   const companyName = useActiveCompany().data?.company.name;
   const [templateId, setTemplateId] = useState<string | null>(null);
   const template =
@@ -63,7 +65,7 @@ export default function LabelPrintDialog({ initialItems, onClose }: Props) {
     setItems((prev) =>
       prev.some((item) => item.product.id === product.id)
         ? prev.map((item) => (item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item))
-        : [...prev, { product: toLabelProduct(product), quantity: 1 }],
+        : [...prev, { product: toLabelProduct(product, toBase), quantity: 1 }],
     );
     setSearch("");
   };

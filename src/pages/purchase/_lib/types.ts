@@ -89,6 +89,8 @@ export type ProductOption = {
   sku: string;
   baseUnitId: string;
   purchasePrice: string;
+  /** Narx valyutasi; null — asosiy valyuta. */
+  purchaseCurrency: string | null;
   taxRate: string;
   isActive: boolean;
   isPurchaseable: boolean;

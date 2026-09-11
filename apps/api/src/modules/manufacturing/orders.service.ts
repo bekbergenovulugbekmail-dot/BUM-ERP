@@ -30,6 +30,7 @@ import { nextDocumentNumber } from "../../shared/numbering.js";
 import { unitFactorToBase } from "../catalog/conversions.js";
 import type { TenantContext } from "../company/tenant.js";
 import { todayIso } from "../finance/cash.service.js";
+import { currencyRate } from "../finance/currencies.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { moveStock } from "../inventory/stock.service.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
@@ -52,14 +53,25 @@ async function lockOrder(tx: Tx, tenant: TenantContext, orderId: string) {
   return order;
 }
 
-/** Omborda qoldiq bo'lsa — o'rtacha tannarx, bo'lmasa xarid narxi (reja uchun taxmin). */
-async function estimatedBaseCost(tx: Tx, companyId: string, warehouseId: string, product: { id: string; purchasePrice: string }) {
+/**
+ * Omborda qoldiq bo'lsa — o'rtacha tannarx, bo'lmasa xarid narxi (reja uchun taxmin).
+ * Xarid narxi boshqa valyutada bo'lsa — joriy kurs bilan asosiy valyutada.
+ */
+async function estimatedBaseCost(
+  tx: Tx,
+  companyId: string,
+  warehouseId: string,
+  product: { id: string; purchasePrice: string; purchaseCurrency?: string | null },
+) {
   const [level] = await tx
     .select({ quantity: stockLevels.quantity, avgCostPrice: stockLevels.avgCostPrice })
     .from(stockLevels)
     .where(and(eq(stockLevels.companyId, companyId), eq(stockLevels.productId, product.id), eq(stockLevels.warehouseId, warehouseId)))
     .limit(1);
-  return level && toMinor(level.quantity, 4) > 0n ? level.avgCostPrice : product.purchasePrice;
+  if (level && toMinor(level.quantity, 4) > 0n) return level.avgCostPrice;
+  if (!product.purchaseCurrency) return product.purchasePrice;
+  const rate = await currencyRate(tx, companyId, product.purchaseCurrency);
+  return fromMinor(rescale(toMinor(product.purchasePrice, 4) * toMinor(rate, 4), 8, 4), 4);
 }
 
 // ─── O'qish ──────────────────────────────────────────────────────────────────
@@ -172,7 +184,13 @@ export async function createOrder(
   const items = await tx.select().from(bomItems).where(eq(bomItems.bomId, bom.id));
   if (items.length === 0) throw badRequest("Retseptda tarkib yo'q");
   const productRows = await tx
-    .select({ id: products.id, name: products.name, baseUnitId: products.baseUnitId, purchasePrice: products.purchasePrice })
+    .select({
+      id: products.id,
+      name: products.name,
+      baseUnitId: products.baseUnitId,
+      purchasePrice: products.purchasePrice,
+      purchaseCurrency: products.purchaseCurrency,
+    })
     .from(products)
     .where(inArray(products.id, items.map((i) => i.productId)));
   const productById = new Map(productRows.map((p) => [p.id, p]));

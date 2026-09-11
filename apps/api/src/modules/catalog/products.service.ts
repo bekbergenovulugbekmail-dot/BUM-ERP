@@ -25,6 +25,8 @@ import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import { priceSchema, qtySchema } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
+import { companyCurrency } from "../finance/accounts.service.js";
+import { currencyRate } from "../finance/currencies.service.js";
 import { assertUnitsActive, listUnits } from "./units.service.js";
 import {
   assertCategoryInScope,
@@ -200,6 +202,9 @@ export type ProductInput = {
   retailPrice?: string | null;
   promoPrice?: string | null;
   promoPriceEnd?: string | null;
+  /** null yoki asosiy valyuta — asosiy valyuta (null saqlanadi); boshqasi kompaniyada yoqilgan bo'lishi kerak. */
+  purchaseCurrency?: string | null;
+  salesCurrency?: string | null;
   taxRate?: string;
   taxIncluded?: boolean;
   minStock?: string;
@@ -259,6 +264,24 @@ async function assertReferences(tx: Tx, tenant: TenantContext, input: Partial<Pr
   await assertUnitsActive(tx, [input.baseUnitId, input.purchaseUnitId, input.salesUnitId]);
 }
 
+/** Narx valyutasi: asosiy valyuta — null; boshqasi kompaniyada yoqilgan bo'lishi kerak. */
+async function normalizeCurrency(tx: Tx, companyId: string, code: string | null | undefined) {
+  if (code === undefined || code === null) return code;
+  if (code === (await companyCurrency(tx, companyId))) return null;
+  await currencyRate(tx, companyId, code);
+  return code;
+}
+
+async function normalizeCurrencies<T extends Partial<ProductInput>>(tx: Tx, companyId: string, input: T): Promise<T> {
+  const purchaseCurrency = await normalizeCurrency(tx, companyId, input.purchaseCurrency);
+  const salesCurrency = await normalizeCurrency(tx, companyId, input.salesCurrency);
+  return {
+    ...input,
+    ...(purchaseCurrency !== undefined ? { purchaseCurrency } : {}),
+    ...(salesCurrency !== undefined ? { salesCurrency } : {}),
+  };
+}
+
 async function loadProductForUpdate(tx: Tx, tenant: TenantContext, productId: string) {
   const [product] = await tx
     .select({
@@ -277,9 +300,10 @@ async function loadProductForUpdate(tx: Tx, tenant: TenantContext, productId: st
   return product;
 }
 
-export async function createProduct(tx: Tx, tenant: TenantContext, input: ProductInput, meta: RequestMeta) {
-  assertCostingMethod(input.costingMethod);
-  await assertReferences(tx, tenant, input);
+export async function createProduct(tx: Tx, tenant: TenantContext, rawInput: ProductInput, meta: RequestMeta) {
+  assertCostingMethod(rawInput.costingMethod);
+  await assertReferences(tx, tenant, rawInput);
+  const input = await normalizeCurrencies(tx, tenant.company.id, rawInput);
   // Cheklangan xodim mahsulotni faqat o'z kategoriyasida yaratadi (kategoriyasiz — yo'q)
   assertCategoryInScope(await categoryScope(tx, tenant), input.categoryId);
 
@@ -314,7 +338,7 @@ export async function updateProduct(
   await assertReferences(tx, tenant, patch);
   if (patch.categoryId !== undefined) assertCategoryInScope(await categoryScope(tx, tenant), patch.categoryId);
 
-  const { costingMethod: _costing, ...fields } = patch;
+  const { costingMethod: _costing, ...fields } = await normalizeCurrencies(tx, tenant.company.id, patch);
   const [updated] = await tx
     .update(products)
     .set({ ...fields, updatedAt: new Date() })

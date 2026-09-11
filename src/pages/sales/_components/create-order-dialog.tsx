@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
+import { useCurrencies } from "@/hooks/use-currencies.ts";
 import { computeLine, minorToNumber } from "../_lib/line-amounts.ts";
 import {
   num, todayLocal,
@@ -47,6 +48,7 @@ const emptyLine = (): LineItem => ({
 
 export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const { can } = usePermissions();
+  const currencies = useCurrencies();
   // Narx va chegirmani o'zgartirish — faqat sales.edit (aks holda server rad etadi)
   const canOverride = can("sales.edit");
   const customers = useApiQuery<{ customers: Customer[] }>("/api/sales/customers").data?.customers;
@@ -82,7 +84,8 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
       if (patch.productId !== undefined) {
         const prod = products?.find((p) => p.id === patch.productId);
         if (prod) {
-          const price = num(prod.salesPrice);
+          // Narxi boshqa valyutada — joriy kurs bilan asosiy valyutada (server ham shunday)
+          const price = currencies.toBase(prod.salesPrice, prod.salesCurrency) || 0;
           line.unitId = prod.baseUnitId;
           line.unitPrice = price;
           line.listPrice = price;

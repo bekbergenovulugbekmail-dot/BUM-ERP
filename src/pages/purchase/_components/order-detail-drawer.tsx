@@ -8,6 +8,7 @@ import {
 import LabelPrintDialog from "@/components/label-print-dialog.tsx";
 import { toLabelProduct, type LabelItem } from "@/lib/print/label-html.ts";
 import type { ProductListItem } from "@/pages/products/_lib/types.ts";
+import { useCurrencies } from "@/hooks/use-currencies.ts";
 import { generatePurchaseOrderPDF } from "@/lib/pdf/purchase-order-pdf.ts";
 import { Button } from "@/components/ui/button.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
@@ -51,6 +52,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const orderQuery = useApiQuery<{ order: PurchaseOrderDetail }>(`/api/purchase/orders/${orderId}`);
   const order = orderQuery.data?.order;
   const company = useActiveCompany().data?.company;
+  const currencies = useCurrencies();
 
   const confirmOrder = useApiMutation(() => api.post(`/api/purchase/orders/${orderId}/confirm`));
   const cancelOrder = useApiMutation(() => api.post(`/api/purchase/orders/${orderId}/cancel`));
@@ -94,7 +96,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
       );
       setLabelItems(
         products.map(({ product }) => ({
-          product: toLabelProduct(product),
+          product: toLabelProduct(product, currencies.toBase),
           quantity: Math.max(1, Math.ceil(quantities.get(product.id) ?? 1)),
         })),
       );

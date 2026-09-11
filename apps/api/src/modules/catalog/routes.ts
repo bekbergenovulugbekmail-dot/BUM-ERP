@@ -108,6 +108,8 @@ const brandBody = z.strictObject({
 });
 const brandPatch = brandBody.partial().extend({ isActive: z.boolean().optional() });
 
+const currencyCode = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Valyuta kodi 3 harf (ISO 4217)");
+
 // Standart qiymatlar sxemada EMAS — PATCH da berilmagan maydon tiklanib ketmasligi uchun
 const productBody = z.strictObject({
   name: z.string().trim().min(1).max(300),
@@ -128,6 +130,9 @@ const productBody = z.strictObject({
   retailPrice: priceSchema.nullable().optional(),
   promoPrice: priceSchema.nullable().optional(),
   promoPriceEnd: z.iso.date().nullable().optional(),
+  /** Narx valyutasi; null — asosiy valyuta. */
+  purchaseCurrency: currencyCode.nullable().optional(),
+  salesCurrency: currencyCode.nullable().optional(),
   taxRate: percentSchema.optional(),
   taxIncluded: z.boolean().optional(),
   minStock: qtySchema.optional(),

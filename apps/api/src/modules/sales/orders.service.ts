@@ -39,6 +39,7 @@ import { nextDocumentNumber } from "../../shared/numbering.js";
 import { unitFactorToBase } from "../catalog/conversions.js";
 import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
+import { currencyRate } from "../finance/currencies.service.js";
 import {
   ledgerAccountFor,
   recordCashTransaction,
@@ -105,6 +106,7 @@ export async function prepareSalesItems(tx: Tx, tenant: TenantContext, items: Sa
       name: products.name,
       baseUnitId: products.baseUnitId,
       salesPrice: products.salesPrice,
+      salesCurrency: products.salesCurrency,
       taxRate: products.taxRate,
       taxIncluded: products.taxIncluded,
       isActive: products.isActive,
@@ -114,6 +116,14 @@ export async function prepareSalesItems(tx: Tx, tenant: TenantContext, items: Sa
     .where(and(eq(products.companyId, companyId), inArray(products.id, [...new Set(items.map((i) => i.productId))])));
   const byId = new Map(rows.map((p) => [p.id, p]));
   const canOverride = (await effectivePermissions(tx, tenant)).includes("sales.edit");
+
+  // Narxi boshqa valyutada belgilangan mahsulot — joriy kurs bilan asosiy valyutada sotiladi
+  const rates = new Map<string, string>();
+  const basePrice = async (salesPrice: string, currency: string | null) => {
+    if (!currency) return salesPrice;
+    if (!rates.has(currency)) rates.set(currency, await currencyRate(tx, companyId, currency));
+    return fromMinor(rescale(toMinor(salesPrice, 4) * toMinor(rates.get(currency)!, 4), 8, 4), 4);
+  };
 
   let subtotal = 0n;
   let taxAmount = 0n;
@@ -136,7 +146,8 @@ export async function prepareSalesItems(tx: Tx, tenant: TenantContext, items: Sa
 
     const unitId = item.unitId ?? product.baseUnitId;
     const factor = await unitFactorToBase(tx, companyId, product, unitId);
-    const listPrice = fromMinor(rescale(toMinor(product.salesPrice, 4) * toMinor(factor, 4), 8, 4), 4);
+    const unitBasePrice = await basePrice(product.salesPrice, product.salesCurrency);
+    const listPrice = fromMinor(rescale(toMinor(unitBasePrice, 4) * toMinor(factor, 4), 8, 4), 4);
     const unitPrice = item.unitPrice ?? listPrice;
     const discountPercent = item.discountPercent ?? customerDiscount;
     const changed =

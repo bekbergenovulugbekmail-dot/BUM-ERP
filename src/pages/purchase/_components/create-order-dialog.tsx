@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
+import { useCurrencies } from "@/hooks/use-currencies.ts";
 import {
   num, todayLocal,
   type ProductOption, type Supplier, type WarehouseOption,
@@ -50,6 +51,7 @@ function mergeById<T extends { id: string }>(list: T[] | undefined, extra: T[]):
 
 export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const { can } = usePermissions();
+  const currencies = useCurrencies();
   const currency = useActiveCompany().data?.company.currency ?? "UZS";
   const suppliers = useApiQuery<{ suppliers: Supplier[] }>("/api/purchase/suppliers").data?.suppliers;
   const warehouses = useApiQuery<{ warehouses: WarehouseOption[] }>("/api/inventory/warehouses").data?.warehouses;
@@ -96,7 +98,8 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
         const prod = productOptions.find((p) => p.id === value);
         if (prod) {
           line.unitId = prod.baseUnitId;
-          line.unitPrice = num(prod.purchasePrice);
+          // Narxi boshqa valyutada — joriy kurs bilan asosiy valyutada
+          line.unitPrice = currencies.toBase(prod.purchasePrice, prod.purchaseCurrency) || 0;
           line.taxRate = num(prod.taxRate);
         }
       }

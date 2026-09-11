@@ -30,11 +30,12 @@ import ProductFormDialog from "./_components/product-form-dialog.tsx";
 import ProductDetailDrawer from "./_components/product-detail-drawer.tsx";
 import { ProductImage } from "./_lib/product-image.tsx";
 import {
-  formatQty, formatSom,
+  formatQty,
   type Category, type ImportResult, type ProductListItem, type ProductListResponse,
 } from "./_lib/types.ts";
 import LabelPrintDialog from "@/components/label-print-dialog.tsx";
 import { toLabelProduct, type LabelItem } from "@/lib/print/label-html.ts";
+import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import BarcodeScanner from "@/components/barcode-scanner.tsx";
 
 type ViewMode = "table" | "grid";
@@ -69,6 +70,7 @@ function downloadBlob(blob: Blob, filename: string) {
 export default function ProductsPage() {
   const { t } = useTranslation("common");
   const { can } = usePermissions();
+  const currencies = useCurrencies();
   const [search, setSearch] = useState("");
   const [debouncedSearch] = useDebounce(search, 300);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -211,7 +213,8 @@ export default function ProductsPage() {
 
   const openCreate = () => { setEditId(null); setFormOpen(true); };
   const openEdit = (id: string) => { setEditId(id); setFormOpen(true); };
-  const openLabels = (p: ProductListItem) => setLabelItems([{ product: toLabelProduct(p), quantity: 1 }]);
+  const openLabels = (p: ProductListItem) =>
+    setLabelItems([{ product: toLabelProduct(p, currencies.toBase), quantity: 1 }]);
 
   return (
     <div className="flex flex-col h-full">
@@ -472,6 +475,7 @@ type ListProps = {
 };
 
 function ProductTable({ products, perms, onView, onEdit, onDelete, onLabel }: ListProps) {
+  const { base } = useCurrencies();
   return (
     <div className="border border-border rounded-lg overflow-hidden">
       <table className="w-full text-sm">
@@ -537,10 +541,10 @@ function ProductTable({ products, perms, onView, onEdit, onDelete, onLabel }: Li
                 )}
               </td>
               <td className="px-4 py-3 text-right">
-                <span className="text-xs font-medium">{formatSom(p.purchasePrice)}</span>
+                <span className="text-xs font-medium">{formatMoney(p.purchasePrice, p.purchaseCurrency ?? base)}</span>
               </td>
               <td className="px-4 py-3 text-right">
-                <span className="text-sm font-bold text-primary">{formatSom(p.salesPrice)}</span>
+                <span className="text-sm font-bold text-primary">{formatMoney(p.salesPrice, p.salesCurrency ?? base)}</span>
               </td>
               <td className="px-4 py-3 text-center hidden lg:table-cell">
                 <span className="text-xs">{formatQty(p.minStock)} {p.baseUnitName}</span>
@@ -568,6 +572,7 @@ function ProductTable({ products, perms, onView, onEdit, onDelete, onLabel }: Li
 }
 
 function ProductGrid({ products, perms, onView, onEdit, onDelete, onLabel }: ListProps) {
+  const { base } = useCurrencies();
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
       {products.map((p, i) => (
@@ -595,7 +600,7 @@ function ProductGrid({ products, perms, onView, onEdit, onDelete, onLabel }: Lis
               {p.categoryName && (
                 <p className="text-[10px] text-muted-foreground mb-2">{p.categoryName}</p>
               )}
-              <p className="text-sm font-bold text-primary">{formatSom(p.salesPrice)}</p>
+              <p className="text-sm font-bold text-primary">{formatMoney(p.salesPrice, p.salesCurrency ?? base)}</p>
               <div className="flex items-center justify-between mt-2" onClick={(e) => e.stopPropagation()}>
                 <span className={cn(
                   "text-[10px] px-1.5 py-0.5 rounded-full font-medium",

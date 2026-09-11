@@ -50,6 +50,9 @@ export type Product = {
   retailPrice: string | null;
   promoPrice: string | null;
   promoPriceEnd: string | null;
+  /** Narx valyutasi; null — kompaniya asosiy valyutasi. */
+  purchaseCurrency: string | null;
+  salesCurrency: string | null;
   taxRate: string;
   taxIncluded: boolean;
   minStock: string;
