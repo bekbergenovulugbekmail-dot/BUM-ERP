@@ -43,7 +43,7 @@ import {
   shipOrder,
   updateOrder,
 } from "./orders.service.js";
-import { listCustomerPayments, recordCustomerPayment } from "./payments.service.js";
+import { listCustomerPayments, recordSalesPayment } from "./payments.service.js";
 import {
   cashbackSettingsSchema,
   getCashbackSettings,
@@ -113,6 +113,8 @@ const orderBody = z.strictObject({
   deliveryDate: isoDate.nullable().optional(),
   notes: nullableText(2000),
   items: z.array(salesItem).min(1).max(500),
+  /** Sotuv valyutalari: mahsulot o'z narx valyutasida, tanlanmagan bo'lsa birinchi valyutada. */
+  saleCurrencies: z.array(currencyCode).min(1).max(6).optional(),
 });
 const ordersQuery = z.object({
   status: z.enum(["draft", "confirmed", "shipped", "delivered", "returned", "cancelled"]).optional(),
@@ -139,9 +141,11 @@ const returnBody = z
 const paymentBody = z.strictObject({
   customerId: z.uuid().nullable().optional(),
   orderId: z.uuid().nullable().optional(),
+  /** `currency` berilsa — shu valyutada. */
   amount: positiveMoney,
+  currency: currencyCode.optional(),
   paymentDate: isoDate.optional(),
-  method: paymentMethod.default("cash"),
+  method: z.enum(["cash", "bank", "card", "transfer", "balance", "cashback"]).default("cash"),
   cashAccountId: z.uuid().nullable().optional(),
   reference: nullableText(100),
   notes: nullableText(2000),
@@ -362,7 +366,7 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   app.post("/payments", async (req, reply) => {
     const body = paymentBody.parse(req.body);
     const result = await writeInTenant(req, "finance.manage", (tx, tenant) =>
-      recordCustomerPayment(tx, tenant, body, requestMeta(req)),
+      recordSalesPayment(tx, tenant, body, requestMeta(req)),
     );
     reply.status(result.created ? 201 : 200);
     return result;

@@ -13,7 +13,8 @@ import { Textarea } from "@/components/ui/textarea.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
-import { useCurrencies } from "@/hooks/use-currencies.ts";
+import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
+import { cn } from "@/lib/utils.ts";
 import { computeLine, minorToNumber } from "../_lib/line-amounts.ts";
 import {
   num, todayLocal,
@@ -31,6 +32,8 @@ type LineItem = {
   discountPercent: number | null;
   taxRate: string;
   taxIncluded: boolean;
+  /** Mahsulot narx valyutasi; null — asosiy. Sotuv valyutalari tanlansa qator valyutasini belgilaydi. */
+  salesCurrency: string | null;
 };
 
 type Props = {
@@ -44,7 +47,15 @@ const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
 const emptyLine = (): LineItem => ({
   productId: "", unitId: "", quantity: 1, unitPrice: 0, listPrice: 0, discountPercent: null, taxRate: "0", taxIncluded: true,
+  salesCurrency: null,
 });
+
+/** Asosiy summa (tiyin) → valyutada (tiyin): server `mulDivRound` bilan bir xil yaxlitlash. */
+const toCurrencyMinor = (baseMinor: bigint, rate: number) => {
+  if (!Number.isFinite(rate) || rate <= 0) return 0n;
+  const rateMinor = BigInt(Math.round(rate * 10_000));
+  return (baseMinor * 10_000n * 2n + rateMinor) / (2n * rateMinor);
+};
 
 export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const { can } = usePermissions();
@@ -65,6 +76,8 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineItem[]>([emptyLine()]);
   const [loading, setLoading] = useState(false);
+  /** Sotuv valyutalari; bo'sh — asosiy valyuta. */
+  const [saleCurrencies, setSaleCurrencies] = useState<string[]>([]);
 
   if (!warehouseId && warehouses?.length) {
     const def = warehouses.find((w) => w.isDefault) ?? warehouses[0];
@@ -91,6 +104,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
           line.listPrice = price;
           line.taxRate = prod.taxRate;
           line.taxIncluded = prod.taxIncluded;
+          line.salesCurrency = prod.salesCurrency;
         }
       }
       next[i] = line;
@@ -112,6 +126,26 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const taxTotal = minorToNumber(amounts.reduce((s, a) => s + a.tax, 0n));
   const total = minorToNumber(amounts.reduce((s, a) => s + a.lineTotal, 0n));
 
+  // Sotuv valyutalari — server bilan bir xil: mahsulot o'z narx valyutasida (tanlangan bo'lsa), aks holda birinchi tanlangani
+  const selectedCurrencies = saleCurrencies.length > 0 ? saleCurrencies : [currencies.base];
+  const currencyMode = selectedCurrencies.length > 1 || selectedCurrencies[0] !== currencies.base;
+  const toggleCurrency = (code: string) => {
+    const next = selectedCurrencies.includes(code)
+      ? selectedCurrencies.filter((c) => c !== code)
+      : [...selectedCurrencies, code];
+    if (next.length > 0) setSaleCurrencies(currencies.codes.filter((c) => next.includes(c)));
+  };
+  const lineCurrency = lines.map((line, i) => {
+    const own = line.salesCurrency ?? currencies.base;
+    const code = selectedCurrencies.includes(own) ? own : selectedCurrencies[0]!;
+    const baseMinor = amounts[i]!.lineTotal;
+    return { code, total: code === currencies.base ? baseMinor : toCurrencyMinor(baseMinor, currencies.rateOf(code)) };
+  });
+  const currencyTotals = new Map<string, bigint>();
+  lineCurrency.forEach((line, i) => {
+    if (lines[i]!.productId) currencyTotals.set(line.code, (currencyTotals.get(line.code) ?? 0n) + line.total);
+  });
+
   const handleSubmit = async () => {
     if (!warehouseId) { toast.error("Ombor tanlang"); return; }
     const validLines = lines.filter((l) => l.productId && l.quantity > 0);
@@ -125,6 +159,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
         orderDate,
         deliveryDate: deliveryDate || null,
         notes: notes || null,
+        ...(currencyMode ? { saleCurrencies: selectedCurrencies } : {}),
         // Soliq stavkasi yuborilmaydi — serverda mahsulotdan
         items: validLines.map((l) => ({
           productId: l.productId,
@@ -189,6 +224,32 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
             </div>
           </div>
 
+          {currencies.codes.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-muted-foreground mr-1">Sotuv valyutalari:</span>
+              {currencies.codes.map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => toggleCurrency(code)}
+                  className={cn(
+                    "h-7 rounded-md border px-2.5 text-xs font-semibold transition-colors cursor-pointer",
+                    selectedCurrencies.includes(code)
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-muted/30 text-muted-foreground border-border hover:bg-accent",
+                  )}
+                >
+                  {code}
+                </button>
+              ))}
+              {currencyMode && (
+                <span className="text-[11px] text-muted-foreground ml-1">
+                  mahsulot o'z narx valyutasida, tanlanmagan bo'lsa — {selectedCurrencies[0]} da
+                </span>
+              )}
+            </div>
+          )}
+
           <Separator />
 
           <div>
@@ -248,7 +309,9 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                           })} />
                       </td>
                       <td className="px-3 py-2 text-right font-medium text-xs whitespace-nowrap">
-                        {fmt(minorToNumber(amounts[i]!.lineTotal))} so'm
+                        {lineCurrency[i]!.code === currencies.base
+                          ? `${fmt(minorToNumber(amounts[i]!.lineTotal))} so'm`
+                          : formatMoney(minorToNumber(lineCurrency[i]!.total), lineCurrency[i]!.code)}
                       </td>
                       <td className="px-2 py-2">
                         {lines.length > 1 && (
@@ -273,9 +336,15 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                 <span>QQS</span><span>{fmt(taxTotal)} so'm</span>
               </div>
               <Separator />
-              <div className="flex justify-between font-bold text-base">
-                <span>Jami</span>
-                <span className="text-emerald-600 dark:text-emerald-400">{fmt(total)} so'm</span>
+              {currencyMode && [...currencyTotals].map(([code, amount]) => (
+                <div key={code} className="flex justify-between font-bold text-base">
+                  <span>Jami ({code})</span>
+                  <span className="text-emerald-600 dark:text-emerald-400">{formatMoney(minorToNumber(amount), code)}</span>
+                </div>
+              ))}
+              <div className={cn("flex justify-between", currencyMode ? "text-xs text-muted-foreground" : "font-bold text-base")}>
+                <span>{currencyMode ? `≈ ${currencies.base} da` : "Jami"}</span>
+                <span className={currencyMode ? undefined : "text-emerald-600 dark:text-emerald-400"}>{fmt(total)} so'm</span>
               </div>
             </div>
           </div>

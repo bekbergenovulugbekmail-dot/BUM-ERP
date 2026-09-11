@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
+import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import {
   PAYMENT_LABELS, companyInfo, newReference, num, todayLocal,
   type PaymentMethod, type SalesOrderDetail,
@@ -59,6 +60,10 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const [showPayment, setShowPayment] = useState(false);
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
+  // To'lov valyutasi; null — asosiy. Balans va keshbek faqat asosiy valyutada
+  const [payCurrency, setPayCurrency] = useState<string | null>(null);
+  const currencies = useCurrencies();
+  const payCurrencyCode = payCurrency ?? currencies.base;
   const [payNote, setPayNote] = useState("");
   // Bitta to'lov formasi — bitta reference (ikki marta bosilsa server takrorlamaydi)
   const [payReference, setPayReference] = useState(() => newReference("CP"));
@@ -90,6 +95,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
       const result = await recordPayment.mutateAsync({
         orderId,
         amount: payAmount.trim(),
+        ...(payCurrencyCode !== currencies.base ? { currency: payCurrencyCode } : {}),
         paymentDate: todayLocal(),
         method: payMethod,
         reference: payReference,
@@ -158,6 +164,15 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
 
   const balance = order ? num(order.balance) : 0;
   const paid = order ? num(order.paidAmount) : 0;
+  // To'lov valyutasidagi qoldiq: asosiy — butun qoldiq; buyurtmadagi valyuta qismi — undan; boshqasi — joriy kurs bilan
+  const payBucket = order?.currencyTotals.find((c) => c.currency === payCurrencyCode);
+  const payRemaining =
+    payCurrencyCode === currencies.base
+      ? balance
+      : payBucket
+        ? Math.max(0, num(payBucket.totalAmount) - num(payBucket.paidAmount))
+        : balance / currencies.rateOf(payCurrencyCode);
+  const payCurrencyOptions = [...new Set([...currencies.codes, ...(order?.currencyTotals.map((c) => c.currency) ?? [])])];
 
   return (
     <AnimatePresence>
@@ -201,6 +216,11 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                     { label: "To'langan", value: fmt(paid) },
                     { label: "Qoldi", value: fmt(balance) },
                     { label: "Mahsulotlar", value: String(order.items.length) + " ta" },
+                    ...order.currencyTotals.map((c) => ({
+                      label: `Jami (${c.currency})`,
+                      value: `${formatMoney(c.totalAmount, c.currency)} · to'langan ${formatMoney(c.paidAmount, c.currency)}`,
+                    })),
+                    ...(num(order.cashbackEarned) > 0 ? [{ label: "Keshbek berildi", value: fmt(num(order.cashbackEarned)) }] : []),
                   ].map(({ label, value }) => (
                     <div key={label} className="bg-muted/40 rounded-lg px-3 py-2">
                       <p className="text-xs text-muted-foreground">{label}</p>
@@ -247,12 +267,28 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                 {showPayment && (
                   <div className="border border-border rounded-xl p-4 space-y-3 bg-muted/20">
                     <p className="text-sm font-semibold">To'lov qayd etish</p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-3 gap-3">
                       <div>
-                        <Label className="text-xs">Summa (so'm)</Label>
-                        <Input type="number" min="0" value={payAmount}
+                        <Label className="text-xs">Valyuta</Label>
+                        <Select
+                          value={payCurrencyCode}
+                          onValueChange={(v) => {
+                            setPayCurrency(v);
+                            setPayAmount("");
+                            if (v !== currencies.base && (payMethod === "balance" || payMethod === "cashback")) setPayMethod("cash");
+                          }}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {payCurrencyOptions.map((code) => <SelectItem key={code} value={code}>{code}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Summa ({payCurrencyCode})</Label>
+                        <Input type="number" min="0" step="any" value={payAmount}
                           onChange={(e) => setPayAmount(e.target.value)}
-                          placeholder={String(balance)} />
+                          placeholder={String(Math.round(payRemaining * 100) / 100)} />
                       </div>
                       <div>
                         <Label className="text-xs">Usul</Label>
@@ -263,6 +299,12 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                             <SelectItem value="card">Karta</SelectItem>
                             <SelectItem value="bank">Bank</SelectItem>
                             <SelectItem value="transfer">O'tkazma</SelectItem>
+                            {order.customerId && payCurrencyCode === currencies.base && (
+                              <>
+                                <SelectItem value="balance">Balansdan</SelectItem>
+                                <SelectItem value="cashback">Keshbekdan</SelectItem>
+                              </>
+                            )}
                           </SelectContent>
                         </Select>
                       </div>
@@ -327,7 +369,9 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                         </div>
                         <div className="text-right ml-4">
                           <p className="text-xs text-muted-foreground">{new Intl.NumberFormat("uz-UZ").format(num(item.unitPrice))} × {num(item.quantity)}</p>
-                          <p className="text-sm font-semibold">{fmt(num(item.lineTotal))}</p>
+                          <p className="text-sm font-semibold">
+                            {item.priceCurrency ? formatMoney(item.currencyTotal, item.priceCurrency) : fmt(num(item.lineTotal))}
+                          </p>
                         </div>
                       </div>
                     ))}
@@ -343,7 +387,9 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                       {order.payments.map((p) => (
                         <div key={p.id} className="flex justify-between py-1.5 text-sm border-b border-border/40 last:border-0">
                           <div>
-                            <span className="font-medium">{fmt(num(p.amount))}</span>
+                            <span className="font-medium">
+                              {p.currency !== order.currency ? `${formatMoney(p.foreignAmount, p.currency)} (${fmt(num(p.amount))})` : fmt(num(p.amount))}
+                            </span>
                             <span className="text-xs text-muted-foreground ml-2">{PAYMENT_LABELS[p.method] ?? p.method}</span>
                           </div>
                           <span className="text-xs text-muted-foreground">{p.paymentDate}</span>

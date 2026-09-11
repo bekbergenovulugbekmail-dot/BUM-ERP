@@ -15,9 +15,8 @@
  *    ombor ruxsati tekshirilmasdi; `cashierName` mijozdan kelardi, `cashierId` yozilmasdi
  *  - `getShifts` / `getOpenShift` ruxsat tekshirmasdi — `pos.use`
  */
-import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
 import { badRequest, conflict, forbidden, notFound } from "@bum/shared";
-import { products } from "../../db/schema/catalog.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import { customers, posShifts, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -33,10 +32,12 @@ import { computeCashback, earnCashback, getCashbackSettings, maxCashbackUsage, r
 import { customerSummary, depositToBalance, payFromBalance } from "./customer-balance.service.js";
 import { createCustomer, salesAudit, type CustomerInput } from "./customers.service.js";
 import {
+  assignSaleCurrencies,
   dispatchOrder,
   getOrder,
   insertSalesItems,
   prepareSalesItems,
+  type SaleBucket,
   type SalesItemInput,
   type SalesItemRow,
 } from "./orders.service.js";
@@ -247,48 +248,6 @@ export async function closeShift(
     /** Valyuta bo'yicha kutilgan, sanalgan va farq. */
     foreignCash,
   };
-}
-
-type SaleBucket = { currency: string; rate: string; total: bigint; base: bigint };
-
-/**
- * Qatorlarga chek valyutasini beradi: mahsulot narx valyutasi tanlanganlar ichida bo'lsa — o'sha, aks holda
- * birinchi tanlangan valyuta. Valyutadagi summa = asosiy summa / kurs (tiyinga yaxlitlab). Valyuta bo'yicha
- * asosiy qiymat — qatorlar yig'indisi: valyutadagi jami to'liq to'lansa aynan shu yopiladi.
- */
-async function assignSaleCurrencies(
-  tx: Tx,
-  companyId: string,
-  baseCurrency: string,
-  saleCurrencies: string[],
-  items: SalesItemRow[],
-) {
-  const rates = new Map<string, string>([[baseCurrency, "1.0000"]]);
-  for (const code of saleCurrencies) {
-    if (!rates.has(code)) rates.set(code, await currencyRate(tx, companyId, code));
-  }
-  const productRows = await tx
-    .select({ id: products.id, salesCurrency: products.salesCurrency })
-    .from(products)
-    .where(inArray(products.id, [...new Set(items.map((item) => item.productId))]));
-  const ownCurrency = new Map(productRows.map((row) => [row.id, row.salesCurrency ?? baseCurrency]));
-
-  const buckets = new Map<string, SaleBucket>();
-  for (const item of items) {
-    const own = ownCurrency.get(item.productId) ?? baseCurrency;
-    const code = saleCurrencies.includes(own) ? own : saleCurrencies[0]!;
-    const rate = rates.get(code)!;
-    const baseLine = toMinor(item.lineTotal);
-    const currencyLine = code === baseCurrency ? baseLine : mulDivRound(baseLine, 10_000n, toMinor(rate, 4));
-    item.priceCurrency = code === baseCurrency ? null : code;
-    item.priceRate = rate;
-    item.currencyTotal = fromMinor(currencyLine);
-    const bucket = buckets.get(code) ?? { currency: code, rate, total: 0n, base: 0n };
-    bucket.total += currencyLine;
-    bucket.base += baseLine;
-    buckets.set(code, bucket);
-  }
-  return buckets;
 }
 
 export async function completeSale(

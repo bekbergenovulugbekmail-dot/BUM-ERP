@@ -29,7 +29,14 @@ import { and, asc, desc, eq, getTableColumns, gte, ilike, inArray, lt, lte, ne, 
 import { badRequest, forbidden, notFound } from "@bum/shared";
 import { products, units } from "../../db/schema/catalog.js";
 import { warehouses } from "../../db/schema/inventory.js";
-import { customerPayments, customers, posShifts, salesOrderItems, salesOrders } from "../../db/schema/sales.js";
+import {
+  customerCashbackTransactions,
+  customerPayments,
+  customers,
+  posShifts,
+  salesOrderItems,
+  salesOrders,
+} from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
@@ -49,7 +56,7 @@ import {
 } from "../finance/cash.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { moveStock } from "../inventory/stock.service.js";
-import { reverseOrderCashback } from "./cashback.service.js";
+import { earnOrderCashback, reverseOrderCashback } from "./cashback.service.js";
 import { refundToBalance } from "./customer-balance.service.js";
 import { addCurrencyAmounts } from "./shift-totals.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
@@ -81,6 +88,8 @@ export type SalesOrderInput = {
   deliveryDate?: string | null;
   notes?: string | null;
   items: SalesItemInput[];
+  /** Sotuv valyutalari (POS bilan bir xil qoida); standart — asosiy valyuta. */
+  saleCurrencies?: string[];
 };
 
 export type DispatchableOrder = {
@@ -199,6 +208,111 @@ export async function insertSalesItems(tx: Tx, companyId: string, orderId: strin
   await tx.insert(salesOrderItems).values(items.map((item) => ({ ...item, companyId, orderId })));
 }
 
+export type SaleBucket = { currency: string; rate: string; total: bigint; base: bigint };
+
+/**
+ * Qatorlarga sotuv valyutasini beradi: mahsulot narx valyutasi tanlanganlar ichida bo'lsa — o'sha, aks holda
+ * birinchi tanlangan valyuta. Valyutadagi summa = asosiy summa / kurs (tiyinga yaxlitlab). Valyuta bo'yicha
+ * asosiy qiymat — qatorlar yig'indisi: valyutadagi jami to'liq to'lansa aynan shu yopiladi.
+ */
+export async function assignSaleCurrencies(
+  tx: Tx,
+  companyId: string,
+  baseCurrency: string,
+  saleCurrencies: string[],
+  items: SalesItemRow[],
+) {
+  const rates = new Map<string, string>([[baseCurrency, "1.0000"]]);
+  for (const code of saleCurrencies) {
+    if (!rates.has(code)) rates.set(code, await currencyRate(tx, companyId, code));
+  }
+  const productRows = await tx
+    .select({ id: products.id, salesCurrency: products.salesCurrency })
+    .from(products)
+    .where(inArray(products.id, [...new Set(items.map((item) => item.productId))]));
+  const ownCurrency = new Map(productRows.map((row) => [row.id, row.salesCurrency ?? baseCurrency]));
+
+  const buckets = new Map<string, SaleBucket>();
+  for (const item of items) {
+    const own = ownCurrency.get(item.productId) ?? baseCurrency;
+    const code = saleCurrencies.includes(own) ? own : saleCurrencies[0]!;
+    const rate = rates.get(code)!;
+    const baseLine = toMinor(item.lineTotal);
+    const currencyLine = code === baseCurrency ? baseLine : mulDivRound(baseLine, 10_000n, toMinor(rate, 4));
+    item.priceCurrency = code === baseCurrency ? null : code;
+    item.priceRate = rate;
+    item.currencyTotal = fromMinor(currencyLine);
+    const bucket = buckets.get(code) ?? { currency: code, rate, total: 0n, base: 0n };
+    bucket.total += currencyLine;
+    bucket.base += baseLine;
+    buckets.set(code, bucket);
+  }
+  return buckets;
+}
+
+export type OrderCurrencyBucket = SaleBucket & {
+  /** To'langani valyutada va asosiy qiymatda. */
+  paid: bigint;
+  paidBase: bigint;
+};
+
+/**
+ * Buyurtma valyuta bo'yicha: jami — qatorlardan (valyutada va asosiy qiymatda), to'langani — to'lovlardan.
+ * Asosiy valyutadagi to'lovlar (naqd, balans, keshbek) avval asosiy qismni yopadi, ortig'i chet valyuta
+ * qismlariga asosiy qiymatda o'tadi (POS bilan bir xil). Buyurtmada yo'q valyutadagi to'lov — asosiy qiymati bilan.
+ */
+export function orderCurrencyBuckets(
+  baseCurrency: string,
+  items: { priceCurrency: string | null; priceRate: string; currencyTotal: string; lineTotal: string }[],
+  payments: { currency: string; amount: string; foreignAmount: string }[],
+): OrderCurrencyBucket[] {
+  const buckets = new Map<string, OrderCurrencyBucket>();
+  for (const item of items) {
+    const code = item.priceCurrency ?? baseCurrency;
+    const bucket = buckets.get(code) ?? {
+      currency: code,
+      rate: item.priceCurrency ? item.priceRate : "1.0000",
+      total: 0n,
+      base: 0n,
+      paid: 0n,
+      paidBase: 0n,
+    };
+    bucket.total += toMinor(item.priceCurrency ? item.currencyTotal : item.lineTotal);
+    bucket.base += toMinor(item.lineTotal);
+    buckets.set(code, bucket);
+  }
+
+  let basePaid = 0n;
+  for (const payment of payments) {
+    const bucket = payment.currency === baseCurrency ? undefined : buckets.get(payment.currency);
+    if (bucket) {
+      bucket.paid += toMinor(payment.foreignAmount);
+      bucket.paidBase += toMinor(payment.amount);
+    } else {
+      basePaid += toMinor(payment.amount);
+    }
+  }
+
+  let overflow = basePaid;
+  const base = buckets.get(baseCurrency);
+  if (base) {
+    const applied = overflow < base.total ? overflow : base.total;
+    base.paid += applied;
+    base.paidBase += applied;
+    overflow -= applied;
+  }
+  for (const bucket of buckets.values()) {
+    if (bucket.currency === baseCurrency || overflow <= 0n) continue;
+    const remainingBase = bucket.base - bucket.paidBase;
+    if (remainingBase <= 0n) continue;
+    const applied = overflow < remainingBase ? overflow : remainingBase;
+    bucket.paid += applied === remainingBase ? bucket.total - bucket.paid : mulDivRound(applied, 10_000n, toMinor(bucket.rate, 4));
+    bucket.paidBase += applied;
+    overflow -= applied;
+  }
+  return [...buckets.values()];
+}
+
 async function customerDiscountFor(tx: Tx, companyId: string, customerId: string | null | undefined) {
   if (!customerId) return "0";
   const [customer] = await tx
@@ -288,28 +402,22 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
     .where(eq(customerPayments.orderId, orderId))
     .orderBy(asc(customerPayments.createdAt));
 
-  // Valyuta bo'yicha (POS sotuv valyutalari): jami — qatorlardan, to'langani — to'lovlardan
-  let currencyTotals: { currency: string; totalAmount: string; paidAmount: string }[] = [];
-  if (items.some((item) => item.priceCurrency)) {
-    const buckets = new Map<string, { total: bigint; paid: bigint }>();
-    for (const item of items) {
-      const code = item.priceCurrency ?? order.currency;
-      const bucket = buckets.get(code) ?? { total: 0n, paid: 0n };
-      bucket.total += toMinor(item.priceCurrency ? item.currencyTotal : item.lineTotal);
-      buckets.set(code, bucket);
-    }
-    for (const payment of payments) {
-      const bucket = buckets.get(payment.currency);
-      if (bucket) bucket.paid += toMinor(payment.currency === order.currency ? payment.amount : payment.foreignAmount);
-    }
-    currencyTotals = [...buckets].map(([currency, bucket]) => ({
-      currency,
-      totalAmount: fromMinor(bucket.total),
-      paidAmount: fromMinor(bucket.paid),
-    }));
-  }
+  // Valyuta bo'yicha jami va to'langan — chet valyuta qatnashgan buyurtmada
+  const hasForeign = items.some((item) => item.priceCurrency) || payments.some((payment) => payment.currency !== order.currency);
+  const currencyTotals = hasForeign
+    ? orderCurrencyBuckets(order.currency, items, payments).map((bucket) => ({
+        currency: bucket.currency,
+        totalAmount: fromMinor(bucket.total),
+        paidAmount: fromMinor(bucket.paid < bucket.total ? bucket.paid : bucket.total),
+      }))
+    : [];
 
-  return { ...order, currencyTotals, items, payments };
+  const [earned] = await conn
+    .select({ total: sql<string>`coalesce(sum(${customerCashbackTransactions.amount}), 0)::numeric(18,2)` })
+    .from(customerCashbackTransactions)
+    .where(and(eq(customerCashbackTransactions.orderId, orderId), eq(customerCashbackTransactions.type, "earn")));
+
+  return { ...order, currencyTotals, cashbackEarned: earned!.total, items, payments };
 }
 
 export async function listOrders(
@@ -405,6 +513,10 @@ export async function createOrder(tx: Tx, tenant: TenantContext, input: SalesOrd
   const customerDiscount = await customerDiscountFor(tx, companyId, input.customerId);
   await assertWarehouse(tx, tenant, input.warehouseId);
   const { items, totals } = await prepareSalesItems(tx, tenant, input.items, customerDiscount);
+  const baseCurrency = await companyCurrency(tx, companyId);
+  if (input.saleCurrencies?.length) {
+    await assignSaleCurrencies(tx, companyId, baseCurrency, [...new Set(input.saleCurrencies)], items);
+  }
 
   const number = await nextDocumentNumber(tx, {
     table: salesOrders,
@@ -425,7 +537,7 @@ export async function createOrder(tx: Tx, tenant: TenantContext, input: SalesOrd
       orderDate: input.orderDate,
       deliveryDate: input.deliveryDate ?? null,
       notes: input.notes ?? null,
-      currency: await companyCurrency(tx, companyId),
+      currency: baseCurrency,
       ...totals,
       createdBy: tenant.user.id,
     })
@@ -461,6 +573,10 @@ export async function updateOrder(
   let totals = {};
   if (patch.items) {
     const prepared = await prepareSalesItems(tx, tenant, patch.items, customerDiscount);
+    if (patch.saleCurrencies?.length) {
+      const baseCurrency = await companyCurrency(tx, companyId);
+      await assignSaleCurrencies(tx, companyId, baseCurrency, [...new Set(patch.saleCurrencies)], prepared.items);
+    }
     await tx.delete(salesOrderItems).where(eq(salesOrderItems.orderId, orderId));
     await insertSalesItems(tx, companyId, orderId, prepared.items);
     totals = prepared.totals;
@@ -634,12 +750,14 @@ export async function shipOrder(tx: Tx, tenant: TenantContext, orderId: string, 
   const { cogs } = await dispatchOrder(tx, tenant, order, todayIso());
   const status: SalesOrderStatus = toMinor(order.paidAmount) >= toMinor(order.totalAmount) ? "delivered" : "shipped";
   await tx.update(salesOrders).set({ status, updatedAt: new Date() }).where(eq(salesOrders.id, orderId));
+  // Keshbek: sozlama "total" — jo'natilganda, "paid" — to'liq to'langan bo'lsa
+  const cashbackEarned = await earnOrderCashback(tx, tenant, orderId);
 
   await salesAudit(tx, tenant, meta, {
     action: "SALES_ORDER_SHIPPED",
     resource: "sales_orders",
     resourceId: orderId,
-    details: { number: order.number, totalAmount: order.totalAmount, cogs, status },
+    details: { number: order.number, totalAmount: order.totalAmount, cogs, status, cashbackEarned: fromMinor(cashbackEarned) },
   });
   return getOrder(tx, tenant, orderId);
 }

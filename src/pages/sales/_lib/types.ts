@@ -103,6 +103,8 @@ export type SalesOrderDetail = Omit<SalesOrderRow, "itemCount"> & {
   customerPhone: string | null;
   /** Chet valyuta qatnashgan chekda: valyuta bo'yicha jami va to'langan. */
   currencyTotals: { currency: string; totalAmount: string; paidAmount: string }[];
+  /** Shu buyurtmadan mijozga berilgan keshbek. */
+  cashbackEarned: string;
   items: SalesOrderItem[];
   payments: CustomerPayment[];
 };

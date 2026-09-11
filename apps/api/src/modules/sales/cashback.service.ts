@@ -22,7 +22,13 @@ import {
 } from "@bum/shared";
 import { categories, products } from "../../db/schema/catalog.js";
 import { settings } from "../../db/schema/platform.js";
-import { customerCashbackTransactions, customerPayments, customers, salesOrders } from "../../db/schema/sales.js";
+import {
+  customerCashbackTransactions,
+  customerPayments,
+  customers,
+  salesOrderItems,
+  salesOrders,
+} from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
@@ -228,6 +234,60 @@ export async function earnCashback(
     orderId: input.orderId,
     journalEntryId: entry.id,
   });
+}
+
+/**
+ * Oddiy savdo buyurtmasi (POS emas) uchun keshbek — bir marta: sozlama "total" bo'lsa jo'natilganda,
+ * "paid" bo'lsa jo'natilgan va to'liq to'langanda (keshbek bilan to'langan qismi asosdan chiqariladi).
+ * Chaqiruvchi buyurtma qatorini qulflagan bo'lishi kerak (jo'natish yoki to'lov tranzaksiyasi).
+ */
+export async function earnOrderCashback(tx: Tx, tenant: TenantContext, orderId: string): Promise<bigint> {
+  const companyId = tenant.company.id;
+  const cashback = await getCashbackSettings(tx, companyId);
+  if (!cashback.enabled) return 0n;
+
+  const [order] = await tx
+    .select({
+      id: salesOrders.id,
+      number: salesOrders.number,
+      customerId: salesOrders.customerId,
+      status: salesOrders.status,
+      isPos: salesOrders.isPos,
+      totalAmount: salesOrders.totalAmount,
+      paidAmount: salesOrders.paidAmount,
+    })
+    .from(salesOrders)
+    .where(and(eq(salesOrders.id, orderId), eq(salesOrders.companyId, companyId)))
+    .limit(1);
+  if (!order || order.isPos || !order.customerId) return 0n;
+  const total = toMinor(order.totalAmount);
+  if (total <= 0n || (order.status !== "shipped" && order.status !== "delivered")) return 0n;
+  if (cashback.accrualBase === "paid" && toMinor(order.paidAmount) < total) return 0n;
+
+  const [existing] = await tx
+    .select({ id: customerCashbackTransactions.id })
+    .from(customerCashbackTransactions)
+    .where(and(eq(customerCashbackTransactions.orderId, order.id), eq(customerCashbackTransactions.type, "earn")))
+    .limit(1);
+  if (existing) return 0n;
+
+  const lines = await tx
+    .select({ productId: salesOrderItems.productId, lineTotal: salesOrderItems.lineTotal })
+    .from(salesOrderItems)
+    .where(eq(salesOrderItems.orderId, order.id));
+  let base = total;
+  if (cashback.accrualBase === "paid") {
+    const [redeemed] = await tx
+      .select({
+        total: sql<string>`coalesce(sum(${customerPayments.amount}) filter (where ${customerPayments.method} = 'cashback'), 0)::numeric(18,2)`,
+      })
+      .from(customerPayments)
+      .where(eq(customerPayments.orderId, order.id));
+    base = total - toMinor(redeemed!.total);
+  }
+  const amount = await computeCashback(tx, companyId, cashback, lines, total, base);
+  await earnCashback(tx, tenant, { customerId: order.customerId, orderId: order.id, orderNumber: order.number, amount });
+  return amount;
 }
 
 /** Chekni keshbek bilan to'lash: kassaga pul tushmaydi — majburiyat debitorlik bilan yopiladi. */

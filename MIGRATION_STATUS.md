@@ -649,7 +649,13 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - chet valyuta qismini karta bilan to'lash — shu valyutadagi bank hisobiga (qoldiqdan oshmaydi)
   - balans va keshbek butun chekka: avval asosiy valyutadagi qismga, qolgani chet valyuta qismlariga asosiy qiymatda; javobda `covered`
   - PDF chek: valyutadagi qatorlar, valyuta bo'yicha jami/to'langan/qaytim, balans va keshbek, qaytim balansga, qarz
-- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `distribution` (4); API jami 226 (45 fayl)
+- **L1** commit `39f6192`
+- **L2 — oddiy savdo buyurtmalari:**
+  - buyurtma yaratishda sotuv valyutalari (`saleCurrencies`, POS bilan bir xil qoida, kurs buyurtmada qoladi); buyurtmada valyuta bo'yicha jami va to'langan — asosiy valyutadagi to'lov avval asosiy qismni, ortig'i chet valyuta qismlarini yopadi (`orderCurrencyBuckets`)
+  - `POST /api/sales/payments`: `currency` bilan to'lov shu valyutadagi kassa/bankka — buyurtmadagi valyuta qismi buyurtma kursida (qoldiqdan oshmaydi), boshqasi joriy kurs bilan; `method: balance | cashback` — mijoz balansidan va keshbekdan (keshbek sozlamadagi buyurtma ulushi chegarasida)
+  - keshbek oddiy buyurtmalarda ham: sozlama "total" — jo'natilganda, "paid" — jo'natilgan va to'liq to'langanda (keshbek bilan to'langani asosdan chiqadi), bir marta; buyurtmada `cashbackEarned`; qaytarishda bekor bo'ladi
+  - web: buyurtma oynasida sotuv valyutalari, qator va jami valyutada; buyurtma tafsilotida valyuta bo'yicha jami/to'langan, to'lovda valyuta va "Balansdan"/"Keshbekdan"
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `sales-currency` (2), `distribution` (4); API jami 228 (46 fayl)
 
 ## Sotuv agenti loyihasi (2026-09-12)
 

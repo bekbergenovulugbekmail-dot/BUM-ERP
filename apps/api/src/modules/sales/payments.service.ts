@@ -14,7 +14,7 @@
  */
 import { and, desc, eq, getTableColumns, lt, or, sql } from "drizzle-orm";
 import { badRequest, notFound } from "@bum/shared";
-import { customerPayments, customers, salesOrders } from "../../db/schema/sales.js";
+import { customerPayments, customers, salesOrderItems, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
@@ -29,7 +29,11 @@ import {
   type PaymentMethod,
 } from "../finance/cash.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { currencyRate } from "../finance/currencies.service.js";
+import { earnOrderCashback, getCashbackSettings, maxCashbackUsage, redeemCashback } from "./cashback.service.js";
+import { payFromBalance } from "./customer-balance.service.js";
 import { salesAudit } from "./customers.service.js";
+import { orderCurrencyBuckets } from "./orders.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...paymentFields } = getTableColumns(customerPayments);
 
@@ -186,6 +190,147 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
     details: { customerId, orderId: order?.id ?? null, amount: input.amount, method: input.method, cashAccountId: account.id },
   });
   return { payment: updated!, created: true };
+}
+
+/**
+ * Chet valyutadagi to'lovning asosiy qiymati. Buyurtmada shu valyuta qismi bo'lsa — buyurtma kursida
+ * (qoldiqni to'liq yopsa — aynan qolgan asosiy qiymat), aks holda joriy kurs bilan.
+ */
+async function foreignPaymentBase(tx: Tx, companyId: string, orderId: string | null, currency: string, amount: bigint) {
+  if (amount <= 0n) throw badRequest("Summa musbat bo'lishi kerak");
+  if (!orderId) return mulDivRound(amount, toMinor(await currencyRate(tx, companyId, currency), 4), 10_000n);
+
+  const [order] = await tx
+    .select({ currency: salesOrders.currency, totalAmount: salesOrders.totalAmount, paidAmount: salesOrders.paidAmount })
+    .from(salesOrders)
+    .where(and(eq(salesOrders.id, orderId), eq(salesOrders.companyId, companyId)))
+    .limit(1)
+    .for("update");
+  if (!order) throw notFound("Buyurtma topilmadi");
+  const items = await tx
+    .select({
+      priceCurrency: salesOrderItems.priceCurrency,
+      priceRate: salesOrderItems.priceRate,
+      currencyTotal: salesOrderItems.currencyTotal,
+      lineTotal: salesOrderItems.lineTotal,
+    })
+    .from(salesOrderItems)
+    .where(eq(salesOrderItems.orderId, orderId));
+  const payments = await tx
+    .select({ currency: customerPayments.currency, amount: customerPayments.amount, foreignAmount: customerPayments.foreignAmount })
+    .from(customerPayments)
+    .where(eq(customerPayments.orderId, orderId));
+  const balance = toMinor(order.totalAmount) - toMinor(order.paidAmount);
+
+  const bucket = orderCurrencyBuckets(order.currency, items, payments).find((b) => b.currency === currency);
+  if (bucket) {
+    const remaining = bucket.total - bucket.paid;
+    if (amount > remaining) {
+      throw badRequest(`To'lov ${currency} qoldig'idan ortiq (qoldiq ${fromMinor(remaining > 0n ? remaining : 0n)})`);
+    }
+    const base = amount === remaining ? bucket.base - bucket.paidBase : mulDivRound(amount, toMinor(bucket.rate, 4), 10_000n);
+    return base < balance ? base : balance;
+  }
+  const rate = toMinor(await currencyRate(tx, companyId, currency), 4);
+  const base = mulDivRound(amount, rate, 10_000n);
+  // Qoldiqni yopadigan summa yaxlitlash sababli bir tiyin oshsa — aynan qoldiq
+  if (base > balance && mulDivRound(amount - 1n, rate, 10_000n) < balance) return balance;
+  return base;
+}
+
+export type SalesPaymentInput = Omit<CustomerPaymentInput, "method" | "foreignAmount"> & {
+  method: CustomerPaymentInput["method"] | "balance" | "cashback";
+};
+
+/**
+ * `POST /api/sales/payments`: naqd/karta/bank asosiy yoki chet valyutada (`currency` bo'lsa `amount` shu valyutada,
+ * pul shu valyutadagi kassa/bankka), mijoz balansidan va keshbekdan (asosiy valyutada; keshbek — buyurtmaga,
+ * sozlamadagi ulush chegarasida). To'lovdan keyin buyurtma keshbek shartiga yetsa — keshbek beriladi.
+ */
+export async function recordSalesPayment(tx: Tx, tenant: TenantContext, input: SalesPaymentInput, meta: RequestMeta) {
+  const companyId = tenant.company.id;
+  if (!input.orderId && !input.customerId) throw badRequest("Mijoz yoki buyurtma tanlanishi kerak");
+  if (input.reference) {
+    const [existing] = await tx
+      .select(paymentFields)
+      .from(customerPayments)
+      .where(and(eq(customerPayments.companyId, companyId), eq(customerPayments.reference, input.reference)))
+      .limit(1);
+    if (existing) return { payment: existing, created: false };
+  }
+
+  const baseCurrency = await companyCurrency(tx, companyId);
+  const currency = input.currency ?? baseCurrency;
+  let paymentId: string;
+
+  if (input.method === "balance" || input.method === "cashback") {
+    if (currency !== baseCurrency) throw badRequest("Balans va keshbekdan to'lov asosiy valyutada kiritiladi");
+    let customerId = input.customerId ?? null;
+    let orderTotal = 0n;
+    if (input.orderId) {
+      const [order] = await tx
+        .select({ customerId: salesOrders.customerId, totalAmount: salesOrders.totalAmount })
+        .from(salesOrders)
+        .where(and(eq(salesOrders.id, input.orderId), eq(salesOrders.companyId, companyId)))
+        .limit(1);
+      if (!order) throw notFound("Buyurtma topilmadi");
+      if (customerId && order.customerId !== customerId) throw badRequest("Buyurtma boshqa mijozniki");
+      customerId = order.customerId;
+      orderTotal = toMinor(order.totalAmount);
+    }
+    if (!customerId) throw badRequest("Balans va keshbekdan to'lash uchun mijoz kerak");
+
+    if (input.method === "balance") {
+      ({ paymentId } = await payFromBalance(
+        tx,
+        tenant,
+        { customerId, orderId: input.orderId ?? null, amount: input.amount, notes: input.notes, date: input.paymentDate },
+        meta,
+      ));
+    } else {
+      if (!input.orderId) throw badRequest("Keshbekdan faqat buyurtma to'lanadi");
+      const cashback = await getCashbackSettings(tx, companyId);
+      if (!cashback.enabled) throw badRequest("Keshbek tizimi o'chirilgan");
+      const [used] = await tx
+        .select({
+          total: sql<string>`coalesce(sum(${customerPayments.amount}) filter (where ${customerPayments.method} = 'cashback'), 0)::numeric(18,2)`,
+        })
+        .from(customerPayments)
+        .where(eq(customerPayments.orderId, input.orderId));
+      const limit = maxCashbackUsage(cashback, orderTotal) - toMinor(used!.total);
+      if (toMinor(input.amount) > limit) {
+        throw badRequest(
+          `Keshbek bilan buyurtmaning ${cashback.maxUsagePercent}% igacha to'lash mumkin (qolgan ${fromMinor(limit > 0n ? limit : 0n)})`,
+        );
+      }
+      ({ paymentId } = await redeemCashback(
+        tx,
+        tenant,
+        { customerId, orderId: input.orderId, amount: input.amount, date: input.paymentDate },
+        meta,
+      ));
+    }
+    if (input.reference) {
+      await tx.update(customerPayments).set({ reference: input.reference }).where(eq(customerPayments.id, paymentId));
+    }
+  } else if (currency !== baseCurrency) {
+    const foreignAmount = toMinor(input.amount);
+    const base = await foreignPaymentBase(tx, companyId, input.orderId ?? null, currency, foreignAmount);
+    const { payment } = await recordCustomerPayment(
+      tx,
+      tenant,
+      { ...input, method: input.method, amount: fromMinor(base), currency, foreignAmount: fromMinor(foreignAmount) },
+      meta,
+    );
+    paymentId = payment.id;
+  } else {
+    const { payment } = await recordCustomerPayment(tx, tenant, { ...input, method: input.method }, meta);
+    paymentId = payment.id;
+  }
+
+  if (input.orderId) await earnOrderCashback(tx, tenant, input.orderId);
+  const [payment] = await tx.select(paymentFields).from(customerPayments).where(eq(customerPayments.id, paymentId)).limit(1);
+  return { payment: payment!, created: true };
 }
 
 export async function listCustomerPayments(
