@@ -99,7 +99,7 @@ export async function insertUser(
 }
 
 /** Parolni almashtiradi va foydalanuvchining BARCHA sessiyalarini bekor qiladi. */
-async function applyNewPassword(tx: Tx, target: SessionUser, newPassword: string): Promise<void> {
+export async function applyNewPassword(tx: Tx, target: SessionUser, newPassword: string): Promise<void> {
   assertPasswordPolicy(newPassword);
   await tx
     .update(users)

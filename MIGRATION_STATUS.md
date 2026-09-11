@@ -7,7 +7,7 @@
 |---|---|
 | Branch | `feat/postgres-migration` |
 | Oxirgi yangilanish | 2026-09-11 |
-| Umumiy holat | 12 / 16 PHASE tugallandi, PHASE 4 va 14 jarayonda |
+| Umumiy holat | 13 / 16 PHASE tugallandi, PHASE 4 jarayonda (faqat tozalash vazifasi), keyingi — PHASE 15 |
 | Ishlab turgan ilova | Hali to'liq Convex'da — frontend yangi API'ga ulanmagan |
 
 **Holat belgilari:** ✅ tugallandi · 🟡 jarayonda · ⬜ boshlanmagan
@@ -23,7 +23,7 @@
 | 1 | Monorepo skeleti | ✅ tugallandi |
 | 2 | PostgreSQL sxemasi | ✅ tugallandi |
 | 3 | API poydevori | ✅ tugallandi |
-| 4 | Auth va sessiyalar | 🟡 jarayonda (SMS tiklash — Eskiz ulangach) |
+| 4 | Auth va sessiyalar | 🟡 jarayonda (SMS tiklash tayyor; eskirgan sessiya/limit yozuvlarini tozalash qoldi) |
 | 5 | Platforma: kompaniya, filial, rol, admin | ✅ tugallandi |
 | 6 | Katalog | ✅ tugallandi |
 | 7 | Ombor | ✅ tugallandi |
@@ -33,7 +33,7 @@
 | 11 | CRM | ✅ tugallandi |
 | 12 | Ishlab chiqarish | ✅ tugallandi |
 | 13 | HR | ✅ tugallandi |
-| 14 | Dashboard, hisobot, AI, bildirishnoma, fayl | 🟡 jarayonda (dashboard, hisobotlar, bildirishnomalar, AI, fayllar tayyor; SMS qoldi) |
+| 14 | Dashboard, hisobot, AI, bildirishnoma, fayl | ✅ tugallandi (takliflar — qaror bo'yicha yozilmadi) |
 | 15 | Ma'lumotni Convex'dan ko'chirish | ⬜ boshlanmagan |
 | 16 | Frontend'ni API'ga o'tkazish, deploy, Convex'ni o'chirish | ⬜ boshlanmagan |
 
@@ -126,6 +126,7 @@ Xatolar doim `{ code, message }`. Unique buzilishi 409, FK 409, CHECK 400. Yozis
 | POST | `/api/auth/login`, `/api/auth/logout` | — | `signIn`, `signOut` |
 | GET | `/api/auth/me` | sessiya | `users.getCurrentUser` |
 | POST | `/api/auth/password` | sessiya (bootstrap admindan tashqari) | — |
+| POST | `/api/auth/password-reset/request` (`phone`), `/api/auth/password-reset/confirm` (`phone`, `code`, `newPassword`) — Eskiz sozlanmagan bo'lsa 503 | — | — (yangi) |
 | GET/POST/PUT | `/api/auth/security`, `/pin`, `/pin/change`, `/pin/remove`, `/pin/verify`, `/auto-lock` | sessiya | `pin.*` |
 | GET/POST | `/api/registration` | — (POST faqat yoqilgan bo'lsa) | `isRegistrationEnabled`, `registerCompany` |
 | GET | `/api/public/companies/:slug`, `/:slug/access` | — / sessiya | `getCompanyBySlug`, `verifyTenantAccess` |
@@ -322,7 +323,7 @@ Kompaniyaning faol a'zosi; yuborish — `company.manage`.
 - **Migratsiya:** `pnpm --filter @bum/api db:migrate`
 - **Seed:** `.env` ga `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_PASSWORD` — `pnpm --filter @bum/api db:seed` (bootstrap admin + 14 global rol + 9 standart o'lchov birligi; idempotent)
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
-- **Testlar:** `pnpm --filter @bum/api test` — 197 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
+- **Testlar:** `pnpm --filter @bum/api test` — 200 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
 
 ---
 
@@ -342,7 +343,8 @@ DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, 
 
 - **Ko'chirilgan:** `modules/auth/` — argon2id (+ Convex lucia Scrypt xeshlari), sessiya (httpOnly cookie, SHA-256, 30 kun / 12 soat), login (rate limit, audit), PIN (5 xato → 5 daqiqa, Convex `reason` kodlari), guard'lar.
 - **Testlar:** `auth` (17), `pin` (14), `password` (4)
-- **Qolgan:** SMS orqali parol tiklash — Eskiz ulangach PHASE 14 da; eskirgan `rate_limits` / `sessions` tozalash
+- **SMS orqali parol tiklash** — PHASE 14d da yozildi (`ESKIZ_EMAIL` / `ESKIZ_PASSWORD` bo'lsa yoqiladi)
+- **Qolgan:** eskirgan `rate_limits` / `sessions` / `password_reset_codes` yozuvlarini davriy tozalash
 
 ## PHASE 5 — Platforma: kompaniya, filial, rol, admin ✅
 
@@ -472,7 +474,7 @@ DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, 
 - **Testlar:** `hr` (2 — bog'liqliklar va maxfiylik, davomat va ta'tillar), `salary` (2 — to'liq hisob-tasdiq-to'lov zanjiri, davomatsiz kompaniya va haq to'lanmaydigan ta'til)
 - **Eslatma:** ta'til tugagach xodim holati avtomatik "active" ga qaytmaydi (Convex'da ham) — HR qo'lda o'zgartiradi; soliq to'lovi (2200 dan budjetga) moliya jurnalida qo'lda
 
-## PHASE 14 — Dashboard, hisobot, AI, bildirishnoma, fayl 🟡
+## PHASE 14 — Dashboard, hisobot, AI, bildirishnoma, fayl ✅
 
 - **Convex manbasi:** `convex/dashboard.ts`, `convex/notifications.ts`, `convex/analytics/reports.ts`, `convex/analytics/ai.ts`; sahifalar `dashboard`, `analytics`, `settings` (bildirishnomalar)
 - **14a ✅ Dashboard, hisobotlar, bildirishnomalar:**
@@ -488,8 +490,11 @@ DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, 
   - `modules/files/` — mahsulot rasmi (`image_key`), xarajat cheki (`attachment_key`), xodim surati (`photo_key`): yuklash → biriktirish (kalit shu kompaniya va turga tegishli, fayl haqiqatan yuklangan, hajm va MIME tur saqlashdagi haqiqiy qiymat bo'yicha) → almashtirishda eski fayl o'chadi; har amal auditda (`FILE_ATTACHED`, `FILE_DETACHED`)
   - Convex'dagi `imageUrl` (foydalanuvchi kiritgan tashqi URL — saqlangan XSS va kuzatuv yo'li) o'rniga faqat o'z saqlashimizdagi kalit
   - **Testlar:** `files` (3 — SigV4 rasmiy namuna, to'liq oqim va barcha rad etishlar, PDF chek va 503)
-- **Qolgan:**
-  - **14d** SMS (Eskiz): parol tiklash, takliflar — kalit bo'lsa
+- **14d ✅ SMS orqali parol tiklash (Eskiz):**
+  - `shared/sms.ts` — Eskiz mijozi (kirish, yuborish, token eskirsa bir marta qayta kirish); kalit bo'lmasa o'chiq
+  - `modules/auth/password-reset.service.ts` — 6 xonali kod (`crypto.randomInt`), bazada faqat SHA-256, 10 daqiqa, bir martalik (parallel ishlatishdan himoya), yangi so'rov oldingilarini bekor qiladi, 5 xatodan keyin kod yonadi; javob raqam ro'yxatdan o'tgan-o'tmaganidan qat'i nazar bir xil (SMS xatosida ham); bloklangan va bootstrap admin hisoblariga kod yuborilmaydi; so'rov raqamga 15 daqiqada 3 ta, IP dan soatiga 10 ta; tasdiqlashda barcha sessiyalar bekor qilinadi; audit `PASSWORD_RESET_REQUESTED`, `PASSWORD_RESET_COMPLETED`
+  - **Testlar:** `password-reset` (3 — to'liq oqim va sessiyalar, oshkor qilmaslik va barcha himoyalar, Eskiz mijozi token yangilash)
+- **Ataylab yozilmagan:** takliflar (`invitations`) — yakuniy qaror bo'yicha kerak emas (login/parol to'g'ridan-to'g'ri beriladi); jadval sxemada qoladi
 
 ## PHASE 15 — Ma'lumotni Convex'dan ko'chirish ⬜
 
@@ -513,11 +518,12 @@ Poydevor: `legacy_id` ustunlari; login Convex Auth parol xeshlarini qabul qiladi
   - `hooks/use-notifications.ts`: `/api/notifications` ga; havolalar tilsiz (`/warehouse`) — frontend `/uz` qo'shadi; `triggerSmartAlerts` → `POST /refresh` (javobda `throttled`)
   - `analytics/ai-assistant-section.tsx`: `POST /api/ai/assistant`; `GET /api/ai/status` bo'yicha bo'limni yashirish; 429/502/503 xabarlarini ko'rsatish
   - Rasm/chek yuklash: `POST /api/files/uploads` → `PUT uploadUrl` (aynan `headers` bilan) → `POST /api/files/attach`; ko'rsatish `GET /api/files/url` (5 daqiqada eskiradi — sahifa ochilganda olinadi); `product-form-dialog.tsx` dagi `imageUrl` maydoni shu oqim bilan almashtiriladi
+  - Kirish sahifasiga "Parolni unutdingizmi?" — `POST /api/auth/password-reset/request` → kod va yangi parol → `/confirm` → oddiy kirish (Convex'da bunday sahifa yo'q edi)
 
 ---
 
 ## Keyingi qadam
 
-1. **PHASE 14d** — SMS (Eskiz): parol tiklash va takliflar (kalit bo'lmasa o'chiq)
+1. **PHASE 15 (Ma'lumotni Convex'dan ko'chirish)** — Convex eksportini (`npx convex export`) o'qib PostgreSQL'ga yozadigan, qayta ishga tushirsa bo'ladigan (idempotent, `legacy_id` bo'yicha) import CLI va solishtirish hisoboti
 2. **Production:** Convex tuzatishini (`main` `3f958f1`) production kaliti bilan deploy qilish
 3. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_*` qo'shib `db:seed`

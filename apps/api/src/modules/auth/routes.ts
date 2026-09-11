@@ -6,6 +6,7 @@
  *   signOut                   → POST /logout
  *   users.getCurrentUser      → GET  /me
  *   (yangi)                   → POST /password     o'z parolini eski parol bilan
+ *   (yangi)                   → POST /password-reset/request, /password-reset/confirm   SMS kod (Eskiz; o'chiq — 503)
  *   pin.getSecuritySettings   → GET  /security
  *   pin.setPin                → POST /pin
  *   pin.changePin             → POST /pin/change
@@ -18,7 +19,9 @@ import { z } from "zod";
 import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
+import { smsProvider } from "../../shared/sms.js";
 import { changeOwnPassword, verifyCurrentPassword } from "../users/user-admin.service.js";
+import { confirmPasswordReset, requestPasswordReset } from "./password-reset.service.js";
 import { authenticate, buildMe, startSession } from "./auth.service.js";
 import { authOf, requireAuth } from "./guard.js";
 import {
@@ -46,6 +49,13 @@ const changePasswordBody = z.object({
   currentPassword: z.string().min(1).max(256),
   newPassword: z.string().min(1).max(256),
 });
+const resetRequestBody = z.object({ phone: z.string().min(1).max(32) });
+const resetConfirmBody = z.object({
+  phone: z.string().min(1).max(32),
+  code: z.string().regex(/^\d{6}$/, "Kod 6 xonali bo'lishi kerak"),
+  newPassword: z.string().min(1).max(256),
+});
+const SMS_UNAVAILABLE = { code: "SERVICE_UNAVAILABLE", message: "SMS orqali tiklash sozlanmagan — administratorga murojaat qiling" };
 const setPinBody = z.object({ pin: z.string() });
 const changePinBody = z.object({ oldPin: z.string(), newPin: z.string() });
 const removePinBody = z.object({ currentPin: z.string() });
@@ -92,6 +102,25 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     });
 
     setSessionCookie(reply, session.token, session.expiresAt);
+    return { ok: true };
+  });
+
+  // ─── SMS orqali parol tiklash ────────────────────────────────────────────
+
+  app.post("/password-reset/request", async (req, reply) => {
+    const { phone } = resetRequestBody.parse(req.body);
+    const sms = smsProvider.client;
+    if (!sms) return reply.status(503).send(SMS_UNAVAILABLE);
+
+    await requestPasswordReset(phone, requestMeta(req), sms);
+    return { ok: true, message: "Agar raqam ro'yxatdan o'tgan bo'lsa, SMS kod yuborildi" };
+  });
+
+  app.post("/password-reset/confirm", async (req, reply) => {
+    const body = resetConfirmBody.parse(req.body);
+    if (!smsProvider.client) return reply.status(503).send(SMS_UNAVAILABLE);
+
+    await confirmPasswordReset(body, requestMeta(req));
     return { ok: true };
   });
 
