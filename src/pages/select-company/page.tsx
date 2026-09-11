@@ -5,7 +5,7 @@
  * has NOT yet set an activeCompanyId (or just logged in fresh).
  *
  * UX flow:
- *   1. User logs in via the OIDC provider
+ *   1. User logs in (telefon + parol, /api/auth/login)
  *   2. Auth callback → / → RootRedirect → /:lng
  *   3. ERPLayout guard detects no activeCompany → this page
  *   4. User picks a company → switchCompany mutation → /dashboard
@@ -13,9 +13,9 @@
  * Also accessible from the sidebar switcher for quick switching.
  */
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
 import { useState } from "react";
+import { useCurrentUser } from "@/hooks/use-auth.ts";
+import { useMyCompanies, useSwitchCompany } from "@/hooks/use-company.ts";
 import { motion } from "motion/react";
 import {
   Building2, Layers, CheckCircle, Loader2, LogIn,
@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { SignInButton } from "@/components/ui/signin.tsx";
-import { Authenticated, Unauthenticated, AuthLoading } from "convex/react";
+import { Authenticated, Unauthenticated, AuthLoading } from "@/components/auth-gates.tsx";
 import { format } from "date-fns";
 
 export default function SelectCompanyPage() {
@@ -61,15 +61,15 @@ export default function SelectCompanyPage() {
 function CompanyList() {
   const { lng = "uz" } = useParams<{ lng: string }>();
   const navigate = useNavigate();
-  const myCompanies = useQuery(api.companies.listMyCompanies);
-  const switchCompany = useMutation(api.companies.switchCompany);
-  const currentUser = useQuery(api.users.getCurrentUser);
+  const myCompanies = useMyCompanies();
+  const switchCompany = useSwitchCompany();
+  const currentUser = useCurrentUser();
   const [switching, setSwitching] = useState<string | null>(null);
 
   const handleSelect = async (companyId: string) => {
     setSwitching(companyId);
     try {
-      await switchCompany({ companyId: companyId as Parameters<typeof switchCompany>[0]["companyId"] });
+      await switchCompany.mutateAsync(companyId);
       navigate(`/${lng}/dashboard`, { replace: true });
     } catch {
       setSwitching(null);
@@ -104,9 +104,8 @@ function CompanyList() {
       {/* Company cards */}
       <div className="space-y-2.5">
         {myCompanies.map((company, i) => {
-          if (!company) return null;
-          const isActive = company._id === currentUser?.activeCompanyId;
-          const isSwitching = switching === company._id;
+          const isActive = company.isCurrent;
+          const isSwitching = switching === company.id;
           const initials = company.name
             .split(/\s+/)
             .slice(0, 2)
@@ -115,12 +114,12 @@ function CompanyList() {
 
           return (
             <motion.button
-              key={company._id}
+              key={company.id}
               initial={{ opacity: 0, x: -16 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.25, delay: i * 0.06 }}
-              onClick={() => { void handleSelect(company._id); }}
-              disabled={isSwitching}
+              onClick={() => { void handleSelect(company.id); }}
+              disabled={isSwitching || !company.membershipActive}
               className={[
                 "w-full flex items-center gap-4 p-4 rounded-2xl border text-left transition-all cursor-pointer group",
                 isActive

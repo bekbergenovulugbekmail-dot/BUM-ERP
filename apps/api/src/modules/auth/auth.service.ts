@@ -49,7 +49,12 @@ export type Me = {
   companyCurrency: string | null;
   companySlug: string | null;
   companyRole: string | null;
+  /** Amaldagi holat: faol emas yoki sinov muddati tugagan kompaniya — "suspended" (tenant so'rovlari 403 beradi). */
+  companyStatus: string | null;
+  companySuspendReason: string | null;
 };
+
+const TRIAL_EXPIRED = "Sinov muddati tugagan. Platforma admini bilan bog'laning.";
 
 export async function authenticate(
   phoneRaw: string,
@@ -136,11 +141,30 @@ export async function buildMe(conn: DbOrTx, user: SessionUser): Promise<Me> {
 
   const [company] = companyId
     ? await conn
-        .select({ name: companies.name, currency: companies.currency, slug: companies.slug })
+        .select({
+          name: companies.name,
+          currency: companies.currency,
+          slug: companies.slug,
+          status: companies.status,
+          isActive: companies.isActive,
+          suspendReason: companies.suspendReason,
+          trialEndsAt: companies.trialEndsAt,
+        })
         .from(companies)
         .where(eq(companies.id, companyId))
         .limit(1)
     : [];
+
+  // tenant.ts dagi kirish tekshiruvi bilan bir xil qoida
+  const blocked = !company
+    ? null
+    : company.status === "cancelled"
+      ? { status: "cancelled", reason: company.suspendReason }
+      : company.status === "suspended" || !company.isActive
+        ? { status: "suspended", reason: company.suspendReason }
+        : company.status === "trial" && company.trialEndsAt && company.trialEndsAt.getTime() < Date.now()
+          ? { status: "suspended", reason: TRIAL_EXPIRED }
+          : null;
 
   const [membership] = companyId
     ? await conn
@@ -163,5 +187,7 @@ export async function buildMe(conn: DbOrTx, user: SessionUser): Promise<Me> {
     companyCurrency: company?.currency ?? null,
     companySlug: company?.slug ?? null,
     companyRole: membership?.companyRole ?? null,
+    companyStatus: company ? (blocked?.status ?? company.status) : null,
+    companySuspendReason: blocked?.reason ?? null,
   };
 }

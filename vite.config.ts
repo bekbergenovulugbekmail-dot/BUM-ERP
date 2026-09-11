@@ -12,10 +12,16 @@ export default defineConfig({
     hmr: {
       overlay: false,
     },
+    // API bir domenda ko'rinadi — sessiya cookie'si telefondan (LAN IP) ochilganda ham ishlaydi
+    proxy: {
+      "/api": { target: process.env.API_PROXY_TARGET ?? "http://localhost:3000" },
+    },
   },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
+      // API bilan umumiy: ruxsatlar katalogi, telefon formati, xato kodlari
+      "@bum/shared": path.resolve(import.meta.dirname, "./packages/shared/src/index.ts"),
       "@/convex": path.resolve(import.meta.dirname, "./convex"),
       "@": path.resolve(import.meta.dirname, "./src"),
     },

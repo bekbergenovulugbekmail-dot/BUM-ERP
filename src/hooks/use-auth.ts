@@ -4,14 +4,33 @@
  * Butun ilova auth'ga FAQAT shu fayl orqali murojaat qiladi.
  * Backend almashtirilsa, boshqa hech bir fayl o'zgarmaydi.
  *
- * Asos: Convex Auth (@convex-dev/auth) — parol provayderi, tashqi
- * OIDC provayderisiz. Login identifikatori telefon raqam
- * (qarang: convex/auth.ts).
+ * Asos (PHASE 16): Fastify API sessiyasi — httpOnly cookie, `/api/auth/*`.
+ * Login identifikatori telefon raqam. Ro'yxatdan o'tish — `/api/registration` (onboarding sahifasi).
  */
 import { useCallback, useMemo, useState } from "react";
-import { useAuthActions } from "@convex-dev/auth/react";
-import { useConvexAuth, useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, ApiError, errorMessage } from "@/lib/api.ts";
+import { AUTH_ME_KEY } from "@/lib/query.ts";
+import type { CompanyStatus } from "./use-company.ts";
+
+/** `GET /api/auth/me` javobi. */
+export type Me = {
+  id: string;
+  phone: string;
+  name: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+  isPlatformAdmin: boolean;
+  activeCompanyId: string | null;
+  hasCompany: boolean;
+  companyName: string | null;
+  companyCurrency: string | null;
+  companySlug: string | null;
+  companyRole: string | null;
+  /** Amaldagi holat — faol emas yoki sinov muddati tugagan kompaniya "suspended". */
+  companyStatus: CompanyStatus | null;
+  companySuspendReason: string | null;
+};
 
 export type AppUser = {
   id: string;
@@ -28,56 +47,67 @@ function loginPath(): string {
   return `/${lng}/login`;
 }
 
+async function fetchMe(signal?: AbortSignal): Promise<Me | null> {
+  try {
+    return (await api.get<{ user: Me }>("/api/auth/me", undefined, signal)).user;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return null;
+    throw error;
+  }
+}
+
+function useMeQuery() {
+  return useQuery<Me | null, ApiError>({
+    queryKey: AUTH_ME_KEY,
+    queryFn: ({ signal }) => fetchMe(signal),
+    staleTime: 60_000,
+  });
+}
+
+/** Convex'dagi `users.getCurrentUser` kabi: `undefined` — yuklanmoqda, `null` — kirilmagan. */
+export function useCurrentUser(): Me | null | undefined {
+  return useMeQuery().data;
+}
+
 export function useAuth() {
-  const { signIn: convexSignIn, signOut } = useAuthActions();
-  const { isLoading, isAuthenticated } = useConvexAuth();
+  const queryClient = useQueryClient();
+  const meQuery = useMeQuery();
+  const me = meQuery.data;
   const [error, setError] = useState<string | undefined>(undefined);
 
-  const me = useQuery(api.users.getCurrentUser, isAuthenticated ? {} : "skip");
+  /** Boshqa foydalanuvchi yoki kompaniya ma'lumoti keshda qolmasligi uchun. */
+  const replaceSession = useCallback(
+    (user: Me | null) => {
+      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== AUTH_ME_KEY[0] });
+      queryClient.setQueryData(AUTH_ME_KEY, user);
+    },
+    [queryClient],
+  );
 
   /** Telefon + parol bilan kirish. Xato bo'lsa qayta tashlaydi. */
   const signInWithPassword = useCallback(
     async (phone: string, password: string) => {
       setError(undefined);
       try {
-        await convexSignIn("password", { email: phone, password, flow: "signIn" });
+        const { user } = await api.post<{ user: Me }>("/api/auth/login", { phone, password });
+        replaceSession(user);
+        return user;
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "Kirishda xatolik";
-        setError(msg);
+        setError(errorMessage(e, "Kirishda xatolik"));
         throw e;
       }
     },
-    [convexSignIn],
-  );
-
-  /** Yangi hisob yaratish. */
-  const signUpWithPassword = useCallback(
-    async (phone: string, password: string, name?: string) => {
-      setError(undefined);
-      try {
-        await convexSignIn("password", {
-          email: phone,
-          password,
-          flow: "signUp",
-          ...(name ? { name } : {}),
-        });
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "Ro'yxatdan o'tishda xatolik";
-        setError(msg);
-        throw e;
-      }
-    },
-    [convexSignIn],
+    [replaceSession],
   );
 
   const signout = useCallback(() => {
-    void signOut();
-  }, [signOut]);
+    void api
+      .post("/api/auth/logout")
+      .catch(() => undefined)
+      .finally(() => replaceSession(null));
+  }, [replaceSession]);
 
-  /**
-   * Eski OIDC API bilan moslik: avval tashqi provayder sahifasiga
-   * yo'naltirardi, endi ilovaning o'z login sahifasiga olib boradi.
-   */
+  /** Ilovaning login sahifasiga olib boradi (eski OIDC API bilan moslik). */
   const signin = useCallback(() => {
     window.location.assign(loginPath());
   }, []);
@@ -85,21 +115,22 @@ export function useAuth() {
   const user = useMemo<AppUser | undefined>(() => {
     if (!me) return undefined;
     return {
-      id: me._id,
-      email: me.email,
+      id: me.id,
+      email: me.email ?? undefined,
       phone: me.phone,
-      name: me.name ?? me.phone ?? me.email,
-      picture: me.avatar ?? me.image,
+      name: me.name ?? me.phone,
+      picture: me.avatarUrl ?? undefined,
     };
   }, [me]);
 
   return {
     user,
-    isAuthenticated,
-    isLoading,
+    me,
+    isAuthenticated: Boolean(me),
+    // Tarmoq xatosida cheksiz yuklanish ko'rsatilmaydi
+    isLoading: me === undefined && !meQuery.isError,
     error,
     signInWithPassword,
-    signUpWithPassword,
     signin,
     signout,
     // Eski chaqiruvlar bilan moslik uchun aliaslar

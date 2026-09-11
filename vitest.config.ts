@@ -11,6 +11,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
+      "@bum/shared": path.resolve(import.meta.dirname, "./packages/shared/src/index.ts"),
       "@/convex": path.resolve(import.meta.dirname, "./convex"),
       "@": path.resolve(import.meta.dirname, "./src"),
     },

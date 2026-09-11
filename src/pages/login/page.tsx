@@ -1,7 +1,7 @@
 /**
  * BUM ERP Login Page
  *
- * Telefon raqam + parol formasi. Autentifikatsiya Convex Auth orqali —
+ * Telefon raqam + parol formasi. Autentifikatsiya API sessiyasi orqali (httpOnly cookie) —
  * tashqi provayder sahifasiga yo'naltirish yo'q, hammasi shu sahifada.
  *
  * Platform Admin uchun admin.bum-erp.uz alohida.
@@ -9,7 +9,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth.ts";
-import { useConvexAuth } from "convex/react";
+import { errorMessage } from "@/lib/api.ts";
 import { motion } from "motion/react";
 import {
   Phone, Lock, ArrowRight, Shield, Building2,
@@ -18,8 +18,7 @@ import {
 import { Button } from "@/components/ui/button.tsx";
 
 export default function LoginPage() {
-  const { signInWithPassword } = useAuth();
-  const { isAuthenticated } = useConvexAuth();
+  const { signInWithPassword, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const { lng } = useParams<{ lng: string }>();
 
@@ -43,8 +42,9 @@ export default function LoginPage() {
     try {
       await signInWithPassword(phone.trim(), password);
       // muvaffaqiyatli bo'lsa yuqoridagi useEffect dashboard'ga o'tkazadi
-    } catch {
-      setError("Telefon raqam yoki parol noto'g'ri");
+    } catch (err) {
+      // Serverdan: noto'g'ri parol, bloklangan hisob, juda ko'p urinish yoki aloqa yo'q
+      setError(errorMessage(err, "Telefon raqam yoki parol noto'g'ri"));
     } finally {
       setSubmitting(false);
     }

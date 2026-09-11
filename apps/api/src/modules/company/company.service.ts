@@ -87,6 +87,8 @@ export async function listMyCompanies(conn: DbOrTx, user: SessionUser) {
       logoUrl: companies.logoUrl,
       status: companies.status,
       isActive: companies.isActive,
+      currency: companies.currency,
+      trialEndsAt: companies.trialEndsAt,
       companyRole: companyMembers.companyRole,
       membershipActive: companyMembers.isActive,
     })

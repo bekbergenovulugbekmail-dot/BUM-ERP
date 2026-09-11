@@ -12,9 +12,7 @@
  * PIN never unlocks a different user's session or crosses tenant boundary.
  */
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useMutation, useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
-import { ConvexError } from "convex/values";
+import { api, errorMessage } from "@/lib/api.ts";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Lock, LogOut, Eye, EyeOff, Delete, RefreshCw,
@@ -22,8 +20,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
-import { useAuth } from "@/hooks/use-auth.ts";
-import { unlockScreen } from "@/hooks/use-lock-screen.ts";
+import { useAuth, useCurrentUser } from "@/hooks/use-auth.ts";
+import { unlockScreen, useSecuritySettings } from "@/hooks/use-lock-screen.ts";
 import { toast } from "sonner";
 
 const PIN_LENGTH = 6; // can be 4-8; we use 6 as default
@@ -36,9 +34,8 @@ type Mode = "pin" | "password";
 
 export default function LockScreen({ onUnlocked }: LockScreenProps) {
   const { signout } = useAuth();
-  const currentUser = useQuery(api.users.getCurrentUser);
-  const securitySettings = useQuery(api.pin.getSecuritySettings);
-  const verifyPinMutation = useMutation(api.pin.verifyPin);
+  const currentUser = useCurrentUser();
+  const securitySettings = useSecuritySettings();
 
   const [mode, setMode] = useState<Mode>("pin");
   const [pin, setPin] = useState("");
@@ -89,9 +86,10 @@ export default function LockScreen({ onUnlocked }: LockScreenProps) {
     setError(null);
 
     try {
-      const result = await verifyPinMutation({
+      // Server doim 200 qaytaradi: { success, reason } — urinishlar hisobi serverda
+      const result = await api.post<{ success: boolean; reason?: string }>("/api/auth/pin/verify", {
         pin: pinValue,
-        expectedUserId: currentUser._id,
+        expectedUserId: currentUser.id,
         expectedCompanyId: currentUser.activeCompanyId,
       });
 
@@ -109,7 +107,7 @@ export default function LockScreen({ onUnlocked }: LockScreenProps) {
           const secs = parseInt(reason.split(":")[1] ?? "300", 10);
           setLockedUntil(new Date(Date.now() + secs * 1000));
           setLockedRemaining(secs);
-          setError(`PIN ${Math.ceil(secs / 60)} daqiqa bloklanди`);
+          setError(`PIN ${Math.ceil(secs / 60)} daqiqa bloklandi`);
         } else if (reason.startsWith("WRONG_PIN:")) {
           const remaining = reason.split(":")[1] ?? "?";
           setError(`PIN noto'g'ri. Yana ${remaining} ta urinish qoldi`);
@@ -125,10 +123,7 @@ export default function LockScreen({ onUnlocked }: LockScreenProps) {
         }
       }
     } catch (err) {
-      const msg = err instanceof ConvexError
-        ? (err.data as { message?: string }).message ?? "Xatolik"
-        : "Xatolik yuz berdi";
-      setError(msg);
+      setError(errorMessage(err));
       triggerShake();
       setPin("");
     } finally {

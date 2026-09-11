@@ -10,10 +10,25 @@
  * PIN or password required to unlock.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api.js";
+import { useCurrentUser } from "@/hooks/use-auth.ts";
+import { useApiQuery } from "@/lib/query.ts";
 
 const DEFAULT_TIMEOUT_SECONDS = 30;
+
+/** `GET /api/auth/security` javobi. */
+export type SecuritySettings = {
+  hasPIN: boolean;
+  autoLockTimeoutSeconds: number;
+  isPinLocked: boolean;
+  pinLockedUntil: string | null;
+  pinFailedAttempts: number;
+};
+
+/** Faqat kirgan foydalanuvchi uchun so'raladi. */
+export function useSecuritySettings(): SecuritySettings | undefined {
+  const currentUser = useCurrentUser();
+  return useApiQuery<SecuritySettings>(currentUser ? "/api/auth/security" : null).data;
+}
 
 export type LockState = {
   isLocked: boolean;
@@ -47,7 +62,7 @@ export function useLockScreen(): LockState {
   const [, forceUpdate] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const securitySettings = useQuery(api.pin.getSecuritySettings);
+  const securitySettings = useSecuritySettings();
   const timeoutSeconds = securitySettings?.autoLockTimeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
 
   // Subscribe to module-level state changes

@@ -53,10 +53,10 @@ import { SignInButton } from "@/components/ui/signin.tsx";
 import NotificationCenter from "@/components/notification-center.tsx";
 import PWAInstallBanner from "@/components/pwa-install-banner.tsx";
 import { GlobalSearch } from "@/components/global-search.tsx";
-import { useAuth } from "@/hooks/use-auth.ts";
-import { Authenticated, Unauthenticated, useQuery, useMutation } from "convex/react";
+import { useAuth, useCurrentUser } from "@/hooks/use-auth.ts";
+import { useMyCompanies, useSwitchCompany } from "@/hooks/use-company.ts";
+import { Authenticated, Unauthenticated } from "@/components/auth-gates.tsx";
 import { useTheme } from "next-themes";
-import { api } from "@/convex/_generated/api.js";
 import { isAdminSubdomain } from "@/lib/subdomain.ts";
 import { useLockScreen } from "@/hooks/use-lock-screen.ts";
 import LockScreen from "@/components/lock-screen.tsx";
@@ -312,7 +312,7 @@ function UserMenu() {
   const { user, signout } = useAuth();
   const { lng } = useParams<{ lng: string }>();
   const navigate = useNavigate();
-  const currentUser = useQuery(api.users.getCurrentUser);
+  const currentUser = useCurrentUser();
 
   return (
     <DropdownMenu>
@@ -366,9 +366,10 @@ function UserMenu() {
 function CompanySwitcher() {
   const { lng } = useParams<{ lng: string }>();
   const navigate = useNavigate();
-  const currentUser = useQuery(api.users.getCurrentUser);
-  const myCompanies = useQuery(api.companies.listMyCompanies);
-  const switchCompany = useMutation(api.companies.switchCompany);
+  const currentUser = useCurrentUser();
+  const myCompanies = useMyCompanies();
+  const switchCompany = useSwitchCompany();
+  const companies = (myCompanies ?? []).filter((c) => c.membershipActive);
 
   if (!currentUser || !currentUser.hasCompany) return null;
 
@@ -384,30 +385,30 @@ function CompanySwitcher() {
             </span>
             <span className="hidden md:inline">{currentUser.companyName}</span>
           </span>
-          {(myCompanies?.length ?? 0) > 1 && <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />}
+          {companies.length > 1 && <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />}
         </Button>
       </DropdownMenuTrigger>
       {/* Dropdown har doim ochiladi: bitta kompaniyasi bor foydalanuvchi ham
           "+ Yangi kompaniya" orqali ikkinchisini qo'sha olishi kerak. */}
       <DropdownMenuContent align="start" className="w-52">
-        {(myCompanies?.length ?? 0) > 1 &&
-          myCompanies?.filter(Boolean).map((c) => (
+        {companies.length > 1 &&
+          companies.map((c) => (
           <DropdownMenuItem
-            key={c!._id}
+            key={c.id}
             className="cursor-pointer"
             onClick={async () => {
-              await switchCompany({ companyId: c!._id });
+              await switchCompany.mutateAsync(c.id);
               navigate(`/${lng}/dashboard`);
             }}
           >
             <Building2 className="mr-2 h-4 w-4" />
-            <span className="truncate">{c!.name}</span>
-            {c!._id === currentUser.activeCompanyId && (
+            <span className="truncate">{c.name}</span>
+            {c.isCurrent && (
               <span className="ml-auto text-xs text-primary">✓</span>
             )}
           </DropdownMenuItem>
         ))}
-        {(myCompanies?.length ?? 0) > 1 && <DropdownMenuSeparator />}
+        {companies.length > 1 && <DropdownMenuSeparator />}
         <DropdownMenuItem
           className="cursor-pointer text-muted-foreground text-xs"
           onClick={() => navigate(`/${lng}/onboarding`)}
@@ -485,12 +486,12 @@ function SuspendedScreen({
   lng: string;
 }) {
   const { signout } = useAuth();
-  const myCompanies = useQuery(api.companies.listMyCompanies);
-  const switchCompany = useMutation(api.companies.switchCompany);
+  const myCompanies = useMyCompanies();
+  const switchCompany = useSwitchCompany();
   const navigate = useNavigate();
 
   const otherCompanies = (myCompanies ?? []).filter(
-    (c) => c && c.status !== "suspended" && c.status !== "cancelled",
+    (c) => !c.isCurrent && c.membershipActive && c.isActive && c.status !== "suspended" && c.status !== "cancelled",
   );
 
   return (
@@ -547,11 +548,11 @@ function SuspendedScreen({
               <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
                 Boshqa kompaniyaga o'ting
               </p>
-              {otherCompanies.map((c) => c && (
+              {otherCompanies.map((c) => (
                 <button
-                  key={c._id}
+                  key={c.id}
                   onClick={async () => {
-                    await switchCompany({ companyId: c._id });
+                    await switchCompany.mutateAsync(c.id);
                     navigate(`/${lng}/dashboard`);
                   }}
                   className="w-full flex items-center gap-3 p-3 rounded-xl border border-border hover:border-primary/40 hover:bg-accent transition-colors text-left"
@@ -580,9 +581,8 @@ export default function ERPLayout({ children }: { children: React.ReactNode }) {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const { lng } = useParams<{ lng: string }>();
   const location = useLocation();
-  const currentUser = useQuery(api.users.getCurrentUser);
-  const activeCompany = useQuery(api.companies.getActiveCompany);
-  const myCompanies = useQuery(api.companies.listMyCompanies);
+  const currentUser = useCurrentUser();
+  const myCompanies = useMyCompanies(Boolean(currentUser));
 
   // Auto-lock / PIN system
   const { isLocked, unlock } = useLockScreen();
@@ -617,11 +617,16 @@ export default function ERPLayout({ children }: { children: React.ReactNode }) {
   }
 
   // Guard: company suspended or cancelled — show professional block screen
-  if (
-    activeCompany &&
-    (activeCompany.status === "suspended" || activeCompany.status === "cancelled")
-  ) {
-    return <SuspendedScreen status={activeCompany.status} reason={activeCompany.suspendReason} companyName={activeCompany.name} lng={lng ?? "uz"} />;
+  // (holat /me dan — bunday kompaniyada tenant so'rovlari 403 qaytaradi)
+  if (currentUser && (currentUser.companyStatus === "suspended" || currentUser.companyStatus === "cancelled")) {
+    return (
+      <SuspendedScreen
+        status={currentUser.companyStatus}
+        reason={currentUser.companySuspendReason ?? undefined}
+        companyName={currentUser.companyName ?? ""}
+        lng={lng ?? "uz"}
+      />
+    );
   }
 
   return (
