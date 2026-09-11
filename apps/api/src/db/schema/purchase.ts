@@ -191,7 +191,10 @@ export const purchaseReceiptItems = pgTable(
     unitId: uuid("unit_id").notNull().references(() => units.id),
 
     receivedQty: qty("received_qty").notNull(),
+    /** Buyurtma birligidagi tannarx (chegirma va soliq bilan). */
     unitPrice: price("unit_price").notNull(),
+    /** Qabul qiymati — ta'minotchi qarzi va jurnal shu summada; oxirgi qabul tiyin qoldig'ini yopadi. */
+    lineTotal: money("line_total").notNull().default("0"),
     batchNumber: varchar("batch_number", { length: 64 }),
     expiryDate: date("expiry_date"),
     ...timestamps(),
@@ -233,6 +236,10 @@ export const supplierPayments = pgTable(
   (t) => [
     index("sp_company_supplier_idx").on(t.companyId, t.supplierId),
     index("sp_company_date_idx").on(t.companyId, t.paymentDate),
+    /** Takroriy yuborish (ikki marta bosish) ikkinchi to'lov yaratmasin. */
+    uniqueIndex("sp_company_supplier_reference_key")
+      .on(t.companyId, t.supplierId, t.reference)
+      .where(sql`${t.reference} IS NOT NULL`),
     check("sp_amount_positive", sql`${t.amount} > 0`),
   ],
 );

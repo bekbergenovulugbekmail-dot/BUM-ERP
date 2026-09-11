@@ -1,0 +1,2 @@
+ALTER TABLE "purchase_receipt_items" ADD COLUMN "line_total" numeric(18, 2) DEFAULT '0' NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "sp_company_supplier_reference_key" ON "supplier_payments" USING btree ("company_id","supplier_id","reference") WHERE "supplier_payments"."reference" IS NOT NULL;

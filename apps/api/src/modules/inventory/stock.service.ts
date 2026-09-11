@@ -107,7 +107,8 @@ export async function moveStock(tx: Tx, companyId: string, performedBy: string |
     level = await lockLevel(tx, companyId, product.id, warehouse.id);
   }
 
-  const updatesCost = INCOMING.has(move.type) && Boolean(move.costPrice) && Number(move.costPrice) > 0;
+  // Nol tannarxli kirim (bepul tovar) ham o'rtachani kamaytiradi; tannarx berilmasa o'zgarmaydi
+  const updatesCost = INCOMING.has(move.type) && move.costPrice != null;
   const [updated] = await tx
     .update(stockLevels)
     .set({

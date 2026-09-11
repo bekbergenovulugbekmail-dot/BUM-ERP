@@ -19,6 +19,7 @@ import { financeRoutes } from "./modules/finance/routes.js";
 import { inventoryRoutes } from "./modules/inventory/routes.js";
 import { platformRoutes } from "./modules/platform/routes.js";
 import { publicRoutes } from "./modules/public/routes.js";
+import { purchaseRoutes } from "./modules/purchase/routes.js";
 import { registrationRoutes } from "./modules/registration/routes.js";
 
 export async function buildServer() {
@@ -75,6 +76,7 @@ export async function buildServer() {
   await app.register(catalogRoutes, { prefix: "/api/catalog" });
   await app.register(inventoryRoutes, { prefix: "/api/inventory" });
   await app.register(financeRoutes, { prefix: "/api/finance" });
+  await app.register(purchaseRoutes, { prefix: "/api/purchase" });
 
   return app;
 }

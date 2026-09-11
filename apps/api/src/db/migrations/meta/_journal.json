@@ -43,6 +43,13 @@
       "when": 1789103565460,
       "tag": "0005_finance_integrity",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789104598435,
+      "tag": "0006_purchase_integrity",
+      "breakpoints": true
     }
   ]
 }

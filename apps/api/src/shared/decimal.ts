@@ -65,6 +65,20 @@ export function toMinor(value: string, scale = 2): bigint {
   return negative ? -minor : minor;
 }
 
+/** Masshtabni o'zgartirish, kichraytirishda half-up (ishoraga simmetrik) yaxlitlash. */
+export function rescale(minor: bigint, fromScale: number, toScale: number): bigint {
+  if (toScale >= fromScale) return minor * 10n ** BigInt(toScale - fromScale);
+  const divisor = 10n ** BigInt(fromScale - toScale);
+  const negative = minor < 0n;
+  const rounded = ((negative ? -minor : minor) + divisor / 2n) / divisor;
+  return negative ? -rounded : rounded;
+}
+
+/** round(a × b / c), half-up; a, b ≥ 0, c > 0. */
+export function mulDivRound(a: bigint, b: bigint, c: bigint): bigint {
+  return (a * b * 2n + c) / (2n * c);
+}
+
 /** `toMinor` teskarisi: 1250n → "12.50". */
 export function fromMinor(minor: bigint, scale = 2): string {
   const negative = minor < 0n;
