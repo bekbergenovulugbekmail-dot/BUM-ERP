@@ -13,6 +13,7 @@ import { logger } from "./shared/logger.js";
 import { registerErrorHandler } from "./shared/errors.js";
 import { closeDb, pool } from "./db/client.js";
 import { authRoutes } from "./modules/auth/routes.js";
+import { catalogRoutes } from "./modules/catalog/routes.js";
 import { companyRoutes } from "./modules/company/routes.js";
 import { platformRoutes } from "./modules/platform/routes.js";
 import { publicRoutes } from "./modules/public/routes.js";
@@ -69,6 +70,7 @@ export async function buildServer() {
   await app.register(publicRoutes, { prefix: "/api/public" });
   await app.register(platformRoutes, { prefix: "/api/platform" });
   await app.register(companyRoutes, { prefix: "/api/company" });
+  await app.register(catalogRoutes, { prefix: "/api/catalog" });
 
   return app;
 }

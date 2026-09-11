@@ -7,7 +7,7 @@
 |---|---|
 | Branch | `feat/postgres-migration` |
 | Oxirgi yangilanish | 2026-09-11 |
-| Umumiy holat | 4 / 16 PHASE tugallandi, PHASE 4 jarayonda, keyingi — PHASE 6 |
+| Umumiy holat | 5 / 16 PHASE tugallandi, PHASE 4 jarayonda, keyingi — PHASE 7 |
 | Ishlab turgan ilova | Hali to'liq Convex'da — frontend yangi API'ga ulanmagan |
 
 **Holat belgilari:** ✅ tugallandi · 🟡 jarayonda · ⬜ boshlanmagan
@@ -25,7 +25,7 @@
 | 3 | API poydevori | ✅ tugallandi |
 | 4 | Auth va sessiyalar | 🟡 jarayonda (SMS tiklash — Eskiz ulangach) |
 | 5 | Platforma: kompaniya, filial, rol, admin | ✅ tugallandi |
-| 6 | Katalog | ⬜ boshlanmagan |
+| 6 | Katalog | ✅ tugallandi |
 | 7 | Ombor | ⬜ boshlanmagan |
 | 8 | Moliya | ⬜ boshlanmagan |
 | 9 | Xarid | ⬜ boshlanmagan |
@@ -42,34 +42,29 @@
 - **Ierarxiya:** bootstrap admin (`.env` dan seed, o'chirilmaydi) → platforma admini biznes egasi uchun login/parol ochadi → biznes egasi o'z kompaniyasidagi xodimlar uchun login/parol ochadi → xodim faqat o'z parolini (eski parol bilan) o'zgartiradi
 - **Qo'shimcha platforma adminlari:** faqat bootstrap admin tayinlaydi va olib tashlaydi
 - **O'zi ro'yxatdan o'tish:** standart holatda yopiq; platforma admini sozlamalardan yoqadi/o'chiradi
-- **Takliflar (invitations):** kerak emas — SMS yo'q, parol to'g'ridan-to'g'ri beriladi. `invitations` jadvali sxemada qoladi, API yozilmaydi; Eskiz ulangach PHASE 14 da qaytiladi
+- **Takliflar (invitations):** kerak emas — `invitations` jadvali sxemada qoladi, API yozilmaydi; Eskiz ulangach PHASE 14 da
 - **Cheklovlar:** ega faqat o'z kompaniyasi xodimini ko'radi va boshqaradi; hech kim o'ziga rol ko'tara olmaydi; parol o'zgarsa barcha sessiyalar bekor; har amal audit jurnaliga
+- **Mustaqil ish:** foydalanuvchi ruxsat so'ramasdan barcha PHASE larni oxirigacha davom ettirishni tasdiqlagan
 
 ## Convex (ishlab turgan ilova) xavfsizlik teshiklari
 
 Ko'chirish paytida topilgan. Yangi API'da hammasi yopilgan.
 
-**Convex kodida yopildi** — `main` branch'da `3f958f1` (feat'da `8ab75e2`), `convex/rbac.test.ts` 10 ta test:
-
-| Joy | Muammo (har qanday a'zo qila olardi) | Holat |
-|---|---|---|
-| `admin.updateRole` | Global rolni tahrirlab barcha kompaniyalarga ta'sir qilish | ✅ yopildi |
-| `admin.updateUserRole` | O'ziga Superadmin berish | ✅ yopildi |
-| `companies.updateMember` | O'zini Business Owner qilish | ✅ yopildi |
-| `admin.createRole` / `deleteRole` | Ruxsatsiz rol yaratish/o'chirish, global rolni o'chirish | ✅ yopildi |
-| `admin.toggleUserActive` | Egani bloklash | ✅ yopildi |
-| `admin.createAuditLog` | Audit yozuvini qalbakilashtirish | ✅ internal qilindi |
+**Convex kodida yopildi** — `main` da `3f958f1` (feat'da `8ab75e2`), `convex/rbac.test.ts` 10 ta test:
+`admin.updateRole` (global rol), `admin.updateUserRole` (o'ziga Superadmin), `companies.updateMember` (o'zini Business Owner), `admin.createRole` / `deleteRole`, `admin.toggleUserActive` (egani bloklash), `admin.createAuditLog` (internal qilindi).
 
 > ⚠️ **Production'ga deploy qilinmagan.** Bu muhitda faqat dev deployment (`cheerful-toad-597`) kaliti bor.
-> Yopish kuchga kirishi uchun `main` dan production kaliti bilan `npx convex deploy` qilish kerak.
+> Kuchga kirishi uchun `main` dan production kaliti bilan `npx convex deploy` qilish kerak.
 
 **Convex'da hali ochiq** (frontend PHASE 16 da yangi API'ga ko'chganda yo'qoladi):
 
 | Joy | Muammo |
 |---|---|
+| `products/units.ts` `create`, `addConversion`, `seedDefaultUnits` | **Autentifikatsiya umuman yo'q** — tizimga kirmagan odam ham global birlik/konversiya yaratadi |
+| `products/units.ts` `listConversions` | Barcha kompaniyalarning konversiyalarini qaytaradi |
+| `products/products.ts` `getByBarcode` | Global indeksdan birinchi mahsulot — boshqa kompaniyada shu kod bo'lsa o'zinikini topmaydi (xato) |
 | `admin.upsertCompany` | Kompaniyasi yo'q foydalanuvchi "default" kompaniyani o'zgartiradi; ruxsat tekshiruvi yo'q |
-| `admin.upsertSetting` | Ruxsat tekshiruvi yo'q |
-| `companies.updateCompany`, `createBranch`, `updateBranch` | Ruxsat tekshiruvi yo'q |
+| `admin.upsertSetting`; `companies.updateCompany`, `createBranch`, `updateBranch` | Ruxsat tekshiruvi yo'q |
 | `admin.listUsers`, `companies.platformListAllUsers` | Foydalanuvchi hujjati to'liq (PIN xeshi) brauzerga |
 | `companies.platformGetSettings` | Autentifikatsiyasiz ochiq |
 
@@ -77,176 +72,176 @@ Ko'chirish paytida topilgan. Yangi API'da hammasi yopilgan.
 
 | Kim | Nima qila oladi | Himoya |
 |---|---|---|
-| **Bootstrap admin** | Hamma narsa; qo'shimcha platforma adminlarini tayinlaydi | `.env` dagi `BOOTSTRAP_ADMIN_PHONE` / `BOOTSTRAP_ADMIN_PASSWORD` dan `db:seed`. Parol faqat argon2id xeshi. API orqali o'zgartirilmaydi, bloklanmaydi, o'chirilmaydi. Bazada: CHECK, partial unique, trigger |
-| **Platforma admini** | Kompaniya + egasini yaratadi; kompaniyani to'xtatadi; oddiy foydalanuvchilarning telefon/parolini o'zgartiradi, bloklaydi; statistika, audit, sozlamalar (ro'yxatdan o'tishni yoqish ham) | Bootstrap admin, boshqa platforma adminlari va o'z hisobiga tegolmaydi; admin tayinlay olmaydi |
-| **Kompaniya egasi** | Faqat aktiv kompaniyasiga xodim qo'shadi, parolini tiklaydi, a'zoligini yangilaydi; rollar, sozlamalar, audit | Boshqa kompaniya xodimi → 404; egalik rollarini berolmaydi; boshqa kompaniyaga ham a'zo xodimning parolini tiklay olmaydi |
-| **Xodim** | O'z parolini eski parol bilan o'zgartiradi; roliga qarab kompaniya amallari (RBAC) | Xato joriy parol: 5 ta / 15 daqiqa |
+| **Bootstrap admin** | Hamma narsa; qo'shimcha platforma adminlarini tayinlaydi | `.env` dan `db:seed`, argon2id. API orqali o'zgartirilmaydi, bloklanmaydi, o'chirilmaydi. Bazada: CHECK, partial unique, trigger |
+| **Platforma admini** | Kompaniya + egasini yaratadi; kompaniyani to'xtatadi; oddiy foydalanuvchilarni boshqaradi; statistika, audit, sozlamalar; o'lchov birliklari | Bootstrap admin, boshqa platforma adminlari va o'z hisobiga tegolmaydi |
+| **Kompaniya egasi** | O'z kompaniyasiga xodim qo'shadi, parolini tiklaydi, a'zoligini yangilaydi; rollar, sozlamalar, audit | Boshqa kompaniya xodimi → 404; egalik rollarini berolmaydi |
+| **Xodim** | O'z paroli; roliga qarab kompaniya amallari (RBAC) | Xato joriy parol: 5 ta / 15 daqiqa |
 
-**RBAC** (`modules/company/tenant.ts`): ruxsat faol a'zolikning roli bo'yicha. `Superadmin` / `Business Owner` — barcha ruxsatlar (bu nomlarda maxsus rol yaratib bo'lmaydi). `requirePermission` faqat katalogdagi `Permission` tipini qabul qiladi. Rol tahrirlovchi faqat o'zida bor ruxsatni bera oladi. To'xtatilgan, tugatilgan yoki **sinov muddati o'tgan** kompaniyada yozish amallari 403, o'qish mumkin.
+**RBAC** (`modules/company/tenant.ts`): ruxsat faol a'zolikning roli bo'yicha; `Superadmin` / `Business Owner` — barcha ruxsatlar; `requirePermission` faqat katalogdagi `Permission`; rol tahrirlovchi faqat o'zida bor ruxsatni bera oladi; to'xtatilgan, tugatilgan yoki sinov muddati o'tgan kompaniyada yozish 403.
 
-## Tayyor API endpointlar (jami)
+## Tayyor API endpointlar
 
-| Metod | Yo'l | Kim | Convex'dagi muqobili |
+Xatolar doim `{ code, message }`. Unique buzilishi 409, FK 409, CHECK 400. Yozish endpointlari noma'lum maydonlarni 400 bilan rad etadi. Pul/miqdor — satr (`"12500.5000"`), son yoki satr qabul qilinadi.
+
+### Auth, ro'yxatdan o'tish, ommaviy
+
+| Metod | Yo'l | Kim | Convex |
 |---|---|---|---|
 | GET | `/health` | — | — |
-| POST | `/api/auth/login` | — | `signIn("password")` |
-| POST | `/api/auth/logout` | — | `signOut` |
+| POST | `/api/auth/login`, `/api/auth/logout` | — | `signIn`, `signOut` |
 | GET | `/api/auth/me` | sessiya | `users.getCurrentUser` |
-| POST | `/api/auth/password` | sessiya (bootstrap admindan tashqari) | — (yangi) |
-| GET | `/api/auth/security` | sessiya | `pin.getSecuritySettings` |
-| POST | `/api/auth/pin` | sessiya | `pin.setPin` |
-| POST | `/api/auth/pin/change` | sessiya | `pin.changePin` |
-| POST | `/api/auth/pin/remove` | sessiya | `pin.removePin` |
-| POST | `/api/auth/pin/verify` | sessiya | `pin.verifyPin` |
-| PUT | `/api/auth/auto-lock` | sessiya | `pin.setAutoLockTimeout` |
-| GET | `/api/registration` | — | `companies.isRegistrationEnabled` |
-| POST | `/api/registration` | — (faqat yoqilgan bo'lsa) | `companies.registerCompany` |
-| GET | `/api/public/companies/:slug` | — | `companies.getCompanyBySlug` |
-| GET | `/api/public/companies/:slug/access` | sessiya | `companies.verifyTenantAccess` |
-| GET | `/api/platform/companies` | platforma admini | `companies.platformListCompanies` (`?status=`) |
-| POST | `/api/platform/companies` | platforma admini | `companies.platformCreateCompany` |
-| GET | `/api/platform/companies/:companyId` | platforma admini | `companies.platformGetCompany` |
-| POST | `/api/platform/companies/:companyId/status` | platforma admini | `companies.platformUpdateCompanyStatus` |
-| GET | `/api/platform/stats` | platforma admini | `companies.platformGetStats` |
-| GET | `/api/platform/audit-logs` | platforma admini | `companies.platformListAuditLogs` |
-| GET | `/api/platform/users` | platforma admini | `companies.platformListAllUsers` |
-| PATCH | `/api/platform/users/:userId` | platforma admini | — (telefon) |
-| POST | `/api/platform/users/:userId/password` | platforma admini | `userAdmin.resetUserPassword` |
-| POST | `/api/platform/users/:userId/status` | platforma admini | — (bloklash) |
-| POST | `/api/platform/users/:userId/platform-admin` | **faqat bootstrap admin** | `companies.platformGrantAdmin` / `platformRevokeAdmin` |
-| GET | `/api/platform/settings` | platforma admini | `companies.platformGetSettings` |
-| PUT | `/api/platform/settings` | platforma admini | `companies.platformSaveSettings` |
-| GET | `/api/company` | faol a'zo | `companies.getActiveCompany`, `admin.getCompany` |
-| PATCH | `/api/company` | `company.manage` | `companies.updateCompany`, `admin.upsertCompany` |
-| GET | `/api/company/mine` | sessiya | `companies.listMyCompanies` |
-| POST | `/api/company/switch` | faol a'zo | `companies.switchCompany` |
-| GET | `/api/company/branches` | faol a'zo | `companies.listBranches` |
-| POST | `/api/company/branches` | `branches.manage` | `companies.createBranch` |
-| PATCH | `/api/company/branches/:branchId` | `branches.manage` | `companies.updateBranch` |
-| GET | `/api/company/employees` | `users.view` | `companies.listMembers`, `admin.listUsers` |
-| POST | `/api/company/employees` | kompaniya egasi | `userAdmin.createUserAccount` |
-| PATCH | `/api/company/employees/:userId` | kompaniya egasi | `companies.updateMember`, `admin.updateUserRole` |
-| POST | `/api/company/employees/:userId/password` | kompaniya egasi | `userAdmin.resetUserPassword` |
-| GET | `/api/company/roles` | faol a'zo | `admin.listRoles` |
-| POST | `/api/company/roles` | `roles.manage` | `admin.createRole` |
-| PATCH | `/api/company/roles/:roleId` | `roles.manage` | `admin.updateRole` |
-| DELETE | `/api/company/roles/:roleId` | `roles.manage` | `admin.deleteRole` |
-| GET | `/api/company/audit-logs` | `audit.view` | `admin.listAuditLogs` |
-| GET | `/api/company/settings` | `settings.view` | `admin.getSettings` |
-| PUT | `/api/company/settings/:key` | `settings.manage` (`modules` — `modules.manage`) | `admin.upsertSetting` |
+| POST | `/api/auth/password` | sessiya (bootstrap admindan tashqari) | — |
+| GET/POST/PUT | `/api/auth/security`, `/pin`, `/pin/change`, `/pin/remove`, `/pin/verify`, `/auto-lock` | sessiya | `pin.*` |
+| GET/POST | `/api/registration` | — (POST faqat yoqilgan bo'lsa) | `isRegistrationEnabled`, `registerCompany` |
+| GET | `/api/public/companies/:slug`, `/:slug/access` | — / sessiya | `getCompanyBySlug`, `verifyTenantAccess` |
 
-Xatolar doim `{ code, message }` shaklida. PostgreSQL unique buzilishi 409. Yozish endpointlari noma'lum maydonlarni 400 bilan rad etadi.
+### Platforma admini (`/api/platform`)
+
+| Metod | Yo'l | Convex |
+|---|---|---|
+| GET/POST | `/companies` (`?status=`) | `platformListCompanies`, `platformCreateCompany` |
+| GET | `/companies/:companyId` | `platformGetCompany` |
+| POST | `/companies/:companyId/status` | `platformUpdateCompanyStatus` |
+| GET | `/stats`, `/audit-logs`, `/users` | `platformGetStats`, `platformListAuditLogs`, `platformListAllUsers` |
+| PATCH/POST | `/users/:userId`, `/users/:userId/password`, `/users/:userId/status` | `userAdmin.resetUserPassword` va yangi |
+| POST | `/users/:userId/platform-admin` (**faqat bootstrap admin**) | `platformGrantAdmin` / `platformRevokeAdmin` |
+| GET/PUT | `/settings` | `platformGetSettings`, `platformSaveSettings` |
+
+### Kompaniya (`/api/company`)
+
+| Metod | Yo'l | Kim | Convex |
+|---|---|---|---|
+| GET / PATCH | `/` | a'zo / `company.manage` | `getActiveCompany`, `updateCompany` |
+| GET / POST | `/mine`, `/switch` | sessiya / faol a'zo | `listMyCompanies`, `switchCompany` |
+| GET / POST / PATCH | `/branches`, `/branches/:branchId` | a'zo / `branches.manage` | `listBranches`, `createBranch`, `updateBranch` |
+| GET | `/employees` | `users.view` | `listMembers`, `admin.listUsers` |
+| POST / PATCH / POST | `/employees`, `/employees/:userId`, `/employees/:userId/password` | kompaniya egasi | `createUserAccount`, `updateMember`, `resetUserPassword` |
+| GET / POST / PATCH / DELETE | `/roles`, `/roles/:roleId` | a'zo / `roles.manage` | `admin.*Role` |
+| GET | `/audit-logs` | `audit.view` | `admin.listAuditLogs` |
+| GET / PUT | `/settings`, `/settings/:key` | `settings.view` / `settings.manage` (`modules` — `modules.manage`) | `admin.getSettings`, `upsertSetting` |
+
+### Katalog (`/api/catalog`)
+
+| Metod | Yo'l | Kim | Convex |
+|---|---|---|---|
+| GET | `/units` | sessiya | `units.list` |
+| POST / PATCH | `/units`, `/units/:unitId` | platforma admini | `units.create` |
+| GET / POST / DELETE | `/unit-conversions` (`?productId=`), `/unit-conversions/:id` | a'zo / `products.manage` | `units.listConversions`, `addConversion` |
+| GET / POST / PATCH / DELETE | `/categories` (`?includeInactive=`), `/categories/:id` | a'zo / `products.manage` | `categories.*` |
+| GET / POST / PATCH / DELETE | `/brands` (`?isActive=`), `/brands/:id` | a'zo / `products.manage` | `brands.*` |
+| GET | `/products` (`?search=&categoryId=&brandId=&isActive=&limit=&cursor=`) | `products.view` | `products.list` |
+| GET | `/products/:productId` (partiyalar bilan), `/products/by-barcode/:barcode` | `products.view` | `getById`, `getByBarcode` |
+| POST / PATCH / DELETE | `/products`, `/products/:productId` | `products.create` / `.edit` / `.delete` | `create`, `update`, `remove` |
+| POST | `/products/import` (JSON qatorlar) | `products.create` | frontend CSV import |
+| GET | `/products/export` (CSV) | `products.view` | frontend CSV export |
+| POST | `/products/:productId/batches` | `warehouse.manage` | `addBatch` |
+| GET | `/batches/expiring` (`?daysAhead=30`) | `warehouse.view` | `getExpiringBatches` |
 
 ## Lokal muhit
 
-- **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432).
-  - `bumerp` — ishchi baza: 4 ta migratsiya, **ma'lumot yo'q**.
-  - `bumerp_test` — testlar uchun, `pnpm test` o'zi yaratadi va har testda tozalaydi.
-- **MinIO** — 9000 (S3), 9001 (konsol). `bum-erp` bucket va `.env` da `STORAGE_*` hali yo'q.
+- **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432). `bumerp` — 4 ta migratsiya, ma'lumot yo'q; `bumerp_test` — testlar.
+- **MinIO** — 9000/9001; `bum-erp` bucket va `STORAGE_*` hali yo'q.
 - **Migratsiya:** `pnpm --filter @bum/api db:migrate`
-- **Bootstrap admin:** `.env` ga `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_PASSWORD` (ixtiyoriy `BOOTSTRAP_ADMIN_NAME`) — `pnpm --filter @bum/api db:seed`. Idempotent.
+- **Seed:** `.env` ga `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_PASSWORD` — `pnpm --filter @bum/api db:seed` (bootstrap admin + 14 global rol + 9 standart o'lchov birligi; idempotent)
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
-- **Testlar:** `pnpm --filter @bum/api test` — 124 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
+- **Testlar:** `pnpm --filter @bum/api test` — 139 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
 
 ---
 
 ## PHASE 1 — Monorepo skeleti ✅
 
-- **Ko'chirilgan:** pnpm workspace; `packages/shared`; `apps/api` skeleti; `docker-compose.yml`; `.env.example`.
-- **Commitlar:** `c5c082a`, `070367f`
+pnpm workspace; `packages/shared`; `apps/api`; `docker-compose.yml`; `.env.example`. Commitlar: `c5c082a`, `070367f`.
 
 ## PHASE 2 — PostgreSQL sxemasi ✅
 
-- **Ko'chirilgan:** 61 jadval, 10 domen (platform 11, catalog 6, inventory 6, finance 6, purchase 6, sales 5, crm 8, manufacturing 6, hr 6, notifications 1).
-- **Asosiy qarorlar:** pul/miqdor `numeric`; har tenant jadvalida `company_id NOT NULL`; `legacy_id` ko'chirish uchun (API javoblariga chiqmaydi); DB darajasidagi CHECK/unique himoyalar.
-- **Migratsiyalar:** `0000` to'liq sxema; `0001` NULLS NOT DISTINCT (global rol/sozlama/konversiya dublikatlari); `0002` bootstrap admin himoyasi; `0003` bitta asosiy filial.
-- **Commitlar:** `c5c082a`, `2bab68c`, `7ca1235`
+61 jadval, 10 domen. Pul/miqdor `numeric`; `company_id NOT NULL`; `legacy_id` (API ga chiqmaydi); DB darajasidagi CHECK/unique. Migratsiyalar: `0000` sxema; `0001` NULLS NOT DISTINCT; `0002` bootstrap admin himoyasi; `0003` bitta asosiy filial.
 
 ## PHASE 3 — API poydevori ✅
 
-- **Ko'chirilgan:** DB mijozi, tranzaksiya, xatolar (`{ code, message }`, unique → 409), logger, env, `.env` yuklash, migrate, Fastify (helmet, cors, cookie), dual-stack `HOST=::`.
-- **Brauzerda sinash:** `http://localhost:3000/health`
-- **Commitlar:** `3a9872d`, `045f6e1`, `fe7f664`, `43a3fcd`
+DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, dual-stack `HOST=::`. Umumiy yordamchilar: `shared/decimal.ts` (numeric satr validatsiyasi), `shared/cursor.ts` (keyset sahifalash), `shared/rate-limit.ts`, `shared/audit.ts`.
 
 ## PHASE 4 — Auth va sessiyalar 🟡
 
-- **Ko'chirilgan modullar:** `modules/auth/` — argon2id (+ Convex Auth lucia Scrypt xeshlari, birinchi kirishda argon2id ga), sessiya (httpOnly cookie, SHA-256, mutlaq 30 kun + faolsizlik 12 soat), login (bir xil javob/vaqt, rate limit, audit), PIN (5 xato → 5 daqiqa blok, Convex `reason` kodlari), guard'lar; `shared/rate-limit.ts`, `shared/audit.ts`.
-- **Convex'dan farqlar:** PIN change/remove ham urinishlarni hisoblaydi; mavjud PIN ustiga yozilmaydi; ochiq signup yo'q (o'rniga boshqariladigan ro'yxatdan o'tish, PHASE 5).
+- **Ko'chirilgan:** `modules/auth/` — argon2id (+ Convex lucia Scrypt xeshlari), sessiya (httpOnly cookie, SHA-256, 30 kun / 12 soat), login (rate limit, audit), PIN (5 xato → 5 daqiqa, Convex `reason` kodlari), guard'lar.
 - **Testlar:** `auth` (17), `pin` (14), `password` (4)
-- **Qolgan ishlar:** SMS orqali parol tiklash (`password_reset_codes`) — Eskiz ulangach PHASE 14 da; eskirgan `rate_limits` / `sessions` qatorlarini tozalash
+- **Qolgan:** SMS orqali parol tiklash — Eskiz ulangach PHASE 14 da; eskirgan `rate_limits` / `sessions` tozalash
 
 ## PHASE 5 — Platforma: kompaniya, filial, rol, admin ✅
 
-- **Ko'chirilgan modullar:**
-  - `modules/platform/bootstrap.service.ts` + `cli/seed-bootstrap-admin.ts` (`db:seed`) — bootstrap admin
-  - `modules/platform/company.service.ts` — kompaniya + ega (platforma admini yoki ro'yxatdan o'tish), ro'yxat, tafsilot, holat
-  - `modules/platform/platform.service.ts` — statistika, foydalanuvchilar, platforma sozlamalari
-  - `modules/users/user-admin.service.ts` — ierarxiya: platforma admini, ega, o'z paroli, platforma adminini tayinlash (faqat bootstrap)
-  - `modules/registration/` — o'zi ro'yxatdan o'tish: faqat yoqilgan bo'lsa, IP ga soatiga 5, `defaultTrialDays` sinov muddati, ega darhol kiradi
-  - `modules/public/routes.ts` — `/t/:slug` portal
-  - `modules/audit/audit-log.service.ts` — audit jurnali (platforma va kompaniya)
-  - `modules/company/` — tenant va RBAC, aktiv kompaniya, filiallar, a'zoni yangilash, rollar, sozlamalar
-- **Ataylab ko'chirilmaganlar:** takliflar (`inviteMember`, `createInvitation`, `listInvitations`, `cancelInvitation`, `acceptInvitation`) — qaror bo'yicha PHASE 14 ga; `admin.createAuditLog` (audit faqat serverda); `admin.seedDefaultRoles` (rollar kompaniya yaratilganda); `platformSetAdminByEmail` (o'rniga `db:seed`); Convex'ning `migrateExistingDataToTenant` kabi bir martalik funksiyalari
-- **Audit amallari:** `BOOTSTRAP_ADMIN_SEEDED`, `COMPANY_CREATED`, `COMPANY_REGISTERED`, `COMPANY_STATUS_CHANGED`, `COMPANY_UPDATED`, `COMPANY_SWITCHED`, `PLATFORM_SETTINGS_UPDATED`, `PLATFORM_ADMIN_GRANTED`, `PLATFORM_ADMIN_REVOKED`, `USER_CREATED`, `EMPLOYEE_CREATED`, `USER_PASSWORD_RESET`, `USER_PHONE_CHANGED`, `USER_BLOCKED`, `USER_ACTIVATED`, `PASSWORD_CHANGED`, `BRANCH_CREATED`, `BRANCH_UPDATED`, `MEMBER_UPDATED`, `ROLE_CREATED`, `ROLE_UPDATED`, `ROLE_DELETED`, `SETTING_UPDATED`
+- **Ko'chirilgan:** `modules/platform/` (bootstrap, kompaniyalar, statistika, sozlamalar), `modules/users/` (ierarxiya), `modules/registration/` (boshqariladigan ro'yxatdan o'tish), `modules/public/` (`/t/:slug`), `modules/audit/`, `modules/company/` (tenant, RBAC, filiallar, a'zolar, rollar, sozlamalar).
+- **Ataylab ko'chirilmagan:** takliflar (PHASE 14), `createAuditLog`, `seedDefaultRoles`, `platformSetAdminByEmail`, bir martalik ko'chirish funksiyalari.
 - **Testlar:** `bootstrap` (13), `platform-admin` (11), `platform-ops` (10), `platform-admins` (4), `registration` (6), `public` (2), `company-owner` (7), `company` (20), `roles` (10), `company-audit-settings` (6)
-- **Brauzerda sinash:** frontend hali Convex'da; `curl` bilan: `db:seed` → login → `POST /api/platform/companies` → ega kirib `GET /api/company`, `POST /api/company/employees`
 
-## PHASE 6 — Katalog ⬜
+## PHASE 6 — Katalog ✅
 
 - **Convex manbasi:** `convex/products/` (products, categories, brands, units); sahifa `products`
-- **Tayyor poydevor:** catalog jadvallari; `requireTenantForWrite` + `requirePermission("products.*")`
+- **Ko'chirilgan modullar** (`modules/catalog/`):
+  - `units.service.ts` — o'lchov birliklari (platforma; yozish faqat platforma admini; `db:seed` 9 ta standart birlik), birlik konversiyalari (kompaniyaga tegishli, `products.manage`)
+  - `categories.service.ts` — kategoriyalar (ota shu kompaniyaniki, sikl taqiqlangan, mahsulot yoki ichki kategoriyasi borini o'chirib bo'lmaydi) va brendlar (nomi noyob, ishlatilayotganini o'chirib bo'lmaydi)
+  - `products.service.ts` — mahsulotlar (nom bo'yicha kursorli sahifalash, nom/SKU/shtrix-kod qidiruvi, kompaniya ichidagi shtrix-kod qidiruvi), faolsizlantirish, partiyalar (ombor va ta'minotchi shu kompaniyaniki, sanalar tekshiruvi), muddati yaqinlashgan partiyalar, CSV import (qatorma-qator xatolar) va export (formula injection himoyasi)
+  - Audit: `UNIT_CREATED`, `UNIT_UPDATED`, `UNIT_CONVERSION_CREATED`, `UNIT_CONVERSION_DELETED`, `CATEGORY_CREATED/UPDATED/DELETED`, `BRAND_CREATED/UPDATED/DELETED`, `PRODUCT_CREATED`, `PRODUCT_UPDATED`, `PRODUCT_DEACTIVATED`, `PRODUCTS_IMPORTED`, `BATCH_CREATED`
+- **Convex'dan ataylab farqlar:**
+  - `units.ts` autentifikatsiyasiz edi — endi birlik yozish faqat platforma admini, konversiyalar kompaniyaga tegishli
+  - `getByBarcode` kompaniya ichida qidiradi (Convex boshqa kompaniyadagi bir xil kodda xato qilardi)
+  - `products.list` / `getById` ruxsat tekshirmasdi — endi `products.view`
+  - Narxlar float emas, numeric satr; ko'pi bilan 4 kasr xona
+  - `costingMethod`: amalda faqat AVCO — `fifo`/`fefo`/`manual` aniq xato bilan rad etiladi (Convex jimgina AVCO qo'llardi)
+  - `imageUrl` (foydalanuvchi kiritgan tashqi URL — saqlangan XSS yo'li) qabul qilinmaydi; rasm fayl saqlash bilan PHASE 14 da (`image_key`)
+  - CSV import serverda: noma'lum o'lchov birligi rad etiladi (Convex frontendi jimgina birinchi birlikni qo'yardi); kategoriya/brend nomi bo'yicha bog'lanadi
+  - Kategoriyani o'chirishda ichki kategoriyalar tekshiriladi; sikl taqiqlangan; brendni o'chirish qo'shildi
+- **Testlar:** `catalog` (7), `products` (8)
+- **Eslatma:** partiya qo'shish zaxira qoldig'iga ta'sir qilmaydi (Convex'dagi kabi); zaxira harakatlari PHASE 7 da
 
 ## PHASE 7 — Ombor ⬜
 
-- **Convex manbasi:** `convex/warehouse/` (warehouses, stock, inventoryCounts); sahifa `warehouse`
-- **Tayyor poydevor:** inventory jadvallari; "Asosiy ombor" (WH-001); a'zoning `allowedWarehouseIds` (bo'sh = hammasi) — ombor amallarida qo'llanadi
+- **Convex manbasi:** `convex/warehouse/` — `warehouses.ts` (list, getById, create, update, seedDefault), `stock.ts` (getWarehouseStock, getProductStock, getWarehouseStats, recordMovement, transferStock, getMovements), `inventoryCounts.ts` (list, getById, create, updateItem, updateStatus, applyAdjustments); sahifa `warehouse`
+- **Tayyor poydevor:** inventory jadvallari (`stock_levels.quantity >= 0` CHECK, o'zgarmas `stock_movements` jurnali); "Asosiy ombor" (WH-001); a'zoning `allowedWarehouseIds`
+- **Bog'liqlik:** zaxira jadvallari xarid, savdo, POS, ishlab chiqarish, hisobotlar va dashboard'da ishlatiladi — zaxira servisi shu PHASE da umumiy qilib yoziladi
 
 ## PHASE 8 — Moliya ⬜
 
-- **Convex manbasi:** `convex/finance/` (accounts, cashAccounts, expenses, journalHelper); sahifa `finance`
+`convex/finance/` (accounts, cashAccounts, expenses, journalHelper); sahifa `finance`
 
 ## PHASE 9 — Xarid ⬜
 
-- **Convex manbasi:** `convex/purchase/` (suppliers, orders); sahifa `purchase`
+`convex/purchase/` (suppliers, orders); sahifa `purchase`
 
 ## PHASE 10 — Savdo va POS ⬜
 
-- **Convex manbasi:** `convex/sales/` (customers, orders, pos); sahifalar `sales`, `pos`
-- **Tayyor poydevor:** kompaniya sozlamalari (`PUT /api/company/settings/:key`) — POS sozlamalari uchun
+`convex/sales/` (customers, orders, pos); sahifalar `sales`, `pos`. Poydevor: kompaniya sozlamalari (POS sozlamalari uchun).
 
 ## PHASE 11 — CRM ⬜
 
-- **Convex manbasi:** `convex/crm/` (leads, activities, salesReps, distribution); sahifa `crm`
+`convex/crm/` (leads, activities, salesReps, distribution); sahifa `crm`
 
 ## PHASE 12 — Ishlab chiqarish ⬜
 
-- **Convex manbasi:** `convex/manufacturing/` (boms, orders); sahifa `manufacturing`
+`convex/manufacturing/` (boms, orders); sahifa `manufacturing`
 
 ## PHASE 13 — HR ⬜
 
-- **Convex manbasi:** `convex/hr/` (employees, attendance, salary); sahifa `hr`
+`convex/hr/` (employees, attendance, salary); sahifa `hr`
 
 ## PHASE 14 — Dashboard, hisobot, AI, bildirishnoma, fayl ⬜
 
-- **Convex manbasi:** `convex/dashboard.ts`, `convex/notifications.ts`, `convex/analytics/`; sahifalar `dashboard`, `analytics`
-- **Shu yerga qoldirilgan:** takliflar (invitations) va SMS orqali parol tiklash — Eskiz ulangach
-- **Tayyor poydevor:** `notifications`, `invitations`, `password_reset_codes` jadvallari; MinIO konteyneri
+`convex/dashboard.ts`, `convex/notifications.ts`, `convex/analytics/`; sahifalar `dashboard`, `analytics`. Shu yerga qoldirilgan: takliflar, SMS parol tiklash (Eskiz), mahsulot rasmi (`image_key`, MinIO).
 
 ## PHASE 15 — Ma'lumotni Convex'dan ko'chirish ⬜
 
-- **Tayyor poydevor:** `legacy_id` ustunlari; login Convex Auth parol xeshlarini qabul qiladi
-- **E'tibor:** Convex'dagi `users.roleId` (global rol) yangi modelda yo'q — rol a'zolikda (`company_members.role_id`)
+Poydevor: `legacy_id` ustunlari; login Convex Auth parol xeshlarini qabul qiladi. E'tibor: Convex'dagi `users.roleId` (global rol) yangi modelda a'zolikda (`company_members.role_id`); Convex'dagi `imageUrl` ko'chirilmaydi; `costingMethod` hammasi `average` ga.
 
 ## PHASE 16 — Frontend'ni API'ga o'tkazish, deploy, Convex'ni o'chirish ⬜
 
 - **Manba:** `src/` (barcha sahifalar Convex hook'larini ishlatadi); auth kirish nuqtasi `src/hooks/use-auth.ts`
-- **E'tibor:** `admin/bootstrap.tsx` keraksiz (`db:seed`); `users-section.tsx` → `PATCH /api/company/employees/:userId`; `roles-section.tsx` `seedDefaultRoles` tugmasi keraksiz; `onboarding` → `/api/registration` (yoqilgan bo'lsa)
+- **E'tibor:**
+  - `admin/bootstrap.tsx` keraksiz (`db:seed`); `onboarding` → `/api/registration` (yoqilgan bo'lsa)
+  - `users-section.tsx` → `PATCH /api/company/employees/:userId`; `roles-section.tsx` `seedDefaultRoles` tugmasi keraksiz
+  - `products/product-form-dialog.tsx`: standart `costingMethod: "fifo"` → `"average"` bo'lishi kerak; `imageUrl` maydoni olib tashlanadi (PHASE 14 gacha); `products/page.tsx` `seedDefaultUnits` chaqiruvi keraksiz; CSV import → `POST /api/catalog/products/import`, export → `GET /api/catalog/products/export`
 
 ---
 
 ## Keyingi qadam
 
-1. **PHASE 6 (Katalog)** — `convex/products/` ni ko'chirish: birliklar, konversiyalar, kategoriyalar, brendlar, mahsulotlar, import/export
+1. **PHASE 7 (Ombor)** — omborlar, zaxira qoldiqlari va harakatlari (AVCO, tranzaksiya va qator qulfi bilan), o'tkazmalar, inventarizatsiya
 2. **Production:** Convex tuzatishini (`main` `3f958f1`) production kaliti bilan deploy qilish
 3. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_*` qo'shib `db:seed`
-4. MinIO bucket va `STORAGE_*` (PHASE 14 dan oldin)

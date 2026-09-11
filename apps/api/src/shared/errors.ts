@@ -46,10 +46,25 @@ export function registerErrorHandler(app: FastifyInstance): void {
     }
 
     // unique_violation — servis tekshiruvidan keyingi poyga (masalan, bir xil telefon)
-    if (pgErrorCode(err) === "23505") {
+    const pgCode = pgErrorCode(err);
+    if (pgCode === "23505") {
       return reply.status(409).send({
         code: "CONFLICT",
         message: "Bunday yozuv allaqachon mavjud",
+      });
+    }
+    // foreign_key_violation — bog'liq yozuv yo'q yoki yozuv hali ishlatilmoqda
+    if (pgCode === "23503") {
+      return reply.status(409).send({
+        code: "CONFLICT",
+        message: "Yozuv boshqa ma'lumotlar bilan bog'langan",
+      });
+    }
+    // check_violation — bazadagi cheklov (manfiy qoldiq va h.k.); servis odatda oldinroq ushlaydi
+    if (pgCode === "23514") {
+      return reply.status(400).send({
+        code: "BAD_REQUEST",
+        message: "Qiymat ruxsat etilgan chegaradan tashqarida",
       });
     }
 
