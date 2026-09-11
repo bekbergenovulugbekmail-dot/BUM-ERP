@@ -1,0 +1,278 @@
+/**
+ * Xarajatlar (convex/finance/expenses.ts).
+ *
+ * Holatlar: pending → approved → paid (paid — yakuniy); approved → pending qaytarish mumkin.
+ *
+ * Convex'dan farqlar:
+ *  - `updateStatus` istalgan holatga o'tkazardi (paid → pending ham), "to'landi"
+ *    kassadan pul chiqarmas va jurnalga yozmasdi — endi to'lov: kassa chiqimi +
+ *    DR xarajat hisobi / CR kassa (bank), bitta tranzaksiyada
+ *  - raqam `oxirgi + 1` edi — parallel yaratishda takrorlanardi (advisory lock)
+ *  - xarajatni tahrirlash yo'q edi — faqat kutilayotgan holatda
+ *  - `list`, `getStats` ruxsat tekshirmasdi — `finance.view`; statistika oxirgi 500 ta
+ *    emas, barcha yozuvlardan
+ */
+import { and, desc, eq, getTableColumns, gte, lt, lte, or, sql } from "drizzle-orm";
+import { badRequest, notFound } from "@bum/shared";
+import { accounts, expenses } from "../../db/schema/finance.js";
+import type { DbOrTx, Tx } from "../../db/transaction.js";
+import type { RequestMeta } from "../../shared/audit.js";
+import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
+import { nextDocumentNumber } from "../../shared/numbering.js";
+import type { TenantContext } from "../company/tenant.js";
+import { companyCurrency, financeAudit } from "./accounts.service.js";
+import { ledgerAccountFor, recordCashTransaction, todayIso } from "./cash.service.js";
+import { findAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "./journal.service.js";
+
+const { legacyId: _legacyId, companyId: _companyId, ...expenseFields } = getTableColumns(expenses);
+
+export type ExpenseStatus = (typeof expenses.status.enumValues)[number];
+
+const TRANSITIONS: Record<ExpenseStatus, ExpenseStatus[]> = {
+  pending: ["approved"],
+  approved: ["pending", "paid"],
+  paid: [],
+};
+
+/** Frontend kategoriyalari → hisoblar rejasi; qolganlari "Boshqa xarajatlar". */
+const CATEGORY_SUBTYPES: Record<string, string> = {
+  ijara: "rent",
+  maosh: "salary",
+  kommunal: "utilities",
+  transport: "transport",
+};
+
+export type ExpenseInput = {
+  category: string;
+  description: string;
+  amount: string;
+  expenseDate: string;
+  accountId?: string | null;
+  paidBy?: string | null;
+  notes?: string | null;
+};
+
+async function assertExpenseAccount(tx: Tx, companyId: string, accountId: string) {
+  const [account] = await tx
+    .select({ type: accounts.type, isActive: accounts.isActive })
+    .from(accounts)
+    .where(and(eq(accounts.id, accountId), eq(accounts.companyId, companyId)))
+    .limit(1);
+  if (!account) throw badRequest("Hisob topilmadi");
+  if (account.type !== "expense") throw badRequest("Xarajat hisobi tanlanishi kerak");
+  if (!account.isActive) throw badRequest("Hisob faol emas");
+}
+
+async function lockExpense(tx: Tx, tenant: TenantContext, expenseId: string) {
+  const [expense] = await tx
+    .select(expenseFields)
+    .from(expenses)
+    .where(and(eq(expenses.id, expenseId), eq(expenses.companyId, tenant.company.id)))
+    .limit(1)
+    .for("update");
+  if (!expense) throw notFound("Xarajat topilmadi");
+  return expense;
+}
+
+export async function listExpenses(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  options: {
+    status?: ExpenseStatus;
+    category?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    limit: number;
+    cursor?: string;
+  },
+) {
+  let after: { date: string; id: string } | null = null;
+  if (options.cursor) {
+    const [date, id] = decodeCursor(options.cursor, 2) as [string, string];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !UUID_RE.test(id)) throw badRequest("Kursor noto'g'ri");
+    after = { date, id };
+  }
+
+  const rows = await conn
+    .select(expenseFields)
+    .from(expenses)
+    .where(
+      and(
+        eq(expenses.companyId, tenant.company.id),
+        options.status ? eq(expenses.status, options.status) : undefined,
+        options.category ? eq(expenses.category, options.category) : undefined,
+        options.dateFrom ? gte(expenses.expenseDate, options.dateFrom) : undefined,
+        options.dateTo ? lte(expenses.expenseDate, options.dateTo) : undefined,
+        after
+          ? or(lt(expenses.expenseDate, after.date), and(eq(expenses.expenseDate, after.date), lt(expenses.id, after.id)))
+          : undefined,
+      ),
+    )
+    .orderBy(desc(expenses.expenseDate), desc(expenses.id))
+    .limit(options.limit + 1);
+
+  const page = rows.slice(0, options.limit);
+  const last = page.at(-1);
+  return {
+    expenses: page,
+    nextCursor: rows.length > options.limit && last ? encodeCursor([last.expenseDate, last.id]) : null,
+  };
+}
+
+export async function expenseStats(conn: DbOrTx, tenant: TenantContext) {
+  const companyId = tenant.company.id;
+  const monthStart = `${todayIso().slice(0, 7)}-01`;
+
+  const [totals] = await conn
+    .select({
+      totalThisMonth: sql<string>`coalesce(sum(${expenses.amount}) filter (where ${expenses.expenseDate} >= ${monthStart}), 0)::numeric(18,2)`,
+      countThisMonth: sql<number>`(count(*) filter (where ${expenses.expenseDate} >= ${monthStart}))::int`,
+      pendingCount: sql<number>`(count(*) filter (where ${expenses.status} = 'pending'))::int`,
+      pendingAmount: sql<string>`coalesce(sum(${expenses.amount}) filter (where ${expenses.status} = 'pending'), 0)::numeric(18,2)`,
+    })
+    .from(expenses)
+    .where(eq(expenses.companyId, companyId));
+
+  const byCategory = await conn
+    .select({ category: expenses.category, total: sql<string>`sum(${expenses.amount})::numeric(18,2)` })
+    .from(expenses)
+    .where(and(eq(expenses.companyId, companyId), gte(expenses.expenseDate, monthStart)))
+    .groupBy(expenses.category)
+    .orderBy(desc(sql`sum(${expenses.amount})`));
+
+  return { ...totals!, byCategory };
+}
+
+export async function createExpense(tx: Tx, tenant: TenantContext, input: ExpenseInput, meta: RequestMeta) {
+  const companyId = tenant.company.id;
+  if (input.accountId) await assertExpenseAccount(tx, companyId, input.accountId);
+
+  const number = await nextDocumentNumber(tx, {
+    table: expenses,
+    column: expenses.number,
+    companyColumn: expenses.companyId,
+    companyId,
+    prefix: `EXP-${input.expenseDate.slice(0, 4)}-`,
+    width: 4,
+  });
+
+  const [expense] = await tx
+    .insert(expenses)
+    .values({
+      ...input,
+      number,
+      companyId,
+      currency: await companyCurrency(tx, companyId),
+      createdBy: tenant.user.id,
+    })
+    .returning(expenseFields);
+
+  await financeAudit(tx, tenant, meta, {
+    action: "EXPENSE_CREATED",
+    resource: "expenses",
+    resourceId: expense!.id,
+    details: { number, category: input.category, amount: expense!.amount },
+  });
+  return expense!;
+}
+
+export async function updateExpense(
+  tx: Tx,
+  tenant: TenantContext,
+  expenseId: string,
+  patch: Partial<ExpenseInput>,
+  meta: RequestMeta,
+) {
+  const expense = await lockExpense(tx, tenant, expenseId);
+  if (expense.status !== "pending") throw badRequest("Faqat kutilayotgan xarajatni tahrirlash mumkin");
+  if (patch.accountId) await assertExpenseAccount(tx, tenant.company.id, patch.accountId);
+
+  const [updated] = await tx
+    .update(expenses)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(eq(expenses.id, expenseId))
+    .returning(expenseFields);
+
+  await financeAudit(tx, tenant, meta, {
+    action: "EXPENSE_UPDATED",
+    resource: "expenses",
+    resourceId: expenseId,
+    details: { changes: Object.keys(patch) },
+  });
+  return updated!;
+}
+
+export async function setExpenseStatus(
+  tx: Tx,
+  tenant: TenantContext,
+  expenseId: string,
+  input: { status: ExpenseStatus; cashAccountId?: string | null; paidDate?: string },
+  meta: RequestMeta,
+) {
+  const companyId = tenant.company.id;
+  const expense = await lockExpense(tx, tenant, expenseId);
+  if (!TRANSITIONS[expense.status].includes(input.status)) {
+    throw badRequest(`Holatni o'zgartirib bo'lmaydi: ${expense.status} → ${input.status}`);
+  }
+
+  let payment: { cashTransactionId: string; journalEntryId: string } | null = null;
+  if (input.status === "paid") {
+    const paidDate = input.paidDate ?? todayIso();
+    const { transaction, account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
+      cashAccountId: input.cashAccountId ?? null,
+      type: "out",
+      amount: expense.amount,
+      txDate: paidDate,
+      description: `${expense.number}: ${expense.description}`,
+      category: expense.category,
+      referenceType: "expense",
+      referenceId: expense.id,
+    });
+    if (account.currency !== expense.currency) throw badRequest("Kassa valyutasi xarajat valyutasiga mos emas");
+
+    const mapped = CATEGORY_SUBTYPES[expense.category];
+    const debitAccount =
+      expense.accountId ??
+      (mapped ? await findAccountBySubtype(tx, companyId, mapped, "expense") : null) ??
+      (await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"));
+
+    const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+      entryDate: paidDate,
+      description: `Xarajat ${expense.number}: ${expense.description}`,
+      referenceType: "expense",
+      referenceId: expense.id,
+      lines: [
+        { accountId: debitAccount, debit: expense.amount, description: expense.category },
+        { accountId: await ledgerAccountFor(tx, companyId, account.type), credit: expense.amount },
+      ],
+    });
+    payment = { cashTransactionId: transaction.id, journalEntryId: entry.id };
+  }
+
+  const [updated] = await tx
+    .update(expenses)
+    .set({ status: input.status, updatedAt: new Date() })
+    .where(eq(expenses.id, expenseId))
+    .returning(expenseFields);
+
+  await financeAudit(tx, tenant, meta, {
+    action: "EXPENSE_STATUS_CHANGED",
+    resource: "expenses",
+    resourceId: expenseId,
+    details: { number: expense.number, from: expense.status, to: input.status, ...payment },
+  });
+  return { expense: updated!, payment };
+}
+
+export async function deleteExpense(tx: Tx, tenant: TenantContext, expenseId: string, meta: RequestMeta) {
+  const expense = await lockExpense(tx, tenant, expenseId);
+  if (expense.status === "paid") throw badRequest("To'langan xarajat o'chirilmaydi");
+
+  await tx.delete(expenses).where(eq(expenses.id, expenseId));
+  await financeAudit(tx, tenant, meta, {
+    action: "EXPENSE_DELETED",
+    resource: "expenses",
+    resourceId: expenseId,
+    details: { number: expense.number, amount: expense.amount },
+  });
+}

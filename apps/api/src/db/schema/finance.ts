@@ -169,6 +169,10 @@ export const cashAccounts = pgTable(
   (t) => [
     index("ca_company_type_idx").on(t.companyId, t.type),
     index("ca_company_default_idx").on(t.companyId, t.isDefault),
+    /** Har kompaniyada bitta asosiy kassa — to'lovlar shunga tushadi. */
+    uniqueIndex("ca_one_default_per_company_key")
+      .on(t.companyId)
+      .where(sql`${t.isDefault}`),
   ],
 );
 

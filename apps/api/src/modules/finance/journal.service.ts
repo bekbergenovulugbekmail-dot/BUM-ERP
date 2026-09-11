@@ -1,0 +1,330 @@
+/**
+ * Buxgalteriya jurnali (convex/finance/journalHelper.ts).
+ *
+ * `postJournalEntry` — jurnalga yozishning YAGONA yo'li; xarid, savdo, POS va
+ * xarajatlar shuni chaqiradi. Qoidalar:
+ *  - debet = kredit ANIQ (butun tiyinlarda; Convex float bilan ±1 so'm farqqa yo'l qo'yardi)
+ *  - har qatorda debet yoki kreditdan faqat bittasi; kamida 2 qator
+ *  - hisoblar shu kompaniyaniki va faol
+ *  - bir hujjatga (referenceType + referenceId) bitta amaldagi yozuv — takroriy chaqiruv
+ *    mavjudini qaytaradi; baza darajasida unique indeks ham bor
+ *  - baza darajasida: kechiktirilgan trigger tranzaksiya oxirida balansni tekshiradi (0005)
+ *  - hisob balanslari hisob turining normal tomonida yangilanadi, qulflar doimiy tartibda
+ *
+ * Bekor qilingan yozuv o'chirilmaydi — `voided` holatiga o'tadi, balanslar qaytariladi.
+ */
+import { and, asc, desc, eq, getTableColumns, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { badRequest, notFound } from "@bum/shared";
+import { accounts, journalEntries, journalLines } from "../../db/schema/finance.js";
+import type { DbOrTx, Tx } from "../../db/transaction.js";
+import type { RequestMeta } from "../../shared/audit.js";
+import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
+import { fromMinor, toMinor } from "../../shared/decimal.js";
+import { nextDocumentNumber } from "../../shared/numbering.js";
+import type { TenantContext } from "../company/tenant.js";
+import { financeAudit, type AccountType } from "./accounts.service.js";
+
+const { legacyId: _l1, companyId: _c1, ...entryFields } = getTableColumns(journalEntries);
+const { legacyId: _l2, companyId: _c2, ...lineFields } = getTableColumns(journalLines);
+
+export type JournalStatus = (typeof journalEntries.status.enumValues)[number];
+
+export type JournalLineInput = {
+  accountId: string;
+  debit?: string;
+  credit?: string;
+  description?: string | null;
+};
+
+export type JournalEntryInput = {
+  entryDate: string;
+  description: string;
+  referenceType?: string | null;
+  referenceId?: string | null;
+  notes?: string | null;
+  lines: JournalLineInput[];
+};
+
+export async function findAccountBySubtype(conn: DbOrTx, companyId: string, subtype: string, type?: AccountType) {
+  const [account] = await conn
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.companyId, companyId),
+        eq(accounts.subtype, subtype),
+        eq(accounts.isActive, true),
+        type ? eq(accounts.type, type) : undefined,
+      ),
+    )
+    .orderBy(asc(accounts.code))
+    .limit(1);
+  return account?.id ?? null;
+}
+
+export async function requireAccountBySubtype(
+  conn: DbOrTx,
+  companyId: string,
+  subtype: string,
+  type: AccountType,
+  label: string,
+) {
+  const id = await findAccountBySubtype(conn, companyId, subtype, type);
+  if (!id) throw badRequest(`Hisoblar rejasida "${label}" hisobi yo'q — moliya sozlamalarini tekshiring`);
+  return id;
+}
+
+async function applyBalances(
+  tx: Tx,
+  companyId: string,
+  lines: { accountId: string; debit: bigint; credit: bigint }[],
+  direction: 1n | -1n,
+) {
+  const ids = [...new Set(lines.map((l) => l.accountId))];
+  const types = await tx
+    .select({ id: accounts.id, type: accounts.type })
+    .from(accounts)
+    .where(and(eq(accounts.companyId, companyId), inArray(accounts.id, ids)));
+  const typeOf = new Map(types.map((t) => [t.id, t.type]));
+
+  const deltas = new Map<string, bigint>();
+  for (const line of lines) {
+    const type = typeOf.get(line.accountId);
+    const normal = type === "asset" || type === "expense" ? line.debit - line.credit : line.credit - line.debit;
+    deltas.set(line.accountId, (deltas.get(line.accountId) ?? 0n) + normal * direction);
+  }
+
+  // Parallel yozuvlar bir-birini kutadi, lekin deadlock bermaydi
+  for (const accountId of [...deltas.keys()].sort()) {
+    const delta = deltas.get(accountId)!;
+    if (delta === 0n) continue;
+    await tx
+      .update(accounts)
+      .set({ balance: sql`${accounts.balance} + ${fromMinor(delta)}::numeric`, updatedAt: new Date() })
+      .where(eq(accounts.id, accountId));
+  }
+}
+
+export async function postJournalEntry(tx: Tx, companyId: string, createdBy: string | null, input: JournalEntryInput) {
+  if (input.referenceType && input.referenceId) {
+    const [existing] = await tx
+      .select(entryFields)
+      .from(journalEntries)
+      .where(
+        and(
+          eq(journalEntries.companyId, companyId),
+          eq(journalEntries.referenceType, input.referenceType),
+          eq(journalEntries.referenceId, input.referenceId),
+          ne(journalEntries.status, "voided"),
+        ),
+      )
+      .limit(1);
+    if (existing) return { entry: existing, created: false };
+  }
+
+  if (input.lines.length < 2) throw badRequest("Buxgalteriya yozuvida kamida 2 ta qator bo'lishi kerak");
+  const parsed = input.lines.map((line, i) => {
+    const debit = toMinor(line.debit ?? "0");
+    const credit = toMinor(line.credit ?? "0");
+    if (debit < 0n || credit < 0n || (debit === 0n) === (credit === 0n)) {
+      throw badRequest(`${i + 1}-qator: debet yoki kreditdan faqat bittasi musbat bo'lishi kerak`);
+    }
+    return { accountId: line.accountId, description: line.description ?? null, debit, credit };
+  });
+
+  const totalDebit = parsed.reduce((s, l) => s + l.debit, 0n);
+  const totalCredit = parsed.reduce((s, l) => s + l.credit, 0n);
+  if (totalDebit !== totalCredit) {
+    throw badRequest(`Yozuv balanslanmagan: debet ${fromMinor(totalDebit)} ≠ kredit ${fromMinor(totalCredit)}`);
+  }
+
+  const accountIds = [...new Set(parsed.map((l) => l.accountId))];
+  const found = await tx
+    .select({ id: accounts.id, isActive: accounts.isActive })
+    .from(accounts)
+    .where(and(eq(accounts.companyId, companyId), inArray(accounts.id, accountIds)));
+  if (found.length !== accountIds.length) throw badRequest("Hisob topilmadi");
+  if (found.some((a) => !a.isActive)) throw badRequest("Hisob faol emas");
+
+  const number = await nextDocumentNumber(tx, {
+    table: journalEntries,
+    column: journalEntries.number,
+    companyColumn: journalEntries.companyId,
+    companyId,
+    prefix: `JE-${input.entryDate.slice(0, 4)}-`,
+    width: 5,
+  });
+
+  const [entry] = await tx
+    .insert(journalEntries)
+    .values({
+      companyId,
+      number,
+      entryDate: input.entryDate,
+      description: input.description,
+      referenceType: input.referenceType ?? null,
+      referenceId: input.referenceId ?? null,
+      notes: input.notes ?? null,
+      status: "posted",
+      totalDebit: fromMinor(totalDebit),
+      totalCredit: fromMinor(totalCredit),
+      createdBy,
+    })
+    .returning(entryFields);
+
+  await tx.insert(journalLines).values(
+    parsed.map((l) => ({
+      companyId,
+      entryId: entry!.id,
+      accountId: l.accountId,
+      debit: fromMinor(l.debit),
+      credit: fromMinor(l.credit),
+      description: l.description,
+    })),
+  );
+  await applyBalances(tx, companyId, parsed, 1n);
+
+  return { entry: entry!, created: true };
+}
+
+export async function voidJournalEntry(tx: Tx, companyId: string, entryId: string, voidedBy: string | null) {
+  const [entry] = await tx
+    .select(entryFields)
+    .from(journalEntries)
+    .where(and(eq(journalEntries.id, entryId), eq(journalEntries.companyId, companyId)))
+    .limit(1)
+    .for("update");
+  if (!entry) throw notFound("Buxgalteriya yozuvi topilmadi");
+  if (entry.status === "voided") throw badRequest("Yozuv allaqachon bekor qilingan");
+
+  if (entry.status === "posted") {
+    const lines = await tx
+      .select({ accountId: journalLines.accountId, debit: journalLines.debit, credit: journalLines.credit })
+      .from(journalLines)
+      .where(eq(journalLines.entryId, entryId));
+    await applyBalances(
+      tx,
+      companyId,
+      lines.map((l) => ({ accountId: l.accountId, debit: toMinor(l.debit), credit: toMinor(l.credit) })),
+      -1n,
+    );
+  }
+
+  const [updated] = await tx
+    .update(journalEntries)
+    .set({ status: "voided", voidedAt: new Date(), voidedBy, updatedAt: new Date() })
+    .where(eq(journalEntries.id, entryId))
+    .returning(entryFields);
+  return updated!;
+}
+
+// ─── API ─────────────────────────────────────────────────────────────────────
+
+export async function getJournalEntry(conn: DbOrTx, tenant: TenantContext, entryId: string) {
+  const [entry] = await conn
+    .select(entryFields)
+    .from(journalEntries)
+    .where(and(eq(journalEntries.id, entryId), eq(journalEntries.companyId, tenant.company.id)))
+    .limit(1);
+  if (!entry) throw notFound("Buxgalteriya yozuvi topilmadi");
+
+  const lines = await conn
+    .select({ ...lineFields, accountCode: accounts.code, accountName: accounts.name })
+    .from(journalLines)
+    .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
+    .where(eq(journalLines.entryId, entryId))
+    .orderBy(desc(journalLines.debit), asc(accounts.code));
+  return { ...entry, lines };
+}
+
+export async function listJournal(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  options: {
+    dateFrom?: string;
+    dateTo?: string;
+    status?: JournalStatus;
+    referenceType?: string;
+    limit: number;
+    cursor?: string;
+  },
+) {
+  let after: { date: string; id: string } | null = null;
+  if (options.cursor) {
+    const [date, id] = decodeCursor(options.cursor, 2) as [string, string];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !UUID_RE.test(id)) throw badRequest("Kursor noto'g'ri");
+    after = { date, id };
+  }
+
+  const rows = await conn
+    .select(entryFields)
+    .from(journalEntries)
+    .where(
+      and(
+        eq(journalEntries.companyId, tenant.company.id),
+        options.dateFrom ? gte(journalEntries.entryDate, options.dateFrom) : undefined,
+        options.dateTo ? lte(journalEntries.entryDate, options.dateTo) : undefined,
+        options.status ? eq(journalEntries.status, options.status) : undefined,
+        options.referenceType === "manual"
+          ? isNull(journalEntries.referenceType)
+          : options.referenceType
+            ? eq(journalEntries.referenceType, options.referenceType)
+            : undefined,
+        after
+          ? or(
+              lt(journalEntries.entryDate, after.date),
+              and(eq(journalEntries.entryDate, after.date), lt(journalEntries.id, after.id)),
+            )
+          : undefined,
+      ),
+    )
+    .orderBy(desc(journalEntries.entryDate), desc(journalEntries.id))
+    .limit(options.limit + 1);
+
+  const page = rows.slice(0, options.limit);
+  const last = page.at(-1);
+  return {
+    entries: page,
+    nextCursor: rows.length > options.limit && last ? encodeCursor([last.entryDate, last.id]) : null,
+  };
+}
+
+export async function createManualEntry(
+  tx: Tx,
+  tenant: TenantContext,
+  input: Omit<JournalEntryInput, "referenceType" | "referenceId">,
+  meta: RequestMeta,
+) {
+  const { entry } = await postJournalEntry(tx, tenant.company.id, tenant.user.id, {
+    ...input,
+    referenceType: null,
+    referenceId: null,
+  });
+  await financeAudit(tx, tenant, meta, {
+    action: "JOURNAL_ENTRY_CREATED",
+    resource: "journal_entries",
+    resourceId: entry.id,
+    details: { number: entry.number, total: entry.totalDebit },
+  });
+  return getJournalEntry(tx, tenant, entry.id);
+}
+
+/** Qo'lda kiritilgan yozuvni bekor qilish; hujjat yozuvlari hujjatning o'zi orqali bekor qilinadi. */
+export async function voidManualEntry(tx: Tx, tenant: TenantContext, entryId: string, meta: RequestMeta) {
+  const [entry] = await tx
+    .select({ referenceType: journalEntries.referenceType })
+    .from(journalEntries)
+    .where(and(eq(journalEntries.id, entryId), eq(journalEntries.companyId, tenant.company.id)))
+    .limit(1);
+  if (!entry) throw notFound("Buxgalteriya yozuvi topilmadi");
+  if (entry.referenceType) throw badRequest("Hujjatga bog'langan yozuvni hujjatning o'zi orqali bekor qiling");
+
+  const voided = await voidJournalEntry(tx, tenant.company.id, entryId, tenant.user.id);
+  await financeAudit(tx, tenant, meta, {
+    action: "JOURNAL_ENTRY_VOIDED",
+    resource: "journal_entries",
+    resourceId: entryId,
+    details: { number: voided.number },
+  });
+  return voided;
+}

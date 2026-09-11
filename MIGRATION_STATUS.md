@@ -7,7 +7,7 @@
 |---|---|
 | Branch | `feat/postgres-migration` |
 | Oxirgi yangilanish | 2026-09-11 |
-| Umumiy holat | 6 / 16 PHASE tugallandi, PHASE 4 jarayonda, keyingi — PHASE 8 |
+| Umumiy holat | 7 / 16 PHASE tugallandi, PHASE 4 jarayonda, keyingi — PHASE 9 |
 | Ishlab turgan ilova | Hali to'liq Convex'da — frontend yangi API'ga ulanmagan |
 
 **Holat belgilari:** ✅ tugallandi · 🟡 jarayonda · ⬜ boshlanmagan
@@ -27,7 +27,7 @@
 | 5 | Platforma: kompaniya, filial, rol, admin | ✅ tugallandi |
 | 6 | Katalog | ✅ tugallandi |
 | 7 | Ombor | ✅ tugallandi |
-| 8 | Moliya | ⬜ boshlanmagan |
+| 8 | Moliya | ✅ tugallandi |
 | 9 | Xarid | ⬜ boshlanmagan |
 | 10 | Savdo va POS | ⬜ boshlanmagan |
 | 11 | CRM | ⬜ boshlanmagan |
@@ -71,6 +71,11 @@ Ko'chirish paytida topilgan. Yangi API'da hammasi yopilgan.
 | `warehouse/warehouses.ts` `seedDefault` | Ruxsat tekshiruvi yo'q |
 | `warehouse/inventoryCounts.ts` `applyAdjustments` | Hisob yaratilgandagi eski farqni yozadi — orada bo'lgan sotuv/kirim yo'qoladi; bekor qilingan hisobni ham qo'llaydi |
 | a'zoning `allowedWarehouseIds` | Saqlanadi, lekin hech qayerda tekshirilmaydi |
+| `finance/expenses.ts` `updateStatus` | Istalgan holatga o'tkazadi (to'langanni qaytadan kutilayotganga); "to'landi" kassadan pul chiqarmaydi va jurnalga yozmaydi |
+| `finance/cashAccounts.ts` `recordTransaction` (`type: "transfer"`) | Balansdan pul yechiladi, lekin hech qayerga tushmaydi |
+| `finance/journalHelper.ts` `recordCashTransaction` | Xarid/savdo to'lovlarida kassa balansi manfiyga tushadi |
+| `finance/accounts.ts` `seedDefaultAccounts` | Ruxsat tekshiruvi yo'q (frontend sahifa ochilganda chaqiradi) |
+| xarajat va jurnal raqamlari (`nextExpNumber`, `nextJENumber`) | Parallel yaratishda bir xil raqam |
 
 ## Foydalanuvchi boshqaruvi ierarxiyasi (yangi API)
 
@@ -158,14 +163,31 @@ Har amalda a'zoning `allowedWarehouseIds` ruxsati tekshiriladi (bo'sh — barcha
 | POST / PATCH | `/counts`, `/counts/:countId/items`, `/counts/:countId/items/:itemId`, `/counts/:countId/status` | `warehouse.count` | `create`, `updateItem`, `updateStatus` |
 | POST | `/counts/:countId/apply` | `warehouse.count` + `warehouse.manage` | `applyAdjustments` |
 
+### Moliya (`/api/finance`)
+
+| Metod | Yo'l | Kim | Convex |
+|---|---|---|---|
+| POST | `/setup` (standart hisoblar va kassalar; idempotent) | `finance.manage` | `accounts.seedDefaultAccounts` |
+| GET / POST / PATCH | `/accounts` (`?type=&includeInactive=`), `/accounts/:accountId` | `finance.view` / `finance.manage` | `accounts.list`, `create` |
+| GET | `/reports/trial-balance`, `/reports/profit-loss` (`?dateFrom=&dateTo=`) | `finance.view` | yangi (frontend P&L o'zi hisoblardi) |
+| GET | `/journal` (`?dateFrom=&dateTo=&status=&referenceType=&limit=&cursor=`), `/journal/:entryId` | `finance.view` | yangi |
+| POST | `/journal` (qo'lda yozuv), `/journal/:entryId/void` | `finance.manage` / `finance.approve` | yangi |
+| GET | `/dashboard` | `finance.view` | `cashAccounts.getDashboardStats` |
+| GET / POST / PATCH | `/cash-accounts` (`?includeInactive=`), `/cash-accounts/:cashAccountId` | `finance.view` / `finance.manage` | `cashAccounts.list`, `createAccount` |
+| GET | `/cash-accounts/:cashAccountId/transactions` (`?dateFrom=&dateTo=&limit=&cursor=`) | `finance.view` | `getTransactions` |
+| POST | `/cash-transactions` (in/out, ixtiyoriy `counterAccountId`), `/cash-transfers` | `finance.manage` | `recordTransaction` |
+| GET | `/expenses` (`?status=&category=&dateFrom=&dateTo=&limit=&cursor=`), `/expenses/stats` | `finance.view` | `expenses.list`, `getStats` |
+| POST / PATCH / DELETE | `/expenses`, `/expenses/:expenseId` | `finance.manage` | `create`, `remove` |
+| POST | `/expenses/:expenseId/status` (`paid` — kassa chiqimi + jurnal) | `finance.approve` | `updateStatus` |
+
 ## Lokal muhit
 
-- **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432). `bumerp` — 5 ta migratsiya, ma'lumot yo'q; `bumerp_test` — testlar.
+- **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432). `bumerp` — 6 ta migratsiya, ma'lumot yo'q; `bumerp_test` — testlar.
 - **MinIO** — 9000/9001; `bum-erp` bucket va `STORAGE_*` hali yo'q.
 - **Migratsiya:** `pnpm --filter @bum/api db:migrate`
 - **Seed:** `.env` ga `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_PASSWORD` — `pnpm --filter @bum/api db:seed` (bootstrap admin + 14 global rol + 9 standart o'lchov birligi; idempotent)
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
-- **Testlar:** `pnpm --filter @bum/api test` — 150 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
+- **Testlar:** `pnpm --filter @bum/api test` — 164 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
 
 ---
 
@@ -175,11 +197,11 @@ pnpm workspace; `packages/shared`; `apps/api`; `docker-compose.yml`; `.env.examp
 
 ## PHASE 2 — PostgreSQL sxemasi ✅
 
-61 jadval, 10 domen. Pul/miqdor `numeric`; `company_id NOT NULL`; `legacy_id` (API ga chiqmaydi); DB darajasidagi CHECK/unique. Migratsiyalar: `0000` sxema; `0001` NULLS NOT DISTINCT; `0002` bootstrap admin himoyasi; `0003` bitta asosiy filial; `0004` bitta asosiy ombor.
+61 jadval, 10 domen. Pul/miqdor `numeric`; `company_id NOT NULL`; `legacy_id` (API ga chiqmaydi); DB darajasidagi CHECK/unique. Migratsiyalar: `0000` sxema; `0001` NULLS NOT DISTINCT; `0002` bootstrap admin himoyasi; `0003` bitta asosiy filial; `0004` bitta asosiy ombor; `0005` moliya yaxlitligi (buxgalteriya yozuvi balansi — kechiktirilgan trigger, bitta asosiy kassa).
 
 ## PHASE 3 — API poydevori ✅
 
-DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, dual-stack `HOST=::`. Umumiy yordamchilar: `shared/decimal.ts` (numeric satr validatsiyasi), `shared/cursor.ts` (keyset sahifalash), `shared/rate-limit.ts`, `shared/audit.ts`.
+DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, dual-stack `HOST=::`. Umumiy yordamchilar: `shared/decimal.ts` (numeric satr validatsiyasi), `shared/cursor.ts` (keyset sahifalash), `shared/numbering.ts` (hujjat raqamlari, advisory lock), `shared/rate-limit.ts`, `shared/audit.ts`.
 
 ## PHASE 4 — Auth va sessiyalar 🟡
 
@@ -231,9 +253,20 @@ DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, 
 - **Testlar:** `inventory` (8 — parallel chiqimlar qoldiqni manfiyga tushirmasligi ham), `counts` (3)
 - **Eslatma:** zonalar (`warehouse_zones`) Convex'da ham ishlatilmagan — API yozilmadi; `reserved_qty` savdo buyurtmalari bilan PHASE 10 da
 
-## PHASE 8 — Moliya ⬜
+## PHASE 8 — Moliya ✅
 
-`convex/finance/` (accounts, cashAccounts, expenses, journalHelper); sahifa `finance`
+- **Convex manbasi:** `convex/finance/` — `accounts.ts`, `cashAccounts.ts`, `expenses.ts`, `journalHelper.ts`; sahifa `finance`
+- **Ko'chirilgan modullar** (`modules/finance/`):
+  - `accounts.service.ts` — hisoblar rejasi (15 ta standart hisob, `subtype` bo'yicha topiladi), kompaniya yaratilganda avtomatik seed (+ "Asosiy kassa", "Asosiy bank hisobi"), hisob yaratish/tahrirlash (ota hisob shu turda, siklsiz; balansli hisobni faolsizlantirib bo'lmaydi), aylanma-saldo va foyda-zarar — jurnal qatorlaridan
+  - `journal.service.ts` — **`postJournalEntry`: jurnalga yozishning yagona yo'li** (xarid, savdo, POS ham shuni chaqiradi): debet = kredit butun tiyinlarda aniq, har qatorda faqat debet yoki kredit, hisoblar shu kompaniyaniki va faol, bir hujjatga bitta amaldagi yozuv (idempotent), hisob balanslari normal tomonda va qulflar doimiy tartibda. Bekor qilish — `voided`, balanslar qaytariladi. Qo'lda yozuv va kursorli jurnal
+  - `cash.service.ts` — **`recordCashTransaction`: kassa balansini o'zgartiradigan yagona yo'l** (`FOR UPDATE`, manfiy balans yo'q, bir hujjatga takroriy yozuv yo'q); kassalar (bitta asosiy — bazada ham), boshlang'ich qoldiq (kirim + DR kassa / CR ustav kapitali), qo'lda kirim/chiqim (qarshi hisob tanlansa jurnal yozuvi), kassalar orasida o'tkazma (kassa ↔ bank bo'lsa jurnal yozuvi), kursorli tranzaksiyalar, dashboard
+  - `expenses.service.ts` — xarajatlar: `pending → approved → paid` (paid yakuniy; approved → pending qaytarish), to'lov = kassa chiqimi + DR xarajat hisobi (kategoriya bo'yicha: ijara, maosh, kommunal, transport, qolgani "Boshqa xarajatlar") / CR kassa yoki bank; faqat kutilayotganini tahrirlash, to'langanini o'chirib bo'lmaydi; statistika
+  - `shared/numbering.ts` — `EXP-2026-0001`, `JE-2026-00001`: kompaniya + prefiks bo'yicha advisory lock
+  - Audit: `ACCOUNT_CREATED/UPDATED`, `JOURNAL_ENTRY_CREATED/VOIDED`, `CASH_ACCOUNT_CREATED/UPDATED`, `CASH_TRANSACTION_RECORDED`, `CASH_TRANSFERRED`, `EXPENSE_CREATED/UPDATED/STATUS_CHANGED/DELETED`
+- **Baza darajasida (0005):** posted yozuv tranzaksiya oxirida tekshiriladi (kamida 2 qator, qatorlar = sarlavha jami, debet = kredit; Convex'dan ko'chgan yozuvlarga ±1 so'm); bitta asosiy kassa
+- **Convex'dan ataylab farqlar:** yuqoridagi "Convex'da hali ochiq" jadvalidagi moliya qatorlari yopilgan; pul float emas; ro'yxat/statistika so'rovlari `finance.view` talab qiladi; xarajat statistikasi barcha yozuvlardan (Convex oxirgi 500 ta)
+- **Testlar:** `finance` (5 — baza triggeri ham), `cash` (5 — parallel chiqimlar ham), `expenses` (4 — parallel raqamlash ham)
+- **Eslatma:** ko'p valyuta yo'q (kassa valyutasi kompaniya valyutasi; o'tkazma faqat bir xil valyutada); `attachmentKey` (chek fayli) PHASE 14 da
 
 ## PHASE 9 — Xarid ⬜
 
@@ -270,11 +303,12 @@ Poydevor: `legacy_id` ustunlari; login Convex Auth parol xeshlarini qabul qiladi
   - `admin/bootstrap.tsx` keraksiz (`db:seed`); `onboarding` → `/api/registration` (yoqilgan bo'lsa)
   - `users-section.tsx` → `PATCH /api/company/employees/:userId`; `roles-section.tsx` `seedDefaultRoles` tugmasi keraksiz
   - `products/product-form-dialog.tsx`: standart `costingMethod: "fifo"` → `"average"` bo'lishi kerak; `imageUrl` maydoni olib tashlanadi (PHASE 14 gacha); `products/page.tsx` `seedDefaultUnits` chaqiruvi keraksiz; CSV import → `POST /api/catalog/products/import`, export → `GET /api/catalog/products/export`
+  - `finance/page.tsx`: `seedDefaultAccounts` chaqiruvi keraksiz; `expenses-section.tsx`: "To'landi" tugmasi faqat tasdiqlangan xarajatda (va kassa tanlash), `byCategory` endi massiv; `cash-accounts-section.tsx`: summalar satr; `profit-loss-section.tsx` → `GET /api/finance/reports/profit-loss`
 
 ---
 
 ## Keyingi qadam
 
-1. **PHASE 8 (Moliya)** — hisoblar rejasi, kassa/bank hisoblari, xarajatlar, buxgalteriya jurnali (debet = kredit kafolati bilan)
+1. **PHASE 9 (Xarid)** — ta'minotchilar, xarid buyurtmalari, tovar qabul qilish (zaxira `moveStock` + DR tovar zaxirasi / CR kreditorlar), ta'minotchiga to'lov (kassa + jurnal)
 2. **Production:** Convex tuzatishini (`main` `3f958f1`) production kaliti bilan deploy qilish
 3. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_*` qo'shib `db:seed`

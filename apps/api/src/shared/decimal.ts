@@ -50,3 +50,25 @@ export const priceSchema = decimalSchema({ scale: 4, min: 0 });
 export const qtySchema = decimalSchema({ scale: 4, min: 0 });
 /** numeric(5,2) — foiz 0..100. */
 export const percentSchema = decimalSchema({ scale: 2, min: 0, max: 100 });
+
+/**
+ * numeric satr → kichik birliklardagi butun son: "12.5" → 1250n (scale 2).
+ * Yig'indi va solishtirish float'siz, aniq bo'lishi uchun.
+ */
+export function toMinor(value: string, scale = 2): bigint {
+  const text = value.trim();
+  if (!/^-?\d+(\.\d+)?$/.test(text)) throw new Error(`Son emas: ${value}`);
+  const negative = text.startsWith("-");
+  const [int = "0", frac = ""] = text.replace(/^-/, "").split(".");
+  if (/[1-9]/.test(frac.slice(scale))) throw new Error(`Kasr xonalar ${scale} tadan ko'p: ${value}`);
+  const minor = BigInt(int + frac.slice(0, scale).padEnd(scale, "0"));
+  return negative ? -minor : minor;
+}
+
+/** `toMinor` teskarisi: 1250n → "12.50". */
+export function fromMinor(minor: bigint, scale = 2): string {
+  const negative = minor < 0n;
+  const digits = (negative ? -minor : minor).toString().padStart(scale + 1, "0");
+  const text = `${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
+  return negative ? `-${text}` : text;
+}

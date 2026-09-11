@@ -13,6 +13,7 @@
 import { desc, eq, like, or, sql } from "drizzle-orm";
 import { DEFAULT_ROLES, notFound } from "@bum/shared";
 import { warehouses } from "../../db/schema/inventory.js";
+import { seedFinanceDefaults } from "../finance/accounts.service.js";
 import { branches, companies, companyMembers, roles, users } from "../../db/schema/platform.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
@@ -167,6 +168,7 @@ export async function createCompanyWithOwner(
     branchId: branch!.id,
     isDefault: true,
   });
+  await seedFinanceDefaults(tx, companyId, input.currency ?? "UZS");
 
   await tx.insert(companyMembers).values({
     companyId,
