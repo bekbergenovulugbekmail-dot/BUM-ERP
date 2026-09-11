@@ -661,7 +661,7 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - inventarizatsiya qo'llanganda ortiqcha — 4100, kamomad — 5500 (bitta jurnal yozuvi)
   - moliya dashboardi: oylik tushum/chiqim valyutali kassalardan joriy kurs bilan asosiy valyutada
   - tizimdan chiqish (`logout`) audit jurnaliga yoziladi (kirish va xato urinish avval ham yozilardi)
-- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `sales-currency` (2), `distribution` (4), `inventory-journal` (1); API jami 229 (47 fayl)
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `sales-currency` (2), `distribution` (4), `inventory-journal` (1), `sales-agent` (3); API jami 232 (48 fayl)
 
 ## Sotuv agenti loyihasi (2026-09-12)
 
@@ -671,8 +671,8 @@ xarita — Yandex Maps (`MapProvider` orqasida, kalit env'da), lokatsiya — avv
 | # | Bosqich | Holat |
 |---|---|---|
 | A | CRM va Distributsiya alohida; `distribution.*` ruxsatlari; menyu ruxsat bo'yicha | ✅ |
-| L | Oldingi bosqichlar cheklovlarini bartaraf etish (valyuta, smena, PDF, dashboard, ombor kirimi jurnali) | navbatda |
-| B | Sotuv agenti va Supervayzer rollari; agent ish joyi (mobil, 5 bo'lim, uz/ru/kk) | |
+| L | Oldingi bosqichlar cheklovlarini bartaraf etish (valyuta, smena, PDF, dashboard, ombor kirimi jurnali) | ✅ L1 `39f6192`, L2 `0494db5`, L3 `0f54442` |
+| B | Sotuv agenti va Supervayzer rollari; agent ish joyi (mobil, 5 bo'lim, uz/ru/kk) | ✅ |
 | C | Do'kon koordinatasi; sana bo'yicha hudud/marshrut; do'konlar, profil, qarzdorlar | |
 | D | Lokatsiya kuzatuvi, sifat tekshiruvi, saqlash muddati; supervayzer xaritasi | |
 | E | Tashrif: boshlash/yakunlash, buyurtmasiz sabab, rasm | |
@@ -687,6 +687,13 @@ xarita — Yandex Maps (`MapProvider` orqasida, kalit env'da), lokatsiya — avv
 - web: `/crm` — Pipeline va Faoliyatlar; `/distribution` — Marshrutlar va Savdo agentlari, o'z statistikasi bilan
 - menyu va mobil pastki navigatsiya ruxsat bo'yicha (`useVisibleModules`); ruxsatsiz bo'lim havolasi "kirish ruxsati yo'q" sahifasini ko'rsatadi (`ModuleGuard`, uz/ru/kk); "Distributsiya" standart yoqilgan (eski `localStorage` sozlamasi ko'chiriladi)
 - ishlatilmagan `src/lib/permissions.ts` nusxasi o'chirildi (yagona manba — `@bum/shared`)
+
+**B — Sotuv agenti roli va ish joyi** (migratsiya 0020):
+- ruxsatlar: `sales_agent.use`, `sales_agent.supervise`, `sales_agent.location.view|live|history`, `promotions.manage`; lokatsiya ruxsatlari faqat o'qish rollariga (Auditor, Ko'ruvchi) avtomatik berilmaydi
+- rollar: "Sotuv agenti" — faqat `sales_agent.use` (ERP API'lari 403); "Supervayzer" — distributsiya, nazorat, lokatsiya, aksiyalar; Direktorga barcha yangi ruxsatlar, Savdo menejeriga nazorat va aksiyalar. Migratsiya mavjud kompaniyalarga rollarni qo'shadi
+- savdo agenti tizim foydalanuvchisiga bog'lanadi (`sales_reps.user_id`, kompaniyada unikal — `sr_company_user_key`); Distributsiya → Savdo agentlari oynasida "Tizim foydalanuvchisi (login)"
+- `GET /api/sales-agent/me` — bog'langan FAOL agent profili (`requireAgent`: agent hech qachon so'rovdan olinmaydi)
+- web: `/:lng/sales-agent/*` — mobil ish joyi (Bosh sahifa, Sotuv, Qarzdorlar, Do'konlar, Aksiyalar; pastki navigatsiya, til, chiqish), ERP menyusiz; faqat agent ruxsati bor xodim ERP sahifalaridan avtomatik shu yerga o'tadi; bog'lanmagan bo'lsa tushuntirish ekrani. Matnlar `agent` namespace'ida uz/ru/kk
 
 ### Distributsiya (`/api/distribution`)
 

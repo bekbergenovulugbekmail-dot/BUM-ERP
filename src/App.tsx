@@ -16,6 +16,12 @@ import FinancePage from "./pages/finance/page.tsx";
 import CRMPage from "./pages/crm/page.tsx";
 import DistributionPage from "./pages/distribution/page.tsx";
 import ModuleGuard from "./components/module-guard.tsx";
+import SalesAgentLayout from "./pages/sales-agent/layout.tsx";
+import AgentDashboardPage from "./pages/sales-agent/dashboard/page.tsx";
+import AgentSalesPage from "./pages/sales-agent/sales/page.tsx";
+import AgentDebtorsPage from "./pages/sales-agent/debtors/page.tsx";
+import AgentStoresPage from "./pages/sales-agent/stores/page.tsx";
+import AgentPromotionsPage from "./pages/sales-agent/promotions/page.tsx";
 import ManufacturingPage from "./pages/manufacturing/page.tsx";
 import HRPage from "./pages/hr/page.tsx";
 import AnalyticsPage from "./pages/analytics/page.tsx";
@@ -115,6 +121,16 @@ function MainApp() {
 
           {/* Platform Admin Panel: outside ERPLayout */}
           <Route path="admin" element={<AdminPage />} />
+
+          {/* Sotuv agenti ish joyi: mobil, ERP menyusiz */}
+          <Route path="sales-agent" element={<SalesAgentLayout />}>
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="dashboard" element={<AgentDashboardPage />} />
+            <Route path="sales" element={<AgentSalesPage />} />
+            <Route path="debtors" element={<AgentDebtorsPage />} />
+            <Route path="stores" element={<AgentStoresPage />} />
+            <Route path="promotions" element={<AgentPromotionsPage />} />
+          </Route>
 
           {/* ERP App with layout */}
           <Route element={<ERPApp />}>

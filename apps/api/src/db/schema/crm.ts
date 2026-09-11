@@ -2,7 +2,7 @@
  * CRM va distribution: savdo vakillari, lidlar, faoliyatlar, segmentlar,
  * marshrutlar va tashriflar.
  */
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   date,
@@ -82,6 +82,8 @@ export const salesReps = pgTable(
   (t) => [
     uniqueIndex("sr_company_code_key").on(t.companyId, t.code),
     index("sr_company_active_idx").on(t.companyId, t.isActive),
+    /** Bitta foydalanuvchi — bitta savdo agenti (agent ish joyi shu bog'lanish orqali ochiladi). */
+    uniqueIndex("sr_company_user_key").on(t.companyId, t.userId).where(sql`${t.userId} is not null`),
   ],
 );
 

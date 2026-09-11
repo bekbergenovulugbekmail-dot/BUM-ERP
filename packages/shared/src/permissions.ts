@@ -57,6 +57,16 @@ export const PERMISSIONS = {
   "distribution.view":    { label: "Distributsiyani ko'rish",      group: "Distributsiya" },
   "distribution.manage":  { label: "Distributsiyani boshqarish",   group: "Distributsiya" },
 
+  // ─── Sotuv agenti ──────────────────────────────────────────────────────────
+  /** Mobil agent ish joyi — bog'langan agentning o'z marshruti, do'konlari va buyurtmalari. */
+  "sales_agent.use":              { label: "Sotuv agenti ish joyi",        group: "Sotuv agenti" },
+  "sales_agent.supervise":        { label: "Agentlarni nazorat qilish",    group: "Sotuv agenti" },
+  /** Lokatsiya — maxfiy operatsion ma'lumot: faqat o'qish rollariga avtomatik berilmaydi. */
+  "sales_agent.location.view":    { label: "Agent lokatsiyasini ko'rish",  group: "Sotuv agenti" },
+  "sales_agent.location.live":    { label: "Jonli kuzatuv xaritasi",       group: "Sotuv agenti" },
+  "sales_agent.location.history": { label: "Lokatsiya tarixi",             group: "Sotuv agenti" },
+  "promotions.manage":            { label: "Aksiyalarni boshqarish",       group: "Sotuv agenti" },
+
   // ─── Ishlab chiqarish ──────────────────────────────────────────────────────
   "manufacturing.view":   { label: "Ishlab chiqarishni ko'rish",    group: "Ishlab chiqarish" },
   "manufacturing.manage": { label: "Ishlab chiqarishni boshqarish", group: "Ishlab chiqarish" },
@@ -99,7 +109,7 @@ export function isPermission(value: string): value is Permission {
 // ─── Rollar ──────────────────────────────────────────────────────────────────
 
 const VIEW_ONLY: Permission[] = ALL_PERMISSIONS.filter(
-  (p) => p.endsWith(".view") || p === "pos.use",
+  (p) => (p.endsWith(".view") || p === "pos.use") && !p.startsWith("sales_agent.location."),
 );
 
 /** Bu ikki rol har doim barcha ruxsatlarga ega (kodda ham bypass qilinadi). */
@@ -181,6 +191,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "finance.view",
       "crm.view", "crm.manage",
       "distribution.view", "distribution.manage",
+      "sales_agent.supervise", "promotions.manage",
       "analytics.view",
       "settings.view",
     ],
@@ -258,6 +269,30 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "manufacturing.view", "manufacturing.manage", "manufacturing.approve",
       "warehouse.view", "warehouse.manage", "warehouse.receive",
       "purchase.view",
+      "analytics.view",
+    ],
+  },
+  {
+    name: "Sotuv agenti",
+    description: "Mobil agent ish joyi: marshrut, do'konlar, buyurtma",
+    color: "#10b981",
+    isSystem: true,
+    // Faqat agent ish joyi — ERP bo'limlari va boshqa agentlarning ma'lumoti ko'rinmaydi
+    permissions: ["sales_agent.use"],
+  },
+  {
+    name: "Supervayzer",
+    description: "Savdo agentlari nazorati: marshrut, lokatsiya, aksiyalar",
+    color: "#0891b2",
+    isSystem: true,
+    permissions: [
+      "products.view",
+      "sales.view",
+      "crm.view",
+      "distribution.view", "distribution.manage",
+      "sales_agent.supervise",
+      "sales_agent.location.view", "sales_agent.location.live", "sales_agent.location.history",
+      "promotions.manage",
       "analytics.view",
     ],
   },

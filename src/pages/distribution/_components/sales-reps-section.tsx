@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, Target, Percent, Phone, Mail, MapPin, Pencil, Trash2 } from "lucide-react";
+import { Plus, Target, Percent, Phone, Mail, MapPin, Pencil, Trash2, KeyRound } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -13,10 +14,21 @@ import { num, type SalesRep } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
-const emptyForm = () => ({ name: "", phone: "", email: "", region: "", monthlyTarget: "", commission: "" });
+const NO_USER = "none";
+
+const emptyForm = () => ({ name: "", phone: "", email: "", region: "", monthlyTarget: "", commission: "", userId: NO_USER });
+
+/** `GET /api/company/employees` — agentga bog'lanadigan tizim foydalanuvchisi (login). */
+type EmployeeOption = { id: string; name: string | null; phone: string; companyRole: string; membershipActive: boolean };
 
 export default function SalesRepsSection() {
   const reps = useApiQuery<{ salesReps: SalesRep[] }>("/api/distribution/sales-reps", { includeInactive: true }).data?.salesReps;
+  // `users.view` bo'lmasa ro'yxat kelmaydi — bog'lash maydoni ko'rsatilmaydi
+  const employees = useApiQuery<{ employees: EmployeeOption[] }>("/api/company/employees").data?.employees;
+  const employeeName = (id: string | null) => {
+    const employee = employees?.find((e) => e.id === id);
+    return employee ? (employee.name ?? employee.phone) : null;
+  };
   const createRep = useApiMutation((body: Record<string, unknown>) => api.post("/api/distribution/sales-reps", body));
   const updateRep = useApiMutation(({ id, ...body }: { id: string } & Record<string, unknown>) =>
     api.patch(`/api/distribution/sales-reps/${id}`, body));
@@ -39,6 +51,7 @@ export default function SalesRepsSection() {
         region: form.region || null,
         monthlyTarget: form.monthlyTarget || "0",
         commission: form.commission || "0",
+        ...(employees ? { userId: form.userId !== NO_USER ? form.userId : null } : {}),
       });
       toast.success("Savdo vakili qo'shildi");
       setCreateOpen(false); resetForm();
@@ -58,6 +71,7 @@ export default function SalesRepsSection() {
         region: form.region || null,
         ...(form.monthlyTarget ? { monthlyTarget: form.monthlyTarget } : {}),
         ...(form.commission ? { commission: form.commission } : {}),
+        ...(employees ? { userId: form.userId !== NO_USER ? form.userId : null } : {}),
       });
       toast.success("Yangilandi");
       setEditRep(null); resetForm();
@@ -69,6 +83,7 @@ export default function SalesRepsSection() {
       name: rep.name, phone: rep.phone ?? "", email: rep.email ?? "",
       region: rep.region ?? "", monthlyTarget: String(num(rep.monthlyTarget)),
       commission: String(num(rep.commission)),
+      userId: rep.userId ?? NO_USER,
     });
     setEditRep(rep.id);
   };
@@ -139,6 +154,11 @@ export default function SalesRepsSection() {
                     <MapPin className="h-3.5 w-3.5 flex-shrink-0" /> {rep.region}
                   </div>
                 )}
+                {rep.userId && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <KeyRound className="h-3.5 w-3.5 flex-shrink-0" /> {employeeName(rep.userId) ?? "Tizim foydalanuvchisi bog'langan"}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border">
@@ -206,6 +226,25 @@ export default function SalesRepsSection() {
                   <Input type="number" min="0" max="100" step="0.1" value={form.commission} onChange={(e) => setForm({ ...form, commission: e.target.value })} placeholder="5" />
                 </div>
               </div>
+              {employees && (
+                <div>
+                  <Label>Tizim foydalanuvchisi (login)</Label>
+                  <Select value={form.userId} onValueChange={(v) => setForm({ ...form, userId: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_USER}>Bog'lanmagan</SelectItem>
+                      {employees
+                        .filter((e) => e.membershipActive)
+                        .map((e) => (
+                          <SelectItem key={e.id} value={e.id}>{e.name ?? e.phone} · {e.companyRole}</SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Bog'langan xodim "Sotuv agenti" roli bilan kirganda mobil agent ish joyi ochiladi.
+                  </p>
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => { setCreateOpen(false); setEditRep(null); resetForm(); }}>Bekor</Button>

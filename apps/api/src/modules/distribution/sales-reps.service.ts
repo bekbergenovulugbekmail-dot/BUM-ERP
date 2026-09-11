@@ -9,7 +9,7 @@
  *  - `userId` kompaniya a'zosi ekani tekshiriladi; `update` / `remove` to'xtatilgan kompaniyada ham yozardi
  *  - o'qish `distribution.view` talab qiladi (CRM'dagi lidga agent tanlash — faqat id, nom, kod)
  */
-import { and, asc, eq, getTableColumns, sql } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, ne, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
 import { distributionRoutes, leads, routeVisits, salesReps } from "../../db/schema/crm.js";
 import { companyMembers } from "../../db/schema/platform.js";
@@ -51,6 +51,23 @@ async function assertMember(tx: Tx, companyId: string, userId: string) {
     .where(and(eq(companyMembers.companyId, companyId), eq(companyMembers.userId, userId), eq(companyMembers.isActive, true)))
     .limit(1);
   if (!member) throw badRequest("Foydalanuvchi kompaniya a'zosi emas");
+}
+
+/** Kompaniya a'zosi va boshqa agentga bog'lanmagan: bitta foydalanuvchi — bitta agent ish joyi. */
+async function assertUserFree(tx: Tx, companyId: string, userId: string, exceptRepId?: string) {
+  await assertMember(tx, companyId, userId);
+  const [taken] = await tx
+    .select({ name: salesReps.name })
+    .from(salesReps)
+    .where(
+      and(
+        eq(salesReps.companyId, companyId),
+        eq(salesReps.userId, userId),
+        exceptRepId ? ne(salesReps.id, exceptRepId) : undefined,
+      ),
+    )
+    .limit(1);
+  if (taken) throw conflict(`Bu foydalanuvchi boshqa savdo agentiga bog'langan: ${taken.name}`);
 }
 
 export type SalesRepInput = {
@@ -96,7 +113,7 @@ export async function salesRepStats(conn: DbOrTx, tenant: TenantContext) {
 
 export async function createSalesRep(tx: Tx, tenant: TenantContext, input: SalesRepInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
-  if (input.userId) await assertMember(tx, companyId, input.userId);
+  if (input.userId) await assertUserFree(tx, companyId, input.userId);
   const code = await nextDocumentNumber(tx, {
     table: salesReps,
     column: salesReps.code,
@@ -124,7 +141,7 @@ export async function updateSalesRep(
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
-  if (patch.userId) await assertMember(tx, companyId, patch.userId);
+  if (patch.userId) await assertUserFree(tx, companyId, patch.userId, salesRepId);
 
   const [rep] = await tx
     .update(salesReps)
