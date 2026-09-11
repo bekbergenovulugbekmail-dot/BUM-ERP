@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "warehouses_one_default_per_company_key" ON "warehouses" USING btree ("company_id") WHERE "warehouses"."is_default";

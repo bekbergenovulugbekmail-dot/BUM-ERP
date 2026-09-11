@@ -75,6 +75,10 @@ export const warehouses = pgTable(
     uniqueIndex("warehouses_company_code_key").on(t.companyId, t.code),
     index("warehouses_company_idx").on(t.companyId),
     uniqueIndex("warehouses_legacy_id_key").on(t.legacyId),
+    /** Har kompaniyada bitta asosiy ombor. */
+    uniqueIndex("warehouses_one_default_per_company_key")
+      .on(t.companyId)
+      .where(sql`${t.isDefault}`),
   ],
 );
 

@@ -7,7 +7,7 @@
 |---|---|
 | Branch | `feat/postgres-migration` |
 | Oxirgi yangilanish | 2026-09-11 |
-| Umumiy holat | 5 / 16 PHASE tugallandi, PHASE 4 jarayonda, keyingi — PHASE 7 |
+| Umumiy holat | 6 / 16 PHASE tugallandi, PHASE 4 jarayonda, keyingi — PHASE 8 |
 | Ishlab turgan ilova | Hali to'liq Convex'da — frontend yangi API'ga ulanmagan |
 
 **Holat belgilari:** ✅ tugallandi · 🟡 jarayonda · ⬜ boshlanmagan
@@ -26,7 +26,7 @@
 | 4 | Auth va sessiyalar | 🟡 jarayonda (SMS tiklash — Eskiz ulangach) |
 | 5 | Platforma: kompaniya, filial, rol, admin | ✅ tugallandi |
 | 6 | Katalog | ✅ tugallandi |
-| 7 | Ombor | ⬜ boshlanmagan |
+| 7 | Ombor | ✅ tugallandi |
 | 8 | Moliya | ⬜ boshlanmagan |
 | 9 | Xarid | ⬜ boshlanmagan |
 | 10 | Savdo va POS | ⬜ boshlanmagan |
@@ -67,6 +67,10 @@ Ko'chirish paytida topilgan. Yangi API'da hammasi yopilgan.
 | `admin.upsertSetting`; `companies.updateCompany`, `createBranch`, `updateBranch` | Ruxsat tekshiruvi yo'q |
 | `admin.listUsers`, `companies.platformListAllUsers` | Foydalanuvchi hujjati to'liq (PIN xeshi) brauzerga |
 | `companies.platformGetSettings` | Autentifikatsiyasiz ochiq |
+| `warehouse/stock.ts` `recordMovement`, `transferStock` | Ruxsat tekshiruvi yo'q — har qanday a'zo (Kassir ham) zaxirani o'zgartiradi; o'tkazmada tannarxni mijoz yuboradi |
+| `warehouse/warehouses.ts` `seedDefault` | Ruxsat tekshiruvi yo'q |
+| `warehouse/inventoryCounts.ts` `applyAdjustments` | Hisob yaratilgandagi eski farqni yozadi — orada bo'lgan sotuv/kirim yo'qoladi; bekor qilingan hisobni ham qo'llaydi |
+| a'zoning `allowedWarehouseIds` | Saqlanadi, lekin hech qayerda tekshirilmaydi |
 
 ## Foydalanuvchi boshqaruvi ierarxiyasi (yangi API)
 
@@ -137,14 +141,31 @@ Xatolar doim `{ code, message }`. Unique buzilishi 409, FK 409, CHECK 400. Yozis
 | POST | `/products/:productId/batches` | `warehouse.manage` | `addBatch` |
 | GET | `/batches/expiring` (`?daysAhead=30`) | `warehouse.view` | `getExpiringBatches` |
 
+### Ombor (`/api/inventory`)
+
+Har amalda a'zoning `allowedWarehouseIds` ruxsati tekshiriladi (bo'sh — barcha omborlar). Miqdor mahsulotning asosiy birligida.
+
+| Metod | Yo'l | Kim | Convex |
+|---|---|---|---|
+| GET | `/warehouses` (`?includeInactive=`), `/warehouses/:warehouseId` | a'zo | `warehouses.list`, `getById` |
+| POST / PATCH | `/warehouses`, `/warehouses/:warehouseId` | `warehouses.manage` | `create`, `update` |
+| GET | `/stock` (`?warehouseId=&search=&lowStockOnly=`) | `warehouse.view` | `getWarehouseStock` |
+| GET | `/stock/stats` (`?warehouseId=`), `/stock/products/:productId` | `warehouse.view` | `getWarehouseStats`, `getProductStock` |
+| GET | `/stock/movements` (`?warehouseId=&productId=&type=&limit=&cursor=`) | `warehouse.view` | `getMovements` |
+| POST | `/stock/movements` (receive, issue, adjust, writeoff, return_in, return_out) | `receive` — `warehouse.receive`; boshqalar — `warehouse.manage` | `recordMovement` |
+| POST | `/stock/transfers` | `warehouse.transfer` | `transferStock` |
+| GET | `/counts` (`?warehouseId=&status=`), `/counts/:countId` | `warehouse.view` | `inventoryCounts.list`, `getById` |
+| POST / PATCH | `/counts`, `/counts/:countId/items`, `/counts/:countId/items/:itemId`, `/counts/:countId/status` | `warehouse.count` | `create`, `updateItem`, `updateStatus` |
+| POST | `/counts/:countId/apply` | `warehouse.count` + `warehouse.manage` | `applyAdjustments` |
+
 ## Lokal muhit
 
-- **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432). `bumerp` — 4 ta migratsiya, ma'lumot yo'q; `bumerp_test` — testlar.
+- **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432). `bumerp` — 5 ta migratsiya, ma'lumot yo'q; `bumerp_test` — testlar.
 - **MinIO** — 9000/9001; `bum-erp` bucket va `STORAGE_*` hali yo'q.
 - **Migratsiya:** `pnpm --filter @bum/api db:migrate`
 - **Seed:** `.env` ga `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_PASSWORD` — `pnpm --filter @bum/api db:seed` (bootstrap admin + 14 global rol + 9 standart o'lchov birligi; idempotent)
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
-- **Testlar:** `pnpm --filter @bum/api test` — 139 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
+- **Testlar:** `pnpm --filter @bum/api test` — 150 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
 
 ---
 
@@ -154,7 +175,7 @@ pnpm workspace; `packages/shared`; `apps/api`; `docker-compose.yml`; `.env.examp
 
 ## PHASE 2 — PostgreSQL sxemasi ✅
 
-61 jadval, 10 domen. Pul/miqdor `numeric`; `company_id NOT NULL`; `legacy_id` (API ga chiqmaydi); DB darajasidagi CHECK/unique. Migratsiyalar: `0000` sxema; `0001` NULLS NOT DISTINCT; `0002` bootstrap admin himoyasi; `0003` bitta asosiy filial.
+61 jadval, 10 domen. Pul/miqdor `numeric`; `company_id NOT NULL`; `legacy_id` (API ga chiqmaydi); DB darajasidagi CHECK/unique. Migratsiyalar: `0000` sxema; `0001` NULLS NOT DISTINCT; `0002` bootstrap admin himoyasi; `0003` bitta asosiy filial; `0004` bitta asosiy ombor.
 
 ## PHASE 3 — API poydevori ✅
 
@@ -192,11 +213,23 @@ DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, 
 - **Testlar:** `catalog` (7), `products` (8)
 - **Eslatma:** partiya qo'shish zaxira qoldig'iga ta'sir qilmaydi (Convex'dagi kabi); zaxira harakatlari PHASE 7 da
 
-## PHASE 7 — Ombor ⬜
+## PHASE 7 — Ombor ✅
 
-- **Convex manbasi:** `convex/warehouse/` — `warehouses.ts` (list, getById, create, update, seedDefault), `stock.ts` (getWarehouseStock, getProductStock, getWarehouseStats, recordMovement, transferStock, getMovements), `inventoryCounts.ts` (list, getById, create, updateItem, updateStatus, applyAdjustments); sahifa `warehouse`
-- **Tayyor poydevor:** inventory jadvallari (`stock_levels.quantity >= 0` CHECK, o'zgarmas `stock_movements` jurnali); "Asosiy ombor" (WH-001); a'zoning `allowedWarehouseIds`
-- **Bog'liqlik:** zaxira jadvallari xarid, savdo, POS, ishlab chiqarish, hisobotlar va dashboard'da ishlatiladi — zaxira servisi shu PHASE da umumiy qilib yoziladi
+- **Convex manbasi:** `convex/warehouse/` — `warehouses.ts`, `stock.ts`, `inventoryCounts.ts`; sahifa `warehouse`
+- **Ko'chirilgan modullar** (`modules/inventory/`):
+  - `warehouses.service.ts` — omborlar (kod noyob, bitta asosiy ombor — bazada ham, filial va mas'ul shu kompaniyaniki, zaxirasi bor yoki asosiy omborni faolsizlantirib bo'lmaydi), `allowedWarehouses` / `assertWarehouseAccess`
+  - `stock.service.ts` — **`moveStock`: zaxirani o'zgartiradigan yagona yo'l** (xarid, savdo, POS, ishlab chiqarish ham shuni chaqiradi): qoldiq qatori `FOR UPDATE` bilan qulflanadi, arifmetika PostgreSQL `numeric` da, AVCO faqat tannarxli kirimda, chiqim joriy o'rtacha tannarxda yoziladi, yetmasa aniq xato. Qoldiqlar (kam qolgan, ortiqcha), statistika, kursorli harakatlar jurnali, qo'lda harakat, o'tkazma (qulflar doimiy tartibda — deadlock yo'q)
+  - `counts.service.ts` — inventarizatsiya: qoldiqlardan tuziladi, mahsulot qo'shish, sanash, bekor qilish, qo'llash (bir martalik)
+  - Audit: `WAREHOUSE_CREATED`, `WAREHOUSE_UPDATED`, `STOCK_MOVEMENT_RECORDED`, `STOCK_TRANSFERRED`, `INVENTORY_COUNT_CREATED`, `INVENTORY_COUNT_ITEM_ADDED`, `INVENTORY_COUNT_STATUS_CHANGED`, `INVENTORY_COUNT_APPLIED`
+- **Convex'dan ataylab farqlar:**
+  - `recordMovement` / `transferStock` ruxsat tekshirmasdi — endi `warehouse.receive` / `warehouse.manage` / `warehouse.transfer`
+  - O'tkazmada qabul qiluvchi omborga manbadagi o'rtacha tannarx yoziladi (Convex mijoz yuborganini yozardi)
+  - Inventarizatsiyani qo'llash farqni **joriy** qoldiqqa nisbatan hisoblaydi (Convex eski farqni yozardi — orada sotilgan tovar qoldiqqa qaytib qo'shilardi); bekor qilingan/yakunlangan hisob qo'llanmaydi; qoldig'i yo'q topilma ham qo'llanadi
+  - Ombor yaratish `warehouses.manage` (Convex'da `warehouse.manage` — Omborchi ham ombor ochardi); `seedDefault` kerak emas — kompaniya bilan WH-001 yaratiladi
+  - `allowedWarehouseIds` amalda qo'llanadi (Convex saqlardi, lekin tekshirmasdi)
+  - `stock_movements.type = count` faqat inventarizatsiyadan; `transfer_*` faqat o'tkazmadan — qo'lda yuborib bo'lmaydi
+- **Testlar:** `inventory` (8 — parallel chiqimlar qoldiqni manfiyga tushirmasligi ham), `counts` (3)
+- **Eslatma:** zonalar (`warehouse_zones`) Convex'da ham ishlatilmagan — API yozilmadi; `reserved_qty` savdo buyurtmalari bilan PHASE 10 da
 
 ## PHASE 8 — Moliya ⬜
 
@@ -242,6 +275,6 @@ Poydevor: `legacy_id` ustunlari; login Convex Auth parol xeshlarini qabul qiladi
 
 ## Keyingi qadam
 
-1. **PHASE 7 (Ombor)** — omborlar, zaxira qoldiqlari va harakatlari (AVCO, tranzaksiya va qator qulfi bilan), o'tkazmalar, inventarizatsiya
+1. **PHASE 8 (Moliya)** — hisoblar rejasi, kassa/bank hisoblari, xarajatlar, buxgalteriya jurnali (debet = kredit kafolati bilan)
 2. **Production:** Convex tuzatishini (`main` `3f958f1`) production kaliti bilan deploy qilish
 3. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_*` qo'shib `db:seed`

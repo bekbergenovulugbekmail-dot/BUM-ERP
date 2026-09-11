@@ -1,0 +1,294 @@
+/**
+ * Inventarizatsiya (convex/warehouse/inventoryCounts.ts).
+ *
+ * Convex'dan farqlar:
+ *  - applyAdjustments qoldiqni hisob yaratilgan paytdagi eski `difference` bo'yicha
+ *    yozardi — orada bo'lgan sotuv/kirim yo'qolib ketardi. Endi tuzatma = sanalgan
+ *    miqdor − JORIY qoldiq (qulf ostida)
+ *  - bekor qilingan yoki yakunlangan hisobni qo'llash taqiqlangan
+ *  - qoldig'i yo'q mahsulot sanalgan bo'lsa ham qo'llanadi (Convex o'tkazib yuborardi)
+ *  - hisobga mahsulot qo'shish mumkin (omborda qoldig'i yo'q topilma)
+ *  - `warehouse.count` ruxsati; qo'llash qo'shimcha `warehouse.manage` (routes)
+ */
+import { and, desc, eq, getTableColumns, inArray, isNotNull, sql } from "drizzle-orm";
+import { badRequest, notFound } from "@bum/shared";
+import { products, units } from "../../db/schema/catalog.js";
+import { inventoryCountItems, inventoryCounts, stockLevels, warehouses } from "../../db/schema/inventory.js";
+import type { DbOrTx, Tx } from "../../db/transaction.js";
+import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
+import type { TenantContext } from "../company/tenant.js";
+import { moveStock } from "./stock.service.js";
+import { allowedWarehouses, assertWarehouseAccess } from "./warehouses.service.js";
+
+const { legacyId: _l1, companyId: _c1, ...countFields } = getTableColumns(inventoryCounts);
+const { legacyId: _l2, companyId: _c2, ...itemFields } = getTableColumns(inventoryCountItems);
+
+export type CountStatus = (typeof inventoryCounts.status.enumValues)[number];
+
+function audit(tx: Tx, tenant: TenantContext, meta: RequestMeta, action: string, id: string, details: Record<string, unknown>) {
+  return writeAuditLog(
+    {
+      userId: tenant.user.id,
+      userName: tenant.user.name,
+      companyId: tenant.company.id,
+      action,
+      resource: "inventory_counts",
+      resourceId: id,
+      details,
+      ...meta,
+    },
+    tx,
+  );
+}
+
+export async function listCounts(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  options: { warehouseId?: string; status?: CountStatus },
+) {
+  if (options.warehouseId) assertWarehouseAccess(tenant, options.warehouseId);
+  const allowed = options.warehouseId ? null : allowedWarehouses(tenant);
+
+  return conn
+    .select({
+      ...countFields,
+      warehouseName: warehouses.name,
+      itemCount: sql<number>`(select count(*)::int from ${inventoryCountItems} where ${inventoryCountItems.countId} = ${inventoryCounts.id})`,
+      countedItems: sql<number>`(select count(*)::int from ${inventoryCountItems} where ${inventoryCountItems.countId} = ${inventoryCounts.id} and ${inventoryCountItems.countedQty} is not null)`,
+    })
+    .from(inventoryCounts)
+    .innerJoin(warehouses, eq(warehouses.id, inventoryCounts.warehouseId))
+    .where(
+      and(
+        eq(inventoryCounts.companyId, tenant.company.id),
+        options.warehouseId ? eq(inventoryCounts.warehouseId, options.warehouseId) : undefined,
+        allowed ? inArray(inventoryCounts.warehouseId, allowed) : undefined,
+        options.status ? eq(inventoryCounts.status, options.status) : undefined,
+      ),
+    )
+    .orderBy(desc(inventoryCounts.createdAt))
+    .limit(100);
+}
+
+async function loadCount(conn: DbOrTx, tenant: TenantContext, countId: string, forUpdate = false) {
+  const query = conn
+    .select(countFields)
+    .from(inventoryCounts)
+    .where(and(eq(inventoryCounts.id, countId), eq(inventoryCounts.companyId, tenant.company.id)))
+    .limit(1);
+  const [count] = forUpdate ? await query.for("update") : await query;
+  if (!count) throw notFound("Inventarizatsiya topilmadi");
+  assertWarehouseAccess(tenant, count.warehouseId);
+  return count;
+}
+
+function assertEditable(count: { status: CountStatus; adjustmentsMade: boolean }) {
+  if (count.adjustmentsMade || count.status === "completed" || count.status === "cancelled") {
+    throw badRequest("Inventarizatsiya yakunlangan yoki bekor qilingan");
+  }
+}
+
+export async function getCount(conn: DbOrTx, tenant: TenantContext, countId: string) {
+  const count = await loadCount(conn, tenant, countId);
+  const [warehouse] = await conn.select({ name: warehouses.name }).from(warehouses).where(eq(warehouses.id, count.warehouseId));
+  const items = await conn
+    .select({ ...itemFields, productName: products.name, productSku: products.sku, unitName: units.shortName })
+    .from(inventoryCountItems)
+    .innerJoin(products, eq(products.id, inventoryCountItems.productId))
+    .innerJoin(units, eq(units.id, products.baseUnitId))
+    .where(and(eq(inventoryCountItems.countId, countId), eq(inventoryCountItems.companyId, tenant.company.id)))
+    .orderBy(products.name);
+  return { ...count, warehouseName: warehouse?.name ?? null, items };
+}
+
+export async function createCount(
+  tx: Tx,
+  tenant: TenantContext,
+  input: { warehouseId: string; name: string; notes?: string | null },
+  meta: RequestMeta,
+) {
+  const [warehouse] = await tx
+    .select({ id: warehouses.id, isActive: warehouses.isActive })
+    .from(warehouses)
+    .where(and(eq(warehouses.id, input.warehouseId), eq(warehouses.companyId, tenant.company.id)))
+    .limit(1);
+  if (!warehouse) throw notFound("Ombor topilmadi");
+  if (!warehouse.isActive) throw badRequest("Ombor faol emas");
+  assertWarehouseAccess(tenant, warehouse.id);
+
+  const [count] = await tx
+    .insert(inventoryCounts)
+    .values({
+      companyId: tenant.company.id,
+      warehouseId: warehouse.id,
+      name: input.name,
+      notes: input.notes ?? null,
+      countedBy: tenant.user.id,
+    })
+    .returning(countFields);
+
+  const levels = await tx
+    .select({ productId: stockLevels.productId, quantity: stockLevels.quantity })
+    .from(stockLevels)
+    .innerJoin(products, eq(products.id, stockLevels.productId))
+    .where(
+      and(
+        eq(stockLevels.companyId, tenant.company.id),
+        eq(stockLevels.warehouseId, warehouse.id),
+        eq(products.isActive, true),
+      ),
+    );
+  if (levels.length > 0) {
+    await tx.insert(inventoryCountItems).values(
+      levels.map((l) => ({
+        companyId: tenant.company.id,
+        countId: count!.id,
+        productId: l.productId,
+        expectedQty: l.quantity,
+      })),
+    );
+  }
+
+  await audit(tx, tenant, meta, "INVENTORY_COUNT_CREATED", count!.id, { warehouseId: warehouse.id, items: levels.length });
+  return { ...count!, itemCount: levels.length };
+}
+
+export async function addCountItem(tx: Tx, tenant: TenantContext, countId: string, productId: string, meta: RequestMeta) {
+  const count = await loadCount(tx, tenant, countId, true);
+  assertEditable(count);
+
+  const [product] = await tx
+    .select({ id: products.id })
+    .from(products)
+    .where(and(eq(products.id, productId), eq(products.companyId, tenant.company.id)))
+    .limit(1);
+  if (!product) throw badRequest("Mahsulot topilmadi");
+
+  const [level] = await tx
+    .select({ quantity: stockLevels.quantity })
+    .from(stockLevels)
+    .where(
+      and(
+        eq(stockLevels.companyId, tenant.company.id),
+        eq(stockLevels.warehouseId, count.warehouseId),
+        eq(stockLevels.productId, product.id),
+      ),
+    )
+    .limit(1);
+
+  const [item] = await tx
+    .insert(inventoryCountItems)
+    .values({ companyId: tenant.company.id, countId, productId: product.id, expectedQty: level?.quantity ?? "0" })
+    .returning(itemFields);
+
+  await audit(tx, tenant, meta, "INVENTORY_COUNT_ITEM_ADDED", countId, { productId: product.id });
+  return item!;
+}
+
+export async function updateCountItem(
+  tx: Tx,
+  tenant: TenantContext,
+  countId: string,
+  itemId: string,
+  input: { countedQty: string; notes?: string | null },
+) {
+  const count = await loadCount(tx, tenant, countId, true);
+  assertEditable(count);
+
+  const [item] = await tx
+    .update(inventoryCountItems)
+    .set({
+      countedQty: input.countedQty,
+      difference: sql`${input.countedQty}::numeric - ${inventoryCountItems.expectedQty}`,
+      ...(input.notes !== undefined ? { notes: input.notes } : {}),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(inventoryCountItems.id, itemId),
+        eq(inventoryCountItems.countId, countId),
+        eq(inventoryCountItems.companyId, tenant.company.id),
+      ),
+    )
+    .returning(itemFields);
+  if (!item) throw notFound("Hisob qatori topilmadi");
+
+  // Birinchi sanalgan qator hisobni "jarayonda" holatiga o'tkazadi
+  if (count.status === "draft") {
+    await tx
+      .update(inventoryCounts)
+      .set({ status: "in_progress", startedAt: new Date(), updatedAt: new Date() })
+      .where(eq(inventoryCounts.id, countId));
+  }
+  return item;
+}
+
+export async function setCountStatus(
+  tx: Tx,
+  tenant: TenantContext,
+  countId: string,
+  status: "in_progress" | "cancelled",
+  meta: RequestMeta,
+) {
+  const count = await loadCount(tx, tenant, countId, true);
+  assertEditable(count);
+
+  const [updated] = await tx
+    .update(inventoryCounts)
+    .set({
+      status,
+      ...(status === "in_progress" && !count.startedAt ? { startedAt: new Date() } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(inventoryCounts.id, countId))
+    .returning(countFields);
+
+  await audit(tx, tenant, meta, "INVENTORY_COUNT_STATUS_CHANGED", countId, { from: count.status, to: status });
+  return updated!;
+}
+
+export async function applyCount(tx: Tx, tenant: TenantContext, countId: string, meta: RequestMeta) {
+  const count = await loadCount(tx, tenant, countId, true);
+  assertEditable(count);
+
+  const items = await tx
+    .select({ productId: inventoryCountItems.productId, countedQty: inventoryCountItems.countedQty })
+    .from(inventoryCountItems)
+    .where(and(eq(inventoryCountItems.countId, countId), isNotNull(inventoryCountItems.countedQty)));
+
+  let adjusted = 0;
+  for (const item of items) {
+    // Farq JORIY qoldiqqa nisbatan — hisob yaratilgandan keyingi harakatlar ham hisobga olinadi
+    const [row] = await tx.execute<{ delta: string }>(
+      sql`select (${item.countedQty}::numeric - coalesce((
+            select ${stockLevels.quantity} from ${stockLevels}
+            where ${stockLevels.companyId} = ${tenant.company.id}
+              and ${stockLevels.warehouseId} = ${count.warehouseId}
+              and ${stockLevels.productId} = ${item.productId}
+            for update
+          ), 0))::text as delta`,
+    ).then((r) => r.rows);
+    const delta = row?.delta ?? "0";
+    if (Number(delta) === 0) continue;
+
+    await moveStock(tx, tenant.company.id, tenant.user.id, {
+      type: "count",
+      productId: item.productId,
+      warehouseId: count.warehouseId,
+      quantity: delta,
+      referenceType: "inventory_count",
+      referenceId: countId,
+      notes: `Inventarizatsiya: ${count.name}`,
+    });
+    adjusted++;
+  }
+
+  const [updated] = await tx
+    .update(inventoryCounts)
+    .set({ status: "completed", adjustmentsMade: true, completedAt: new Date(), updatedAt: new Date() })
+    .where(eq(inventoryCounts.id, countId))
+    .returning(countFields);
+
+  await audit(tx, tenant, meta, "INVENTORY_COUNT_APPLIED", countId, { counted: items.length, adjusted });
+  return { count: updated!, adjusted };
+}
