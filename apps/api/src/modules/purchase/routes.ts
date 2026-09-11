@@ -47,6 +47,7 @@ const isoDate = z.iso.date();
 const limitQuery = z.coerce.number().int().min(1).max(200).default(50);
 const cursorQuery = z.string().max(500).optional();
 const positiveQty = decimalSchema({ scale: 4, positive: true });
+const currencyCode = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Valyuta kodi 3 harf (ISO 4217)");
 
 const supplierBody = z.strictObject({
   name: z.string().trim().min(1).max(200),
@@ -73,6 +74,11 @@ const orderItem = z.strictObject({
   taxRate: percentSchema.optional(),
   discountPercent: percentSchema.optional(),
   notes: nullableText(1000),
+  /** Qator valyutasi; berilmasa yoki null — asosiy valyuta. */
+  currency: currencyCode.nullable().optional(),
+  /** Qabulda mahsulotga yoziladigan sotuv narxi (asosiy birlik uchun). */
+  salesPrice: priceSchema.nullable().optional(),
+  salesCurrency: currencyCode.nullable().optional(),
 });
 const orderBody = z.strictObject({
   supplierId: z.uuid(),
@@ -112,6 +118,8 @@ const paymentBody = z.strictObject({
   supplierId: z.uuid(),
   orderId: z.uuid().nullable().optional(),
   amount: decimalSchema({ scale: 2, positive: true }),
+  /** To'lov valyutasi — kassa ham shu valyutada; standart asosiy valyuta. */
+  currency: currencyCode.optional(),
   paymentDate: isoDate.optional(),
   method: z.enum(["cash", "bank", "card", "transfer"]).default("cash"),
   cashAccountId: z.uuid().nullable().optional(),

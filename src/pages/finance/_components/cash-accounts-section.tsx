@@ -11,7 +11,8 @@ import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
-import { fmt, localIsoDate, toNum, type CashAccount, type CashTransaction } from "../_lib/types.ts";
+import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
+import { localIsoDate, toNum, type CashAccount, type CashTransaction } from "../_lib/types.ts";
 
 const CATEGORIES = ["sotuv", "xarid", "ijara", "maosh", "kommunal", "transport", "boshqa"];
 
@@ -36,11 +37,14 @@ type CashAccountBody = {
   bankName: string | null;
   accountNumber: string | null;
   openingBalance?: string;
+  /** Standart — asosiy valyuta. */
+  currency?: string;
 };
 
 export default function CashAccountsSection() {
   const { can } = usePermissions();
   const canManage = can("finance.manage");
+  const currencies = useCurrencies();
   const accounts = useApiQuery<{ cashAccounts: CashAccount[] }>("/api/finance/cash-accounts").data?.cashAccounts;
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [txDialog, setTxDialog] = useState<"in" | "out" | null>(null);
@@ -65,6 +69,7 @@ export default function CashAccountsSection() {
   const [acctBank, setAcctBank] = useState("");
   const [acctNumber, setAcctNumber] = useState("");
   const [acctOpening, setAcctOpening] = useState("");
+  const [acctCurrency, setAcctCurrency] = useState("");
 
   const handleTx = async () => {
     if (!selectedAccount || !txDialog) return;
@@ -94,10 +99,11 @@ export default function CashAccountsSection() {
         bankName: acctType === "bank" ? acctBank.trim() || null : null,
         accountNumber: acctType === "bank" ? acctNumber.trim() || null : null,
         openingBalance: toNum(acctOpening) > 0 ? acctOpening : undefined,
+        ...(acctCurrency && acctCurrency !== currencies.base ? { currency: acctCurrency } : {}),
       });
       toast.success("Kassa/bank hisobi qo'shildi");
       setCreateAccountOpen(false);
-      setAcctName(""); setAcctBank(""); setAcctNumber(""); setAcctOpening("");
+      setAcctName(""); setAcctBank(""); setAcctNumber(""); setAcctOpening(""); setAcctCurrency("");
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -151,7 +157,7 @@ export default function CashAccountsSection() {
                   <p className="text-xs text-muted-foreground">{acct.type === "cash" ? "Naqd" : acct.bankName ?? "Bank"}</p>
                 </div>
               </div>
-              <p className="text-xl font-bold">{fmt(acct.balance)} so'm</p>
+              <p className="text-xl font-bold">{formatMoney(acct.balance, acct.currency)}</p>
             </button>
           ))}
         </div>
@@ -203,9 +209,11 @@ export default function CashAccountsSection() {
                       "px-4 py-2.5 text-right font-semibold",
                       tx.type === "in" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
                     )}>
-                      {tx.type === "in" ? "+" : "-"}{fmt(tx.amount)} so'm
+                      {tx.type === "in" ? "+" : "-"}{formatMoney(tx.amount, selectedAccount.currency)}
                     </td>
-                    <td className="px-4 py-2.5 text-right text-muted-foreground">{fmt(tx.balanceAfter)} so'm</td>
+                    <td className="px-4 py-2.5 text-right text-muted-foreground">
+                      {formatMoney(tx.balanceAfter, selectedAccount.currency)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -223,7 +231,7 @@ export default function CashAccountsSection() {
             </DialogHeader>
             <div className="space-y-3">
               <div>
-                <Label>Summa (so'm)</Label>
+                <Label>Summa ({selectedAccount?.currency ?? currencies.base})</Label>
                 <Input type="number" min="0" step="0.01" value={txAmount} onChange={(e) => setTxAmount(e.target.value)} placeholder="0" />
               </div>
               <div>
@@ -270,6 +278,17 @@ export default function CashAccountsSection() {
                   </SelectContent>
                 </Select>
               </div>
+              {currencies.codes.length > 1 && (
+                <div>
+                  <Label>Valyuta</Label>
+                  <Select value={acctCurrency || currencies.base} onValueChange={setAcctCurrency}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {currencies.codes.map((code) => <SelectItem key={code} value={code}>{code}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               {acctType === "bank" && (
                 <>
                   <div>
@@ -283,7 +302,7 @@ export default function CashAccountsSection() {
                 </>
               )}
               <div>
-                <Label>Boshlang'ich qoldiq (so'm)</Label>
+                <Label>Boshlang'ich qoldiq ({acctCurrency || currencies.base})</Label>
                 <Input type="number" min="0" step="0.01" value={acctOpening} onChange={(e) => setAcctOpening(e.target.value)} placeholder="0" />
               </div>
             </div>

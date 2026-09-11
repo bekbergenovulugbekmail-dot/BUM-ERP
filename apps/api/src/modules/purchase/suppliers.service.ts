@@ -17,6 +17,7 @@ import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { toMinor } from "../../shared/decimal.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
+import { supplierDebtsByCurrency } from "./supplier-balances.service.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 
@@ -63,7 +64,7 @@ export async function listSuppliers(
   options: { includeInactive?: boolean; search?: string },
 ) {
   const pattern = options.search ? `%${options.search.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
-  return conn
+  const rows = await conn
     .select(supplierFields)
     .from(suppliers)
     .where(
@@ -76,6 +77,9 @@ export async function listSuppliers(
       ),
     )
     .orderBy(asc(suppliers.name));
+  // Qarz valyuta bo'yicha (asosiy valyutadagi `totalDebt` — kitob qiymati)
+  const debts = await supplierDebtsByCurrency(conn, tenant.company.id, rows.map((row) => row.id));
+  return rows.map((row) => ({ ...row, balances: debts.get(row.id) ?? [] }));
 }
 
 export async function getSupplier(conn: DbOrTx, tenant: TenantContext, supplierId: string) {
@@ -93,7 +97,8 @@ export async function getSupplier(conn: DbOrTx, tenant: TenantContext, supplierI
     })
     .from(purchaseOrders)
     .where(and(eq(purchaseOrders.companyId, tenant.company.id), eq(purchaseOrders.supplierId, supplierId)));
-  return { ...supplier, ...stats! };
+  const debts = await supplierDebtsByCurrency(conn, tenant.company.id, [supplierId]);
+  return { ...supplier, ...stats!, balances: debts.get(supplierId) ?? [] };
 }
 
 export async function createSupplier(tx: Tx, tenant: TenantContext, input: SupplierInput, meta: RequestMeta) {

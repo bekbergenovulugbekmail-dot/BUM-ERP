@@ -16,10 +16,13 @@ export type Supplier = {
   bankAccount: string | null;
   paymentTermDays: number;
   currency: string;
+  /** Asosiy valyutada — barcha valyutalardagi qarzning kitob qiymati. */
   totalDebt: string;
   totalPurchased: string;
   isActive: boolean;
   notes: string | null;
+  /** Qarz valyuta bo'yicha (nol bo'lmaganlari). */
+  balances?: { currency: string; debt: string }[];
 };
 
 export type PurchaseOrderRow = {
@@ -54,6 +57,12 @@ export type PurchaseOrderItem = {
   taxRate: string;
   discountPercent: string;
   lineTotal: string;
+  /** Qator valyutasi; null — asosiy valyuta. `unitPrice`, `lineTotal` shu valyutada. */
+  currency: string | null;
+  exchangeRate: string;
+  /** Qabulda mahsulotga yoziladigan sotuv narxi (null — o'zgarmaydi). */
+  salesPrice: string | null;
+  salesCurrency: string | null;
   notes: string | null;
   productName: string;
   productSku: string;
@@ -65,7 +74,13 @@ export type PurchaseReceipt = { id: string; receiptDate: string; notes: string |
 
 export type SupplierPayment = {
   id: string;
+  /** To'lov valyutasida. */
   amount: string;
+  currency: string;
+  exchangeRate: string;
+  /** Asosiy valyutada (to'lov kunidagi kurs) va kurs farqi (+ daromad / − xarajat). */
+  baseAmount: string;
+  fxAmount: string;
   method: PaymentMethod;
   paymentDate: string;
   reference: string | null;
@@ -74,6 +89,8 @@ export type SupplierPayment = {
 
 export type PurchaseOrderDetail = Omit<PurchaseOrderRow, "itemCount"> & {
   supplierPhone: string | null;
+  /** Jami va to'langani valyuta bo'yicha (asosiy valyuta ham). */
+  currencyTotals: { currency: string; totalAmount: string; paidAmount: string }[];
   items: PurchaseOrderItem[];
   receipts: PurchaseReceipt[];
   payments: SupplierPayment[];

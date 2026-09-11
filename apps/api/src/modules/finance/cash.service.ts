@@ -33,15 +33,16 @@ import {
   sql,
 } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
-import { accounts, cashAccounts, cashTransactions } from "../../db/schema/finance.js";
+import { accounts, cashAccounts, cashTransactions, companyCurrencies } from "../../db/schema/finance.js";
 import { purchaseOrders } from "../../db/schema/purchase.js";
 import { salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
-import { fromMinor, toMinor } from "../../shared/decimal.js";
+import { fromMinor, rescale, toMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency, financeAudit } from "./accounts.service.js";
+import { currencyRate } from "./currencies.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "./journal.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...cashAccountFields } = getTableColumns(cashAccounts);
@@ -65,25 +66,52 @@ export function ledgerAccountFor(conn: DbOrTx, companyId: string, type: CashAcco
 export type PaymentMethod = "cash" | "bank" | "card" | "transfer";
 
 /**
- * To'lov usuli → kassa: aniq tanlangan hisob ustun; naqd — asosiy kassa (null);
+ * To'lov usuli → kassa: aniq tanlangan hisob ustun; asosiy valyutada naqd — asosiy kassa (null);
  * karta, bank, o'tkazma — birinchi faol bank hisobi (karta tushumi bankka tushadi).
+ * Boshqa valyutada — shu valyutadagi birinchi faol kassa (naqd) yoki bank hisobi.
  */
 export async function resolvePaymentAccount(
   tx: Tx,
   companyId: string,
   method: PaymentMethod,
   cashAccountId?: string | null,
+  currency?: string,
 ): Promise<string | null> {
   if (cashAccountId) return cashAccountId;
-  if (method === "cash") return null;
-  const [bank] = await tx
+  const baseCurrency = await companyCurrency(tx, companyId);
+  const code = currency ?? baseCurrency;
+  if (method === "cash" && code === baseCurrency) return null;
+  const type = method === "cash" ? "cash" : "bank";
+  const [account] = await tx
     .select({ id: cashAccounts.id })
     .from(cashAccounts)
-    .where(and(eq(cashAccounts.companyId, companyId), eq(cashAccounts.type, "bank"), eq(cashAccounts.isActive, true)))
+    .where(
+      and(
+        eq(cashAccounts.companyId, companyId),
+        eq(cashAccounts.type, type),
+        eq(cashAccounts.currency, code),
+        eq(cashAccounts.isActive, true),
+      ),
+    )
     .orderBy(desc(cashAccounts.isDefault), asc(cashAccounts.name))
     .limit(1);
-  if (!bank) throw badRequest("Faol bank hisobi yo'q");
-  return bank.id;
+  if (!account) {
+    throw badRequest(
+      code === baseCurrency
+        ? "Faol bank hisobi yo'q"
+        : `${code} valyutasidagi faol ${type === "cash" ? "kassa" : "bank hisobi"} yo'q — Moliya bo'limida oching`,
+    );
+  }
+  return account.id;
+}
+
+/** Summa × kurs → asosiy valyuta (2 kasr). */
+export function toBaseAmount(amount: string, rate: string): string {
+  return fromMinor(rescale(toMinor(amount) * toMinor(rate, 4), 6, 2));
+}
+
+async function accountRate(tx: DbOrTx, companyId: string, currency: string) {
+  return currency === (await companyCurrency(tx, companyId)) ? "1.0000" : currencyRate(tx, companyId, currency);
 }
 
 export type CashMove = {
@@ -96,6 +124,8 @@ export type CashMove = {
   category?: string | null;
   referenceType?: string | null;
   referenceId?: string | null;
+  /** Summa qaysi valyutada; kassa shu valyutada bo'lishi shart. Standart — asosiy valyuta. */
+  currency?: string;
 };
 
 export async function recordCashTransaction(tx: Tx, companyId: string, createdBy: string | null, move: CashMove) {
@@ -116,6 +146,11 @@ export async function recordCashTransaction(tx: Tx, companyId: string, createdBy
     .for("update");
   if (!account) throw move.cashAccountId ? notFound("Kassa topilmadi") : badRequest("Asosiy kassa belgilanmagan");
   if (!account.isActive) throw badRequest("Kassa faol emas");
+  // Chaqiruvchi jurnalni shu valyuta bo'yicha yozadi — boshqa valyutadagi kassaga tushirib bo'lmaydi
+  const expectedCurrency = move.currency ?? (await companyCurrency(tx, companyId));
+  if (account.currency !== expectedCurrency) {
+    throw badRequest(`"${account.name}" ${account.currency} valyutasida — bu amal ${expectedCurrency} da`);
+  }
 
   if (move.referenceType && move.referenceId) {
     const [existing] = await tx
@@ -191,16 +226,24 @@ export type CashAccountInput = {
   accountNumber?: string | null;
   isDefault?: boolean;
   openingBalance?: string;
+  /** Standart — asosiy valyuta; boshqasi kompaniyada yoqilgan bo'lishi kerak. */
+  currency?: string;
 };
 
 export async function createCashAccount(tx: Tx, tenant: TenantContext, input: CashAccountInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
-  const { openingBalance, ...fields } = input;
+  const { openingBalance, currency: requestedCurrency, ...fields } = input;
+  const baseCurrency = await companyCurrency(tx, companyId);
+  const currency = requestedCurrency ?? baseCurrency;
+  const rate = await accountRate(tx, companyId, currency);
+  if (input.isDefault && currency !== baseCurrency) {
+    throw badRequest(`Asosiy kassa ${baseCurrency} valyutasida bo'lishi kerak`);
+  }
   if (input.isDefault) await clearDefault(tx, companyId);
 
   const [account] = await tx
     .insert(cashAccounts)
-    .values({ ...fields, isDefault: input.isDefault ?? false, companyId, currency: await companyCurrency(tx, companyId) })
+    .values({ ...fields, isDefault: input.isDefault ?? false, companyId, currency })
     .returning(cashAccountFields);
 
   if (openingBalance && toMinor(openingBalance) > 0n) {
@@ -209,22 +252,25 @@ export async function createCashAccount(tx: Tx, tenant: TenantContext, input: Ca
       cashAccountId: account!.id,
       type: "in",
       amount: openingBalance,
+      currency,
       txDate,
       description: "Boshlang'ich qoldiq",
       category: OPENING_BALANCE_CATEGORY,
       referenceType: "cash_opening_balance",
       referenceId: account!.id,
     });
+    // Jurnal asosiy valyutada — valyutali kassa joriy kurs bilan
+    const baseAmount = toBaseAmount(openingBalance, rate);
     await postJournalEntry(tx, companyId, tenant.user.id, {
       entryDate: txDate,
       description: `Boshlang'ich qoldiq: ${account!.name}`,
       referenceType: "cash_opening_balance",
       referenceId: account!.id,
       lines: [
-        { accountId: await ledgerAccountFor(tx, companyId, account!.type), debit: openingBalance },
+        { accountId: await ledgerAccountFor(tx, companyId, account!.type), debit: baseAmount },
         {
           accountId: await requireAccountBySubtype(tx, companyId, "capital", "equity", "Ustav kapitali"),
-          credit: openingBalance,
+          credit: baseAmount,
         },
       ],
     });
@@ -265,6 +311,9 @@ export async function updateCashAccount(
   }
   if (current.isActive && patch.isActive === false && toMinor(current.balance) !== 0n) {
     throw conflict("Kassada mablag' bor — avval boshqa kassaga o'tkazing");
+  }
+  if (patch.isDefault && current.currency !== (await companyCurrency(tx, companyId))) {
+    throw badRequest("Asosiy kassa asosiy valyutada bo'lishi kerak");
   }
   if (patch.isDefault && !current.isDefault) await clearDefault(tx, companyId);
 
@@ -349,10 +398,17 @@ export async function recordManualCashTransaction(
 ) {
   const companyId = tenant.company.id;
   const txDate = input.txDate ?? todayIso();
+  const [target] = await tx
+    .select({ currency: cashAccounts.currency })
+    .from(cashAccounts)
+    .where(and(eq(cashAccounts.id, input.cashAccountId), eq(cashAccounts.companyId, companyId)))
+    .limit(1);
+  if (!target) throw notFound("Kassa topilmadi");
   const { transaction, account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
     cashAccountId: input.cashAccountId,
     type: input.type,
     amount: input.amount,
+    currency: target.currency,
     txDate,
     description: input.description,
     category: input.category ?? null,
@@ -369,10 +425,12 @@ export async function recordManualCashTransaction(
     const ledger = await ledgerAccountFor(tx, companyId, account.type);
     if (ledger === counter.id) throw badRequest("Qarshi hisob kassaning o'z hisobi bo'lishi mumkin emas");
 
+    // Jurnal asosiy valyutada — valyutali kassa joriy kurs bilan
+    const baseAmount = toBaseAmount(input.amount, await accountRate(tx, companyId, account.currency));
     const lines =
       input.type === "in"
-        ? [{ accountId: ledger, debit: input.amount }, { accountId: counter.id, credit: input.amount }]
-        : [{ accountId: counter.id, debit: input.amount }, { accountId: ledger, credit: input.amount }];
+        ? [{ accountId: ledger, debit: baseAmount }, { accountId: counter.id, credit: baseAmount }]
+        : [{ accountId: counter.id, debit: baseAmount }, { accountId: ledger, credit: baseAmount }];
     const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
       entryDate: txDate,
       description: input.description,
@@ -416,7 +474,15 @@ export async function transferCash(
   const referenceId = randomUUID();
   const txDate = input.txDate ?? todayIso();
   const description = input.description || `${source.name} → ${target.name}`;
-  const common = { amount: input.amount, txDate, description, category: TRANSFER_CATEGORY, referenceType: "cash_transfer", referenceId };
+  const common = {
+    amount: input.amount,
+    currency: source.currency,
+    txDate,
+    description,
+    category: TRANSFER_CATEGORY,
+    referenceType: "cash_transfer",
+    referenceId,
+  };
 
   const out = await recordCashTransaction(tx, companyId, tenant.user.id, { ...common, cashAccountId: source.id, type: "out" });
   const into = await recordCashTransaction(tx, companyId, tenant.user.id, { ...common, cashAccountId: target.id, type: "in" });
@@ -424,14 +490,15 @@ export async function transferCash(
   // Kassa ↔ bank — hisoblar rejasida ham pul ko'chadi; kassa ↔ kassa bitta hisob ichida
   let journalEntryId: string | null = null;
   if (source.type !== target.type) {
+    const baseAmount = toBaseAmount(input.amount, await accountRate(tx, companyId, source.currency));
     const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
       entryDate: txDate,
       description,
       referenceType: "cash_transfer",
       referenceId,
       lines: [
-        { accountId: await ledgerAccountFor(tx, companyId, target.type), debit: input.amount },
-        { accountId: await ledgerAccountFor(tx, companyId, source.type), credit: input.amount },
+        { accountId: await ledgerAccountFor(tx, companyId, target.type), debit: baseAmount },
+        { accountId: await ledgerAccountFor(tx, companyId, source.type), credit: baseAmount },
       ],
     });
     journalEntryId = entry.id;
@@ -453,8 +520,19 @@ export async function financeDashboard(conn: DbOrTx, tenant: TenantContext) {
   const monthStart = `${todayIso().slice(0, 7)}-01`;
 
   const accountList = await listCashAccounts(conn, tenant);
+  // Valyutali kassalar joriy kurs bilan asosiy valyutada qo'shiladi
+  const baseCurrency = await companyCurrency(conn, companyId);
+  const rateRows = await conn
+    .select({ code: companyCurrencies.code, rate: companyCurrencies.rate })
+    .from(companyCurrencies)
+    .where(eq(companyCurrencies.companyId, companyId));
+  const rateOf = new Map(rateRows.map((row) => [row.code, toMinor(row.rate, 4)]));
+  const inBase = (account: { balance: string; currency: string }) =>
+    account.currency === baseCurrency
+      ? toMinor(account.balance)
+      : rescale(toMinor(account.balance) * (rateOf.get(account.currency) ?? 0n), 6, 2);
   const totalOf = (type: CashAccountType) =>
-    accountList.filter((a) => a.type === type).reduce((s, a) => s + toMinor(a.balance), 0n);
+    accountList.filter((a) => a.type === type).reduce((s, a) => s + inBase(a), 0n);
 
   const [cash] = await conn
     .select({

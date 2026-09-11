@@ -143,7 +143,15 @@ export const purchaseOrderItems = pgTable(
     unitPrice: price("unit_price").notNull(),
     taxRate: percent("tax_rate").notNull().default("0"),
     discountPercent: percent("discount_percent").notNull().default("0"),
+    /** Qator valyutasida (`currency`). */
     lineTotal: money("line_total").notNull().default("0"),
+    /** Qator valyutasi; null — asosiy valyuta. `unitPrice` va `lineTotal` shu valyutada. */
+    currency: varchar("currency", { length: 3 }),
+    /** Buyurtma paytidagi kurs — buyurtma jami (asosiy valyutada) shu bilan; tannarx qabul kunidagi kurs bilan. */
+    exchangeRate: price("exchange_rate").notNull().default("1"),
+    /** Qabulda mahsulotning yangi sotuv narxi (asosiy birlik uchun) va valyutasi; null — o'zgarmaydi. */
+    salesPrice: price("sales_price"),
+    salesCurrency: varchar("sales_currency", { length: 3 }),
     notes: text("notes"),
     ...timestamps(),
   },
@@ -152,6 +160,26 @@ export const purchaseOrderItems = pgTable(
     index("poi_company_product_idx").on(t.companyId, t.productId),
     check("poi_ordered_positive", sql`${t.orderedQty} > 0`),
     check("poi_received_not_over", sql`${t.receivedQty} >= 0 AND ${t.receivedQty} <= ${t.orderedQty}`),
+  ],
+);
+
+/** Buyurtma jami va to'langani valyuta bo'yicha (asosiy valyuta ham alohida qator). */
+export const purchaseOrderCurrencies = pgTable(
+  "purchase_order_currencies",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    orderId: uuid("order_id").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }),
+    currency: varchar("currency", { length: 3 }).notNull(),
+    totalAmount: money("total_amount").notNull().default("0"),
+    paidAmount: money("paid_amount").notNull().default("0"),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("poc_order_currency_key").on(t.orderId, t.currency),
+    check("poc_amounts_non_negative", sql`${t.totalAmount} >= 0 AND ${t.paidAmount} >= 0`),
   ],
 );
 
@@ -199,6 +227,10 @@ export const purchaseReceiptItems = pgTable(
     unitPrice: price("unit_price").notNull(),
     /** Qabul qiymati — ta'minotchi qarzi va jurnal shu summada; oxirgi qabul tiyin qoldig'ini yopadi. */
     lineTotal: money("line_total").notNull().default("0"),
+    /** Qator valyutasi (null — asosiy), qabul kunidagi kurs va shu valyutadagi qiymat; `lineTotal` = qiymat × kurs. */
+    currency: varchar("currency", { length: 3 }),
+    exchangeRate: price("exchange_rate").notNull().default("1"),
+    foreignTotal: money("foreign_total").notNull().default("0"),
     batchNumber: varchar("batch_number", { length: 64 }),
     expiryDate: date("expiry_date"),
     ...timestamps(),
@@ -227,6 +259,9 @@ export const supplierPayments = pgTable(
     amount: money("amount").notNull(),
     currency: varchar("currency", { length: 3 }).notNull().default("UZS"),
     exchangeRate: price("exchange_rate").notNull().default("1"),
+    /** Asosiy valyutada: to'lov kunidagi kurs bilan chiqim va kurs farqi (+ daromad / − xarajat). */
+    baseAmount: money("base_amount").notNull().default("0"),
+    fxAmount: money("fx_amount").notNull().default("0"),
     paymentDate: date("payment_date").notNull(),
     method: paymentMethod("method").notNull().default("cash"),
 
@@ -245,6 +280,31 @@ export const supplierPayments = pgTable(
       .on(t.companyId, t.supplierId, t.reference)
       .where(sql`${t.reference} IS NOT NULL`),
     check("sp_amount_positive", sql`${t.amount} > 0`),
+  ],
+);
+
+// ─── supplier_balances ───────────────────────────────────────────────────────
+
+/**
+ * Ta'minotchi qarzi valyuta bo'yicha: `debt` — o'z valyutasida, `bookValue` — asosiy valyutadagi kitob qiymati
+ * (kreditorlarda qanday turgan bo'lsa). Asosiy valyutada ikkalasi teng; `suppliers.total_debt` — kitob qiymatlari yig'indisi.
+ */
+export const supplierBalances = pgTable(
+  "supplier_balances",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    supplierId: uuid("supplier_id").notNull().references(() => suppliers.id, { onDelete: "restrict" }),
+    currency: varchar("currency", { length: 3 }).notNull(),
+    debt: money("debt").notNull().default("0"),
+    bookValue: money("book_value").notNull().default("0"),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("sb_supplier_currency_key").on(t.supplierId, t.currency),
+    index("sb_company_supplier_idx").on(t.companyId, t.supplierId),
   ],
 );
 

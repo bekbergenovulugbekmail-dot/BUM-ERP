@@ -23,6 +23,7 @@ import { badRequest, notFound } from "@bum/shared";
 import { batches, products, units } from "../../db/schema/catalog.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import {
+  purchaseOrderCurrencies,
   purchaseOrderItems,
   purchaseOrders,
   purchaseReceiptItems,
@@ -40,10 +41,12 @@ import { unitFactorToBase } from "../catalog/conversions.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { todayIso } from "../finance/cash.service.js";
+import { currencyRate } from "../finance/currencies.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { moveStock } from "../inventory/stock.service.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
 import { assertProductsInScope, categoryScope, documentHasScopedItem } from "../catalog/category-scope.js";
+import { applySupplierBalance } from "./supplier-balances.service.js";
 import { purchaseAudit } from "./suppliers.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...orderFields } = getTableColumns(purchaseOrders);
@@ -62,6 +65,11 @@ export type OrderItemInput = {
   taxRate?: string;
   discountPercent?: string;
   notes?: string | null;
+  /** Qator valyutasi; null/asosiy — asosiy valyuta. Narx shu valyutada. */
+  currency?: string | null;
+  /** Qabulda mahsulotga yoziladigan sotuv narxi (asosiy birlik uchun) va valyutasi. */
+  salesPrice?: string | null;
+  salesCurrency?: string | null;
 };
 
 export type OrderInput = {
@@ -75,6 +83,13 @@ export type OrderInput = {
 
 async function prepareItems(tx: Tx, companyId: string, items: OrderItemInput[]) {
   if (items.length === 0) throw badRequest("Buyurtmada kamida bitta mahsulot bo'lishi kerak");
+
+  const baseCurrency = await companyCurrency(tx, companyId);
+  const rates = new Map<string, string>([[baseCurrency, "1.0000"]]);
+  const rateOf = async (code: string) => {
+    if (!rates.has(code)) rates.set(code, await currencyRate(tx, companyId, code));
+    return rates.get(code)!;
+  };
 
   const rows = await tx
     .select({
@@ -91,7 +106,16 @@ async function prepareItems(tx: Tx, companyId: string, items: OrderItemInput[]) 
   let subtotal = 0n;
   let taxAmount = 0n;
   let discountAmount = 0n;
-  const prepared: (OrderItemInput & { taxRate: string; discountPercent: string; lineTotal: string })[] = [];
+  const currencyTotals = new Map<string, bigint>();
+  const prepared: (OrderItemInput & {
+    currency: string | null;
+    exchangeRate: string;
+    taxRate: string;
+    discountPercent: string;
+    lineTotal: string;
+    salesPrice: string | null;
+    salesCurrency: string | null;
+  })[] = [];
   for (const item of items) {
     const product = byId.get(item.productId);
     if (!product) throw badRequest("Mahsulot topilmadi");
@@ -99,16 +123,28 @@ async function prepareItems(tx: Tx, companyId: string, items: OrderItemInput[]) 
     if (toMinor(item.orderedQty, 4) <= 0n) throw badRequest(`${product.name}: miqdor musbat bo'lishi kerak`);
     await unitFactorToBase(tx, companyId, product, item.unitId);
 
-    // Ta'minotchi narxi soliqsiz — soliq ustiga qo'shiladi
+    const code = item.currency ?? baseCurrency;
+    const rate = await rateOf(code);
+    const salesCurrency = item.salesCurrency && item.salesCurrency !== baseCurrency ? item.salesCurrency : null;
+    if (salesCurrency) await rateOf(salesCurrency);
+
+    // Ta'minotchi narxi soliqsiz — soliq ustiga qo'shiladi; qator summasi o'z valyutasida,
+    // buyurtma jami asosiy valyutada (buyurtma kunidagi kurs bilan)
     const amounts = computeLine({ ...item, quantity: item.orderedQty });
-    subtotal += amounts.net;
-    taxAmount += amounts.tax;
-    discountAmount += amounts.discount;
+    const inBase = (minor: bigint) => rescale(minor * toMinor(rate, 4), 6, 2);
+    subtotal += inBase(amounts.net);
+    taxAmount += inBase(amounts.tax);
+    discountAmount += inBase(amounts.discount);
+    currencyTotals.set(code, (currencyTotals.get(code) ?? 0n) + amounts.lineTotal);
     prepared.push({
       ...item,
+      currency: code === baseCurrency ? null : code,
+      exchangeRate: rate,
       taxRate: item.taxRate ?? "0",
       discountPercent: item.discountPercent ?? "0",
       lineTotal: fromMinor(amounts.lineTotal),
+      salesPrice: item.salesPrice ?? null,
+      salesCurrency: item.salesPrice ? salesCurrency : null,
     });
   }
 
@@ -120,7 +156,31 @@ async function prepareItems(tx: Tx, companyId: string, items: OrderItemInput[]) 
       discountAmount: fromMinor(discountAmount),
       totalAmount: fromMinor(subtotal + taxAmount),
     },
+    currencyTotals: [...currencyTotals].map(([currency, total]) => ({ currency, totalAmount: fromMinor(total) })),
   };
+}
+
+async function replaceOrderCurrencies(
+  tx: Tx,
+  companyId: string,
+  orderId: string,
+  totals: { currency: string; totalAmount: string }[],
+) {
+  await tx.delete(purchaseOrderCurrencies).where(eq(purchaseOrderCurrencies.orderId, orderId));
+  if (totals.length > 0) {
+    await tx
+      .insert(purchaseOrderCurrencies)
+      .values(totals.map((total) => ({ companyId, orderId, currency: total.currency, totalAmount: total.totalAmount })));
+  }
+}
+
+/** Har valyuta bo'yicha to'liq to'langanmi. */
+async function orderFullyPaid(tx: Tx, orderId: string) {
+  const buckets = await tx
+    .select({ totalAmount: purchaseOrderCurrencies.totalAmount, paidAmount: purchaseOrderCurrencies.paidAmount })
+    .from(purchaseOrderCurrencies)
+    .where(eq(purchaseOrderCurrencies.orderId, orderId));
+  return buckets.length > 0 && buckets.every((b) => toMinor(b.paidAmount) >= toMinor(b.totalAmount));
 }
 
 async function assertSupplierAndWarehouse(tx: Tx, tenant: TenantContext, supplierId: string, warehouseId: string) {
@@ -154,6 +214,10 @@ async function insertItems(tx: Tx, companyId: string, orderId: string, items: Aw
       taxRate: item.taxRate,
       discountPercent: item.discountPercent,
       lineTotal: item.lineTotal,
+      currency: item.currency,
+      exchangeRate: item.exchangeRate,
+      salesPrice: item.salesPrice,
+      salesCurrency: item.salesCurrency,
       notes: item.notes ?? null,
     })),
   );
@@ -238,8 +302,19 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
     .where(eq(supplierPayments.orderId, orderId))
     .orderBy(asc(supplierPayments.createdAt));
 
+  const currencyTotals = await conn
+    .select({
+      currency: purchaseOrderCurrencies.currency,
+      totalAmount: purchaseOrderCurrencies.totalAmount,
+      paidAmount: purchaseOrderCurrencies.paidAmount,
+    })
+    .from(purchaseOrderCurrencies)
+    .where(eq(purchaseOrderCurrencies.orderId, orderId))
+    .orderBy(asc(purchaseOrderCurrencies.currency));
+
   return {
     ...order,
+    currencyTotals,
     items,
     receipts: receipts.map((r) => ({ ...r, items: receiptItems.filter((i) => i.receiptId === r.id) })),
     payments,
@@ -319,7 +394,7 @@ export async function createOrder(tx: Tx, tenant: TenantContext, input: OrderInp
   const companyId = tenant.company.id;
   await assertSupplierAndWarehouse(tx, tenant, input.supplierId, input.warehouseId);
   await assertProductsInScope(tx, tenant, input.items.map((i) => i.productId));
-  const { items, totals } = await prepareItems(tx, companyId, input.items);
+  const { items, totals, currencyTotals } = await prepareItems(tx, companyId, input.items);
 
   const number = await nextDocumentNumber(tx, {
     table: purchaseOrders,
@@ -346,6 +421,7 @@ export async function createOrder(tx: Tx, tenant: TenantContext, input: OrderInp
     })
     .returning({ id: purchaseOrders.id });
   await insertItems(tx, companyId, order!.id, items);
+  await replaceOrderCurrencies(tx, companyId, order!.id, currencyTotals);
 
   await purchaseAudit(tx, tenant, meta, {
     action: "PURCHASE_ORDER_CREATED",
@@ -378,6 +454,7 @@ export async function updateOrder(
     const prepared = await prepareItems(tx, companyId, patch.items);
     await tx.delete(purchaseOrderItems).where(eq(purchaseOrderItems.orderId, orderId));
     await insertItems(tx, companyId, orderId, prepared.items);
+    await replaceOrderCurrencies(tx, companyId, orderId, prepared.currencyTotals);
     totals = prepared.totals;
   }
 
@@ -499,6 +576,9 @@ export async function receiveGoods(tx: Tx, tenant: TenantContext, orderId: strin
     })
     .returning(receiptFields);
 
+  const baseCurrency = await companyCurrency(tx, companyId);
+  // Valyuta bo'yicha: ta'minotchi qarzi (o'z valyutasida) va kitob qiymati (asosiy valyutada)
+  const byCurrency = new Map<string, { foreign: bigint; base: bigint }>();
   let total = 0n;
   for (const line of input.items) {
     const orderItem = itemById.get(line.orderItemId);
@@ -528,10 +608,15 @@ export async function receiveGoods(tx: Tx, tenant: TenantContext, orderId: strin
       value = mulDivRound(received, lineTotal, ordered);
     }
 
+    // Qiymat qator valyutasida; tannarx va kreditorlar asosiy valyutada — qabul kunidagi (joriy) kurs bilan
+    const lineCurrency = orderItem.currency ?? baseCurrency;
+    const rate = orderItem.currency ? await currencyRate(tx, companyId, orderItem.currency) : "1.0000";
+    const baseValue = orderItem.currency ? rescale(value * toMinor(rate, 4), 6, 2) : value;
+
     const factor = await unitFactorToBase(tx, companyId, product, orderItem.unitId);
     const baseQty = rescale(received * toMinor(factor, 4), 8, 4);
     if (baseQty <= 0n) throw badRequest(`${product.name}: miqdor juda kichik`);
-    const costPerBase = fromMinor(mulDivRound(value, 1_000_000n, baseQty), 4);
+    const costPerBase = fromMinor(mulDivRound(baseValue, 1_000_000n, baseQty), 4);
 
     let batchId: string | null = null;
     if (line.batchNumber) {
@@ -559,8 +644,11 @@ export async function receiveGoods(tx: Tx, tenant: TenantContext, orderId: strin
       productId: product.id,
       unitId: orderItem.unitId,
       receivedQty: fromMinor(received, 4),
-      unitPrice: fromMinor(mulDivRound(value, 1_000_000n, received), 4),
-      lineTotal: fromMinor(value),
+      unitPrice: fromMinor(mulDivRound(baseValue, 1_000_000n, received), 4),
+      lineTotal: fromMinor(baseValue),
+      currency: orderItem.currency,
+      exchangeRate: rate,
+      foreignTotal: fromMinor(value),
       batchNumber: line.batchNumber ?? null,
       expiryDate: line.expiryDate ?? null,
     });
@@ -581,22 +669,31 @@ export async function receiveGoods(tx: Tx, tenant: TenantContext, orderId: strin
       referenceId: receipt!.id,
       notes: `Xarid: ${order.number}`,
     });
-    total += value;
+
+    // Xaridda belgilangan yangi sotuv narxi mahsulotga yoziladi
+    if (orderItem.salesPrice !== null) {
+      await tx
+        .update(products)
+        .set({ salesPrice: orderItem.salesPrice, salesCurrency: orderItem.salesCurrency, updatedAt: new Date() })
+        .where(eq(products.id, product.id));
+    }
+
+    total += baseValue;
+    const bucket = byCurrency.get(lineCurrency) ?? { foreign: 0n, base: 0n };
+    bucket.foreign += value;
+    bucket.base += baseValue;
+    byCurrency.set(lineCurrency, bucket);
   }
 
   const allReceived = orderItems.every((i) => toMinor(i.receivedQty, 4) >= toMinor(i.orderedQty, 4));
-  const fullyPaid = toMinor(order.paidAmount) >= toMinor(order.totalAmount);
+  const fullyPaid = await orderFullyPaid(tx, orderId);
   const status: PurchaseOrderStatus = allReceived ? (fullyPaid ? "paid" : "received") : "partial";
   await tx.update(purchaseOrders).set({ status, updatedAt: new Date() }).where(eq(purchaseOrders.id, orderId));
 
   const totalText = fromMinor(total);
   await tx
     .update(suppliers)
-    .set({
-      totalDebt: sql`${suppliers.totalDebt} + ${totalText}::numeric`,
-      totalPurchased: sql`${suppliers.totalPurchased} + ${totalText}::numeric`,
-      updatedAt: new Date(),
-    })
+    .set({ totalPurchased: sql`${suppliers.totalPurchased} + ${totalText}::numeric`, updatedAt: new Date() })
     .where(eq(suppliers.id, order.supplierId));
 
   if (total > 0n) {
@@ -609,6 +706,20 @@ export async function receiveGoods(tx: Tx, tenant: TenantContext, orderId: strin
         { accountId: await requireAccountBySubtype(tx, companyId, "inventory", "asset", "Tovar zaxirasi"), debit: totalText },
         { accountId: await requireAccountBySubtype(tx, companyId, "payable", "liability", "Kreditorlar"), credit: totalText },
       ],
+    });
+  }
+
+  // Ta'minotchi qarzi valyuta bo'yicha; `total_debt` kitob qiymati bilan birga yangilanadi
+  for (const [currency, amounts] of byCurrency) {
+    await applySupplierBalance(tx, {
+      companyId,
+      userId: tenant.user.id,
+      supplierId: order.supplierId,
+      currency,
+      debtDelta: amounts.foreign,
+      bookDelta: amounts.base,
+      date: receiptDate,
+      description: order.number,
     });
   }
 

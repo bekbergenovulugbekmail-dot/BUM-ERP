@@ -630,8 +630,14 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - mahsulotda xarid va sotuv narxi valyutasi (`purchase_currency`, `sales_currency`; null — asosiy valyuta); faqat asosiy yoki yoqilgan valyuta
   - savdo buyurtmasi va POS'da narxi boshqa valyutada belgilangan mahsulot joriy kurs bilan asosiy valyutada sotiladi; valyuta o'chirilsa sotib bo'lmaydi
   - mahsulot formasida narx yonida valyuta, so'mdagi taxminiy qiymat va marja; ro'yxat, tafsilot, POS kartochkasi, savdo/xarid oynasi, ombor kirimi, etiketka — kurs bilan
-- **Navbatda — ko'p valyuta davomi:** xarid qatorlari valyutada (yetkazuvchi qarzi o'z valyutasida, tannarx va buxgalteriya so'mda qabul sanasidagi kurs bilan, kurs farqi); POS/sotuvda valyuta tanlash, bitta valyutada — kurs bilan hisoblash, bir nechtasida — chekda har valyuta bo'yicha jami
-- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2); API jami 218 (41 fayl)
+- **Ko'p valyuta — 3-qism: xarid valyutada** (commit `e4dd300` — 2-qism; migratsiya 0016):
+  - xarid oynasida yuqorida valyutalar tanlanadi, har qatorda valyuta, xarid narxi va (ixtiyoriy) sotuv narxi — qabulda mahsulotga yoziladi; jami valyuta bo'yicha
+  - buyurtma jami va to'langani valyuta bo'yicha (`purchase_order_currencies`); `total_amount` asosiy valyutada (buyurtma kursi)
+  - qabulda tannarx va jurnal asosiy valyutada qabul kunidagi kurs bilan; ta'minotchi qarzi o'z valyutasida (`supplier_balances`: qarz + so'mdagi kitob qiymati)
+  - to'lov valyutada shu valyutadagi kassa/bankdan; kreditorlar kitob qiymati ulushida, kassa to'lov kursida, farqi — 4200 "Kurs farqi daromadi" / 5700 "Kurs farqi xarajati"
+  - valyutali kassa/bank hisoblari (asosiy kassa bo'la olmaydi); kassa amali valyutasi tekshiriladi; dashboard jami asosiy valyutada
+- **Navbatda — ko'p valyuta davomi:** POS/sotuvda valyuta tanlash — bitta valyutada kurs bilan hisoblash va to'lov, bir nechtasida chekda har valyuta bo'yicha jami
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2); API jami 221 (43 fayl)
 
 ---
 

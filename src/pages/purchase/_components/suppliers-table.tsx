@@ -11,7 +11,8 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyCont
 import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation } from "@/lib/query.ts";
-import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
+import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import { num, type Supplier } from "../_lib/types.ts";
 
 type Props = { suppliers: Supplier[] | undefined };
@@ -35,15 +36,16 @@ const fmt = (n: number) => new Intl.NumberFormat("uz-UZ", { notation: "compact" 
 
 export default function SuppliersTable({ suppliers }: Props) {
   const { can } = usePermissions();
-  // Ta'minotchi valyutasi — faqat kompaniya valyutasi (ko'p valyutali hisob yo'q)
-  const currency = useActiveCompany().data?.company.currency ?? "UZS";
+  // Qarz valyuta bo'yicha ko'rsatiladi (asosiy valyutadagi `totalDebt` — kitob qiymati)
+  const { base } = useCurrencies();
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<SupplierForm>(EMPTY_FORM);
 
   const createSupplier = useApiMutation((body: SupplierForm) =>
     api.post("/api/purchase/suppliers", {
       name: body.name,
-      code: body.code,
+      // Bo'sh — serverda avtomatik (S-0001)
+      code: body.code.trim() || undefined,
       contactPerson: body.contactPerson || null,
       phone: body.phone || null,
       email: body.email || null,
@@ -54,7 +56,7 @@ export default function SuppliersTable({ suppliers }: Props) {
   );
 
   const handleCreate = async () => {
-    if (!form.name.trim() || !form.code.trim()) { toast.error("Nomi va kod kiritilishi shart"); return; }
+    if (!form.name.trim()) { toast.error("Nomi kiritilishi shart"); return; }
     try {
       await createSupplier.mutateAsync(form);
       toast.success("Yetkazuvchi qo'shildi");
@@ -101,6 +103,8 @@ export default function SuppliersTable({ suppliers }: Props) {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {suppliers.map((s) => {
             const debt = num(s.totalDebt);
+            const balances = s.balances ?? [];
+            const foreignDebts = balances.some((b) => b.currency !== base) ? balances : [];
             return (
               <div key={s.id} className="border border-border rounded-xl p-4 hover:bg-muted/30 transition-colors">
                 <div className="flex items-start justify-between mb-3">
@@ -124,9 +128,17 @@ export default function SuppliersTable({ suppliers }: Props) {
                   </div>
                   <div>
                     <p className="text-muted-foreground">Qarz</p>
-                    <p className={cn("font-bold", debt > 0 ? "text-amber-600" : "text-green-600")}>
-                      {debt > 0 ? fmt(debt) : "Yo'q"}
-                    </p>
+                    {foreignDebts.length > 0 ? (
+                      foreignDebts.map((b) => (
+                        <p key={b.currency} className={cn("font-bold", num(b.debt) > 0 ? "text-amber-600" : "text-green-600")}>
+                          {formatMoney(b.debt, b.currency)}
+                        </p>
+                      ))
+                    ) : (
+                      <p className={cn("font-bold", debt > 0 ? "text-amber-600" : "text-green-600")}>
+                        {debt > 0 ? fmt(debt) : "Yo'q"}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <p className="text-muted-foreground">Muddat</p>
@@ -150,8 +162,8 @@ export default function SuppliersTable({ suppliers }: Props) {
                 <Input value={form.name} onChange={(e) => setForm(p => ({ ...p, name: e.target.value }))} placeholder="OOO Rizo Trade" />
               </div>
               <div>
-                <Label>Kod *</Label>
-                <Input value={form.code} onChange={(e) => setForm(p => ({ ...p, code: e.target.value }))} placeholder="SUP-001" />
+                <Label>Kod</Label>
+                <Input value={form.code} onChange={(e) => setForm(p => ({ ...p, code: e.target.value }))} placeholder="Avtomatik (S-0001)" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -173,10 +185,6 @@ export default function SuppliersTable({ suppliers }: Props) {
               <Input value={form.address} onChange={(e) => setForm(p => ({ ...p, address: e.target.value }))} placeholder="Toshkent, ..." />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Valyuta</Label>
-                <Input value={currency} disabled />
-              </div>
               <div>
                 <Label>To'lov muddati (kun)</Label>
                 <Input type="number" min="0" value={form.paymentTermDays}

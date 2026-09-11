@@ -34,6 +34,7 @@ export const DEFAULT_ACCOUNTS: { code: string; name: string; type: AccountType; 
   { code: "3000", name: "Ustav kapitali", type: "equity", subtype: "capital" },
   { code: "4000", name: "Sotuv daromadi", type: "income", subtype: "sales" },
   { code: "4100", name: "Boshqa daromadlar", type: "income", subtype: "other" },
+  { code: "4200", name: "Kurs farqi daromadi", type: "income", subtype: "fx_gain" },
   { code: "5000", name: "Tovar tannarxi", type: "expense", subtype: "cogs" },
   { code: "5100", name: "Ish haqi xarajatlari", type: "expense", subtype: "salary" },
   { code: "5200", name: "Ijara xarajatlari", type: "expense", subtype: "rent" },
@@ -41,6 +42,7 @@ export const DEFAULT_ACCOUNTS: { code: string; name: string; type: AccountType; 
   { code: "5400", name: "Transport xarajatlari", type: "expense", subtype: "transport" },
   { code: "5500", name: "Boshqa xarajatlar", type: "expense", subtype: "other" },
   { code: "5600", name: "Keshbek xarajatlari", type: "expense", subtype: "cashback_expense" },
+  { code: "5700", name: "Kurs farqi xarajati", type: "expense", subtype: "fx_loss" },
 ];
 
 const { legacyId: _legacyId, companyId: _companyId, ...accountFields } = getTableColumns(accounts);

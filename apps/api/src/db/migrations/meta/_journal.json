@@ -113,6 +113,13 @@
       "when": 1789156710032,
       "tag": "0015_product_price_currency",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1789157839988,
+      "tag": "0016_purchase_currency",
+      "breakpoints": true
     }
   ]
 }

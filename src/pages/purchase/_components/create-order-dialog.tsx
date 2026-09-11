@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { Plus, Trash2, ShoppingCart } from "lucide-react";
+import { currencySymbol } from "@bum/shared";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog.tsx";
@@ -10,10 +11,11 @@ import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
+import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
-import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
-import { useCurrencies } from "@/hooks/use-currencies.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
+import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import {
   num, todayLocal,
   type ProductOption, type Supplier, type WarehouseOption,
@@ -28,6 +30,10 @@ type LineItem = {
   unitPrice: number;
   taxRate: number;
   discountPercent: number;
+  /** "" — xaridning birinchi valyutasi. Narx va sotuv narxi shu valyutada. */
+  currency: string;
+  /** Qabulda mahsulotning yangi sotuv narxi (bo'sh — o'zgarmaydi). */
+  salesPrice: string;
 };
 
 type Props = {
@@ -35,9 +41,17 @@ type Props = {
   onCreated: (id: string) => void;
 };
 
-const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
+const emptyLine = (): LineItem => ({
+  productId: "", unitId: "", orderedQty: 1, unitPrice: 0, taxRate: 12, discountPercent: 0, currency: "", salesPrice: "",
+});
 
-const emptyLine = (): LineItem => ({ productId: "", unitId: "", orderedQty: 1, unitPrice: 0, taxRate: 12, discountPercent: 0 });
+/** Oldindan ko'rish — ta'minotchi narxi soliqsiz, soliq ustiga; aniq summa serverda. */
+function lineAmounts(line: LineItem) {
+  const gross = line.orderedQty * line.unitPrice;
+  const net = gross - gross * (line.discountPercent / 100);
+  const tax = net * (line.taxRate / 100);
+  return { net, tax, total: net + tax };
+}
 
 /** Ro'yxat oxiridagi "yangi qo'shish" bandlari — tanlanganda qiymat o'zgarmaydi, oyna ochiladi. */
 const NEW_SUPPLIER = "__new_supplier__";
@@ -52,7 +66,6 @@ function mergeById<T extends { id: string }>(list: T[] | undefined, extra: T[]):
 export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const { can } = usePermissions();
   const currencies = useCurrencies();
-  const currency = useActiveCompany().data?.company.currency ?? "UZS";
   const suppliers = useApiQuery<{ suppliers: Supplier[] }>("/api/purchase/suppliers").data?.suppliers;
   const warehouses = useApiQuery<{ warehouses: WarehouseOption[] }>("/api/inventory/warehouses").data?.warehouses;
   // API chegarasi: 200 ta faol mahsulot
@@ -69,6 +82,12 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const [lines, setLines] = useState<LineItem[]>([emptyLine()]);
   const [loading, setLoading] = useState(false);
 
+  // Xaridda ishlatiladigan valyutalar (yuqorida tanlanadi); qator valyutasi shulardan
+  const [chosenCurrencies, setChosenCurrencies] = useState<string[] | null>(null);
+  const selectedCurrencies = chosenCurrencies ?? [currencies.base];
+  const lineCurrency = (line: LineItem) => line.currency || selectedCurrencies[0] || currencies.base;
+  const showCurrencyColumn = selectedCurrencies.length > 1 || selectedCurrencies[0] !== currencies.base;
+
   // Shu oynaning o'zidan yetkazuvchi va mahsulot qo'shish
   const [supplierDialogOpen, setSupplierDialogOpen] = useState(false);
   const [productDialogLine, setProductDialogLine] = useState<number | null>(null);
@@ -84,6 +103,17 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
     setWarehouseId(def.id);
   }
 
+  const toggleCurrency = (code: string) => {
+    const next = selectedCurrencies.includes(code)
+      ? selectedCurrencies.filter((c) => c !== code)
+      : [...selectedCurrencies, code];
+    if (next.length === 0) return;
+    const ordered = currencies.codes.filter((c) => next.includes(c));
+    setChosenCurrencies(ordered);
+    // Olib tashlangan valyutadagi qatorlar birinchi valyutaga o'tadi
+    setLines((prev) => prev.map((line) => (line.currency && !ordered.includes(line.currency) ? { ...line, currency: "" } : line)));
+  };
+
   const addLine = () => setLines((p) => [...p, emptyLine()]);
 
   const removeLine = (i: number) => setLines((p) => p.filter((_, idx) => idx !== i));
@@ -91,35 +121,40 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const updateLine = (i: number, field: keyof LineItem, value: string | number) => {
     setLines((p) => {
       const next = [...p];
-      const line = { ...next[i] } as Record<string, string | number>;
-      line[field] = value;
-      // Auto-fill unit and price when product selected
+      const line = { ...next[i]! };
+      (line as Record<string, string | number>)[field] = value;
+      // Mahsulot tanlanganda birlik, soliq va narx; narx valyutasi xaridda tanlangan bo'lsa — o'zida
       if (field === "productId" && typeof value === "string") {
         const prod = productOptions.find((p) => p.id === value);
         if (prod) {
           line.unitId = prod.baseUnitId;
-          // Narxi boshqa valyutada — joriy kurs bilan asosiy valyutada
-          line.unitPrice = currencies.toBase(prod.purchasePrice, prod.purchaseCurrency) || 0;
           line.taxRate = num(prod.taxRate);
+          const productCurrency = prod.purchaseCurrency ?? currencies.base;
+          if (selectedCurrencies.includes(productCurrency)) {
+            line.currency = productCurrency;
+            line.unitPrice = num(prod.purchasePrice);
+          } else {
+            const target = lineCurrency(line);
+            const price = currencies.toBase(prod.purchasePrice, prod.purchaseCurrency) / currencies.rateOf(target);
+            line.unitPrice = Number.isFinite(price) ? Math.round(price * 100) / 100 : 0;
+          }
         }
       }
-      next[i] = line as unknown as LineItem;
+      next[i] = line;
       return next;
     });
   };
 
-  // Oldindan ko'rish — ta'minotchi narxi soliqsiz, soliq ustiga; aniq summa serverda
-  const subtotal = lines.reduce((s, l) => {
-    const gross = l.orderedQty * l.unitPrice;
-    const disc = gross * (l.discountPercent / 100);
-    return s + (gross - disc);
-  }, 0);
-  const taxTotal = lines.reduce((s, l) => {
-    const gross = l.orderedQty * l.unitPrice;
-    const disc = gross * (l.discountPercent / 100);
-    return s + (gross - disc) * (l.taxRate / 100);
-  }, 0);
-  const total = subtotal + taxTotal;
+  // Jami valyuta bo'yicha; asosiy valyutada taxminiy (joriy kurs)
+  const perCurrency = new Map<string, { net: number; tax: number; total: number }>();
+  for (const line of lines) {
+    if (!line.productId) continue;
+    const code = lineCurrency(line);
+    const amounts = lineAmounts(line);
+    const acc = perCurrency.get(code) ?? { net: 0, tax: 0, total: 0 };
+    perCurrency.set(code, { net: acc.net + amounts.net, tax: acc.tax + amounts.tax, total: acc.total + amounts.total });
+  }
+  const baseTotal = [...perCurrency].reduce((sum, [code, amounts]) => sum + amounts.total * currencies.rateOf(code), 0);
 
   const handleSubmit = async (asDraft: boolean) => {
     if (!supplierId) { toast.error("Yetkazuvchi tanlang"); return; }
@@ -135,14 +170,21 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
         orderDate,
         expectedDate: expectedDate || null,
         notes: notes || null,
-        items: validLines.map((l) => ({
-          productId: l.productId,
-          unitId: l.unitId,
-          orderedQty: l.orderedQty,
-          unitPrice: l.unitPrice,
-          taxRate: l.taxRate,
-          discountPercent: l.discountPercent,
-        })),
+        items: validLines.map((l) => {
+          const code = lineCurrency(l);
+          const foreign = code !== currencies.base;
+          const salesPrice = l.salesPrice.trim();
+          return {
+            productId: l.productId,
+            unitId: l.unitId,
+            orderedQty: l.orderedQty,
+            unitPrice: l.unitPrice,
+            taxRate: l.taxRate,
+            discountPercent: l.discountPercent,
+            ...(foreign ? { currency: code } : {}),
+            ...(salesPrice && Number(salesPrice) >= 0 ? { salesPrice, ...(foreign ? { salesCurrency: code } : {}) } : {}),
+          };
+        }),
       });
       if (asDraft) {
         toast.success("Qoralama saqlandi");
@@ -162,7 +204,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShoppingCart className="h-5 w-5 text-primary" />
@@ -205,9 +247,28 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
               </Select>
             </div>
             <div>
-              {/* Valyuta — faqat kompaniya valyutasi */}
-              <Label>Valyuta</Label>
-              <Input value={currency} disabled />
+              <Label>Valyutalar</Label>
+              {currencies.codes.length > 1 ? (
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {currencies.codes.map((code) => (
+                    <button
+                      key={code}
+                      type="button"
+                      onClick={() => toggleCurrency(code)}
+                      className={cn(
+                        "h-8 rounded-lg border px-2.5 text-xs font-medium transition-colors cursor-pointer",
+                        selectedCurrencies.includes(code)
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-muted/30 text-muted-foreground border-border hover:bg-accent",
+                      )}
+                    >
+                      {code}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <Input value={currencies.base} disabled />
+              )}
             </div>
             <div>
               <Label>Buyurtma sanasi</Label>
@@ -224,32 +285,36 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
           {/* Line items */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-semibold">Mahsulotlar</p>
+              <div>
+                <p className="text-sm font-semibold">Mahsulotlar</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Sotuv narxi kiritilsa — tovar qabul qilinganda mahsulotning sotuv narxi yangilanadi
+                </p>
+              </div>
               <Button size="sm" variant="secondary" onClick={addLine}>
                 <Plus className="h-3.5 w-3.5 mr-1" /> Qo'shish
               </Button>
             </div>
 
-            <div className="rounded-xl border border-border overflow-hidden">
+            <div className="rounded-xl border border-border overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-muted/50 border-b border-border">
-                    <th className="text-left px-3 py-2 text-xs text-muted-foreground">Mahsulot</th>
+                    <th className="text-left px-3 py-2 text-xs text-muted-foreground min-w-[180px]">Mahsulot</th>
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-24">Miqdor</th>
-                    <th className="text-right px-3 py-2 text-xs text-muted-foreground w-28">Narx</th>
+                    {showCurrencyColumn && <th className="text-left px-3 py-2 text-xs text-muted-foreground w-24">Valyuta</th>}
+                    <th className="text-right px-3 py-2 text-xs text-muted-foreground w-28">Xarid narxi</th>
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-20">Soliq %</th>
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-20">Chegirma %</th>
+                    <th className="text-right px-3 py-2 text-xs text-muted-foreground w-28">Sotuv narxi</th>
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-32">Jami</th>
                     <th className="w-8 px-2"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {lines.map((line, i) => {
-                    const gross = line.orderedQty * line.unitPrice;
-                    const disc = gross * (line.discountPercent / 100);
-                    const net = gross - disc;
-                    const tax = net * (line.taxRate / 100);
-                    const lineTotal = net + tax;
+                    const code = lineCurrency(line);
+                    const lineTotal = lineAmounts(line).total;
 
                     return (
                       <tr key={i}>
@@ -284,8 +349,18 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                             value={line.orderedQty}
                             onChange={(e) => updateLine(i, "orderedQty", e.target.valueAsNumber || 0)} />
                         </td>
+                        {showCurrencyColumn && (
+                          <td className="px-2 py-2">
+                            <Select value={code} onValueChange={(v) => updateLine(i, "currency", v)}>
+                              <SelectTrigger className="h-8 text-xs w-20"><SelectValue /></SelectTrigger>
+                              <SelectContent position="popper">
+                                {selectedCurrencies.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </td>
+                        )}
                         <td className="px-2 py-2">
-                          <Input type="number" min="0" className="h-8 text-xs text-right"
+                          <Input type="number" min="0" step="any" className="h-8 text-xs text-right"
                             value={line.unitPrice}
                             onChange={(e) => updateLine(i, "unitPrice", e.target.valueAsNumber || 0)} />
                         </td>
@@ -299,8 +374,15 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                             value={line.discountPercent}
                             onChange={(e) => updateLine(i, "discountPercent", e.target.valueAsNumber || 0)} />
                         </td>
+                        <td className="px-2 py-2">
+                          <Input type="number" min="0" step="any" className="h-8 text-xs text-right"
+                            placeholder="—"
+                            title={`Qabulda mahsulotning yangi sotuv narxi, ${code} (bo'sh — o'zgarmaydi)`}
+                            value={line.salesPrice}
+                            onChange={(e) => updateLine(i, "salesPrice", e.target.value)} />
+                        </td>
                         <td className="px-3 py-2 text-right font-medium text-xs whitespace-nowrap">
-                          {fmt(lineTotal)} so'm
+                          {formatMoney(lineTotal, code)}
                         </td>
                         <td className="px-2 py-2">
                           {lines.length > 1 && (
@@ -319,20 +401,41 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
 
           {/* Totals */}
           <div className="flex justify-end">
-            <div className="w-64 space-y-1 text-sm">
-              <div className="flex justify-between text-muted-foreground">
-                <span>Mahsulotlar jami</span>
-                <span>{fmt(subtotal)} so'm</span>
-              </div>
-              <div className="flex justify-between text-muted-foreground">
-                <span>QQS</span>
-                <span>{fmt(taxTotal)} so'm</span>
-              </div>
-              <Separator />
-              <div className="flex justify-between font-bold text-base">
-                <span>Jami</span>
-                <span className="text-primary">{fmt(total)} so'm</span>
-              </div>
+            <div className="w-72 space-y-1 text-sm">
+              {perCurrency.size === 0 ? (
+                <div className="flex justify-between font-bold text-base">
+                  <span>Jami</span>
+                  <span className="text-primary">0 {currencySymbol(currencies.base)}</span>
+                </div>
+              ) : (
+                [...perCurrency].map(([code, amounts]) => (
+                  <div key={code} className="space-y-1">
+                    {perCurrency.size === 1 && (
+                      <>
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>Mahsulotlar jami</span>
+                          <span>{formatMoney(amounts.net, code)}</span>
+                        </div>
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>QQS</span>
+                          <span>{formatMoney(amounts.tax, code)}</span>
+                        </div>
+                        <Separator />
+                      </>
+                    )}
+                    <div className="flex justify-between font-bold text-base">
+                      <span>Jami{perCurrency.size > 1 ? ` (${code})` : ""}</span>
+                      <span className="text-primary">{formatMoney(amounts.total, code)}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+              {showCurrencyColumn && perCurrency.size > 0 && Number.isFinite(baseTotal) && (
+                <div className="flex justify-between text-xs text-muted-foreground pt-1">
+                  <span>≈ {currencies.base} da (joriy kurs)</span>
+                  <span>{formatMoney(baseTotal, currencies.base)}</span>
+                </div>
+              )}
             </div>
           </div>
 

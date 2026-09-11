@@ -8,7 +8,7 @@ import {
 import LabelPrintDialog from "@/components/label-print-dialog.tsx";
 import { toLabelProduct, type LabelItem } from "@/lib/print/label-html.ts";
 import type { ProductListItem } from "@/pages/products/_lib/types.ts";
-import { useCurrencies } from "@/hooks/use-currencies.ts";
+import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import { generatePurchaseOrderPDF } from "@/lib/pdf/purchase-order-pdf.ts";
 import { Button } from "@/components/ui/button.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
@@ -68,6 +68,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const [receiveLines, setReceiveLines] = useState<Record<string, ReceiveLine>>({});
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
+  const [payCurrency, setPayCurrency] = useState<string | null>(null);
   const [payNote, setPayNote] = useState("");
   // Bitta to'lov formasi — bitta reference (ikki marta bosilsa server takrorlamaydi)
   const [payReference, setPayReference] = useState(() => newReference("SP"));
@@ -150,6 +151,8 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
         supplierId: order.supplierId,
         orderId,
         amount: payAmount.trim(),
+        // Valyutada to'lov shu valyutadagi kassadan; kurs farqi serverda
+        ...(activePayCurrency !== currencies.base ? { currency: activePayCurrency } : {}),
         paymentDate: todayLocal(),
         method: payMethod,
         reference: payReference,
@@ -204,6 +207,17 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   };
 
   const balance = order ? num(order.balance) : 0;
+  // Valyuta bo'yicha qoldiq — to'lov qoldig'i bor valyutada qilinadi
+  const buckets = order?.currencyTotals ?? [];
+  const openBuckets = buckets.filter((b) => num(b.totalAmount) > num(b.paidAmount));
+  const activePayCurrency =
+    payCurrency && openBuckets.some((b) => b.currency === payCurrency)
+      ? payCurrency
+      : openBuckets[0]?.currency ?? currencies.base;
+  const activeBucket = buckets.find((b) => b.currency === activePayCurrency);
+  const payRemaining = activeBucket ? num(activeBucket.totalAmount) - num(activeBucket.paidAmount) : balance;
+  const multiCurrency = buckets.length > 1 || buckets.some((b) => b.currency !== currencies.base);
+  const hasOpenBalance = buckets.length > 0 ? openBuckets.length > 0 : balance > 0;
 
   return (
     <AnimatePresence>
@@ -246,10 +260,11 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                   {[
                     { label: "Ombor", value: order.warehouseName },
                     { label: "Sana", value: order.orderDate },
-                    { label: "Jami", value: fmt(num(order.totalAmount)) },
-                    { label: "To'langan", value: fmt(num(order.paidAmount)) },
-                    { label: "Qoldi", value: fmt(balance) },
-                    { label: "Valyuta", value: order.currency },
+                    { label: multiCurrency ? "Jami (so'mda, buyurtma kursi)" : "Jami", value: fmt(num(order.totalAmount)) },
+                    { label: multiCurrency ? "To'langan (so'mda)" : "To'langan", value: fmt(num(order.paidAmount)) },
+                    ...(multiCurrency
+                      ? []
+                      : [{ label: "Qoldi", value: fmt(balance) }, { label: "Valyuta", value: order.currency }]),
                   ].map(({ label, value }) => (
                     <div key={label} className="bg-muted/40 rounded-lg px-3 py-2">
                       <p className="text-xs text-muted-foreground">{label}</p>
@@ -257,6 +272,27 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                     </div>
                   ))}
                 </div>
+
+                {multiCurrency && (
+                  <div className="rounded-lg border border-border overflow-hidden text-sm">
+                    <div className="grid grid-cols-4 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+                      <span>Valyuta</span>
+                      <span className="text-right">Jami</span>
+                      <span className="text-right">To'langan</span>
+                      <span className="text-right">Qoldi</span>
+                    </div>
+                    {buckets.map((b) => (
+                      <div key={b.currency} className="grid grid-cols-4 px-3 py-1.5 border-t border-border/60">
+                        <span className="font-medium">{b.currency}</span>
+                        <span className="text-right">{formatMoney(b.totalAmount, b.currency)}</span>
+                        <span className="text-right">{formatMoney(b.paidAmount, b.currency)}</span>
+                        <span className="text-right font-semibold">
+                          {formatMoney(Math.max(0, num(b.totalAmount) - num(b.paidAmount)), b.currency)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* Action buttons */}
                 <div className="flex flex-wrap gap-2">
@@ -271,7 +307,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                       {showReceive ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
                     </Button>
                   )}
-                  {["confirmed", "partial", "received", "invoiced"].includes(order.status) && balance > 0 && can("purchase.approve") && (
+                  {["confirmed", "partial", "received", "invoiced"].includes(order.status) && hasOpenBalance && can("purchase.approve") && (
                     <Button size="sm" variant="secondary" onClick={() => setShowPayment((p) => !p)}>
                       <CreditCard className="h-4 w-4 mr-1" /> To'lov qilish
                       {showPayment ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
@@ -349,12 +385,32 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                 {showPayment && (
                   <div className="border border-border rounded-xl p-4 space-y-3 bg-muted/20">
                     <p className="text-sm font-semibold">To'lov qayd etish</p>
+                    {openBuckets.length > 1 && (
+                      <div>
+                        <Label className="text-xs">Valyuta</Label>
+                        <Select value={activePayCurrency} onValueChange={(v) => { setPayCurrency(v); setPayAmount(""); }}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {openBuckets.map((b) => (
+                              <SelectItem key={b.currency} value={b.currency}>
+                                {b.currency} — qoldi {formatMoney(num(b.totalAmount) - num(b.paidAmount), b.currency)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {activePayCurrency !== currencies.base && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Pul {activePayCurrency} valyutasidagi kassa yoki bank hisobidan chiqadi; kurs farqi avtomatik hisoblanadi
+                      </p>
+                    )}
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <Label className="text-xs">Summa (so'm)</Label>
+                        <Label className="text-xs">Summa ({activePayCurrency})</Label>
                         <Input type="number" min="0" value={payAmount}
                           onChange={(e) => setPayAmount(e.target.value)}
-                          placeholder={String(balance)} />
+                          placeholder={String(payRemaining)} />
                       </div>
                       <div>
                         <Label className="text-xs">Usul</Label>
@@ -395,7 +451,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                           <p className="text-xs text-muted-foreground">
                             {num(item.receivedQty)}/{num(item.orderedQty)} {item.unitName}
                           </p>
-                          <p className="text-sm font-semibold">{fmt(num(item.lineTotal))}</p>
+                          <p className="text-sm font-semibold">{formatMoney(item.lineTotal, item.currency ?? currencies.base)}</p>
                         </div>
                       </div>
                     ))}
@@ -431,8 +487,13 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                       {order.payments.map((p) => (
                         <div key={p.id} className="flex justify-between py-1.5 text-sm border-b border-border/40 last:border-0">
                           <div>
-                            <span className="font-medium">{fmt(num(p.amount))}</span>
+                            <span className="font-medium">{formatMoney(p.amount, p.currency)}</span>
                             <span className="text-xs text-muted-foreground ml-2">{PAYMENT_LABELS[p.method] ?? p.method}</span>
+                            {num(p.fxAmount) !== 0 && (
+                              <span className={cn("text-[11px] ml-2", num(p.fxAmount) > 0 ? "text-emerald-600" : "text-rose-600")}>
+                                kurs farqi {num(p.fxAmount) > 0 ? "+" : ""}{fmt(num(p.fxAmount))}
+                              </span>
+                            )}
                           </div>
                           <span className="text-muted-foreground text-xs">{p.paymentDate}</span>
                         </div>

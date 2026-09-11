@@ -130,6 +130,8 @@ const cashAccountBody = z.strictObject({
   accountNumber: nullableText(64),
   isDefault: z.boolean().optional(),
   openingBalance: moneySchema.optional(),
+  /** Standart — asosiy valyuta; valyutali kassa asosiy bo'la olmaydi. */
+  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Valyuta kodi 3 harf (ISO 4217)").optional(),
 });
 const cashAccountPatch = z.strictObject({
   name: z.string().trim().min(1).max(200).optional(),

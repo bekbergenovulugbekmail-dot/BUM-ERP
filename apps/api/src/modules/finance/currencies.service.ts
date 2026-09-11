@@ -26,7 +26,11 @@ import { toMinor } from "../../shared/decimal.js";
 import { upsertCompanySetting } from "../company/settings.service.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency, financeAudit } from "./accounts.service.js";
-import { todayIso } from "./cash.service.js";
+
+/** UTC sana (cash.service'dagi bilan bir xil) — kassa servisi bu modulni import qiladi, aylanma import bo'lmasin. */
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 export const CBU_SETTING_KEY = "currency.cbu";
 const CBU_CACHE_MS = 60 * 60 * 1000;

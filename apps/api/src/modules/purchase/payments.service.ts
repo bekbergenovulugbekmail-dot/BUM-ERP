@@ -1,8 +1,13 @@
 /**
  * Ta'minotchiga to'lov (convex/purchase/orders.ts `recordPayment`).
  *
- * Bitta tranzaksiyada: to'lov, kassa/bank chiqimi (`recordCashTransaction`), jurnal
- * (DR kreditorlar / CR kassa yoki bank), buyurtmaning to'langan summasi, ta'minotchi qarzi.
+ * Bitta tranzaksiyada: to'lov, kassa/bank chiqimi (`recordCashTransaction`), jurnal, buyurtmaning to'langan
+ * summasi (valyuta bo'yicha), ta'minotchi qarzi (valyuta bo'yicha + kitob qiymati).
+ *
+ * Valyutada to'lov: pul shu valyutadagi kassa/bankdan chiqadi, qarz o'z valyutasida kamayadi. Jurnal asosiy
+ * valyutada: DR kreditorlar — qarzning kitob qiymatidan ulush, CR kassa — to'lov kunidagi kurs bilan,
+ * farqi — kurs farqi (CR 4200 daromad / DR 5700 xarajat). Qarzdan ortig'i (avans) joriy kurs bilan.
+ * Asosiy valyutada kurs 1 — farq bo'lmaydi.
  *
  * Convex'dan farqlar:
  *  - usul "bank" bo'lsa ham pul asosiy (naqd) kassadan yechilar, jurnal esa bankni
@@ -16,15 +21,17 @@
  */
 import { and, desc, eq, getTableColumns, lt, or, sql } from "drizzle-orm";
 import { badRequest, notFound } from "@bum/shared";
-import { purchaseOrders, supplierPayments, suppliers } from "../../db/schema/purchase.js";
+import { purchaseOrderCurrencies, purchaseOrders, supplierPayments, suppliers } from "../../db/schema/purchase.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
-import { fromMinor, toMinor } from "../../shared/decimal.js";
+import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { ledgerAccountFor, recordCashTransaction, resolvePaymentAccount, todayIso } from "../finance/cash.service.js";
-import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { currencyRate } from "../finance/currencies.service.js";
+import { ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { applySupplierBalance, lockSupplierBalance } from "./supplier-balances.service.js";
 import { purchaseAudit } from "./suppliers.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...paymentFields } = getTableColumns(supplierPayments);
@@ -36,6 +43,8 @@ export type SupplierPaymentInput = {
   supplierId: string;
   orderId?: string | null;
   amount: string;
+  /** Standart — asosiy valyuta; boshqasi kompaniyada yoqilgan bo'lishi kerak. */
+  currency?: string;
   paymentDate?: string;
   method: PaymentMethod;
   cashAccountId?: string | null;
@@ -46,7 +55,7 @@ export type SupplierPaymentInput = {
 export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input: SupplierPaymentInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
   const [supplier] = await tx
-    .select({ id: suppliers.id, name: suppliers.name, totalDebt: suppliers.totalDebt })
+    .select({ id: suppliers.id, name: suppliers.name })
     .from(suppliers)
     .where(and(eq(suppliers.id, input.supplierId), eq(suppliers.companyId, companyId)))
     .limit(1)
@@ -68,8 +77,13 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
     if (existing) return { payment: existing, created: false };
   }
 
+  const baseCurrency = await companyCurrency(tx, companyId);
+  const currency = input.currency ?? baseCurrency;
+  const rate = currency === baseCurrency ? "1.0000" : await currencyRate(tx, companyId, currency);
   const amount = toMinor(input.amount);
-  let order: { id: string; number: string; status: string; totalAmount: string; paidAmount: string } | null = null;
+
+  let order: { id: string; number: string; status: string } | null = null;
+  let bucket: { id: string; totalAmount: string; paidAmount: string } | null = null;
   if (input.orderId) {
     const [row] = await tx
       .select({
@@ -77,8 +91,6 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
         number: purchaseOrders.number,
         supplierId: purchaseOrders.supplierId,
         status: purchaseOrders.status,
-        totalAmount: purchaseOrders.totalAmount,
-        paidAmount: purchaseOrders.paidAmount,
       })
       .from(purchaseOrders)
       .where(and(eq(purchaseOrders.id, input.orderId), eq(purchaseOrders.companyId, companyId)))
@@ -89,18 +101,47 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
     if (row.status === "draft" || row.status === "cancelled") {
       throw badRequest("Qoralama yoki bekor qilingan buyurtmaga to'lov qilib bo'lmaydi");
     }
-    const balance = toMinor(row.totalAmount) - toMinor(row.paidAmount);
-    if (amount > balance) throw badRequest(`To'lov buyurtma qoldig'idan ortiq (qoldiq ${fromMinor(balance)})`);
-    order = row;
-  } else {
-    const debt = toMinor(supplier.totalDebt);
-    if (amount > debt) {
-      throw badRequest(`To'lov ta'minotchi qarzidan ortiq (qarz ${fromMinor(debt > 0n ? debt : 0n)}) — avans uchun buyurtmani tanlang`);
+    const [currencyRow] = await tx
+      .select({
+        id: purchaseOrderCurrencies.id,
+        totalAmount: purchaseOrderCurrencies.totalAmount,
+        paidAmount: purchaseOrderCurrencies.paidAmount,
+      })
+      .from(purchaseOrderCurrencies)
+      .where(and(eq(purchaseOrderCurrencies.orderId, row.id), eq(purchaseOrderCurrencies.currency, currency)))
+      .limit(1)
+      .for("update");
+    if (!currencyRow) throw badRequest(`Buyurtmada ${currency} valyutasidagi mahsulot yo'q`);
+    const balance = toMinor(currencyRow.totalAmount) - toMinor(currencyRow.paidAmount);
+    if (amount > balance) {
+      throw badRequest(`To'lov buyurtma qoldig'idan ortiq (qoldiq ${fromMinor(balance)} ${currency})`);
     }
+    order = row;
+    bucket = currencyRow;
   }
 
+  const balanceRow = await lockSupplierBalance(tx, companyId, supplier.id, currency);
+  const debt = toMinor(balanceRow.debt);
+  const book = toMinor(balanceRow.bookValue);
+  if (!order && amount > debt) {
+    throw badRequest(
+      `To'lov ta'minotchi qarzidan ortiq (qarz ${fromMinor(debt > 0n ? debt : 0n)} ${currency}) — avans uchun buyurtmani tanlang`,
+    );
+  }
+
+  // Asosiy valyutada: kassadan to'lov kunidagi kurs bilan; kreditorlardan qarzning kitob qiymati ulushi
+  const rateMinor = toMinor(rate, 4);
+  const baseAmount = rescale(amount * rateMinor, 6, 2);
+  let bookReduction = baseAmount;
+  if (debt > 0n && book > 0n) {
+    const covered = amount < debt ? amount : debt;
+    const coveredBook = covered === debt ? book : mulDivRound(book, covered, debt);
+    bookReduction = coveredBook + rescale((amount - covered) * rateMinor, 6, 2);
+  }
+  const fx = bookReduction - baseAmount;
+
   const paymentDate = input.paymentDate ?? todayIso();
-  const cashAccountId = await resolvePaymentAccount(tx, companyId, input.method, input.cashAccountId);
+  const cashAccountId = await resolvePaymentAccount(tx, companyId, input.method, input.cashAccountId, currency);
 
   const [payment] = await tx
     .insert(supplierPayments)
@@ -108,8 +149,11 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
       companyId,
       supplierId: supplier.id,
       orderId: order?.id ?? null,
-      amount: input.amount,
-      currency: await companyCurrency(tx, companyId),
+      amount: fromMinor(amount),
+      currency,
+      exchangeRate: rate,
+      baseAmount: fromMinor(baseAmount),
+      fxAmount: fromMinor(fx),
       paymentDate,
       method: input.method,
       reference: input.reference ?? null,
@@ -122,22 +166,27 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
   const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
     cashAccountId,
     type: "out",
-    amount: input.amount,
+    amount: fromMinor(amount),
+    currency,
     txDate: paymentDate,
     description,
     category: "purchase",
     referenceType: "supplier_payment",
     referenceId: payment!.id,
   });
+
+  const lines: { accountId: string; debit?: string; credit?: string }[] = [
+    { accountId: await requireAccountBySubtype(tx, companyId, "payable", "liability", "Kreditorlar"), debit: fromMinor(bookReduction) },
+    { accountId: await ledgerAccountFor(tx, companyId, account.type), credit: fromMinor(baseAmount) },
+  ];
+  if (fx > 0n) lines.push({ accountId: await ensureAccountBySubtype(tx, companyId, "fx_gain"), credit: fromMinor(fx) });
+  if (fx < 0n) lines.push({ accountId: await ensureAccountBySubtype(tx, companyId, "fx_loss"), debit: fromMinor(-fx) });
   const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
     entryDate: paymentDate,
     description,
     referenceType: "supplier_payment",
     referenceId: payment!.id,
-    lines: [
-      { accountId: await requireAccountBySubtype(tx, companyId, "payable", "liability", "Kreditorlar"), debit: input.amount },
-      { accountId: await ledgerAccountFor(tx, companyId, account.type), credit: input.amount },
-    ],
+    lines,
   });
 
   const [updated] = await tx
@@ -146,24 +195,52 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
     .where(eq(supplierPayments.id, payment!.id))
     .returning(paymentFields);
 
-  if (order) {
-    const paid = toMinor(order.paidAmount) + amount;
-    const settled = paid >= toMinor(order.totalAmount) && (order.status === "received" || order.status === "invoiced");
+  if (order && bucket) {
+    await tx
+      .update(purchaseOrderCurrencies)
+      .set({ paidAmount: fromMinor(toMinor(bucket.paidAmount) + amount), updatedAt: new Date() })
+      .where(eq(purchaseOrderCurrencies.id, bucket.id));
+    const buckets = await tx
+      .select({ totalAmount: purchaseOrderCurrencies.totalAmount, paidAmount: purchaseOrderCurrencies.paidAmount })
+      .from(purchaseOrderCurrencies)
+      .where(eq(purchaseOrderCurrencies.orderId, order.id));
+    const allPaid = buckets.every((b) => toMinor(b.paidAmount) >= toMinor(b.totalAmount));
+    const settled = allPaid && (order.status === "received" || order.status === "invoiced");
     await tx
       .update(purchaseOrders)
-      .set({ paidAmount: fromMinor(paid), ...(settled ? { status: "paid" as const } : {}), updatedAt: new Date() })
+      .set({
+        paidAmount: sql`${purchaseOrders.paidAmount} + ${fromMinor(baseAmount)}::numeric`,
+        ...(settled ? { status: "paid" as const } : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(purchaseOrders.id, order.id));
   }
-  await tx
-    .update(suppliers)
-    .set({ totalDebt: sql`${suppliers.totalDebt} - ${input.amount}::numeric`, updatedAt: new Date() })
-    .where(eq(suppliers.id, supplier.id));
+
+  await applySupplierBalance(tx, {
+    companyId,
+    userId: tenant.user.id,
+    supplierId: supplier.id,
+    currency,
+    debtDelta: -amount,
+    bookDelta: -bookReduction,
+    date: paymentDate,
+    description: supplier.name,
+  });
 
   await purchaseAudit(tx, tenant, meta, {
     action: "SUPPLIER_PAYMENT_RECORDED",
     resource: "supplier_payments",
     resourceId: payment!.id,
-    details: { supplierId: supplier.id, orderId: order?.id ?? null, amount: input.amount, cashAccountId: account.id },
+    details: {
+      supplierId: supplier.id,
+      orderId: order?.id ?? null,
+      amount: fromMinor(amount),
+      currency,
+      exchangeRate: rate,
+      baseAmount: fromMinor(baseAmount),
+      fxAmount: fromMinor(fx),
+      cashAccountId: account.id,
+    },
   });
   return { payment: updated!, created: true };
 }
