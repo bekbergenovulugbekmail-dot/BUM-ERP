@@ -2,7 +2,7 @@
  * Termal chek (58 / 80 mm) — HTML satr. Sozlamalardagi jonli ko'rinish (iframe) va chop etish bir manbadan,
  * shuning uchun ko'rilgan narsa aynan chiqadi. Brauzer chop etish oynasi orqali istalgan termal printerga.
  */
-import { DEFAULT_RECEIPT_TEMPLATE, type ReceiptTemplate } from "@bum/shared";
+import { DEFAULT_RECEIPT_TEMPLATE, currencySymbol, type ReceiptTemplate } from "@bum/shared";
 
 export type ReceiptDocument = {
   company: { name: string; address?: string | null; phone?: string | null; taxId?: string | null };
@@ -10,7 +10,18 @@ export type ReceiptDocument = {
   /** Tayyor formatlangan sana. */
   date: string;
   cashierName?: string | null;
-  items: { name: string; sku?: string | null; quantity: number; unitPrice: number; lineTotal: number }[];
+  items: {
+    name: string;
+    sku?: string | null;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
+    /** Chet valyutadagi qator: valyuta va shu valyutadagi summa. */
+    currency?: string | null;
+    currencyTotal?: number;
+  }[];
+  /** Bir nechta yoki chet valyutadagi chek: har valyuta bo'yicha jami, to'langan va qaytim. */
+  currencyTotals?: { currency: string; total: number; paid: number; change: number }[];
   taxAmount: number;
   discountAmount: number;
   totalAmount: number;
@@ -87,22 +98,43 @@ export function buildReceiptHtml(doc: ReceiptDocument, template: ReceiptTemplate
   if (t.showCashier && doc.cashierName) parts.push(row("Kassir", doc.cashierName));
   parts.push(`<div class="sep"></div>`);
 
+  const inCurrency = (amount: number, code: string) => `${money(amount)} ${currencySymbol(code)}`;
   for (const item of doc.items) {
     const name = t.showSku && item.sku ? `${item.name} (${item.sku})` : item.name;
-    parts.push(
-      `<div class="item"><div class="item-name">${escapeHtml(name)}</div>` +
-        `${row(`${quantity(item.quantity)} × ${money(item.unitPrice)}`, money(item.lineTotal))}</div>`,
-    );
+    // Chet valyutadagi qator o'z valyutasida (birlik narxi — shu summadan)
+    const lineRow = item.currency
+      ? row(
+          `${quantity(item.quantity)} × ${money((item.currencyTotal ?? 0) / (item.quantity || 1))}`,
+          inCurrency(item.currencyTotal ?? 0, item.currency),
+        )
+      : row(`${quantity(item.quantity)} × ${money(item.unitPrice)}`, money(item.lineTotal));
+    parts.push(`<div class="item"><div class="item-name">${escapeHtml(name)}</div>${lineRow}</div>`);
   }
   parts.push(`<div class="sep"></div>`);
 
   if (doc.discountAmount > 0) parts.push(row("Chegirma", `−${sum(doc.discountAmount)}`));
-  parts.push(row("JAMI", sum(doc.totalAmount), "total"));
-  if (t.showTax && doc.taxAmount > 0) parts.push(row("shu jumladan QQS", sum(doc.taxAmount), "muted"));
-  for (const payment of doc.payments) {
-    if (payment.amount > 0) parts.push(row(payment.label, sum(payment.amount)));
+  const byCurrency = doc.currencyTotals ?? [];
+  if (byCurrency.length > 0) {
+    // Valyuta bo'yicha: jami, to'langan, qaytim
+    for (const part of byCurrency) parts.push(row(`JAMI (${part.currency})`, inCurrency(part.total, part.currency), "total"));
+    if (t.showTax && doc.taxAmount > 0) parts.push(row("shu jumladan QQS", sum(doc.taxAmount), "muted"));
+    for (const payment of doc.payments) {
+      if (payment.amount > 0 && payment.label !== "Naqd" && payment.label !== "Karta" && payment.label !== "Bank") {
+        parts.push(row(payment.label, sum(payment.amount)));
+      }
+    }
+    for (const part of byCurrency) {
+      if (part.paid > 0) parts.push(row(`To'landi (${part.currency})`, inCurrency(part.paid + part.change, part.currency)));
+      if (part.change > 0) parts.push(row(`Qaytim (${part.currency})`, inCurrency(part.change, part.currency), "bold"));
+    }
+  } else {
+    parts.push(row("JAMI", sum(doc.totalAmount), "total"));
+    if (t.showTax && doc.taxAmount > 0) parts.push(row("shu jumladan QQS", sum(doc.taxAmount), "muted"));
+    for (const payment of doc.payments) {
+      if (payment.amount > 0) parts.push(row(payment.label, sum(payment.amount)));
+    }
   }
-  if (doc.change > 0) parts.push(row("Qaytim", sum(doc.change), "bold"));
+  if (doc.change > 0 && byCurrency.length === 0) parts.push(row("Qaytim", sum(doc.change), "bold"));
   if (doc.changeToBalance > 0) parts.push(row("Qaytim balansga", `+${sum(doc.changeToBalance)}`, "bold"));
   if (doc.debt > 0) parts.push(row("Qarzga yozildi", sum(doc.debt), "bold"));
 

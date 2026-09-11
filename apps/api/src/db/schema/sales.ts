@@ -207,6 +207,14 @@ export const salesOrderItems = pgTable(
     /** Sotuv lahzasidagi AVCO tannarx — COGS shundan hisoblanadi, keyin o'zgarmaydi. */
     costPrice: price("cost_price").notNull().default("0"),
 
+    /**
+     * Chekda ko'rsatiladigan va to'lanadigan valyuta (POS sotuv valyutalari); null — asosiy.
+     * `lineTotal` asosiy valyutada (buxgalteriya), `currencyTotal` = lineTotal / priceRate.
+     */
+    priceCurrency: varchar("price_currency", { length: 3 }),
+    priceRate: price("price_rate").notNull().default("1"),
+    currencyTotal: money("currency_total").notNull().default("0"),
+
     notes: text("notes"),
     ...timestamps(),
   },
@@ -235,6 +243,8 @@ export const customerPayments = pgTable(
     amount: money("amount").notNull(),
     currency: varchar("currency", { length: 3 }).notNull().default("UZS"),
     exchangeRate: price("exchange_rate").notNull().default("1"),
+    /** Chet valyutadagi to'lov summasi (`currency` da); `amount` — asosiy valyutadagi qiymati. */
+    foreignAmount: money("foreign_amount").notNull().default("0"),
     paymentDate: date("payment_date").notNull(),
     method: paymentMethod("method").notNull().default("cash"),
 

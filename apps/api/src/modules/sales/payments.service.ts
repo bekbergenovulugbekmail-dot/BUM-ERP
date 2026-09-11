@@ -18,7 +18,7 @@ import { customerPayments, customers, salesOrders } from "../../db/schema/sales.
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
-import { fromMinor, toMinor } from "../../shared/decimal.js";
+import { fromMinor, mulDivRound, toMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import {
@@ -42,6 +42,12 @@ export type CustomerPaymentInput = {
   cashAccountId?: string | null;
   reference?: string | null;
   notes?: string | null;
+  /**
+   * Chet valyutadagi to'lov: pul shu valyutadagi kassaga `foreignAmount` bo'lib tushadi,
+   * `amount` — uning asosiy valyutadagi qiymati (qarz va jurnal shu bilan).
+   */
+  currency?: string;
+  foreignAmount?: string;
 };
 
 export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input: CustomerPaymentInput, meta: RequestMeta) {
@@ -104,6 +110,12 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
   }
 
   const paymentDate = input.paymentDate ?? todayIso();
+  const baseCurrency = await companyCurrency(tx, companyId);
+  const paymentCurrency = input.currency ?? baseCurrency;
+  const foreign = paymentCurrency !== baseCurrency;
+  if (foreign && !(input.foreignAmount && toMinor(input.foreignAmount) > 0n)) {
+    throw badRequest("Valyutadagi to'lov summasi ko'rsatilmagan");
+  }
   const [payment] = await tx
     .insert(customerPayments)
     .values({
@@ -111,7 +123,10 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
       customerId,
       orderId: order?.id ?? null,
       amount: input.amount,
-      currency: await companyCurrency(tx, companyId),
+      currency: paymentCurrency,
+      // Kurs: asosiy qiymat / valyutadagi summa
+      exchangeRate: foreign ? fromMinor(mulDivRound(amount, 10_000n, toMinor(input.foreignAmount!)), 4) : "1",
+      foreignAmount: foreign ? input.foreignAmount! : "0",
       paymentDate,
       method: input.method,
       reference: input.reference ?? null,
@@ -122,9 +137,10 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
 
   const description = order ? `Mijoz to'lovi: ${order.number}` : `Mijoz to'lovi: ${customerName}`;
   const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
-    cashAccountId: await resolvePaymentAccount(tx, companyId, input.method, input.cashAccountId),
+    cashAccountId: await resolvePaymentAccount(tx, companyId, input.method, input.cashAccountId, paymentCurrency),
     type: "in",
-    amount: input.amount,
+    amount: foreign ? input.foreignAmount! : input.amount,
+    currency: paymentCurrency,
     txDate: paymentDate,
     description,
     category: "sales",

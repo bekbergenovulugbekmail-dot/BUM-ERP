@@ -636,8 +636,14 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - qabulda tannarx va jurnal asosiy valyutada qabul kunidagi kurs bilan; ta'minotchi qarzi o'z valyutasida (`supplier_balances`: qarz + so'mdagi kitob qiymati)
   - to'lov valyutada shu valyutadagi kassa/bankdan; kreditorlar kitob qiymati ulushida, kassa to'lov kursida, farqi — 4200 "Kurs farqi daromadi" / 5700 "Kurs farqi xarajati"
   - valyutali kassa/bank hisoblari (asosiy kassa bo'la olmaydi); kassa amali valyutasi tekshiriladi; dashboard jami asosiy valyutada
-- **Navbatda — ko'p valyuta davomi:** POS/sotuvda valyuta tanlash — bitta valyutada kurs bilan hisoblash va to'lov, bir nechtasida chekda har valyuta bo'yicha jami
-- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2); API jami 221 (43 fayl)
+- **POS sotuv valyutalari (migratsiya 0017):** kassada sotuv valyutalari tanlanadi
+  - bitta valyuta — hamma narx joriy kurs bilan shu valyutada; bir nechta — mahsulot o'z narx valyutasida (tanlanmagan bo'lsa birinchi valyutada)
+  - `sales_order_items`: `price_currency`, `price_rate`, `currency_total`; buxgalteriya (`line_total`, jurnal) asosiy valyutada
+  - chet valyuta qismi naqd, shu valyutadagi kassaga (`customer_payments.foreign_amount`), qaytim o'sha valyutada; mijozga qisman to'lovda qarz asosiy valyutada
+  - balans va keshbek faqat asosiy valyutadagi qismga; qaytarishda valyutadagi to'lov o'z kassasidan qaytadi
+  - chek (ekran va termal shablon): qator o'z valyutasida, oxirida har valyuta bo'yicha jami, to'langan va qaytim
+  - cheklovlar: POS smena naqd yig'indisi faqat asosiy valyutada; oddiy (POS bo'lmagan) sotuv buyurtmasi asosiy valyutada; PDF chek asosiy valyutada
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (2); API jami 223 (44 fayl)
 
 ---
 

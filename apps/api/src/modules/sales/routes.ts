@@ -77,6 +77,7 @@ const cursorQuery = z.string().max(500).optional();
 const positiveQty = decimalSchema({ scale: 4, positive: true });
 const positiveMoney = decimalSchema({ scale: 2, positive: true });
 const paymentMethod = z.enum(["cash", "bank", "card", "transfer"]);
+const currencyCode = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Valyuta kodi 3 harf (ISO 4217)");
 
 const customerBody = z.strictObject({
   name: z.string().trim().min(1).max(200),
@@ -173,6 +174,10 @@ const posSaleBody = z.strictObject({
   cashbackAmount: moneySchema.optional(),
   balanceAmount: moneySchema.optional(),
   changeToBalance: z.boolean().optional(),
+  /** Sotuv valyutalari; bitta chet valyuta — hamma narx shu valyutada. */
+  saleCurrencies: z.array(currencyCode).min(1).max(6).optional(),
+  /** Chet valyutadagi naqd to'lovlar. */
+  currencyPayments: z.array(z.strictObject({ currency: currencyCode, amount: moneySchema })).max(6).optional(),
   notes: nullableText(1000),
 });
 const posCustomerBody = z.strictObject({

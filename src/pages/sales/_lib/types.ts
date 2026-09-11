@@ -77,6 +77,10 @@ export type SalesOrderItem = {
   discountPercent: string;
   lineTotal: string;
   costPrice: string;
+  /** Chek valyutasi (POS sotuv valyutalari); null — asosiy. `currencyTotal` shu valyutada, `lineTotal` — asosiyda. */
+  priceCurrency: string | null;
+  priceRate: string;
+  currencyTotal: string;
   notes: string | null;
   productName: string;
   productSku: string;
@@ -85,7 +89,10 @@ export type SalesOrderItem = {
 
 export type CustomerPayment = {
   id: string;
+  /** Asosiy valyutada; chet valyutadagi to'lovda `foreignAmount` — `currency` da. */
   amount: string;
+  currency: string;
+  foreignAmount: string;
   method: PaymentMethod;
   paymentDate: string;
   reference: string | null;
@@ -94,6 +101,8 @@ export type CustomerPayment = {
 
 export type SalesOrderDetail = Omit<SalesOrderRow, "itemCount"> & {
   customerPhone: string | null;
+  /** Chet valyuta qatnashgan chekda: valyuta bo'yicha jami va to'langan. */
+  currencyTotals: { currency: string; totalAmount: string; paidAmount: string }[];
   items: SalesOrderItem[];
   payments: CustomerPayment[];
 };

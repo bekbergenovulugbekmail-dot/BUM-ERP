@@ -42,6 +42,8 @@ type CartItem = {
   taxRate: string;
   taxIncluded: boolean;
   stock: number;
+  /** Mahsulot narx valyutasi; null — asosiy. Sotuv valyutalari tanlansa chek valyutasini belgilaydi. */
+  salesCurrency: string | null;
 };
 
 type SaleResult = {
@@ -56,6 +58,8 @@ type SaleResult = {
   cashbackEarned: string;
   /** Shu chekdan qarzga yozilgan summa. */
   debt: string;
+  /** Chet valyuta qatnashgan chekda: valyuta bo'yicha jami, to'langan va qaytim. */
+  currencyTotals: { currency: string; total: string; paid: string; change: string }[];
   customer: PosCustomerSummary | null;
 };
 type LastReceipt = SaleResult & { payMethod: PaymentMethod };
@@ -70,6 +74,8 @@ const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 /** Kiritilgan summa → tiyin (faqat oldindan ko'rish; aniq hisob serverda). */
 const minorOf = (value: string | number) => BigInt(Math.round(num(value) * 100));
 const minBigInt = (...values: bigint[]) => values.reduce((a, b) => (b < a ? b : a));
+/** Serverdagi `mulDivRound` bilan bir xil yaxlitlash. */
+const mulDivRound = (a: bigint, b: bigint, c: bigint) => (a * b * 2n + c) / (2n * c);
 
 export default function POSPage() {
   const currentUser = useCurrentUser();
@@ -111,6 +117,20 @@ export default function POSPage() {
   const [lastReceipt, setLastReceipt] = useState<LastReceipt | null>(null);
   const [showScanner, setShowScanner] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Sotuv valyutalari: bittasi — hamma narx shu valyutada; bir nechtasi — mahsulot o'z narx valyutasida
+  const [saleCurrencies, setSaleCurrencies] = useState<string[] | null>(null);
+  const [foreignTendered, setForeignTendered] = useState<Record<string, string>>({});
+  const selectedSaleCurrencies = saleCurrencies ?? [currencies.base];
+  const currencyMode = selectedSaleCurrencies.length > 1 || selectedSaleCurrencies[0] !== currencies.base;
+  const toggleSaleCurrency = (code: string) => {
+    const next = selectedSaleCurrencies.includes(code)
+      ? selectedSaleCurrencies.filter((c) => c !== code)
+      : [...selectedSaleCurrencies, code];
+    if (next.length === 0) return;
+    setSaleCurrencies(currencies.codes.filter((c) => next.includes(c)));
+    setForeignTendered({});
+  };
 
   // Mijoz: qarzi va balansi ko'rinib turadi; sotuv yoki to'lovdan keyin so'rov yangilanadi
   const [customerId, setCustomerId] = useState<string | null>(null);
@@ -158,6 +178,40 @@ export default function POSPage() {
   const subtotal = minorToNumber(amounts.reduce((s, a) => s + a.net, 0n));
   const taxTotal = minorToNumber(amounts.reduce((s, a) => s + a.tax, 0n));
   const total = minorToNumber(totalMinor);
+
+  // Chek valyutalari — server bilan bir xil: qator valyutasi, valyutadagi summa = asosiy / kurs
+  const rateMinorOf = (code: string) => {
+    const rate = currencies.rateOf(code);
+    return Number.isFinite(rate) ? BigInt(Math.round(rate * 10_000)) : 0n;
+  };
+  const lineCurrencyOf = (item: CartItem) => {
+    const own = item.salesCurrency ?? currencies.base;
+    return selectedSaleCurrencies.includes(own) ? own : selectedSaleCurrencies[0] ?? currencies.base;
+  };
+  const buckets = new Map<string, { total: bigint; base: bigint }>();
+  const lineDisplay = cart.map((item, idx) => {
+    const code = lineCurrencyOf(item);
+    const baseLine = amounts[idx]!.lineTotal;
+    const rateMinor = rateMinorOf(code);
+    const lineTotal = code === currencies.base ? baseLine : rateMinor > 0n ? mulDivRound(baseLine, 10_000n, rateMinor) : 0n;
+    const bucket = buckets.get(code) ?? { total: 0n, base: 0n };
+    buckets.set(code, { total: bucket.total + lineTotal, base: bucket.base + baseLine });
+    return { code, total: lineTotal };
+  });
+  const baseBucketMinor = buckets.get(currencies.base)?.base ?? (currencyMode ? 0n : totalMinor);
+  const showBasePayment = !currencyMode || cart.length === 0 || buckets.has(currencies.base);
+  // Chet valyutadagi qismlar: bo'sh maydon — aniq summa; ortig'i — o'sha valyutada qaytim
+  const foreignBuckets = [...buckets]
+    .filter(([code]) => code !== currencies.base)
+    .map(([code, bucket]) => {
+      const text = foreignTendered[code] ?? "";
+      const given = text.trim() !== "" ? minorOf(text) : bucket.total;
+      const paidInCurrency = given < bucket.total ? given : bucket.total;
+      const paidBase = paidInCurrency === bucket.total ? bucket.base : mulDivRound(paidInCurrency, rateMinorOf(code), 10_000n);
+      return { code, total: bucket.total, given, change: given - paidInCurrency, unpaidBase: bucket.base - paidBase };
+    });
+  const foreignDebt = minorToNumber(foreignBuckets.reduce((sum, bucket) => sum + bucket.unpaidBase, 0n));
+
   // Keshbekdan: mijoz keshbeki, sozlamadagi chek ulushi chegarasi va chek summasidan oshmaydi
   const cashbackEnabled = !!cashbackSettings?.enabled;
   const cashbackAvailable = customer && cashbackEnabled ? minorOf(customer.cashbackBalance) : 0n;
@@ -165,22 +219,23 @@ export default function POSPage() {
     ? (totalMinor * BigInt(Math.round(cashbackSettings.maxUsagePercent * 100))) / 10_000n
     : 0n;
   const cashbackRequested = cashbackInput.trim() !== "" ? minorOf(cashbackInput) : cashbackAvailable;
+  // Keshbek va balans asosiy valyutada — faqat chekning asosiy valyutadagi qismiga
   const cashbackMinor = customer && useCashback && cashbackRequested > 0n
-    ? minBigInt(cashbackRequested, cashbackAvailable, cashbackLimit)
+    ? minBigInt(cashbackRequested, cashbackAvailable, cashbackLimit, baseBucketMinor)
     : 0n;
   // Mijoz balansidan yechiladigan qism — qolgan chek summasi va balansdan oshmaydi
   const balanceAvailable = customer ? minorOf(customer.balance) : 0n;
   const balanceRequested = balanceInput.trim() !== "" ? minorOf(balanceInput) : balanceAvailable;
   const balanceMinor = customer && useBalance && balanceRequested > 0n
-    ? minBigInt(balanceRequested, balanceAvailable, totalMinor - cashbackMinor)
+    ? minBigInt(balanceRequested, balanceAvailable, baseBucketMinor - cashbackMinor)
     : 0n;
-  const dueMinor = totalMinor - cashbackMinor - balanceMinor;
+  const dueMinor = baseBucketMinor - cashbackMinor - balanceMinor;
   const due = minorToNumber(dueMinor);
   // Naqdda bo'sh maydon — aniq summa; karta/bankda to'lov doim to'lanadigan summaga teng
   const paid = payMethod === "cash" && amountPaid.trim() !== "" ? num(amountPaid) : due;
   const change = Math.max(0, paid - due);
   // Yetmagan qismi faqat mijoz tanlanganda qarzga yoziladi
-  const debtAmount = Math.max(0, due - paid);
+  const debtAmount = Math.max(0, due - paid) + foreignDebt;
   const onCredit = debtAmount >= 0.01;
 
   // Narxi boshqa valyutada belgilangan mahsulot — joriy kurs bilan (server ham shunday hisoblaydi)
@@ -212,6 +267,7 @@ export default function POSPage() {
         taxRate: p.taxRate,
         taxIncluded: p.taxIncluded,
         stock,
+        salesCurrency: p.salesCurrency,
       }];
     });
   };
@@ -281,10 +337,17 @@ export default function POSPage() {
         ...(cashbackMinor > 0n ? { cashbackAmount: fromMinor(cashbackMinor) } : {}),
         ...(balanceMinor > 0n ? { balanceAmount: fromMinor(balanceMinor) } : {}),
         ...(keepChange ? { changeToBalance: true } : {}),
+        ...(currencyMode
+          ? {
+              saleCurrencies: selectedSaleCurrencies,
+              currencyPayments: foreignBuckets.map((bucket) => ({ currency: bucket.code, amount: fromMinor(bucket.given) })),
+            }
+          : {}),
       });
       setLastReceipt({ ...result, payMethod });
       setCart([]);
       setAmountPaid("");
+      setForeignTendered({});
       clearCustomer();
       const details = [
         num(result.change) > 0 ? `Qaytim: ${fmt(num(result.change))} so'm` : null,
@@ -501,6 +564,28 @@ export default function POSPage() {
           )}
         </div>
 
+        {/* Sotuv valyutalari */}
+        {currencies.codes.length > 1 && (
+          <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
+            <span className="text-[11px] text-muted-foreground mr-1">Valyuta:</span>
+            {currencies.codes.map((code) => (
+              <button
+                key={code}
+                type="button"
+                onClick={() => toggleSaleCurrency(code)}
+                className={cn(
+                  "h-7 rounded-md border px-2 text-[11px] font-semibold transition-colors cursor-pointer",
+                  selectedSaleCurrencies.includes(code)
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-muted/30 text-muted-foreground border-border hover:bg-accent",
+                )}
+              >
+                {code}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Mijoz */}
         <div className="px-3 py-2 border-b border-border shrink-0">
           {customer ? (
@@ -586,7 +671,11 @@ export default function POSPage() {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium truncate">{item.name}</p>
-                      <p className="text-[11px] text-muted-foreground">{fmt(num(item.unitPrice))} so'm</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {lineDisplay[idx]!.code === currencies.base
+                          ? `${fmt(num(item.unitPrice))} so'm`
+                          : formatMoney(num(item.unitPrice) / currencies.rateOf(lineDisplay[idx]!.code), lineDisplay[idx]!.code)}
+                      </p>
                     </div>
                     <div className="flex items-center gap-1">
                       <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => updateQty(idx, -1)}>
@@ -599,7 +688,7 @@ export default function POSPage() {
                     </div>
                     <div className="text-right w-20">
                       <p className="text-xs font-semibold">
-                        {fmt(minorToNumber(amounts[idx]!.lineTotal))} so'm
+                        {formatMoney(minorToNumber(lineDisplay[idx]!.total), lineDisplay[idx]!.code)}
                       </p>
                     </div>
                     <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => removeFromCart(idx)}>
@@ -622,10 +711,26 @@ export default function POSPage() {
             <div className="flex justify-between text-muted-foreground">
               <span>QQS</span><span>{fmt(taxTotal)} so'm</span>
             </div>
-            <div className="flex justify-between font-bold text-lg pt-1 border-t border-border">
-              <span>Jami</span>
-              <span className="text-primary">{fmt(total)} so'm</span>
-            </div>
+            {currencyMode && buckets.size > 0 ? (
+              <div className="pt-1 border-t border-border space-y-0.5">
+                {[...buckets].map(([code, bucket]) => (
+                  <div key={code} className="flex justify-between font-bold text-base">
+                    <span>Jami ({code})</span>
+                    <span className="text-primary">{formatMoney(minorToNumber(bucket.total), code)}</span>
+                  </div>
+                ))}
+                {buckets.size > 1 && (
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>≈ {currencies.base} da</span><span>{fmt(total)} so'm</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex justify-between font-bold text-lg pt-1 border-t border-border">
+                <span>Jami</span>
+                <span className="text-primary">{fmt(total)} so'm</span>
+              </div>
+            )}
             {cashbackMinor > 0n && (
               <div className="flex justify-between text-violet-600 dark:text-violet-400">
                 <span>Keshbekdan</span><span>−{fmt(minorToNumber(cashbackMinor))} so'm</span>
@@ -644,7 +749,7 @@ export default function POSPage() {
           </div>
 
           {/* Keshbekdan to'lash */}
-          {customer && cashbackAvailable > 0n && cashbackLimit > 0n && (
+          {customer && cashbackAvailable > 0n && cashbackLimit > 0n && baseBucketMinor > 0n && (
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -663,7 +768,7 @@ export default function POSPage() {
                   type="number"
                   min="0"
                   className="h-9 text-right"
-                  placeholder={String(minorToNumber(minBigInt(cashbackAvailable, cashbackLimit)))}
+                  placeholder={String(minorToNumber(minBigInt(cashbackAvailable, cashbackLimit, baseBucketMinor)))}
                   value={cashbackInput}
                   onChange={(e) => setCashbackInput(e.target.value)}
                 />
@@ -672,7 +777,7 @@ export default function POSPage() {
           )}
 
           {/* Mijoz balansidan to'lash */}
-          {customer && balanceAvailable > 0n && totalMinor > 0n && (
+          {customer && balanceAvailable > 0n && baseBucketMinor > 0n && (
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -691,7 +796,7 @@ export default function POSPage() {
                   type="number"
                   min="0"
                   className="h-9 text-right"
-                  placeholder={String(minorToNumber(minBigInt(balanceAvailable, totalMinor)))}
+                  placeholder={String(minorToNumber(minBigInt(balanceAvailable, baseBucketMinor)))}
                   value={balanceInput}
                   onChange={(e) => setBalanceInput(e.target.value)}
                 />
@@ -700,7 +805,7 @@ export default function POSPage() {
           )}
 
           {/* Payment method */}
-          <div className="grid grid-cols-3 gap-2">
+          {showBasePayment && <div className="grid grid-cols-3 gap-2">
             {PAY_METHODS.map((m) => (
               <button
                 key={m.key}
@@ -716,10 +821,10 @@ export default function POSPage() {
                 {m.label}
               </button>
             ))}
-          </div>
+          </div>}
 
           {/* Amount paid — faqat naqdda (karta/bank to'lovi chek summasidan oshmaydi) */}
-          {payMethod === "cash" && (
+          {payMethod === "cash" && showBasePayment && (
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <label className="text-xs text-muted-foreground">Berilgan summa</label>
@@ -758,6 +863,39 @@ export default function POSPage() {
               )}
             </div>
           )}
+
+          {/* Chet valyutadagi qismlar — naqd, shu valyutadagi kassaga */}
+          {foreignBuckets.map((bucket) => (
+            <div key={bucket.code} className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-muted-foreground">Berilgan ({bucket.code}, naqd)</label>
+                {customer && bucket.total > 0n && (
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
+                    onClick={() => setForeignTendered((prev) => ({ ...prev, [bucket.code]: "0" }))}
+                  >
+                    Qarzga
+                  </button>
+                )}
+              </div>
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                className="text-right text-lg font-bold h-11"
+                placeholder={String(minorToNumber(bucket.total))}
+                value={foreignTendered[bucket.code] ?? ""}
+                onChange={(e) => setForeignTendered((prev) => ({ ...prev, [bucket.code]: e.target.value }))}
+              />
+              {bucket.change > 0n && (
+                <div className="flex justify-between text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                  <span>Qaytim ({bucket.code})</span>
+                  <span>{formatMoney(minorToNumber(bucket.change), bucket.code)}</span>
+                </div>
+              )}
+            </div>
+          ))}
 
           {onCredit && (
             <div className={cn(
@@ -819,6 +957,7 @@ export default function POSPage() {
           debt={lastReceipt.debt}
           cashbackUsed={lastReceipt.cashbackUsed}
           cashbackEarned={lastReceipt.cashbackEarned}
+          currencyTotals={lastReceipt.currencyTotals}
           customer={lastReceipt.customer}
           payMethod={lastReceipt.payMethod}
           cashierName={currentUser?.name ?? undefined}

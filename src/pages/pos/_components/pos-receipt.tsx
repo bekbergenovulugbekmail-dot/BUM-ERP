@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator.tsx";
 import { generateReceiptPDF } from "@/lib/pdf/receipt-pdf.ts";
 import { useActiveCompany } from "@/hooks/use-company.ts";
 import { usePrintSettings } from "@/hooks/use-print-settings.ts";
+import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import { buildReceiptHtml, printHtml, type ReceiptDocument } from "@/lib/print/receipt-html.ts";
 import {
   PAYMENT_LABELS, num, type PaymentMethod, type PosCustomerSummary, type SalesOrderDetail,
@@ -29,6 +30,8 @@ type Props = {
   /** Keshbek bilan to'langan summa va shu chekdan hisoblangan keshbek. */
   cashbackUsed?: string;
   cashbackEarned?: string;
+  /** Chet valyuta qatnashgan chekda: valyuta bo'yicha jami, to'langan va qaytim. */
+  currencyTotals?: { currency: string; total: string; paid: string; change: string }[];
   /** Sotuvdan keyingi mijoz holati (umumiy qarz va balans). */
   customer?: PosCustomerSummary | null;
   onClose: () => void;
@@ -36,9 +39,11 @@ type Props = {
 };
 
 export default function POSReceipt({
-  order, paid, change, payMethod, balanceUsed, changeToBalance, debt, cashbackUsed, cashbackEarned, customer,
-  onClose, cashierName,
+  order, paid, change, payMethod, balanceUsed, changeToBalance, debt, cashbackUsed, cashbackEarned, currencyTotals,
+  customer, onClose, cashierName,
 }: Props) {
+  const { base } = useCurrencies();
+  const byCurrency = currencyTotals ?? [];
   const company = useActiveCompany().data?.company;
   const total = num(order.totalAmount);
   const changeAmount = num(change);
@@ -62,6 +67,14 @@ export default function POSReceipt({
       quantity: num(item.quantity),
       unitPrice: num(item.unitPrice),
       lineTotal: num(item.lineTotal),
+      currency: item.priceCurrency,
+      currencyTotal: num(item.currencyTotal),
+    })),
+    currencyTotals: byCurrency.map((part) => ({
+      currency: part.currency,
+      total: num(part.total),
+      paid: num(part.paid),
+      change: num(part.change),
     })),
     taxAmount: num(order.taxAmount),
     discountAmount: num(order.discountAmount),
@@ -144,7 +157,9 @@ export default function POSReceipt({
               <span className="text-muted-foreground truncate max-w-[60%]">
                 {item.productName} × {num(item.quantity)}
               </span>
-              <span className="font-medium">{fmt(num(item.lineTotal))} so'm</span>
+              <span className="font-medium">
+                {item.priceCurrency ? formatMoney(item.currencyTotal, item.priceCurrency) : `${fmt(num(item.lineTotal))} so'm`}
+              </span>
             </div>
           ))}
         </div>
@@ -159,10 +174,27 @@ export default function POSReceipt({
               <span>{fmt(num(order.taxAmount))} so'm</span>
             </div>
           )}
-          <div className="flex justify-between font-bold text-base">
-            <span>Jami to'lov</span>
-            <span className="text-primary">{fmt(total)} so'm</span>
-          </div>
+          {byCurrency.length > 0 ? (
+            byCurrency.map((part) => (
+              <div key={part.currency} className="space-y-0.5">
+                <div className="flex justify-between font-bold text-base">
+                  <span>Jami ({part.currency})</span>
+                  <span className="text-primary">{formatMoney(part.total, part.currency)}</span>
+                </div>
+                {part.currency !== base && num(part.change) > 0 && (
+                  <div className="flex justify-between font-semibold text-emerald-600 dark:text-emerald-400">
+                    <span>Qaytim ({part.currency})</span>
+                    <span>{formatMoney(part.change, part.currency)}</span>
+                  </div>
+                )}
+              </div>
+            ))
+          ) : (
+            <div className="flex justify-between font-bold text-base">
+              <span>Jami to'lov</span>
+              <span className="text-primary">{fmt(total)} so'm</span>
+            </div>
+          )}
           <div className="flex justify-between text-muted-foreground">
             <span>To'lov usuli</span>
             <span>{PAYMENT_LABELS[payMethod] ?? payMethod}</span>

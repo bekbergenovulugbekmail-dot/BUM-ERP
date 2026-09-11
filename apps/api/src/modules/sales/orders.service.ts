@@ -25,7 +25,7 @@
  *  - `confirm` / `ship` / `cancel` to'xtatilgan kompaniyada ham yozardi; raqam parallel takrorlanardi;
  *    statistika oxirgi 500 ta buyurtmadan
  */
-import { and, asc, desc, eq, getTableColumns, gte, ilike, inArray, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, ilike, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 import { badRequest, forbidden, notFound } from "@bum/shared";
 import { products, units } from "../../db/schema/catalog.js";
 import { warehouses } from "../../db/schema/inventory.js";
@@ -187,12 +187,14 @@ export async function prepareSalesItems(tx: Tx, tenant: TenantContext, items: Sa
   };
 }
 
-export async function insertSalesItems(
-  tx: Tx,
-  companyId: string,
-  orderId: string,
-  items: Awaited<ReturnType<typeof prepareSalesItems>>["items"],
-) {
+/** Qator + (POS sotuv valyutalarida) chek valyutasi, kurs va valyutadagi summa. */
+export type SalesItemRow = Awaited<ReturnType<typeof prepareSalesItems>>["items"][number] & {
+  priceCurrency?: string | null;
+  priceRate?: string;
+  currencyTotal?: string;
+};
+
+export async function insertSalesItems(tx: Tx, companyId: string, orderId: string, items: SalesItemRow[]) {
   await tx.insert(salesOrderItems).values(items.map((item) => ({ ...item, companyId, orderId })));
 }
 
@@ -285,7 +287,28 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
     .where(eq(customerPayments.orderId, orderId))
     .orderBy(asc(customerPayments.createdAt));
 
-  return { ...order, items, payments };
+  // Valyuta bo'yicha (POS sotuv valyutalari): jami — qatorlardan, to'langani — to'lovlardan
+  let currencyTotals: { currency: string; totalAmount: string; paidAmount: string }[] = [];
+  if (items.some((item) => item.priceCurrency)) {
+    const buckets = new Map<string, { total: bigint; paid: bigint }>();
+    for (const item of items) {
+      const code = item.priceCurrency ?? order.currency;
+      const bucket = buckets.get(code) ?? { total: 0n, paid: 0n };
+      bucket.total += toMinor(item.priceCurrency ? item.currencyTotal : item.lineTotal);
+      buckets.set(code, bucket);
+    }
+    for (const payment of payments) {
+      const bucket = buckets.get(payment.currency);
+      if (bucket) bucket.paid += toMinor(payment.currency === order.currency ? payment.amount : payment.foreignAmount);
+    }
+    currencyTotals = [...buckets].map(([currency, bucket]) => ({
+      currency,
+      totalAmount: fromMinor(bucket.total),
+      paidAmount: fromMinor(bucket.paid),
+    }));
+  }
+
+  return { ...order, currencyTotals, items, payments };
 }
 
 export async function listOrders(
@@ -720,7 +743,19 @@ export async function returnOrder(
     : [{ balance: "0", cashback: "0" }];
   const balancePaid = toMinor(nonCash!.balance);
   const cashbackPaid = toMinor(nonCash!.cashback);
-  const cashPaid = paid - balancePaid - cashbackPaid;
+  // Chet valyutada naqd to'langanlar (POS sotuv valyutalari) — o'z valyutasidagi kassaga qaytariladi
+  const foreignPayments = await tx
+    .select({
+      id: customerPayments.id,
+      amount: customerPayments.amount,
+      foreignAmount: customerPayments.foreignAmount,
+      currency: customerPayments.currency,
+      cashAccountId: customerPayments.cashAccountId,
+    })
+    .from(customerPayments)
+    .where(and(eq(customerPayments.orderId, orderId), ne(customerPayments.currency, order.currency)));
+  const foreignPaid = foreignPayments.reduce((sum, payment) => sum + toMinor(payment.amount), 0n);
+  const cashPaid = paid - balancePaid - cashbackPaid - foreignPaid;
 
   let cashRefunded = 0n;
   let refundAccountId: string | null = null;
@@ -771,6 +806,41 @@ export async function returnOrder(
       meta,
     );
   }
+  let foreignRefunded = 0n;
+  if (refund) {
+    for (const payment of foreignPayments) {
+      if (!payment.cashAccountId) continue;
+      const description = `Qaytarish: ${order.number} (${payment.currency})`;
+      const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
+        cashAccountId: payment.cashAccountId,
+        type: "out",
+        amount: payment.foreignAmount,
+        currency: payment.currency,
+        txDate: today,
+        description,
+        category: "sales_refund",
+        referenceType: "sales_refund_fx",
+        referenceId: payment.id,
+      });
+      await postJournalEntry(tx, companyId, tenant.user.id, {
+        entryDate: today,
+        description,
+        referenceType: "sales_refund_fx",
+        referenceId: payment.id,
+        lines: [
+          { accountId: await requireAccountBySubtype(tx, companyId, "receivable", "asset", "Debitorlar"), debit: payment.amount },
+          { accountId: await ledgerAccountFor(tx, companyId, account.type), credit: payment.amount },
+        ],
+      });
+      if (order.customerId) {
+        await tx
+          .update(customers)
+          .set({ totalDebt: sql`${customers.totalDebt} + ${payment.amount}::numeric`, updatedAt: new Date() })
+          .where(eq(customers.id, order.customerId));
+      }
+      foreignRefunded += toMinor(payment.amount);
+    }
+  }
   // Keshbek: ishlatilgani qaytadi (pul qaytarilganda), shu chekdan berilgani bekor qilinadi
   if (order.customerId) {
     await reverseOrderCashback(
@@ -780,7 +850,7 @@ export async function returnOrder(
       meta,
     );
   }
-  const refunded = cashRefunded + (refund ? balancePaid + cashbackPaid : 0n);
+  const refunded = cashRefunded + foreignRefunded + (refund ? balancePaid + cashbackPaid : 0n);
 
   // Ochiq smenada qaytarish kassir yig'indisidan ayriladi — smena yopilishida kassa farqi to'g'ri chiqsin
   if (order.posShiftId) {

@@ -120,6 +120,13 @@
       "when": 1789157839988,
       "tag": "0016_purchase_currency",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789159403676,
+      "tag": "0017_pos_sale_currencies",
+      "breakpoints": true
     }
   ]
 }

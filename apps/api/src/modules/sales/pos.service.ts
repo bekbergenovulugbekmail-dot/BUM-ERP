@@ -15,22 +15,31 @@
  *    ombor ruxsati tekshirilmasdi; `cashierName` mijozdan kelardi, `cashierId` yozilmasdi
  *  - `getShifts` / `getOpenShift` ruxsat tekshirmasdi — `pos.use`
  */
-import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { badRequest, conflict, forbidden, notFound } from "@bum/shared";
+import { products } from "../../db/schema/catalog.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import { customers, posShifts, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
-import { fromMinor, toMinor } from "../../shared/decimal.js";
+import { fromMinor, mulDivRound, toMinor } from "../../shared/decimal.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
 import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
+import { currencyRate } from "../finance/currencies.service.js";
 import { todayIso, type PaymentMethod } from "../finance/cash.service.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
 import { computeCashback, earnCashback, getCashbackSettings, maxCashbackUsage, redeemCashback } from "./cashback.service.js";
 import { customerSummary, depositToBalance, payFromBalance } from "./customer-balance.service.js";
 import { createCustomer, salesAudit, type CustomerInput } from "./customers.service.js";
-import { dispatchOrder, getOrder, insertSalesItems, prepareSalesItems, type SalesItemInput } from "./orders.service.js";
+import {
+  dispatchOrder,
+  getOrder,
+  insertSalesItems,
+  prepareSalesItems,
+  type SalesItemInput,
+  type SalesItemRow,
+} from "./orders.service.js";
 import { recordCustomerPayment } from "./payments.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...shiftFields } = getTableColumns(posShifts);
@@ -180,6 +189,48 @@ export async function closeShift(
   return { shift: await getShift(tx, tenant, shiftId), expectedCash: fromMinor(expected), difference: fromMinor(difference) };
 }
 
+type SaleBucket = { currency: string; rate: string; total: bigint; base: bigint };
+
+/**
+ * Qatorlarga chek valyutasini beradi: mahsulot narx valyutasi tanlanganlar ichida bo'lsa — o'sha, aks holda
+ * birinchi tanlangan valyuta. Valyutadagi summa = asosiy summa / kurs (tiyinga yaxlitlab). Valyuta bo'yicha
+ * asosiy qiymat — qatorlar yig'indisi: valyutadagi jami to'liq to'lansa aynan shu yopiladi.
+ */
+async function assignSaleCurrencies(
+  tx: Tx,
+  companyId: string,
+  baseCurrency: string,
+  saleCurrencies: string[],
+  items: SalesItemRow[],
+) {
+  const rates = new Map<string, string>([[baseCurrency, "1.0000"]]);
+  for (const code of saleCurrencies) {
+    if (!rates.has(code)) rates.set(code, await currencyRate(tx, companyId, code));
+  }
+  const productRows = await tx
+    .select({ id: products.id, salesCurrency: products.salesCurrency })
+    .from(products)
+    .where(inArray(products.id, [...new Set(items.map((item) => item.productId))]));
+  const ownCurrency = new Map(productRows.map((row) => [row.id, row.salesCurrency ?? baseCurrency]));
+
+  const buckets = new Map<string, SaleBucket>();
+  for (const item of items) {
+    const own = ownCurrency.get(item.productId) ?? baseCurrency;
+    const code = saleCurrencies.includes(own) ? own : saleCurrencies[0]!;
+    const rate = rates.get(code)!;
+    const baseLine = toMinor(item.lineTotal);
+    const currencyLine = code === baseCurrency ? baseLine : mulDivRound(baseLine, 10_000n, toMinor(rate, 4));
+    item.priceCurrency = code === baseCurrency ? null : code;
+    item.priceRate = rate;
+    item.currencyTotal = fromMinor(currencyLine);
+    const bucket = buckets.get(code) ?? { currency: code, rate, total: 0n, base: 0n };
+    bucket.total += currencyLine;
+    bucket.base += baseLine;
+    buckets.set(code, bucket);
+  }
+  return buckets;
+}
+
 export async function completeSale(
   tx: Tx,
   tenant: TenantContext,
@@ -195,6 +246,10 @@ export async function completeSale(
     balanceAmount?: string | null;
     /** Naqd qaytim mijozga berilmaydi, kassada qolib mijoz balansiga yoziladi. */
     changeToBalance?: boolean;
+    /** Sotuv valyutalari: mahsulot o'z narx valyutasida, u tanlanmagan bo'lsa birinchi valyutada. Standart — asosiy. */
+    saleCurrencies?: string[];
+    /** Chet valyutadagi naqd to'lovlar (shu valyutadagi kassaga); asosiy valyutadagi qism — `amountPaid`. */
+    currencyPayments?: { currency: string; amount: string }[];
     notes?: string | null;
   },
   meta: RequestMeta,
@@ -230,6 +285,13 @@ export async function completeSale(
   const total = toMinor(totals.totalAmount);
   const cashbackSettings = input.customerId ? await getCashbackSettings(tx, companyId) : null;
 
+  // Chek valyutalari; buxgalteriya asosiy valyutada, to'lov har valyuta bo'yicha
+  const baseCurrency = await companyCurrency(tx, companyId);
+  const saleCurrencies = [...new Set(input.saleCurrencies?.length ? input.saleCurrencies : [baseCurrency])];
+  const saleItems: SalesItemRow[] = items;
+  const buckets = await assignSaleCurrencies(tx, companyId, baseCurrency, saleCurrencies, saleItems);
+  const baseTotal = buckets.get(baseCurrency)?.base ?? 0n;
+
   const fromCashback = input.cashbackAmount ? toMinor(input.cashbackAmount) : 0n;
   if (fromCashback > 0n) {
     if (!input.customerId || !cashbackSettings) throw badRequest("Keshbekdan foydalanish uchun mijoz tanlanishi kerak");
@@ -247,20 +309,56 @@ export async function completeSale(
   if ((fromBalance > 0n || input.changeToBalance) && !input.customerId) {
     throw badRequest("Mijoz balansidan foydalanish uchun mijoz tanlanishi kerak");
   }
-  if (fromCashback + fromBalance > total) throw badRequest("Balans va keshbekdan to'lov chek summasidan oshmasligi kerak");
+  // Balans va keshbek asosiy valyutada — faqat chekning asosiy valyutadagi qismiga
+  if (fromCashback + fromBalance > baseTotal) {
+    throw badRequest(
+      baseTotal === total
+        ? "Balans va keshbekdan to'lov chek summasidan oshmasligi kerak"
+        : `Balans va keshbekdan faqat ${baseCurrency} dagi qismga to'lanadi (${fromMinor(baseTotal)})`,
+    );
+  }
   if (fromBalance > customerBalance) {
     throw badRequest(`Mijoz balansida yetarli mablag' yo'q (balans ${fromMinor(customerBalance)})`);
   }
 
   // Keshbek va balansdan keyin qolgani naqd/karta bilan to'lanadi; yetmagani mijoz qarziga yoziladi
-  const due = total - fromCashback - fromBalance;
+  const due = baseTotal - fromCashback - fromBalance;
   const tendered = toMinor(input.amountPaid);
+  if (!buckets.has(baseCurrency) && tendered > 0n) {
+    throw badRequest(`Chekda ${baseCurrency} dagi mahsulot yo'q — to'lov valyuta bo'yicha kiritiladi`);
+  }
   if (input.paymentMethod !== "cash" && tendered > due) {
     throw badRequest("Karta yoki bank to'lovi chek summasidan oshmasligi kerak");
   }
   const paid = tendered < due ? tendered : due;
   const change = tendered - paid;
   if (!input.customerId && paid < due) throw badRequest("Mijozsiz sotuvda chek to'liq to'lanishi kerak");
+
+  // Chet valyutadagi qismlar: naqd, shu valyutadagi kassaga; ortig'i — o'sha valyutada qaytim
+  const tenderedByCurrency = new Map<string, bigint>();
+  for (const payment of input.currencyPayments ?? []) {
+    if (payment.currency === baseCurrency) {
+      throw badRequest(`${baseCurrency} dagi to'lov asosiy to'lov maydonida kiritiladi`);
+    }
+    if (!buckets.has(payment.currency)) throw badRequest(`Chekda ${payment.currency} dagi mahsulot yo'q`);
+    tenderedByCurrency.set(payment.currency, (tenderedByCurrency.get(payment.currency) ?? 0n) + toMinor(payment.amount));
+  }
+  const foreignParts = [...buckets.values()]
+    .filter((bucket) => bucket.currency !== baseCurrency)
+    .map((bucket) => {
+      const given = tenderedByCurrency.get(bucket.currency) ?? 0n;
+      const paidInCurrency = given < bucket.total ? given : bucket.total;
+      // To'liq to'lansa — aynan valyuta qismining asosiy qiymati (yaxlitlash qoldig'isiz)
+      const paidBase =
+        paidInCurrency === bucket.total ? bucket.base : mulDivRound(paidInCurrency, toMinor(bucket.rate, 4), 10_000n);
+      return { ...bucket, given, paid: paidInCurrency, change: given - paidInCurrency, paidBase };
+    });
+  for (const part of foreignParts) {
+    if (!input.customerId && part.paid < part.total) {
+      throw badRequest(`Mijozsiz sotuvda ${part.currency} qismi to'liq to'lanishi kerak`);
+    }
+  }
+  const foreignPaidBase = foreignParts.reduce((sum, part) => sum + part.paidBase, 0n);
 
   const today = todayIso();
   const number = await nextDocumentNumber(tx, {
@@ -299,7 +397,7 @@ export async function completeSale(
     });
   await insertSalesItems(tx, companyId, order!.id, items);
 
-  await dispatchOrder(tx, tenant, order!, today, paid + fromBalance + fromCashback);
+  await dispatchOrder(tx, tenant, order!, today, paid + fromBalance + fromCashback + foreignPaidBase);
   await tx
     .update(salesOrders)
     .set({ status: total === 0n ? "delivered" : "shipped", updatedAt: new Date() })
@@ -330,6 +428,22 @@ export async function completeSale(
       meta,
     );
   }
+  for (const part of foreignParts) {
+    if (part.paid <= 0n) continue;
+    await recordCustomerPayment(
+      tx,
+      tenant,
+      {
+        orderId: order!.id,
+        amount: fromMinor(part.paidBase),
+        currency: part.currency,
+        foreignAmount: fromMinor(part.paid),
+        method: "cash",
+        paymentDate: today,
+      },
+      meta,
+    );
+  }
 
   // Qaytim kassada qoladi va mijoz balansiga yoziladi (faqat naqdda qaytim bo'ladi)
   let changeKept = 0n;
@@ -353,7 +467,7 @@ export async function completeSale(
   // Keshbek: sozlamaga ko'ra butun chekka yoki faqat pul (naqd/karta/balans) bilan to'langan qismiga
   let cashbackEarned = 0n;
   if (input.customerId && cashbackSettings?.enabled) {
-    const base = cashbackSettings.accrualBase === "total" ? total : paid + fromBalance;
+    const base = cashbackSettings.accrualBase === "total" ? total : paid + fromBalance + foreignPaidBase;
     cashbackEarned = await computeCashback(tx, companyId, cashbackSettings, items, total, base);
     await earnCashback(tx, tenant, {
       customerId: input.customerId,
@@ -377,7 +491,27 @@ export async function completeSale(
     })
     .where(eq(posShifts.id, shift.id));
 
-  const debt = due - paid;
+  const debt = due - paid + foreignParts.reduce((sum, part) => sum + (part.base - part.paidBase), 0n);
+  // Valyuta bo'yicha natija — faqat chet valyuta qatnashgan chekda
+  const currencyTotals =
+    buckets.size > 1 || !buckets.has(baseCurrency)
+      ? [...buckets.values()].map((bucket) => {
+          const part = foreignParts.find((p) => p.currency === bucket.currency);
+          return bucket.currency === baseCurrency
+            ? {
+                currency: bucket.currency,
+                total: fromMinor(bucket.total),
+                paid: fromMinor(paid + fromBalance + fromCashback),
+                change: fromMinor(change),
+              }
+            : {
+                currency: bucket.currency,
+                total: fromMinor(bucket.total),
+                paid: fromMinor(part?.paid ?? 0n),
+                change: fromMinor(part?.change ?? 0n),
+              };
+        })
+      : [];
   await salesAudit(tx, tenant, meta, {
     action: "POS_SALE_COMPLETED",
     resource: "sales_orders",
@@ -393,6 +527,7 @@ export async function completeSale(
       debt: fromMinor(debt),
       cashbackUsed: fromMinor(fromCashback),
       cashbackEarned: fromMinor(cashbackEarned),
+      ...(currencyTotals.length > 0 ? { currencyTotals } : {}),
     },
   });
   return {
@@ -406,6 +541,8 @@ export async function completeSale(
     debt: fromMinor(debt),
     cashbackUsed: fromMinor(fromCashback),
     cashbackEarned: fromMinor(cashbackEarned),
+    /** Chet valyuta qatnashgan chekda: valyuta bo'yicha jami, to'langan va qaytim. */
+    currencyTotals,
     customer: input.customerId ? await customerSummary(tx, companyId, input.customerId) : null,
   };
 }
