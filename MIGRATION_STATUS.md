@@ -7,7 +7,7 @@
 |---|---|
 | Branch | `feat/postgres-migration` |
 | Oxirgi yangilanish | 2026-09-11 |
-| Umumiy holat | 3 / 16 PHASE tugallandi |
+| Umumiy holat | 3 / 16 PHASE tugallandi, PHASE 4 jarayonda |
 | Ishlab turgan ilova | Hali to'liq Convex'da — frontend yangi API'ga ulanmagan |
 
 **Holat belgilari:** ✅ tugallandi · 🟡 jarayonda · ⬜ boshlanmagan
@@ -23,7 +23,7 @@
 | 1 | Monorepo skeleti | ✅ tugallandi |
 | 2 | PostgreSQL sxemasi | ✅ tugallandi |
 | 3 | API poydevori | ✅ tugallandi |
-| 4 | Auth va sessiyalar | ⬜ boshlanmagan |
+| 4 | Auth va sessiyalar | 🟡 jarayonda |
 | 5 | Platforma: kompaniya, filial, rol, admin | ⬜ boshlanmagan |
 | 6 | Katalog | ⬜ boshlanmagan |
 | 7 | Ombor | ⬜ boshlanmagan |
@@ -39,20 +39,31 @@
 
 ## Tayyor API endpointlar (jami)
 
-| Metod | Yo'l | Vazifasi |
-|---|---|---|
-| GET | `/health` | Server va DB ulanishi (`select 1`), yoqilgan integratsiyalar |
+| Metod | Yo'l | Auth | Convex'dagi muqobili |
+|---|---|---|---|
+| GET | `/health` | — | — |
+| POST | `/api/auth/login` | — | `signIn("password")` |
+| POST | `/api/auth/logout` | — | `signOut` |
+| GET | `/api/auth/me` | sessiya | `users.getCurrentUser` |
+| GET | `/api/auth/security` | sessiya | `pin.getSecuritySettings` |
+| POST | `/api/auth/pin` | sessiya | `pin.setPin` |
+| POST | `/api/auth/pin/change` | sessiya | `pin.changePin` |
+| POST | `/api/auth/pin/remove` | sessiya | `pin.removePin` |
+| POST | `/api/auth/pin/verify` | sessiya | `pin.verifyPin` |
+| PUT | `/api/auth/auto-lock` | sessiya | `pin.setAutoLockTimeout` |
 
-Boshqa marshrut yo'q — `server.ts` da modul marshrutlari hali izohda.
+Xatolar doim `{ code, message }` shaklida (Convex bilan bir xil).
 
 ## Lokal muhit
 
 - **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432).
-  Sxema qo'llangan: 61 jadval, 32 enum, 166 FK, 36 CHECK, 151 indeks. Ma'lumot yo'q.
+  - `bumerp` — ishchi baza: sxema qo'llangan, **ma'lumot yo'q (foydalanuvchi ham yo'q)**.
+  - `bumerp_test` — testlar uchun, `pnpm test` o'zi yaratadi va har testda tozalaydi.
 - **MinIO** — 9000 (S3), 9001 (konsol). Ishlaydi, lekin `bum-erp` bucket yo'q
   va `.env` da `STORAGE_*` yo'q → `features.storage` o'chiq.
 - **Migratsiya:** `pnpm --filter @bum/api db:migrate` (`.env` o'zi yuklanadi)
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
+- **Testlar:** `pnpm --filter @bum/api test` — 31 ta test
 
 ---
 
@@ -88,24 +99,38 @@ Boshqa marshrut yo'q — `server.ts` da modul marshrutlari hali izohda.
 
 ## PHASE 3 — API poydevori ✅
 
-- **Ko'chirilgan:** `db/client.ts` (pg havza + Drizzle, numeric/int8 string bo'lib qoladi); `db/transaction.ts` (`withTransaction`); `shared/errors.ts` (`{ code, message }` — Convex bilan bir xil shakl); `shared/logger.ts` (pino, maxfiy maydonlar redact); `env.ts` (zod tekshiruvi); `load-env.ts` (ildizdagi `.env`); `db/migrate.ts`; Fastify server (helmet, cors, cookie), dual-stack `HOST=::`.
+- **Ko'chirilgan:** `db/client.ts` (pg havza + Drizzle, numeric/int8 string bo'lib qoladi); `db/transaction.ts` (`withTransaction`); `shared/errors.ts` (`{ code, message }` — Convex bilan bir xil shakl); `shared/logger.ts` (pino, maxfiy maydonlar redact, testda jim); `env.ts` (zod tekshiruvi); `load-env.ts` (ildizdagi `.env`); `db/migrate.ts`; Fastify server (helmet, cors, cookie), dual-stack `HOST=::`.
 - **API endpointlar:** `GET /health`
 - **Brauzerda sinash:** `http://localhost:3000/health` → `{"status":"ok",...}`
-- **Hali yo'q:** avtomatik testlar (vitest sozlangan, test fayllari yo'q).
 - **Commitlar:** `3a9872d`, `045f6e1`, `fe7f664`, `43a3fcd`
 
-## PHASE 4 — Auth va sessiyalar ⬜
+## PHASE 4 — Auth va sessiyalar 🟡
 
-- **Convex manbasi:** `convex/auth.ts`, `convex/auth.config.ts`, `convex/pin.ts`; sahifalar `login`, `admin/login`
-- **Tayyor poydevor:** `sessions`, `password_reset_codes`, `rate_limits` jadvallari; `@node-rs/argon2`; cookie plugin; `SESSION_*` va `ESKIZ_*` sozlamalari
-- **Ko'chirilgan modullar:** —
-- **API endpointlar:** —
-- **Brauzerda sinash:** —
+- **Convex manbasi:** `convex/auth.ts`, `convex/pin.ts`, `users.getCurrentUser`; sahifalar `login`, `admin/login`, lock screen, sozlamalar → xavfsizlik
+- **Ko'chirilgan modullar** (`apps/api/src/modules/auth/`):
+  - `password.ts` — argon2id; Convex Auth'ning lucia Scrypt xeshlarini ham tekshiradi va birinchi kirishda argon2id ga o'tkazadi (haqiqiy lucia bilan ikki tomonlama tekshirilgan)
+  - `session.ts` — 32 baytli token httpOnly cookie'da (`bum_session`), bazada SHA-256; mutlaq (30 kun) + faolsizlik (12 soat, sirpanuvchi) muddat; o'chirilgan hisob sessiyalari ishlamaydi
+  - `auth.service.ts` — login: telefon normallashtirish (`packages/shared/phone.ts`), noma'lum raqam va xato parolga bir xil javob va bir xil vaqt, faol bo'lmagan hisob 403, audit (`login_success` / `login_failed`)
+  - `pin.service.ts` — PIN argon2id; 5 xato → 5 daqiqa blok; `reason` kodlari Convex bilan bir xil (`WRONG_PIN:n`, `PIN_LOCKED:s`, `SESSION_MISMATCH`, …)
+  - `guard.ts` — `requireAuth` preHandler
+  - `shared/rate-limit.ts` — PostgreSQL'da: raqamga 5, IP ga 30 xato / 15 daqiqa
+  - `shared/audit.ts` — audit jurnali yozuvi
+- **Convex'dan ataylab farqlar:**
+  - PIN tekshiruvi `change`/`remove` da ham urinishlarni hisoblaydi — Convex'da shu yo'l bilan bloklashni chetlab o'tib PIN tanlash mumkin edi
+  - Mavjud PIN `setPin` bilan ustidan yozilmaydi (409) — frontend baribir faqat PIN yo'q bo'lganda chaqiradi
+  - Ochiq ro'yxatdan o'tish endpointi yo'q — frontend'da `signUpWithPassword` hech qayerda ishlatilmaydi, akkauntni admin yaratadi (PHASE 5)
+- **API endpointlar:** yuqoridagi jadvaldagi 9 ta `/api/auth/*`
+- **Testlar:** `test/auth.test.ts` (17), `test/pin.test.ts` (14) — alohida `bumerp_test` bazasida, hammasi o'tadi
+- **Brauzerda sinash:** hali yo'q — frontend Convex'da, ishchi bazada foydalanuvchi yo'q. Hozircha test bazasiga seed qilib `curl` bilan sinaladi (login → me → PIN → logout → me=401 oqimi tekshirilgan).
+- **Qolgan ishlar:**
+  - SMS orqali parol tiklash (`password_reset_codes`, Eskiz) — Convex'da yo'q edi, yangi funksiya
+  - Eskirgan `rate_limits` va `sessions` qatorlarini tozalash
+  - Birinchi foydalanuvchini yaratish yo'li (seed/bootstrap buyrug'i) — busiz ishchi bazada kirib bo'lmaydi
 
 ## PHASE 5 — Platforma: kompaniya, filial, rol, admin ⬜
 
 - **Convex manbasi:** `convex/companies.ts`, `tenant.ts`, `users.ts`, `userAdmin.ts`, `admin.ts`; sahifalar `admin`, `onboarding`, `select-company`, `settings`, `tenant`
-- **Tayyor poydevor:** platform jadvallari; RBAC katalogi `packages/shared/src/permissions.ts`
+- **Tayyor poydevor:** platform jadvallari; RBAC katalogi `packages/shared/src/permissions.ts`; `requireAuth` va `revokeUserSessions` (parolni admin tiklaganda kerak)
 - **Ko'chirilgan modullar:** —
 - **API endpointlar:** —
 - **Brauzerda sinash:** —
@@ -184,15 +209,15 @@ Boshqa marshrut yo'q — `server.ts` da modul marshrutlari hali izohda.
 
 ## PHASE 15 — Ma'lumotni Convex'dan ko'chirish ⬜
 
-- **Tayyor poydevor:** har jadvalda `legacy_id` ustuni
+- **Tayyor poydevor:** har jadvalda `legacy_id` ustuni; login Convex Auth parol xeshlarini (lucia Scrypt) qabul qiladi — ko'chirilgan foydalanuvchilar parolini qayta o'rnatishi shart emas
 - **Ko'chirilgan modullar:** —
 - **API endpointlar:** —
 - **Brauzerda sinash:** —
 
 ## PHASE 16 — Frontend'ni API'ga o'tkazish, deploy, Convex'ni o'chirish ⬜
 
-- **Manba:** `src/` (barcha sahifalar hozir Convex hook'larini ishlatadi)
-- **Tayyor poydevor:** `VITE_API_URL` `.env.example` da; server `WEB_ORIGIN` bilan CORS + cookie sozlangan
+- **Manba:** `src/` (barcha sahifalar hozir Convex hook'larini ishlatadi); auth uchun yagona kirish nuqtasi `src/hooks/use-auth.ts`
+- **Tayyor poydevor:** `VITE_API_URL` `.env.example` da; server `WEB_ORIGIN` bilan CORS + cookie sozlangan; `/api/auth/*` javoblari Convex shakliga mos
 - **Ko'chirilgan modullar:** —
 - **API endpointlar:** —
 - **Brauzerda sinash:** —
@@ -201,10 +226,11 @@ Boshqa marshrut yo'q — `server.ts` da modul marshrutlari hali izohda.
 
 ## Keyingi qadam
 
-**PHASE 4 — Auth va sessiyalar:**
-1. Parol xeshlash (argon2id) va sessiya servisi (`sessions.token_hash`, mutlaq + faolsizlik muddati)
-2. `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
-3. Login uchun rate limit (`rate_limits`)
-4. Auth marshrutlari uchun birinchi vitest testlari
+**PHASE 4 ni yakunlash:**
+1. Birinchi foydalanuvchi / platforma adminini yaratish buyrug'i (`PLATFORM_BOOTSTRAP_KEY` yoki CLI seed) — ishchi bazada kirib sinash uchun shart
+2. SMS orqali parol tiklash: `POST /api/auth/password-reset/request` va `/confirm` (Eskiz, OTP xeshlangan, rate limit)
+3. Eskirgan `rate_limits` / `sessions` qatorlarini davriy tozalash
+
+Keyin — **PHASE 5** (kompaniya, a'zolik, rollar, admin foydalanuvchi boshqaruvi).
 
 Kichik infratuzilma ishi: MinIO'da `bum-erp` bucket yaratish va `.env` ga `STORAGE_*` qo'shish (PHASE 14 dan oldin).

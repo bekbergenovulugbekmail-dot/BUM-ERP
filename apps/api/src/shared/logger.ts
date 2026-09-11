@@ -1,8 +1,10 @@
 import pino from "pino";
 import { env, isProd } from "../env.js";
 
+const isTest = env.NODE_ENV === "test";
+
 export const logger = pino({
-  level: isProd ? "info" : "debug",
+  level: isTest ? "silent" : isProd ? "info" : "debug",
   /** Parol, token, PIN hech qachon logga tushmasin. */
   redact: {
     paths: [

@@ -12,6 +12,7 @@ import { env, features, isProd } from "./env.js";
 import { logger } from "./shared/logger.js";
 import { registerErrorHandler } from "./shared/errors.js";
 import { closeDb, pool } from "./db/client.js";
+import { authRoutes } from "./modules/auth/routes.js";
 
 export async function buildServer() {
   const app = Fastify({
@@ -55,8 +56,11 @@ export async function buildServer() {
     };
   });
 
-  // Modul marshrutlari shu yerga ulanadi:
-  // await app.register(authRoutes,     { prefix: "/api/auth" });
+  /** `requireAuth` to'ldiradi — qarang modules/auth/guard.ts. */
+  app.decorateRequest("auth", null);
+
+  // Modul marshrutlari
+  await app.register(authRoutes, { prefix: "/api/auth" });
   // await app.register(productsRoutes, { prefix: "/api/products" });
 
   return app;
