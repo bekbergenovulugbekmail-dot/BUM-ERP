@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, UserPlus, Phone, Mail, MapPin } from "lucide-react";
+import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -16,45 +16,106 @@ import { num, type Customer } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
-type CustomerForm = { name: string; phone: string; email: string; address: string };
+type CustomerForm = {
+  name: string;
+  phone: string;
+  email: string;
+  address: string;
+  contactName: string;
+  latitude: string;
+  longitude: string;
+  creditLimit: string;
+  paymentTermDays: string;
+};
+
+const emptyForm = (): CustomerForm => ({
+  name: "", phone: "", email: "", address: "", contactName: "",
+  latitude: "", longitude: "", creditLimit: "", paymentTermDays: "",
+});
+
+const formOf = (c: Customer): CustomerForm => ({
+  name: c.name,
+  phone: c.phone ?? "",
+  email: c.email ?? "",
+  address: c.address ?? "",
+  contactName: c.contactName ?? "",
+  latitude: c.latitude ?? "",
+  longitude: c.longitude ?? "",
+  creditLimit: num(c.creditLimit) > 0 ? String(num(c.creditLimit)) : "",
+  paymentTermDays: c.paymentTermDays > 0 ? String(c.paymentTermDays) : "",
+});
+
+type DialogState = { mode: "create" } | { mode: "edit"; id: string } | null;
 
 export default function CustomersSection() {
   const { can } = usePermissions();
   const [search, setSearch] = useState("");
   const [debouncedSearch] = useDebounce(search.trim(), 300);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [address, setAddress] = useState("");
+  const [dialog, setDialog] = useState<DialogState>(null);
+  const [form, setForm] = useState<CustomerForm>(emptyForm);
+  const [locating, setLocating] = useState(false);
 
   const customers = useApiQuery<{ customers: Customer[] }>(
     "/api/sales/customers",
     { search: debouncedSearch || undefined },
     { placeholderData: (previous) => previous },
   ).data?.customers;
-  const createCustomer = useApiMutation((body: CustomerForm) =>
-    api.post("/api/sales/customers", {
-      name: body.name.trim(),
-      phone: body.phone || null,
-      email: body.email || null,
-      address: body.address || null,
-    }),
+  const saveCustomer = useApiMutation(({ id, body }: { id?: string; body: Record<string, unknown> }) =>
+    id ? api.patch(`/api/sales/customers/${id}`, body) : api.post("/api/sales/customers", body),
   );
 
-  const handleCreate = async () => {
-    if (!name.trim()) { toast.error("Ism kiritilishi shart"); return; }
+  const set = (patch: Partial<CustomerForm>) => setForm((previous) => ({ ...previous, ...patch }));
+  const openCreate = () => { setForm(emptyForm()); setDialog({ mode: "create" }); };
+  const openEdit = (customer: Customer) => { setForm(formOf(customer)); setDialog({ mode: "edit", id: customer.id }); };
+
+  const handleSave = async () => {
+    if (!dialog) return;
+    if (!form.name.trim()) { toast.error("Ism kiritilishi shart"); return; }
+    const hasLatitude = form.latitude.trim() !== "";
+    const hasLongitude = form.longitude.trim() !== "";
+    if (hasLatitude !== hasLongitude) { toast.error("Kenglik va uzunlik birga kiritiladi"); return; }
     try {
-      await createCustomer.mutateAsync({ name, phone, email, address });
-      toast.success("Mijoz qo'shildi");
-      setCreateOpen(false);
-      setName(""); setPhone(""); setEmail(""); setAddress("");
+      await saveCustomer.mutateAsync({
+        id: dialog.mode === "edit" ? dialog.id : undefined,
+        body: {
+          name: form.name.trim(),
+          phone: form.phone.trim() || null,
+          email: form.email.trim() || null,
+          address: form.address.trim() || null,
+          contactName: form.contactName.trim() || null,
+          // Bo'sh — koordinata o'chiriladi
+          latitude: hasLatitude ? Number(form.latitude) : null,
+          longitude: hasLongitude ? Number(form.longitude) : null,
+          ...(form.creditLimit.trim() ? { creditLimit: form.creditLimit.trim() } : {}),
+          ...(form.paymentTermDays.trim() ? { paymentTermDays: Number(form.paymentTermDays) } : {}),
+        },
+      });
+      toast.success(dialog.mode === "edit" ? "Mijoz yangilandi" : "Mijoz qo'shildi");
+      setDialog(null);
     } catch (err) {
       toast.error(errorMessage(err));
     }
   };
 
-  const canCreate = can("crm.manage");
+  // Do'kon ichida turib koordinatani olish (agent yoki supervayzer telefonidan)
+  const fillCurrentLocation = () => {
+    if (!("geolocation" in navigator)) { toast.error("Brauzer joylashuvni aniqlay olmaydi"); return; }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        set({ latitude: position.coords.latitude.toFixed(6), longitude: position.coords.longitude.toFixed(6) });
+        setLocating(false);
+        toast.success(`Joylashuv olindi (±${Math.round(position.coords.accuracy)} m)`);
+      },
+      (error) => {
+        setLocating(false);
+        toast.error(error.code === error.PERMISSION_DENIED ? "Joylashuvga ruxsat berilmadi" : "Joylashuvni aniqlab bo'lmadi");
+      },
+      { enableHighAccuracy: true, timeout: 15_000 },
+    );
+  };
+
+  const canManage = can("crm.manage");
 
   return (
     <div className="space-y-4">
@@ -65,8 +126,8 @@ export default function CustomersSection() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        {canCreate && (
-          <Button onClick={() => setCreateOpen(true)}>
+        {canManage && (
+          <Button onClick={openCreate}>
             <UserPlus className="h-4 w-4 mr-1.5" /> Mijoz qo'shish
           </Button>
         )}
@@ -80,8 +141,8 @@ export default function CustomersSection() {
         <div className="flex flex-col items-center py-16 text-center">
           <UserPlus className="h-12 w-12 text-muted-foreground/30 mb-3" />
           <p className="text-muted-foreground">Mijozlar yo'q</p>
-          {canCreate && (
-            <Button className="mt-4" onClick={() => setCreateOpen(true)}>
+          {canManage && (
+            <Button className="mt-4" onClick={openCreate}>
               <Plus className="h-4 w-4 mr-1" /> Birinchi mijozni qo'shing
             </Button>
           )}
@@ -92,30 +153,42 @@ export default function CustomersSection() {
             const debt = num(c.totalDebt);
             return (
               <div key={c.id} className="bg-card border border-border rounded-2xl p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold">{c.name}</p>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold truncate">{c.name}</p>
                     <p className="text-xs font-mono text-muted-foreground">{c.code}</p>
                   </div>
-                  <div className="flex flex-col items-end gap-1">
-                    {debt > 0 && (
-                      <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded-full">
-                        Qarz: {fmt(debt)} so'm
-                      </span>
-                    )}
-                    {num(c.balance) > 0 && (
-                      <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full">
-                        Balans: {fmt(num(c.balance))} so'm
-                      </span>
-                    )}
-                    {num(c.cashbackBalance) > 0 && (
-                      <span className="text-xs bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400 px-2 py-0.5 rounded-full">
-                        Keshbek: {fmt(num(c.cashbackBalance))} so'm
-                      </span>
+                  <div className="flex items-start gap-1">
+                    <div className="flex flex-col items-end gap-1">
+                      {debt > 0 && (
+                        <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded-full">
+                          Qarz: {fmt(debt)} so'm
+                        </span>
+                      )}
+                      {num(c.balance) > 0 && (
+                        <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full">
+                          Balans: {fmt(num(c.balance))} so'm
+                        </span>
+                      )}
+                      {num(c.cashbackBalance) > 0 && (
+                        <span className="text-xs bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400 px-2 py-0.5 rounded-full">
+                          Keshbek: {fmt(num(c.cashbackBalance))} so'm
+                        </span>
+                      )}
+                    </div>
+                    {canManage && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Tahrirlash" onClick={() => openEdit(c)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
                     )}
                   </div>
                 </div>
                 <div className="space-y-1 text-xs text-muted-foreground">
+                  {c.contactName && (
+                    <div className="flex items-center gap-1.5">
+                      <User className="h-3 w-3" />{c.contactName}
+                    </div>
+                  )}
                   {c.phone && (
                     <div className="flex items-center gap-1.5">
                       <Phone className="h-3 w-3" />{c.phone}
@@ -131,6 +204,11 @@ export default function CustomersSection() {
                       <MapPin className="h-3 w-3" />{c.address}
                     </div>
                   )}
+                  {c.latitude && c.longitude && (
+                    <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                      <Navigation className="h-3 w-3" />{Number(c.latitude).toFixed(5)}, {Number(c.longitude).toFixed(5)}
+                    </div>
+                  )}
                 </div>
                 <div className="pt-1 border-t border-border/50 flex justify-between text-xs text-muted-foreground">
                   <span>Jami xarid</span>
@@ -142,34 +220,62 @@ export default function CustomersSection() {
         </div>
       )}
 
-      {createOpen && (
-        <Dialog open onOpenChange={(o) => !o && setCreateOpen(false)}>
-          <DialogContent>
+      {dialog && (
+        <Dialog open onOpenChange={(o) => !o && setDialog(null)}>
+          <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Yangi mijoz</DialogTitle>
+              <DialogTitle>{dialog.mode === "edit" ? "Mijozni tahrirlash" : "Yangi mijoz"}</DialogTitle>
             </DialogHeader>
             <div className="space-y-3">
               <div>
                 <Label>Ism *</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Mijoz ismi" />
+                <Input value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="Mijoz yoki do'kon nomi" />
               </div>
-              <div>
-                <Label>Telefon</Label>
-                <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+998 90 123 45 67" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Telefon</Label>
+                  <Input value={form.phone} onChange={(e) => set({ phone: e.target.value })} placeholder="+998 90 123 45 67" />
+                </div>
+                <div>
+                  <Label>Mas'ul shaxs</Label>
+                  <Input value={form.contactName} onChange={(e) => set({ contactName: e.target.value })} placeholder="Egasi yoki sotuvchi" />
+                </div>
               </div>
               <div>
                 <Label>Email</Label>
-                <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="example@email.com" />
+                <Input value={form.email} onChange={(e) => set({ email: e.target.value })} placeholder="example@email.com" />
               </div>
               <div>
                 <Label>Manzil</Label>
-                <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Shahar, ko'cha..." />
+                <Input value={form.address} onChange={(e) => set({ address: e.target.value })} placeholder="Shahar, ko'cha..." />
+              </div>
+              <div>
+                <div className="flex items-center justify-between">
+                  <Label>Joylashuv (agent masofasi va geofence)</Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={fillCurrentLocation} disabled={locating}>
+                    <LocateFixed className="h-3.5 w-3.5 mr-1" /> {locating ? "Aniqlanmoqda..." : "Joriy joylashuv"}
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mt-1">
+                  <Input type="number" step="any" value={form.latitude} onChange={(e) => set({ latitude: e.target.value })} placeholder="Kenglik: 41.311081" />
+                  <Input type="number" step="any" value={form.longitude} onChange={(e) => set({ longitude: e.target.value })} placeholder="Uzunlik: 69.240562" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Kredit limiti (so'm)</Label>
+                  <Input type="number" min="0" value={form.creditLimit} onChange={(e) => set({ creditLimit: e.target.value })} placeholder="0 — cheklanmagan" />
+                </div>
+                <div>
+                  <Label>To'lov muddati (kun)</Label>
+                  <Input type="number" min="0" value={form.paymentTermDays} onChange={(e) => set({ paymentTermDays: e.target.value })} placeholder="0" />
+                </div>
               </div>
             </div>
             <DialogFooter>
-              <Button variant="secondary" onClick={() => setCreateOpen(false)}>Bekor</Button>
-              <Button onClick={handleCreate} disabled={createCustomer.isPending}>
-                {createCustomer.isPending ? "..." : "Qo'shish"}
+              <Button variant="secondary" onClick={() => setDialog(null)}>Bekor</Button>
+              <Button onClick={handleSave} disabled={saveCustomer.isPending}>
+                {saveCustomer.isPending ? "..." : dialog.mode === "edit" ? "Saqlash" : "Qo'shish"}
               </Button>
             </DialogFooter>
           </DialogContent>

@@ -16,6 +16,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -76,6 +77,11 @@ export const customers = pgTable(
     email: varchar("email", { length: 255 }),
     address: text("address"),
     taxId: varchar("tax_id", { length: 32 }),
+    /** Do'kon egasi yoki mas'ul shaxs. */
+    contactName: varchar("contact_name", { length: 200 }),
+    /** Do'kon joylashuvi (WGS-84): agentga masofa va geofence uchun. */
+    latitude: numeric("latitude", { precision: 9, scale: 6 }),
+    longitude: numeric("longitude", { precision: 9, scale: 6 }),
 
     discountPercent: percent("discount_percent").notNull().default("0"),
     creditLimit: money("credit_limit").notNull().default("0"),

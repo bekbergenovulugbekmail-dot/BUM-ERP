@@ -16,6 +16,11 @@ export type Customer = {
   email: string | null;
   address: string | null;
   taxId: string | null;
+  /** Do'kon egasi yoki mas'ul shaxs. */
+  contactName: string | null;
+  /** Do'kon joylashuvi (numeric satr); agent masofasi va geofence uchun. */
+  latitude: string | null;
+  longitude: string | null;
   discountPercent: string;
   creditLimit: string;
   paymentTermDays: number;

@@ -148,6 +148,13 @@
       "when": 1789165334575,
       "tag": "0020_sales_agent_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789166022717,
+      "tag": "0021_agent_stores_assignments",
+      "breakpoints": true
     }
   ]
 }

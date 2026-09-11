@@ -90,6 +90,9 @@ const customerBody = z.strictObject({
   paymentTermDays: z.number().int().min(0).max(3650).optional(),
   currency: z.string().trim().length(3).toUpperCase().optional(),
   notes: nullableText(2000),
+  contactName: nullableText(200),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
 });
 const customerPatch = customerBody.partial().extend({ isActive: z.boolean().optional() });
 const customersQuery = z.object({

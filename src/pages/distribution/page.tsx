@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import {
-  Truck, Route, Users,
+  Truck, Route, Users, CalendarRange,
   MapPinned, UserCheck, CalendarCheck, CircleDollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import RoutesSection from "./_components/routes-section.tsx";
+import AssignmentsSection from "./_components/assignments-section.tsx";
 import SalesRepsSection from "./_components/sales-reps-section.tsx";
 import { num, type DistributionRoute, type SalesRepStats } from "./_lib/types.ts";
 
@@ -14,6 +15,7 @@ const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
 const TABS = [
   { key: "routes", label: "Marshrutlar", icon: Route },
+  { key: "assignments", label: "Hudud va kun", icon: CalendarRange },
   { key: "reps", label: "Savdo agentlari", icon: Users },
 ] as const;
 
@@ -135,6 +137,7 @@ export default function DistributionPage() {
         transition={{ duration: 0.15 }}
       >
         {tab === "routes" && <RoutesSection />}
+        {tab === "assignments" && <AssignmentsSection />}
         {tab === "reps" && <SalesRepsSection />}
       </motion.div>
     </div>

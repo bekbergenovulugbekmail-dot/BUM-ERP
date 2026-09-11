@@ -13,6 +13,7 @@ import { customerPayments, customers, salesOrders } from "../../db/schema/sales.
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { toMinor } from "../../shared/decimal.js";
+import { isValidCoordinate } from "../../shared/geo.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
@@ -42,7 +43,27 @@ export type CustomerInput = {
   paymentTermDays?: number;
   currency?: string;
   notes?: string | null;
+  /** Do'kon egasi yoki mas'ul shaxs. */
+  contactName?: string | null;
+  /** Do'kon joylashuvi — ikkalasi birga (null — o'chirish). */
+  latitude?: number | null;
+  longitude?: number | null;
 };
+
+/** Koordinata juftligi: ikkalasi ham yoki hech biri; 6 xona (~10 sm). Berilmasa — o'zgarmaydi. */
+function coordinateValues(input: { latitude?: number | null; longitude?: number | null }) {
+  if (input.latitude === undefined && input.longitude === undefined) return {};
+  const latitude = input.latitude ?? null;
+  const longitude = input.longitude ?? null;
+  if ((latitude === null) !== (longitude === null)) throw badRequest("Kenglik va uzunlik birga kiritiladi");
+  if (latitude !== null && longitude !== null && !isValidCoordinate({ latitude, longitude })) {
+    throw badRequest("Koordinata noto'g'ri");
+  }
+  return {
+    latitude: latitude === null ? null : latitude.toFixed(6),
+    longitude: longitude === null ? null : longitude.toFixed(6),
+  };
+}
 
 async function resolveCurrency(conn: DbOrTx, companyId: string, requested?: string) {
   const currency = await companyCurrency(conn, companyId);
@@ -142,9 +163,10 @@ export async function createCustomer(tx: Tx, tenant: TenantContext, input: Custo
     width: 4,
   });
 
+  const { latitude, longitude, ...fields } = input;
   const [customer] = await tx
     .insert(customers)
-    .values({ ...input, code, currency, companyId })
+    .values({ ...fields, ...coordinateValues({ latitude, longitude }), code, currency, companyId })
     .returning(customerFields);
 
   await salesAudit(tx, tenant, meta, {
@@ -177,9 +199,10 @@ export async function updateCustomer(
     throw conflict("Mijoz bilan hisob-kitob yopilmagan — qarz nolga teng bo'lishi kerak");
   }
 
+  const { latitude, longitude, ...fields } = patch;
   const [updated] = await tx
     .update(customers)
-    .set({ ...patch, updatedAt: new Date() })
+    .set({ ...fields, ...coordinateValues({ latitude, longitude }), updatedAt: new Date() })
     .where(eq(customers.id, customerId))
     .returning(customerFields);
 

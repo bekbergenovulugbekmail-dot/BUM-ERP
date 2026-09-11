@@ -9,6 +9,8 @@
  *          DELETE /routes/:routeId/customers/:memberId                   distribution.manage
  *   GET    /visits (?routeId=&salesRepId=&status=&dateFrom=&dateTo=&limit=)   distribution.view
  *   POST   /visits, PATCH /visits/:visitId                                distribution.manage
+ *   GET    /assignments (?dateFrom=&dateTo=&salesRepId=)                  distribution.view
+ *   POST   /assignments, DELETE /assignments/:assignmentId               distribution.manage
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -21,10 +23,13 @@ import { authOf, requireAuth } from "../auth/guard.js";
 import { requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import {
   addRouteCustomer,
+  assignRoute,
   createRoute,
   createVisit,
+  deleteAssignment,
   deleteRoute,
   getRoute,
+  listAssignments,
   listRoutes,
   listVisits,
   removeRouteCustomer,
@@ -93,6 +98,18 @@ const visitsQuery = z.object({
   dateTo: isoDate.optional(),
   limit: limitQuery,
 });
+
+const assignmentBody = z.strictObject({
+  routeId: z.uuid(),
+  salesRepId: z.uuid(),
+  assignDate: isoDate,
+  deliveryDate: isoDate.nullable().optional(),
+  notes: nullableText(1000),
+});
+const assignmentsQuery = z
+  .object({ dateFrom: isoDate, dateTo: isoDate, salesRepId: z.uuid().optional() })
+  .refine((query) => query.dateFrom <= query.dateTo, { message: "Sana oralig'i noto'g'ri", path: ["dateTo"] });
+const assignmentParams = z.object({ assignmentId: z.uuid() });
 
 const includeInactiveQuery = z.object({ includeInactive: boolQuery });
 const repParams = z.object({ salesRepId: z.uuid() });
@@ -215,5 +232,25 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
     const { visitId } = visitParams.parse(req.params);
     const patch = visitPatch.parse(req.body);
     return { visit: await writeInTenant(req, (tx, tenant) => updateVisit(tx, tenant, visitId, patch, requestMeta(req))) };
+  });
+
+  // ─── Sanaga biriktirish ──────────────────────────────────────────────────
+
+  app.get("/assignments", async (req) => {
+    const query = assignmentsQuery.parse(req.query);
+    return { assignments: await listAssignments(db, await readTenant(req), query) };
+  });
+
+  app.post("/assignments", async (req, reply) => {
+    const body = assignmentBody.parse(req.body);
+    const assignment = await writeInTenant(req, (tx, tenant) => assignRoute(tx, tenant, body, requestMeta(req)));
+    reply.status(201);
+    return { assignment };
+  });
+
+  app.delete("/assignments/:assignmentId", async (req, reply) => {
+    const { assignmentId } = assignmentParams.parse(req.params);
+    await writeInTenant(req, (tx, tenant) => deleteAssignment(tx, tenant, assignmentId, requestMeta(req)));
+    return reply.status(204).send();
   });
 }

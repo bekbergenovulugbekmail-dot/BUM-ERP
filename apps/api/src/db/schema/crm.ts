@@ -266,6 +266,32 @@ export const routeVisits = pgTable(
   ],
 );
 
+/**
+ * Marshrutni aniq sanaga agentga biriktirish (hudud va kun). Shu kunga biriktirish bo'lsa — hafta kuni
+ * jadvalidan ustun; bir marshrut bir kunda bitta agentda.
+ */
+export const routeAssignments = pgTable(
+  "route_assignments",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    routeId: uuid("route_id").notNull().references(() => distributionRoutes.id, { onDelete: "cascade" }),
+    salesRepId: uuid("sales_rep_id").notNull().references(() => salesReps.id, { onDelete: "cascade" }),
+    assignDate: date("assign_date").notNull(),
+    /** Shu kungi buyurtmalarning yetkazish kuni; null — kompaniya siyosati bo'yicha. */
+    deliveryDate: date("delivery_date"),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("ra_route_date_key").on(t.routeId, t.assignDate),
+    index("ra_company_rep_date_idx").on(t.companyId, t.salesRepId, t.assignDate),
+  ],
+);
+
 // ─── relations ───────────────────────────────────────────────────────────────
 
 export const leadsRelations = relations(leads, ({ one, many }) => ({

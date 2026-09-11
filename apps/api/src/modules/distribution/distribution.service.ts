@@ -14,7 +14,7 @@
  */
 import { and, asc, desc, eq, getTableColumns, gte, lte, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
-import { distributionRoutes, routeCustomers, routeVisits, salesReps } from "../../db/schema/crm.js";
+import { distributionRoutes, routeAssignments, routeCustomers, routeVisits, salesReps } from "../../db/schema/crm.js";
 import { customers } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
@@ -321,4 +321,86 @@ export async function updateVisit(
     details: { from: visit.status, ...patch },
   });
   return updated!;
+}
+
+// ─── Sanaga biriktirish (hudud va kun) ───────────────────────────────────────
+
+const { companyId: _c4, ...assignmentFields } = getTableColumns(routeAssignments);
+
+export async function listAssignments(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  options: { dateFrom: string; dateTo: string; salesRepId?: string },
+) {
+  return conn
+    .select({
+      ...assignmentFields,
+      routeName: distributionRoutes.name,
+      routeColor: distributionRoutes.color,
+      salesRepName: salesReps.name,
+    })
+    .from(routeAssignments)
+    .innerJoin(distributionRoutes, eq(distributionRoutes.id, routeAssignments.routeId))
+    .innerJoin(salesReps, eq(salesReps.id, routeAssignments.salesRepId))
+    .where(
+      and(
+        eq(routeAssignments.companyId, tenant.company.id),
+        gte(routeAssignments.assignDate, options.dateFrom),
+        lte(routeAssignments.assignDate, options.dateTo),
+        options.salesRepId ? eq(routeAssignments.salesRepId, options.salesRepId) : undefined,
+      ),
+    )
+    .orderBy(asc(routeAssignments.assignDate), asc(salesReps.name), asc(distributionRoutes.name));
+}
+
+/** Marshrutni sanaga agentga biriktiradi; shu kunga biriktirish bo'lsa — agent va yetkazish kuni almashadi. */
+export async function assignRoute(
+  tx: Tx,
+  tenant: TenantContext,
+  input: { routeId: string; salesRepId: string; assignDate: string; deliveryDate?: string | null; notes?: string | null },
+  meta: RequestMeta,
+) {
+  const companyId = tenant.company.id;
+  const route = await lockRoute(tx, tenant, input.routeId);
+  if (!route.isActive) throw badRequest("Marshrut faol emas");
+  await assertSalesRep(tx, companyId, input.salesRepId);
+  if (input.deliveryDate && input.deliveryDate < input.assignDate) {
+    throw badRequest("Yetkazish kuni biriktirish kunidan oldin bo'lishi mumkin emas");
+  }
+
+  const values = {
+    salesRepId: input.salesRepId,
+    deliveryDate: input.deliveryDate ?? null,
+    notes: input.notes ?? null,
+    createdBy: tenant.user.id,
+  };
+  const [assignment] = await tx
+    .insert(routeAssignments)
+    .values({ companyId, routeId: route.id, assignDate: input.assignDate, ...values })
+    .onConflictDoUpdate({
+      target: [routeAssignments.routeId, routeAssignments.assignDate],
+      set: { ...values, updatedAt: new Date() },
+    })
+    .returning(assignmentFields);
+  await distributionAudit(tx, tenant, meta, {
+    action: "ROUTE_ASSIGNED",
+    resource: "route_assignments",
+    resourceId: assignment!.id,
+    details: { routeId: route.id, salesRepId: input.salesRepId, assignDate: input.assignDate, deliveryDate: values.deliveryDate },
+  });
+  return assignment!;
+}
+
+export async function deleteAssignment(tx: Tx, tenant: TenantContext, assignmentId: string, meta: RequestMeta) {
+  const [deleted] = await tx
+    .delete(routeAssignments)
+    .where(and(eq(routeAssignments.id, assignmentId), eq(routeAssignments.companyId, tenant.company.id)))
+    .returning({ routeId: routeAssignments.routeId, salesRepId: routeAssignments.salesRepId, assignDate: routeAssignments.assignDate });
+  if (!deleted) throw notFound("Biriktirish topilmadi");
+  await distributionAudit(tx, tenant, meta, {
+    action: "ROUTE_UNASSIGNED",
+    resource: "route_assignments",
+    resourceId: assignmentId,
+    details: deleted,
+  });
 }

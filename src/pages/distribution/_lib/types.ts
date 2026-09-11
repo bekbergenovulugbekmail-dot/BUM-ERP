@@ -71,6 +71,19 @@ export type RouteVisit = {
   salesRepName: string | null;
 };
 
+/** `GET /api/distribution/assignments` — marshrutning aniq sanaga agentga biriktirilishi. */
+export type RouteAssignment = {
+  id: string;
+  routeId: string;
+  salesRepId: string;
+  assignDate: string;
+  deliveryDate: string | null;
+  notes: string | null;
+  routeName: string;
+  routeColor: string | null;
+  salesRepName: string;
+};
+
 export type CustomerOption = { id: string; name: string; phone: string | null };
 
 /** Numeric satr → son (faqat ko'rsatish uchun). */

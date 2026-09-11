@@ -661,7 +661,7 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - inventarizatsiya qo'llanganda ortiqcha — 4100, kamomad — 5500 (bitta jurnal yozuvi)
   - moliya dashboardi: oylik tushum/chiqim valyutali kassalardan joriy kurs bilan asosiy valyutada
   - tizimdan chiqish (`logout`) audit jurnaliga yoziladi (kirish va xato urinish avval ham yozilardi)
-- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `sales-currency` (2), `distribution` (4), `inventory-journal` (1), `sales-agent` (3); API jami 232 (48 fayl)
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `sales-currency` (2), `distribution` (4), `inventory-journal` (1), `sales-agent` (3), `sales-agent-stores` (2); API jami 234 (49 fayl)
 
 ## Sotuv agenti loyihasi (2026-09-12)
 
@@ -673,7 +673,7 @@ xarita — Yandex Maps (`MapProvider` orqasida, kalit env'da), lokatsiya — avv
 | A | CRM va Distributsiya alohida; `distribution.*` ruxsatlari; menyu ruxsat bo'yicha | ✅ |
 | L | Oldingi bosqichlar cheklovlarini bartaraf etish (valyuta, smena, PDF, dashboard, ombor kirimi jurnali) | ✅ L1 `39f6192`, L2 `0494db5`, L3 `0f54442` |
 | B | Sotuv agenti va Supervayzer rollari; agent ish joyi (mobil, 5 bo'lim, uz/ru/kk) | ✅ |
-| C | Do'kon koordinatasi; sana bo'yicha hudud/marshrut; do'konlar, profil, qarzdorlar | |
+| C | Do'kon koordinatasi; sana bo'yicha hudud/marshrut; do'konlar, profil, qarzdorlar | ✅ |
 | D | Lokatsiya kuzatuvi, sifat tekshiruvi, saqlash muddati; supervayzer xaritasi | |
 | E | Tashrif: boshlash/yakunlash, buyurtmasiz sabab, rasm | |
 | F | Katalog, dona/blok, draft (idempotent), yetkazish kuni, nasiya, kredit limiti, geofence bilan buyurtma | |
@@ -694,6 +694,17 @@ xarita — Yandex Maps (`MapProvider` orqasida, kalit env'da), lokatsiya — avv
 - savdo agenti tizim foydalanuvchisiga bog'lanadi (`sales_reps.user_id`, kompaniyada unikal — `sr_company_user_key`); Distributsiya → Savdo agentlari oynasida "Tizim foydalanuvchisi (login)"
 - `GET /api/sales-agent/me` — bog'langan FAOL agent profili (`requireAgent`: agent hech qachon so'rovdan olinmaydi)
 - web: `/:lng/sales-agent/*` — mobil ish joyi (Bosh sahifa, Sotuv, Qarzdorlar, Do'konlar, Aksiyalar; pastki navigatsiya, til, chiqish), ERP menyusiz; faqat agent ruxsati bor xodim ERP sahifalaridan avtomatik shu yerga o'tadi; bog'lanmagan bo'lsa tushuntirish ekrani. Matnlar `agent` namespace'ida uz/ru/kk
+- **B** commit `a69f04c`
+
+**C — Hudud, do'konlar va qarzdorlar** (migratsiya 0021):
+- do'kon (mijoz): `contact_name`, `latitude`/`longitude` (numeric 9,6; juftlik va chegara tekshiruvi, "0,0" rad); mijoz oynasida mas'ul shaxs, koordinata va "Joriy joylashuv", kredit limiti, to'lov muddati; mijozni tahrirlash
+- `route_assignments` — marshrutni aniq sanaga agentga biriktirish (bir marshrut bir kunda bitta agentda, yetkazish kuni bilan); Distributsiya → "Hudud va kun" (hafta ko'rinishi). `GET/POST /api/distribution/assignments`, `DELETE /assignments/:id`
+- agent API (`sales_agent.use`, sana — har doim server sanasi):
+  - `GET /api/sales-agent/today` — bugungi marshrut: shu kunga biriktirilgan, bo'lmasa hafta kuni mos o'z marshrutlari (shu kunga boshqa agentga berilganidan tashqari); do'konlar marshrut tartibida
+  - `GET /stores` (`scope=today|all`, qidiruv nom/telefon raqamlari/manzil), `GET /stores/:id` — profil: aloqa, qarz, kredit limiti va qolgan kredit, 90 kunlik buyurtmalar, so'nggi buyurtmalar, tashrif kunlari; boshqa agent do'koni — 404
+  - `GET /debtors` (`filter=overdue|today|soon|all`) — eng eski to'lanmagan buyurtma muddati (buyurtma sanasi + to'lov muddati) bo'yicha
+  - masofa serverda (haversine, `shared/geo.ts`), agent `lat`/`lng` yuboradi
+- web agent: Sotuv — bugungi marshrut, do'konlar kartalari (qarz, masofa), yetkazish kuni; Do'konlar — qidiruv, yaqinidan; do'kon profili (qo'ng'iroq, xaritada ochish); Qarzdorlar — filtrlar va kechikish kunlari; lokatsiya holati (faol/aniqlanmoqda/"lokatsiyani yoqish")
 
 ### Distributsiya (`/api/distribution`)
 
