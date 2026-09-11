@@ -1612,8 +1612,15 @@ async function importCrm(ctx: Context) {
   for (const doc of await ctx.load("distributionRoutes")) {
     const r = ctx.refs("distributionRoutes", doc, { companyId: doc.companyId });
     if (!r) continue;
+    // Convex UI'da 0 = dushanba … 6 = yakshanba edi; API'da 0 = yakshanba … 6 = shanba
     const days = Array.isArray(doc.days)
-      ? [...new Set((doc.days as unknown[]).filter((d): d is number => typeof d === "number" && Number.isInteger(d) && d >= 0 && d <= 6))].sort()
+      ? [
+          ...new Set(
+            (doc.days as unknown[])
+              .filter((d): d is number => typeof d === "number" && Number.isInteger(d) && d >= 0 && d <= 6)
+              .map((d) => (d + 1) % 7),
+          ),
+        ].sort((a, b) => a - b)
       : [];
     const id = await save(ctx, "distributionRoutes", distributionRoutes, doc, {
       companyId: r.companyId,

@@ -10,7 +10,8 @@
  *    bazada CHECK ham bor
  *  - AVCO faqat tannarxli kirimda qayta hisoblanadi; chiqim joriy o'rtacha
  *    tannarxda yoziladi
- *  - miqdor mahsulotning asosiy o'lchov birligida (Convex ham konvertatsiya qilmasdi)
+ *  - zaxira mahsulotning asosiy o'lchov birligida; qo'lda harakat va o'tkazma boshqa birlikda
+ *    kiritilsa (`unitId`) konversiya bilan asosiy birlikka o'tkaziladi (Convex konvertatsiya qilmasdi)
  *
  * Convex'dan farqlar: recordMovement va transferStock ruxsat tekshirmasdi (har
  * qanday a'zo zaxirani o'zgartirardi); o'tkazmada qabul qiluvchi omborga mijoz
@@ -24,6 +25,8 @@ import { stockLevels, stockMovementType, stockMovements, warehouses } from "../.
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
+import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
+import { unitFactorToBase } from "../catalog/conversions.js";
 import type { TenantContext } from "../company/tenant.js";
 import { allowedWarehouses, assertWarehouseAccess } from "./warehouses.service.js";
 
@@ -303,14 +306,54 @@ export async function listMovements(
 export const MANUAL_MOVEMENT_TYPES = ["receive", "issue", "adjust", "writeoff", "return_in", "return_out"] as const;
 export type ManualMovementType = (typeof MANUAL_MOVEMENT_TYPES)[number];
 
+/**
+ * Boshqa o'lchov birligidagi miqdor va birlik narxini asosiy birlikka o'tkazadi:
+ * 2 quti × 12 = 24 dona, quti narxi 24000 → dona narxi 2000. Aniq o'nlik arifmetika.
+ */
+async function toBaseUnit(
+  tx: Tx,
+  companyId: string,
+  input: { productId: string; unitId?: string | null; quantity: string; costPrice?: string | null },
+) {
+  if (!input.unitId) return { quantity: input.quantity, costPrice: input.costPrice, factor: "1" };
+
+  const [product] = await tx
+    .select({ id: products.id, name: products.name, baseUnitId: products.baseUnitId })
+    .from(products)
+    .where(and(eq(products.id, input.productId), eq(products.companyId, companyId)))
+    .limit(1);
+  if (!product) throw notFound("Mahsulot topilmadi");
+
+  const factor = await unitFactorToBase(tx, companyId, product, input.unitId);
+  if (factor === "1") return { quantity: input.quantity, costPrice: input.costPrice, factor };
+
+  const factorMinor = toMinor(factor, 4);
+  return {
+    quantity: fromMinor(rescale(toMinor(input.quantity, 4) * factorMinor, 8, 4), 4),
+    costPrice:
+      input.costPrice == null ? input.costPrice : fromMinor(mulDivRound(toMinor(input.costPrice, 4), 10_000n, factorMinor), 4),
+    factor,
+  };
+}
+
 export async function recordManualMovement(
   tx: Tx,
   tenant: TenantContext,
-  input: Omit<StockMove, "type" | "referenceType" | "referenceId" | "zoneId"> & { type: ManualMovementType },
+  input: Omit<StockMove, "type" | "referenceType" | "referenceId" | "zoneId"> & {
+    type: ManualMovementType;
+    /** Kiritilgan birlik; berilmasa — asosiy birlik. */
+    unitId?: string | null;
+  },
   meta: RequestMeta,
 ) {
   assertWarehouseAccess(tenant, input.warehouseId);
-  const result = await moveStock(tx, tenant.company.id, tenant.user.id, input);
+  const { unitId, ...move } = input;
+  const base = await toBaseUnit(tx, tenant.company.id, input);
+  const result = await moveStock(tx, tenant.company.id, tenant.user.id, {
+    ...move,
+    quantity: base.quantity,
+    costPrice: base.costPrice,
+  });
 
   await writeAuditLog(
     {
@@ -325,6 +368,7 @@ export async function recordManualMovement(
         productId: input.productId,
         warehouseId: input.warehouseId,
         quantity: result.movement.quantity,
+        ...(unitId && base.factor !== "1" ? { enteredQuantity: input.quantity, unitId, factor: base.factor } : {}),
       },
       ...meta,
     },
@@ -336,7 +380,16 @@ export async function recordManualMovement(
 export async function transferStock(
   tx: Tx,
   tenant: TenantContext,
-  input: { productId: string; fromWarehouseId: string; toWarehouseId: string; quantity: string; notes?: string | null },
+  input: {
+    productId: string;
+    fromWarehouseId: string;
+    toWarehouseId: string;
+    quantity: string;
+    unitId?: string | null;
+    /** O'tgan sana bilan kiritish; berilmasa — hozir. */
+    occurredAt?: Date;
+    notes?: string | null;
+  },
   meta: RequestMeta,
 ) {
   if (input.fromWarehouseId === input.toWarehouseId) throw badRequest("Bir xil ombor tanlandi");
@@ -358,7 +411,15 @@ export async function transferStock(
     .for("update");
 
   const referenceId = randomUUID();
-  const base = { productId: input.productId, quantity: input.quantity, notes: input.notes ?? null, referenceType: "transfer", referenceId };
+  const { quantity } = await toBaseUnit(tx, tenant.company.id, input);
+  const base = {
+    productId: input.productId,
+    quantity,
+    notes: input.notes ?? null,
+    referenceType: "transfer",
+    referenceId,
+    occurredAt: input.occurredAt,
+  };
 
   const out = await moveStock(tx, tenant.company.id, tenant.user.id, {
     ...base,
@@ -381,7 +442,7 @@ export async function transferStock(
       action: "STOCK_TRANSFERRED",
       resource: "stock_movements",
       resourceId: referenceId,
-      details: { ...input, costPrice: out.movement.costPrice },
+      details: { ...input, baseQuantity: quantity, costPrice: out.movement.costPrice },
       ...meta,
     },
     tx,

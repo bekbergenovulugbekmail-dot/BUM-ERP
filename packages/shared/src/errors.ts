@@ -25,13 +25,15 @@ export const HTTP_STATUS: Record<ErrorCode, number> = {
 };
 
 export class AppError extends Error {
-  constructor(
-    readonly code: ErrorCode,
-    message: string,
-    readonly details?: unknown,
-  ) {
+  // Konstruktor parametr-xossalari emas: Node type stripping ularni qo'llamaydi (index.ts ga qarang)
+  readonly code: ErrorCode;
+  readonly details?: unknown;
+
+  constructor(code: ErrorCode, message: string, details?: unknown) {
     super(message);
     this.name = "AppError";
+    this.code = code;
+    this.details = details;
   }
 
   get status(): number {

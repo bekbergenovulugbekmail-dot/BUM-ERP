@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
 import { products, units } from "../src/db/schema/catalog.js";
+import { distributionRoutes } from "../src/db/schema/crm.js";
 import { accounts, journalEntries } from "../src/db/schema/finance.js";
 import { stockLevels } from "../src/db/schema/inventory.js";
 import { notifications } from "../src/db/schema/notifications.js";
@@ -88,6 +89,8 @@ beforeAll(async () => {
     doc("jl_3", { entryId: "je_bad", accountId: "acc_cash", debit: 100, credit: 0 }),
     doc("jl_4", { entryId: "je_bad", accountId: "acc_sales", debit: 0, credit: 95 }),
   ]);
+  // Convex: 0 = dushanba, 4 = juma, 6 = yakshanba
+  writeTable("distributionRoutes", [doc("route_1", { companyId: "c_main", name: "Chilonzor", days: [0, 4, 6], isActive: true })]);
   writeTable("notifications", [doc("n_1", { companyId: "c_main", type: "system", title: "Salom", message: "Test", severity: "info", isRead: false, isGlobal: true, link: "https://evil.example", createdAt: "2026-03-07T10:00:00Z" })]);
   writeTable("auditLogs", [doc("log_1", { companyId: "c_main", userId: "u_owner", action: "login", resource: "users", details: '{"ok":true}', severity: "info", timestamp: "2026-03-07T10:00:00Z" })]);
 });
@@ -145,6 +148,10 @@ describe("Convex eksportidan import", () => {
     expect(entries.find((e) => e.legacyId === "je_ok")).toMatchObject({ status: "posted", totalDebit: "3001.00", totalCredit: "3000.50", referenceType: "sale_ship" });
     expect(entries.find((e) => e.legacyId === "je_bad")).toMatchObject({ status: "draft", totalDebit: "100.00", totalCredit: "100.00" });
     expect(entries.find((e) => e.legacyId === "je_bad")!.notes).toContain("debet 100.00, kredit 95.00");
+
+    // API: 0 = yakshanba, 1 = dushanba, 5 = juma
+    const [route] = await db.select().from(distributionRoutes).where(eq(distributionRoutes.legacyId, "route_1"));
+    expect(route!.days).toEqual([0, 1, 5]);
 
     const [notification] = await db.select().from(notifications).where(eq(notifications.legacyId, "n_1"));
     expect(notification!.link).toBeNull();

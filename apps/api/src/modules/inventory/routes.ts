@@ -99,6 +99,8 @@ const movementBody = z
     productId: z.uuid(),
     warehouseId: z.uuid(),
     quantity: signedQty,
+    /** Kiritilgan birlik (konversiya bilan asosiy birlikka); `costPrice` shu birlik narxi. */
+    unitId: z.uuid().nullable().optional(),
     costPrice: priceSchema.nullable().optional(),
     batchId: z.uuid().nullable().optional(),
     notes: nullableText(2000),
@@ -114,6 +116,8 @@ const transferBody = z.strictObject({
   fromWarehouseId: z.uuid(),
   toWarehouseId: z.uuid(),
   quantity: decimalSchema({ scale: 4, positive: true }),
+  unitId: z.uuid().nullable().optional(),
+  occurredAt: z.iso.datetime({ offset: true }).transform((v) => new Date(v)).optional(),
   notes: nullableText(2000),
 });
 

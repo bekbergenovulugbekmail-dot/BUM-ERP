@@ -190,6 +190,45 @@ describe("O'tkazmalar", () => {
     expect((await api(companyA.ownerCookie, "POST", "/stock/transfers", tooMuch)).statusCode).toBe(400);
     expect(await level(productId, second.id)).toMatchObject({ quantity: "20.0000" });
   });
+
+  it("boshqa o'lchov birligida: miqdor va narx asosiy birlikka o'tadi, o'tkazma sanasi saqlanadi", async () => {
+    const box = (await db.select().from(units).where(eq(units.shortName, "qt")))[0]!.id;
+    const kg = (await db.select().from(units).where(eq(units.shortName, "kg")))[0]!.id;
+    const second = (await api(companyA.ownerCookie, "POST", "/warehouses", { name: "Ikkinchi", code: "WH-002" })).json().warehouse;
+    const productId = await product(companyA, "BOX");
+    const conversion = await app.inject({
+      method: "POST",
+      url: "/api/catalog/unit-conversions",
+      headers: { cookie: companyA.ownerCookie },
+      payload: { fromUnitId: box, toUnitId: piece, factor: "12", productId },
+    });
+    expect(conversion.statusCode).toBe(201);
+
+    // 2 quti × 12 = 24 dona; quti narxi 24000 → dona narxi 2000
+    const received = await move(companyA.ownerCookie, { type: "receive", productId, warehouseId: mainA, quantity: "2", unitId: box, costPrice: "24000" });
+    expect(received.statusCode).toBe(201);
+    expect(received.json().movement).toMatchObject({ quantity: "24.0000", unitId: piece, costPrice: "2000.0000" });
+    expect(await level(productId, mainA)).toMatchObject({ quantity: "24.0000", avgCostPrice: "2000.0000" });
+
+    const occurredAt = "2026-09-01T09:30:00.000Z";
+    const transfer = await api(companyA.ownerCookie, "POST", "/stock/transfers", {
+      productId,
+      fromWarehouseId: mainA,
+      toWarehouseId: second.id,
+      quantity: "0.5",
+      unitId: box,
+      occurredAt,
+    });
+    expect(transfer.statusCode).toBe(201);
+    expect(await level(productId, second.id)).toMatchObject({ quantity: "6.0000", avgCostPrice: "2000.0000" });
+    const pair = await db.select().from(stockMovements).where(eq(stockMovements.referenceId, transfer.json().referenceId));
+    expect(pair.map((m) => m.occurredAt.toISOString())).toEqual([occurredAt, occurredAt]);
+
+    // Asosiy birlikka konversiyasi yo'q birlik — rad, qoldiq o'zgarmaydi
+    const noConversion = await move(companyA.ownerCookie, { type: "issue", productId, warehouseId: mainA, quantity: "1", unitId: kg });
+    expect(noConversion.statusCode).toBe(400);
+    expect(await level(productId, mainA)).toMatchObject({ quantity: "18.0000" });
+  });
 });
 
 describe("Qoldiq, statistika va harakatlar jurnali", () => {

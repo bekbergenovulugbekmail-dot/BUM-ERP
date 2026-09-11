@@ -2,10 +2,12 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
+    "rootDir": "src",
     "outDir": "dist",
     "module": "NodeNext",
     "moduleResolution": "nodenext",
-    "allowImportingTsExtensions": false
+    "allowImportingTsExtensions": false,
+    "rewriteRelativeImportExtensions": true
   },
   "include": ["src"]
 }
