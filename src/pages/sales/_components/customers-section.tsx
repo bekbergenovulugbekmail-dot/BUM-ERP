@@ -108,6 +108,11 @@ export default function CustomersSection() {
                         Balans: {fmt(num(c.balance))} so'm
                       </span>
                     )}
+                    {num(c.cashbackBalance) > 0 && (
+                      <span className="text-xs bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400 px-2 py-0.5 rounded-full">
+                        Keshbek: {fmt(num(c.cashbackBalance))} so'm
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="space-y-1 text-xs text-muted-foreground">

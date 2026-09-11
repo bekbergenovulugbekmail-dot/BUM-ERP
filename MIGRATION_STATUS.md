@@ -613,8 +613,15 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - buxgalteriya: yangi hisob 2300 "Mijozlar avanslari" (migratsiya mavjud kompaniyalarga ham qo'shadi); kirim DR kassa / CR 2300, sarf DR 2300 / CR 1100; `payment_method` ga `balance`
 - **Chek shabloni** (commit `3e03b23`): Sozlamalar → "Chek" — qog'oz 58/80 mm, shrift, logo (data URL, termal uchun kichraytiriladi), sarlavha va pastki matn, kassir/SKU/QQS, mijoz qarzi/balansi/keshbek, avtomatik chop etish; jonli ko'rinish. `GET /api/company/print-settings` (har bir a'zo), `PUT /api/company/print-settings/receipt` (`settings.manage`). POS cheki shu shablon bo'yicha HTML orqali chop etiladi
 - **Etiketkalar:** Sozlamalar → "Etiketka" — shablonlar (tayyor 58×40, 40×30, 30×20, A4 70×37; o'z o'lchami 15–150 mm), termal rulon yoki A4 ustunlar, shtrix-kod (CODE128) / QR / kodsiz, ko'rsatiladigan maydonlar, standart shablon; `PUT /api/company/print-settings/labels` (`settings.manage`). Chop etish oynasi — mahsulotlar sahifasidan (bir nechta mahsulot, nusxa soni) va xarid buyurtmasidan (qabul qilingan miqdor bilan)
-- **Navbatda** (foydalanuvchi 8 ta talabidan): keshbek tizimi → ko'p valyuta (xarid/sotuv, kurslar, Markaziy bank kursi yoqib-o'chiriladi)
-- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2); API jami 214 (39 fayl)
+- **Etiketkalar** commit `45cb213`
+- **Keshbek tizimi** (migratsiya 0013):
+  - Sozlamalar → "Keshbek": yoqish/o'chirish; keshbek faqat pul bilan to'langan qismiga yoki butun chekka; keshbek bilan to'lash chegarasi (chekning %, 100 — cheklovsiz); chek summasi pog'onalari; kategoriya foizlari (pog'onadan ustun, ichki kategoriyalarga ham). `GET/PUT /api/sales/cashback/settings`
+  - mijoz keshbek hisobi pul balansidan alohida (`customers.cashback_balance` + `customer_cashback_transactions`); POS'da mijoz kartasida ko'rinadi, "Keshbekdan" to'lanadi, chekda berilgan keshbek va qoldiq
+  - qaytarishda ishlatilgan keshbek qaytadi, berilgani bekor qilinadi (sarflangan bo'lsa — qolgani miqdorida)
+  - buxgalteriya: 2400 "Keshbek majburiyati", 5600 "Keshbek xarajatlari"; hisoblash DR 5600 / CR 2400, ishlatish DR 2400 / CR 1100
+  - hozircha faqat POS cheklarida (oddiy savdo buyurtmalarida keshbek hisoblanmaydi)
+- **Navbatda** (foydalanuvchi 8 ta talabidan): ko'p valyuta (xarid/sotuv, kurslar, Markaziy bank kursi yoqib-o'chiriladi)
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2); API jami 216 (40 fayl)
 
 ---
 

@@ -49,6 +49,15 @@ export const customerBalanceTxType = pgEnum("customer_balance_tx_type", [
   "refund", //       qaytarilgan chekning balansdan to'langan qismi
 ]);
 
+/** Keshbek hisobi harakati — pul balansidan alohida. */
+export const customerCashbackTxType = pgEnum("customer_cashback_tx_type", [
+  "earn", //          chekdan hisoblandi
+  "redeem", //        chek keshbek bilan to'landi
+  "earn_reversal", // qaytarilgan chekdan berilgan keshbek bekor qilindi
+  "redeem_refund", // qaytarilgan chekda ishlatilgan keshbek qaytdi
+  "adjustment", //    qo'lda tuzatish
+]);
+
 // ─── customers ───────────────────────────────────────────────────────────────
 
 export const customers = pgTable(
@@ -76,6 +85,8 @@ export const customers = pgTable(
     totalPurchased: money("total_purchased").notNull().default("0"),
     /** Oldindan to'langan pul (hamyon) — qarzdan alohida; o'zgarishi faqat customer_balance_transactions orqali. */
     balance: money("balance").notNull().default("0"),
+    /** Keshbek — balansdan alohida; o'zgarishi faqat customer_cashback_transactions orqali. */
+    cashbackBalance: money("cashback_balance").notNull().default("0"),
 
     isActive: boolean("is_active").notNull().default(true),
     notes: text("notes"),
@@ -86,6 +97,7 @@ export const customers = pgTable(
     index("customers_company_active_idx").on(t.companyId, t.isActive),
     index("customers_company_phone_idx").on(t.companyId, t.phone),
     check("customers_balance_non_negative", sql`${t.balance} >= 0`),
+    check("customers_cashback_non_negative", sql`${t.cashbackBalance} >= 0`),
   ],
 );
 
@@ -278,6 +290,38 @@ export const customerBalanceTransactions = pgTable(
     index("cbt_order_idx").on(t.orderId),
     check("cbt_amount_non_zero", sql`${t.amount} <> 0`),
     check("cbt_balance_after_non_negative", sql`${t.balanceAfter} >= 0`),
+  ],
+);
+
+// ─── customer_cashback_transactions ──────────────────────────────────────────
+
+export const customerCashbackTransactions = pgTable(
+  "customer_cashback_transactions",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    customerId: uuid("customer_id").notNull().references(() => customers.id, { onDelete: "restrict" }),
+
+    type: customerCashbackTxType("type").notNull(),
+    /** Ishorali: kirim musbat, sarf manfiy. */
+    amount: money("amount").notNull(),
+    balanceAfter: money("balance_after").notNull(),
+
+    orderId: uuid("order_id").references(() => salesOrders.id, { onDelete: "set null" }),
+    paymentId: uuid("payment_id").references(() => customerPayments.id, { onDelete: "set null" }),
+    journalEntryId: uuid("journal_entry_id").references(() => journalEntries.id, { onDelete: "set null" }),
+
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    index("cct_company_customer_idx").on(t.companyId, t.customerId, t.createdAt),
+    index("cct_order_idx").on(t.orderId),
+    check("cct_amount_non_zero", sql`${t.amount} <> 0`),
+    check("cct_balance_after_non_negative", sql`${t.balanceAfter} >= 0`),
   ],
 );
 

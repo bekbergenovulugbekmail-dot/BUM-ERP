@@ -48,6 +48,7 @@ import {
 } from "../finance/cash.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { moveStock } from "../inventory/stock.service.js";
+import { reverseOrderCashback } from "./cashback.service.js";
 import { refundToBalance } from "./customer-balance.service.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
 import { assertProductsInScope, categoryScope, documentHasScopedItem } from "../catalog/category-scope.js";
@@ -696,15 +697,19 @@ export async function returnOrder(
       .where(eq(customers.id, order.customerId));
   }
 
-  // Mijoz balansidan to'langan qism naqd emas — balansga qaytadi; qolgani tanlangan usulda qaytariladi
-  const [balancePayments] = order.customerId
+  // Mijoz balansi va keshbekidan to'langan qismlar naqd emas — o'z hisobiga qaytadi; qolgani tanlangan usulda
+  const [nonCash] = order.customerId
     ? await tx
-        .select({ total: sql<string>`coalesce(sum(${customerPayments.amount}), 0)::numeric(18,2)` })
+        .select({
+          balance: sql<string>`coalesce(sum(${customerPayments.amount}) filter (where ${customerPayments.method} = 'balance'), 0)::numeric(18,2)`,
+          cashback: sql<string>`coalesce(sum(${customerPayments.amount}) filter (where ${customerPayments.method} = 'cashback'), 0)::numeric(18,2)`,
+        })
         .from(customerPayments)
-        .where(and(eq(customerPayments.orderId, orderId), eq(customerPayments.method, "balance")))
-    : [{ total: "0" }];
-  const balancePaid = toMinor(balancePayments!.total);
-  const cashPaid = paid - balancePaid;
+        .where(eq(customerPayments.orderId, orderId))
+    : [{ balance: "0", cashback: "0" }];
+  const balancePaid = toMinor(nonCash!.balance);
+  const cashbackPaid = toMinor(nonCash!.cashback);
+  const cashPaid = paid - balancePaid - cashbackPaid;
 
   let cashRefunded = 0n;
   let refundAccountId: string | null = null;
@@ -755,7 +760,16 @@ export async function returnOrder(
       meta,
     );
   }
-  const refunded = cashRefunded + (refund ? balancePaid : 0n);
+  // Keshbek: ishlatilgani qaytadi (pul qaytarilganda), shu chekdan berilgani bekor qilinadi
+  if (order.customerId) {
+    await reverseOrderCashback(
+      tx,
+      tenant,
+      { customerId: order.customerId, orderId, orderNumber: order.number, redeemed: refund ? cashbackPaid : 0n, date: today },
+      meta,
+    );
+  }
+  const refunded = cashRefunded + (refund ? balancePaid + cashbackPaid : 0n);
 
   // Ochiq smenada qaytarish kassir yig'indisidan ayriladi — smena yopilishida kassa farqi to'g'ri chiqsin
   if (order.posShiftId) {

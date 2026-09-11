@@ -5,8 +5,8 @@ import type { CompanyInfo } from "@/lib/pdf/pdf-utils.ts";
 import type { ActiveCompany } from "@/hooks/use-company.ts";
 
 export type SalesOrderStatus = "draft" | "confirmed" | "shipped" | "delivered" | "returned" | "cancelled";
-/** `balance` — mijoz balansidan (faqat server yozadi: POS va qarz to'lovi). */
-export type PaymentMethod = "cash" | "bank" | "card" | "transfer" | "balance";
+/** `balance` — mijoz balansidan, `cashback` — keshbekdan (faqat server yozadi: POS va qarz to'lovi). */
+export type PaymentMethod = "cash" | "bank" | "card" | "transfer" | "balance" | "cashback";
 
 export type Customer = {
   id: string;
@@ -24,6 +24,8 @@ export type Customer = {
   totalPurchased: string;
   /** Oldindan to'langan pul (hamyon) — qarzdan alohida. */
   balance: string;
+  /** Keshbek hisobi — pul balansidan alohida. */
+  cashbackBalance: string;
   isActive: boolean;
   notes: string | null;
 };
@@ -37,6 +39,7 @@ export type PosCustomerSummary = {
   balance: string;
   totalDebt: string;
   creditLimit: string;
+  cashbackBalance: string;
 };
 
 export type SalesOrderRow = {
@@ -146,6 +149,7 @@ export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   card: "Karta",
   transfer: "O'tkazma",
   balance: "Balansdan",
+  cashback: "Keshbekdan",
 };
 
 /** Faqat ko'rsatish va oldindan hisoblash uchun — aniq summa serverda. */

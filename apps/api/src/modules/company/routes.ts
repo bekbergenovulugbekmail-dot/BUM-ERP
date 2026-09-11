@@ -352,8 +352,10 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
   app.put("/settings/:key", async (req) => {
     const { key } = settingParams.parse(req.params);
     const body = settingBody.parse(req.body);
-    // Tekshiruvsiz JSON yozilmasin — chop etish sozlamalarining o'z endpointi bor
-    if (key.startsWith("print.")) throw badRequest("Chop etish sozlamalari /print-settings orqali saqlanadi");
+    // Tekshiruvsiz JSON yozilmasin — chop etish va keshbek sozlamalarining o'z endpointlari bor
+    if (key.startsWith("print.") || key.startsWith("loyalty.")) {
+      throw badRequest("Bu sozlama o'z bo'limi orqali saqlanadi (chek/etiketka yoki keshbek)");
+    }
     const { user } = authOf(req);
     const setting = await withTransaction(async (tx) => {
       const tenant = await requireTenantForWrite(tx, user);

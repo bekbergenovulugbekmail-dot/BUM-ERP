@@ -29,8 +29,8 @@ import { purchaseAudit } from "./suppliers.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...paymentFields } = getTableColumns(supplierPayments);
 
-/** `balance` — faqat mijoz balansidan to'lov uchun; ta'minotchiga qo'llanmaydi. */
-export type PaymentMethod = Exclude<(typeof supplierPayments.method.enumValues)[number], "balance">;
+/** `balance`, `cashback` — faqat mijoz to'lovi uchun; ta'minotchiga qo'llanmaydi. */
+export type PaymentMethod = Exclude<(typeof supplierPayments.method.enumValues)[number], "balance" | "cashback">;
 
 export type SupplierPaymentInput = {
   supplierId: string;

@@ -10,7 +10,6 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
 import { badRequest, notFound } from "@bum/shared";
-import { accounts } from "../../db/schema/finance.js";
 import { customerBalanceTransactions, customerPayments, customers, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
@@ -24,7 +23,7 @@ import {
   todayIso,
   type PaymentMethod,
 } from "../finance/cash.service.js";
-import { findAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { salesAudit } from "./customers.service.js";
 
 const { companyId: _companyId, ...balanceTxFields } = getTableColumns(customerBalanceTransactions);
@@ -32,21 +31,8 @@ const { companyId: _companyId, ...balanceTxFields } = getTableColumns(customerBa
 export type BalanceTxType = (typeof customerBalanceTransactions.type.enumValues)[number];
 
 /** 2300 "Mijozlar avanslari" — hisob rejasida bo'lmasa (eski kompaniya) shu yerda qo'shiladi. */
-export async function customerAdvanceAccount(tx: Tx, companyId: string) {
-  const existing = await findAccountBySubtype(tx, companyId, "customer_advance", "liability");
-  if (existing) return existing;
-  await tx
-    .insert(accounts)
-    .values({
-      companyId,
-      code: "2300",
-      name: "Mijozlar avanslari (balans)",
-      type: "liability",
-      subtype: "customer_advance",
-      currency: await companyCurrency(tx, companyId),
-    })
-    .onConflictDoNothing();
-  return requireAccountBySubtype(tx, companyId, "customer_advance", "liability", "Mijozlar avanslari");
+export function customerAdvanceAccount(tx: Tx, companyId: string) {
+  return ensureAccountBySubtype(tx, companyId, "customer_advance");
 }
 
 /** POS javoblari va chek uchun mijozning joriy holati. */
@@ -60,6 +46,7 @@ export async function customerSummary(conn: DbOrTx, companyId: string, customerI
       balance: customers.balance,
       totalDebt: customers.totalDebt,
       creditLimit: customers.creditLimit,
+      cashbackBalance: customers.cashbackBalance,
     })
     .from(customers)
     .where(and(eq(customers.id, customerId), eq(customers.companyId, companyId)))

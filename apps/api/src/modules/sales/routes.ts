@@ -18,6 +18,9 @@
  *   POST   /pos/customers                                 pos.use (kassada mijoz qo'shish)
  *   POST   /pos/customers/:customerId/payments            pos.use (balansni to'ldirish / qarzni to'lash)
  *   GET    /customers/:customerId/balance (?limit=)       sales.view (balans tarixi)
+ *   GET    /customers/:customerId/cashback (?limit=)      sales.view (keshbek tarixi)
+ *   GET    /cashback/settings                             sales.view
+ *   PUT    /cashback/settings                             settings.manage
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -41,6 +44,12 @@ import {
   updateOrder,
 } from "./orders.service.js";
 import { listCustomerPayments, recordCustomerPayment } from "./payments.service.js";
+import {
+  cashbackSettingsSchema,
+  getCashbackSettings,
+  listCashbackTransactions,
+  saveCashbackSettings,
+} from "./cashback.service.js";
 import { listBalanceTransactions } from "./customer-balance.service.js";
 import {
   closeShift,
@@ -161,6 +170,7 @@ const posSaleBody = z.strictObject({
   items: z.array(salesItem).min(1).max(500),
   paymentMethod: paymentMethod.default("cash"),
   amountPaid: moneySchema,
+  cashbackAmount: moneySchema.optional(),
   balanceAmount: moneySchema.optional(),
   changeToBalance: z.boolean().optional(),
   notes: nullableText(1000),
@@ -220,6 +230,27 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     const { customerId } = customerParams.parse(req.params);
     const { limit } = balanceQuery.parse(req.query);
     return { transactions: await listBalanceTransactions(db, await readTenant(req, "sales.view"), customerId, limit) };
+  });
+
+  app.get("/customers/:customerId/cashback", async (req) => {
+    const { customerId } = customerParams.parse(req.params);
+    const { limit } = balanceQuery.parse(req.query);
+    return { transactions: await listCashbackTransactions(db, await readTenant(req, "sales.view"), customerId, limit) };
+  });
+
+  // ─── Keshbek sozlamalari ─────────────────────────────────────────────────
+
+  app.get("/cashback/settings", async (req) => {
+    const tenant = await readTenant(req, "sales.view");
+    return { settings: await getCashbackSettings(db, tenant.company.id) };
+  });
+
+  app.put("/cashback/settings", async (req) => {
+    const body = cashbackSettingsSchema.parse(req.body);
+    const settings = await writeInTenant(req, "settings.manage", (tx, tenant) =>
+      saveCashbackSettings(tx, tenant, body, requestMeta(req)),
+    );
+    return { settings };
   });
 
   app.post("/customers", async (req, reply) => {

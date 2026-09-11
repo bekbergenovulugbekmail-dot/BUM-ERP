@@ -4,8 +4,9 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   ShoppingCart, Search, Trash2, Plus, Minus, CreditCard, Banknote,
   Smartphone, X, Power, Package, Calculator, ScanLine,
-  UserPlus, UserRound, Wallet, HandCoins,
+  UserPlus, UserRound, Wallet, HandCoins, Gift,
 } from "lucide-react";
+import type { CashbackSettings } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -49,6 +50,9 @@ type SaleResult = {
   change: string;
   balanceUsed: string;
   changeToBalance: string;
+  cashbackUsed: string;
+  /** Shu chekdan hisoblangan keshbek. */
+  cashbackEarned: string;
   /** Shu chekdan qarzga yozilgan summa. */
   debt: string;
   customer: PosCustomerSummary | null;
@@ -113,17 +117,27 @@ export default function POSPage() {
   const [useBalance, setUseBalance] = useState(false);
   const [balanceInput, setBalanceInput] = useState("");
   const [changeToBalance, setChangeToBalance] = useState(false);
+  const [useCashback, setUseCashback] = useState(false);
+  const [cashbackInput, setCashbackInput] = useState("");
+  const cashbackSettings = useApiQuery<{ settings: CashbackSettings }>(
+    "/api/sales/cashback/settings",
+    undefined,
+    { staleTime: 60_000 },
+  ).data?.settings;
   const customer = useApiQuery<{ customer: Customer }>(
     customerId ? `/api/sales/customers/${customerId}` : null,
   ).data?.customer;
   const customerDebt = customer ? Math.max(0, num(customer.totalDebt)) : 0;
   const customerBalance = customer ? num(customer.balance) : 0;
+  const customerCashback = customer ? num(customer.cashbackBalance) : 0;
 
   const clearCustomer = () => {
     setCustomerId(null);
     setUseBalance(false);
     setBalanceInput("");
     setChangeToBalance(false);
+    setUseCashback(false);
+    setCashbackInput("");
   };
 
   // `warehouse.view` ruxsati bo'lmasa (kassir) qoldiq noma'lum — cheklov serverda tekshiriladi
@@ -142,13 +156,23 @@ export default function POSPage() {
   const subtotal = minorToNumber(amounts.reduce((s, a) => s + a.net, 0n));
   const taxTotal = minorToNumber(amounts.reduce((s, a) => s + a.tax, 0n));
   const total = minorToNumber(totalMinor);
-  // Mijoz balansidan yechiladigan qism — chek summasi va balansdan oshmaydi
+  // Keshbekdan: mijoz keshbeki, sozlamadagi chek ulushi chegarasi va chek summasidan oshmaydi
+  const cashbackEnabled = !!cashbackSettings?.enabled;
+  const cashbackAvailable = customer && cashbackEnabled ? minorOf(customer.cashbackBalance) : 0n;
+  const cashbackLimit = cashbackSettings
+    ? (totalMinor * BigInt(Math.round(cashbackSettings.maxUsagePercent * 100))) / 10_000n
+    : 0n;
+  const cashbackRequested = cashbackInput.trim() !== "" ? minorOf(cashbackInput) : cashbackAvailable;
+  const cashbackMinor = customer && useCashback && cashbackRequested > 0n
+    ? minBigInt(cashbackRequested, cashbackAvailable, cashbackLimit)
+    : 0n;
+  // Mijoz balansidan yechiladigan qism — qolgan chek summasi va balansdan oshmaydi
   const balanceAvailable = customer ? minorOf(customer.balance) : 0n;
   const balanceRequested = balanceInput.trim() !== "" ? minorOf(balanceInput) : balanceAvailable;
   const balanceMinor = customer && useBalance && balanceRequested > 0n
-    ? minBigInt(balanceRequested, balanceAvailable, totalMinor)
+    ? minBigInt(balanceRequested, balanceAvailable, totalMinor - cashbackMinor)
     : 0n;
-  const dueMinor = totalMinor - balanceMinor;
+  const dueMinor = totalMinor - cashbackMinor - balanceMinor;
   const due = minorToNumber(dueMinor);
   // Naqdda bo'sh maydon — aniq summa; karta/bankda to'lov doim to'lanadigan summaga teng
   const paid = payMethod === "cash" && amountPaid.trim() !== "" ? num(amountPaid) : due;
@@ -245,6 +269,7 @@ export default function POSPage() {
         items: cart.map((i) => ({ productId: i.productId, unitId: i.unitId, quantity: i.qty })),
         paymentMethod: payMethod,
         amountPaid: payMethod === "cash" && amountPaid.trim() !== "" ? amountPaid.trim() : fromMinor(dueMinor),
+        ...(cashbackMinor > 0n ? { cashbackAmount: fromMinor(cashbackMinor) } : {}),
         ...(balanceMinor > 0n ? { balanceAmount: fromMinor(balanceMinor) } : {}),
         ...(keepChange ? { changeToBalance: true } : {}),
       });
@@ -256,6 +281,7 @@ export default function POSPage() {
         num(result.change) > 0 ? `Qaytim: ${fmt(num(result.change))} so'm` : null,
         num(result.changeToBalance) > 0 ? `Balansga: ${fmt(num(result.changeToBalance))} so'm` : null,
         num(result.debt) > 0 ? `Qarzga: ${fmt(num(result.debt))} so'm` : null,
+        num(result.cashbackEarned) > 0 ? `Keshbek: +${fmt(num(result.cashbackEarned))} so'm` : null,
       ].filter(Boolean);
       toast.success(["Sotuv amalga oshirildi", ...details].join(" · "));
     } catch (err) {
@@ -484,21 +510,22 @@ export default function POSPage() {
                   <X className="h-3.5 w-3.5" />
                 </Button>
               </div>
-              <div className="grid grid-cols-2 gap-1.5 text-[11px]">
-                <div className={cn(
-                  "rounded-lg px-2 py-1.5",
-                  customerDebt > 0 ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "bg-background text-muted-foreground",
-                )}>
-                  <p>Qarz</p>
-                  <p className="text-sm font-bold">{fmt(customerDebt)} so'm</p>
-                </div>
-                <div className={cn(
-                  "rounded-lg px-2 py-1.5",
-                  customerBalance > 0 ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "bg-background text-muted-foreground",
-                )}>
-                  <p>Balans</p>
-                  <p className="text-sm font-bold">{fmt(customerBalance)} so'm</p>
-                </div>
+              <div className={cn("grid gap-1.5 text-[11px]", cashbackEnabled ? "grid-cols-3" : "grid-cols-2")}>
+                {[
+                  { label: "Qarz", value: customerDebt, tone: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
+                  { label: "Balans", value: customerBalance, tone: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
+                  ...(cashbackEnabled
+                    ? [{ label: "Keshbek", value: customerCashback, tone: "bg-violet-500/10 text-violet-700 dark:text-violet-400" }]
+                    : []),
+                ].map((cell) => (
+                  <div
+                    key={cell.label}
+                    className={cn("rounded-lg px-2 py-1.5 min-w-0", cell.value > 0 ? cell.tone : "bg-background text-muted-foreground")}
+                  >
+                    <p>{cell.label}</p>
+                    <p className="text-[13px] font-bold truncate" title={`${fmt(cell.value)} so'm`}>{fmt(cell.value)}</p>
+                  </div>
+                ))}
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 <Button size="sm" variant="secondary" className="h-7 text-xs" onClick={() => setCustomerPayment("deposit")}>
@@ -587,17 +614,50 @@ export default function POSPage() {
               <span>Jami</span>
               <span className="text-primary">{fmt(total)} so'm</span>
             </div>
+            {cashbackMinor > 0n && (
+              <div className="flex justify-between text-violet-600 dark:text-violet-400">
+                <span>Keshbekdan</span><span>−{fmt(minorToNumber(cashbackMinor))} so'm</span>
+              </div>
+            )}
             {balanceMinor > 0n && (
-              <>
-                <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
-                  <span>Balansdan</span><span>−{fmt(minorToNumber(balanceMinor))} so'm</span>
-                </div>
-                <div className="flex justify-between font-semibold">
-                  <span>To'lanadi</span><span>{fmt(due)} so'm</span>
-                </div>
-              </>
+              <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
+                <span>Balansdan</span><span>−{fmt(minorToNumber(balanceMinor))} so'm</span>
+              </div>
+            )}
+            {cashbackMinor + balanceMinor > 0n && (
+              <div className="flex justify-between font-semibold">
+                <span>To'lanadi</span><span>{fmt(due)} so'm</span>
+              </div>
             )}
           </div>
+
+          {/* Keshbekdan to'lash */}
+          {customer && cashbackAvailable > 0n && cashbackLimit > 0n && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { setUseCashback((v) => !v); setCashbackInput(""); }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border px-2.5 h-9 text-xs font-medium cursor-pointer shrink-0 transition-all",
+                  useCashback
+                    ? "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/40"
+                    : "bg-muted/30 text-muted-foreground border-border hover:bg-accent",
+                )}
+              >
+                <Gift className="h-3.5 w-3.5" /> Keshbekdan
+              </button>
+              {useCashback && (
+                <Input
+                  type="number"
+                  min="0"
+                  className="h-9 text-right"
+                  placeholder={String(minorToNumber(minBigInt(cashbackAvailable, cashbackLimit)))}
+                  value={cashbackInput}
+                  onChange={(e) => setCashbackInput(e.target.value)}
+                />
+              )}
+            </div>
+          )}
 
           {/* Mijoz balansidan to'lash */}
           {customer && balanceAvailable > 0n && totalMinor > 0n && (
@@ -723,6 +783,8 @@ export default function POSPage() {
             setCustomerId(picked.id);
             setUseBalance(false);
             setBalanceInput("");
+            setUseCashback(false);
+            setCashbackInput("");
             setShowCustomerPicker(false);
           }}
         />
@@ -743,6 +805,8 @@ export default function POSPage() {
           balanceUsed={lastReceipt.balanceUsed}
           changeToBalance={lastReceipt.changeToBalance}
           debt={lastReceipt.debt}
+          cashbackUsed={lastReceipt.cashbackUsed}
+          cashbackEarned={lastReceipt.cashbackEarned}
           customer={lastReceipt.customer}
           payMethod={lastReceipt.payMethod}
           cashierName={currentUser?.name ?? undefined}

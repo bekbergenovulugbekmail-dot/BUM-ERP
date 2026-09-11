@@ -44,6 +44,8 @@ export const paymentMethod = pgEnum("payment_method", [
   "transfer",
   /** Faqat mijoz to'lovida: mijoz balansidan (hamyon) — kassaga pul tushmaydi. */
   "balance",
+  /** Faqat mijoz to'lovida: keshbek hisobidan. */
+  "cashback",
 ]);
 
 // ─── suppliers ───────────────────────────────────────────────────────────────

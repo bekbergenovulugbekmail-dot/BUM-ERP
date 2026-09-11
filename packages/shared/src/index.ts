@@ -5,3 +5,4 @@ export * from "./permissions.ts";
 export * from "./errors.ts";
 export * from "./phone.ts";
 export * from "./print-settings.ts";
+export * from "./cashback.ts";

@@ -130,6 +130,9 @@ export default function CustomerPicker({ onSelect, onClose }: Props) {
                       <div className="text-right text-[11px] shrink-0 space-y-0.5">
                         {debt > 0 && <p className="font-semibold text-amber-600 dark:text-amber-400">Qarz {fmt(debt)}</p>}
                         {balance > 0 && <p className="font-semibold text-emerald-600 dark:text-emerald-400">Balans {fmt(balance)}</p>}
+                        {num(c.cashbackBalance) > 0 && (
+                          <p className="font-semibold text-violet-600 dark:text-violet-400">Keshbek {fmt(num(c.cashbackBalance))}</p>
+                        )}
                       </div>
                     </button>
                   );

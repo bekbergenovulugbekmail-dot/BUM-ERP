@@ -22,7 +22,7 @@ import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
 import type { TenantContext } from "../company/tenant.js";
-import { financeAudit, type AccountType } from "./accounts.service.js";
+import { DEFAULT_ACCOUNTS, companyCurrency, financeAudit, type AccountType } from "./accounts.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...entryFields } = getTableColumns(journalEntries);
 const { legacyId: _l2, companyId: _c2, ...lineFields } = getTableColumns(journalLines);
@@ -72,6 +72,22 @@ export async function requireAccountBySubtype(
   const id = await findAccountBySubtype(conn, companyId, subtype, type);
   if (!id) throw badRequest(`Hisoblar rejasida "${label}" hisobi yo'q — moliya sozlamalarini tekshiring`);
   return id;
+}
+
+/**
+ * Keyinroq qo'shilgan standart hisob (2300 avanslar, 2400/5600 keshbek) eski kompaniyada bo'lmasa — shu yerda
+ * ochiladi. Kod band bo'lsa (foydalanuvchi o'zi shu kod bilan hisob ochgan) — aniq xato.
+ */
+export async function ensureAccountBySubtype(tx: Tx, companyId: string, subtype: string) {
+  const definition = DEFAULT_ACCOUNTS.find((account) => account.subtype === subtype);
+  if (!definition) throw new Error(`Standart hisob ta'riflanmagan: ${subtype}`);
+  const existing = await findAccountBySubtype(tx, companyId, subtype, definition.type);
+  if (existing) return existing;
+  await tx
+    .insert(accounts)
+    .values({ ...definition, companyId, currency: await companyCurrency(tx, companyId) })
+    .onConflictDoNothing();
+  return requireAccountBySubtype(tx, companyId, subtype, definition.type, definition.name);
 }
 
 async function applyBalances(

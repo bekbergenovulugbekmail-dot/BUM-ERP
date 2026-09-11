@@ -27,6 +27,7 @@ import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { todayIso, type PaymentMethod } from "../finance/cash.service.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
+import { computeCashback, earnCashback, getCashbackSettings, maxCashbackUsage, redeemCashback } from "./cashback.service.js";
 import { customerSummary, depositToBalance, payFromBalance } from "./customer-balance.service.js";
 import { createCustomer, salesAudit, type CustomerInput } from "./customers.service.js";
 import { dispatchOrder, getOrder, insertSalesItems, prepareSalesItems, type SalesItemInput } from "./orders.service.js";
@@ -188,6 +189,8 @@ export async function completeSale(
     items: SalesItemInput[];
     paymentMethod: PaymentMethod;
     amountPaid: string;
+    /** Mijoz keshbekidan yechiladigan qism — sozlamadagi chek ulushi chegarasida. */
+    cashbackAmount?: string | null;
     /** Mijoz balansidan yechiladigan qism — naqd/karta to'lovidan oldin qo'llanadi. */
     balanceAmount?: string | null;
     /** Naqd qaytim mijozga berilmaydi, kassada qolib mijoz balansiga yoziladi. */
@@ -204,9 +207,15 @@ export async function completeSale(
 
   let customerDiscount = "0";
   let customerBalance = 0n;
+  let customerCashback = 0n;
   if (input.customerId) {
     const [customer] = await tx
-      .select({ discountPercent: customers.discountPercent, isActive: customers.isActive, balance: customers.balance })
+      .select({
+        discountPercent: customers.discountPercent,
+        isActive: customers.isActive,
+        balance: customers.balance,
+        cashbackBalance: customers.cashbackBalance,
+      })
       .from(customers)
       .where(and(eq(customers.id, input.customerId), eq(customers.companyId, companyId)))
       .limit(1);
@@ -214,21 +223,37 @@ export async function completeSale(
     if (!customer.isActive) throw badRequest("Mijoz faol emas");
     customerDiscount = customer.discountPercent;
     customerBalance = toMinor(customer.balance);
+    customerCashback = toMinor(customer.cashbackBalance);
   }
 
   const { items, totals } = await prepareSalesItems(tx, tenant, input.items, customerDiscount);
   const total = toMinor(totals.totalAmount);
+  const cashbackSettings = input.customerId ? await getCashbackSettings(tx, companyId) : null;
+
+  const fromCashback = input.cashbackAmount ? toMinor(input.cashbackAmount) : 0n;
+  if (fromCashback > 0n) {
+    if (!input.customerId || !cashbackSettings) throw badRequest("Keshbekdan foydalanish uchun mijoz tanlanishi kerak");
+    if (!cashbackSettings.enabled) throw badRequest("Keshbek tizimi o'chirilgan");
+    const limit = maxCashbackUsage(cashbackSettings, total);
+    if (fromCashback > limit) {
+      throw badRequest(`Keshbek bilan chekning ${cashbackSettings.maxUsagePercent}% igacha to'lash mumkin (${fromMinor(limit)})`);
+    }
+    if (fromCashback > customerCashback) {
+      throw badRequest(`Mijozning keshbeki yetarli emas (keshbek ${fromMinor(customerCashback)})`);
+    }
+  }
+
   const fromBalance = input.balanceAmount ? toMinor(input.balanceAmount) : 0n;
   if ((fromBalance > 0n || input.changeToBalance) && !input.customerId) {
     throw badRequest("Mijoz balansidan foydalanish uchun mijoz tanlanishi kerak");
   }
-  if (fromBalance > total) throw badRequest("Balansdan to'lov chek summasidan oshmasligi kerak");
+  if (fromCashback + fromBalance > total) throw badRequest("Balans va keshbekdan to'lov chek summasidan oshmasligi kerak");
   if (fromBalance > customerBalance) {
     throw badRequest(`Mijoz balansida yetarli mablag' yo'q (balans ${fromMinor(customerBalance)})`);
   }
 
-  // Balansdan keyin qolgani naqd/karta bilan to'lanadi; yetmagani mijoz qarziga yoziladi
-  const due = total - fromBalance;
+  // Keshbek va balansdan keyin qolgani naqd/karta bilan to'lanadi; yetmagani mijoz qarziga yoziladi
+  const due = total - fromCashback - fromBalance;
   const tendered = toMinor(input.amountPaid);
   if (input.paymentMethod !== "cash" && tendered > due) {
     throw badRequest("Karta yoki bank to'lovi chek summasidan oshmasligi kerak");
@@ -274,12 +299,20 @@ export async function completeSale(
     });
   await insertSalesItems(tx, companyId, order!.id, items);
 
-  await dispatchOrder(tx, tenant, order!, today, paid + fromBalance);
+  await dispatchOrder(tx, tenant, order!, today, paid + fromBalance + fromCashback);
   await tx
     .update(salesOrders)
     .set({ status: total === 0n ? "delivered" : "shipped", updatedAt: new Date() })
     .where(eq(salesOrders.id, order!.id));
 
+  if (fromCashback > 0n) {
+    await redeemCashback(
+      tx,
+      tenant,
+      { customerId: input.customerId!, orderId: order!.id, amount: fromMinor(fromCashback), date: today },
+      meta,
+    );
+  }
   if (fromBalance > 0n) {
     await payFromBalance(
       tx,
@@ -317,6 +350,20 @@ export async function completeSale(
     );
     changeKept = change;
   }
+  // Keshbek: sozlamaga ko'ra butun chekka yoki faqat pul (naqd/karta/balans) bilan to'langan qismiga
+  let cashbackEarned = 0n;
+  if (input.customerId && cashbackSettings?.enabled) {
+    const base = cashbackSettings.accrualBase === "total" ? total : paid + fromBalance;
+    cashbackEarned = await computeCashback(tx, companyId, cashbackSettings, items, total, base);
+    await earnCashback(tx, tenant, {
+      customerId: input.customerId,
+      orderId: order!.id,
+      orderNumber: number,
+      amount: cashbackEarned,
+      date: today,
+    });
+  }
+
   const cashIn = input.paymentMethod === "cash" ? paid + changeKept : 0n;
 
   await tx
@@ -344,6 +391,8 @@ export async function completeSale(
       balanceUsed: fromMinor(fromBalance),
       changeToBalance: fromMinor(changeKept),
       debt: fromMinor(debt),
+      cashbackUsed: fromMinor(fromCashback),
+      cashbackEarned: fromMinor(cashbackEarned),
     },
   });
   return {
@@ -355,6 +404,8 @@ export async function completeSale(
     changeToBalance: fromMinor(changeKept),
     /** Shu chekdan mijoz qarziga yozilgan summa. */
     debt: fromMinor(debt),
+    cashbackUsed: fromMinor(fromCashback),
+    cashbackEarned: fromMinor(cashbackEarned),
     customer: input.customerId ? await customerSummary(tx, companyId, input.customerId) : null,
   };
 }

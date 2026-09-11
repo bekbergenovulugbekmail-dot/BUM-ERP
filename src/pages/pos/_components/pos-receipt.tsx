@@ -26,6 +26,9 @@ type Props = {
   changeToBalance?: string;
   /** Shu chekdan qarzga yozilgan summa. */
   debt?: string;
+  /** Keshbek bilan to'langan summa va shu chekdan hisoblangan keshbek. */
+  cashbackUsed?: string;
+  cashbackEarned?: string;
   /** Sotuvdan keyingi mijoz holati (umumiy qarz va balans). */
   customer?: PosCustomerSummary | null;
   onClose: () => void;
@@ -33,7 +36,8 @@ type Props = {
 };
 
 export default function POSReceipt({
-  order, paid, change, payMethod, balanceUsed, changeToBalance, debt, customer, onClose, cashierName,
+  order, paid, change, payMethod, balanceUsed, changeToBalance, debt, cashbackUsed, cashbackEarned, customer,
+  onClose, cashierName,
 }: Props) {
   const company = useActiveCompany().data?.company;
   const total = num(order.totalAmount);
@@ -63,6 +67,7 @@ export default function POSReceipt({
     discountAmount: num(order.discountAmount),
     totalAmount: total,
     payments: [
+      { label: "Keshbekdan", amount: num(cashbackUsed) },
       { label: "Balansdan", amount: num(balanceUsed) },
       // Mijoz bergan summa: chekka yozilgan to'lov + qaytim (balansga o'tgani ham)
       { label: PAYMENT_LABELS[payMethod] ?? payMethod, amount: num(paid) + changeAmount + num(changeToBalance) },
@@ -73,6 +78,7 @@ export default function POSReceipt({
     customer: customer
       ? { name: customer.name, phone: customer.phone, totalDebt: num(customer.totalDebt), balance: num(customer.balance) }
       : null,
+    cashback: customer ? { earned: num(cashbackEarned), balance: num(customer.cashbackBalance) } : null,
   });
   const handlePrint = () => printHtml(buildReceiptHtml(receiptDocument(), template));
 
@@ -161,6 +167,12 @@ export default function POSReceipt({
             <span>To'lov usuli</span>
             <span>{PAYMENT_LABELS[payMethod] ?? payMethod}</span>
           </div>
+          {num(cashbackUsed) > 0 && (
+            <div className="flex justify-between text-muted-foreground">
+              <span>Keshbekdan to'landi</span>
+              <span>{fmt(num(cashbackUsed))} so'm</span>
+            </div>
+          )}
           {num(balanceUsed) > 0 && (
             <div className="flex justify-between text-muted-foreground">
               <span>Balansdan to'landi</span>
@@ -199,6 +211,12 @@ export default function POSReceipt({
                 <span>Balans</span>
                 <span>{fmt(num(customer.balance))} so'm</span>
               </div>
+              {(num(cashbackEarned) > 0 || num(customer.cashbackBalance) > 0) && (
+                <div className="flex justify-between text-violet-600 dark:text-violet-400">
+                  <span>Keshbek{num(cashbackEarned) > 0 ? ` (+${fmt(num(cashbackEarned))})` : ""}</span>
+                  <span>{fmt(num(customer.cashbackBalance))} so'm</span>
+                </div>
+              )}
             </div>
           )}
         </div>
