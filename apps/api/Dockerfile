@@ -31,4 +31,7 @@ COPY apps/api/src/db/migrations apps/api/src/db/migrations
 WORKDIR /app/apps/api
 USER node
 EXPOSE 3000
-CMD ["node", "--disable-warning=ExperimentalWarning", "dist/server.js"]
+# Har ishga tushishda: migratsiyalar (xato bo'lsa server ishga tushmaydi) → bootstrap admin seed
+# (idempotent; BOOTSTRAP_ADMIN_* bo'lmasa o'tkazib yuboriladi) → server.
+# Bir nechta nusxa (replica) ishlatilsa migratsiyani alohida pre-deploy buyrug'iga o'tkazing.
+CMD ["sh", "-c", "node --disable-warning=ExperimentalWarning dist/db/migrate.js && { [ -z \"$BOOTSTRAP_ADMIN_PHONE\" ] || node --disable-warning=ExperimentalWarning dist/cli/seed-bootstrap-admin.js; } && exec node --disable-warning=ExperimentalWarning dist/server.js"]
