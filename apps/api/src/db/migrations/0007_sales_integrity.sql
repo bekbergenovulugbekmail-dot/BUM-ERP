@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "cp_company_reference_key" ON "customer_payments" USING btree ("company_id","reference") WHERE "customer_payments"."reference" IS NOT NULL;

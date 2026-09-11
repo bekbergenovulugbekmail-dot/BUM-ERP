@@ -62,6 +62,30 @@ export function ledgerAccountFor(conn: DbOrTx, companyId: string, type: CashAcco
   return requireAccountBySubtype(conn, companyId, type, "asset", type === "cash" ? "Naqd kassa" : "Bank hisobi");
 }
 
+export type PaymentMethod = "cash" | "bank" | "card" | "transfer";
+
+/**
+ * To'lov usuli → kassa: aniq tanlangan hisob ustun; naqd — asosiy kassa (null);
+ * karta, bank, o'tkazma — birinchi faol bank hisobi (karta tushumi bankka tushadi).
+ */
+export async function resolvePaymentAccount(
+  tx: Tx,
+  companyId: string,
+  method: PaymentMethod,
+  cashAccountId?: string | null,
+): Promise<string | null> {
+  if (cashAccountId) return cashAccountId;
+  if (method === "cash") return null;
+  const [bank] = await tx
+    .select({ id: cashAccounts.id })
+    .from(cashAccounts)
+    .where(and(eq(cashAccounts.companyId, companyId), eq(cashAccounts.type, "bank"), eq(cashAccounts.isActive, true)))
+    .orderBy(desc(cashAccounts.isDefault), asc(cashAccounts.name))
+    .limit(1);
+  if (!bank) throw badRequest("Faol bank hisobi yo'q");
+  return bank.id;
+}
+
 export type CashMove = {
   /** null — kompaniyaning asosiy kassasi. */
   cashAccountId?: string | null;

@@ -21,6 +21,7 @@ import { platformRoutes } from "./modules/platform/routes.js";
 import { publicRoutes } from "./modules/public/routes.js";
 import { purchaseRoutes } from "./modules/purchase/routes.js";
 import { registrationRoutes } from "./modules/registration/routes.js";
+import { salesRoutes } from "./modules/sales/routes.js";
 
 export async function buildServer() {
   const app = Fastify({
@@ -77,6 +78,7 @@ export async function buildServer() {
   await app.register(inventoryRoutes, { prefix: "/api/inventory" });
   await app.register(financeRoutes, { prefix: "/api/finance" });
   await app.register(purchaseRoutes, { prefix: "/api/purchase" });
+  await app.register(salesRoutes, { prefix: "/api/sales" });
 
   return app;
 }

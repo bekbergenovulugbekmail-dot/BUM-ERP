@@ -6,7 +6,7 @@
  *
  * Convex'dan farqlar:
  *  - usul "bank" bo'lsa ham pul asosiy (naqd) kassadan yechilar, jurnal esa bankni
- *    kreditlardi — endi bank usulida bank hisobidan, jurnal haqiqiy hisob turiga qarab
+ *    kreditlardi — endi karta/bank/o'tkazmada bank hisobidan, jurnal haqiqiy hisob turiga qarab
  *  - ortiqcha to'lov mumkin edi (buyurtma summasidan ham, qarzdan ham)
  *  - buyurtma boshqa ta'minotchiniki ekani tekshirilmasdi; qoralama/bekor qilingan buyurtmaga ham to'lanardi
  *  - takroriy `reference` boshqa ta'minotchining to'lovini qaytarardi — endi ta'minotchi ichida, bazada unique
@@ -16,7 +16,6 @@
  */
 import { and, desc, eq, getTableColumns, lt, or, sql } from "drizzle-orm";
 import { badRequest, notFound } from "@bum/shared";
-import { cashAccounts } from "../../db/schema/finance.js";
 import { purchaseOrders, supplierPayments, suppliers } from "../../db/schema/purchase.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
@@ -24,7 +23,7 @@ import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
-import { ledgerAccountFor, recordCashTransaction, todayIso } from "../finance/cash.service.js";
+import { ledgerAccountFor, recordCashTransaction, resolvePaymentAccount, todayIso } from "../finance/cash.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { purchaseAudit } from "./suppliers.service.js";
 
@@ -42,17 +41,6 @@ export type SupplierPaymentInput = {
   reference?: string | null;
   notes?: string | null;
 };
-
-async function firstBankAccount(tx: Tx, companyId: string) {
-  const [bank] = await tx
-    .select({ id: cashAccounts.id })
-    .from(cashAccounts)
-    .where(and(eq(cashAccounts.companyId, companyId), eq(cashAccounts.type, "bank"), eq(cashAccounts.isActive, true)))
-    .orderBy(desc(cashAccounts.isDefault), cashAccounts.name)
-    .limit(1);
-  if (!bank) throw badRequest("Faol bank hisobi yo'q");
-  return bank.id;
-}
 
 export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input: SupplierPaymentInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
@@ -111,9 +99,7 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
   }
 
   const paymentDate = input.paymentDate ?? todayIso();
-  const cashAccountId =
-    input.cashAccountId ??
-    (input.method === "bank" || input.method === "transfer" ? await firstBankAccount(tx, companyId) : null);
+  const cashAccountId = await resolvePaymentAccount(tx, companyId, input.method, input.cashAccountId);
 
   const [payment] = await tx
     .insert(supplierPayments)

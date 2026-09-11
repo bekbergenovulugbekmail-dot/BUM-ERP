@@ -226,6 +226,10 @@ export const customerPayments = pgTable(
     index("cp_company_customer_idx").on(t.companyId, t.customerId),
     index("cp_company_date_idx").on(t.companyId, t.paymentDate),
     index("cp_order_idx").on(t.orderId),
+    /** Takroriy yuborish ikkinchi to'lov yaratmasin (Convex ham kompaniya bo'yicha tekshirardi). */
+    uniqueIndex("cp_company_reference_key")
+      .on(t.companyId, t.reference)
+      .where(sql`${t.reference} IS NOT NULL`),
     check("cp_amount_positive", sql`${t.amount} > 0`),
   ],
 );

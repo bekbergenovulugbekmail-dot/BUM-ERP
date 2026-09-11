@@ -34,6 +34,7 @@ import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
+import { computeLine } from "../../shared/line-amounts.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
 import { unitFactorToBase } from "../catalog/conversions.js";
 import type { TenantContext } from "../company/tenant.js";
@@ -71,17 +72,6 @@ export type OrderInput = {
   items: OrderItemInput[];
 };
 
-/** Qator summasi butun sonlarda: miqdor × narx (8 xona) → chegirma → soliq → tiyinga yaxlitlash. */
-export function computeLine(item: { orderedQty: string; unitPrice: string; taxRate?: string; discountPercent?: string }) {
-  const gross = toMinor(item.orderedQty, 4) * toMinor(item.unitPrice, 4);
-  const discount = rescale(gross * toMinor(item.discountPercent ?? "0", 2), 12, 8);
-  const net = gross - discount;
-  const tax = rescale(net * toMinor(item.taxRate ?? "0", 2), 12, 8);
-  const netMoney = rescale(net, 8, 2);
-  const taxMoney = rescale(tax, 8, 2);
-  return { net: netMoney, tax: taxMoney, discount: rescale(discount, 8, 2), lineTotal: netMoney + taxMoney };
-}
-
 async function prepareItems(tx: Tx, companyId: string, items: OrderItemInput[]) {
   if (items.length === 0) throw badRequest("Buyurtmada kamida bitta mahsulot bo'lishi kerak");
 
@@ -108,7 +98,8 @@ async function prepareItems(tx: Tx, companyId: string, items: OrderItemInput[]) 
     if (toMinor(item.orderedQty, 4) <= 0n) throw badRequest(`${product.name}: miqdor musbat bo'lishi kerak`);
     await unitFactorToBase(tx, companyId, product, item.unitId);
 
-    const amounts = computeLine(item);
+    // Ta'minotchi narxi soliqsiz — soliq ustiga qo'shiladi
+    const amounts = computeLine({ ...item, quantity: item.orderedQty });
     subtotal += amounts.net;
     taxAmount += amounts.tax;
     discountAmount += amounts.discount;
