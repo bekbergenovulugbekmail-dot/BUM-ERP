@@ -108,6 +108,14 @@ describe("Ta'minotchilar", () => {
     expect((await purchase("POST", "/suppliers", { name: "X", code: "OLMA" })).statusCode).toBe(409);
     expect((await purchase("POST", "/suppliers", { name: "X", code: "USD-1", currency: "USD" })).statusCode).toBe(400);
 
+    // Kod berilmasa — avtomatik S-0001, S-0002 (xarid oynasidan tezkor qo'shish)
+    const auto1 = await purchase("POST", "/suppliers", { name: "Tezkor 1" });
+    const auto2 = await purchase("POST", "/suppliers", { name: "Tezkor 2", phone: "+998907654321" });
+    expect(auto1.statusCode).toBe(201);
+    expect([auto1.json().supplier.code, auto2.json().supplier.code]).toEqual(["S-0001", "S-0002"]);
+    await purchase("PATCH", `/suppliers/${auto1.json().supplier.id}`, { isActive: false });
+    await purchase("PATCH", `/suppliers/${auto2.json().supplier.id}`, { isActive: false });
+
     const found = (await purchase("GET", "/suppliers?search=olma")).json().suppliers;
     expect(found.map((s: { id: string }) => s.id)).toEqual([id]);
     expect((await purchase("PATCH", `/suppliers/${id}`, { name: "Olma savdo MChJ" })).json().supplier.name).toBe("Olma savdo MChJ");

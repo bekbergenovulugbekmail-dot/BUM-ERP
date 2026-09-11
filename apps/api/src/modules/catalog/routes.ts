@@ -111,7 +111,8 @@ const brandPatch = brandBody.partial().extend({ isActive: z.boolean().optional()
 // Standart qiymatlar sxemada EMAS — PATCH da berilmagan maydon tiklanib ketmasligi uchun
 const productBody = z.strictObject({
   name: z.string().trim().min(1).max(300),
-  sku: z.string().trim().min(1).max(64),
+  /** Berilmasa — avtomatik raqam (1001 dan). */
+  sku: z.string().trim().min(1).max(64).optional(),
   barcode: nullableText(64),
   qrCode: nullableText(128),
   description: nullableText(5000),

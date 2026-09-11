@@ -60,6 +60,26 @@ describe("Mahsulot yaratish", () => {
     expect(await db.select().from(auditLogs).where(eq(auditLogs.action, "PRODUCT_CREATED"))).toHaveLength(1);
   });
 
+  it("SKU berilmasa — kompaniya bo'yicha 1001 dan boshlab avtomatik raqam", async () => {
+    const skuOf = async (company: Company, body: Record<string, unknown>) => {
+      const res = await create(company, body);
+      expect(res.statusCode).toBe(201);
+      return res.json().product.sku as string;
+    };
+    expect(await skuOf(companyA, { name: "Birinchi" })).toBe("1001");
+    expect(await skuOf(companyA, { name: "Ikkinchi" })).toBe("1002");
+    // Harfli SKU raqamlashga ta'sir qilmaydi, qo'lda kiritilgan katta raqamdan keyin davom etadi
+    expect(await skuOf(companyA, { name: "Harfli", sku: "ABC-99999" })).toBe("ABC-99999");
+    expect(await skuOf(companyA, { name: "Qo'lda", sku: "2500" })).toBe("2500");
+    expect(await skuOf(companyA, { name: "Keyingi" })).toBe("2501");
+    // Boshqa kompaniyada o'z hisobi
+    expect(await skuOf(companyB, { name: "B birinchi" })).toBe("1001");
+    // Parallel yaratish takrorlanmaydi
+    const parallel = await Promise.all([1, 2, 3].map((i) => create(companyB, { name: `P${i}` })));
+    expect(parallel.map((r) => r.statusCode)).toEqual([201, 201, 201]);
+    expect(parallel.map((r) => r.json().product.sku).sort()).toEqual(["1002", "1003", "1004"]);
+  });
+
   it("SKU kompaniya ichida noyob; begona kategoriya, faol bo'lmagan birlik, FIFO va noto'g'ri narx rad etiladi", async () => {
     expect((await create(companyA, { name: "A", sku: "SKU-1" })).statusCode).toBe(201);
     expect((await create(companyA, { name: "A2", sku: "SKU-1" })).statusCode).toBe(409);

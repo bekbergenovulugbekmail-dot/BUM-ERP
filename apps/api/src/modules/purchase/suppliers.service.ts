@@ -16,6 +16,7 @@ import { purchaseOrders, suppliers } from "../../db/schema/purchase.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { toMinor } from "../../shared/decimal.js";
+import { nextDocumentNumber } from "../../shared/numbering.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 
@@ -35,7 +36,8 @@ export function purchaseAudit(
 
 export type SupplierInput = {
   name: string;
-  code: string;
+  /** Berilmasa — avtomatik (S-0001). */
+  code?: string;
   contactPerson?: string | null;
   phone?: string | null;
   email?: string | null;
@@ -97,10 +99,20 @@ export async function getSupplier(conn: DbOrTx, tenant: TenantContext, supplierI
 export async function createSupplier(tx: Tx, tenant: TenantContext, input: SupplierInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
   const currency = await resolveCurrency(tx, companyId, input.currency);
+  const code =
+    input.code ??
+    (await nextDocumentNumber(tx, {
+      table: suppliers,
+      column: suppliers.code,
+      companyColumn: suppliers.companyId,
+      companyId,
+      prefix: "S-",
+      width: 4,
+    }));
 
   const [supplier] = await tx
     .insert(suppliers)
-    .values({ ...input, currency, companyId })
+    .values({ ...input, code, currency, companyId })
     .returning(supplierFields);
 
   await purchaseAudit(tx, tenant, meta, {

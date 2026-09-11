@@ -14,7 +14,7 @@
  *  - CSV import serverda: qatorma-qator xatolar, noma'lum o'lchov birligi rad
  *    etiladi (Convex frontendi jimgina birinchi birlikni qo'yardi)
  */
-import { and, asc, eq, getTableColumns, gt, gte, ilike, inArray, lte, or } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, gt, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { badRequest, notFound } from "@bum/shared";
 import { batches, brands, categories, products, units } from "../../db/schema/catalog.js";
@@ -183,7 +183,8 @@ export type CostingMethod = "average" | "fifo" | "fefo" | "manual";
 
 export type ProductInput = {
   name: string;
-  sku: string;
+  /** Berilmasa — `nextNumericSku`. */
+  sku?: string;
   barcode?: string | null;
   qrCode?: string | null;
   description?: string | null;
@@ -214,6 +215,22 @@ export type ProductInput = {
   weight?: string | null;
   weightUnit?: string | null;
 };
+
+const FIRST_AUTO_SKU = 1001n;
+
+/**
+ * Avtomatik SKU: kompaniyadagi eng katta raqamli SKU + 1, lekin 1001 dan kam emas.
+ * Parallel yaratishda takrorlanmasligi uchun kompaniya bo'yicha advisory lock (unique indeks — ikkinchi qatlam).
+ */
+export async function nextNumericSku(tx: Tx, companyId: string): Promise<bigint> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`${companyId}:product-sku`}))`);
+  const [row] = await tx
+    .select({ last: sql<string | null>`max(${products.sku}::bigint)` })
+    .from(products)
+    .where(and(eq(products.companyId, companyId), sql`${products.sku} ~ '^[0-9]{1,18}$'`));
+  const next = BigInt(row?.last ?? "0") + 1n;
+  return next < FIRST_AUTO_SKU ? FIRST_AUTO_SKU : next;
+}
 
 function assertCostingMethod(method: CostingMethod | undefined): void {
   if (method !== undefined && method !== "average") {
@@ -268,7 +285,12 @@ export async function createProduct(tx: Tx, tenant: TenantContext, input: Produc
 
   const [product] = await tx
     .insert(products)
-    .values({ ...input, costingMethod: "average", companyId: tenant.company.id })
+    .values({
+      ...input,
+      sku: input.sku ?? (await nextNumericSku(tx, tenant.company.id)).toString(),
+      costingMethod: "average",
+      companyId: tenant.company.id,
+    })
     .returning(productFields);
 
   await audit(tx, tenant, meta, {
@@ -454,14 +476,21 @@ export async function importProducts(tx: Tx, tenant: TenantContext, rows: Import
 
   const errors: ImportError[] = [];
   const values: (typeof products.$inferInsert)[] = [];
+  let autoSku = await nextNumericSku(tx, companyId);
 
   rows.forEach((row, index) => {
     const line = index + 1;
     const name = row.name?.trim() ?? "";
-    const sku = row.sku?.trim() ?? "";
+    let sku = row.sku?.trim() ?? "";
     const fail = (message: string) => errors.push({ row: line, sku: sku || null, message });
 
-    if (!name || !sku) return fail("Nomi va SKU majburiy");
+    if (!name) return fail("Nomi majburiy");
+    if (!sku) {
+      // SKU berilmasa — avtomatik raqam (1001 dan), fayldagi va bazadagilar bilan to'qnashmasdan
+      while (taken.has(autoSku.toString())) autoSku += 1n;
+      sku = autoSku.toString();
+      autoSku += 1n;
+    }
     if (name.length > 300 || sku.length > 64) return fail("Nomi yoki SKU juda uzun");
     if (taken.has(sku)) return fail("Bu SKU allaqachon mavjud");
 

@@ -7,7 +7,7 @@ import {
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
@@ -17,6 +17,8 @@ import {
   num, todayLocal,
   type ProductOption, type Supplier, type WarehouseOption,
 } from "../_lib/types.ts";
+import QuickSupplierDialog from "./quick-supplier-dialog.tsx";
+import QuickProductDialog from "./quick-product-dialog.tsx";
 
 type LineItem = {
   productId: string;
@@ -35,6 +37,16 @@ type Props = {
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
 const emptyLine = (): LineItem => ({ productId: "", unitId: "", orderedQty: 1, unitPrice: 0, taxRate: 12, discountPercent: 0 });
+
+/** Ro'yxat oxiridagi "yangi qo'shish" bandlari — tanlanganda qiymat o'zgarmaydi, oyna ochiladi. */
+const NEW_SUPPLIER = "__new_supplier__";
+const NEW_PRODUCT = "__new_product__";
+
+/** Hozirgina yaratilgan yozuv ro'yxat qayta yuklanguncha ham ko'rinib tursin. */
+function mergeById<T extends { id: string }>(list: T[] | undefined, extra: T[]): T[] {
+  const base = list ?? [];
+  return [...base, ...extra.filter((e) => !base.some((b) => b.id === e.id))];
+}
 
 export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const { can } = usePermissions();
@@ -55,6 +67,15 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const [lines, setLines] = useState<LineItem[]>([emptyLine()]);
   const [loading, setLoading] = useState(false);
 
+  // Shu oynaning o'zidan yetkazuvchi va mahsulot qo'shish
+  const [supplierDialogOpen, setSupplierDialogOpen] = useState(false);
+  const [productDialogLine, setProductDialogLine] = useState<number | null>(null);
+  const [extraSuppliers, setExtraSuppliers] = useState<Supplier[]>([]);
+  const [extraProducts, setExtraProducts] = useState<ProductOption[]>([]);
+  const supplierOptions = mergeById(suppliers, extraSuppliers);
+  const productOptions = mergeById(products, extraProducts);
+  const canCreateProduct = can("products.create");
+
   // Auto-set default warehouse
   if (!warehouseId && warehouses?.length) {
     const def = warehouses.find((w) => w.isDefault) ?? warehouses[0];
@@ -72,7 +93,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
       line[field] = value;
       // Auto-fill unit and price when product selected
       if (field === "productId" && typeof value === "string") {
-        const prod = products?.find((p) => p.id === value);
+        const prod = productOptions.find((p) => p.id === value);
         if (prod) {
           line.unitId = prod.baseUnitId;
           line.unitPrice = num(prod.purchasePrice);
@@ -151,12 +172,21 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div>
               <Label>Yetkazuvchi *</Label>
-              <Select value={supplierId} onValueChange={setSupplierId}>
+              <Select
+                value={supplierId}
+                onValueChange={(v) => (v === NEW_SUPPLIER ? setSupplierDialogOpen(true) : setSupplierId(v))}
+              >
                 <SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger>
                 <SelectContent>
-                  {suppliers?.map((s) => (
+                  {supplierOptions.map((s) => (
                     <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                   ))}
+                  {supplierOptions.length > 0 && <SelectSeparator />}
+                  <SelectItem value={NEW_SUPPLIER}>
+                    <span className="flex items-center gap-1.5 font-medium text-primary">
+                      <Plus className="h-3.5 w-3.5" /> Yangi yetkazuvchi qo'shish
+                    </span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -221,15 +251,28 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                     return (
                       <tr key={i}>
                         <td className="px-2 py-2">
-                          <Select value={line.productId} onValueChange={(v) => updateLine(i, "productId", v)}>
+                          <Select
+                            value={line.productId}
+                            onValueChange={(v) => (v === NEW_PRODUCT ? setProductDialogLine(i) : updateLine(i, "productId", v))}
+                          >
                             <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Mahsulot" /></SelectTrigger>
                             <SelectContent>
-                              {products?.map((p) => (
+                              {productOptions.map((p) => (
                                 <SelectItem key={p.id} value={p.id}>
                                   <span className="font-mono text-[11px] mr-1 text-muted-foreground">{p.sku}</span>
                                   {p.name}
                                 </SelectItem>
                               ))}
+                              {canCreateProduct && (
+                                <>
+                                  {productOptions.length > 0 && <SelectSeparator />}
+                                  <SelectItem value={NEW_PRODUCT}>
+                                    <span className="flex items-center gap-1.5 font-medium text-primary">
+                                      <Plus className="h-3.5 w-3.5" /> Yangi mahsulot qo'shish
+                                    </span>
+                                  </SelectItem>
+                                </>
+                              )}
                             </SelectContent>
                           </Select>
                         </td>
@@ -308,6 +351,41 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
           )}
         </DialogFooter>
       </DialogContent>
+
+      {supplierDialogOpen && (
+        <QuickSupplierDialog
+          onClose={() => setSupplierDialogOpen(false)}
+          onCreated={(supplier) => {
+            setExtraSuppliers((prev) => [...prev, supplier]);
+            setSupplierId(supplier.id);
+            setSupplierDialogOpen(false);
+          }}
+        />
+      )}
+
+      {productDialogLine !== null && (
+        <QuickProductDialog
+          onClose={() => setProductDialogLine(null)}
+          onCreated={(product) => {
+            const lineIndex = productDialogLine;
+            setExtraProducts((prev) => [...prev, product]);
+            setLines((prev) =>
+              prev.map((line, idx) =>
+                idx === lineIndex
+                  ? {
+                      ...line,
+                      productId: product.id,
+                      unitId: product.baseUnitId,
+                      unitPrice: num(product.purchasePrice),
+                      taxRate: num(product.taxRate),
+                    }
+                  : line,
+              ),
+            );
+            setProductDialogLine(null);
+          }}
+        />
+      )}
     </Dialog>
   );
 }

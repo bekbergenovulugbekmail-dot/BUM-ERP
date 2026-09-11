@@ -50,7 +50,8 @@ const positiveQty = decimalSchema({ scale: 4, positive: true });
 
 const supplierBody = z.strictObject({
   name: z.string().trim().min(1).max(200),
-  code: z.string().trim().min(1).max(32),
+  /** Berilmasa — avtomatik (S-0001). */
+  code: z.string().trim().min(1).max(32).optional(),
   contactPerson: nullableText(200),
   phone: nullableText(20),
   email: nullableText(255),

@@ -29,7 +29,8 @@ import type { Brand, Category, ProductDetail, Unit } from "../_lib/types.ts";
 
 const schema = z.object({
   name: z.string().min(1, "Nomi kiritilishi shart"),
-  sku: z.string().min(1, "SKU kiritilishi shart"),
+  /** Bo'sh qoldirilsa serverda avtomatik raqam (1001, 1002, …). */
+  sku: z.string(),
   barcode: z.string().optional(),
   description: z.string().optional(),
   categoryId: z.string().optional(),
@@ -83,7 +84,7 @@ const optionalNumber = (value: string | null) => (value === null ? undefined : N
 function toPayload(values: FormValues) {
   return {
     name: values.name.trim(),
-    sku: values.sku.trim(),
+    ...(values.sku.trim() ? { sku: values.sku.trim() } : {}),
     barcode: textOrNull(values.barcode),
     description: textOrNull(values.description),
     categoryId: idOrNull(values.categoryId),
@@ -270,8 +271,8 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
 
                   <FormField control={form.control} name="sku" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>SKU *</FormLabel>
-                      <FormControl><Input placeholder="CC-1L-001" {...field} /></FormControl>
+                      <FormLabel>SKU</FormLabel>
+                      <FormControl><Input placeholder={editId ? "" : "Avtomatik (1001…)"} {...field} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
