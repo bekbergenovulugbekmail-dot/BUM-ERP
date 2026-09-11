@@ -22,10 +22,12 @@
  *   GET    /audit-logs                  kompaniya audit jurnali           (audit.view)
  *   GET    /settings                    sozlamalar (?group=)              (settings.view)
  *   PUT    /settings/:key               sozlamani saqlash                 (settings.manage; modules → modules.manage)
+ *   GET    /print-settings              chek shabloni (standart bilan)    (a'zo — kassir chek chiqaradi)
+ *   PUT    /print-settings/receipt      chek shablonini saqlash           (settings.manage)
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { isPermission, type Permission } from "@bum/shared";
+import { badRequest, isPermission, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
@@ -54,6 +56,7 @@ import {
   listRoles,
   updateRole,
 } from "./role.service.js";
+import { getPrintSettings, receiptTemplateSchema, saveReceiptTemplate } from "./print-settings.service.js";
 import { listCompanySettings, upsertCompanySetting } from "./settings.service.js";
 import {
   effectivePermissions,
@@ -342,6 +345,8 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
   app.put("/settings/:key", async (req) => {
     const { key } = settingParams.parse(req.params);
     const body = settingBody.parse(req.body);
+    // Tekshiruvsiz JSON yozilmasin — chop etish sozlamalarining o'z endpointi bor
+    if (key.startsWith("print.")) throw badRequest("Chop etish sozlamalari /print-settings orqali saqlanadi");
     const { user } = authOf(req);
     const setting = await withTransaction(async (tx) => {
       const tenant = await requireTenantForWrite(tx, user);
@@ -349,5 +354,23 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
       return upsertCompanySetting(tx, tenant, { key, ...body }, requestMeta(req));
     });
     return { setting };
+  });
+
+  // ─── Chop etish sozlamalari ──────────────────────────────────────────────
+
+  app.get("/print-settings", async (req) => {
+    const tenant = await requireTenant(db, authOf(req).user);
+    return getPrintSettings(db, tenant);
+  });
+
+  app.put("/print-settings/receipt", async (req) => {
+    const template = receiptTemplateSchema.parse(req.body);
+    const { user } = authOf(req);
+    const receipt = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, user);
+      await requirePermission(tx, tenant, "settings.manage");
+      return saveReceiptTemplate(tx, tenant, template, requestMeta(req));
+    });
+    return { receipt };
   });
 }

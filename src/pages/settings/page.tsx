@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { Settings, Shield, Users, Building2, ListChecks, Puzzle, Bell, MapPin, Lock } from "lucide-react";
+import { Settings, Shield, Users, Building2, ListChecks, Puzzle, Bell, MapPin, Lock, ReceiptText } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import { useTranslation } from "react-i18next";
 import CompanySection from "./_components/company-section.tsx";
@@ -11,17 +11,19 @@ import ModulesSection from "./_components/modules-section.tsx";
 import NotificationsSection from "./_components/notifications-section.tsx";
 import BranchesSection from "./_components/branches-section.tsx";
 import SecuritySection from "./_components/security-section.tsx";
+import ReceiptSection from "./_components/receipt-section.tsx";
 
 // Takliflar (invitations) bo'limi yo'q — yakuniy qaror: xodim loginini kompaniya egasi o'zi ochadi
 export default function SettingsPage() {
   const { t } = useTranslation("modules");
   const [tab, setTab] = useState<
-    "company" | "branches" | "modules" | "roles" | "users" | "audit" | "notifications" | "security"
+    "company" | "branches" | "receipt" | "modules" | "roles" | "users" | "audit" | "notifications" | "security"
   >("company");
 
   const TABS = [
     { key: "company"       as const, label: t("settings.tab.company"),  icon: Building2 },
     { key: "branches"      as const, label: "Filiallar",                 icon: MapPin },
+    { key: "receipt"       as const, label: "Chek",                      icon: ReceiptText },
     { key: "modules"       as const, label: t("settings.tab.modules"),   icon: Puzzle },
     { key: "roles"         as const, label: t("settings.tab.roles"),     icon: Shield },
     { key: "users"         as const, label: t("settings.tab.users"),     icon: Users },
@@ -65,6 +67,7 @@ export default function SettingsPage() {
       <motion.div key={tab} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }}>
         {tab === "company"       && <CompanySection />}
         {tab === "branches"      && <BranchesSection />}
+        {tab === "receipt"       && <ReceiptSection />}
         {tab === "modules"       && <ModulesSection />}
         {tab === "roles"         && <RolesSection />}
         {tab === "users"         && <UsersSection />}

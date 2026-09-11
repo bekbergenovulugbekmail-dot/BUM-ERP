@@ -1,9 +1,12 @@
+import { useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { CheckCircle, Printer, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
 import { generateReceiptPDF } from "@/lib/pdf/receipt-pdf.ts";
 import { useActiveCompany } from "@/hooks/use-company.ts";
+import { usePrintSettings } from "@/hooks/use-print-settings.ts";
+import { buildReceiptHtml, printHtml, type ReceiptDocument } from "@/lib/print/receipt-html.ts";
 import {
   PAYMENT_LABELS, num, type PaymentMethod, type PosCustomerSummary, type SalesOrderDetail,
 } from "@/pages/sales/_lib/types.ts";
@@ -36,7 +39,50 @@ export default function POSReceipt({
   const total = num(order.totalAmount);
   const changeAmount = num(change);
 
-  const handlePrint = () => window.print();
+  const { receipt: template, isLoaded: templateLoaded } = usePrintSettings();
+
+  // Chop etish sozlamalardagi shablon bo'yicha (termal chek HTML)
+  const receiptDocument = (): ReceiptDocument => ({
+    company: {
+      name: company?.name ?? "BUM ERP",
+      address: company?.address,
+      phone: company?.phone,
+      taxId: company?.taxId,
+    },
+    number: order.number,
+    date: new Date(order.createdAt).toLocaleString("uz-UZ"),
+    cashierName,
+    items: order.items.map((item) => ({
+      name: item.productName,
+      sku: item.productSku,
+      quantity: num(item.quantity),
+      unitPrice: num(item.unitPrice),
+      lineTotal: num(item.lineTotal),
+    })),
+    taxAmount: num(order.taxAmount),
+    discountAmount: num(order.discountAmount),
+    totalAmount: total,
+    payments: [
+      { label: "Balansdan", amount: num(balanceUsed) },
+      // Mijoz bergan summa: chekka yozilgan to'lov + qaytim (balansga o'tgani ham)
+      { label: PAYMENT_LABELS[payMethod] ?? payMethod, amount: num(paid) + changeAmount + num(changeToBalance) },
+    ],
+    change: changeAmount,
+    changeToBalance: num(changeToBalance),
+    debt: num(debt),
+    customer: customer
+      ? { name: customer.name, phone: customer.phone, totalDebt: num(customer.totalDebt), balance: num(customer.balance) }
+      : null,
+  });
+  const handlePrint = () => printHtml(buildReceiptHtml(receiptDocument(), template));
+
+  // Avtomatik chop etish — shablon yuklangach, bir marta
+  const autoPrinted = useRef(false);
+  useEffect(() => {
+    if (!templateLoaded || autoPrinted.current) return;
+    autoPrinted.current = true;
+    if (template.autoPrint) handlePrint();
+  });
 
   const handleDownloadPDF = () => {
     generateReceiptPDF({
