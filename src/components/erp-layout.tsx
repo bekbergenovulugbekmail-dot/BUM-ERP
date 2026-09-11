@@ -58,9 +58,6 @@ import { useMyCompanies, useSwitchCompany } from "@/hooks/use-company.ts";
 import { Authenticated, Unauthenticated } from "@/components/auth-gates.tsx";
 import { useTheme } from "next-themes";
 import { isAdminSubdomain } from "@/lib/subdomain.ts";
-import { useLockScreen } from "@/hooks/use-lock-screen.ts";
-import LockScreen from "@/components/lock-screen.tsx";
-import { AnimatePresence } from "motion/react";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   LayoutDashboard,
@@ -584,9 +581,6 @@ export default function ERPLayout({ children }: { children: React.ReactNode }) {
   const currentUser = useCurrentUser();
   const myCompanies = useMyCompanies(Boolean(currentUser));
 
-  // Auto-lock / PIN system
-  const { isLocked, unlock } = useLockScreen();
-
   // HARD BLOCK: admin subdomain must NEVER show ERP layout or onboarding.
   // Redirect to /admin immediately regardless of auth state.
   if (isAdminSubdomain()) {
@@ -652,13 +646,6 @@ export default function ERPLayout({ children }: { children: React.ReactNode }) {
 
       {/* PWA install banner */}
       <PWAInstallBanner />
-
-      {/* Lock Screen overlay — rendered above everything */}
-      <AnimatePresence>
-        {isLocked && (
-          <LockScreen onUnlocked={unlock} />
-        )}
-      </AnimatePresence>
     </div>
   );
 }
