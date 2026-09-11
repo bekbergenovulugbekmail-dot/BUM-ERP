@@ -51,19 +51,25 @@
 | POST | `/api/auth/pin/remove` | sessiya | `pin.removePin` |
 | POST | `/api/auth/pin/verify` | sessiya | `pin.verifyPin` |
 | PUT | `/api/auth/auto-lock` | sessiya | `pin.setAutoLockTimeout` |
+| GET | `/api/platform/bootstrap` | — | `companies.platformAdminCount` |
+| POST | `/api/platform/bootstrap` | `PLATFORM_BOOTSTRAP_KEY` | `companies.platformSetAdminByEmail` |
 
 Xatolar doim `{ code, message }` shaklida (Convex bilan bir xil).
 
 ## Lokal muhit
 
 - **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432).
-  - `bumerp` — ishchi baza: sxema qo'llangan, **ma'lumot yo'q (foydalanuvchi ham yo'q)**.
-  - `bumerp_test` — testlar uchun, `pnpm test` o'zi yaratadi va har testda tozalaydi.
+  - `bumerp` — ishchi baza: 2 ta migratsiya qo'llangan, **ma'lumot yo'q (foydalanuvchi ham yo'q)**.
+  - `bumerp_test` — testlar uchun, `pnpm test` o'zi yaratadi, migratsiya qiladi va har testda tozalaydi.
 - **MinIO** — 9000 (S3), 9001 (konsol). Ishlaydi, lekin `bum-erp` bucket yo'q
   va `.env` da `STORAGE_*` yo'q → `features.storage` o'chiq.
 - **Migratsiya:** `pnpm --filter @bum/api db:migrate` (`.env` o'zi yuklanadi)
+- **Birinchi admin:** `pnpm --filter @bum/api platform:bootstrap --phone +998XXXXXXXXX --name "Ism"`
+  (parol terminalda yashirin so'raladi yoki `BOOTSTRAP_ADMIN_PASSWORD` dan olinadi).
+  Windows + Volta'da bo'sh joyli argument (`--name "Ism Familiya"`) pnpm orqali buziladi —
+  u holda `apps/api` dan `node --import tsx src/cli/platform-bootstrap.ts ...` bilan ishga tushiring
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
-- **Testlar:** `pnpm --filter @bum/api test` — 31 ta test
+- **Testlar:** `pnpm --filter @bum/api test` — 41 ta test
 
 ---
 
@@ -92,7 +98,9 @@ Xatolar doim `{ code, message }` shaklida (Convex bilan bir xil).
   | notifications (1) | notifications |
 
 - **Asosiy qarorlar:** pul/miqdor `numeric` (float emas); har tenant jadvalida `company_id NOT NULL`; `legacy_id` ko'chirish uchun; DB darajasidagi CHECK/unique himoyalar (manfiy qoldiq, dublikat JE, ikkita ochiq smena va h.k.).
-- **Migratsiya:** `0000_fantastic_speed.sql` — lokal PG18 ga qo'llangan va tekshirilgan.
+- **Migratsiyalar:**
+  - `0000_fantastic_speed.sql` — to'liq sxema
+  - `0001_nulls_not_distinct_uniques.sql` — tuzatish: `roles (company_id, name)`, `settings (company_id, key)`, `unit_conversions (…, product_id)` unikalligi `NULLS NOT DISTINCT`. Oddiy unikal indeksda NULL lar teng hisoblanmaydi, ya'ni global rollar, platforma sozlamalari va umumiy konversiyalar takrorlanib ketaverardi — aynan Convex'dagi dublikat rol muammosi
 - **API endpointlar:** —
 - **Brauzerda sinash:** —
 - **Commitlar:** `c5c082a`, `2bab68c`
@@ -106,31 +114,36 @@ Xatolar doim `{ code, message }` shaklida (Convex bilan bir xil).
 
 ## PHASE 4 — Auth va sessiyalar 🟡
 
-- **Convex manbasi:** `convex/auth.ts`, `convex/pin.ts`, `users.getCurrentUser`; sahifalar `login`, `admin/login`, lock screen, sozlamalar → xavfsizlik
-- **Ko'chirilgan modullar** (`apps/api/src/modules/auth/`):
-  - `password.ts` — argon2id; Convex Auth'ning lucia Scrypt xeshlarini ham tekshiradi va birinchi kirishda argon2id ga o'tkazadi (haqiqiy lucia bilan ikki tomonlama tekshirilgan)
-  - `session.ts` — 32 baytli token httpOnly cookie'da (`bum_session`), bazada SHA-256; mutlaq (30 kun) + faolsizlik (12 soat, sirpanuvchi) muddat; o'chirilgan hisob sessiyalari ishlamaydi
-  - `auth.service.ts` — login: telefon normallashtirish (`packages/shared/phone.ts`), noma'lum raqam va xato parolga bir xil javob va bir xil vaqt, faol bo'lmagan hisob 403, audit (`login_success` / `login_failed`)
-  - `pin.service.ts` — PIN argon2id; 5 xato → 5 daqiqa blok; `reason` kodlari Convex bilan bir xil (`WRONG_PIN:n`, `PIN_LOCKED:s`, `SESSION_MISMATCH`, …)
-  - `guard.ts` — `requireAuth` preHandler
-  - `shared/rate-limit.ts` — PostgreSQL'da: raqamga 5, IP ga 30 xato / 15 daqiqa
-  - `shared/audit.ts` — audit jurnali yozuvi
+- **Convex manbasi:** `convex/auth.ts`, `convex/pin.ts`, `users.getCurrentUser`, `companies.platformSetAdminByEmail` / `platformAdminCount`; sahifalar `login`, `admin/login`, `admin/bootstrap`, lock screen, sozlamalar → xavfsizlik
+- **Ko'chirilgan modullar:**
+  - `modules/auth/password.ts` — argon2id; Convex Auth'ning lucia Scrypt xeshlarini ham tekshiradi va birinchi kirishda argon2id ga o'tkazadi (haqiqiy lucia bilan ikki tomonlama tekshirilgan)
+  - `modules/auth/session.ts` — 32 baytli token httpOnly cookie'da (`bum_session`), bazada SHA-256; mutlaq (30 kun) + faolsizlik (12 soat, sirpanuvchi) muddat; o'chirilgan hisob sessiyalari ishlamaydi
+  - `modules/auth/auth.service.ts` — login: telefon normallashtirish (`packages/shared/phone.ts`), noma'lum raqam va xato parolga bir xil javob va bir xil vaqt, faol bo'lmagan hisob 403, audit (`login_success` / `login_failed`)
+  - `modules/auth/pin.service.ts` — PIN argon2id; 5 xato → 5 daqiqa blok; `reason` kodlari Convex bilan bir xil (`WRONG_PIN:n`, `PIN_LOCKED:s`, `SESSION_MISMATCH`, …)
+  - `modules/auth/guard.ts` — `requireAuth` preHandler
+  - `modules/platform/bootstrap.service.ts` — birinchi platforma admini: faqat admin yo'q bo'lsa; advisory lock (parallel bootstrap ikkita admin yaratmaydi); raqam band bo'lsa egasining paroli talab qilinadi; 14 ta global standart rol (`DEFAULT_ROLES`) qo'shiladi; audit `PLATFORM_ADMIN_BOOTSTRAP`
+  - `cli/platform-bootstrap.ts` — shu servis CLI orqali (kalitsiz, parol buyruq qatorida emas)
+  - `shared/rate-limit.ts` — PostgreSQL'da: login uchun raqamga 5, IP ga 30 xato; bootstrap kalitiga IP ga 5 xato / 15 daqiqa
+  - `shared/audit.ts` — audit jurnali va `requestMeta`
 - **Convex'dan ataylab farqlar:**
   - PIN tekshiruvi `change`/`remove` da ham urinishlarni hisoblaydi — Convex'da shu yo'l bilan bloklashni chetlab o'tib PIN tanlash mumkin edi
   - Mavjud PIN `setPin` bilan ustidan yozilmaydi (409) — frontend baribir faqat PIN yo'q bo'lganda chaqiradi
-  - Ochiq ro'yxatdan o'tish endpointi yo'q — frontend'da `signUpWithPassword` hech qayerda ishlatilmaydi, akkauntni admin yaratadi (PHASE 5)
-- **API endpointlar:** yuqoridagi jadvaldagi 9 ta `/api/auth/*`
-- **Testlar:** `test/auth.test.ts` (17), `test/pin.test.ts` (14) — alohida `bumerp_test` bazasida, hammasi o'tadi
-- **Brauzerda sinash:** hali yo'q — frontend Convex'da, ishchi bazada foydalanuvchi yo'q. Hozircha test bazasiga seed qilib `curl` bilan sinaladi (login → me → PIN → logout → me=401 oqimi tekshirilgan).
+  - Ochiq ro'yxatdan o'tish endpointi yo'q — frontend'da `signUpWithPassword` hech qayerda ishlatilmaydi; shuning uchun bootstrap foydalanuvchini o'zi yaratadi (Convex'da faqat mavjud hisobga huquq berardi)
+  - Bootstrap kaliti doimiy vaqtda solishtiriladi va rate limit bilan himoyalangan (Convex'da oddiy `!==` edi); holat endpointi adminlar sonini emas, faqat `{ enabled, needed }` qaytaradi
+- **API endpointlar:** yuqoridagi jadvaldagi 9 ta `/api/auth/*` va 2 ta `/api/platform/bootstrap`
+- **Testlar:** `test/auth.test.ts` (17), `test/pin.test.ts` (14), `test/bootstrap.test.ts` (10) — alohida `bumerp_test` bazasida, hammasi o'tadi. CLI qo'lda tekshirilgan: yaratish, takroriy chaqiruv, `--phone` yo'q, interaktiv bo'lmagan terminalda parolsiz.
+- **Brauzerda sinash:** frontend hali Convex'da. Lekin endi ishchi bazada kirib sinash mumkin:
+  1. `pnpm --filter @bum/api platform:bootstrap --phone +998XXXXXXXXX --name "Ism"`
+  2. `pnpm --filter @bum/api dev`
+  3. `curl` bilan `POST /api/auth/login` → `GET /api/auth/me` (`isPlatformAdmin: true`)
 - **Qolgan ishlar:**
   - SMS orqali parol tiklash (`password_reset_codes`, Eskiz) — Convex'da yo'q edi, yangi funksiya
-  - Eskirgan `rate_limits` va `sessions` qatorlarini tozalash
-  - Birinchi foydalanuvchini yaratish yo'li (seed/bootstrap buyrug'i) — busiz ishchi bazada kirib bo'lmaydi
+  - Eskirgan `rate_limits` va `sessions` qatorlarini davriy tozalash
 
 ## PHASE 5 — Platforma: kompaniya, filial, rol, admin ⬜
 
 - **Convex manbasi:** `convex/companies.ts`, `tenant.ts`, `users.ts`, `userAdmin.ts`, `admin.ts`; sahifalar `admin`, `onboarding`, `select-company`, `settings`, `tenant`
-- **Tayyor poydevor:** platform jadvallari; RBAC katalogi `packages/shared/src/permissions.ts`; `requireAuth` va `revokeUserSessions` (parolni admin tiklaganda kerak)
+- **Tayyor poydevor:** platform jadvallari; RBAC katalogi `packages/shared/src/permissions.ts`; global standart rollar bootstrap'da qo'shiladi; `requireAuth` va `revokeUserSessions` (parolni admin tiklaganda kerak); `modules/platform/` papkasi
 - **Ko'chirilgan modullar:** —
 - **API endpointlar:** —
 - **Brauzerda sinash:** —
@@ -227,9 +240,8 @@ Xatolar doim `{ code, message }` shaklida (Convex bilan bir xil).
 ## Keyingi qadam
 
 **PHASE 4 ni yakunlash:**
-1. Birinchi foydalanuvchi / platforma adminini yaratish buyrug'i (`PLATFORM_BOOTSTRAP_KEY` yoki CLI seed) — ishchi bazada kirib sinash uchun shart
-2. SMS orqali parol tiklash: `POST /api/auth/password-reset/request` va `/confirm` (Eskiz, OTP xeshlangan, rate limit)
-3. Eskirgan `rate_limits` / `sessions` qatorlarini davriy tozalash
+1. SMS orqali parol tiklash: `POST /api/auth/password-reset/request` va `/confirm` (Eskiz, OTP xeshlangan, urinishlar va rate limit)
+2. Eskirgan `rate_limits` / `sessions` qatorlarini davriy tozalash
 
 Keyin — **PHASE 5** (kompaniya, a'zolik, rollar, admin foydalanuvchi boshqaruvi).
 

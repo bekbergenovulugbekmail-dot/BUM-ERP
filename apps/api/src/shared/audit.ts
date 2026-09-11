@@ -2,6 +2,7 @@
  * Audit jurnali. Convexdagi writeAuditLog (convex/tenant.ts) bilan bir xil
  * maydonlar; `details` endi JSON satr emas, jsonb.
  */
+import type { FastifyRequest } from "fastify";
 import { db } from "../db/client.js";
 import { auditLogs } from "../db/schema/platform.js";
 import type { DbOrTx } from "../db/transaction.js";
@@ -11,6 +12,10 @@ export type RequestMeta = {
   ipAddress: string;
   userAgent: string | null;
 };
+
+export function requestMeta(req: FastifyRequest): RequestMeta {
+  return { ipAddress: req.ip, userAgent: req.headers["user-agent"] ?? null };
+}
 
 export type AuditEntry = Partial<RequestMeta> & {
   companyId?: string | null;

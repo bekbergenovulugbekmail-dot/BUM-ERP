@@ -13,6 +13,7 @@ import { logger } from "./shared/logger.js";
 import { registerErrorHandler } from "./shared/errors.js";
 import { closeDb, pool } from "./db/client.js";
 import { authRoutes } from "./modules/auth/routes.js";
+import { platformRoutes } from "./modules/platform/routes.js";
 
 export async function buildServer() {
   const app = Fastify({
@@ -61,6 +62,7 @@ export async function buildServer() {
 
   // Modul marshrutlari
   await app.register(authRoutes, { prefix: "/api/auth" });
+  await app.register(platformRoutes, { prefix: "/api/platform" });
   // await app.register(productsRoutes, { prefix: "/api/products" });
 
   return app;

@@ -11,7 +11,8 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "platform:bootstrap": "tsx src/cli/platform-bootstrap.ts"
   },
   "dependencies": {
     "@bum/shared": "workspace:*",
