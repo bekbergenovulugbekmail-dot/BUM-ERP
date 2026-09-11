@@ -22,6 +22,9 @@ import {
   requireTenantAccess,
   getTenantId,
   requirePlatformAdmin,
+  requireAccessForWrite,
+  assertCanGrant,
+  isFullAccessRole,
   writeAuditLog,
 } from "./tenant.ts";
 
@@ -481,13 +484,57 @@ export const updateMember = mutation({
     isActive:    v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const tenantId = await requireTenantAccess(ctx);
+    // SECURITY: previously any member could set any companyRole on any membership —
+    // a cashier could make themselves "Business Owner".
+    const access = await requireAccessForWrite(ctx, "users.manage");
     const member = await ctx.db.get(args.id);
-    if (!member || member.companyId !== tenantId) {
+    if (!member || member.companyId !== access.tenantId) {
       throw new ConvexError({ code: "FORBIDDEN", message: "A'zo topilmadi" });
     }
+    if (member.userId === access.user._id) {
+      throw new ConvexError({ code: "FORBIDDEN", message: "O'z a'zoligingizni o'zgartira olmaysiz" });
+    }
+    if (isFullAccessRole(member.companyRole)) {
+      throw new ConvexError({ code: "FORBIDDEN", message: "Kompaniya egasining a'zoligini o'zgartirib bo'lmaydi" });
+    }
+
+    if (args.companyRole !== undefined && args.companyRole !== member.companyRole) {
+      if (isFullAccessRole(args.companyRole)) {
+        throw new ConvexError({ code: "FORBIDDEN", message: `"${args.companyRole}" rolini berib bo'lmaydi` });
+      }
+      const role = await ctx.db
+        .query("roles")
+        .withIndex("by_company_name", (q) =>
+          q.eq("companyId", access.tenantId).eq("name", args.companyRole!),
+        )
+        .first();
+      if (!role) {
+        throw new ConvexError({ code: "BAD_REQUEST", message: `Rol topilmadi: ${args.companyRole}` });
+      }
+      // No granting permissions the caller does not hold
+      assertCanGrant(access, role.permissions);
+    }
+
+    if (args.branchId !== undefined) {
+      const branch = await ctx.db.get(args.branchId);
+      if (!branch || branch.companyId !== access.tenantId) {
+        throw new ConvexError({ code: "FORBIDDEN", message: "Filial topilmadi" });
+      }
+    }
+
     const { id, ...fields } = args;
     await ctx.db.patch(id, fields);
+
+    await writeAuditLog(ctx, {
+      userId: access.user._id,
+      userName: access.user.name,
+      action: "MEMBER_UPDATED",
+      resource: "companyMembers",
+      resourceId: id,
+      details: JSON.stringify(fields),
+      severity: "warning",
+      companyId: access.tenantId,
+    });
   },
 });
 

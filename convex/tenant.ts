@@ -7,11 +7,14 @@
  * - Platform admins (isPlatformAdmin=true) see ALL companies; use carefully
  * - Suspended companies: users see a suspension screen, all mutations throw FORBIDDEN
  * - Backend permissions are enforced via requirePermission() — frontend checks are UX only
+ * - Role/user management uses requireAccessForWrite() + assertCanGrant(): nobody can
+ *   grant a permission they do not hold themselves (no self-escalation)
  */
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError } from "convex/values";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
+import { ALL_PERMISSIONS, type Permission } from "../src/lib/permissions.ts";
 
 // ─── User resolution ─────────────────────────────────────────────────────────
 
@@ -167,6 +170,13 @@ export async function assertSameTenant(
 
 // ─── Backend permission enforcement ──────────────────────────────────────────
 
+/** These roles hold every permission — requirePermission bypasses them by NAME. */
+export const FULL_ACCESS_ROLES = ["Business Owner", "Superadmin"] as const;
+
+export function isFullAccessRole(name: string | undefined): boolean {
+  return name !== undefined && (FULL_ACCESS_ROLES as readonly string[]).includes(name);
+}
+
 /**
  * Verifies the current user holds a specific permission within their active company.
  *
@@ -201,10 +211,7 @@ export async function requirePermission(
   }
 
   // Business Owner and Superadmin always have every permission
-  if (
-    membership.companyRole === "Business Owner" ||
-    membership.companyRole === "Superadmin"
-  ) {
+  if (isFullAccessRole(membership.companyRole)) {
     return;
   }
 
@@ -227,6 +234,79 @@ export async function requirePermission(
     throw new ConvexError({
       code: "FORBIDDEN",
       message: `Bu amal uchun ruxsat yo'q: ${permission}`,
+    });
+  }
+}
+
+export type TenantAccess = {
+  user: Doc<"users">;
+  tenantId: Id<"companies">;
+  membership: Doc<"companyMembers">;
+  /** Business Owner / Superadmin. */
+  fullAccess: boolean;
+  /** Caller's effective permissions — used to block granting what they don't hold. */
+  permissions: string[];
+};
+
+/**
+ * requirePermission for WRITE operations that also returns the caller's full
+ * permission set. Rejects suspended/cancelled companies.
+ */
+export async function requireAccessForWrite(
+  ctx: MutationCtx,
+  permission: Permission,
+): Promise<TenantAccess> {
+  const tenantId = await requireTenantAccessForWrite(ctx);
+  const user = await requireAuth(ctx);
+
+  const membership = await ctx.db
+    .query("companyMembers")
+    .withIndex("by_company_user", (q) => q.eq("companyId", tenantId).eq("userId", user._id))
+    .first();
+  if (!membership || !membership.isActive) {
+    throw new ConvexError({ code: "FORBIDDEN", message: "Kompaniya a'zoligi faol emas" });
+  }
+
+  if (isFullAccessRole(membership.companyRole)) {
+    return { user, tenantId, membership, fullAccess: true, permissions: [...ALL_PERMISSIONS] };
+  }
+
+  const roleDoc = await ctx.db
+    .query("roles")
+    .withIndex("by_company_name", (q) =>
+      q.eq("companyId", tenantId).eq("name", membership.companyRole),
+    )
+    .first();
+  const permissions = roleDoc && roleDoc.isActive ? roleDoc.permissions : [];
+
+  if (!permissions.includes(permission)) {
+    throw new ConvexError({
+      code: "FORBIDDEN",
+      message: `Bu amal uchun ruxsat yo'q: ${permission}`,
+    });
+  }
+  return { user, tenantId, membership, fullAccess: false, permissions };
+}
+
+/** Nobody can grant a permission they do not hold themselves. */
+export function assertCanGrant(access: TenantAccess, requested: readonly string[]): void {
+  if (access.fullAccess) return;
+  const missing = requested.filter((p) => !access.permissions.includes(p));
+  if (missing.length > 0) {
+    throw new ConvexError({
+      code: "FORBIDDEN",
+      message: `O'zingizda yo'q ruxsatni bera olmaysiz: ${missing.join(", ")}`,
+    });
+  }
+}
+
+/** Only permission names from the catalog are accepted. */
+export function assertKnownPermissions(requested: readonly string[]): void {
+  const unknown = requested.filter((p) => !(ALL_PERMISSIONS as readonly string[]).includes(p));
+  if (unknown.length > 0) {
+    throw new ConvexError({
+      code: "BAD_REQUEST",
+      message: `Noma'lum ruxsat: ${unknown.join(", ")}`,
     });
   }
 }
