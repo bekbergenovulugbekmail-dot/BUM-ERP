@@ -593,6 +593,20 @@ Kod tomoni tugadi. Brauzerda qo'lda sinov, production deploy va ma'lumot importi
   - Rasm/chek yuklash: `POST /api/files/uploads` → `PUT uploadUrl` (aynan `headers` bilan) → `POST /api/files/attach`; ko'rsatish `GET /api/files/url` (5 daqiqada eskiradi — sahifa ochilganda olinadi); `product-form-dialog.tsx` dagi `imageUrl` maydoni shu oqim bilan almashtiriladi
   - Kirish sahifasiga "Parolni unutdingizmi?" — `POST /api/auth/password-reset/request` → kod va yangi parol → `/confirm` → oddiy kirish (Convex'da bunday sahifa yo'q edi)
 
+## Production'dan keyingi o'zgarishlar (2026-09-11)
+
+Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
+
+- **Kirish sahifalari:** parolni ko'rsatish/yashirish tugmasi; admin havolasi `/uz/admin` ga
+- **Avtomatik qulf ekrani olib tashlandi** (30 soniya faolsizlikda bloklardi); xavfsizlik bo'limida faqat parolni almashtirish qoldi
+- **Xodimni tahrirlash:** egasi ism, telefon (login — o'zgarsa sessiyalar yopiladi), rol, filial, omborlarni o'zgartiradi; boshqa kompaniyaga ham a'zo xodimning hisob ma'lumotini faqat platforma admini o'zgartiradi. Jadvaldagi rol tanlagichi ochilmaslik xatosi tuzatildi
+- **Mas'ul kategoriyalar** (`company_members.allowed_category_ids`, migratsiya 0011, `catalog/category-scope.ts`):
+  - bo'sh = barcha kategoriyalar; tanlangan kategoriyaning ichki kategoriyalari ham kiradi; egalik rollari cheklovsiz
+  - cheklangan xodim katalog, ombor (qoldiq, harakatlar, inventarizatsiya), xarid va savdoda (POS bilan) faqat o'z kategoriyalaridagi mahsulotlarni ko'radi va ular bilan ishlaydi; kategoriyasiz mahsulot unga ko'rinmaydi
+  - amal turi (ko'rish / qo'shish / o'zgartirish) rol ruxsatlari bilan; hujjat ro'yxatida faqat uning mahsuloti qatnashgan buyurtmalar, hujjatdagi boshqa kategoriya qatori bo'lsa tasdiqlash/jo'natish/qabul rad etiladi
+  - analitika, dashboard va bildirishnomalar cheklanmaydi (`analytics.view` bilan boshqariladi)
+- **Testlar:** `category-scope` (3); API jami 208
+
 ---
 
 ## Keyingi qadam
