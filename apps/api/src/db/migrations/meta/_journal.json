@@ -134,6 +134,13 @@
       "when": 1789161570281,
       "tag": "0018_distribution_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789163290420,
+      "tag": "0019_pos_shift_currencies",
+      "breakpoints": true
     }
   ]
 }

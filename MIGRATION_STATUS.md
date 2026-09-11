@@ -642,9 +642,14 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - chet valyuta qismi naqd, shu valyutadagi kassaga (`customer_payments.foreign_amount`), qaytim o'sha valyutada; mijozga qisman to'lovda qarz asosiy valyutada
   - balans va keshbek faqat asosiy valyutadagi qismga; qaytarishda valyutadagi to'lov o'z kassasidan qaytadi
   - chek (ekran va termal shablon): qator o'z valyutasida, oxirida har valyuta bo'yicha jami, to'langan va qaytim
-  - cheklovlar: POS smena naqd yig'indisi faqat asosiy valyutada; oddiy (POS bo'lmagan) sotuv buyurtmasi asosiy valyutada; PDF chek asosiy valyutada
+  - dastlabki cheklovlar (smena yig'indisi, karta, balans/keshbek faqat asosiy qismga, PDF) — L1 da bartaraf etildi
 - **POS sotuv valyutalari** commit `4b9249f`
-- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (2), `distribution` (4); API jami 225 (45 fayl)
+- **L1 — POS valyuta cheklovlari bartaraf etildi** (migratsiya 0019):
+  - smena valyuta bo'yicha: boshlang'ich naqd, naqd va karta tushumi (`pos_shifts.opening_foreign_cash`, `foreign_cash`, `foreign_card`); yopishda har valyuta sanaladi va farqi chiqadi (`closing_foreign_cash`); qaytarishda ochiq smenadan ayriladi
+  - chet valyuta qismini karta bilan to'lash — shu valyutadagi bank hisobiga (qoldiqdan oshmaydi)
+  - balans va keshbek butun chekka: avval asosiy valyutadagi qismga, qolgani chet valyuta qismlariga asosiy qiymatda; javobda `covered`
+  - PDF chek: valyutadagi qatorlar, valyuta bo'yicha jami/to'langan/qaytim, balans va keshbek, qaytim balansga, qarz
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `distribution` (4); API jami 226 (45 fayl)
 
 ## Sotuv agenti loyihasi (2026-09-12)
 

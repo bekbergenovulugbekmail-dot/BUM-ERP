@@ -59,7 +59,8 @@ type SaleResult = {
   /** Shu chekdan qarzga yozilgan summa. */
   debt: string;
   /** Chet valyuta qatnashgan chekda: valyuta bo'yicha jami, to'langan va qaytim. */
-  currencyTotals: { currency: string; total: string; paid: string; change: string }[];
+  /** `covered` — shu valyuta qismidan balans va keshbek yopgan summa (valyutada). */
+  currencyTotals: { currency: string; total: string; covered: string; paid: string; change: string }[];
   customer: PosCustomerSummary | null;
 };
 type LastReceipt = SaleResult & { payMethod: PaymentMethod };
@@ -121,6 +122,8 @@ export default function POSPage() {
   // Sotuv valyutalari: bittasi — hamma narx shu valyutada; bir nechtasi — mahsulot o'z narx valyutasida
   const [saleCurrencies, setSaleCurrencies] = useState<string[] | null>(null);
   const [foreignTendered, setForeignTendered] = useState<Record<string, string>>({});
+  /** Chet valyuta qismi qanday to'lanadi: naqd (qaytim bilan) yoki karta — shu valyutadagi kassa/bankka. */
+  const [foreignMethod, setForeignMethod] = useState<Record<string, "cash" | "card">>({});
   const selectedSaleCurrencies = saleCurrencies ?? [currencies.base];
   const currencyMode = selectedSaleCurrencies.length > 1 || selectedSaleCurrencies[0] !== currencies.base;
   const toggleSaleCurrency = (code: string) => {
@@ -130,6 +133,7 @@ export default function POSPage() {
     if (next.length === 0) return;
     setSaleCurrencies(currencies.codes.filter((c) => next.includes(c)));
     setForeignTendered({});
+    setForeignMethod({});
   };
 
   // Mijoz: qarzi va balansi ko'rinib turadi; sotuv yoki to'lovdan keyin so'rov yangilanadi
@@ -200,17 +204,6 @@ export default function POSPage() {
   });
   const baseBucketMinor = buckets.get(currencies.base)?.base ?? (currencyMode ? 0n : totalMinor);
   const showBasePayment = !currencyMode || cart.length === 0 || buckets.has(currencies.base);
-  // Chet valyutadagi qismlar: bo'sh maydon — aniq summa; ortig'i — o'sha valyutada qaytim
-  const foreignBuckets = [...buckets]
-    .filter(([code]) => code !== currencies.base)
-    .map(([code, bucket]) => {
-      const text = foreignTendered[code] ?? "";
-      const given = text.trim() !== "" ? minorOf(text) : bucket.total;
-      const paidInCurrency = given < bucket.total ? given : bucket.total;
-      const paidBase = paidInCurrency === bucket.total ? bucket.base : mulDivRound(paidInCurrency, rateMinorOf(code), 10_000n);
-      return { code, total: bucket.total, given, change: given - paidInCurrency, unpaidBase: bucket.base - paidBase };
-    });
-  const foreignDebt = minorToNumber(foreignBuckets.reduce((sum, bucket) => sum + bucket.unpaidBase, 0n));
 
   // Keshbekdan: mijoz keshbeki, sozlamadagi chek ulushi chegarasi va chek summasidan oshmaydi
   const cashbackEnabled = !!cashbackSettings?.enabled;
@@ -219,21 +212,52 @@ export default function POSPage() {
     ? (totalMinor * BigInt(Math.round(cashbackSettings.maxUsagePercent * 100))) / 10_000n
     : 0n;
   const cashbackRequested = cashbackInput.trim() !== "" ? minorOf(cashbackInput) : cashbackAvailable;
-  // Keshbek va balans asosiy valyutada — faqat chekning asosiy valyutadagi qismiga
   const cashbackMinor = customer && useCashback && cashbackRequested > 0n
-    ? minBigInt(cashbackRequested, cashbackAvailable, cashbackLimit, baseBucketMinor)
+    ? minBigInt(cashbackRequested, cashbackAvailable, cashbackLimit, totalMinor)
     : 0n;
   // Mijoz balansidan yechiladigan qism — qolgan chek summasi va balansdan oshmaydi
   const balanceAvailable = customer ? minorOf(customer.balance) : 0n;
   const balanceRequested = balanceInput.trim() !== "" ? minorOf(balanceInput) : balanceAvailable;
   const balanceMinor = customer && useBalance && balanceRequested > 0n
-    ? minBigInt(balanceRequested, balanceAvailable, baseBucketMinor - cashbackMinor)
+    ? minBigInt(balanceRequested, balanceAvailable, totalMinor - cashbackMinor)
     : 0n;
-  const dueMinor = baseBucketMinor - cashbackMinor - balanceMinor;
+  // Balans va keshbek asosiy valyutada — server bilan bir xil: avval asosiy valyutadagi qismga, qolgani chet valyuta qismlariga
+  const baseCoveredMinor = minBigInt(cashbackMinor + balanceMinor, baseBucketMinor);
+  const dueMinor = baseBucketMinor - baseCoveredMinor;
   const due = minorToNumber(dueMinor);
   // Naqdda bo'sh maydon — aniq summa; karta/bankda to'lov doim to'lanadigan summaga teng
   const paid = payMethod === "cash" && amountPaid.trim() !== "" ? num(amountPaid) : due;
   const change = Math.max(0, paid - due);
+
+  // Chet valyutadagi qismlar: bo'sh maydon — aniq summa; naqdda ortig'i — o'sha valyutada qaytim
+  const foreignBuckets: {
+    code: string; method: "cash" | "card"; total: bigint; due: bigint; given: bigint; change: bigint; unpaidBase: bigint;
+  }[] = [];
+  let uncoveredMinor = cashbackMinor + balanceMinor - baseCoveredMinor;
+  for (const [code, bucket] of buckets) {
+    if (code === currencies.base) continue;
+    const rate = rateMinorOf(code);
+    const coveredBase = minBigInt(uncoveredMinor, bucket.base);
+    uncoveredMinor -= coveredBase;
+    const dueBase = bucket.base - coveredBase;
+    const dueInCurrency =
+      coveredBase === 0n ? bucket.total : dueBase === 0n || rate === 0n ? 0n : mulDivRound(dueBase, 10_000n, rate);
+    const method = foreignMethod[code] ?? "cash";
+    const text = foreignTendered[code] ?? "";
+    const given = text.trim() !== "" ? minorOf(text) : dueInCurrency;
+    const paidInCurrency = given < dueInCurrency ? given : dueInCurrency;
+    const paidBase = paidInCurrency === dueInCurrency ? dueBase : mulDivRound(paidInCurrency, rate, 10_000n);
+    foreignBuckets.push({
+      code,
+      method,
+      total: bucket.total,
+      due: dueInCurrency,
+      given,
+      change: method === "cash" ? given - paidInCurrency : 0n,
+      unpaidBase: dueBase - paidBase,
+    });
+  }
+  const foreignDebt = minorToNumber(foreignBuckets.reduce((sum, bucket) => sum + bucket.unpaidBase, 0n));
   // Yetmagan qismi faqat mijoz tanlanganda qarzga yoziladi
   const debtAmount = Math.max(0, due - paid) + foreignDebt;
   const onCredit = debtAmount >= 0.01;
@@ -340,7 +364,11 @@ export default function POSPage() {
         ...(currencyMode
           ? {
               saleCurrencies: selectedSaleCurrencies,
-              currencyPayments: foreignBuckets.map((bucket) => ({ currency: bucket.code, amount: fromMinor(bucket.given) })),
+              currencyPayments: foreignBuckets.map((bucket) => ({
+                currency: bucket.code,
+                amount: fromMinor(bucket.given),
+                method: bucket.method,
+              })),
             }
           : {}),
       });
@@ -348,6 +376,7 @@ export default function POSPage() {
       setCart([]);
       setAmountPaid("");
       setForeignTendered({});
+      setForeignMethod({});
       clearCustomer();
       const details = [
         num(result.change) > 0 ? `Qaytim: ${fmt(num(result.change))} so'm` : null,
@@ -741,15 +770,20 @@ export default function POSPage() {
                 <span>Balansdan</span><span>−{fmt(minorToNumber(balanceMinor))} so'm</span>
               </div>
             )}
-            {cashbackMinor + balanceMinor > 0n && (
+            {cashbackMinor + balanceMinor > 0n && (!currencyMode || buckets.has(currencies.base)) && (
               <div className="flex justify-between font-semibold">
                 <span>To'lanadi</span><span>{fmt(due)} so'm</span>
               </div>
             )}
+            {cashbackMinor + balanceMinor > 0n && foreignBuckets.map((bucket) => bucket.due !== bucket.total && (
+              <div key={bucket.code} className="flex justify-between font-semibold">
+                <span>To'lanadi ({bucket.code})</span><span>{formatMoney(minorToNumber(bucket.due), bucket.code)}</span>
+              </div>
+            ))}
           </div>
 
           {/* Keshbekdan to'lash */}
-          {customer && cashbackAvailable > 0n && cashbackLimit > 0n && baseBucketMinor > 0n && (
+          {customer && cashbackAvailable > 0n && cashbackLimit > 0n && totalMinor > 0n && (
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -768,7 +802,7 @@ export default function POSPage() {
                   type="number"
                   min="0"
                   className="h-9 text-right"
-                  placeholder={String(minorToNumber(minBigInt(cashbackAvailable, cashbackLimit, baseBucketMinor)))}
+                  placeholder={String(minorToNumber(minBigInt(cashbackAvailable, cashbackLimit, totalMinor)))}
                   value={cashbackInput}
                   onChange={(e) => setCashbackInput(e.target.value)}
                 />
@@ -777,7 +811,7 @@ export default function POSPage() {
           )}
 
           {/* Mijoz balansidan to'lash */}
-          {customer && balanceAvailable > 0n && baseBucketMinor > 0n && (
+          {customer && balanceAvailable > 0n && totalMinor > 0n && (
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -796,7 +830,7 @@ export default function POSPage() {
                   type="number"
                   min="0"
                   className="h-9 text-right"
-                  placeholder={String(minorToNumber(minBigInt(balanceAvailable, baseBucketMinor)))}
+                  placeholder={String(minorToNumber(minBigInt(balanceAvailable, totalMinor)))}
                   value={balanceInput}
                   onChange={(e) => setBalanceInput(e.target.value)}
                 />
@@ -864,27 +898,46 @@ export default function POSPage() {
             </div>
           )}
 
-          {/* Chet valyutadagi qismlar — naqd, shu valyutadagi kassaga */}
+          {/* Chet valyutadagi qismlar — naqd yoki karta, shu valyutadagi kassa/bankka */}
           {foreignBuckets.map((bucket) => (
             <div key={bucket.code} className="space-y-1">
-              <div className="flex items-center justify-between">
-                <label className="text-xs text-muted-foreground">Berilgan ({bucket.code}, naqd)</label>
-                {customer && bucket.total > 0n && (
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
-                    onClick={() => setForeignTendered((prev) => ({ ...prev, [bucket.code]: "0" }))}
-                  >
-                    Qarzga
-                  </button>
-                )}
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs text-muted-foreground">
+                  {bucket.method === "cash" ? "Berilgan" : "Karta"} ({bucket.code})
+                </label>
+                <div className="flex items-center gap-1">
+                  {(["cash", "card"] as const).map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => setForeignMethod((prev) => ({ ...prev, [bucket.code]: method }))}
+                      className={cn(
+                        "h-6 rounded-md border px-1.5 text-[11px] font-medium cursor-pointer",
+                        bucket.method === method
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-muted/30 text-muted-foreground border-border hover:bg-accent",
+                      )}
+                    >
+                      {method === "cash" ? "Naqd" : "Karta"}
+                    </button>
+                  ))}
+                  {customer && bucket.due > 0n && (
+                    <button
+                      type="button"
+                      className="ml-1 text-xs font-medium text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
+                      onClick={() => setForeignTendered((prev) => ({ ...prev, [bucket.code]: "0" }))}
+                    >
+                      Qarzga
+                    </button>
+                  )}
+                </div>
               </div>
               <Input
                 type="number"
                 min="0"
                 step="any"
                 className="text-right text-lg font-bold h-11"
-                placeholder={String(minorToNumber(bucket.total))}
+                placeholder={String(minorToNumber(bucket.due))}
                 value={foreignTendered[bucket.code] ?? ""}
                 onChange={(e) => setForeignTendered((prev) => ({ ...prev, [bucket.code]: e.target.value }))}
               />

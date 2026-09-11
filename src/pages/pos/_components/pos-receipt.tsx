@@ -119,15 +119,29 @@ export default function POSReceipt({
         qty: num(item.quantity),
         unitPrice: num(item.unitPrice),
         lineTotal: num(item.lineTotal),
+        currency: item.priceCurrency,
+        currencyTotal: num(item.currencyTotal),
       })),
       subtotal: num(order.subtotal),
       taxTotal: num(order.taxAmount),
       discountTotal: num(order.discountAmount),
       totalAmount: total,
-      // Mijoz bergan summa = chekka yozilgan to'lov + qaytim
-      paidAmount: num(paid) + changeAmount,
+      // Mijoz bergan summa = chekka yozilgan to'lov + qaytim (balansga o'tgani ham)
+      paidAmount: num(paid) + changeAmount + num(changeToBalance),
       change: changeAmount,
+      changeToBalance: num(changeToBalance),
+      debt: num(debt),
       paymentMethod: payMethod,
+      extraPayments: [
+        { label: "Keshbekdan", amount: num(cashbackUsed) },
+        { label: "Balansdan", amount: num(balanceUsed) },
+      ],
+      currencyTotals: byCurrency.map((part) => ({
+        currency: part.currency,
+        total: num(part.total),
+        paid: num(part.paid),
+        change: num(part.change),
+      })),
     });
   };
 

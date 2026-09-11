@@ -15,6 +15,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -126,6 +127,11 @@ export const posShifts = pgTable(
     totalCash: money("total_cash").notNull().default("0"),
     totalCard: money("total_card").notNull().default("0"),
     receiptCount: integer("receipt_count").notNull().default(0),
+    /** Chet valyuta bo'yicha (`{ USD: "20.00" }`): boshlang'ich naqd, naqd va karta tushumi, yopilishda sanalgan naqd. */
+    openingForeignCash: jsonb("opening_foreign_cash").$type<Record<string, string>>().notNull().default({}),
+    foreignCash: jsonb("foreign_cash").$type<Record<string, string>>().notNull().default({}),
+    foreignCard: jsonb("foreign_card").$type<Record<string, string>>().notNull().default({}),
+    closingForeignCash: jsonb("closing_foreign_cash").$type<Record<string, string>>(),
 
     notes: text("notes"),
     ...timestamps(),

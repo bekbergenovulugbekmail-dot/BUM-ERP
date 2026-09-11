@@ -133,6 +133,11 @@ export type PosShift = {
   warehouseName: string;
   /** Boshlang'ich naqd + naqd tushum. */
   expectedCash: string;
+  /** Chet valyutada: boshlang'ich naqd, naqd va karta tushumi, yopilishda sanalgan naqd — `{ USD: "20.00" }`. */
+  openingForeignCash: Record<string, string>;
+  foreignCash: Record<string, string>;
+  foreignCard: Record<string, string>;
+  closingForeignCash: Record<string, string> | null;
 };
 
 /** `/api/inventory/warehouses` — tanlash uchun kerakli maydonlar. */

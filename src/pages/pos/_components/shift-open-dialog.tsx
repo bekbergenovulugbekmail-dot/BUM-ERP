@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation } from "@/lib/query.ts";
+import { useCurrencies } from "@/hooks/use-currencies.ts";
 
 type Props = {
   warehouseId: string;
@@ -16,14 +17,22 @@ type Props = {
 export default function ShiftOpenDialog({ warehouseId, warehouseName, onClose }: Props) {
   // Kassir — tizimga kirgan foydalanuvchi (server o'zi yozadi)
   const [openingCash, setOpeningCash] = useState("");
+  const [foreignCash, setForeignCash] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState("");
   const openShift = useApiMutation((body: object) => api.post("/api/sales/pos/shifts", body));
+  const currencies = useCurrencies();
+  const foreignCodes = currencies.codes.filter((code) => code !== currencies.base);
 
   const handleOpen = async () => {
+    // Chet valyutadagi boshlang'ich naqd — faqat kiritilganlari
+    const openingForeignCash = foreignCodes
+      .map((currency) => ({ currency, amount: (foreignCash[currency] ?? "").trim() }))
+      .filter((row) => row.amount !== "" && Number(row.amount) > 0);
     try {
       await openShift.mutateAsync({
         warehouseId,
         openingCash: openingCash.trim() || "0",
+        ...(openingForeignCash.length > 0 ? { openingForeignCash } : {}),
         notes: notes.trim() || null,
       });
       toast.success("Smena ochildi");
@@ -45,6 +54,23 @@ export default function ShiftOpenDialog({ warehouseId, warehouseName, onClose }:
             <Input type="number" min="0" value={openingCash}
               onChange={(e) => setOpeningCash(e.target.value)} placeholder="0" />
           </div>
+          {foreignCodes.length > 0 && (
+            <div className="grid grid-cols-2 gap-3">
+              {foreignCodes.map((code) => (
+                <div key={code}>
+                  <Label>Boshlang'ich naqd ({code})</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={foreignCash[code] ?? ""}
+                    onChange={(e) => setForeignCash((prev) => ({ ...prev, [code]: e.target.value }))}
+                    placeholder="0"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
           <div>
             <Label>Izoh</Label>
             <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ixtiyoriy..." />

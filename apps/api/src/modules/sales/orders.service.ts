@@ -51,6 +51,7 @@ import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.se
 import { moveStock } from "../inventory/stock.service.js";
 import { reverseOrderCashback } from "./cashback.service.js";
 import { refundToBalance } from "./customer-balance.service.js";
+import { addCurrencyAmounts } from "./shift-totals.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
 import { assertProductsInScope, categoryScope, documentHasScopedItem } from "../catalog/category-scope.js";
 import { salesAudit } from "./customers.service.js";
@@ -750,6 +751,7 @@ export async function returnOrder(
       amount: customerPayments.amount,
       foreignAmount: customerPayments.foreignAmount,
       currency: customerPayments.currency,
+      method: customerPayments.method,
       cashAccountId: customerPayments.cashAccountId,
     })
     .from(customerPayments)
@@ -837,6 +839,19 @@ export async function returnOrder(
           .update(customers)
           .set({ totalDebt: sql`${customers.totalDebt} + ${payment.amount}::numeric`, updatedAt: new Date() })
           .where(eq(customers.id, order.customerId));
+      }
+      // Ochiq smenada valyuta tushumidan ayriladi (naqd — kassa sanog'i, karta — alohida)
+      if (order.posShiftId) {
+        const amounts = new Map([[payment.currency, -toMinor(payment.foreignAmount)]]);
+        await tx
+          .update(posShifts)
+          .set({
+            ...(payment.method === "card"
+              ? { foreignCard: addCurrencyAmounts(posShifts.foreignCard, amounts) }
+              : { foreignCash: addCurrencyAmounts(posShifts.foreignCash, amounts) }),
+            updatedAt: new Date(),
+          })
+          .where(and(eq(posShifts.id, order.posShiftId), eq(posShifts.status, "open")));
       }
       foreignRefunded += toMinor(payment.amount);
     }

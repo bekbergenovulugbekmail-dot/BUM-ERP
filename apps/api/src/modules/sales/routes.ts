@@ -159,12 +159,20 @@ const shiftsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(20),
 });
 const openShiftQuery = z.object({ warehouseId: z.uuid() });
+const currencyAmount = z.strictObject({ currency: currencyCode, amount: moneySchema });
 const openShiftBody = z.strictObject({
   warehouseId: z.uuid(),
   openingCash: moneySchema.default("0"),
+  /** Chet valyutadagi boshlang'ich naqd. */
+  openingForeignCash: z.array(currencyAmount).max(10).optional(),
   notes: nullableText(1000),
 });
-const closeShiftBody = z.strictObject({ closingCash: moneySchema, notes: nullableText(1000) });
+const closeShiftBody = z.strictObject({
+  closingCash: moneySchema,
+  /** Kassada sanalgan chet valyuta naqdi. */
+  closingForeignCash: z.array(currencyAmount).max(10).optional(),
+  notes: nullableText(1000),
+});
 const posSaleBody = z.strictObject({
   shiftId: z.uuid(),
   customerId: z.uuid().nullable().optional(),
@@ -176,8 +184,11 @@ const posSaleBody = z.strictObject({
   changeToBalance: z.boolean().optional(),
   /** Sotuv valyutalari; bitta chet valyuta — hamma narx shu valyutada. */
   saleCurrencies: z.array(currencyCode).min(1).max(6).optional(),
-  /** Chet valyutadagi naqd to'lovlar. */
-  currencyPayments: z.array(z.strictObject({ currency: currencyCode, amount: moneySchema })).max(6).optional(),
+  /** Chet valyutadagi to'lovlar: naqd (standart) yoki karta — shu valyutadagi kassa/bankka. */
+  currencyPayments: z
+    .array(z.strictObject({ currency: currencyCode, amount: moneySchema, method: z.enum(["cash", "card"]).optional() }))
+    .max(6)
+    .optional(),
   notes: nullableText(1000),
 });
 const posCustomerBody = z.strictObject({

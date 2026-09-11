@@ -41,6 +41,7 @@ import {
   type SalesItemRow,
 } from "./orders.service.js";
 import { recordCustomerPayment } from "./payments.service.js";
+import { addCurrencyAmounts } from "./shift-totals.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...shiftFields } = getTableColumns(posShifts);
 const expectedCashSql = sql<string>`(${posShifts.openingCash} + ${posShifts.totalCash})::numeric(18,2)`;
@@ -95,7 +96,13 @@ export async function listShifts(
 export async function openShift(
   tx: Tx,
   tenant: TenantContext,
-  input: { warehouseId: string; openingCash: string; notes?: string | null },
+  input: {
+    warehouseId: string;
+    openingCash: string;
+    /** Chet valyutadagi boshlang'ich naqd (yoqilgan qo'shimcha valyutalar). */
+    openingForeignCash?: { currency: string; amount: string }[];
+    notes?: string | null;
+  },
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
@@ -115,6 +122,18 @@ export async function openShift(
     .limit(1);
   if (existing) throw conflict("Bu omborda smena allaqachon ochiq");
 
+  // Chet valyutadagi boshlang'ich naqd — faqat yoqilgan qo'shimcha valyutalar, har biri bir marta
+  const baseCurrency = await companyCurrency(tx, companyId);
+  const openingForeignCash: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const row of input.openingForeignCash ?? []) {
+    if (row.currency === baseCurrency) throw badRequest(`${baseCurrency} dagi boshlang'ich naqd asosiy maydonda kiritiladi`);
+    if (seen.has(row.currency)) throw badRequest(`${row.currency} bir marta kiritiladi`);
+    seen.add(row.currency);
+    await currencyRate(tx, companyId, row.currency);
+    if (toMinor(row.amount) > 0n) openingForeignCash[row.currency] = fromMinor(toMinor(row.amount));
+  }
+
   const [shift] = await tx
     .insert(posShifts)
     .values({
@@ -124,6 +143,7 @@ export async function openShift(
       cashierName: tenant.user.name,
       openedAt: new Date(),
       openingCash: input.openingCash,
+      openingForeignCash,
       notes: input.notes ?? null,
     })
     .returning({ id: posShifts.id });
@@ -132,7 +152,7 @@ export async function openShift(
     action: "POS_SHIFT_OPENED",
     resource: "pos_shifts",
     resourceId: shift!.id,
-    details: { warehouseId: input.warehouseId, openingCash: input.openingCash },
+    details: { warehouseId: input.warehouseId, openingCash: input.openingCash, openingForeignCash },
   });
   return getShift(tx, tenant, shift!.id);
 }
@@ -160,7 +180,12 @@ export async function closeShift(
   tx: Tx,
   tenant: TenantContext,
   shiftId: string,
-  input: { closingCash: string; notes?: string | null },
+  input: {
+    closingCash: string;
+    /** Kassada sanalgan chet valyuta naqdi; smenada shu valyutada naqd bo'lsa — majburiy. */
+    closingForeignCash?: { currency: string; amount: string }[];
+    notes?: string | null;
+  },
   meta: RequestMeta,
 ) {
   const shift = await lockShift(tx, tenant, shiftId);
@@ -169,12 +194,36 @@ export async function closeShift(
 
   const expected = toMinor(shift.openingCash) + toMinor(shift.totalCash);
   const difference = toMinor(input.closingCash) - expected;
+
+  // Har chet valyuta alohida sanaladi: kutilgan = boshlang'ich + naqd tushum
+  const counted = new Map<string, bigint>();
+  for (const row of input.closingForeignCash ?? []) {
+    if (counted.has(row.currency)) throw badRequest(`${row.currency} bir marta kiritiladi`);
+    counted.set(row.currency, toMinor(row.amount));
+  }
+  const codes = [
+    ...new Set([...Object.keys(shift.openingForeignCash), ...Object.keys(shift.foreignCash), ...counted.keys()]),
+  ].sort();
+  const foreignCash = codes.map((currency) => {
+    const expectedAmount = toMinor(shift.openingForeignCash[currency] ?? "0") + toMinor(shift.foreignCash[currency] ?? "0");
+    const countedAmount = counted.get(currency);
+    if (countedAmount === undefined && expectedAmount !== 0n) throw badRequest(`Kassadagi ${currency} naqdini kiriting`);
+    const actual = countedAmount ?? 0n;
+    return {
+      currency,
+      expected: fromMinor(expectedAmount),
+      counted: fromMinor(actual),
+      difference: fromMinor(actual - expectedAmount),
+    };
+  });
+
   await tx
     .update(posShifts)
     .set({
       status: "closed",
       closedAt: new Date(),
       closingCash: input.closingCash,
+      closingForeignCash: foreignCash.length > 0 ? Object.fromEntries(foreignCash.map((row) => [row.currency, row.counted])) : null,
       notes: input.notes ?? shift.notes,
       updatedAt: new Date(),
     })
@@ -184,9 +233,20 @@ export async function closeShift(
     action: "POS_SHIFT_CLOSED",
     resource: "pos_shifts",
     resourceId: shiftId,
-    details: { expectedCash: fromMinor(expected), closingCash: input.closingCash, difference: fromMinor(difference) },
+    details: {
+      expectedCash: fromMinor(expected),
+      closingCash: input.closingCash,
+      difference: fromMinor(difference),
+      ...(foreignCash.length > 0 ? { foreignCash } : {}),
+    },
   });
-  return { shift: await getShift(tx, tenant, shiftId), expectedCash: fromMinor(expected), difference: fromMinor(difference) };
+  return {
+    shift: await getShift(tx, tenant, shiftId),
+    expectedCash: fromMinor(expected),
+    difference: fromMinor(difference),
+    /** Valyuta bo'yicha kutilgan, sanalgan va farq. */
+    foreignCash,
+  };
 }
 
 type SaleBucket = { currency: string; rate: string; total: bigint; base: bigint };
@@ -248,8 +308,11 @@ export async function completeSale(
     changeToBalance?: boolean;
     /** Sotuv valyutalari: mahsulot o'z narx valyutasida, u tanlanmagan bo'lsa birinchi valyutada. Standart — asosiy. */
     saleCurrencies?: string[];
-    /** Chet valyutadagi naqd to'lovlar (shu valyutadagi kassaga); asosiy valyutadagi qism — `amountPaid`. */
-    currencyPayments?: { currency: string; amount: string }[];
+    /**
+     * Chet valyutadagi to'lovlar (har valyutaga bittadan): naqd — shu valyutadagi kassaga, ortig'i qaytim;
+     * karta — shu valyutadagi bank hisobiga, qoldiqdan oshmaydi. Asosiy valyutadagi qism — `amountPaid`.
+     */
+    currencyPayments?: { currency: string; amount: string; method?: "cash" | "card" }[];
     notes?: string | null;
   },
   meta: RequestMeta,
@@ -309,20 +372,18 @@ export async function completeSale(
   if ((fromBalance > 0n || input.changeToBalance) && !input.customerId) {
     throw badRequest("Mijoz balansidan foydalanish uchun mijoz tanlanishi kerak");
   }
-  // Balans va keshbek asosiy valyutada — faqat chekning asosiy valyutadagi qismiga
-  if (fromCashback + fromBalance > baseTotal) {
-    throw badRequest(
-      baseTotal === total
-        ? "Balans va keshbekdan to'lov chek summasidan oshmasligi kerak"
-        : `Balans va keshbekdan faqat ${baseCurrency} dagi qismga to'lanadi (${fromMinor(baseTotal)})`,
-    );
-  }
+  if (fromCashback + fromBalance > total) throw badRequest("Balans va keshbekdan to'lov chek summasidan oshmasligi kerak");
   if (fromBalance > customerBalance) {
     throw badRequest(`Mijoz balansida yetarli mablag' yo'q (balans ${fromMinor(customerBalance)})`);
   }
 
+  // Balans va keshbek (asosiy valyutada): avval asosiy valyutadagi qismga, qolgani chet valyuta qismlariga — asosiy qiymatda
+  const nonCash = fromCashback + fromBalance;
+  const baseCovered = nonCash < baseTotal ? nonCash : baseTotal;
+  let uncovered = nonCash - baseCovered;
+
   // Keshbek va balansdan keyin qolgani naqd/karta bilan to'lanadi; yetmagani mijoz qarziga yoziladi
-  const due = baseTotal - fromCashback - fromBalance;
+  const due = baseTotal - baseCovered;
   const tendered = toMinor(input.amountPaid);
   if (!buckets.has(baseCurrency) && tendered > 0n) {
     throw badRequest(`Chekda ${baseCurrency} dagi mahsulot yo'q — to'lov valyuta bo'yicha kiritiladi`);
@@ -334,27 +395,53 @@ export async function completeSale(
   const change = tendered - paid;
   if (!input.customerId && paid < due) throw badRequest("Mijozsiz sotuvda chek to'liq to'lanishi kerak");
 
-  // Chet valyutadagi qismlar: naqd, shu valyutadagi kassaga; ortig'i — o'sha valyutada qaytim
-  const tenderedByCurrency = new Map<string, bigint>();
+  // Chet valyutadagi qismlar: naqd (ortig'i — o'sha valyutada qaytim) yoki karta; shu valyutadagi kassa/bankka
+  const tenderedByCurrency = new Map<string, { amount: bigint; method: "cash" | "card" }>();
   for (const payment of input.currencyPayments ?? []) {
     if (payment.currency === baseCurrency) {
       throw badRequest(`${baseCurrency} dagi to'lov asosiy to'lov maydonida kiritiladi`);
     }
     if (!buckets.has(payment.currency)) throw badRequest(`Chekda ${payment.currency} dagi mahsulot yo'q`);
-    tenderedByCurrency.set(payment.currency, (tenderedByCurrency.get(payment.currency) ?? 0n) + toMinor(payment.amount));
+    if (tenderedByCurrency.has(payment.currency)) throw badRequest(`${payment.currency} bo'yicha to'lov bir marta kiritiladi`);
+    tenderedByCurrency.set(payment.currency, { amount: toMinor(payment.amount), method: payment.method ?? "cash" });
   }
-  const foreignParts = [...buckets.values()]
-    .filter((bucket) => bucket.currency !== baseCurrency)
-    .map((bucket) => {
-      const given = tenderedByCurrency.get(bucket.currency) ?? 0n;
-      const paidInCurrency = given < bucket.total ? given : bucket.total;
-      // To'liq to'lansa — aynan valyuta qismining asosiy qiymati (yaxlitlash qoldig'isiz)
-      const paidBase =
-        paidInCurrency === bucket.total ? bucket.base : mulDivRound(paidInCurrency, toMinor(bucket.rate, 4), 10_000n);
-      return { ...bucket, given, paid: paidInCurrency, change: given - paidInCurrency, paidBase };
+  const foreignParts: (SaleBucket & {
+    method: "cash" | "card";
+    covered: bigint;
+    due: bigint;
+    dueBase: bigint;
+    paid: bigint;
+    change: bigint;
+    paidBase: bigint;
+  })[] = [];
+  for (const bucket of buckets.values()) {
+    if (bucket.currency === baseCurrency) continue;
+    const rate = toMinor(bucket.rate, 4);
+    const coveredBase = uncovered < bucket.base ? uncovered : bucket.base;
+    uncovered -= coveredBase;
+    const dueBase = bucket.base - coveredBase;
+    // Balans yopmagan qism valyutada; to'liq yopilsa yoki umuman tegilmasa — yaxlitlashsiz
+    const dueInCurrency = coveredBase === 0n ? bucket.total : dueBase === 0n ? 0n : mulDivRound(dueBase, 10_000n, rate);
+    const tender = tenderedByCurrency.get(bucket.currency) ?? { amount: 0n, method: "cash" as const };
+    if (tender.method === "card" && tender.amount > dueInCurrency) {
+      throw badRequest(`${bucket.currency} karta to'lovi qoldiqdan oshmasligi kerak (${fromMinor(dueInCurrency)})`);
+    }
+    const paidInCurrency = tender.amount < dueInCurrency ? tender.amount : dueInCurrency;
+    // To'liq to'lansa — aynan qolgan asosiy qiymat (yaxlitlash qoldig'isiz)
+    const computedBase = paidInCurrency === dueInCurrency ? dueBase : mulDivRound(paidInCurrency, rate, 10_000n);
+    foreignParts.push({
+      ...bucket,
+      method: tender.method,
+      covered: bucket.total - dueInCurrency,
+      due: dueInCurrency,
+      dueBase,
+      paid: paidInCurrency,
+      change: tender.amount - paidInCurrency,
+      paidBase: computedBase < dueBase ? computedBase : dueBase,
     });
+  }
   for (const part of foreignParts) {
-    if (!input.customerId && part.paid < part.total) {
+    if (!input.customerId && part.paid < part.due) {
       throw badRequest(`Mijozsiz sotuvda ${part.currency} qismi to'liq to'lanishi kerak`);
     }
   }
@@ -438,7 +525,7 @@ export async function completeSale(
         amount: fromMinor(part.paidBase),
         currency: part.currency,
         foreignAmount: fromMinor(part.paid),
-        method: "cash",
+        method: part.method,
         paymentDate: today,
       },
       meta,
@@ -479,6 +566,11 @@ export async function completeSale(
   }
 
   const cashIn = input.paymentMethod === "cash" ? paid + changeKept : 0n;
+  // Chet valyutadagi tushum smenada valyuta bo'yicha: naqd — kassa sanog'i uchun, karta — alohida
+  const foreignIn = (method: "cash" | "card") =>
+    new Map(foreignParts.filter((part) => part.method === method && part.paid > 0n).map((part) => [part.currency, part.paid]));
+  const foreignCashIn = foreignIn("cash");
+  const foreignCardIn = foreignIn("card");
 
   await tx
     .update(posShifts)
@@ -486,29 +578,33 @@ export async function completeSale(
       totalSales: sql`${posShifts.totalSales} + ${totals.totalAmount}::numeric`,
       ...(cashIn > 0n ? { totalCash: sql`${posShifts.totalCash} + ${fromMinor(cashIn)}::numeric` } : {}),
       ...(input.paymentMethod === "card" ? { totalCard: sql`${posShifts.totalCard} + ${paidText}::numeric` } : {}),
+      ...(foreignCashIn.size > 0 ? { foreignCash: addCurrencyAmounts(posShifts.foreignCash, foreignCashIn) } : {}),
+      ...(foreignCardIn.size > 0 ? { foreignCard: addCurrencyAmounts(posShifts.foreignCard, foreignCardIn) } : {}),
       receiptCount: sql`${posShifts.receiptCount} + 1`,
       updatedAt: new Date(),
     })
     .where(eq(posShifts.id, shift.id));
 
-  const debt = due - paid + foreignParts.reduce((sum, part) => sum + (part.base - part.paidBase), 0n);
-  // Valyuta bo'yicha natija — faqat chet valyuta qatnashgan chekda
+  const debt = due - paid + foreignParts.reduce((sum, part) => sum + (part.dueBase - part.paidBase), 0n);
+  // Valyuta bo'yicha natija — faqat chet valyuta qatnashgan chekda; `covered` — balans va keshbek yopgani (valyutada)
   const currencyTotals =
     buckets.size > 1 || !buckets.has(baseCurrency)
       ? [...buckets.values()].map((bucket) => {
           const part = foreignParts.find((p) => p.currency === bucket.currency);
-          return bucket.currency === baseCurrency
+          return part
             ? {
                 currency: bucket.currency,
                 total: fromMinor(bucket.total),
-                paid: fromMinor(paid + fromBalance + fromCashback),
-                change: fromMinor(change),
+                covered: fromMinor(part.covered),
+                paid: fromMinor(part.paid),
+                change: fromMinor(part.change),
               }
             : {
                 currency: bucket.currency,
                 total: fromMinor(bucket.total),
-                paid: fromMinor(part?.paid ?? 0n),
-                change: fromMinor(part?.change ?? 0n),
+                covered: fromMinor(baseCovered),
+                paid: fromMinor(paid),
+                change: fromMinor(change),
               };
         })
       : [];
