@@ -18,9 +18,16 @@ server {
   gzip on;
   gzip_types text/css application/javascript application/json image/svg+xml;
 
+  # API manzili har so'rovda DNS orqali aniqlanadi (o'zgaruvchi orqali proxy_pass): API qayta deploy
+  # bo'lib ichki IP o'zgarsa ham, web API'dan oldin ishga tushsa ham nginx yiqilmaydi.
+  # NGINX_LOCAL_RESOLVERS — konteynerning /etc/resolv.conf dan (Dockerfile.web dagi ENV yoqadi).
+  resolver ${NGINX_LOCAL_RESOLVERS} valid=10s;
+
   # API — bir domen: cookie SameSite muammosiz, CORS kerak emas
   location /api/ {
-    proxy_pass ${API_UPSTREAM};
+    set $api_upstream ${API_UPSTREAM};
+    # URI qismisiz o'zgaruvchi — asl so'rov yo'li (/api/...) o'zgarmay uzatiladi
+    proxy_pass $api_upstream;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

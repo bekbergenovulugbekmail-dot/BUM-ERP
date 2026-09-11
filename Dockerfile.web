@@ -19,7 +19,8 @@ RUN pnpm exec vite build
 FROM nginx:1.29-alpine AS runtime
 # Railway PORT beradi; lokal — 80. API_UPSTREAM — API xizmatining ichki manzili.
 ENV PORT=80 \
-    API_UPSTREAM=http://api:3000
+    API_UPSTREAM=http://api:3000 \
+    NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
 COPY deploy/nginx/default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80
