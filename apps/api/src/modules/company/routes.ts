@@ -353,8 +353,13 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
     const { key } = settingParams.parse(req.params);
     const body = settingBody.parse(req.body);
     // Tekshiruvsiz JSON yozilmasin — chop etish va keshbek sozlamalarining o'z endpointlari bor
-    if (key.startsWith("print.") || key.startsWith("loyalty.") || key.startsWith("currency.")) {
-      throw badRequest("Bu sozlama o'z bo'limi orqali saqlanadi (chek/etiketka, keshbek yoki valyutalar)");
+    if (
+      key.startsWith("print.") ||
+      key.startsWith("loyalty.") ||
+      key.startsWith("currency.") ||
+      key.startsWith("sales_agent.")
+    ) {
+      throw badRequest("Bu sozlama o'z bo'limi orqali saqlanadi (chek/etiketka, keshbek, valyutalar yoki agent siyosati)");
     }
     const { user } = authOf(req);
     const setting = await withTransaction(async (tx) => {

@@ -9,7 +9,8 @@ import { formatMoney } from "@/hooks/use-currencies.ts";
 import { cn } from "@/lib/utils.ts";
 import EmptyState from "../_components/empty-state.tsx";
 import LocationBanner from "../_components/location-banner.tsx";
-import { originParams, useCurrentPosition } from "../_lib/use-current-position.ts";
+import VisitPanel from "../_components/visit-panel.tsx";
+import { originParams, useAgentLocation } from "../_lib/agent-location.ts";
 import { formatDistance, num, type AgentMe, type StoreProfile } from "../_lib/types.ts";
 
 /** Do'kon profili: aloqa, qarz va kredit, buyurtmalar, tashrif kunlari, masofa. */
@@ -17,7 +18,7 @@ export default function AgentStorePage() {
   const { t } = useTranslation("agent");
   const { lng = "uz", customerId } = useParams<{ lng: string; customerId: string }>();
   const { company } = useOutletContext<AgentMe>();
-  const position = useCurrentPosition();
+  const position = useAgentLocation();
   const query = useApiQuery<{ store: StoreProfile }>(
     position.status === "locating" || !customerId ? null : `/api/sales-agent/stores/${customerId}`,
     originParams(position),
@@ -67,7 +68,8 @@ export default function AgentStorePage() {
         <p className="text-xs text-muted-foreground">{store.code} · {store.routes.map((route) => route.name).join(", ")}</p>
       </div>
 
-      <LocationBanner position={position} onRequest={position.request} />
+      <LocationBanner location={position} />
+      <VisitPanel store={store} />
 
       <div className="rounded-2xl border border-border bg-card p-4 space-y-2.5 text-sm">
         {store.contactName && (

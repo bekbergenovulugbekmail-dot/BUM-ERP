@@ -1,26 +1,40 @@
 import { useState } from "react";
 import { motion } from "motion/react";
+import { useTranslation } from "react-i18next";
 import {
-  Truck, Route, Users, CalendarRange,
+  Truck, Route, Users, CalendarRange, Radar, SlidersHorizontal, ClipboardCheck,
   MapPinned, UserCheck, CalendarCheck, CircleDollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import { useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
 import RoutesSection from "./_components/routes-section.tsx";
 import AssignmentsSection from "./_components/assignments-section.tsx";
 import SalesRepsSection from "./_components/sales-reps-section.tsx";
+import MonitoringSection from "./_components/monitoring-section.tsx";
+import VisitsSection from "./_components/visits-section.tsx";
+import AgentPolicySection from "./_components/agent-policy-section.tsx";
 import { num, type DistributionRoute, type SalesRepStats } from "./_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
-const TABS = [
-  { key: "routes", label: "Marshrutlar", icon: Route },
-  { key: "assignments", label: "Hudud va kun", icon: CalendarRange },
-  { key: "reps", label: "Savdo agentlari", icon: Users },
-] as const;
+type TabKey = "routes" | "assignments" | "reps" | "visits" | "monitoring" | "policy";
 
 export default function DistributionPage() {
-  const [tab, setTab] = useState<typeof TABS[number]["key"]>("routes");
+  const { t } = useTranslation("distribution");
+  const { can } = usePermissions();
+  const [tab, setTab] = useState<TabKey>("routes");
+
+  const tabs = [
+    { key: "routes" as const, icon: Route, visible: true },
+    { key: "assignments" as const, icon: CalendarRange, visible: true },
+    { key: "reps" as const, icon: Users, visible: true },
+    // Tashriflar va siyosat — nazorat ruxsati; lokatsiya — alohida ruxsat (Supervayzer)
+    { key: "visits" as const, icon: ClipboardCheck, visible: can("sales_agent.supervise") },
+    { key: "monitoring" as const, icon: Radar, visible: can("sales_agent.location.view") },
+    { key: "policy" as const, icon: SlidersHorizontal, visible: can("sales_agent.supervise") },
+  ].filter((item) => item.visible);
+  const activeTab = tabs.some((item) => item.key === tab) ? tab : "routes";
 
   const routes = useApiQuery<{ routes: DistributionRoute[] }>("/api/distribution/routes").data?.routes;
   const reps = useApiQuery<{ salesReps: SalesRepStats[] }>("/api/distribution/sales-reps/stats").data?.salesReps;
@@ -31,33 +45,33 @@ export default function DistributionPage() {
 
   const statsCards = [
     {
-      label: "Faol marshrutlar",
+      label: t("stats.routes"),
       value: routes?.length ?? 0,
-      sub: `${storeCount} ta do'kon`,
+      sub: t("stats.stores", { count: storeCount }),
       icon: MapPinned,
       color: "text-emerald-500",
       bg: "bg-emerald-500/10",
     },
     {
-      label: "Savdo agentlari",
+      label: t("stats.reps"),
       value: reps?.length ?? 0,
-      sub: "Faol",
+      sub: t("stats.active"),
       icon: UserCheck,
       color: "text-blue-500",
       bg: "bg-blue-500/10",
     },
     {
-      label: "Tashriflar",
+      label: t("stats.visits"),
       value: visitsThisMonth,
-      sub: "Bu oy yakunlangan",
+      sub: t("stats.visits_sub"),
       icon: CalendarCheck,
       color: "text-indigo-500",
       bg: "bg-indigo-500/10",
     },
     {
-      label: "Tashrif savdosi",
+      label: t("stats.visit_sales"),
       value: fmt(visitSales) + " so'm",
-      sub: "Bu oy",
+      sub: t("stats.this_month"),
       icon: CircleDollarSign,
       color: "text-amber-500",
       bg: "bg-amber-500/10",
@@ -65,7 +79,7 @@ export default function DistributionPage() {
   ];
 
   return (
-    <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
+    <div className="p-4 md:p-6 space-y-6 max-w-[1600px] mx-auto">
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
@@ -76,8 +90,8 @@ export default function DistributionPage() {
           <Truck className="h-5 w-5 text-emerald-500" />
         </div>
         <div>
-          <h1 className="text-xl font-bold">Distributsiya</h1>
-          <p className="text-sm text-muted-foreground">Marshrutlar, savdo agentlari va tashriflar</p>
+          <h1 className="text-xl font-bold">{t("title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
         </div>
       </motion.div>
 
@@ -109,21 +123,21 @@ export default function DistributionPage() {
       </motion.div>
 
       {/* Tabs */}
-      <div className="border-b border-border">
+      <div className="border-b border-border overflow-x-auto">
         <div className="flex gap-1">
-          {TABS.map((t) => (
+          {tabs.map((item) => (
             <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
+              key={item.key}
+              onClick={() => setTab(item.key)}
               className={cn(
-                "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-all cursor-pointer",
-                tab === t.key
+                "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-all cursor-pointer whitespace-nowrap",
+                activeTab === item.key
                   ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               )}
             >
-              <t.icon className="h-4 w-4" />
-              {t.label}
+              <item.icon className="h-4 w-4" />
+              {t(`tabs.${item.key}`)}
             </button>
           ))}
         </div>
@@ -131,14 +145,17 @@ export default function DistributionPage() {
 
       {/* Tab content */}
       <motion.div
-        key={tab}
+        key={activeTab}
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.15 }}
       >
-        {tab === "routes" && <RoutesSection />}
-        {tab === "assignments" && <AssignmentsSection />}
-        {tab === "reps" && <SalesRepsSection />}
+        {activeTab === "routes" && <RoutesSection />}
+        {activeTab === "assignments" && <AssignmentsSection />}
+        {activeTab === "reps" && <SalesRepsSection />}
+        {activeTab === "visits" && <VisitsSection />}
+        {activeTab === "monitoring" && <MonitoringSection />}
+        {activeTab === "policy" && <AgentPolicySection />}
       </motion.div>
     </div>
   );

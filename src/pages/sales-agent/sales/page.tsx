@@ -1,30 +1,42 @@
-import { useOutletContext, useParams } from "react-router-dom";
+import { Link, useOutletContext, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Route as RouteIcon, CalendarDays, Store } from "lucide-react";
+import { Route as RouteIcon, CalendarDays, Store, Clock, ChevronRight } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { useApiQuery } from "@/lib/query.ts";
 import EmptyState from "../_components/empty-state.tsx";
 import LocationBanner from "../_components/location-banner.tsx";
 import StoreCard from "../_components/store-card.tsx";
-import { originParams, useCurrentPosition } from "../_lib/use-current-position.ts";
-import type { AgentMe, AgentToday } from "../_lib/types.ts";
+import { originParams, useAgentLocation } from "../_lib/agent-location.ts";
+import type { AgentMe, AgentToday, AgentVisit } from "../_lib/types.ts";
 
 /** Sotuv: bugungi marshrut va do'konlar (marshrut tartibida). */
 export default function AgentSalesPage() {
   const { t } = useTranslation("agent");
   const { lng = "uz" } = useParams<{ lng: string }>();
   const { company } = useOutletContext<AgentMe>();
-  const position = useCurrentPosition();
+  const position = useAgentLocation();
   // Joy aniqlanguncha kutiladi — masofa bir so'rovda keladi
   const today = useApiQuery<AgentToday>(
     position.status === "locating" ? null : "/api/sales-agent/today",
     originParams(position),
   ).data;
   const deliveryDate = today?.routes.find((route) => route.deliveryDate)?.deliveryDate;
+  const openVisit = useApiQuery<{ visit: AgentVisit | null }>("/api/sales-agent/visits/current").data?.visit;
 
   return (
     <div className="p-4 space-y-4">
-      <LocationBanner position={position} onRequest={position.request} />
+      <LocationBanner location={position} />
+      {openVisit && (
+        <Link
+          to={`/${lng}/sales-agent/stores/${openVisit.customerId}`}
+          className="flex items-center gap-3 rounded-2xl border-2 border-primary/40 bg-primary/5 p-4 active:bg-primary/10"
+        >
+          <Clock className="h-5 w-5 text-primary shrink-0" />
+          <span className="flex-1 min-w-0 text-sm font-semibold truncate">{t("visit.open_banner", { store: openVisit.customerName })}</span>
+          <span className="text-sm font-medium text-primary">{t("visit.continue")}</span>
+          <ChevronRight className="h-4 w-4 text-primary" />
+        </Link>
+      )}
 
       {!today ? (
         <div className="space-y-3">

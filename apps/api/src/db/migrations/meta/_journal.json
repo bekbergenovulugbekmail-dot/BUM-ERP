@@ -155,6 +155,20 @@
       "when": 1789166022717,
       "tag": "0021_agent_stores_assignments",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1789167369233,
+      "tag": "0022_agent_locations",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789169336211,
+      "tag": "0023_agent_visits",
+      "breakpoints": true
     }
   ]
 }

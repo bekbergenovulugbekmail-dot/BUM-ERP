@@ -86,6 +86,104 @@ export type RouteAssignment = {
 
 export type CustomerOption = { id: string; name: string; phone: string | null };
 
+// ─── Supervayzer: /api/sales-agent/supervisor/* ─────────────────────────────
+
+export type LocationEventType =
+  | "permission_denied"
+  | "update_failure"
+  | "low_accuracy"
+  | "stale"
+  | "invalid"
+  | "jump"
+  | "mock"
+  | "geofence_block";
+
+/** `GET /supervisor/agents` — faol agent, oxirgi joyi (bo'lmasa null) va bugungi marshruti. */
+export type SupervisedAgent = {
+  id: string;
+  name: string;
+  code: string;
+  phone: string | null;
+  region: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  accuracy: string | null;
+  recordedAt: string | null;
+  receivedAt: string | null;
+  suspicious: boolean | null;
+  hasLogin: boolean;
+  online: boolean;
+  todayRoutes: { id: string; name: string; deliveryDate: string | null }[];
+};
+
+/** `GET /supervisor/live`. */
+export type LiveLocations = {
+  locations: {
+    salesRepId: string;
+    name: string;
+    latitude: string;
+    longitude: string;
+    accuracy: string | null;
+    recordedAt: string;
+    receivedAt: string;
+    suspicious: boolean;
+  }[];
+  serverTime: string;
+};
+
+export type LocationEvent = {
+  id: string;
+  salesRepId?: string;
+  salesRepName?: string;
+  type: LocationEventType;
+  latitude: string | null;
+  longitude: string | null;
+  accuracy: string | null;
+  details: Record<string, unknown> | null;
+  occurredAt: string;
+};
+
+export type NoOrderReason = "no_money" | "has_stock" | "has_debt" | "owner_absent" | "competitor" | "price" | "other";
+export type VisitPhotoKind = "storefront" | "shelf" | "placement" | "promotion";
+
+/** `GET /supervisor/visits` — do'konga tashriflar. */
+export type SupervisorVisit = {
+  id: string;
+  salesRepId: string;
+  salesRepName: string;
+  customerId: string;
+  customerName: string;
+  visitDate: string;
+  status: "in_progress" | "completed";
+  result: "ordered" | "no_order" | null;
+  startedAt: string;
+  completedAt: string | null;
+  durationSeconds: number | null;
+  startDistanceMeters: number | null;
+  endDistanceMeters: number | null;
+  noOrderReason: NoOrderReason | null;
+  noOrderComment: string | null;
+  notes: string | null;
+  photos: { id: string; kind: VisitPhotoKind; takenAt: string }[];
+};
+
+export type VisitsSummary = {
+  total: number;
+  inProgress: number;
+  ordered: number;
+  noOrder: number;
+  reasons: Partial<Record<NoOrderReason, number>>;
+};
+
+/** `GET /supervisor/agents/:id/history?date=`. */
+export type AgentLocationHistory = {
+  agent: { id: string; name: string; code: string };
+  date: string;
+  points: { latitude: string; longitude: string; accuracy: string | null; recordedAt: string; suspicious: boolean }[];
+  events: LocationEvent[];
+  truncated: boolean;
+};
+
 /** Numeric satr → son (faqat ko'rsatish uchun). */
 export const num = (value: string | number | null | undefined): number => Number(value ?? 0) || 0;
 

@@ -28,8 +28,13 @@ export const DUE_SOON_DAYS = 3;
 
 export type TodayRoute = { id: string; name: string; color: string | null; days: number[]; deliveryDate: string | null };
 
-/** Bugungi marshrutlar: shu kunga biriktirish ustun, bo'lmasa hafta kuni bo'yicha o'z marshrutlari. */
-export async function todayRoutes(conn: DbOrTx, context: AgentContext, date = todayIso()): Promise<TodayRoute[]> {
+/** Agentning shu kungi marshrutlari (agent ish joyi va supervayzer ko'rinishi uchun). */
+export function todayRoutes(conn: DbOrTx, context: AgentContext, date = todayIso()): Promise<TodayRoute[]> {
+  return routesForAgent(conn, context.company.id, context.agent.id, date);
+}
+
+/** Shu kunga biriktirish ustun, bo'lmasa hafta kuni bo'yicha agentning o'z marshrutlari. */
+export async function routesForAgent(conn: DbOrTx, companyId: string, salesRepId: string, date = todayIso()): Promise<TodayRoute[]> {
   const assigned = await conn
     .select({
       id: distributionRoutes.id,
@@ -42,8 +47,8 @@ export async function todayRoutes(conn: DbOrTx, context: AgentContext, date = to
     .innerJoin(distributionRoutes, eq(distributionRoutes.id, routeAssignments.routeId))
     .where(
       and(
-        eq(routeAssignments.companyId, context.company.id),
-        eq(routeAssignments.salesRepId, context.agent.id),
+        eq(routeAssignments.companyId, companyId),
+        eq(routeAssignments.salesRepId, salesRepId),
         eq(routeAssignments.assignDate, date),
         eq(distributionRoutes.isActive, true),
       ),
@@ -56,8 +61,8 @@ export async function todayRoutes(conn: DbOrTx, context: AgentContext, date = to
     .from(distributionRoutes)
     .where(
       and(
-        eq(distributionRoutes.companyId, context.company.id),
-        eq(distributionRoutes.salesRepId, context.agent.id),
+        eq(distributionRoutes.companyId, companyId),
+        eq(distributionRoutes.salesRepId, salesRepId),
         eq(distributionRoutes.isActive, true),
         sql`${weekday(date)} = any("distribution_routes"."days")`,
         sql`not exists (select 1 from "route_assignments" ra where ra."route_id" = "distribution_routes"."id" and ra."assign_date" = ${date})`,
@@ -194,6 +199,13 @@ export async function agentStores(
     stores.sort((a, b) => (a.distanceMeters ?? Number.POSITIVE_INFINITY) - (b.distanceMeters ?? Number.POSITIVE_INFINITY));
   }
   return stores;
+}
+
+/** Agentga ochiq do'kon (boshqasi — 404): tashrif va buyurtma shu tekshiruvdan o'tadi. */
+export async function accessibleStore(conn: DbOrTx, context: AgentContext, customerId: string): Promise<AgentStore> {
+  const [store] = await storesOnRoutes(conn, context, await assignedRouteIds(conn, context), { customerId });
+  if (!store) throw notFound("Do'kon topilmadi");
+  return store;
 }
 
 /** Do'kon profili — faqat agentga ochiq bo'lsa. */

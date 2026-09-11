@@ -33,6 +33,37 @@ export type AgentStore = {
   lastOrderDate: string | null;
   /** Server hisoblagan masofa (metr); joy yoki do'kon koordinatasi bo'lmasa null. */
   distanceMeters: number | null;
+  /** Faqat bugungi marshrutda (`/today`): shu kungi tashrif holati. */
+  visitStatus?: StoreVisitStatus;
+};
+
+/** Bugungi marshrutdagi do'kon holati. */
+export type StoreVisitStatus = "waiting" | "in_progress" | "ordered" | "visited_no_order";
+
+export const NO_ORDER_REASONS = ["no_money", "has_stock", "has_debt", "owner_absent", "competitor", "price", "other"] as const;
+export type NoOrderReason = (typeof NO_ORDER_REASONS)[number];
+
+export const PHOTO_KINDS = ["storefront", "shelf", "placement", "promotion"] as const;
+export type PhotoKind = (typeof PHOTO_KINDS)[number];
+
+/** `/api/sales-agent/visits/*` — do'konga tashrif. */
+export type AgentVisit = {
+  id: string;
+  customerId: string;
+  customerName: string;
+  routeId: string | null;
+  visitDate: string;
+  status: "in_progress" | "completed";
+  result: "ordered" | "no_order" | null;
+  startedAt: string;
+  completedAt: string | null;
+  durationSeconds: number | null;
+  startDistanceMeters: number | null;
+  endDistanceMeters: number | null;
+  noOrderReason: NoOrderReason | null;
+  noOrderComment: string | null;
+  notes: string | null;
+  photos: { id: string; kind: PhotoKind; takenAt: string }[];
 };
 
 export type TodayRoute = { id: string; name: string; color: string | null; days: number[]; deliveryDate: string | null };
@@ -54,12 +85,24 @@ export type StoreProfile = AgentStore & {
   visitDays: number[];
   ordersLast90Days: { count: number; total: string };
   recentOrders: { id: string; number: string; orderDate: string; status: OrderStatus; totalAmount: string; paidAmount: string }[];
+  /** Agentning shu do'konga bugungi oxirgi tashrifi. */
+  todayVisit: AgentVisit | null;
 };
 
 export type DebtorStatus = "overdue" | "today" | "soon" | "later" | "unscheduled";
 export type Debtor = AgentStore & { dueDate: string | null; daysOverdue: number | null; status: DebtorStatus };
 
 export const num = (value: string | number | null | undefined): number => Number(value ?? 0) || 0;
+
+/** Taymer: "4:05", "1:02:09". */
+export function formatClock(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
 
 /** "87 m", "1,7 km". */
 export function formatDistance(meters: number | null, t: TFunction<"agent">): string | null {

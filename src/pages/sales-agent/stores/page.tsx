@@ -9,7 +9,7 @@ import { useDebounce } from "@/hooks/use-debounce.ts";
 import EmptyState from "../_components/empty-state.tsx";
 import LocationBanner from "../_components/location-banner.tsx";
 import StoreCard from "../_components/store-card.tsx";
-import { originParams, useCurrentPosition } from "../_lib/use-current-position.ts";
+import { originParams, useAgentLocation } from "../_lib/agent-location.ts";
 import type { AgentMe, AgentStore } from "../_lib/types.ts";
 
 /** Agentga ochiq barcha do'konlar: qidiruv (nom, telefon, manzil), joy aniq bo'lsa — yaqinidan. */
@@ -17,7 +17,7 @@ export default function AgentStoresPage() {
   const { t } = useTranslation("agent");
   const { lng = "uz" } = useParams<{ lng: string }>();
   const { company } = useOutletContext<AgentMe>();
-  const position = useCurrentPosition();
+  const position = useAgentLocation();
   const [search, setSearch] = useState("");
   const [debounced] = useDebounce(search.trim(), 300);
 
@@ -29,7 +29,7 @@ export default function AgentStoresPage() {
 
   return (
     <div className="p-4 space-y-4">
-      <LocationBanner position={position} onRequest={position.request} />
+      <LocationBanner location={position} />
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
         <Input

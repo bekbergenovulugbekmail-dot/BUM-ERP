@@ -21,8 +21,8 @@ import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import type { StorageClient } from "../../shared/storage.js";
 import type { TenantContext } from "../company/tenant.js";
 
-const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
-const MB = 1024 * 1024;
+export const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+export const MB = 1024 * 1024;
 
 export const FILE_KINDS = {
   "product-image": { maxBytes: 5 * MB, types: IMAGE_TYPES, manage: "products.edit", view: "products.view" },
@@ -40,10 +40,47 @@ const EXTENSIONS: Record<string, string> = {
 };
 
 const UPLOAD_TTL = 600;
-const VIEW_TTL = 300;
+export const VIEW_TTL = 300;
 
 export function keyPrefix(companyId: string, kind: FileKind) {
   return `companies/${companyId}/${kind}/`;
+}
+
+export type UploadRules = { maxBytes: number; types: readonly string[] };
+
+/** Imzolangan PUT URL: tur va hajm tekshiriladi, kalit — prefiks + tasodifiy UUID. */
+export function signUpload(client: StorageClient, prefix: string, rules: UploadRules, input: { contentType: string; size: number }) {
+  if (!rules.types.includes(input.contentType)) {
+    throw badRequest(`Fayl turi ruxsat etilmagan: ${rules.types.join(", ")}`);
+  }
+  if (input.size > rules.maxBytes) throw badRequest(`Fayl hajmi ${rules.maxBytes / MB} MB dan oshmasligi kerak`);
+
+  const key = `${prefix}${randomUUID()}.${EXTENSIONS[input.contentType]}`;
+  return {
+    key,
+    uploadUrl: client.signedUrl("PUT", key, UPLOAD_TTL, input.contentType),
+    method: "PUT" as const,
+    headers: { "content-type": input.contentType },
+    expiresIn: UPLOAD_TTL,
+  };
+}
+
+/** Kalit shu prefiks ostida `signUpload` yaratgan ko'rinishda bo'lishi shart (boshqa kompaniya yoki tur kaliti — rad). */
+export function assertUploadKey(prefix: string, key: string) {
+  const name = key.startsWith(prefix) ? key.slice(prefix.length) : "";
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp|pdf)$/.test(name)) {
+    throw badRequest("Fayl kaliti noto'g'ri");
+  }
+}
+
+/** Fayl haqiqatan yuklangan, hajmi va turi qoidaga mos. */
+export async function headUpload(client: StorageClient, rules: UploadRules, key: string) {
+  const stored = await client.head(key);
+  if (!stored) throw badRequest("Fayl yuklanmagan yoki yuklash muddati o'tgan");
+  if (stored.size > rules.maxBytes) throw badRequest(`Fayl hajmi ${rules.maxBytes / MB} MB dan oshmasligi kerak`);
+  const storedType = stored.contentType?.split(";")[0]?.trim();
+  if (storedType && !rules.types.includes(storedType)) throw badRequest("Fayl turi ruxsat etilmagan");
+  return stored;
 }
 
 const targets = {
@@ -77,20 +114,7 @@ export function createUpload(
   input: { kind: FileKind; contentType: string; size: number },
   client: StorageClient,
 ) {
-  const rules = FILE_KINDS[input.kind];
-  if (!(rules.types as readonly string[]).includes(input.contentType)) {
-    throw badRequest(`Fayl turi ruxsat etilmagan: ${rules.types.join(", ")}`);
-  }
-  if (input.size > rules.maxBytes) throw badRequest(`Fayl hajmi ${rules.maxBytes / MB} MB dan oshmasligi kerak`);
-
-  const key = `${keyPrefix(tenant.company.id, input.kind)}${randomUUID()}.${EXTENSIONS[input.contentType]}`;
-  return {
-    key,
-    uploadUrl: client.signedUrl("PUT", key, UPLOAD_TTL, input.contentType),
-    method: "PUT" as const,
-    headers: { "content-type": input.contentType },
-    expiresIn: UPLOAD_TTL,
-  };
+  return signUpload(client, keyPrefix(tenant.company.id, input.kind), FILE_KINDS[input.kind], input);
 }
 
 export async function attachFile(
@@ -100,19 +124,9 @@ export async function attachFile(
   client: StorageClient,
   meta: RequestMeta,
 ) {
-  const rules = FILE_KINDS[input.kind];
-  const prefix = keyPrefix(tenant.company.id, input.kind);
-  const name = input.key.startsWith(prefix) ? input.key.slice(prefix.length) : "";
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp|pdf)$/.test(name)) {
-    throw badRequest("Fayl kaliti noto'g'ri");
-  }
-
+  assertUploadKey(keyPrefix(tenant.company.id, input.kind), input.key);
   const previous = await loadTarget(tx, tenant, input.kind, input.targetId, true);
-  const stored = await client.head(input.key);
-  if (!stored) throw badRequest("Fayl yuklanmagan yoki yuklash muddati o'tgan");
-  if (stored.size > rules.maxBytes) throw badRequest(`Fayl hajmi ${rules.maxBytes / MB} MB dan oshmasligi kerak`);
-  const storedType = stored.contentType?.split(";")[0]?.trim();
-  if (storedType && !(rules.types as readonly string[]).includes(storedType)) throw badRequest("Fayl turi ruxsat etilmagan");
+  const stored = await headUpload(client, FILE_KINDS[input.kind], input.key);
 
   await saveTarget(tx, input.kind, input.targetId, input.key);
   await writeAuditLog(

@@ -3,7 +3,13 @@ import { useTranslation } from "react-i18next";
 import { Store, MapPin, Navigation, ChevronRight } from "lucide-react";
 import { formatMoney } from "@/hooks/use-currencies.ts";
 import { cn } from "@/lib/utils.ts";
-import { formatDistance, num, type AgentStore } from "../_lib/types.ts";
+import { formatDistance, num, type AgentStore, type StoreVisitStatus } from "../_lib/types.ts";
+
+const VISIT_TONES: Record<Exclude<StoreVisitStatus, "waiting">, string> = {
+  in_progress: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
+  ordered: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  visited_no_order: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+};
 
 type Props = {
   store: AgentStore;
@@ -27,7 +33,14 @@ export default function StoreCard({ store, to, currency, index, footer }: Props)
         {index ?? <Store className="h-5 w-5" />}
       </div>
       <div className="min-w-0 flex-1 space-y-1">
-        <p className="font-semibold truncate">{store.name}</p>
+        <div className="flex items-center gap-2 min-w-0">
+          <p className="font-semibold truncate">{store.name}</p>
+          {store.visitStatus && store.visitStatus !== "waiting" && (
+            <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium", VISIT_TONES[store.visitStatus])}>
+              {t(`visit.status.${store.visitStatus}`)}
+            </span>
+          )}
+        </div>
         {store.address && (
           <p className="flex items-center gap-1 text-xs text-muted-foreground truncate">
             <MapPin className="h-3 w-3 shrink-0" /> {store.address}

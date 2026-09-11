@@ -1,0 +1,5 @@
+{
+  "not_configured.title": "Xarita kaliti sozlanmagan",
+  "not_configured.message": "Yandex Maps API kalitini VITE_YANDEX_MAPS_API_KEY sifatida sozlang. Ro'yxat xaritasiz ishlayveradi.",
+  "load_failed": "Xaritani yuklab bo'lmadi"
+}

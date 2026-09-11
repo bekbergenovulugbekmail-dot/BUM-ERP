@@ -14,6 +14,10 @@ COPY apps/api/package.json apps/api/
 COPY packages/shared/package.json packages/shared/
 RUN pnpm install --frozen-lockfile
 COPY . .
+# Xarita kaliti build vaqtida bundle'ga kiradi (Railway xizmat o'zgaruvchisi build arg sifatida uzatiladi).
+# Bo'sh bo'lsa — xarita o'rniga tushuntirish, ro'yxatlar ishlayveradi. Kalitni Yandex kabinetida domen bilan cheklang.
+ARG VITE_YANDEX_MAPS_API_KEY=""
+ENV VITE_YANDEX_MAPS_API_KEY=$VITE_YANDEX_MAPS_API_KEY
 RUN pnpm exec vite build
 
 FROM nginx:1.29-alpine AS runtime

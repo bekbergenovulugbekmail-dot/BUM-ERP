@@ -661,7 +661,7 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - inventarizatsiya qo'llanganda ortiqcha — 4100, kamomad — 5500 (bitta jurnal yozuvi)
   - moliya dashboardi: oylik tushum/chiqim valyutali kassalardan joriy kurs bilan asosiy valyutada
   - tizimdan chiqish (`logout`) audit jurnaliga yoziladi (kirish va xato urinish avval ham yozilardi)
-- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `sales-currency` (2), `distribution` (4), `inventory-journal` (1), `sales-agent` (3), `sales-agent-stores` (2); API jami 234 (49 fayl)
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `sales-currency` (2), `distribution` (4), `inventory-journal` (1), `sales-agent` (3), `sales-agent-stores` (2), `sales-agent-location` (3 — sifat va shubhali nuqtalar, supervayzer ruxsatlari va kompaniya chegarasi, siyosat va saqlash muddati), `sales-agent-visits` (2 — geofence/sifat/ochiq tashrif/sabab, rasmlar va supervayzer ro'yxati); API jami 239 (51 fayl)
 
 ## Sotuv agenti loyihasi (2026-09-12)
 
@@ -673,9 +673,9 @@ xarita — Yandex Maps (`MapProvider` orqasida, kalit env'da), lokatsiya — avv
 | A | CRM va Distributsiya alohida; `distribution.*` ruxsatlari; menyu ruxsat bo'yicha | ✅ |
 | L | Oldingi bosqichlar cheklovlarini bartaraf etish (valyuta, smena, PDF, dashboard, ombor kirimi jurnali) | ✅ L1 `39f6192`, L2 `0494db5`, L3 `0f54442` |
 | B | Sotuv agenti va Supervayzer rollari; agent ish joyi (mobil, 5 bo'lim, uz/ru/kk) | ✅ |
-| C | Do'kon koordinatasi; sana bo'yicha hudud/marshrut; do'konlar, profil, qarzdorlar | ✅ |
-| D | Lokatsiya kuzatuvi, sifat tekshiruvi, saqlash muddati; supervayzer xaritasi | |
-| E | Tashrif: boshlash/yakunlash, buyurtmasiz sabab, rasm | |
+| C | Do'kon koordinatasi; sana bo'yicha hudud/marshrut; do'konlar, profil, qarzdorlar | ✅ `61f648b` |
+| D | Lokatsiya kuzatuvi, sifat tekshiruvi, saqlash muddati; supervayzer xaritasi | ✅ |
+| E | Tashrif: boshlash/yakunlash, buyurtmasiz sabab, rasm | ✅ |
 | F | Katalog, dona/blok, draft (idempotent), yetkazish kuni, nasiya, kredit limiti, geofence bilan buyurtma | |
 | G | Aksiyalar (serverda hisoblash) | |
 | H | Agent dashboardi, prospektlar, supervayzer tafsiloti va lokatsiya tarixi | |
@@ -706,6 +706,29 @@ xarita — Yandex Maps (`MapProvider` orqasida, kalit env'da), lokatsiya — avv
   - masofa serverda (haversine, `shared/geo.ts`), agent `lat`/`lng` yuboradi
 - web agent: Sotuv — bugungi marshrut, do'konlar kartalari (qarz, masofa), yetkazish kuni; Do'konlar — qidiruv, yaqinidan; do'kon profili (qo'ng'iroq, xaritada ochish); Qarzdorlar — filtrlar va kechikish kunlari; lokatsiya holati (faol/aniqlanmoqda/"lokatsiyani yoqish")
 
+**D — Lokatsiya kuzatuvi va monitoring** (migratsiya 0022):
+- jadvallar: `agent_locations` (nuqtalar), `agent_location_latest` (har agentning oxirgi joyi, bitta qator), `agent_location_events` (rad etishlar va shubhali holatlar; enum `agent_location_event_type`)
+- siyosat `sales_agent.policy` (kompaniya sozlamasi, `@bum/shared` `DEFAULT_SALES_AGENT_POLICY` bilan birlashtiriladi): geofence radiusi 200 m, GPS aniqligi ≤100 m, lokatsiya yoshi ≤120 s, kuzatuv oralig'i 60 s, sakrash tezligi 150 km/soat, saqlash 90 kun, tashrif rasmi, yetkazish kuni rejimi, nasiya muddati, kredit limiti siyosati (oxirgi to'rttasi E/F bosqichlarida qo'llanadi). Umumiy `PUT /api/company/settings/sales_agent.*` rad etiladi
+- `POST /api/sales-agent/location` — server tekshiradi: noto'g'ri koordinata yoki kelajak vaqt (`invalid`), eskirgan (`stale`), aniqlik past (`low_accuracy`) — rad, hodisa yoziladi, agentga sabab; imkonsiz tezlikdagi sakrash (`jump`) yoki soxta GPS belgisi (`mock`) — saqlanadi, `suspicious`. Kechikib kelgan eski nuqta oxirgi joyni almashtirmaydi. Agentdan daqiqasiga 12 nuqta
+- `POST /location/events` — qurilmada ruxsat berilmadi / aniqlab bo'lmadi: hodisa + audit (`LOCATION_PERMISSION_DENIED`, `LOCATION_UPDATE_FAILURE`)
+- supervayzer: `GET /supervisor/agents` (`sales_agent.location.view` — onlayn ≤5 daqiqa, oxirgi joy, aniqlik, bugungi marshrut), `GET /supervisor/live` (`location.live`), `GET /supervisor/agents/:id/history?date=` (`location.history`, har ko'rish auditga `LOCATION_HISTORY_VIEWED`, 5000 nuqtagacha), `GET /supervisor/events` (`sales_agent.supervise`). Savdo menejeri va Ko'ruvchi lokatsiyani ko'rmaydi; boshqa kompaniya agenti — 404
+- saqlash muddati: soatlik tozalash (`purgeExpired`) kompaniya siyosatidagi kundan (kamida 7) eski nuqta va hodisalarni o'chiradi
+- web agent: kuzatuv layout'da bitta (`useLocationTracking` — ilova ochiq paytda `watchPosition`, siyosat oralig'ida yoki 50 m siljiganda yuboradi); sarlavhada lokatsiya belgisi; ruxsat berilmasa ish joyi bloklanadi ("Lokatsiyani yoqish"); server rad etsa sababi ko'rsatiladi; sahifalar barqaror nuqtadan foydalanadi (ro'yxat har GPS yangilanishida qayta yuklanmaydi)
+- web Distributsiya: "Monitoring" (agentlar ro'yxati onlayn/oflayn, xarita, 15 s jonli yangilanish, tanlangan agentning kunlik yo'li, hodisalar) va "Agent siyosati" tablari — ruxsat bo'yicha ko'rinadi; matnlar `distribution` va `map` namespace'larida uz/ru/kk
+- xarita: Yandex Maps 2.1 (`src/lib/maps`, `MapProvider` interfeysi), kalit `VITE_YANDEX_MAPS_API_KEY` (`Dockerfile.web` build arg); kalit bo'lmasa xarita o'rniga tushuntirish, ro'yxatlar ishlaydi
+- cheklov: brauzer telefon qulflanganda yoki fonda lokatsiya bermaydi — fondagi kuzatuv native (Android) ilovada
+
+**E — Do'konga tashrif** (migratsiya 0023):
+- jadvallar: `agent_visits` (boshlanish/yakunlanish vaqti va joyi, do'kongacha masofa, davomiylik, natija, buyurtmasiz sabab va izoh; bir agentda bitta ochiq tashrif — `av_rep_open_key`; yakunlanganda vaqt, natija va davomiylik majburiy — CHECK), `agent_visit_photos` (saqlash kaliti, turi, hajmi, vaqt va joy)
+- `POST /api/sales-agent/visits/start` — do'kon agentga ochiq bo'lishi (aks holda 404), joy sifati (400, sabab bilan) va geofence (do'kon koordinatasi bo'lsa: radiusdan uzoq — 403 `details.reason=geofence`, hodisa `geofence_block` va audit `GEO_FENCE_BLOCK`); rad etilgan urinish tranzaksiyada saqlanadi, xato keyin qaytariladi. Ochiq tashrif bo'lsa — 409
+- `POST /visits/:id/complete` — faqat o'z ochiq tashrifi; joy sifati; siyosatda rasm majburiy bo'lsa rasmsiz 400; buyurtmasiz sabab majburiy (`no_money`, `has_stock`, `has_debt`, `owner_absent`, `competitor`, `price`, `other` — "Boshqa" uchun izoh); davomiylik serverda. Audit: `VISIT_STARTED`, `VISIT_COMPLETED`, `VISIT_NO_ORDER`. Buyurtma bilan bog'lash ("ordered" natijasi) — F bosqichida
+- rasmlar: `POST /visits/:id/photos/uploads` (imzolangan PUT, JPEG/PNG/WebP, 8 MB) → `POST /visits/:id/photos` (kalit shu kompaniyaning `visit-photo/` prefiksida, fayl yuklangan, turi va hajmi; bitta kalit bir marta; tashrifga 20 tagacha; audit `STORE_PHOTO_ADDED`) → ko'rish 5 daqiqalik imzolangan havola (agent — o'z tashrifi, supervayzer — kompaniya). Saqlash sozlanmagan bo'lsa 503. Fayl yuklash tekshiruvlari `files.service` bilan umumiy (`signUpload`, `assertUploadKey`, `headUpload`)
+- `GET /today` do'konlarida `visitStatus` (`waiting`/`in_progress`/`ordered`/`visited_no_order`), do'kon profilida `todayVisit`; `GET /visits/current`, `GET /visits?date=`
+- supervayzer (`sales_agent.supervise`): `GET /supervisor/visits?date=&salesRepId=` — tashriflar, jami/davom etayotgan/buyurtmali/buyurtmasiz va sabablar bo'yicha son
+- tashrifi bor savdo agentini o'chirish rad etiladi (faolsizlantirish)
+- web agent: do'kon sahifasida "Tashrifni boshlash" (yangi GPS o'lchovi bilan), ochiq tashrif taymeri, rasm turi va kamera orqali rasm (brauzerda 1600 px JPEG ga siqiladi), "Tashrifni yakunlash" oynasi (sabab, izoh); boshqa do'konda ochiq tashrif bo'lsa havola; Sotuv sahifasida ochiq tashrif banneri va do'kon kartalarida holat
+- web Distributsiya → "Tashriflar": kun va agent filtri, ko'rsatkichlar, buyurtmasiz sabablar diagrammasi, jadval (vaqt, davomiylik, natija, masofa) va rasmni ko'rish
+
 ### Distributsiya (`/api/distribution`)
 
 O'qish — `distribution.view`, yozish — `distribution.manage`.
@@ -716,6 +739,24 @@ O'qish — `distribution.view`, yozish — `distribution.manage`.
 | GET / POST / PATCH / DELETE | `/routes` (`?includeInactive=`), `/routes/:routeId` (mijozlar bilan) |
 | POST / PUT / DELETE | `/routes/:routeId/customers`, `/routes/:routeId/customers/order`, `/routes/:routeId/customers/:memberId` |
 | GET / POST / PATCH | `/visits` (`?routeId=&salesRepId=&status=&dateFrom=&dateTo=`), `/visits/:visitId` |
+| GET / POST / DELETE | `/assignments` (`?dateFrom=&dateTo=&salesRepId=`), `/assignments/:assignmentId` |
+
+### Sotuv agenti (`/api/sales-agent`)
+
+Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol agent (agent so'rovdan olinmaydi).
+
+| Metod | Yo'l | Ruxsat |
+|---|---|---|
+| GET | `/me`, `/today`, `/stores`, `/stores/:customerId`, `/debtors` (`?lat=&lng=`) | `sales_agent.use` |
+| POST | `/location`, `/location/events` | `sales_agent.use` |
+| GET | `/visits/current`, `/visits` (`?date=`), `/visits/:visitId/photos/:photoId/url` | `sales_agent.use` (o'z tashriflari) |
+| POST | `/visits/start`, `/visits/:visitId/complete`, `/visits/:visitId/photos/uploads`, `/visits/:visitId/photos` | `sales_agent.use` |
+| GET / PUT | `/policy` | o'qish — agent yoki `sales_agent.supervise`; yozish — `sales_agent.supervise` |
+| GET | `/supervisor/agents` | `sales_agent.location.view` |
+| GET | `/supervisor/live` (`?since=`) | `sales_agent.location.live` |
+| GET | `/supervisor/agents/:salesRepId/history` (`?date=`) | `sales_agent.location.history` (audit) |
+| GET | `/supervisor/events` (`?date=&type=&salesRepId=&limit=`) | `sales_agent.supervise` |
+| GET | `/supervisor/visits` (`?date=&salesRepId=&limit=`), `/supervisor/visits/:visitId/photos/:photoId/url` | `sales_agent.supervise` |
 
 ---
 
@@ -743,5 +784,6 @@ O'qish — `distribution.view`, yozish — `distribution.manage`.
      - Railway tarifida bir xizmatga 2 ta shaxsiy domen — `admin.bum-erp.uz` qo'shilmadi; admin panel `https://bum-erp.uz/uz/admin`. Kirish sahifasidagi "admin.bum-erp.uz" havolasi yangilanishi kerak
      - logto o'chirilgach `auth.bum-erp.uz` va `logto-admin.bum-erp.uz` CNAME yozuvlarini ham o'chirish (osilib qolgan CNAME — subdomen egallash xavfi)
      - fayl saqlash (S3) sozlanmagan — rasm/chek yuklash 503; SMS (Eskiz) va AI kalitlari yo'q — tegishli funksiyalar o'chiq
+     - xarita: `bum-web` o'zgaruvchisi `VITE_YANDEX_MAPS_API_KEY` (Yandex kabinetida `bum-erp.uz` domeniga cheklangan JavaScript API kaliti) qo'shilib, web qayta deploy qilinishi kerak — hozir Monitoring xaritasi o'rniga tushuntirish ko'rinadi
      - Convex RBAC tuzatishi (`main` `3f958f1`) — Convex ishlatilmasa kerak emas
 3. **PR:** `feat/postgres-migration` → `main` — production'ga o'tish kuni kelishilgach

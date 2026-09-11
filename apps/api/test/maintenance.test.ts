@@ -41,13 +41,25 @@ describe("davriy tozalash", () => {
       { bucket: "login:+998900000001", windowStart: at(-0.25), count: 2 },
     ]);
 
-    expect(await purgeExpired(now)).toEqual({ sessions: 3, passwordResetCodes: 1, rateLimits: 1 });
+    expect(await purgeExpired(now)).toEqual({
+      sessions: 3,
+      passwordResetCodes: 1,
+      rateLimits: 1,
+      agentLocations: 0,
+      agentLocationEvents: 0,
+    });
     expect(await db.$count(sessions)).toBe(3);
     expect(await db.$count(passwordResetCodes)).toBe(2);
     expect(await db.$count(rateLimits)).toBe(1);
 
     // Takror ishga tushirish — o'chiradigan narsa yo'q
-    expect(await purgeExpired(now)).toEqual({ sessions: 0, passwordResetCodes: 0, rateLimits: 0 });
+    expect(await purgeExpired(now)).toEqual({
+      sessions: 0,
+      passwordResetCodes: 0,
+      rateLimits: 0,
+      agentLocations: 0,
+      agentLocationEvents: 0,
+    });
   });
 
   it("boshqa nusxa lockni ushlab turganda o'tkazib yuboradi", async () => {

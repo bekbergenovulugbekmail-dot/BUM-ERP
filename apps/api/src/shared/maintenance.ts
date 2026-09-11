@@ -9,11 +9,19 @@ import { and, isNotNull, lt, or, sql } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
 import { passwordResetCodes, rateLimits, sessions } from "../db/schema/platform.js";
 import { withTransaction } from "../db/transaction.js";
+import { purgeAgentLocations } from "../modules/sales-agent/location.service.js";
 
 const RETENTION_MS = 24 * 60 * 60 * 1000;
 const INTERVAL_MS = 60 * 60 * 1000;
 
-export type PurgeResult = { sessions: number; passwordResetCodes: number; rateLimits: number };
+export type PurgeResult = {
+  sessions: number;
+  passwordResetCodes: number;
+  rateLimits: number;
+  /** Kompaniya siyosatidagi saqlash muddatidan eski agent lokatsiyalari va hodisalari. */
+  agentLocations: number;
+  agentLocationEvents: number;
+};
 
 /** Lock boshqa nusxada band bo'lsa `null`. */
 export async function purgeExpired(now = new Date()): Promise<PurgeResult | null> {
@@ -35,11 +43,13 @@ export async function purgeExpired(now = new Date()): Promise<PurgeResult | null
       );
     const expiredCodes = await tx.delete(passwordResetCodes).where(lt(passwordResetCodes.expiresAt, cutoff));
     const oldWindows = await tx.delete(rateLimits).where(lt(rateLimits.windowStart, cutoff));
+    const agentLocations = await purgeAgentLocations(tx, now);
 
     return {
       sessions: expiredSessions.rowCount ?? 0,
       passwordResetCodes: expiredCodes.rowCount ?? 0,
       rateLimits: oldWindows.rowCount ?? 0,
+      ...agentLocations,
     };
   });
 }
@@ -52,7 +62,7 @@ export function startMaintenance(log: FastifyBaseLogger): () => void {
     running = true;
     try {
       const result = await purgeExpired();
-      if (result && (result.sessions || result.passwordResetCodes || result.rateLimits)) {
+      if (result && Object.values(result).some((count) => count > 0)) {
         log.info({ purged: result }, "Eskirgan yozuvlar tozalandi");
       }
     } catch (error) {

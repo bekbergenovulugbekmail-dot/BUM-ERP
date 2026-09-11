@@ -7,3 +7,4 @@ export * from "./phone.ts";
 export * from "./print-settings.ts";
 export * from "./cashback.ts";
 export * from "./currency.ts";
+export * from "./sales-agent.ts";
