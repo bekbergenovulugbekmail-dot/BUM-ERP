@@ -103,6 +103,8 @@ const movementBody = z
     unitId: z.uuid().nullable().optional(),
     costPrice: priceSchema.nullable().optional(),
     batchId: z.uuid().nullable().optional(),
+    /** Buxgalteriyadagi qarshi hisob (masalan, kreditorlar); berilmasa — kapital / boshqa daromad / boshqa xarajat. */
+    counterAccountId: z.uuid().nullable().optional(),
     notes: nullableText(2000),
     occurredAt: z.iso.datetime({ offset: true }).transform((v) => new Date(v)).optional(),
   })

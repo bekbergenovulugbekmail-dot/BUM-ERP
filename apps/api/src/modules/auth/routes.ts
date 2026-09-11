@@ -18,7 +18,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
-import { requestMeta } from "../../shared/audit.js";
+import { requestMeta, writeAuditLog } from "../../shared/audit.js";
 import { smsProvider } from "../../shared/sms.js";
 import { changeOwnPassword, verifyCurrentPassword } from "../users/user-admin.service.js";
 import { confirmPasswordReset, requestPasswordReset } from "./password-reset.service.js";
@@ -39,6 +39,7 @@ import {
   createSession,
   revokeSession,
   setSessionCookie,
+  validateSession,
 } from "./session.js";
 
 const loginBody = z.object({
@@ -80,7 +81,22 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/logout", async (req, reply) => {
     const token = req.cookies[SESSION_COOKIE];
-    if (token) await revokeSession(token);
+    if (token) {
+      // Audit uchun kim chiqqani — sessiya bekor qilinishidan oldin
+      const active = await validateSession(token);
+      await revokeSession(token);
+      if (active) {
+        await writeAuditLog({
+          userId: active.user.id,
+          userName: active.user.name,
+          companyId: active.user.activeCompanyId,
+          action: "logout",
+          resource: "users",
+          resourceId: active.user.id,
+          ...requestMeta(req),
+        });
+      }
+    }
     clearSessionCookie(reply);
     return { ok: true };
   });

@@ -534,19 +534,25 @@ export async function financeDashboard(conn: DbOrTx, tenant: TenantContext) {
   const totalOf = (type: CashAccountType) =>
     accountList.filter((a) => a.type === type).reduce((s, a) => s + inBase(a), 0n);
 
-  const [cash] = await conn
+  // Tushum va chiqim hisob valyutasida — joriy kurs bilan asosiy valyutaga o'tkaziladi
+  const cashRows = await conn
     .select({
+      currency: cashAccounts.currency,
       income: sql<string>`coalesce(sum(${cashTransactions.amount}) filter (where ${cashTransactions.type} = 'in'), 0)::numeric(18,2)`,
       expense: sql<string>`coalesce(sum(${cashTransactions.amount}) filter (where ${cashTransactions.type} = 'out'), 0)::numeric(18,2)`,
     })
     .from(cashTransactions)
+    .innerJoin(cashAccounts, eq(cashAccounts.id, cashTransactions.cashAccountId))
     .where(
       and(
         eq(cashTransactions.companyId, companyId),
         gte(cashTransactions.txDate, monthStart),
         or(isNull(cashTransactions.category), notInArray(cashTransactions.category, [TRANSFER_CATEGORY, OPENING_BALANCE_CATEGORY])),
       ),
-    );
+    )
+    .groupBy(cashAccounts.currency);
+  const monthIncome = cashRows.reduce((sum, row) => sum + inBase({ balance: row.income, currency: row.currency }), 0n);
+  const monthExpense = cashRows.reduce((sum, row) => sum + inBase({ balance: row.expense, currency: row.currency }), 0n);
 
   const [sales] = await conn
     .select({ total: sql<string>`coalesce(sum(${salesOrders.totalAmount}), 0)::numeric(18,2)` })
@@ -566,9 +572,9 @@ export async function financeDashboard(conn: DbOrTx, tenant: TenantContext) {
     totalCash: fromMinor(totalCash),
     totalBank: fromMinor(totalBank),
     totalBalance: fromMinor(totalCash + totalBank),
-    monthIncome: cash!.income,
-    monthExpense: cash!.expense,
-    monthNetCash: fromMinor(toMinor(cash!.income) - toMinor(cash!.expense)),
+    monthIncome: fromMinor(monthIncome),
+    monthExpense: fromMinor(monthExpense),
+    monthNetCash: fromMinor(monthIncome - monthExpense),
     monthSalesTotal: sales!.total,
     monthPurchaseTotal: purchases!.total,
     accounts: accountList,

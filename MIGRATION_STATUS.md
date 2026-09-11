@@ -655,7 +655,13 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - `POST /api/sales/payments`: `currency` bilan to'lov shu valyutadagi kassa/bankka — buyurtmadagi valyuta qismi buyurtma kursida (qoldiqdan oshmaydi), boshqasi joriy kurs bilan; `method: balance | cashback` — mijoz balansidan va keshbekdan (keshbek sozlamadagi buyurtma ulushi chegarasida)
   - keshbek oddiy buyurtmalarda ham: sozlama "total" — jo'natilganda, "paid" — jo'natilgan va to'liq to'langanda (keshbek bilan to'langani asosdan chiqadi), bir marta; buyurtmada `cashbackEarned`; qaytarishda bekor bo'ladi
   - web: buyurtma oynasida sotuv valyutalari, qator va jami valyutada; buyurtma tafsilotida valyuta bo'yicha jami/to'langan, to'lovda valyuta va "Balansdan"/"Keshbekdan"
-- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `sales-currency` (2), `distribution` (4); API jami 228 (46 fayl)
+- **L2** commit `0494db5`
+- **L3 — buxgalteriya va audit bo'shliqlari:**
+  - ombordagi qo'lda harakatlar jurnalga tannarxda yoziladi (`postStockJournal`): qabul — DR 1200 / CR 3000 Ustav kapitali (boshlang'ich qoldiq), chiqim va hisobdan chiqarish — DR 5500 / CR 1200, tuzatish (+) — CR 4100; `counterAccountId` bilan qarshi hisob tanlanadi (masalan, 2000 Kreditorlar; begona va zaxira hisobi rad). Harakat oynasida qarshi hisob tanlash (moliya ruxsati bo'lsa)
+  - inventarizatsiya qo'llanganda ortiqcha — 4100, kamomad — 5500 (bitta jurnal yozuvi)
+  - moliya dashboardi: oylik tushum/chiqim valyutali kassalardan joriy kurs bilan asosiy valyutada
+  - tizimdan chiqish (`logout`) audit jurnaliga yoziladi (kirish va xato urinish avval ham yozilardi)
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `sales-currency` (2), `distribution` (4), `inventory-journal` (1); API jami 229 (47 fayl)
 
 ## Sotuv agenti loyihasi (2026-09-12)
 

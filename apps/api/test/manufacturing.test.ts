@@ -166,7 +166,9 @@ describe("Ishlab chiqarish buyurtmalari", () => {
     expect(await stock(bread)).toMatchObject({ quantity: "20.0000", avgCostPrice: "3200.0000" });
     expect(await stock(flour)).toMatchObject({ quantity: "88.0000" });
     expect(await stock(sugar)).toMatchObject({ quantity: "48.0000" });
-    expect(await ledger("1200")).toBe("30000.00");
+    // Qo'lda kirim ham jurnalda: un 100 × 2 000 + shakar 50 × 5 000 = 450 000 (CR 3000), ustiga mehnat 30 000
+    expect(await ledger("3000")).toBe("450000.00");
+    expect(await ledger("1200")).toBe("480000.00");
     expect(await ledger("5100")).toBe("-30000.00");
 
     expect((await mfg("POST", `/orders/${order.id}/complete`, { producedQty: "1" })).statusCode).toBe(400);

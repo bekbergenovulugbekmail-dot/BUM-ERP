@@ -217,6 +217,12 @@ describe("POST /api/auth/logout", () => {
       .from(sessions)
       .where(and(eq(sessions.userId, user.id)));
     expect(session!.revokedAt).not.toBeNull();
+
+    const logouts = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.userId, user.id), eq(auditLogs.action, "logout")));
+    expect(logouts).toHaveLength(1);
   });
 
   it("cookie'siz ham xatosiz ishlaydi", async () => {

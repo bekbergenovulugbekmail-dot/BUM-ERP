@@ -16,8 +16,10 @@ import { products, units } from "../../db/schema/catalog.js";
 import { inventoryCountItems, inventoryCounts, stockLevels, warehouses } from "../../db/schema/inventory.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
+import { fromMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
-import { moveStock } from "./stock.service.js";
+import { todayIso } from "../finance/cash.service.js";
+import { moveStock, movementValue, postStockJournal } from "./stock.service.js";
 import { assertProductsInScope, categoryScope, productScopeCondition } from "../catalog/category-scope.js";
 import { allowedWarehouses, assertWarehouseAccess } from "./warehouses.service.js";
 
@@ -276,6 +278,9 @@ export async function applyCount(tx: Tx, tenant: TenantContext, countId: string,
   await assertProductsInScope(tx, tenant, items.map((i) => i.productId));
 
   let adjusted = 0;
+  // Buxgalteriya uchun tannarxdagi ortiqcha va kamomad
+  let surplus = 0n;
+  let shortage = 0n;
   for (const item of items) {
     // Farq JORIY qoldiqqa nisbatan — hisob yaratilgandan keyingi harakatlar ham hisobga olinadi
     const [row] = await tx.execute<{ delta: string }>(
@@ -290,7 +295,7 @@ export async function applyCount(tx: Tx, tenant: TenantContext, countId: string,
     const delta = row?.delta ?? "0";
     if (Number(delta) === 0) continue;
 
-    await moveStock(tx, tenant.company.id, tenant.user.id, {
+    const { movement } = await moveStock(tx, tenant.company.id, tenant.user.id, {
       type: "count",
       productId: item.productId,
       warehouseId: count.warehouseId,
@@ -299,8 +304,22 @@ export async function applyCount(tx: Tx, tenant: TenantContext, countId: string,
       referenceId: countId,
       notes: `Inventarizatsiya: ${count.name}`,
     });
+    const value = movementValue(movement.quantity, movement.costPrice);
+    if (movement.quantity.startsWith("-")) shortage += value;
+    else surplus += value;
     adjusted++;
   }
+
+  // Ortiqcha — 4100 Boshqa daromadlar, kamomad — 5500 Boshqa xarajatlar (tannarxda)
+  const journal = await postStockJournal(tx, tenant.company.id, tenant.user.id, {
+    referenceType: "inventory_count",
+    referenceId: countId,
+    date: todayIso(),
+    description: `Inventarizatsiya: ${count.name}`,
+    incoming: surplus,
+    outgoing: shortage,
+    incomingCounter: "other_income",
+  });
 
   const [updated] = await tx
     .update(inventoryCounts)
@@ -308,6 +327,12 @@ export async function applyCount(tx: Tx, tenant: TenantContext, countId: string,
     .where(eq(inventoryCounts.id, countId))
     .returning(countFields);
 
-  await audit(tx, tenant, meta, "INVENTORY_COUNT_APPLIED", countId, { counted: items.length, adjusted });
+  await audit(tx, tenant, meta, "INVENTORY_COUNT_APPLIED", countId, {
+    counted: items.length,
+    adjusted,
+    surplus: fromMinor(surplus),
+    shortage: fromMinor(shortage),
+    journalEntryId: journal?.id ?? null,
+  });
   return { count: updated!, adjusted };
 }

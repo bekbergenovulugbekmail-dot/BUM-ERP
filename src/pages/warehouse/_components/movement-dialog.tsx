@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import {
@@ -49,6 +49,16 @@ const MOVEMENT_INFO: Record<MovementKind, { title: string; icon: React.ReactNode
   },
 };
 
+/** Buxgalteriyadagi standart qarshi hisob (server `postStockJournal`). */
+const DEFAULT_COUNTER: Record<MovementKind, string> = {
+  receive: "Standart: 3000 Ustav kapitali (boshlang'ich qoldiq)",
+  issue: "Standart: 5500 Boshqa xarajatlar",
+  adjust: "Standart: ortiqcha — 4100 daromad, kamomad — 5500 xarajat",
+  writeoff: "Standart: 5500 Boshqa xarajatlar",
+};
+
+type AccountOption = { id: string; code: string; name: string; subtype: string | null; isActive: boolean };
+
 type FormValues = {
   productId: string;
   unitId: string;
@@ -87,6 +97,10 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
   // Tanlash ro'yxati: faol mahsulotlar, API chegarasi 200 ta
   const products = useApiQuery<ProductListResponse>("/api/catalog/products", { isActive: true, limit: 200 }).data
     ?.products;
+
+  // Qarshi hisob tanlash — moliyani ko'rish ruxsati bo'lsa (aks holda standart hisob)
+  const accountOptions = useApiQuery<{ accounts: AccountOption[] }>("/api/finance/accounts").data?.accounts;
+  const [counterAccountId, setCounterAccountId] = useState("default");
 
   const today = localIsoDate();
   const schema = useMemo(() => schemaFor(type), [type]);
@@ -138,6 +152,7 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
       ...(selectedProduct && values.unitId && values.unitId !== selectedProduct.baseUnitId ? { unitId: values.unitId } : {}),
       // Tannarx faqat kirimda o'rtachani o'zgartiradi; chiqim joriy o'rtacha tannarxda yoziladi
       ...(type === "receive" ? { costPrice: values.costPrice } : {}),
+      ...(counterAccountId !== "default" ? { counterAccountId } : {}),
       notes: values.notes?.trim() || null,
       // Bugungi sana — server vaqti; o'tgan sana tanlansa shu kun yoziladi
       occurredAt: occurredAtFor(values.date),
@@ -251,6 +266,25 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
               <p className="text-xs text-muted-foreground">
                 Tannarx omborning joriy o'rtacha narxi bo'yicha yoziladi.
               </p>
+            )}
+
+            {accountOptions ? (
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium">Buxgalteriyada qarshi hisob</p>
+                <Select value={counterAccountId} onValueChange={setCounterAccountId}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="default">{DEFAULT_COUNTER[type]}</SelectItem>
+                    {accountOptions
+                      .filter((a) => a.isActive && a.subtype !== "inventory")
+                      .map((a) => (
+                        <SelectItem key={a.id} value={a.id}>{a.code} — {a.name}</SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Buxgalteriya: {DEFAULT_COUNTER[type].replace("Standart: ", "")}.</p>
             )}
 
             <FormField control={form.control} name="date" render={({ field }) => (

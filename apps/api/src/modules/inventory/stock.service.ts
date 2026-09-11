@@ -21,6 +21,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, lt, or, sql } from "drizzle-orm";
 import { badRequest, notFound } from "@bum/shared";
 import { batches, products, units } from "../../db/schema/catalog.js";
+import { accounts } from "../../db/schema/finance.js";
 import { stockLevels, stockMovementType, stockMovements, warehouses } from "../../db/schema/inventory.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
@@ -29,6 +30,8 @@ import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.j
 import { unitFactorToBase } from "../catalog/conversions.js";
 import { assertProductsInScope, categoryScope, productScopeCondition } from "../catalog/category-scope.js";
 import type { TenantContext } from "../company/tenant.js";
+import { todayIso } from "../finance/cash.service.js";
+import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { allowedWarehouses, assertWarehouseAccess } from "./warehouses.service.js";
 
 export type MovementType = (typeof stockMovementType.enumValues)[number];
@@ -316,6 +319,80 @@ export async function listMovements(
 export const MANUAL_MOVEMENT_TYPES = ["receive", "issue", "adjust", "writeoff", "return_in", "return_out"] as const;
 export type ManualMovementType = (typeof MANUAL_MOVEMENT_TYPES)[number];
 
+const MOVEMENT_LABELS: Record<ManualMovementType, string> = {
+  receive: "Tovar qabul qilindi",
+  issue: "Tovar chiqarildi",
+  adjust: "Zaxira tuzatildi",
+  writeoff: "Hisobdan chiqarildi",
+  return_in: "Qaytib kelgan tovar",
+  return_out: "Qaytarilgan tovar",
+};
+
+/** Harakat qiymati tannarxda (tiyin): |miqdor| × tannarx. */
+export function movementValue(quantity: string, costPrice: string): bigint {
+  return rescale(toMinor(quantity.replace(/^-/, ""), 4) * toMinor(costPrice, 4), 8, 2);
+}
+
+/**
+ * Qo'lda harakat va inventarizatsiya buxgalteriyasi (tannarxda):
+ *   kirim  — DR 1200 Tovar zaxirasi / CR qarshi hisob (standart: qabul — 3000 Ustav kapitali, ya'ni boshlang'ich
+ *            qoldiq; tuzatish va ortiqcha — 4100 Boshqa daromadlar)
+ *   chiqim — DR qarshi hisob (standart 5500 Boshqa xarajatlar) / CR 1200
+ * `counterAccountId` — kompaniyaning istalgan faol hisobi (masalan, 2000 Kreditorlar), tovar zaxirasidan boshqa.
+ */
+export async function postStockJournal(
+  tx: Tx,
+  companyId: string,
+  userId: string,
+  input: {
+    referenceType: string;
+    referenceId: string;
+    date: string;
+    description: string;
+    /** Tiyinda. */
+    incoming: bigint;
+    outgoing: bigint;
+    incomingCounter: "capital" | "other_income";
+    counterAccountId?: string | null;
+  },
+) {
+  if (input.incoming <= 0n && input.outgoing <= 0n) return null;
+  const inventory = await requireAccountBySubtype(tx, companyId, "inventory", "asset", "Tovar zaxirasi");
+  let counter: string | null = null;
+  if (input.counterAccountId) {
+    const [account] = await tx
+      .select({ id: accounts.id, isActive: accounts.isActive })
+      .from(accounts)
+      .where(and(eq(accounts.id, input.counterAccountId), eq(accounts.companyId, companyId)))
+      .limit(1);
+    if (!account || !account.isActive) throw badRequest("Qarshi hisob topilmadi");
+    if (account.id === inventory) throw badRequest("Qarshi hisob tovar zaxirasi hisobi bo'lmasligi kerak");
+    counter = account.id;
+  }
+
+  const lines: { accountId: string; debit?: string; credit?: string }[] = [];
+  if (input.incoming > 0n) {
+    const credit =
+      counter ??
+      (input.incomingCounter === "capital"
+        ? await requireAccountBySubtype(tx, companyId, "capital", "equity", "Ustav kapitali")
+        : await requireAccountBySubtype(tx, companyId, "other", "income", "Boshqa daromadlar"));
+    lines.push({ accountId: inventory, debit: fromMinor(input.incoming) }, { accountId: credit, credit: fromMinor(input.incoming) });
+  }
+  if (input.outgoing > 0n) {
+    const debit = counter ?? (await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"));
+    lines.push({ accountId: debit, debit: fromMinor(input.outgoing) }, { accountId: inventory, credit: fromMinor(input.outgoing) });
+  }
+  const { entry } = await postJournalEntry(tx, companyId, userId, {
+    entryDate: input.date,
+    description: input.description,
+    referenceType: input.referenceType,
+    referenceId: input.referenceId,
+    lines,
+  });
+  return entry;
+}
+
 /**
  * Boshqa o'lchov birligidagi miqdor va birlik narxini asosiy birlikka o'tkazadi:
  * 2 quti × 12 = 24 dona, quti narxi 24000 → dona narxi 2000. Aniq o'nlik arifmetika.
@@ -353,17 +430,33 @@ export async function recordManualMovement(
     type: ManualMovementType;
     /** Kiritilgan birlik; berilmasa — asosiy birlik. */
     unitId?: string | null;
+    /** Buxgalteriyadagi qarshi hisob; berilmasa — standart (`postStockJournal`). */
+    counterAccountId?: string | null;
   },
   meta: RequestMeta,
 ) {
   assertWarehouseAccess(tenant, input.warehouseId);
   await assertProductsInScope(tx, tenant, [input.productId]);
-  const { unitId, ...move } = input;
+  const { unitId, counterAccountId, ...move } = input;
   const base = await toBaseUnit(tx, tenant.company.id, input);
   const result = await moveStock(tx, tenant.company.id, tenant.user.id, {
     ...move,
     quantity: base.quantity,
     costPrice: base.costPrice,
+  });
+
+  // Buxgalteriya: harakat tannarxda (kirim — zaxira ko'payadi, chiqim — kamayadi)
+  const value = movementValue(result.movement.quantity, result.movement.costPrice);
+  const incoming = !result.movement.quantity.startsWith("-");
+  const journal = await postStockJournal(tx, tenant.company.id, tenant.user.id, {
+    referenceType: "stock_movement",
+    referenceId: result.movement.id,
+    date: input.occurredAt ? input.occurredAt.toISOString().slice(0, 10) : todayIso(),
+    description: MOVEMENT_LABELS[input.type],
+    incoming: incoming ? value : 0n,
+    outgoing: incoming ? 0n : value,
+    incomingCounter: input.type === "adjust" ? "other_income" : "capital",
+    counterAccountId,
   });
 
   await writeAuditLog(
@@ -380,12 +473,14 @@ export async function recordManualMovement(
         warehouseId: input.warehouseId,
         quantity: result.movement.quantity,
         ...(unitId && base.factor !== "1" ? { enteredQuantity: input.quantity, unitId, factor: base.factor } : {}),
+        value: fromMinor(value),
+        journalEntryId: journal?.id ?? null,
       },
       ...meta,
     },
     tx,
   );
-  return result;
+  return { ...result, journalEntryId: journal?.id ?? null };
 }
 
 export async function transferStock(

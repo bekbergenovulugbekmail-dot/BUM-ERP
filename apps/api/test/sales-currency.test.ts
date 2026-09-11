@@ -109,6 +109,8 @@ describe("Savdo buyurtmasi valyutalarda", () => {
     expect(usd.json().payment).toMatchObject({ currency: "USD", foreignAmount: "20.00", amount: "250000.00" });
     expect((await pay({ amount: "20", currency: "USD", reference: "USD-1" })).statusCode).toBe(200);
     expect(await cashBalance(usdCash)).toBe("20.00");
+    // Moliya dashboardida dollar tushumi asosiy valyutada: 20 $ × 12 500
+    expect((await call("GET", "/api/finance/dashboard")).json().monthIncome).toBe("250000.00");
 
     // Keshbekdan: chegara 50% — mijozda 5 100, qoldiq 5 000
     expect((await pay({ amount: "5000", method: "cashback", currency: "USD" })).statusCode).toBe(400);
