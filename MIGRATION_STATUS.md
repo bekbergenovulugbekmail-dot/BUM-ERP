@@ -597,11 +597,13 @@ Kod tomoni tugadi. Brauzerda qo'lda sinov, production deploy va ma'lumot importi
 
 ## Keyingi qadam
 
-1. **Brauzerda sinov (lokal):**
-   - `docker compose up -d` → `pnpm --filter @bum/api db:migrate`
-   - `.env` ga `BOOTSTRAP_ADMIN_*` → `pnpm --filter @bum/api db:seed`
-   - `pnpm --filter @bum/api dev` va `pnpm dev`
-   - admin bilan kompaniya va egasini ochish → egasi bilan asosiy oqim: mahsulot → kirim → sotuv / POS → to'lov → hisobotlar
+1. **Brauzerda sinov (lokal)** — boshlandi 2026-09-11:
+   - tayyor: dev baza migratsiya qilingan, `db:seed` bajarilgan (bootstrap admin `+998900000001`, 14 rol, 9 birlik); `.env` da `BOOTSTRAP_ADMIN_*` va lokal MinIO sozlamalari
+   - sinov kompaniyasi "Sinov do'kon", egasi `+998900000002` — parollar faqat `.env` da (`BOOTSTRAP_ADMIN_PASSWORD`, `LOCAL_TEST_OWNER_PASSWORD`)
+   - Vite proxy orqali avtomatik smoke test — 21/21: SPA, admin kirishi, kompaniya + ega, mahsulot, kirim, mijoz, buyurtma → tasdiqlash → jo'natish → to'lov, qoldiq 47, dashboard, ogohlantirishlar, chiqish
+   - buxgalteriya: aylanma balansi teng (96 000 / 96 000), foyda 12 000, kassa 36 000
+   - **topilgan kamchilik:** ombordagi qo'lda kirim (`POST /api/inventory/stock/movements`, `receive`) buxgalteriya yozuvi yaratmaydi — sotuvdan keyin 1200 "Tovar zaxirasi" −24 000 bo'ladi. Qarshi hisob tanlanishi kerak (masalan 3000 kapital — boshlang'ich qoldiq); xarid qabuli esa to'g'ri yozadi
+   - qolgan: brauzerda qo'lda — `pnpm --filter @bum/api dev` va `pnpm dev`, `http://localhost:5173` (POS, fayl yuklash, sozlamalar, admin panel)
 2. **Production (foydalanuvchi kaliti kerak):**
    - Convex tuzatishini (`main` `3f958f1`) deploy qilish
    - Railway: PostgreSQL; API (`apps/api/Dockerfile`, pre-deploy `node dist/db/migrate.js`); web (`Dockerfile.web`, `API_UPSTREAM`); S3 bucket; env `.env.example` bo'yicha; app.* va admin.* domenlari web xizmatiga
