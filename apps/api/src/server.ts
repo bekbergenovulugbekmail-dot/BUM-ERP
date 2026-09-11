@@ -15,6 +15,7 @@ import { closeDb, pool } from "./db/client.js";
 import { authRoutes } from "./modules/auth/routes.js";
 import { catalogRoutes } from "./modules/catalog/routes.js";
 import { companyRoutes } from "./modules/company/routes.js";
+import { crmRoutes } from "./modules/crm/routes.js";
 import { financeRoutes } from "./modules/finance/routes.js";
 import { inventoryRoutes } from "./modules/inventory/routes.js";
 import { platformRoutes } from "./modules/platform/routes.js";
@@ -79,6 +80,7 @@ export async function buildServer() {
   await app.register(financeRoutes, { prefix: "/api/finance" });
   await app.register(purchaseRoutes, { prefix: "/api/purchase" });
   await app.register(salesRoutes, { prefix: "/api/sales" });
+  await app.register(crmRoutes, { prefix: "/api/crm" });
 
   return app;
 }
