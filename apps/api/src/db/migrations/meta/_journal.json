@@ -64,6 +64,13 @@
       "when": 1789108223206,
       "tag": "0008_payroll_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789109070356,
+      "tag": "0009_notification_receipts",
+      "breakpoints": true
     }
   ]
 }

@@ -11,6 +11,8 @@ import {
   pgEnum,
   pgTable,
   text,
+  timestamp,
+  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -64,6 +66,36 @@ export const notifications = pgTable(
     index("notif_company_user_read_idx").on(t.companyId, t.userId, t.isRead),
     index("notif_company_global_idx").on(t.companyId, t.isGlobal),
     index("notif_company_created_idx").on(t.companyId, t.createdAt),
+    /** Aqlli ogohlantirishlar dublikatini tekshirish uchun. */
+    index("notif_company_type_related_idx").on(t.companyId, t.type, t.relatedId),
+  ],
+);
+
+/**
+ * Kompaniya bo'ylab (global) bildirishnomaning har foydalanuvchi uchun holati.
+ *
+ * Convex'da `isRead` bitta maydon edi — bir xodim o'qisa, hammada o'qilgan bo'lib
+ * qolardi, "o'qilganlarni tozalash" esa bildirishnomani barchadan o'chirardi.
+ */
+export const notificationReceipts = pgTable(
+  "notification_receipts",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    notificationId: uuid("notification_id")
+      .notNull()
+      .references(() => notifications.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("nr_notification_user_key").on(t.notificationId, t.userId),
+    index("nr_company_user_idx").on(t.companyId, t.userId),
   ],
 );
 

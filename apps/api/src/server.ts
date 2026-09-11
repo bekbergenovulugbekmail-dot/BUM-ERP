@@ -12,6 +12,7 @@ import { env, features, isProd } from "./env.js";
 import { logger } from "./shared/logger.js";
 import { registerErrorHandler } from "./shared/errors.js";
 import { closeDb, pool } from "./db/client.js";
+import { analyticsRoutes } from "./modules/analytics/routes.js";
 import { authRoutes } from "./modules/auth/routes.js";
 import { catalogRoutes } from "./modules/catalog/routes.js";
 import { companyRoutes } from "./modules/company/routes.js";
@@ -20,6 +21,7 @@ import { financeRoutes } from "./modules/finance/routes.js";
 import { hrRoutes } from "./modules/hr/routes.js";
 import { inventoryRoutes } from "./modules/inventory/routes.js";
 import { manufacturingRoutes } from "./modules/manufacturing/routes.js";
+import { notificationRoutes } from "./modules/notifications/routes.js";
 import { platformRoutes } from "./modules/platform/routes.js";
 import { publicRoutes } from "./modules/public/routes.js";
 import { purchaseRoutes } from "./modules/purchase/routes.js";
@@ -85,6 +87,8 @@ export async function buildServer() {
   await app.register(crmRoutes, { prefix: "/api/crm" });
   await app.register(manufacturingRoutes, { prefix: "/api/manufacturing" });
   await app.register(hrRoutes, { prefix: "/api/hr" });
+  await app.register(analyticsRoutes, { prefix: "/api/analytics" });
+  await app.register(notificationRoutes, { prefix: "/api/notifications" });
 
   return app;
 }

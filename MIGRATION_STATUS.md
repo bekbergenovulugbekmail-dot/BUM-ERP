@@ -7,7 +7,7 @@
 |---|---|
 | Branch | `feat/postgres-migration` |
 | Oxirgi yangilanish | 2026-09-11 |
-| Umumiy holat | 12 / 16 PHASE tugallandi, PHASE 4 jarayonda, keyingi — PHASE 14 |
+| Umumiy holat | 12 / 16 PHASE tugallandi, PHASE 4 va 14 jarayonda |
 | Ishlab turgan ilova | Hali to'liq Convex'da — frontend yangi API'ga ulanmagan |
 
 **Holat belgilari:** ✅ tugallandi · 🟡 jarayonda · ⬜ boshlanmagan
@@ -33,7 +33,7 @@
 | 11 | CRM | ✅ tugallandi |
 | 12 | Ishlab chiqarish | ✅ tugallandi |
 | 13 | HR | ✅ tugallandi |
-| 14 | Dashboard, hisobot, AI, bildirishnoma, fayl | ⬜ boshlanmagan |
+| 14 | Dashboard, hisobot, AI, bildirishnoma, fayl | 🟡 jarayonda (dashboard, hisobotlar, bildirishnomalar tayyor) |
 | 15 | Ma'lumotni Convex'dan ko'chirish | ⬜ boshlanmagan |
 | 16 | Frontend'ni API'ga o'tkazish, deploy, Convex'ni o'chirish | ⬜ boshlanmagan |
 
@@ -97,6 +97,10 @@ Ko'chirish paytida topilgan. Yangi API'da hammasi yopilgan.
 | `hr/salary.ts` `generateMonthlySalary` | Davomati yo'q xodimga to'liq oy (butun oy kelmagan bo'lsa ham); soatlik/kunlik stavka e'tiborsiz; parallel dublikat |
 | `hr/salary.ts` `updateLeaveStatus`, `createLeave` | `approvedBy` mijozdan; rad etilgan tasdiqlanadi; ta'tillar ustma-ust; kunlar tekshirilmaydi |
 | `hr/employees.ts` `createEmployee`, `updateEmployee`, `deleteEmployee`; `createDepartment` | Boshqa kompaniya bo'lim/lavozim/rahbari; o'ziga rahbar; tarixi bor xodim o'chiriladi; kod takrorlanadi |
+| `dashboard.getKPIs`, `analytics/reports.ts` | Ruxsat tekshirilmaydi — kassir foyda, kassa va qarzlarni ko'radi; oxirgi 200–500 yozuvdan hisoblanadi (katta kompaniyada noto'g'ri); jo'natilmagan buyurtmalar tushumga qo'shiladi |
+| `notifications.create` | Istalgan a'zo butun kompaniyaga istalgan (tashqi) havola bilan bildirishnoma yuboradi |
+| `notifications.markRead`, `remove`, `clearRead` | Global bildirishnomani bir xodim o'qisa/o'chirsa — hammada o'qilgan/o'chirilgan |
+| `notifications.triggerSmartAlerts` | Istalgan foydalanuvchi cheksiz ishga tushiradi |
 
 ## Foydalanuvchi boshqaruvi ierarxiyasi (yangi API)
 
@@ -271,14 +275,35 @@ O'qish — `hr.view` (pasport, INN, bank hisobi — faqat `hr.manage`).
 | POST / PATCH / DELETE | `/salaries/generate`, `/salaries/:salaryId` (faqat qoralama) | `hr.salary` | `generateMonthlySalary`, `updateSalaryPayment` |
 | POST | `/salaries/:salaryId/approve`, `/revert`, `/pay` (kassa + jurnal) | `hr.approve` (tayyorlagan o'zi emas) | `approveSalaryPayment`, `markSalaryPaid` |
 
+### Analitika (`/api/analytics`)
+
+Hammasi `analytics.view`; `days` — 1…366 (standart 30).
+
+| Metod | Yo'l | Convex |
+|---|---|---|
+| GET | `/dashboard` | `dashboard.getKPIs` |
+| GET | `/reports/sales`, `/reports/expenses`, `/reports/purchases`, `/reports/overview` (`?days=`) | `getSalesSummary`, `getExpenseSummary`, `getPurchaseSummary`, `getBIOverview` |
+| GET | `/reports/stock`, `/reports/stock-velocity` (`?days=`), `/reports/top-customers` (`?days=&limit=`) | `getStockSummary`, `getStockVelocity`, `getTopCustomers` |
+
+### Bildirishnomalar (`/api/notifications`)
+
+Kompaniyaning faol a'zosi; yuborish — `company.manage`.
+
+| Metod | Yo'l | Convex |
+|---|---|---|
+| GET | `/` (`?unreadOnly=&limit=`), `/unread-count` | `list`, `unreadCount` |
+| POST / DELETE | `/:notificationId/read`, `/read-all`, `/clear-read`, `/:notificationId` (o'zidan yopish) | `markRead`, `markAllRead`, `clearRead`, `remove` |
+| POST | `/refresh` (aqlli ogohlantirishlar, 5 daqiqada bir) | `triggerSmartAlerts` |
+| POST | `/` (havola faqat ichki yo'l) | `create` |
+
 ## Lokal muhit
 
-- **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432). `bumerp` — 9 ta migratsiya, ma'lumot yo'q; `bumerp_test` — testlar.
+- **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432). `bumerp` — 10 ta migratsiya, ma'lumot yo'q; `bumerp_test` — testlar.
 - **MinIO** — 9000/9001; `bum-erp` bucket va `STORAGE_*` hali yo'q.
 - **Migratsiya:** `pnpm --filter @bum/api db:migrate`
 - **Seed:** `.env` ga `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_PASSWORD` — `pnpm --filter @bum/api db:seed` (bootstrap admin + 14 global rol + 9 standart o'lchov birligi; idempotent)
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
-- **Testlar:** `pnpm --filter @bum/api test` — 190 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
+- **Testlar:** `pnpm --filter @bum/api test` — 193 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
 
 ---
 
@@ -288,7 +313,7 @@ pnpm workspace; `packages/shared`; `apps/api`; `docker-compose.yml`; `.env.examp
 
 ## PHASE 2 — PostgreSQL sxemasi ✅
 
-61 jadval, 10 domen. Pul/miqdor `numeric`; `company_id NOT NULL`; `legacy_id` (API ga chiqmaydi); DB darajasidagi CHECK/unique. Migratsiyalar: `0000` sxema; `0001` NULLS NOT DISTINCT; `0002` bootstrap admin himoyasi; `0003` bitta asosiy filial; `0004` bitta asosiy ombor; `0005` moliya yaxlitligi (buxgalteriya yozuvi balansi — kechiktirilgan trigger, bitta asosiy kassa); `0006` xarid (qabul qatori qiymati, ta'minotchi ichida noyob to'lov reference); `0007` savdo (noyob mijoz to'lovi reference); `0008` maosh (hisoblangan summa va soliq stavkasi).
+61 jadval, 10 domen. Pul/miqdor `numeric`; `company_id NOT NULL`; `legacy_id` (API ga chiqmaydi); DB darajasidagi CHECK/unique. Migratsiyalar: `0000` sxema; `0001` NULLS NOT DISTINCT; `0002` bootstrap admin himoyasi; `0003` bitta asosiy filial; `0004` bitta asosiy ombor; `0005` moliya yaxlitligi (buxgalteriya yozuvi balansi — kechiktirilgan trigger, bitta asosiy kassa); `0006` xarid (qabul qatori qiymati, ta'minotchi ichida noyob to'lov reference); `0007` savdo (noyob mijoz to'lovi reference); `0008` maosh (hisoblangan summa va soliq stavkasi); `0009` bildirishnoma o'qilganligi har foydalanuvchida.
 
 ## PHASE 3 — API poydevori ✅
 
@@ -428,9 +453,18 @@ DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, 
 - **Testlar:** `hr` (2 — bog'liqliklar va maxfiylik, davomat va ta'tillar), `salary` (2 — to'liq hisob-tasdiq-to'lov zanjiri, davomatsiz kompaniya va haq to'lanmaydigan ta'til)
 - **Eslatma:** ta'til tugagach xodim holati avtomatik "active" ga qaytmaydi (Convex'da ham) — HR qo'lda o'zgartiradi; soliq to'lovi (2200 dan budjetga) moliya jurnalida qo'lda
 
-## PHASE 14 — Dashboard, hisobot, AI, bildirishnoma, fayl ⬜
+## PHASE 14 — Dashboard, hisobot, AI, bildirishnoma, fayl 🟡
 
-`convex/dashboard.ts`, `convex/notifications.ts`, `convex/analytics/`; sahifalar `dashboard`, `analytics`. Shu yerga qoldirilgan: takliflar, SMS parol tiklash (Eskiz), mahsulot rasmi (`image_key`, MinIO).
+- **Convex manbasi:** `convex/dashboard.ts`, `convex/notifications.ts`, `convex/analytics/reports.ts`, `convex/analytics/ai.ts`; sahifalar `dashboard`, `analytics`, `settings` (bildirishnomalar)
+- **14a ✅ Dashboard, hisobotlar, bildirishnomalar:**
+  - `modules/analytics/dashboard.service.ts` — bosh sahifa: bugungi va oylik tushum (faqat jo'natilgan/yetkazilgan), bugun kelgan to'lovlar, tannarx va yalpi foyda, zaxira qiymati va kam qolganlar (ombor va birlik bilan), ta'minotchi/mijoz qarzi, kassa/bank, oxirgi savdo va xaridlar, 7 kunlik tushum
+  - `modules/analytics/reports.service.ts` — sotuv, zaxira (ABC — mahsulotdan oldingi jamg'arma ulushi bo'yicha), xarajat (tasdiqlangan/to'langan), xarid, umumiy ko'rinish (yalpi marja), eng yaxshi mijozlar, aylanma tezligi (zaxira necha kunga yetadi). Hammasi SQL yig'indilari
+  - `modules/notifications/` — global bildirishnomaning o'qilgan/yopilgan holati har foydalanuvchida (`notification_receipts`), shaxsiy bildirishnomalar, yuborish `company.manage` va faqat ichki havola, aqlli ogohlantirishlar (kam zaxira — ombor bilan, 30 kunda tugaydigan partiyalar, kechikkan xarid, to'lov muddati o'tgan savdo — buyurtma sanasi + mijoz muddati, ta'til so'rovlari, kutilayotgan xarajatlar; 6 soat ichida takrorlanmaydi; kompaniyaga 5 daqiqada bir)
+  - **Testlar:** `analytics` (1 — to'liq biznes ssenariysi bo'yicha barcha ko'rsatkichlar), `notifications` (2 — har foydalanuvchi holati va izolyatsiya, aqlli ogohlantirishlar)
+- **Qolgan:**
+  - **14b** AI yordamchi (`askAssistant`) — `ANTHROPIC_API_KEY` bo'lsa
+  - **14c** fayl saqlash (MinIO): mahsulot rasmi (`image_key`), xarajat cheki (`attachment_key`)
+  - **14d** SMS (Eskiz): parol tiklash, takliflar — kalit bo'lsa
 
 ## PHASE 15 — Ma'lumotni Convex'dan ko'chirish ⬜
 
@@ -450,11 +484,13 @@ Poydevor: `legacy_id` ustunlari; login Convex Auth parol xeshlarini qabul qiladi
   - `crm/leads-pipeline.tsx`: `company` → `companyName`, "yutildi"da `convertToCustomer`, "yo'qotildi"da sabab; `activities-section.tsx`: `date` → `activityDate`, `listRecent` → `GET /api/crm/activities`; `distribution-section.tsx`: `date` → `visitDate`, tashrif holati ketma-ketligi
   - `manufacturing/*`: miqdor va narxlar satr; `completeOrder` da `actualMaterials` faqat shu buyurtma materiallari; yakunlash xatosida (zaxira yetmasa) xabarni ko'rsatish
   - `hr/*`: `date` → `attendanceDate`; maosh holatini PATCH bilan emas, `/approve` va `/pay` bilan; tayyorlagan foydalanuvchiga "Tasdiqlash" tugmasini yashirish; xodim ro'yxatida maxfiy maydonlar faqat `hr.manage` bo'lsa
+  - `dashboard/page.tsx`: `todayRevenue` → `todayReceipts`, `weeklyRevenue[].day` yo'q (sanadan frontendda); `analytics.view` bo'lmasa bosh sahifada moliyaviy kartochkalarni yashirish
+  - `hooks/use-notifications.ts`: `/api/notifications` ga; havolalar tilsiz (`/warehouse`) — frontend `/uz` qo'shadi; `triggerSmartAlerts` → `POST /refresh` (javobda `throttled`)
 
 ---
 
 ## Keyingi qadam
 
-1. **PHASE 14 (Dashboard, hisobot, bildirishnoma, fayl)** — umumiy dashboard va tahlil hisobotlari, bildirishnomalar, fayl saqlash (MinIO: mahsulot rasmi, xarajat cheki); takliflar va SMS (Eskiz) — kalit bo'lsa
+1. **PHASE 14b–d** — AI yordamchi, fayl saqlash (MinIO), SMS (Eskiz) va takliflar
 2. **Production:** Convex tuzatishini (`main` `3f958f1`) production kaliti bilan deploy qilish
 3. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_*` qo'shib `db:seed`
