@@ -17,6 +17,7 @@ import {
   integer,
   pgTable,
   text,
+  unique,
   uniqueIndex,
   uuid,
   varchar,
@@ -72,7 +73,10 @@ export const unitConversions = pgTable(
   },
   (t) => [
     index("unit_conv_company_idx").on(t.companyId),
-    uniqueIndex("unit_conv_unique").on(t.companyId, t.fromUnitId, t.toUnitId, t.productId),
+    // NULLS NOT DISTINCT: umumiy (product_id NULL) konversiya ham takrorlanmasin
+    unique("unit_conv_unique")
+      .on(t.companyId, t.fromUnitId, t.toUnitId, t.productId)
+      .nullsNotDistinct(),
     check("unit_conv_factor_positive", sql`${t.factor} > 0`),
     check("unit_conv_not_self", sql`${t.fromUnitId} <> ${t.toUnitId}`),
   ],

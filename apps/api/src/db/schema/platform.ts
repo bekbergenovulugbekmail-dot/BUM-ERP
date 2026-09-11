@@ -14,6 +14,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
   varchar,
@@ -214,7 +215,9 @@ export const branches = pgTable(
  * `company_id` NULL bo'lsa — global (tizim) rol.
  * Convexda bu ajratim indeks bilan ta'minlanmagan edi va `by_name` bo'yicha
  * `.first()` noto'g'ri rolni qaytarish muammosini keltirib chiqargan (audit).
- * Bu yerda unikal indeks buni imkonsiz qiladi.
+ *
+ * Unikallik NULLS NOT DISTINCT — oddiy unikal indeksda NULL lar bir-biriga
+ * teng emas, ya'ni bir xil nomli global rollar takrorlanib ketaverardi.
  */
 export const roles = pgTable(
   "roles",
@@ -233,7 +236,7 @@ export const roles = pgTable(
     ...timestamps(),
   },
   (t) => [
-    uniqueIndex("roles_company_name_key").on(t.companyId, t.name),
+    unique("roles_company_name_key").on(t.companyId, t.name).nullsNotDistinct(),
     index("roles_company_idx").on(t.companyId),
   ],
 );
@@ -288,7 +291,8 @@ export const settings = pgTable(
     ...timestamps(),
   },
   (t) => [
-    uniqueIndex("settings_company_key_key").on(t.companyId, t.key),
+    // NULLS NOT DISTINCT: platforma sozlamasi (company_id NULL) ham bitta kalitga bitta
+    unique("settings_company_key_key").on(t.companyId, t.key).nullsNotDistinct(),
     index("settings_company_group_idx").on(t.companyId, t.group),
   ],
 );
