@@ -1,0 +1,59 @@
+-- Qo'lda yozilgan (drizzle-kit `generate --custom`): Convex'dan ko'chirish (PHASE 15) qayta
+-- ishga tushirilganda dublikat yaratmasligi uchun `legacy_id` bo'yicha upsert
+-- (ON CONFLICT (legacy_id)) — buning uchun har jadvalda unique indeks kerak.
+-- companies, products, units, users, warehouses da indeks sxemada allaqachon bor.
+-- NULL qiymatlar (yangi API yaratgan yozuvlar) unique indeksda bir-biriga teng emas — cheklov yo'q.
+-- Ko'chirish tugab `legacy_id` ustunlari o'chirilganda indekslar ham ketadi.
+CREATE UNIQUE INDEX IF NOT EXISTS "accounts_legacy_id_key" ON "accounts" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "activities_legacy_id_key" ON "activities" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "attendances_legacy_id_key" ON "attendances" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "audit_logs_legacy_id_key" ON "audit_logs" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "batches_legacy_id_key" ON "batches" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "bom_items_legacy_id_key" ON "bom_items" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "boms_legacy_id_key" ON "boms" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "branches_legacy_id_key" ON "branches" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "brands_legacy_id_key" ON "brands" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "cash_accounts_legacy_id_key" ON "cash_accounts" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "cash_transactions_legacy_id_key" ON "cash_transactions" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "categories_legacy_id_key" ON "categories" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "company_members_legacy_id_key" ON "company_members" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "customer_payments_legacy_id_key" ON "customer_payments" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "customer_segment_members_legacy_id_key" ON "customer_segment_members" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "customer_segments_legacy_id_key" ON "customer_segments" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "customers_legacy_id_key" ON "customers" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "departments_legacy_id_key" ON "departments" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "distribution_routes_legacy_id_key" ON "distribution_routes" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "employees_legacy_id_key" ON "employees" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "expenses_legacy_id_key" ON "expenses" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "inventory_count_items_legacy_id_key" ON "inventory_count_items" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "inventory_counts_legacy_id_key" ON "inventory_counts" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "invitations_legacy_id_key" ON "invitations" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "journal_entries_legacy_id_key" ON "journal_entries" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "journal_lines_legacy_id_key" ON "journal_lines" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "leads_legacy_id_key" ON "leads" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "leaves_legacy_id_key" ON "leaves" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "notifications_legacy_id_key" ON "notifications" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "pos_shifts_legacy_id_key" ON "pos_shifts" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "positions_legacy_id_key" ON "positions" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "production_materials_legacy_id_key" ON "production_materials" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "production_orders_legacy_id_key" ON "production_orders" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "production_time_lines_legacy_id_key" ON "production_time_lines" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "purchase_order_items_legacy_id_key" ON "purchase_order_items" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "purchase_orders_legacy_id_key" ON "purchase_orders" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "purchase_receipt_items_legacy_id_key" ON "purchase_receipt_items" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "purchase_receipts_legacy_id_key" ON "purchase_receipts" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "roles_legacy_id_key" ON "roles" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "route_customers_legacy_id_key" ON "route_customers" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "route_visits_legacy_id_key" ON "route_visits" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "salary_payments_legacy_id_key" ON "salary_payments" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "sales_order_items_legacy_id_key" ON "sales_order_items" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "sales_orders_legacy_id_key" ON "sales_orders" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "sales_reps_legacy_id_key" ON "sales_reps" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "settings_legacy_id_key" ON "settings" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "stock_levels_legacy_id_key" ON "stock_levels" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "stock_movements_legacy_id_key" ON "stock_movements" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "supplier_payments_legacy_id_key" ON "supplier_payments" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "suppliers_legacy_id_key" ON "suppliers" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "unit_conversions_legacy_id_key" ON "unit_conversions" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "warehouse_zones_legacy_id_key" ON "warehouse_zones" ("legacy_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "work_centers_legacy_id_key" ON "work_centers" ("legacy_id");

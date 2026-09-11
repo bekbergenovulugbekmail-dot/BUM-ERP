@@ -7,7 +7,7 @@
 |---|---|
 | Branch | `feat/postgres-migration` |
 | Oxirgi yangilanish | 2026-09-11 |
-| Umumiy holat | 13 / 16 PHASE tugallandi, PHASE 4 jarayonda (faqat tozalash vazifasi), keyingi — PHASE 15 |
+| Umumiy holat | 14 / 16 PHASE tugallandi, PHASE 4 jarayonda (faqat tozalash vazifasi), keyingi — PHASE 16 |
 | Ishlab turgan ilova | Hali to'liq Convex'da — frontend yangi API'ga ulanmagan |
 
 **Holat belgilari:** ✅ tugallandi · 🟡 jarayonda · ⬜ boshlanmagan
@@ -318,12 +318,13 @@ Kompaniyaning faol a'zosi; yuborish — `company.manage`.
 
 ## Lokal muhit
 
-- **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432). `bumerp` — 10 ta migratsiya, ma'lumot yo'q; `bumerp_test` — testlar.
+- **PostgreSQL 18** — `docker compose up -d` (`bum-pg`, `postgres`/`bumerp`, 5432). `bumerp` — 11 ta migratsiya, ma'lumot yo'q; `bumerp_test` — testlar.
 - **MinIO** — 9000/9001; `bum-erp` bucket yaratilgan (2026-09-11). Fayl endpointlari ishlashi uchun `.env` ga `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY` (qiymatlar `.env.example` da — lokal MinIO)
 - **Migratsiya:** `pnpm --filter @bum/api db:migrate`
 - **Seed:** `.env` ga `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_PASSWORD` — `pnpm --filter @bum/api db:seed` (bootstrap admin + 14 global rol + 9 standart o'lchov birligi; idempotent)
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
-- **Testlar:** `pnpm --filter @bum/api test` — 200 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
+- **Convex'dan import:** `pnpm --filter @bum/api db:import-convex <ochilgan-eksport-papkasi> [--dry-run] [--report fayl.json]` (PHASE 15)
+- **Testlar:** `pnpm --filter @bum/api test` — 202 ta; Convex: `pnpm exec vitest run --project convex` — 10 ta
 
 ---
 
@@ -496,9 +497,44 @@ DB mijozi, tranzaksiya, xatolar, logger, env, `.env` yuklash, migrate, Fastify, 
   - **Testlar:** `password-reset` (3 — to'liq oqim va sessiyalar, oshkor qilmaslik va barcha himoyalar, Eskiz mijozi token yangilash)
 - **Ataylab yozilmagan:** takliflar (`invitations`) — yakuniy qaror bo'yicha kerak emas (login/parol to'g'ridan-to'g'ri beriladi); jadval sxemada qoladi
 
-## PHASE 15 — Ma'lumotni Convex'dan ko'chirish ⬜
+## PHASE 15 — Ma'lumotni Convex'dan ko'chirish ✅
 
-Poydevor: `legacy_id` ustunlari; login Convex Auth parol xeshlarini qabul qiladi. E'tibor: Convex'dagi `users.roleId` (global rol) yangi modelda a'zolikda (`company_members.role_id`); Convex'dagi `imageUrl` ko'chirilmaydi; `costingMethod` hammasi `average` ga.
+Vosita tayyor va sinovdan o'tgan; **haqiqiy ma'lumot hali ko'chirilmagan** — production eksporti kerak (Convex production kaliti).
+
+- **Ishga tushirish:**
+  1. Convex loyihasida `npx convex export --path convex-export.zip`
+  2. ZIP'ni ochish (`<jadval>/documents.jsonl`)
+  3. `pnpm --filter @bum/api db:import-convex convex-export --dry-run` — hisobotni ko'rib chiqish
+  4. xuddi shu buyruq `--dry-run` siz
+- **Fayllar:** `src/migration/convex-import.ts` (jadval tartibi va qoidalar), `src/migration/convert.ts` (float → aniq o'nlik, sana, telefon, ichki havola), `src/cli/import-convex.ts`
+- **Migratsiya 0010:** 53 jadvalga `legacy_id` noyob indeksi (upsert uchun; qolgan 5 tasida sxemada bor edi)
+- **Qoidalar:**
+  - bitta tranzaksiya — xato bo'lsa hech narsa yozilmaydi; `--dry-run` hammasini bajarib bekor qiladi (hisobot bir xil, balans triggeri ham tekshiriladi)
+  - qayta ishga tushirsa bo'ladi: `legacy_id` bo'yicha upsert, ID xaritasi bazadan ham yuklanadi; har yozuv savepoint'da — cheklov buzilishi hisobotga yoziladi, import to'xtamaydi
+  - kompaniyasiz yoki bog'liq yozuvi yo'q yozuvlar o'tkazib yuboriladi (sababi bilan)
+  - takrorlangan kod/raqam/SKU → "-2" qo'shimchasi; ikkinchi asosiy filial/ombor/kassa va ombordagi ikkinchi ochiq smena olib tashlanadi; takrorlangan qoldiq, davomat, maosh oyi, a'zolik o'tkaziladi
+  - pul 2, miqdor/narx 4 kasr xonaga yarimdan yuqoriga yaxlitlanadi; manfiy qoldiq/narx 0 qilinadi (ogohlantirish)
+  - buxgalteriya yozuvi qatorlari bilan birga yoziladi, jami qatorlardan qayta hisoblanadi; ±1 so'mdan ko'p balanslanmagan "posted" yozuv qoralama bo'ladi, haqiqiy summalar izohga yoziladi (sarlavha CHECK'i ±1 talab qiladi)
+  - bitta hujjatga ikkinchi buxgalteriya yozuvi — hujjat bog'lanishi olinadi (`reference` noyobligi)
+  - maosh: Convex hisoblangan summani saqlamagan — `gross = net + tax + deductions`, `tax_rate` shundan
+  - rollar: kompaniyada shu nomli rol bo'lsa unga bog'lanadi (ustidan yozilmaydi); eski ruxsat nomlari `LEGACY_PERMISSION_ALIASES` bo'yicha, noma'lumlari tashlanadi; a'zo roli nomlari yangi nomlarga ("owner" → "Business Owner")
+  - Convex'dagi `users.roleId` (global rol) ko'chirilmaydi — rol a'zolikda
+  - import qilingan kompaniyalarga yetishmayotgan standart hisoblar va kassa qo'shiladi (`seedFinanceDefaults`)
+- **Foydalanuvchilar:**
+  - lucia scrypt parol xeshlari ko'chiriladi — eski parol bilan kirish ishlaydi, birinchi kirishda argon2id ga o'tadi
+  - qayta importda yangi tizimda o'zgargan parol ustidan yozilmaydi
+  - parolsiz foydalanuvchi — SMS orqali tiklash yoki admin o'rnatadi
+  - PIN (SHA-256) ko'chirilmaydi — qayta o'rnatiladi
+  - bootstrap admin maqomi import qilinmaydi
+- **Ko'chirilmaydi:**
+  - tashqi URL'lar (mahsulot rasmi, logo, avatar, chek, xodim surati) — saqlangan XSS yo'li; fayllar PHASE 14 oqimi bilan qayta yuklanadi
+  - bildirishnomadagi tashqi havolalar
+  - takliflar, global (kompaniyasiz) birlik konversiyalari
+  - `costingMethod` hammasi `average` ga
+- **Hisobot:** har jadval uchun o'qildi / yozildi / o'tkazildi va sabablari / ogohlantirishlar. Solishtirish: kompaniya va foydalanuvchi soni, ombor qiymati, mijoz va ta'minotchi qarzi, kassa qoldig'i, posted yozuvlar soni va umumiy debet−kredit farqi. JSON faylga yoziladi.
+- **Testlar:** `import-convex` (2):
+  - scrypt parol bilan kirish va argon2id ga o'tish, havolalar, yaxlitlash, dublikat kod/asosiy belgi, yetim yozuvlar, tashqi URL'lar, balanslanmagan yozuv, hisoblar rejasini to'ldirish, solishtirish
+  - quruq ishga tushirish hech narsa yozmasligi, qayta import dublikatsizligi va o'zgargan parolni saqlashi
 
 ## PHASE 16 — Frontend'ni API'ga o'tkazish, deploy, Convex'ni o'chirish ⬜
 
@@ -524,6 +560,9 @@ Poydevor: `legacy_id` ustunlari; login Convex Auth parol xeshlarini qabul qiladi
 
 ## Keyingi qadam
 
-1. **PHASE 15 (Ma'lumotni Convex'dan ko'chirish)** — Convex eksportini (`npx convex export`) o'qib PostgreSQL'ga yozadigan, qayta ishga tushirsa bo'ladigan (idempotent, `legacy_id` bo'yicha) import CLI va solishtirish hisoboti
-2. **Production:** Convex tuzatishini (`main` `3f958f1`) production kaliti bilan deploy qilish
-3. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_*` qo'shib `db:seed`
+1. **PHASE 16 (Frontend'ni API'ga o'tkazish)** — yuqoridagi "E'tibor" ro'yxati bo'yicha sahifama-sahifa; avval auth (`use-auth.ts`), keyin katalog va ombor
+2. **PHASE 4 qoldig'i:** eskirgan `rate_limits` / `sessions` / `password_reset_codes` ni davriy tozalash
+3. **Production (foydalanuvchi kaliti kerak):**
+   - Convex tuzatishini (`main` `3f958f1`) deploy qilish
+   - `npx convex export` → `db:import-convex --dry-run` → hisobotni ko'rib chiqish → import
+4. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_*` qo'shib `db:seed`

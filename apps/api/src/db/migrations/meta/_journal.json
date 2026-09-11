@@ -71,6 +71,13 @@
       "when": 1789109070356,
       "tag": "0009_notification_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789111118035,
+      "tag": "0010_legacy_id_unique",
+      "breakpoints": true
     }
   ]
 }
