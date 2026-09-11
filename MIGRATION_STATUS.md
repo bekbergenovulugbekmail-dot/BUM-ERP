@@ -605,7 +605,16 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - cheklangan xodim katalog, ombor (qoldiq, harakatlar, inventarizatsiya), xarid va savdoda (POS bilan) faqat o'z kategoriyalaridagi mahsulotlarni ko'radi va ular bilan ishlaydi; kategoriyasiz mahsulot unga ko'rinmaydi
   - amal turi (ko'rish / qo'shish / o'zgartirish) rol ruxsatlari bilan; hujjat ro'yxatida faqat uning mahsuloti qatnashgan buyurtmalar, hujjatdagi boshqa kategoriya qatori bo'lsa tasdiqlash/jo'natish/qabul rad etiladi
   - analitika, dashboard va bildirishnomalar cheklanmaydi (`analytics.view` bilan boshqariladi)
-- **Testlar:** `category-scope` (3); API jami 208
+- **Xariddan tezkor qo'shish** (commit `2c78a88`): xarid buyurtmasi oynasida yetkazuvchi va mahsulot ro'yxati oxirida "Yangi … qo'shish"; yetkazuvchi kodi ixtiyoriy (avtomatik `S-0001`), mahsulot SKU ixtiyoriy — kompaniya bo'yicha eng katta raqamli SKU + 1, 1001 dan (advisory lock; importda ham)
+- **POS mijozlari va balans** (commit `20f1238`, migratsiya 0012):
+  - kassada mijoz tanlash (F4) — telefon raqamlari formatidan qat'i nazar, ism yoki familiya bo'yicha; `POST /api/sales/pos/customers` (`pos.use`, telefon takrori rad)
+  - qarzga sotuv, tanlangan mijozning qarzi va balansi ko'rinib turadi
+  - mijoz balansi (hamyon, `customers.balance` + `customer_balance_transactions`) — qarz va keshbekdan alohida: kassada to'ldirish, qarzni naqd/karta/bank yoki balansdan to'lash (`POST /api/sales/pos/customers/:id/payments`), chekni balansdan to'lash, naqd qaytimni balansga o'tkazish; qaytarishda balansdan to'langan qism balansga qaytadi
+  - buxgalteriya: yangi hisob 2300 "Mijozlar avanslari" (migratsiya mavjud kompaniyalarga ham qo'shadi); kirim DR kassa / CR 2300, sarf DR 2300 / CR 1100; `payment_method` ga `balance`
+- **Chek shabloni** (commit `3e03b23`): Sozlamalar → "Chek" — qog'oz 58/80 mm, shrift, logo (data URL, termal uchun kichraytiriladi), sarlavha va pastki matn, kassir/SKU/QQS, mijoz qarzi/balansi/keshbek, avtomatik chop etish; jonli ko'rinish. `GET /api/company/print-settings` (har bir a'zo), `PUT /api/company/print-settings/receipt` (`settings.manage`). POS cheki shu shablon bo'yicha HTML orqali chop etiladi
+- **Etiketkalar:** Sozlamalar → "Etiketka" — shablonlar (tayyor 58×40, 40×30, 30×20, A4 70×37; o'z o'lchami 15–150 mm), termal rulon yoki A4 ustunlar, shtrix-kod (CODE128) / QR / kodsiz, ko'rsatiladigan maydonlar, standart shablon; `PUT /api/company/print-settings/labels` (`settings.manage`). Chop etish oynasi — mahsulotlar sahifasidan (bir nechta mahsulot, nusxa soni) va xarid buyurtmasidan (qabul qilingan miqdor bilan)
+- **Navbatda** (foydalanuvchi 8 ta talabidan): keshbek tizimi → ko'p valyuta (xarid/sotuv, kurslar, Markaziy bank kursi yoqib-o'chiriladi)
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2); API jami 214 (39 fayl)
 
 ---
 

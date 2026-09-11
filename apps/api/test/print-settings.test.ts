@@ -30,6 +30,8 @@ beforeEach(async () => {
 const get = (cookie: string) => app.inject({ method: "GET", url: "/api/company/print-settings", headers: { cookie } });
 const putReceipt = (cookie: string, payload: object) =>
   app.inject({ method: "PUT", url: "/api/company/print-settings/receipt", headers: { cookie }, payload });
+const putLabels = (cookie: string, payload: object) =>
+  app.inject({ method: "PUT", url: "/api/company/print-settings/labels", headers: { cookie }, payload });
 
 describe("Chop etish sozlamalari", () => {
   it("standart chek shabloni; kassir o'qiydi, saqlay olmaydi; egasi saqlaydi; noto'g'ri qiymatlar rad", async () => {
@@ -80,5 +82,32 @@ describe("Chop etish sozlamalari", () => {
 
     // Boshqa kompaniya o'z standartini ko'radi
     expect((await get(other.ownerCookie)).json().receipt.paperWidth).toBe(80);
+  });
+
+  it("etiketka shablonlari: standart ro'yxat, saqlash, noto'g'ri o'lcham va takroriy/yo'q id rad", async () => {
+    const kassir = await addEmployee(app, company, "Kassir");
+    const initial = (await get(kassir.cookie)).json().labels as {
+      defaultTemplateId: string;
+      templates: { id: string; name: string; widthMm: number }[];
+    };
+    expect(initial.templates.length).toBeGreaterThanOrEqual(3);
+    expect(initial.templates.map((t) => t.id)).toContain(initial.defaultTemplateId);
+
+    const custom = { ...initial.templates[0]!, id: "custom-50x30", name: "Do'kon 50 × 30", widthMm: 50, heightMm: 30, codeType: "qr" };
+    const labels = { defaultTemplateId: "custom-50x30", templates: [custom, initial.templates[1]!] };
+    expect((await putLabels(kassir.cookie, labels)).statusCode).toBe(403);
+
+    const saved = await putLabels(company.ownerCookie, labels);
+    expect(saved.statusCode).toBe(200);
+    expect((await get(kassir.cookie)).json().labels).toEqual(labels);
+
+    expect((await putLabels(company.ownerCookie, { ...labels, defaultTemplateId: "missing" })).statusCode).toBe(400);
+    expect((await putLabels(company.ownerCookie, { ...labels, templates: [custom, custom] })).statusCode).toBe(400);
+    expect((await putLabels(company.ownerCookie, { ...labels, templates: [{ ...custom, widthMm: 5 }] })).statusCode).toBe(400);
+    expect((await putLabels(company.ownerCookie, { defaultTemplateId: "x", templates: [] })).statusCode).toBe(400);
+
+    // Chek sozlamasi alohida — o'zgarmagan; boshqa kompaniya standart etiketkalarni ko'radi
+    expect((await get(kassir.cookie)).json().receipt.paperWidth).toBe(80);
+    expect((await get(other.ownerCookie)).json().labels.defaultTemplateId).toBe(initial.defaultTemplateId);
   });
 });

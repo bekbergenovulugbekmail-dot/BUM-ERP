@@ -24,6 +24,7 @@
  *   PUT    /settings/:key               sozlamani saqlash                 (settings.manage; modules → modules.manage)
  *   GET    /print-settings              chek shabloni (standart bilan)    (a'zo — kassir chek chiqaradi)
  *   PUT    /print-settings/receipt      chek shablonini saqlash           (settings.manage)
+ *   PUT    /print-settings/labels       etiketka shablonlarini saqlash    (settings.manage)
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -56,7 +57,13 @@ import {
   listRoles,
   updateRole,
 } from "./role.service.js";
-import { getPrintSettings, receiptTemplateSchema, saveReceiptTemplate } from "./print-settings.service.js";
+import {
+  getPrintSettings,
+  labelSettingsSchema,
+  receiptTemplateSchema,
+  saveLabelSettings,
+  saveReceiptTemplate,
+} from "./print-settings.service.js";
 import { listCompanySettings, upsertCompanySetting } from "./settings.service.js";
 import {
   effectivePermissions,
@@ -372,5 +379,16 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
       return saveReceiptTemplate(tx, tenant, template, requestMeta(req));
     });
     return { receipt };
+  });
+
+  app.put("/print-settings/labels", async (req) => {
+    const body = labelSettingsSchema.parse(req.body);
+    const { user } = authOf(req);
+    const labels = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, user);
+      await requirePermission(tx, tenant, "settings.manage");
+      return saveLabelSettings(tx, tenant, body, requestMeta(req));
+    });
+    return { labels };
   });
 }

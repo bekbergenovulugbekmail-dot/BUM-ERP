@@ -30,10 +30,11 @@ import ProductFormDialog from "./_components/product-form-dialog.tsx";
 import ProductDetailDrawer from "./_components/product-detail-drawer.tsx";
 import { ProductImage } from "./_lib/product-image.tsx";
 import {
-  formatQty, formatSom, toNumber,
+  formatQty, formatSom,
   type Category, type ImportResult, type ProductListItem, type ProductListResponse,
 } from "./_lib/types.ts";
-import BarcodeLabelPrint from "@/components/barcode-label-print.tsx";
+import LabelPrintDialog from "@/components/label-print-dialog.tsx";
+import { toLabelProduct, type LabelItem } from "@/lib/print/label-html.ts";
 import BarcodeScanner from "@/components/barcode-scanner.tsx";
 
 type ViewMode = "table" | "grid";
@@ -53,8 +54,6 @@ type ImportRow = {
   category?: string;
   brand?: string;
 };
-
-type LabelProduct = { _id: string; name: string; sku: string; barcode?: string; salesPrice: number };
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -78,7 +77,7 @@ export default function ProductsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [labelProduct, setLabelProduct] = useState<LabelProduct | null>(null);
+  const [labelItems, setLabelItems] = useState<LabelItem[] | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -212,13 +211,7 @@ export default function ProductsPage() {
 
   const openCreate = () => { setEditId(null); setFormOpen(true); };
   const openEdit = (id: string) => { setEditId(id); setFormOpen(true); };
-  const toLabel = (p: ProductListItem): LabelProduct => ({
-    _id: p.id,
-    name: p.name,
-    sku: p.sku,
-    barcode: p.barcode ?? undefined,
-    salesPrice: toNumber(p.salesPrice),
-  });
+  const openLabels = (p: ProductListItem) => setLabelItems([{ product: toLabelProduct(p), quantity: 1 }]);
 
   return (
     <div className="flex flex-col h-full">
@@ -235,6 +228,9 @@ export default function ProductsPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setLabelItems([])}>
+              <Tag className="h-4 w-4 mr-1" /> Etiketka
+            </Button>
             <Button size="sm" variant="secondary" onClick={() => setScannerOpen(true)}>
               <ScanBarcode className="h-4 w-4 mr-1" /> Skaner
             </Button>
@@ -353,7 +349,7 @@ export default function ProductsPage() {
             onView={(id) => setDetailId(id)}
             onEdit={openEdit}
             onDelete={handleDelete}
-            onLabel={(p) => setLabelProduct(toLabel(p))}
+            onLabel={openLabels}
           />
         ) : (
           <ProductGrid
@@ -362,7 +358,7 @@ export default function ProductsPage() {
             onView={(id) => setDetailId(id)}
             onEdit={openEdit}
             onDelete={handleDelete}
-            onLabel={(p) => setLabelProduct(toLabel(p))}
+            onLabel={openLabels}
           />
         )}
 
@@ -397,12 +393,9 @@ export default function ProductsPage() {
         />
       )}
 
-      {/* Barcode Label Print */}
-      {labelProduct && (
-        <BarcodeLabelPrint
-          product={labelProduct}
-          onClose={() => setLabelProduct(null)}
-        />
+      {/* Etiketka chop etish */}
+      {labelItems && (
+        <LabelPrintDialog initialItems={labelItems} onClose={() => setLabelItems(null)} />
       )}
 
       {/* Barcode Scanner — scan to search/filter */}
@@ -450,7 +443,7 @@ function ProductActions({ product, perms, onView, onEdit, onDelete, onLabel }: P
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onClick={() => onLabel(product)} className="cursor-pointer">
-          <Tag className="mr-2 h-4 w-4" /> Yorliq chop etish
+          <Tag className="mr-2 h-4 w-4" /> Etiketka chop etish
         </DropdownMenuItem>
         {perms.delete && product.isActive && (
           <>

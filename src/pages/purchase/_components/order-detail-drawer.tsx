@@ -3,8 +3,11 @@ import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import {
   X, CheckCircle, Truck, CreditCard,
-  Ban, ChevronDown, ChevronUp, FileDown,
+  Ban, ChevronDown, ChevronUp, FileDown, Tag,
 } from "lucide-react";
+import LabelPrintDialog from "@/components/label-print-dialog.tsx";
+import { toLabelProduct, type LabelItem } from "@/lib/print/label-html.ts";
+import type { ProductListItem } from "@/pages/products/_lib/types.ts";
 import { generatePurchaseOrderPDF } from "@/lib/pdf/purchase-order-pdf.ts";
 import { Button } from "@/components/ui/button.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
@@ -67,12 +70,40 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   // Bitta to'lov formasi — bitta reference (ikki marta bosilsa server takrorlamaydi)
   const [payReference, setPayReference] = useState(() => newReference("SP"));
   const [loading, setLoading] = useState(false);
+  const [labelItems, setLabelItems] = useState<LabelItem[] | null>(null);
+  const [labelsLoading, setLabelsLoading] = useState(false);
 
   const updateReceive = (itemId: string, patch: Partial<ReceiveLine>) =>
     setReceiveLines((p) => {
       const current: ReceiveLine = p[itemId] ?? { qty: 0, batchNumber: "", expiryDate: "" };
       return { ...p, [itemId]: { ...current, ...patch } };
     });
+
+  // Etiketka: shtrix-kod va sotuv narxi katalogdan; soni — qabul qilingan (bo'lmasa buyurtma qilingan) miqdor
+  const handleLabels = async () => {
+    if (!order) return;
+    setLabelsLoading(true);
+    try {
+      const quantities = new Map<string, number>();
+      for (const item of order.items) {
+        const qty = num(item.receivedQty) || num(item.orderedQty);
+        quantities.set(item.productId, (quantities.get(item.productId) ?? 0) + qty);
+      }
+      const products = await Promise.all(
+        [...quantities.keys()].map((id) => api.get<{ product: ProductListItem }>(`/api/catalog/products/${id}`)),
+      );
+      setLabelItems(
+        products.map(({ product }) => ({
+          product: toLabelProduct(product),
+          quantity: Math.max(1, Math.ceil(quantities.get(product.id) ?? 1)),
+        })),
+      );
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setLabelsLoading(false);
+    }
+  };
 
   const handleConfirm = async () => {
     try { await confirmOrder.mutateAsync(); toast.success("Tasdiqlandi"); }
@@ -252,7 +283,15 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                   <Button size="sm" variant="secondary" onClick={handlePrintPO}>
                     <FileDown className="h-4 w-4 mr-1" /> PDF
                   </Button>
+                  {order.items.length > 0 && (
+                    <Button size="sm" variant="secondary" onClick={() => { void handleLabels(); }} disabled={labelsLoading}>
+                      <Tag className="h-4 w-4 mr-1" /> {labelsLoading ? "Yuklanmoqda..." : "Etiketka"}
+                    </Button>
+                  )}
                 </div>
+                {labelItems && (
+                  <LabelPrintDialog initialItems={labelItems} onClose={() => setLabelItems(null)} />
+                )}
 
                 {/* Receive form */}
                 {showReceive && (

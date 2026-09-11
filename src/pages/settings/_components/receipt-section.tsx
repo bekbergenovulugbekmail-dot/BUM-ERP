@@ -2,13 +2,12 @@
  * Chek shabloni — `GET /api/company/print-settings`, `PUT /api/company/print-settings/receipt` (`settings.manage`).
  * Chapda sozlamalar, o'ngda jonli ko'rinish — chop etishdagi HTML bilan aynan bir xil.
  */
-import { useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { ImagePlus, Printer, ReceiptText, RotateCcw, Save, Trash2 } from "lucide-react";
 import { DEFAULT_RECEIPT_TEMPLATE, RECEIPT_LOGO_MAX_LENGTH, type ReceiptTemplate } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Label } from "@/components/ui/label.tsx";
-import { Switch } from "@/components/ui/switch.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -18,6 +17,7 @@ import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { PRINT_SETTINGS_PATH, type PrintSettings } from "@/hooks/use-print-settings.ts";
 import { buildReceiptHtml, printHtml, sampleReceipt } from "@/lib/print/receipt-html.ts";
+import { SettingsGroup as Group, ToggleRow } from "./form-controls.tsx";
 
 type BooleanKey = {
   [K in keyof ReceiptTemplate]: ReceiptTemplate[K] extends boolean ? K : never;
@@ -70,30 +70,6 @@ async function imageToLogo(file: File): Promise<string> {
   if (dataUrl.length > RECEIPT_LOGO_MAX_LENGTH) dataUrl = canvas.toDataURL("image/jpeg", 0.85);
   if (dataUrl.length > RECEIPT_LOGO_MAX_LENGTH) throw new Error("Rasm juda katta — kichikroq logo tanlang");
   return dataUrl;
-}
-
-function Group({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-border bg-card p-4 space-y-3">
-      <div>
-        <p className="text-sm font-semibold">{title}</p>
-        {description && <p className="text-xs text-muted-foreground">{description}</p>}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function ToggleRow({
-  label, checked, onChange, disabled,
-}: { label: string; checked: boolean; onChange: (value: boolean) => void; disabled?: boolean }) {
-  const id = useId();
-  return (
-    <div className="flex items-center justify-between gap-3 py-0.5">
-      <Label htmlFor={id} className="text-sm font-normal cursor-pointer">{label}</Label>
-      <Switch id={id} checked={checked} onCheckedChange={onChange} disabled={disabled} />
-    </div>
-  );
 }
 
 export default function ReceiptSection() {
