@@ -8,6 +8,12 @@ import { z } from "zod";
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
+  /**
+   * "::" — IPv6 va IPv4 ikkalasini tinglaydi (dual-stack). "0.0.0.0" faqat
+   * IPv4 bo'lib, `localhost` avval ::1 ga urinadigan mijozlarda rad etiladi
+   * yoki kechikadi. IPv6 o'chirilgan muhitda "0.0.0.0" qo'ying.
+   */
+  HOST: z.string().min(1).default("::"),
 
   DATABASE_URL: z.string().min(1, "DATABASE_URL majburiy"),
 
