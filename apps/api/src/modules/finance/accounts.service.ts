@@ -29,6 +29,7 @@ export const DEFAULT_ACCOUNTS: { code: string; name: string; type: AccountType; 
   { code: "2000", name: "Kreditorlar", type: "liability", subtype: "payable" },
   { code: "2100", name: "Qisqa muddatli qarzlar", type: "liability", subtype: "short_debt" },
   { code: "2200", name: "Ish haqidan soliq majburiyati", type: "liability", subtype: "payroll_tax" },
+  { code: "2300", name: "Mijozlar avanslari (balans)", type: "liability", subtype: "customer_advance" },
   { code: "3000", name: "Ustav kapitali", type: "equity", subtype: "capital" },
   { code: "4000", name: "Sotuv daromadi", type: "income", subtype: "sales" },
   { code: "4100", name: "Boshqa daromadlar", type: "income", subtype: "other" },

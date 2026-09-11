@@ -48,6 +48,7 @@ import {
 } from "../finance/cash.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { moveStock } from "../inventory/stock.service.js";
+import { refundToBalance } from "./customer-balance.service.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
 import { assertProductsInScope, categoryScope, documentHasScopedItem } from "../catalog/category-scope.js";
 import { salesAudit } from "./customers.service.js";
@@ -695,11 +696,21 @@ export async function returnOrder(
       .where(eq(customers.id, order.customerId));
   }
 
-  let refunded = 0n;
+  // Mijoz balansidan to'langan qism naqd emas — balansga qaytadi; qolgani tanlangan usulda qaytariladi
+  const [balancePayments] = order.customerId
+    ? await tx
+        .select({ total: sql<string>`coalesce(sum(${customerPayments.amount}), 0)::numeric(18,2)` })
+        .from(customerPayments)
+        .where(and(eq(customerPayments.orderId, orderId), eq(customerPayments.method, "balance")))
+    : [{ total: "0" }];
+  const balancePaid = toMinor(balancePayments!.total);
+  const cashPaid = paid - balancePaid;
+
+  let cashRefunded = 0n;
   let refundAccountId: string | null = null;
   const method = input.method ?? "cash";
-  if (refund && paid > 0n) {
-    const amount = fromMinor(paid);
+  if (refund && cashPaid > 0n) {
+    const amount = fromMinor(cashPaid);
     const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
       cashAccountId: await resolvePaymentAccount(tx, companyId, method, input.cashAccountId),
       type: "out",
@@ -726,13 +737,29 @@ export async function returnOrder(
         .set({ totalDebt: sql`${customers.totalDebt} + ${amount}::numeric`, updatedAt: new Date() })
         .where(eq(customers.id, order.customerId));
     }
-    refunded = paid;
+    cashRefunded = cashPaid;
     refundAccountId = account.id;
   }
+  if (refund && balancePaid > 0n) {
+    await refundToBalance(
+      tx,
+      tenant,
+      {
+        customerId: order.customerId!,
+        orderId,
+        orderNumber: order.number,
+        amount: fromMinor(balancePaid),
+        posShiftId: order.posShiftId,
+        date: today,
+      },
+      meta,
+    );
+  }
+  const refunded = cashRefunded + (refund ? balancePaid : 0n);
 
   // Ochiq smenada qaytarish kassir yig'indisidan ayriladi — smena yopilishida kassa farqi to'g'ri chiqsin
   if (order.posShiftId) {
-    const refundedText = fromMinor(refunded);
+    const refundedText = fromMinor(cashRefunded);
     await tx
       .update(posShifts)
       .set({

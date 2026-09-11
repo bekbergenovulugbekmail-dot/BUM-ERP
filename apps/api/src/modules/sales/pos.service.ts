@@ -27,7 +27,8 @@ import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { todayIso, type PaymentMethod } from "../finance/cash.service.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
-import { salesAudit } from "./customers.service.js";
+import { customerSummary, depositToBalance, payFromBalance } from "./customer-balance.service.js";
+import { createCustomer, salesAudit, type CustomerInput } from "./customers.service.js";
 import { dispatchOrder, getOrder, insertSalesItems, prepareSalesItems, type SalesItemInput } from "./orders.service.js";
 import { recordCustomerPayment } from "./payments.service.js";
 
@@ -187,6 +188,10 @@ export async function completeSale(
     items: SalesItemInput[];
     paymentMethod: PaymentMethod;
     amountPaid: string;
+    /** Mijoz balansidan yechiladigan qism — naqd/karta to'lovidan oldin qo'llanadi. */
+    balanceAmount?: string | null;
+    /** Naqd qaytim mijozga berilmaydi, kassada qolib mijoz balansiga yoziladi. */
+    changeToBalance?: boolean;
     notes?: string | null;
   },
   meta: RequestMeta,
@@ -198,26 +203,39 @@ export async function completeSale(
   assertWarehouseAccess(tenant, shift.warehouseId);
 
   let customerDiscount = "0";
+  let customerBalance = 0n;
   if (input.customerId) {
     const [customer] = await tx
-      .select({ discountPercent: customers.discountPercent, isActive: customers.isActive })
+      .select({ discountPercent: customers.discountPercent, isActive: customers.isActive, balance: customers.balance })
       .from(customers)
       .where(and(eq(customers.id, input.customerId), eq(customers.companyId, companyId)))
       .limit(1);
     if (!customer) throw badRequest("Mijoz topilmadi");
     if (!customer.isActive) throw badRequest("Mijoz faol emas");
     customerDiscount = customer.discountPercent;
+    customerBalance = toMinor(customer.balance);
   }
 
   const { items, totals } = await prepareSalesItems(tx, tenant, input.items, customerDiscount);
   const total = toMinor(totals.totalAmount);
+  const fromBalance = input.balanceAmount ? toMinor(input.balanceAmount) : 0n;
+  if ((fromBalance > 0n || input.changeToBalance) && !input.customerId) {
+    throw badRequest("Mijoz balansidan foydalanish uchun mijoz tanlanishi kerak");
+  }
+  if (fromBalance > total) throw badRequest("Balansdan to'lov chek summasidan oshmasligi kerak");
+  if (fromBalance > customerBalance) {
+    throw badRequest(`Mijoz balansida yetarli mablag' yo'q (balans ${fromMinor(customerBalance)})`);
+  }
+
+  // Balansdan keyin qolgani naqd/karta bilan to'lanadi; yetmagani mijoz qarziga yoziladi
+  const due = total - fromBalance;
   const tendered = toMinor(input.amountPaid);
-  if (input.paymentMethod !== "cash" && tendered > total) {
+  if (input.paymentMethod !== "cash" && tendered > due) {
     throw badRequest("Karta yoki bank to'lovi chek summasidan oshmasligi kerak");
   }
-  const paid = tendered < total ? tendered : total;
+  const paid = tendered < due ? tendered : due;
   const change = tendered - paid;
-  if (!input.customerId && paid < total) throw badRequest("Mijozsiz sotuvda chek to'liq to'lanishi kerak");
+  if (!input.customerId && paid < due) throw badRequest("Mijozsiz sotuvda chek to'liq to'lanishi kerak");
 
   const today = todayIso();
   const number = await nextDocumentNumber(tx, {
@@ -256,12 +274,20 @@ export async function completeSale(
     });
   await insertSalesItems(tx, companyId, order!.id, items);
 
-  await dispatchOrder(tx, tenant, order!, today, paid);
+  await dispatchOrder(tx, tenant, order!, today, paid + fromBalance);
   await tx
     .update(salesOrders)
     .set({ status: total === 0n ? "delivered" : "shipped", updatedAt: new Date() })
     .where(eq(salesOrders.id, order!.id));
 
+  if (fromBalance > 0n) {
+    await payFromBalance(
+      tx,
+      tenant,
+      { customerId: input.customerId!, orderId: order!.id, amount: fromMinor(fromBalance), posShiftId: shift.id, date: today },
+      meta,
+    );
+  }
   const paidText = fromMinor(paid);
   if (paid > 0n) {
     await recordCustomerPayment(
@@ -272,22 +298,139 @@ export async function completeSale(
     );
   }
 
+  // Qaytim kassada qoladi va mijoz balansiga yoziladi (faqat naqdda qaytim bo'ladi)
+  let changeKept = 0n;
+  if (input.changeToBalance && change > 0n) {
+    await depositToBalance(
+      tx,
+      tenant,
+      {
+        customerId: input.customerId!,
+        type: "change",
+        amount: fromMinor(change),
+        method: "cash",
+        orderId: order!.id,
+        posShiftId: shift.id,
+        date: today,
+      },
+      meta,
+    );
+    changeKept = change;
+  }
+  const cashIn = input.paymentMethod === "cash" ? paid + changeKept : 0n;
+
   await tx
     .update(posShifts)
     .set({
       totalSales: sql`${posShifts.totalSales} + ${totals.totalAmount}::numeric`,
-      ...(input.paymentMethod === "cash" ? { totalCash: sql`${posShifts.totalCash} + ${paidText}::numeric` } : {}),
+      ...(cashIn > 0n ? { totalCash: sql`${posShifts.totalCash} + ${fromMinor(cashIn)}::numeric` } : {}),
       ...(input.paymentMethod === "card" ? { totalCard: sql`${posShifts.totalCard} + ${paidText}::numeric` } : {}),
       receiptCount: sql`${posShifts.receiptCount} + 1`,
       updatedAt: new Date(),
     })
     .where(eq(posShifts.id, shift.id));
 
+  const debt = due - paid;
   await salesAudit(tx, tenant, meta, {
     action: "POS_SALE_COMPLETED",
     resource: "sales_orders",
     resourceId: order!.id,
-    details: { number, shiftId: shift.id, total: totals.totalAmount, paid: paidText, change: fromMinor(change) },
+    details: {
+      number,
+      shiftId: shift.id,
+      total: totals.totalAmount,
+      paid: paidText,
+      change: fromMinor(change),
+      balanceUsed: fromMinor(fromBalance),
+      changeToBalance: fromMinor(changeKept),
+      debt: fromMinor(debt),
+    },
   });
-  return { order: await getOrder(tx, tenant, order!.id), paid: paidText, change: fromMinor(change) };
+  return {
+    order: await getOrder(tx, tenant, order!.id),
+    paid: paidText,
+    /** Mijozga qo'lda qaytariladigan qaytim (balansga o'tgani ayirilgan). */
+    change: fromMinor(change - changeKept),
+    balanceUsed: fromMinor(fromBalance),
+    changeToBalance: fromMinor(changeKept),
+    /** Shu chekdan mijoz qarziga yozilgan summa. */
+    debt: fromMinor(debt),
+    customer: input.customerId ? await customerSummary(tx, companyId, input.customerId) : null,
+  };
+}
+
+/** Kassada mijoz qo'shish (`pos.use`). Shu telefon raqamli mijoz bo'lsa — takror yaratilmaydi. */
+export async function createPosCustomer(
+  tx: Tx,
+  tenant: TenantContext,
+  input: Pick<CustomerInput, "name" | "phone" | "notes">,
+  meta: RequestMeta,
+) {
+  // Oxirgi 9 raqam: "+998 90 123 45 67" va "901234567" — bitta raqam
+  const digits = input.phone?.replace(/\D/g, "") ?? "";
+  if (digits.length >= 9) {
+    const key = digits.slice(-9);
+    const [existing] = await tx
+      .select({ name: customers.name })
+      .from(customers)
+      .where(
+        and(
+          eq(customers.companyId, tenant.company.id),
+          sql`right(regexp_replace(coalesce(${customers.phone}, ''), '[^0-9]', '', 'g'), 9) = ${key}`,
+        ),
+      )
+      .limit(1);
+    if (existing) throw conflict(`Bu telefon raqamli mijoz bor: ${existing.name}`);
+  }
+  return createCustomer(tx, tenant, input, meta);
+}
+
+export type PosCustomerPaymentInput = {
+  shiftId: string;
+  customerId: string;
+  /** deposit — balansni to'ldirish; debt — qarzni to'lash. */
+  purpose: "deposit" | "debt";
+  amount: string;
+  /** `balance` — qarzni mijoz balansidan yopish (kassaga pul tushmaydi). */
+  method: PaymentMethod | "balance";
+  notes?: string | null;
+};
+
+/** Kassada mijoz balansini to'ldirish yoki qarzini to'lash; naqd/karta smena yig'indisiga qo'shiladi. */
+export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: PosCustomerPaymentInput, meta: RequestMeta) {
+  const shift = await lockShift(tx, tenant, input.shiftId);
+  if (shift.status !== "open") throw badRequest("Smena yopilgan");
+  await assertShiftOperator(tx, tenant, shift.cashierId);
+  assertWarehouseAccess(tenant, shift.warehouseId);
+
+  const notes = input.notes ?? null;
+  if (input.method === "balance") {
+    if (input.purpose !== "debt") throw badRequest("Balansni balansning o'zidan to'ldirib bo'lmaydi");
+    await payFromBalance(tx, tenant, { customerId: input.customerId, amount: input.amount, posShiftId: shift.id, notes }, meta);
+  } else if (input.purpose === "deposit") {
+    await depositToBalance(
+      tx,
+      tenant,
+      { customerId: input.customerId, type: "deposit", amount: input.amount, method: input.method, posShiftId: shift.id, notes },
+      meta,
+    );
+  } else {
+    await recordCustomerPayment(tx, tenant, { customerId: input.customerId, amount: input.amount, method: input.method, notes }, meta);
+  }
+
+  if (input.method === "cash" || input.method === "card") {
+    await tx
+      .update(posShifts)
+      .set({
+        ...(input.method === "cash"
+          ? { totalCash: sql`${posShifts.totalCash} + ${input.amount}::numeric` }
+          : { totalCard: sql`${posShifts.totalCard} + ${input.amount}::numeric` }),
+        updatedAt: new Date(),
+      })
+      .where(eq(posShifts.id, shift.id));
+  }
+  return {
+    customer: await customerSummary(tx, tenant.company.id, input.customerId),
+    shift: await getShift(tx, tenant, shift.id),
+  };
 }

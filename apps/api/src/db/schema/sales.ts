@@ -41,6 +41,14 @@ export const salesOrderStatus = pgEnum("sales_order_status", [
 
 export const posShiftStatus = pgEnum("pos_shift_status", ["open", "closed"]);
 
+/** Mijoz balansi (hamyon) harakati. Keshbek bu yerda emas — alohida hisob. */
+export const customerBalanceTxType = pgEnum("customer_balance_tx_type", [
+  "deposit", //      kassada balansni to'ldirish
+  "change", //       chek qaytimi mijozga berilmay balansga yozildi
+  "sale_payment", // chek yoki qarz balansdan to'landi
+  "refund", //       qaytarilgan chekning balansdan to'langan qismi
+]);
+
 // ─── customers ───────────────────────────────────────────────────────────────
 
 export const customers = pgTable(
@@ -66,6 +74,8 @@ export const customers = pgTable(
 
     totalDebt: money("total_debt").notNull().default("0"),
     totalPurchased: money("total_purchased").notNull().default("0"),
+    /** Oldindan to'langan pul (hamyon) — qarzdan alohida; o'zgarishi faqat customer_balance_transactions orqali. */
+    balance: money("balance").notNull().default("0"),
 
     isActive: boolean("is_active").notNull().default(true),
     notes: text("notes"),
@@ -75,6 +85,7 @@ export const customers = pgTable(
     uniqueIndex("customers_company_code_key").on(t.companyId, t.code),
     index("customers_company_active_idx").on(t.companyId, t.isActive),
     index("customers_company_phone_idx").on(t.companyId, t.phone),
+    check("customers_balance_non_negative", sql`${t.balance} >= 0`),
   ],
 );
 
@@ -231,6 +242,42 @@ export const customerPayments = pgTable(
       .on(t.companyId, t.reference)
       .where(sql`${t.reference} IS NOT NULL`),
     check("cp_amount_positive", sql`${t.amount} > 0`),
+  ],
+);
+
+// ─── customer_balance_transactions ───────────────────────────────────────────
+
+export const customerBalanceTransactions = pgTable(
+  "customer_balance_transactions",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    customerId: uuid("customer_id").notNull().references(() => customers.id, { onDelete: "restrict" }),
+
+    type: customerBalanceTxType("type").notNull(),
+    /** Ishorali: kirim musbat, sarf manfiy. */
+    amount: money("amount").notNull(),
+    balanceAfter: money("balance_after").notNull(),
+    /** Kirimda — pul qanday tushgani; sarfda null. */
+    method: paymentMethod("method"),
+
+    orderId: uuid("order_id").references(() => salesOrders.id, { onDelete: "set null" }),
+    paymentId: uuid("payment_id").references(() => customerPayments.id, { onDelete: "set null" }),
+    posShiftId: uuid("pos_shift_id").references(() => posShifts.id, { onDelete: "set null" }),
+    cashAccountId: uuid("cash_account_id").references(() => cashAccounts.id, { onDelete: "set null" }),
+    journalEntryId: uuid("journal_entry_id").references(() => journalEntries.id, { onDelete: "set null" }),
+
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    index("cbt_company_customer_idx").on(t.companyId, t.customerId, t.createdAt),
+    index("cbt_order_idx").on(t.orderId),
+    check("cbt_amount_non_zero", sql`${t.amount} <> 0`),
+    check("cbt_balance_after_non_negative", sql`${t.balanceAfter} >= 0`),
   ],
 );
 

@@ -7,7 +7,7 @@
  *  - kredit limiti saqlanardi, lekin hech qayerda tekshirilmasdi — endi jo'natish va POS nasiyasida
  *  - valyuta erkin edi — faqat kompaniya valyutasi; qarzi bor mijozni faolsizlantirib bo'lmaydi
  */
-import { and, asc, desc, eq, getTableColumns, ilike, or } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
 import { customerPayments, customers, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -52,12 +52,30 @@ async function resolveCurrency(conn: DbOrTx, companyId: string, requested?: stri
   return currency;
 }
 
+const likePattern = (value: string) => `%${value.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
+/**
+ * Ismning har bir so'zi alohida ("ali valiyev" → "Valiyev Ali"), kod, telefon; raqamlar bo'yicha
+ * telefon formatidan qat'i nazar ("90 123" → "+998901234567").
+ */
+function customerSearch(search: string) {
+  const words = search.split(/\s+/).filter(Boolean);
+  const digits = search.replace(/\D/g, "");
+  return or(
+    and(...words.map((word) => ilike(customers.name, likePattern(word)))),
+    ilike(customers.code, likePattern(search)),
+    ilike(customers.phone, likePattern(search)),
+    digits.length >= 3
+      ? sql`regexp_replace(coalesce(${customers.phone}, ''), '[^0-9]', '', 'g') like ${`%${digits}%`}`
+      : undefined,
+  );
+}
+
 export async function listCustomers(
   conn: DbOrTx,
   tenant: TenantContext,
   options: { search?: string; includeInactive?: boolean; limit: number },
 ) {
-  const pattern = options.search ? `%${options.search.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
   return conn
     .select(customerFields)
     .from(customers)
@@ -65,9 +83,7 @@ export async function listCustomers(
       and(
         eq(customers.companyId, tenant.company.id),
         options.includeInactive ? undefined : eq(customers.isActive, true),
-        pattern
-          ? or(ilike(customers.name, pattern), ilike(customers.code, pattern), ilike(customers.phone, pattern))
-          : undefined,
+        options.search ? customerSearch(options.search) : undefined,
       ),
     )
     .orderBy(asc(customers.name))

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   ShoppingCart, Search, Trash2, Plus, Minus, CreditCard, Banknote,
   Smartphone, X, Power, Package, Calculator, ScanLine,
+  UserPlus, UserRound, Wallet, HandCoins,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -17,12 +18,15 @@ import { useDebounce } from "@/hooks/use-debounce.ts";
 import ShiftOpenDialog from "./_components/shift-open-dialog.tsx";
 import ShiftCloseDialog from "./_components/shift-close-dialog.tsx";
 import POSReceipt from "./_components/pos-receipt.tsx";
+import CustomerPicker from "./_components/customer-picker.tsx";
+import CustomerPaymentDialog from "./_components/customer-payment-dialog.tsx";
 import BarcodeScanner from "@/components/barcode-scanner.tsx";
 import { useHIDScanner } from "@/hooks/use-hid-scanner.ts";
 import { computeLine, fromMinor, minorToNumber } from "@/pages/sales/_lib/line-amounts.ts";
 import {
   num,
-  type PaymentMethod, type PosShift, type ProductOption, type SalesOrderDetail, type WarehouseOption,
+  type Customer, type PaymentMethod, type PosCustomerSummary, type PosShift, type ProductOption,
+  type SalesOrderDetail, type WarehouseOption,
 } from "@/pages/sales/_lib/types.ts";
 
 type CartItem = {
@@ -38,7 +42,17 @@ type CartItem = {
   stock: number;
 };
 
-type SaleResult = { order: SalesOrderDetail; paid: string; change: string };
+type SaleResult = {
+  order: SalesOrderDetail;
+  paid: string;
+  /** Mijozga qo'lda beriladigan qaytim (balansga o'tgani ayirilgan). */
+  change: string;
+  balanceUsed: string;
+  changeToBalance: string;
+  /** Shu chekdan qarzga yozilgan summa. */
+  debt: string;
+  customer: PosCustomerSummary | null;
+};
 type LastReceipt = SaleResult & { payMethod: PaymentMethod };
 
 const PAY_METHODS: { key: PaymentMethod; label: string; icon: React.ElementType; color: string }[] = [
@@ -48,6 +62,9 @@ const PAY_METHODS: { key: PaymentMethod; label: string; icon: React.ElementType;
 ];
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
+/** Kiritilgan summa → tiyin (faqat oldindan ko'rish; aniq hisob serverda). */
+const minorOf = (value: string | number) => BigInt(Math.round(num(value) * 100));
+const minBigInt = (...values: bigint[]) => values.reduce((a, b) => (b < a ? b : a));
 
 export default function POSPage() {
   const currentUser = useCurrentUser();
@@ -89,6 +106,26 @@ export default function POSPage() {
   const [showScanner, setShowScanner] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
+  // Mijoz: qarzi va balansi ko'rinib turadi; sotuv yoki to'lovdan keyin so'rov yangilanadi
+  const [customerId, setCustomerId] = useState<string | null>(null);
+  const [showCustomerPicker, setShowCustomerPicker] = useState(false);
+  const [customerPayment, setCustomerPayment] = useState<"deposit" | "debt" | null>(null);
+  const [useBalance, setUseBalance] = useState(false);
+  const [balanceInput, setBalanceInput] = useState("");
+  const [changeToBalance, setChangeToBalance] = useState(false);
+  const customer = useApiQuery<{ customer: Customer }>(
+    customerId ? `/api/sales/customers/${customerId}` : null,
+  ).data?.customer;
+  const customerDebt = customer ? Math.max(0, num(customer.totalDebt)) : 0;
+  const customerBalance = customer ? num(customer.balance) : 0;
+
+  const clearCustomer = () => {
+    setCustomerId(null);
+    setUseBalance(false);
+    setBalanceInput("");
+    setChangeToBalance(false);
+  };
+
   // `warehouse.view` ruxsati bo'lmasa (kassir) qoldiq noma'lum — cheklov serverda tekshiriladi
   const stockMap = stockQuery.data
     ? new Map(stockQuery.data.stock.map((s) => [s.productId, num(s.quantity)]))
@@ -105,9 +142,20 @@ export default function POSPage() {
   const subtotal = minorToNumber(amounts.reduce((s, a) => s + a.net, 0n));
   const taxTotal = minorToNumber(amounts.reduce((s, a) => s + a.tax, 0n));
   const total = minorToNumber(totalMinor);
-  // Naqdda bo'sh maydon — aniq summa; karta/bankda to'lov doim chek summasiga teng
-  const paid = payMethod === "cash" && amountPaid.trim() !== "" ? num(amountPaid) : total;
-  const change = Math.max(0, paid - total);
+  // Mijoz balansidan yechiladigan qism — chek summasi va balansdan oshmaydi
+  const balanceAvailable = customer ? minorOf(customer.balance) : 0n;
+  const balanceRequested = balanceInput.trim() !== "" ? minorOf(balanceInput) : balanceAvailable;
+  const balanceMinor = customer && useBalance && balanceRequested > 0n
+    ? minBigInt(balanceRequested, balanceAvailable, totalMinor)
+    : 0n;
+  const dueMinor = totalMinor - balanceMinor;
+  const due = minorToNumber(dueMinor);
+  // Naqdda bo'sh maydon — aniq summa; karta/bankda to'lov doim to'lanadigan summaga teng
+  const paid = payMethod === "cash" && amountPaid.trim() !== "" ? num(amountPaid) : due;
+  const change = Math.max(0, paid - due);
+  // Yetmagan qismi faqat mijoz tanlanganda qarzga yoziladi
+  const debtAmount = Math.max(0, due - paid);
+  const onCredit = debtAmount >= 0.01;
 
   const addToCart = (p: ProductOption) => {
     const stock = stockOf(p.id);
@@ -186,20 +234,30 @@ export default function POSPage() {
   const handleCheckout = async () => {
     if (!shift) { toast.error("Avval smena oching"); return; }
     if (!cart.length) { toast.error("Savatcha bo'sh"); return; }
-    if (paid < total) { toast.error("To'lov summasi yetarli emas"); return; }
+    if (onCredit && !customer) { toast.error("To'lov yetarli emas — qarzga sotish uchun mijoz tanlang"); return; }
 
+    const keepChange = !!customer && payMethod === "cash" && changeToBalance && change > 0;
     try {
       // Narx, soliq va ombor yuborilmaydi — server prays-list, mahsulot soliqi va smena omboridan oladi
       const result = await completeSale.mutateAsync({
         shiftId: shift.id,
+        customerId: customer?.id ?? null,
         items: cart.map((i) => ({ productId: i.productId, unitId: i.unitId, quantity: i.qty })),
         paymentMethod: payMethod,
-        amountPaid: payMethod === "cash" && amountPaid.trim() !== "" ? amountPaid.trim() : fromMinor(totalMinor),
+        amountPaid: payMethod === "cash" && amountPaid.trim() !== "" ? amountPaid.trim() : fromMinor(dueMinor),
+        ...(balanceMinor > 0n ? { balanceAmount: fromMinor(balanceMinor) } : {}),
+        ...(keepChange ? { changeToBalance: true } : {}),
       });
       setLastReceipt({ ...result, payMethod });
       setCart([]);
       setAmountPaid("");
-      toast.success(`Sotuv amalga oshirildi! Qaytim: ${fmt(num(result.change))} so'm`);
+      clearCustomer();
+      const details = [
+        num(result.change) > 0 ? `Qaytim: ${fmt(num(result.change))} so'm` : null,
+        num(result.changeToBalance) > 0 ? `Balansga: ${fmt(num(result.changeToBalance))} so'm` : null,
+        num(result.debt) > 0 ? `Qarzga: ${fmt(num(result.debt))} so'm` : null,
+      ].filter(Boolean);
+      toast.success(["Sotuv amalga oshirildi", ...details].join(" · "));
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -214,6 +272,7 @@ export default function POSPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "F2") { e.preventDefault(); searchRef.current?.focus(); }
+      if (e.key === "F4") { e.preventDefault(); setShowCustomerPicker(true); }
       if (e.key === "F12" && cart.length > 0) { e.preventDefault(); void checkoutRef.current(); }
       if (e.key === "Escape") { setCart([]); setAmountPaid(""); }
     };
@@ -404,6 +463,69 @@ export default function POSPage() {
           )}
         </div>
 
+        {/* Mijoz */}
+        <div className="px-3 py-2 border-b border-border shrink-0">
+          {customer ? (
+            <div className="rounded-xl border border-border bg-muted/30 p-2.5 space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <UserRound className="h-4 w-4 text-primary" />
+                </div>
+                <button
+                  type="button"
+                  className="flex-1 min-w-0 text-left cursor-pointer"
+                  title="Mijozni almashtirish (F4)"
+                  onClick={() => setShowCustomerPicker(true)}
+                >
+                  <p className="text-sm font-semibold truncate">{customer.name}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">{customer.phone ?? customer.code}</p>
+                </button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" title="Mijozni olib tashlash" onClick={clearCustomer}>
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                <div className={cn(
+                  "rounded-lg px-2 py-1.5",
+                  customerDebt > 0 ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "bg-background text-muted-foreground",
+                )}>
+                  <p>Qarz</p>
+                  <p className="text-sm font-bold">{fmt(customerDebt)} so'm</p>
+                </div>
+                <div className={cn(
+                  "rounded-lg px-2 py-1.5",
+                  customerBalance > 0 ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "bg-background text-muted-foreground",
+                )}>
+                  <p>Balans</p>
+                  <p className="text-sm font-bold">{fmt(customerBalance)} so'm</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <Button size="sm" variant="secondary" className="h-7 text-xs" onClick={() => setCustomerPayment("deposit")}>
+                  <Wallet className="h-3.5 w-3.5 mr-1" /> Balansga kirim
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-7 text-xs"
+                  disabled={customerDebt <= 0}
+                  onClick={() => setCustomerPayment("debt")}
+                >
+                  <HandCoins className="h-3.5 w-3.5 mr-1" /> Qarzni to'lash
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              variant="secondary"
+              className="w-full h-9 justify-start text-muted-foreground"
+              onClick={() => setShowCustomerPicker(true)}
+            >
+              <UserPlus className="h-4 w-4 mr-2" /> Mijoz tanlash (F4)
+            </Button>
+          )}
+        </div>
+
         {/* Cart items */}
         <div className="flex-1 overflow-y-auto px-3 py-2">
           {cart.length === 0 ? (
@@ -462,10 +584,48 @@ export default function POSPage() {
               <span>QQS</span><span>{fmt(taxTotal)} so'm</span>
             </div>
             <div className="flex justify-between font-bold text-lg pt-1 border-t border-border">
-              <span>To'lov</span>
+              <span>Jami</span>
               <span className="text-primary">{fmt(total)} so'm</span>
             </div>
+            {balanceMinor > 0n && (
+              <>
+                <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
+                  <span>Balansdan</span><span>−{fmt(minorToNumber(balanceMinor))} so'm</span>
+                </div>
+                <div className="flex justify-between font-semibold">
+                  <span>To'lanadi</span><span>{fmt(due)} so'm</span>
+                </div>
+              </>
+            )}
           </div>
+
+          {/* Mijoz balansidan to'lash */}
+          {customer && balanceAvailable > 0n && totalMinor > 0n && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { setUseBalance((v) => !v); setBalanceInput(""); }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border px-2.5 h-9 text-xs font-medium cursor-pointer shrink-0 transition-all",
+                  useBalance
+                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/40"
+                    : "bg-muted/30 text-muted-foreground border-border hover:bg-accent",
+                )}
+              >
+                <Wallet className="h-3.5 w-3.5" /> Balansdan
+              </button>
+              {useBalance && (
+                <Input
+                  type="number"
+                  min="0"
+                  className="h-9 text-right"
+                  placeholder={String(minorToNumber(minBigInt(balanceAvailable, totalMinor)))}
+                  value={balanceInput}
+                  onChange={(e) => setBalanceInput(e.target.value)}
+                />
+              )}
+            </div>
+          )}
 
           {/* Payment method */}
           <div className="grid grid-cols-3 gap-2">
@@ -489,20 +649,52 @@ export default function POSPage() {
           {/* Amount paid — faqat naqdda (karta/bank to'lovi chek summasidan oshmaydi) */}
           {payMethod === "cash" && (
             <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Berilgan summa</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-muted-foreground">Berilgan summa</label>
+                {customer && dueMinor > 0n && (
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
+                    onClick={() => setAmountPaid("0")}
+                  >
+                    Hammasi qarzga
+                  </button>
+                )}
+              </div>
               <Input
                 type="number"
                 className="text-right text-lg font-bold h-11"
-                placeholder={String(total)}
+                placeholder={String(due)}
                 value={amountPaid}
                 onChange={(e) => setAmountPaid(e.target.value)}
               />
-              {paid >= total && change > 0 && (
-                <div className="flex justify-between text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
-                  <span>Qaytim</span>
-                  <span>{fmt(change)} so'm</span>
+              {change > 0 && (
+                <div className="flex items-center justify-between gap-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                  <span>
+                    {customer && changeToBalance ? `Qaytim balansga: +${fmt(change)} so'm` : `Qaytim: ${fmt(change)} so'm`}
+                  </span>
+                  {customer && (
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-primary hover:underline cursor-pointer"
+                      onClick={() => setChangeToBalance((v) => !v)}
+                    >
+                      {changeToBalance ? "Qaytimni berish" : "Balansga o'tkazish"}
+                    </button>
+                  )}
                 </div>
               )}
+            </div>
+          )}
+
+          {onCredit && (
+            <div className={cn(
+              "rounded-lg px-3 py-2 text-xs font-medium",
+              customer ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "bg-destructive/10 text-destructive",
+            )}>
+              {customer
+                ? `Qarzga yoziladi: ${fmt(debtAmount)} so'm`
+                : "To'lov yetarli emas — qarzga sotish uchun mijoz tanlang"}
             </div>
           )}
 
@@ -510,12 +702,12 @@ export default function POSPage() {
           <Button
             className="w-full h-12 text-base font-bold"
             onClick={() => { void handleCheckout(); }}
-            disabled={completeSale.isPending || !cart.length || paid < total || !shift}
+            disabled={completeSale.isPending || !cart.length || !shift || (onCredit && !customer)}
           >
             {completeSale.isPending ? "Qayta ishlanmoqda..." : (
               <span className="flex items-center gap-2">
                 <CreditCard className="h-5 w-5" />
-                To'lash (F12)
+                {onCredit ? "Qarzga yakunlash (F12)" : "Yakunlash (F12)"}
               </span>
             )}
           </Button>
@@ -524,11 +716,34 @@ export default function POSPage() {
 
       {/* Modals */}
       {modals}
+      {showCustomerPicker && (
+        <CustomerPicker
+          onClose={() => setShowCustomerPicker(false)}
+          onSelect={(picked) => {
+            setCustomerId(picked.id);
+            setUseBalance(false);
+            setBalanceInput("");
+            setShowCustomerPicker(false);
+          }}
+        />
+      )}
+      {customer && customerPayment && shift && (
+        <CustomerPaymentDialog
+          shiftId={shift.id}
+          customer={customer}
+          purpose={customerPayment}
+          onClose={() => setCustomerPayment(null)}
+        />
+      )}
       {lastReceipt && (
         <POSReceipt
           order={lastReceipt.order}
           paid={lastReceipt.paid}
           change={lastReceipt.change}
+          balanceUsed={lastReceipt.balanceUsed}
+          changeToBalance={lastReceipt.changeToBalance}
+          debt={lastReceipt.debt}
+          customer={lastReceipt.customer}
           payMethod={lastReceipt.payMethod}
           cashierName={currentUser?.name ?? undefined}
           onClose={() => setLastReceipt(null)}

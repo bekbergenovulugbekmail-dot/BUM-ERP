@@ -5,7 +5,8 @@ import type { CompanyInfo } from "@/lib/pdf/pdf-utils.ts";
 import type { ActiveCompany } from "@/hooks/use-company.ts";
 
 export type SalesOrderStatus = "draft" | "confirmed" | "shipped" | "delivered" | "returned" | "cancelled";
-export type PaymentMethod = "cash" | "bank" | "card" | "transfer";
+/** `balance` — mijoz balansidan (faqat server yozadi: POS va qarz to'lovi). */
+export type PaymentMethod = "cash" | "bank" | "card" | "transfer" | "balance";
 
 export type Customer = {
   id: string;
@@ -21,8 +22,21 @@ export type Customer = {
   currency: string;
   totalDebt: string;
   totalPurchased: string;
+  /** Oldindan to'langan pul (hamyon) — qarzdan alohida. */
+  balance: string;
   isActive: boolean;
   notes: string | null;
+};
+
+/** POS javobidagi mijoz holati (sotuv yoki to'lovdan keyin). */
+export type PosCustomerSummary = {
+  id: string;
+  name: string;
+  code: string;
+  phone: string | null;
+  balance: string;
+  totalDebt: string;
+  creditLimit: string;
 };
 
 export type SalesOrderRow = {
@@ -131,6 +145,7 @@ export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   bank: "Bank",
   card: "Karta",
   transfer: "O'tkazma",
+  balance: "Balansdan",
 };
 
 /** Faqat ko'rsatish va oldindan hisoblash uchun — aniq summa serverda. */

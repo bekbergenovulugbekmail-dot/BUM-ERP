@@ -97,11 +97,18 @@ export default function CustomersSection() {
                     <p className="font-semibold">{c.name}</p>
                     <p className="text-xs font-mono text-muted-foreground">{c.code}</p>
                   </div>
-                  {debt > 0 && (
-                    <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded-full">
-                      Qarz: {fmt(debt)} so'm
-                    </span>
-                  )}
+                  <div className="flex flex-col items-end gap-1">
+                    {debt > 0 && (
+                      <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded-full">
+                        Qarz: {fmt(debt)} so'm
+                      </span>
+                    )}
+                    {num(c.balance) > 0 && (
+                      <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full">
+                        Balans: {fmt(num(c.balance))} so'm
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-1 text-xs text-muted-foreground">
                   {c.phone && (

@@ -158,7 +158,7 @@ describe("Convex eksportidan import", () => {
 
     // Hisoblar rejasi to'ldirildi: Convex'dagi 1010 va 4000 + qolgan standart hisoblar
     const companyAccounts = await db.select().from(accounts).where(eq(accounts.companyId, ownerRow!.activeCompanyId!));
-    expect(companyAccounts.length).toBe(16);
+    expect(companyAccounts.length).toBe(17);
 
     expect(report.reconciliation).toMatchObject({ companies: 1, users: 2, customer_debt: "0.30", journal_imbalance: "0.50" });
     const [box] = await db.select().from(units).where(eq(units.name, unitName));

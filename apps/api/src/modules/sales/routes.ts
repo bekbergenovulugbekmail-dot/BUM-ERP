@@ -14,7 +14,10 @@
  *   POST   /payments                                      finance.manage (201 yangi / 200 takroriy reference)
  *   GET    /pos/shifts (?warehouseId=&status=&limit=), /pos/shifts/open?warehouseId=, /pos/shifts/:shiftId   pos.use
  *   POST   /pos/shifts, /pos/shifts/:shiftId/close        pos.use (yopish — kassirning o'zi yoki sales.approve)
- *   POST   /pos/sales                                     pos.use
+ *   POST   /pos/sales                                     pos.use (balansdan to'lash, qaytim balansga, qarzga)
+ *   POST   /pos/customers                                 pos.use (kassada mijoz qo'shish)
+ *   POST   /pos/customers/:customerId/payments            pos.use (balansni to'ldirish / qarzni to'lash)
+ *   GET    /customers/:customerId/balance (?limit=)       sales.view (balans tarixi)
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -38,7 +41,17 @@ import {
   updateOrder,
 } from "./orders.service.js";
 import { listCustomerPayments, recordCustomerPayment } from "./payments.service.js";
-import { closeShift, completeSale, getOpenShift, getShift, listShifts, openShift } from "./pos.service.js";
+import { listBalanceTransactions } from "./customer-balance.service.js";
+import {
+  closeShift,
+  completeSale,
+  createPosCustomer,
+  getOpenShift,
+  getShift,
+  listShifts,
+  openShift,
+  posCustomerPayment,
+} from "./pos.service.js";
 
 const nullableText = (max: number) =>
   z
@@ -148,8 +161,23 @@ const posSaleBody = z.strictObject({
   items: z.array(salesItem).min(1).max(500),
   paymentMethod: paymentMethod.default("cash"),
   amountPaid: moneySchema,
+  balanceAmount: moneySchema.optional(),
+  changeToBalance: z.boolean().optional(),
   notes: nullableText(1000),
 });
+const posCustomerBody = z.strictObject({
+  name: z.string().trim().min(1).max(200),
+  phone: nullableText(20),
+  notes: nullableText(2000),
+});
+const posCustomerPaymentBody = z.strictObject({
+  shiftId: z.uuid(),
+  purpose: z.enum(["deposit", "debt"]),
+  amount: positiveMoney,
+  method: z.enum(["cash", "bank", "card", "transfer", "balance"]).default("cash"),
+  notes: nullableText(1000),
+});
+const balanceQuery = z.object({ limit: limitQuery });
 
 const customerParams = z.object({ customerId: z.uuid() });
 const orderParams = z.object({ orderId: z.uuid() });
@@ -186,6 +214,12 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   app.get("/customers/:customerId", async (req) => {
     const { customerId } = customerParams.parse(req.params);
     return { customer: await getCustomer(db, await readTenant(req, "sales.view"), customerId) };
+  });
+
+  app.get("/customers/:customerId/balance", async (req) => {
+    const { customerId } = customerParams.parse(req.params);
+    const { limit } = balanceQuery.parse(req.query);
+    return { transactions: await listBalanceTransactions(db, await readTenant(req, "sales.view"), customerId, limit) };
   });
 
   app.post("/customers", async (req, reply) => {
@@ -321,6 +355,25 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     const body = posSaleBody.parse(req.body);
     const result = await writeInTenant(req, "pos.use", (tx, tenant) =>
       completeSale(tx, tenant, body, requestMeta(req)),
+    );
+    reply.status(201);
+    return result;
+  });
+
+  app.post("/pos/customers", async (req, reply) => {
+    const body = posCustomerBody.parse(req.body);
+    const customer = await writeInTenant(req, "pos.use", (tx, tenant) =>
+      createPosCustomer(tx, tenant, body, requestMeta(req)),
+    );
+    reply.status(201);
+    return { customer };
+  });
+
+  app.post("/pos/customers/:customerId/payments", async (req, reply) => {
+    const { customerId } = customerParams.parse(req.params);
+    const body = posCustomerPaymentBody.parse(req.body);
+    const result = await writeInTenant(req, "pos.use", (tx, tenant) =>
+      posCustomerPayment(tx, tenant, { ...body, customerId }, requestMeta(req)),
     );
     reply.status(201);
     return result;

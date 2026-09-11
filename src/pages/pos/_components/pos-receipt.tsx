@@ -4,7 +4,9 @@ import { Button } from "@/components/ui/button.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
 import { generateReceiptPDF } from "@/lib/pdf/receipt-pdf.ts";
 import { useActiveCompany } from "@/hooks/use-company.ts";
-import { PAYMENT_LABELS, num, type PaymentMethod, type SalesOrderDetail } from "@/pages/sales/_lib/types.ts";
+import {
+  PAYMENT_LABELS, num, type PaymentMethod, type PosCustomerSummary, type SalesOrderDetail,
+} from "@/pages/sales/_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
@@ -15,11 +17,21 @@ type Props = {
   paid: string;
   change: string;
   payMethod: PaymentMethod;
+  /** Mijoz balansidan yechilgan summa. */
+  balanceUsed?: string;
+  /** Mijozga berilmay balansiga yozilgan qaytim. */
+  changeToBalance?: string;
+  /** Shu chekdan qarzga yozilgan summa. */
+  debt?: string;
+  /** Sotuvdan keyingi mijoz holati (umumiy qarz va balans). */
+  customer?: PosCustomerSummary | null;
   onClose: () => void;
   cashierName?: string;
 };
 
-export default function POSReceipt({ order, paid, change, payMethod, onClose, cashierName }: Props) {
+export default function POSReceipt({
+  order, paid, change, payMethod, balanceUsed, changeToBalance, debt, customer, onClose, cashierName,
+}: Props) {
   const company = useActiveCompany().data?.company;
   const total = num(order.totalAmount);
   const changeAmount = num(change);
@@ -103,10 +115,44 @@ export default function POSReceipt({ order, paid, change, payMethod, onClose, ca
             <span>To'lov usuli</span>
             <span>{PAYMENT_LABELS[payMethod] ?? payMethod}</span>
           </div>
+          {num(balanceUsed) > 0 && (
+            <div className="flex justify-between text-muted-foreground">
+              <span>Balansdan to'landi</span>
+              <span>{fmt(num(balanceUsed))} so'm</span>
+            </div>
+          )}
+          {num(debt) > 0 && (
+            <div className="flex justify-between font-semibold text-amber-600 dark:text-amber-400">
+              <span>Qarzga</span>
+              <span>{fmt(num(debt))} so'm</span>
+            </div>
+          )}
           {changeAmount > 0 && (
             <div className="flex justify-between font-bold text-emerald-600 dark:text-emerald-400">
               <span>Qaytim</span>
               <span>{fmt(changeAmount)} so'm</span>
+            </div>
+          )}
+          {num(changeToBalance) > 0 && (
+            <div className="flex justify-between font-semibold text-emerald-600 dark:text-emerald-400">
+              <span>Qaytim balansga</span>
+              <span>+{fmt(num(changeToBalance))} so'm</span>
+            </div>
+          )}
+          {customer && (
+            <div className="mt-2 pt-2 border-t border-dashed border-border space-y-1">
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">Mijoz</span>
+                <span className="font-medium truncate">{customer.name}</span>
+              </div>
+              <div className="flex justify-between text-muted-foreground">
+                <span>Umumiy qarz</span>
+                <span>{fmt(Math.max(0, num(customer.totalDebt)))} so'm</span>
+              </div>
+              <div className="flex justify-between text-muted-foreground">
+                <span>Balans</span>
+                <span>{fmt(num(customer.balance))} so'm</span>
+              </div>
             </div>
           )}
         </div>

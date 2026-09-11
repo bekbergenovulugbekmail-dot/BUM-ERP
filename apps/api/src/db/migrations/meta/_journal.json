@@ -85,6 +85,13 @@
       "when": 1789148080123,
       "tag": "0011_member_category_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789151625955,
+      "tag": "0012_customer_balance",
+      "breakpoints": true
     }
   ]
 }
