@@ -1,14 +1,20 @@
 /**
  * /api/platform — platforma admini. Barcha marshrutlar `requirePlatformAdmin` ortida.
  *
- *   GET   /companies                  kompaniyalar egalari bilan
- *   POST  /companies                  kompaniya + egasi (platformCreateCompany)
- *   PATCH /users/:userId              telefon raqamini o'zgartirish
- *   POST  /users/:userId/password     parolni tiklash — sessiyalar bekor
- *   POST  /users/:userId/status       faollashtirish / bloklash
+ *   GET   /companies                     kompaniyalar (?status=), a'zolar soni, egasi
+ *   POST  /companies                     kompaniya + egasi (platformCreateCompany)
+ *   GET   /companies/:companyId          tafsilot: egasi, a'zolar, filiallar
+ *   POST  /companies/:companyId/status   holat (to'xtatish sababi bilan)
+ *   GET   /stats                         statistika
+ *   GET   /audit-logs                    audit jurnali (?companyId=&limit=&cursor=)
+ *   GET   /users                         foydalanuvchilar (?search=&limit=&offset=)
+ *   PATCH /users/:userId                 telefon raqamini o'zgartirish
+ *   POST  /users/:userId/password        parolni tiklash — sessiyalar bekor
+ *   POST  /users/:userId/status          faollashtirish / bloklash
+ *   GET   /settings, PUT /settings       platforma sozlamalari
  *
- * Bootstrap admin va boshqa platforma adminlariga bu marshrutlar ta'sir qilmaydi
- * (users/user-admin.service.ts). Bootstrap admin `db:seed` orqali yaratiladi.
+ * Bootstrap admin va boshqa platforma adminlariga foydalanuvchi amallari ta'sir
+ * qilmaydi (users/user-admin.service.ts). Bootstrap admin `db:seed` orqali yaratiladi.
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -21,7 +27,20 @@ import {
   platformResetPassword,
   platformSetActive,
 } from "../users/user-admin.service.js";
-import { createCompanyWithOwner, listCompanies } from "./company.service.js";
+import {
+  COMPANY_STATUSES,
+  createCompanyWithOwner,
+  getCompanyDetails,
+  listCompanies,
+  setCompanyStatus,
+} from "./company.service.js";
+import {
+  getPlatformSettings,
+  listAuditLogs,
+  listUsers,
+  platformStats,
+  savePlatformSettings,
+} from "./platform.service.js";
 
 const optionalText = (max: number) => z.string().trim().min(1).max(max).optional();
 
@@ -43,15 +62,45 @@ const createCompanyBody = z.object({
     name: z.string().max(200).optional(),
   }),
 });
+const companyListQuery = z.object({ status: z.enum(COMPANY_STATUSES).optional() });
+const companyParams = z.object({ companyId: z.uuid() });
+const companyStatusBody = z.strictObject({
+  status: z.enum(COMPANY_STATUSES),
+  reason: z.string().trim().min(1).max(500).optional(),
+});
+
+const auditQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+  companyId: z.uuid().optional(),
+  cursor: z.string().max(200).optional(),
+});
+const usersQuery = z.object({
+  search: z.string().trim().min(1).max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 const userParams = z.object({ userId: z.uuid() });
 const updateUserBody = z.object({ phone: z.string().min(1).max(32) });
 const resetPasswordBody = z.object({ newPassword: z.string().min(1).max(256) });
-const statusBody = z.object({ isActive: z.boolean() });
+const userStatusBody = z.object({ isActive: z.boolean() });
+
+const settingsBody = z.strictObject({
+  registrationEnabled: z.boolean().optional(),
+  defaultTrialDays: z.number().int().min(0).max(365).optional(),
+  platformName: z.string().trim().min(1).max(100).optional(),
+  supportEmail: z.union([z.email().max(255), z.literal("")]).optional(),
+});
 
 export async function platformRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", requirePlatformAdmin);
 
-  app.get("/companies", async () => ({ companies: await listCompanies(db) }));
+  // ─── Kompaniyalar ────────────────────────────────────────────────────────
+
+  app.get("/companies", async (req) => {
+    const filter = companyListQuery.parse(req.query);
+    return { companies: await listCompanies(db, filter) };
+  });
 
   app.post("/companies", async (req, reply) => {
     const body = createCompanyBody.parse(req.body);
@@ -62,6 +111,31 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
     reply.status(201);
     return created;
   });
+
+  app.get("/companies/:companyId", async (req) => {
+    const { companyId } = companyParams.parse(req.params);
+    return getCompanyDetails(db, companyId);
+  });
+
+  app.post("/companies/:companyId/status", async (req) => {
+    const { companyId } = companyParams.parse(req.params);
+    const { status, reason } = companyStatusBody.parse(req.body);
+    const { user } = authOf(req);
+    const company = await withTransaction((tx) =>
+      setCompanyStatus(tx, user, companyId, status, reason, requestMeta(req)),
+    );
+    return { company };
+  });
+
+  // ─── Kuzatuv ─────────────────────────────────────────────────────────────
+
+  app.get("/stats", async () => platformStats(db));
+
+  app.get("/audit-logs", async (req) => listAuditLogs(db, auditQuery.parse(req.query)));
+
+  // ─── Foydalanuvchilar ────────────────────────────────────────────────────
+
+  app.get("/users", async (req) => listUsers(db, usersQuery.parse(req.query)));
 
   app.patch("/users/:userId", async (req) => {
     const { userId } = userParams.parse(req.params);
@@ -83,9 +157,20 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/users/:userId/status", async (req) => {
     const { userId } = userParams.parse(req.params);
-    const { isActive } = statusBody.parse(req.body);
+    const { isActive } = userStatusBody.parse(req.body);
     const { user } = authOf(req);
     await withTransaction((tx) => platformSetActive(tx, user, userId, isActive, requestMeta(req)));
     return { ok: true };
+  });
+
+  // ─── Sozlamalar ──────────────────────────────────────────────────────────
+
+  app.get("/settings", async () => ({ settings: await getPlatformSettings(db) }));
+
+  app.put("/settings", async (req) => {
+    const patch = settingsBody.parse(req.body);
+    const { user } = authOf(req);
+    const saved = await withTransaction((tx) => savePlatformSettings(tx, user, patch, requestMeta(req)));
+    return { settings: saved };
   });
 }

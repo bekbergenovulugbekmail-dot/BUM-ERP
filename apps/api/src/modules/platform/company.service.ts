@@ -1,16 +1,16 @@
 /**
- * Platforma admini kompaniyani egasi bilan birga yaratadi.
+ * Platforma admini: kompaniyalar.
  *
- * Convex'dagi companies.platformCreateCompany muqobili: kompaniya (status
- * active), "Asosiy filial" (BR-001), kompaniyaning standart rollari,
- * "Asosiy ombor" (WH-001) va egasining "Business Owner" a'zoligi.
- *
- * Farq: egasi shu yerda yangi hisob sifatida yaratiladi (Convex'da mavjud
- * ownerUserId berilardi). Hammasi bitta tranzaksiyada — raqam band bo'lsa
- * hech narsa qolmaydi.
+ *  - createCompanyWithOwner — Convex'dagi platformCreateCompany: kompaniya
+ *    (status active), "Asosiy filial" (BR-001), kompaniyaning standart rollari,
+ *    "Asosiy ombor" (WH-001) va egasining "Business Owner" a'zoligi. Farq: egasi
+ *    shu yerda yangi hisob sifatida yaratiladi. Hammasi bitta tranzaksiyada.
+ *  - listCompanies / getCompanyDetails — platformListCompanies / platformGetCompany
+ *  - setCompanyStatus — platformUpdateCompanyStatus; to'xtatilgan va tugatilgan
+ *    kompaniyada yozish amallari company/tenant.ts da yopiladi
  */
-import { desc, eq, like, or } from "drizzle-orm";
-import { DEFAULT_ROLES } from "@bum/shared";
+import { desc, eq, like, or, sql } from "drizzle-orm";
+import { DEFAULT_ROLES, notFound } from "@bum/shared";
 import { warehouses } from "../../db/schema/inventory.js";
 import { branches, companies, companyMembers, roles, users } from "../../db/schema/platform.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -19,6 +19,9 @@ import type { SessionUser } from "../auth/session.js";
 import { auditUserAction, insertUser, type NewAccount } from "../users/user-admin.service.js";
 
 const OWNER_ROLE = "Business Owner";
+
+export const COMPANY_STATUSES = ["active", "trial", "pending", "suspended", "cancelled"] as const;
+export type CompanyStatus = (typeof COMPANY_STATUSES)[number];
 
 /** Convex'dagi RESERVED_SLUGS bilan bir xil — subdomen va marshrutlar bilan to'qnashmasin. */
 const RESERVED_SLUGS = new Set([
@@ -182,7 +185,7 @@ export async function createCompanyWithOwner(
   };
 }
 
-export async function listCompanies(conn: DbOrTx) {
+export async function listCompanies(conn: DbOrTx, filter: { status?: CompanyStatus } = {}) {
   const rows = await conn
     .select({
       id: companies.id,
@@ -191,6 +194,7 @@ export async function listCompanies(conn: DbOrTx) {
       status: companies.status,
       isActive: companies.isActive,
       createdAt: companies.createdAt,
+      memberCount: sql<number>`(select count(*)::int from ${companyMembers} where ${companyMembers.companyId} = ${companies.id})`,
       ownerId: users.id,
       ownerPhone: users.phone,
       ownerName: users.name,
@@ -198,10 +202,108 @@ export async function listCompanies(conn: DbOrTx) {
     })
     .from(companies)
     .leftJoin(users, eq(users.id, companies.ownerId))
+    .where(filter.status ? eq(companies.status, filter.status) : undefined)
     .orderBy(desc(companies.createdAt));
 
   return rows.map(({ ownerId, ownerPhone, ownerName, ownerActive, ...company }) => ({
     ...company,
     owner: ownerId ? { id: ownerId, phone: ownerPhone, name: ownerName, isActive: ownerActive } : null,
   }));
+}
+
+/** Kompaniya, egasi, a'zolar va filiallar. Foydalanuvchi maydonlari ruxsat ro'yxati bo'yicha — xeshlar yo'q. */
+export async function getCompanyDetails(conn: DbOrTx, companyId: string) {
+  const [company] = await conn.select().from(companies).where(eq(companies.id, companyId)).limit(1);
+  if (!company) throw notFound("Kompaniya topilmadi");
+
+  const [owner] = company.ownerId
+    ? await conn
+        .select({ id: users.id, phone: users.phone, name: users.name, isActive: users.isActive })
+        .from(users)
+        .where(eq(users.id, company.ownerId))
+        .limit(1)
+    : [];
+
+  const members = await conn
+    .select({
+      userId: users.id,
+      phone: users.phone,
+      name: users.name,
+      userActive: users.isActive,
+      companyRole: companyMembers.companyRole,
+      branchId: companyMembers.branchId,
+      membershipActive: companyMembers.isActive,
+      joinedAt: companyMembers.joinedAt,
+    })
+    .from(companyMembers)
+    .innerJoin(users, eq(users.id, companyMembers.userId))
+    .where(eq(companyMembers.companyId, companyId))
+    .orderBy(companyMembers.joinedAt);
+
+  const companyBranches = await conn
+    .select()
+    .from(branches)
+    .where(eq(branches.companyId, companyId))
+    .orderBy(branches.code);
+
+  // legacy_id — ko'chirish uchun ichki ustun, API javobiga chiqmaydi
+  const { legacyId: _legacyId, ...publicCompany } = company;
+  return {
+    company: publicCompany,
+    owner: owner ?? null,
+    members,
+    branches: companyBranches.map(({ legacyId: _branchLegacyId, ...branch }) => branch),
+  };
+}
+
+export async function setCompanyStatus(
+  tx: Tx,
+  actor: SessionUser,
+  companyId: string,
+  status: CompanyStatus,
+  reason: string | undefined,
+  meta: RequestMeta,
+) {
+  const [company] = await tx
+    .select({ id: companies.id, status: companies.status })
+    .from(companies)
+    .where(eq(companies.id, companyId))
+    .limit(1)
+    .for("update");
+  if (!company) throw notFound("Kompaniya topilmadi");
+
+  const suspending = status === "suspended";
+  const [updated] = await tx
+    .update(companies)
+    .set({
+      status,
+      suspendedAt: suspending ? new Date() : null,
+      suspendReason: suspending ? (reason ?? null) : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(companies.id, companyId))
+    .returning({
+      id: companies.id,
+      status: companies.status,
+      suspendedAt: companies.suspendedAt,
+      suspendReason: companies.suspendReason,
+    });
+
+  if (company.status !== status) {
+    await writeAuditLog(
+      {
+        userId: actor.id,
+        userName: actor.name,
+        companyId,
+        action: "COMPANY_STATUS_CHANGED",
+        resource: "companies",
+        resourceId: companyId,
+        severity: suspending || status === "cancelled" ? "warning" : "info",
+        details: { from: company.status, to: status, ...(reason ? { reason } : {}) },
+        ...meta,
+      },
+      tx,
+    );
+  }
+  return updated!;
 }

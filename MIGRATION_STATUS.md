@@ -42,7 +42,7 @@
 | Kim | Nima qila oladi | Himoya |
 |---|---|---|
 | **Bootstrap admin** | Hamma narsa (platforma admini) | `.env` dagi `BOOTSTRAP_ADMIN_PHONE` / `BOOTSTRAP_ADMIN_PASSWORD` dan `db:seed` bilan yaratiladi. Parol faqat argon2id xeshi. API orqali o'zgartirilmaydi, bloklanmaydi, o'chirilmaydi; parol faqat `.env` ni o'zgartirib qayta seed qilish orqali almashadi. Bazada: CHECK (doim faol platforma admini), partial unique (bitta), trigger (o'chirish va maqomni olish taqiqlangan) |
-| **Platforma admini** | Kompaniya + egasini yaratadi; oddiy foydalanuvchilarning telefon/parolini o'zgartiradi, faollashtiradi/bloklaydi | Bootstrap admin, boshqa platforma adminlari va o'z hisobiga tegolmaydi |
+| **Platforma admini** | Kompaniya + egasini yaratadi; kompaniyani to'xtatadi/faollashtiradi; oddiy foydalanuvchilarning telefon/parolini o'zgartiradi, faollashtiradi/bloklaydi; statistika, audit jurnali, platforma sozlamalari | Bootstrap admin, boshqa platforma adminlari va o'z hisobiga tegolmaydi |
 | **Kompaniya egasi** | Faqat aktiv kompaniyasiga xodim qo'shadi, parolini tiklaydi, a'zoligini yangilaydi (rol, filial, ombor ruxsati, holat) | `companyId` so'rovda qabul qilinmaydi; boshqa kompaniya xodimi → 404; egalik rollarini (Superadmin, Business Owner) berolmaydi; boshqa kompaniyaga ham a'zo xodimning parolini tiklay olmaydi |
 | **Xodim** | O'z parolini eski parol bilan o'zgartiradi; roliga qarab kompaniya amallari (RBAC) | Xato joriy parol: 5 ta / 15 daqiqa. SMS orqali tiklash — Eskiz ulangach |
 
@@ -65,11 +65,18 @@ Har amal `audit_logs` ga yoziladi. Parol almashsa (seed, admin, ega yoki o'zi) �
 | POST | `/api/auth/pin/remove` | sessiya | `pin.removePin` |
 | POST | `/api/auth/pin/verify` | sessiya | `pin.verifyPin` |
 | PUT | `/api/auth/auto-lock` | sessiya | `pin.setAutoLockTimeout` |
-| GET | `/api/platform/companies` | platforma admini | `companies.platformListCompanies` |
+| GET | `/api/platform/companies` | platforma admini | `companies.platformListCompanies` (`?status=`, a'zolar soni) |
 | POST | `/api/platform/companies` | platforma admini | `companies.platformCreateCompany` |
+| GET | `/api/platform/companies/:companyId` | platforma admini | `companies.platformGetCompany` |
+| POST | `/api/platform/companies/:companyId/status` | platforma admini | `companies.platformUpdateCompanyStatus` |
+| GET | `/api/platform/stats` | platforma admini | `companies.platformGetStats` |
+| GET | `/api/platform/audit-logs` | platforma admini | `companies.platformListAuditLogs` (`?companyId=&limit=&cursor=`) |
+| GET | `/api/platform/users` | platforma admini | `companies.platformListAllUsers` (`?search=&limit=&offset=`) |
 | PATCH | `/api/platform/users/:userId` | platforma admini | — (telefon o'zgartirish) |
 | POST | `/api/platform/users/:userId/password` | platforma admini | `userAdmin.resetUserPassword` |
 | POST | `/api/platform/users/:userId/status` | platforma admini | — (bloklash/faollashtirish) |
+| GET | `/api/platform/settings` | platforma admini | `companies.platformGetSettings` |
+| PUT | `/api/platform/settings` | platforma admini | `companies.platformSaveSettings` |
 | GET | `/api/company` | faol a'zo | `companies.getActiveCompany` (+ a'zolik va ruxsatlar) |
 | PATCH | `/api/company` | `company.manage` | `companies.updateCompany` |
 | GET | `/api/company/mine` | sessiya | `companies.listMyCompanies` |
@@ -94,7 +101,7 @@ Xatolar doim `{ code, message }` shaklida (Convex bilan bir xil). PostgreSQL uni
 - **Migratsiya:** `pnpm --filter @bum/api db:migrate` (`.env` o'zi yuklanadi)
 - **Bootstrap admin:** `.env` ga `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_PASSWORD` (va ixtiyoriy `BOOTSTRAP_ADMIN_NAME`) qo'shib — `pnpm --filter @bum/api db:seed`. Idempotent; deployda `db:migrate` dan keyin ishga tushirish mumkin.
 - **API server:** `pnpm --filter @bum/api dev` → `http://localhost:3000`
-- **Testlar:** `pnpm --filter @bum/api test` — 86 ta test
+- **Testlar:** `pnpm --filter @bum/api test` — 96 ta test
 
 ---
 
@@ -122,7 +129,7 @@ Xatolar doim `{ code, message }` shaklida (Convex bilan bir xil). PostgreSQL uni
   | hr (6) | departments, positions, employees, attendances, leaves, salary_payments |
   | notifications (1) | notifications |
 
-- **Asosiy qarorlar:** pul/miqdor `numeric` (float emas); har tenant jadvalida `company_id NOT NULL`; `legacy_id` ko'chirish uchun; DB darajasidagi CHECK/unique himoyalar (manfiy qoldiq, dublikat JE, ikkita ochiq smena va h.k.).
+- **Asosiy qarorlar:** pul/miqdor `numeric` (float emas); har tenant jadvalida `company_id NOT NULL`; `legacy_id` ko'chirish uchun (API javoblariga chiqmaydi); DB darajasidagi CHECK/unique himoyalar (manfiy qoldiq, dublikat JE, ikkita ochiq smena va h.k.).
 - **Migratsiyalar:**
   - `0000_fantastic_speed.sql` — to'liq sxema
   - `0001_nulls_not_distinct_uniques.sql` — tuzatish: `roles (company_id, name)`, `settings (company_id, key)`, `unit_conversions (…, product_id)` unikalligi `NULLS NOT DISTINCT`. Oddiy unikal indeksda NULL lar teng hisoblanmaydi, ya'ni global rollar, platforma sozlamalari va umumiy konversiyalar takrorlanib ketaverardi — aynan Convex'dagi dublikat rol muammosi
@@ -168,29 +175,33 @@ Xatolar doim `{ code, message }` shaklida (Convex bilan bir xil). PostgreSQL uni
 - **Ko'chirilgan modullar:**
   - **Foydalanuvchi ierarxiyasi** (yuqoridagi jadval):
     - `modules/platform/bootstrap.service.ts` + `cli/seed-bootstrap-admin.ts` (`db:seed`) — `.env` dan idempotent seed; parol almashsa sessiyalar bekor; 14 ta global standart rol; audit `BOOTSTRAP_ADMIN_SEEDED` (faqat o'zgargan maydon nomlari)
-    - `modules/platform/company.service.ts` — `platformCreateCompany`: kompaniya, "Asosiy filial" (BR-001), 14 ta kompaniya roli, "Asosiy ombor" (WH-001), egasi va "Business Owner" a'zoligi — bitta tranzaksiyada; slug Convex qoidasi bilan
     - `modules/users/user-admin.service.ts` — platforma admini (telefon, parol, bloklash), kompaniya egasi (xodim qo'shish, parol tiklash), o'z paroli
+  - **Platforma admini:**
+    - `modules/platform/company.service.ts` — kompaniya + egasi (BR-001 filial, 14 rol, WH-001 ombor, Business Owner — bitta tranzaksiyada, slug Convex qoidasi bilan); ro'yxat (holat filtri, a'zolar soni); tafsilot (egasi, a'zolar, filiallar); holatni o'zgartirish (to'xtatish sababi va vaqti)
+    - `modules/platform/platform.service.ts` — statistika; audit jurnali (yangidan eskiga, `(vaqt, id)` kursori — bir millisekunddagi yozuvlar ham tushib qolmaydi); foydalanuvchilar (qidiruv, sahifalash); platforma sozlamalari (`registrationEnabled`, `defaultTrialDays`, `platformName`, `supportEmail`)
   - **Tenant va RBAC:** `modules/company/tenant.ts` — `requireTenant`, `requireTenantForWrite`, `effectivePermissions`, `requirePermission` (`convex/tenant.ts` muqobili)
   - **Kompaniya konteksti va filiallar:** `modules/company/company.service.ts` — aktiv kompaniya, `mine`, `switch`, kompaniyani yangilash, filiallar
   - **A'zoni yangilash:** `modules/company/member.service.ts` — rol (`memberCount` bilan), filial va omborlar (faqat shu kompaniyaniki), a'zolik holati
-  - Audit: `COMPANY_CREATED`, `USER_CREATED`, `EMPLOYEE_CREATED`, `USER_PASSWORD_RESET`, `USER_PHONE_CHANGED`, `USER_BLOCKED`, `USER_ACTIVATED`, `PASSWORD_CHANGED`, `COMPANY_SWITCHED`, `COMPANY_UPDATED`, `BRANCH_CREATED`, `BRANCH_UPDATED`, `MEMBER_UPDATED`
+  - Audit: `COMPANY_CREATED`, `COMPANY_STATUS_CHANGED`, `PLATFORM_SETTINGS_UPDATED`, `USER_CREATED`, `EMPLOYEE_CREATED`, `USER_PASSWORD_RESET`, `USER_PHONE_CHANGED`, `USER_BLOCKED`, `USER_ACTIVATED`, `PASSWORD_CHANGED`, `COMPANY_SWITCHED`, `COMPANY_UPDATED`, `BRANCH_CREATED`, `BRANCH_UPDATED`, `MEMBER_UPDATED`
 - **Convex'dan ataylab farqlar (xavfsizlik teshiklari yopildi):**
   - `updateMember` Convex'da har qanday a'zoga ochiq edi va rol nomini tekshirmasdi — Kassir o'zini "Business Owner" qila olardi. Endi faqat kompaniya egasi, egalik rollarini berib bo'lmaydi
   - `updateCompany`, `createBranch`, `updateBranch` Convex'da faqat a'zolikni tekshirardi — endi `company.manage` / `branches.manage`
   - `updateBranch` boshqa filiallarning `isDefault` ini tushirmasdi — endi doim bitta asosiy filial (bazada ham)
+  - `platformListAllUsers` foydalanuvchi hujjatini to'liq qaytarardi (PIN xeshi va ichki maydonlar brauzerga yetib borardi) — endi faqat ruxsat etilgan maydonlar
+  - `platformGetSettings` autentifikatsiyasiz ochiq edi — endi faqat platforma admini
+  - `platformListAuditLogs` faqat oxirgi N ta edi — endi kursor bilan to'liq sahifalash
   - Convex'da "Direktor" ham foydalanuvchilarni boshqarardi — endi faqat kompaniya egasi (talab bo'yicha); Direktor `users.view` bilan ro'yxatni ko'radi
   - Bloklash yangi: `users.is_active = false` + barcha sessiyalar bekor
-- **API endpointlar:** `/api/platform/*` (5 ta), `/api/company/*` (11 ta) — jadvalda
-- **Testlar:** `test/bootstrap.test.ts` (13), `test/platform-admin.test.ts` (11), `test/company-owner.test.ts` (7), `test/company.test.ts` (20 — RBAC, almashtirish, to'xtatilgan kompaniya, filiallar, a'zoni yangilash). `db:seed` CLI qo'lda tekshirilgan.
-- **Brauzerda sinash:** frontend hali Convex'da; `curl` bilan: admin → `POST /api/platform/companies` → egasi kirib `GET /api/company`, `POST /api/company/branches`, `POST /api/company/employees`.
+- **API endpointlar:** `/api/platform/*` (12 ta), `/api/company/*` (11 ta) — jadvalda
+- **Testlar:** `test/bootstrap.test.ts` (13), `test/platform-admin.test.ts` (11), `test/platform-ops.test.ts` (10), `test/company-owner.test.ts` (7), `test/company.test.ts` (20). `db:seed` CLI qo'lda tekshirilgan.
+- **Brauzerda sinash:** frontend hali Convex'da; `curl` bilan: admin → `POST /api/platform/companies` → `GET /api/platform/stats` → egasi kirib `GET /api/company`, `POST /api/company/branches`, `POST /api/company/employees`.
 - **Qolgan ishlar** (Convex funksiyalari bo'yicha):
+  - Rollar (`convex/admin.ts`): `listRoles`, `createRole`, `updateRole`, `deleteRole` — kompaniyaning o'z rollari (`roles.manage`). `admin.ts` da ruxsat tekshiruvi topilmadi — ko'chirishda alohida ko'rib chiqiladi
+  - Kompaniya audit jurnali (`audit.view`) — `admin.listAuditLogs`
   - Takliflar: `inviteMember`, `createInvitation`, `listInvitations`, `cancelInvitation`, `acceptInvitation`
-  - Rollar: kompaniyaning o'z rollarini yaratish/tahrirlash (`roles.manage`) — Convex'da alohida modul, hali ko'rib chiqilmagan
-  - Kompaniya audit jurnali (`audit.view`)
-  - Platforma: `platformUpdateCompanyStatus`, `platformGetStats`, `platformListAuditLogs`, `platformGetCompany`, `platformListAllUsers`, `platformGetSettings` / `platformSaveSettings`, `isRegistrationEnabled`
   - Ommaviy: `getCompanyBySlug`, `verifyTenantAccess` (`/t/:slug` portal)
-  - **Hal qilinmagan:** qo'shimcha platforma adminlarini kim tayinlaydi (`platformGrantAdmin` / `platformRevokeAdmin`); o'zi ro'yxatdan o'tish (`registerCompany`) qoladimi
-  - `convex/admin.ts` hali batafsil ko'rib chiqilmagan
+  - `admin.ts` ning qolganlari (`listUsers`, `updateUserRole`, `toggleUserActive`, `getCompany` / `upsertCompany`, `getSettings` / `upsertSetting`, `createAuditLog`) — yangi endpointlar bilan takrorlanishini tekshirish
+  - **Hal qilinmagan:** qo'shimcha platforma adminlarini kim tayinlaydi (`platformGrantAdmin` / `platformRevokeAdmin`); o'zi ro'yxatdan o'tish (`registerCompany`, `isRegistrationEnabled`) qoladimi — `registrationEnabled` / `defaultTrialDays` sozlamalari saqlanadi, lekin hozircha hech narsaga ta'sir qilmaydi
 
 ## PHASE 6 — Katalog ⬜
 
@@ -286,7 +297,7 @@ Xatolar doim `{ code, message }` shaklida (Convex bilan bir xil). PostgreSQL uni
 
 1. **Lokal:** `.env` ga `BOOTSTRAP_ADMIN_PHONE` / `BOOTSTRAP_ADMIN_PASSWORD` qo'shib `db:seed` — ishchi bazada birinchi kirish
 2. **Hal qilinishi kerak:** qo'shimcha platforma adminlarini kim tayinlaydi; o'zi ro'yxatdan o'tish (`registerCompany`) qoladimi
-3. **PHASE 5 davomi:** platforma admini uchun kompaniya holati (`platformUpdateCompanyStatus` — to'xtatish/faollashtirish), kompaniya tafsiloti, barcha foydalanuvchilar, audit jurnali; keyin takliflar va kompaniya rollari
+3. **PHASE 5 davomi:** kompaniya rollari (`convex/admin.ts` — `roles.manage`) va kompaniya audit jurnali (`audit.view`); keyin takliflar
 4. **PHASE 4 qoldig'i:** eskirgan `rate_limits` / `sessions` ni tozalash; SMS tiklash — Eskiz ulangach
 
 Kichik infratuzilma ishi: MinIO'da `bum-erp` bucket yaratish va `.env` ga `STORAGE_*` qo'shish (PHASE 14 dan oldin).
