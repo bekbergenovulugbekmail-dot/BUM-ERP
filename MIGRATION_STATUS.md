@@ -661,7 +661,7 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - inventarizatsiya qo'llanganda ortiqcha — 4100, kamomad — 5500 (bitta jurnal yozuvi)
   - moliya dashboardi: oylik tushum/chiqim valyutali kassalardan joriy kurs bilan asosiy valyutada
   - tizimdan chiqish (`logout`) audit jurnaliga yoziladi (kirish va xato urinish avval ham yozilardi)
-- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `sales-currency` (2), `distribution` (4), `inventory-journal` (1), `sales-agent` (3), `sales-agent-stores` (2), `sales-agent-location` (3 — sifat va shubhali nuqtalar, supervayzer ruxsatlari va kompaniya chegarasi, siyosat va saqlash muddati), `sales-agent-visits` (2 — geofence/sifat/ochiq tashrif/sabab, rasmlar va supervayzer ro'yxati), `sales-agent-orders` (2 — katalog, idempotent qoralama, geofence/qoldiq/bekor qilish; nasiya, kredit limiti rad va tasdiq, yetkazish kuni, tashrif natijasi); API jami 241 (52 fayl)
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `sales-currency` (2), `distribution` (4), `inventory-journal` (1), `sales-agent` (3), `sales-agent-stores` (2), `sales-agent-location` (3 — sifat va shubhali nuqtalar, supervayzer ruxsatlari va kompaniya chegarasi, siyosat va saqlash muddati), `sales-agent-visits` (2 — geofence/sifat/ochiq tashrif/sabab, rasmlar va supervayzer ro'yxati), `sales-agent-orders` (2 — katalog, idempotent qoralama, geofence/qoldiq/bekor qilish; nasiya, kredit limiti rad va tasdiq, yetkazish kuni, tashrif natijasi), `sales-agent-promotions` (2), `sales-agent-dashboard` (2), `sales-agent-security` (2); API jami 247 (55 fayl); frontend unit 11 (3 fayl)
 
 ## Sotuv agenti loyihasi (2026-09-12)
 
@@ -677,9 +677,9 @@ xarita — Yandex Maps (`MapProvider` orqasida, kalit env'da), lokatsiya — avv
 | D | Lokatsiya kuzatuvi, sifat tekshiruvi, saqlash muddati; supervayzer xaritasi | ✅ |
 | E | Tashrif: boshlash/yakunlash, buyurtmasiz sabab, rasm | ✅ |
 | F | Katalog, dona/blok, draft (idempotent), yetkazish kuni, nasiya, kredit limiti, geofence bilan buyurtma | ✅ |
-| G | Aksiyalar (serverda hisoblash) | |
-| H | Agent dashboardi, prospektlar, supervayzer tafsiloti va lokatsiya tarixi | |
-| I | Offline kesh, xavfsizlik testlari, E2E, yakuniy hisobot | |
+| G | Aksiyalar (serverda hisoblash) | ✅ |
+| H | Agent dashboardi, prospektlar, supervayzer tafsiloti va lokatsiya tarixi | ✅ |
+| I | Offline kesh, xavfsizlik testlari, E2E, yakuniy hisobot | ✅ (brauzer E2E — qilinmadi, pastda) |
 
 **A — CRM va Distributsiya ajratildi** (migratsiya 0018):
 - backend: `modules/distribution/` — `sales-reps.service.ts`, `distribution.service.ts`, `routes.ts` → `/api/distribution` (`distribution.view` / `distribution.manage`); `/api/crm` da faqat lidlar, faoliyatlar va lidga agent tanlash (`GET /sales-reps` — id, nom, kod)
@@ -740,6 +740,32 @@ xarita — Yandex Maps (`MapProvider` orqasida, kalit env'da), lokatsiya — avv
 - tashrif: shu tashrifda yuborilgan buyurtma bo'lsa yakunlash sababsiz, natija `ordered`
 - web agent: do'kon sahifasida "Buyurtma berish"/"Qoralamani davom ettirish" va so'nggi buyurtmalar; buyurtma sahifasi — qidiruv, dona va blok tugmalari, darhol jami, to'lov turi va muddat, yetkazish kuni (siyosat bo'yicha), qoralama har o'zgarishda qurilmada saqlanadi (yangilash/tarmoq uzilishi), "Saqlash" va tasdiqlash oynasi (do'kon, masofa, qarz, qolgan kredit, yetkazish, to'lov, qatorlar, jami), yuborishda yangi GPS o'lchovi; server sabablari uz/ru/kk xabarlarga aylanadi
 - web Distributsiya → "Agent buyurtmalari": tasdiq kutayotganlar va kun bo'yicha yuborilganlar, tasdiqlash va rad etish
+- **F** commit `213ef2b`, production'ga deploy qilindi (API va web SUCCESS; `/catalog`, `/supervisor/orders` 401; bundle'da buyurtma matnlari)
+
+**G — Aksiyalar** (migratsiya 0025):
+- jadvallar: `promotions` (mahsulot, turi, minimal miqdor, bepul miqdor yoki foiz, sanalar, faollik; CHECK — qoida va sanalar to'g'riligi), `order_promotions` (buyurtmada qo'llangan qoida nusxasi, to'langan va bepul miqdor, chegirma summasi)
+- turlar: `buy_x_get_y` — har `minQuantity` uchun `freeQuantity` bepul (10 → 1, 20 → 2); `percent_discount` — `minQuantity` dan foiz chegirma (mijoz chegirmasidan kattasi). Bir mahsulotga bir nechta aksiya bo'lsa mijoz uchun eng foydalisi
+- hisoblash faqat serverda: agent faqat dona/blok yuboradi; qoralama saqlash va yuborishda aksiya qayta hisoblanadi, bepul miqdor narxsiz alohida qator sifatida qo'shiladi (`orders.service` — `trustedPricing`: server hisoblagan narx uchun `sales.edit` talab qilinmaydi), qoldiq tekshiruvi bepul miqdorni ham qo'shadi; yuborishda har aksiya uchun audit `PROMOTION_APPLIED`
+- boshqarish (`promotions.manage` — Supervayzer, Savdo menejeri, Direktor): `GET/POST /api/sales-agent/supervisor/promotions`, `PATCH/DELETE /supervisor/promotions/:id`; buyurtmada qo'llangan aksiyani o'chirish rad etiladi (faolsizlantirish). Audit `PROMOTION_CREATED/UPDATED/DELETED`
+- agent: `GET /api/sales-agent/promotions?filter=active|upcoming|ending_soon`; katalog mahsulotlarida faol aksiyalar
+- web agent: "Aksiyalar" bo'limi (filtrlar, qoida matni, sanalar); katalogda "AKSIYA" belgisi va qoida; tasdiqlash oynasida qo'llangan aksiyalar (bepul miqdor yoki chegirma)
+- web Distributsiya → "Aksiyalar": ro'yxat, yaratish/tahrirlash, faollik, o'chirish
+
+**H — Agent bosh sahifasi, yangi mijozlar, supervayzer tafsiloti** (migratsiya 0026):
+- `GET /api/sales-agent/dashboard` (serverda): bugungi savdo, buyurtmalar soni, nasiya savdo, yig'ilgan to'lov (bugun agent buyurtmalariga), bugungi marshrut do'konlari / tashrif qilingan / buyurtma bergan / qolgan; oylik plan — bajarilgan, foiz, qolgan, qolgan kunlar (bugun bilan), kuniga kerak; bugungi plan (kun boshidagi qoldiq / qolgan kunlar) va qolgani; eng yaxshi kun, oydagi buyurtmalar, faol agentlar orasida oylik o'rin, oydagi yangi mijozlar. Savdo — agent yuborgan va tasdiqlangan/jo'natilgan/yetkazilgan buyurtmalar
+- jadval `agent_prospects`: agent yuborgan potentsial do'kon (nomi, telefon, manzil, izoh, joylashuv), holat `new`/`converted`/`rejected`. Agent: `GET/POST /prospects` (soatiga 50 tagacha, faqat o'zinikini ko'radi). Supervayzer (`sales_agent.supervise`): `GET /supervisor/prospects?status=`, `POST /supervisor/prospects/:id/convert` (mijoz yaratiladi — aloqa, manzil, koordinata, izoh bilan, ixtiyoriy marshrutga qo'shiladi), `/reject` (sabab bilan). Audit `PROSPECT_CREATED/CONVERTED/REJECTED`
+- `GET /supervisor/agents/:salesRepId` (`sales_agent.location.view`): bugungi marshrut do'konlari va tashrif holati, ochiq tashrif, bugungi savdo va buyurtmalar
+- web agent: bosh sahifa (bugungi savdo va plan, 4 ko'rsatkich, tashriflar progress, oylik plan, ko'rsatkichlar), "Yangi mijoz topish" sahifasi (joriy joylashuv bilan)
+- web Distributsiya: "Yangi mijozlar" (mijozga aylantirish marshrut tanlab, rad etish, xaritada ko'rish); Monitoring'da agent tanlanganda tafsilot kartasi (savdo, buyurtmalar, tashriflar, ochiq tashrif, do'konlar holati) va do'konlar xaritada holat rangida
+- cheklov: "yangi ochilgan savdo nuqtalari"ni xarita provayderidan qidirish (spetsifikatsiyaning 28-bosqichi) qilinmadi — alohida Yandex Geosearch kaliti va shartlari kerak; ochilish sanasi ishonchli emasligi sababli agent o'zi "yangi mijoz" sifatida qo'shadi
+
+**I — Oflayn, xavfsizlik testlari, yakuniy tekshiruv:**
+- service worker (`public/sw.js`): agent o'qish ma'lumotlari (profil, siyosat, bugungi marshrut, do'konlar, katalog, qarzdorlar, aksiyalar, bosh sahifa, buyurtmalar, ochiq tashrif, yangi mijozlar) — tarmoq birinchi, internet bo'lmasa oxirgi nusxa; yozish so'rovlari (buyurtma yuborish, lokatsiya, tashrif) keshlanmaydi va navbatga qo'yilmaydi — geofence/kredit faqat serverda, internet bilan. Supervayzer ma'lumotlari va rasm havolalari keshlanmaydi. Tizimdan chiqishda agent keshi tozalanadi
+- **tuzatildi:** avvalgi service worker barcha `/api/*` GET javoblarini (ERP ma'lumotlari) Cache Storage'da saqlab qo'yardi va chiqishdan keyin ham qolardi; kesh nomi `erp-assets-v2` — eski kesh faollashtirishda o'chadi, API endi faqat yuqoridagi agent ro'yxati bo'yicha keshlanadi
+- agent ish joyida oflayn banner (uz/ru/kk); qoralama qurilmada saqlanadi (F bosqichi)
+- xavfsizlik testlari `sales-agent-security` (2): autentifikatsiyasiz 401; agent supervayzer va ERP (moliya, sotuv, katalog, distributsiya) API'lariga 403; boshqa agent/kompaniya do'koni, buyurtmasi, tashrifi — 404; soxta `insideGeofence`/`distanceMeters` — 400, uzoqdan — 403; boshqa agent nomidan lokatsiya — 400; lokatsiya cheklovi (13-nuqta 429)
+- frontend unit testlar: `order-draft` (3 — server/qurilma nusxasi ustunligi, yangi identifikator, tozalash), `types` (3 — taymer, masofa, aksiya qoidasi matni)
+- brauzer E2E (Playwright) — o'rnatilmagan va bajarilmagan; API oqimlari `app.inject` integratsiya testlarida HTTP darajasida tekshirilgan
 
 ### Distributsiya (`/api/distribution`)
 
@@ -772,6 +798,12 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
 | GET | `/supervisor/events` (`?date=&type=&salesRepId=&limit=`) | `sales_agent.supervise` |
 | GET | `/supervisor/visits` (`?date=&salesRepId=&limit=`), `/supervisor/visits/:visitId/photos/:photoId/url` | `sales_agent.supervise` |
 | GET / POST | `/supervisor/orders` (`?approval=&date=&salesRepId=`), `/supervisor/orders/:orderId/approve`, `/supervisor/orders/:orderId/reject` | `sales_agent.supervise` |
+| GET | `/promotions` (`?filter=active\|upcoming\|ending_soon`) | `sales_agent.use` |
+| GET | `/dashboard`, `/prospects` | `sales_agent.use` |
+| POST | `/prospects` | `sales_agent.use` |
+| GET | `/supervisor/agents/:salesRepId` | `sales_agent.location.view` |
+| GET / POST | `/supervisor/prospects` (`?status=`), `/supervisor/prospects/:prospectId/convert`, `/supervisor/prospects/:prospectId/reject` | `sales_agent.supervise` |
+| GET / POST / PATCH / DELETE | `/supervisor/promotions` (`?status=`), `/supervisor/promotions/:promotionId` | `promotions.manage` |
 
 ---
 

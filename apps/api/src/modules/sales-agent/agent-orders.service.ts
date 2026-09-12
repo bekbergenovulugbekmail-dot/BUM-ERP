@@ -18,7 +18,7 @@ import { stockLevels, warehouses } from "../../db/schema/inventory.js";
 import { notifications } from "../../db/schema/notifications.js";
 import { companyMembers, roles } from "../../db/schema/platform.js";
 import { customers, salesOrderItems, salesOrders } from "../../db/schema/sales.js";
-import { agentOrders, agentVisits, type AgentOrderLine } from "../../db/schema/sales-agent.js";
+import { agentOrders, agentVisits, orderPromotions, type AgentOrderLine } from "../../db/schema/sales-agent.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type AuditEntry, type RequestMeta } from "../../shared/audit.js";
 import { fromMinor, rescale, toMinor } from "../../shared/decimal.js";
@@ -33,6 +33,7 @@ import { cancelOrder, confirmOrder, createOrder, updateOrder, type SalesItemInpu
 import type { AgentContext } from "./agent-context.js";
 import { checkLocationQuality, insertLocationEvent, type LocationInput } from "./location.service.js";
 import { getSalesAgentPolicy } from "./policy.service.js";
+import { activePromotions, applyPromotions, saveOrderPromotions } from "./promotions.service.js";
 import { accessibleStore, todayRoutes } from "./stores.service.js";
 
 export type PaymentType = (typeof agentOrders.paymentType.enumValues)[number];
@@ -147,6 +148,7 @@ export async function agentCatalog(
 
   const page = rows.slice(0, options.limit);
   const boxes = await boxUnits(conn, companyId, page);
+  const promotionsByProduct = await activePromotions(conn, companyId, todayIso(), page.map((row) => row.id));
   const rates = new Map<string, string>();
   const items = [];
   for (const { baseUnitId: _baseUnitId, salesUnitId: _salesUnitId, salesPrice, salesCurrency, ...row } of page) {
@@ -157,7 +159,12 @@ export async function agentCatalog(
       piecePrice = mul4(salesPrice, rates.get(salesCurrency)!);
     }
     const box = boxes.get(row.id);
-    items.push({ ...row, piecePrice, box: box ? { ...box, price: mul4(piecePrice, box.factor) } : null });
+    items.push({
+      ...row,
+      piecePrice,
+      box: box ? { ...box, price: mul4(piecePrice, box.factor) } : null,
+      promotions: promotionsByProduct.get(row.id) ?? [],
+    });
   }
   return { products: items, nextOffset: rows.length > options.limit ? options.offset + options.limit : null };
 }
@@ -249,8 +256,11 @@ async function resolveDeliveryDate(
   return requested;
 }
 
+/** Qoldiq: bir mahsulotning barcha qatorlari (to'lanadigan va aksiya bo'yicha bepul) jamlanadi. */
 async function assertStock(tx: Tx, companyId: string, warehouseId: string, items: SalesItemInput[]) {
-  const ids = items.map((item) => item.productId);
+  const requested = new Map<string, bigint>();
+  for (const item of items) requested.set(item.productId, (requested.get(item.productId) ?? 0n) + toMinor(item.quantity, 4));
+  const ids = [...requested.keys()];
   const levels = await tx
     .select({ productId: stockLevels.productId, quantity: stockLevels.quantity, reservedQty: stockLevels.reservedQty })
     .from(stockLevels)
@@ -259,13 +269,13 @@ async function assertStock(tx: Tx, companyId: string, warehouseId: string, items
   const names = new Map(
     (await tx.select({ id: products.id, name: products.name }).from(products).where(inArray(products.id, ids))).map((row) => [row.id, row.name]),
   );
-  for (const item of items) {
-    const have = available.get(item.productId) ?? 0n;
-    if (toMinor(item.quantity, 4) > have) {
+  for (const [productId, need] of requested) {
+    const have = available.get(productId) ?? 0n;
+    if (need > have) {
       const left = fromMinor(have > 0n ? have : 0n, 4);
-      throw badRequest(`${names.get(item.productId)}: omborda yetarli emas (mavjud ${left})`, {
+      throw badRequest(`${names.get(productId)}: omborda yetarli emas (mavjud ${left})`, {
         reason: "out_of_stock",
-        productId: item.productId,
+        productId,
         available: left,
       });
     }
@@ -394,8 +404,19 @@ async function orderView(conn: DbOrTx, companyId: string, orderId: string, sales
     .from(salesOrderItems)
     .innerJoin(products, eq(products.id, salesOrderItems.productId))
     .where(eq(salesOrderItems.orderId, orderId))
-    .orderBy(asc(products.name));
-  return { ...order, items };
+    .orderBy(asc(products.name), asc(salesOrderItems.unitPrice));
+  const promotionsApplied = await conn
+    .select({
+      promotionId: orderPromotions.promotionId,
+      productId: orderPromotions.productId,
+      rule: orderPromotions.rule,
+      paidQuantity: orderPromotions.paidQuantity,
+      freeQuantity: orderPromotions.freeQuantity,
+      discountAmount: orderPromotions.discountAmount,
+    })
+    .from(orderPromotions)
+    .where(eq(orderPromotions.orderId, orderId));
+  return { ...order, items, promotions: promotionsApplied };
 }
 
 export type AgentOrderView = Awaited<ReturnType<typeof orderView>>;
@@ -441,6 +462,7 @@ export async function saveAgentDraft(tx: Tx, context: AgentContext, clientReques
   await accessibleStore(tx, context, input.customerId);
   const policy = await getSalesAgentPolicy(tx, companyId);
   const { lines, items } = await resolveLines(tx, companyId, input.items);
+  const priced = await applyPromotions(tx, companyId, input.customerId, items);
   const deliveryDate = await resolveDeliveryDate(tx, context, input.customerId, policy, input.deliveryDate, false);
   if (input.paymentDueDate && input.paymentDueDate < todayIso()) {
     throw badRequest("To'lov muddati bugundan oldin bo'lmaydi", { reason: "due_date_past" });
@@ -451,7 +473,7 @@ export async function saveAgentDraft(tx: Tx, context: AgentContext, clientReques
   let orderId: string;
   if (existing) {
     orderId = existing.orderId;
-    await updateOrder(tx, context, orderId, { items, deliveryDate, notes }, meta);
+    await updateOrder(tx, context, orderId, { items: priced.items, deliveryDate, notes }, meta, { trustedPricing: true });
     await tx
       .update(agentOrders)
       .set({ lines, paymentType: input.paymentType, paymentDueDate, updatedAt: new Date() })
@@ -462,8 +484,9 @@ export async function saveAgentDraft(tx: Tx, context: AgentContext, clientReques
     const order = await createOrder(
       tx,
       context,
-      { customerId: input.customerId, warehouseId, orderDate: todayIso(), deliveryDate, notes, items },
+      { customerId: input.customerId, warehouseId, orderDate: todayIso(), deliveryDate, notes, items: priced.items },
       meta,
+      { trustedPricing: true },
     );
     orderId = order.id;
     await tx.insert(agentOrders).values({
@@ -483,6 +506,7 @@ export async function saveAgentDraft(tx: Tx, context: AgentContext, clientReques
       details: { number: order.number, customerId: input.customerId, clientRequestId },
     });
   }
+  await saveOrderPromotions(tx, companyId, orderId, priced.applied);
   return orderView(tx, companyId, orderId, context.agent.id);
 }
 
@@ -575,11 +599,13 @@ export async function submitAgentOrder(
     }
   }
 
-  // Joriy narx va yetkazish kuni bilan qayta hisoblash, keyin qoldiq
+  // Joriy narx, aksiya va yetkazish kuni bilan qayta hisoblash, keyin qoldiq (bepul miqdor bilan)
   const { items } = await resolveLines(tx, companyId, row.lines);
-  await updateOrder(tx, context, orderId, { items, deliveryDate }, meta);
+  const priced = await applyPromotions(tx, companyId, row.customerId, items);
+  await updateOrder(tx, context, orderId, { items: priced.items, deliveryDate }, meta, { trustedPricing: true });
+  await saveOrderPromotions(tx, companyId, orderId, priced.applied);
   const [order] = await tx.select({ totalAmount: salesOrders.totalAmount }).from(salesOrders).where(eq(salesOrders.id, orderId)).limit(1);
-  await assertStock(tx, companyId, row.warehouseId, items);
+  await assertStock(tx, companyId, row.warehouseId, priced.items);
 
   let pendingApproval = false;
   if (row.paymentType === "credit") {
@@ -661,6 +687,14 @@ export async function submitAgentOrder(
       pendingApproval,
     },
   });
+  for (const promotion of priced.applied) {
+    await audit(tx, context, meta, {
+      action: "PROMOTION_APPLIED",
+      resource: "sales_orders",
+      resourceId: orderId,
+      details: { number: row.number, ...promotion },
+    });
+  }
   if (row.paymentType === "credit") {
     await audit(tx, context, meta, {
       action: "CREDIT_ORDER",
@@ -723,7 +757,11 @@ async function lockPending(tx: Tx, tenant: TenantContext, orderId: string) {
 
 export async function approveAgentOrder(tx: Tx, tenant: TenantContext, orderId: string, meta: RequestMeta) {
   const row = await lockPending(tx, tenant, orderId);
-  const { items } = await resolveLines(tx, tenant.company.id, row.lines);
+  // Yuborilgandagi qatorlar (aksiya bepul miqdori bilan) — qayta narxlanmaydi
+  const items = await tx
+    .select({ productId: salesOrderItems.productId, unitId: salesOrderItems.unitId, quantity: salesOrderItems.quantity })
+    .from(salesOrderItems)
+    .where(eq(salesOrderItems.orderId, orderId));
   await assertStock(tx, tenant.company.id, row.warehouseId, items);
   await confirmOrder(tx, tenant, orderId, meta);
   const now = new Date();

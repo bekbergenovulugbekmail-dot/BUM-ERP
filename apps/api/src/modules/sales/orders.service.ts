@@ -104,7 +104,18 @@ export type DispatchableOrder = {
 
 // ─── Qatorlar ────────────────────────────────────────────────────────────────
 
-export async function prepareSalesItems(tx: Tx, tenant: TenantContext, items: SalesItemInput[], customerDiscount: string) {
+export type PricingOptions = {
+  /** Narx va chegirmani server o'zi hisoblagan (masalan, aksiya) — `sales.edit` talab qilinmaydi. */
+  trustedPricing?: boolean;
+};
+
+export async function prepareSalesItems(
+  tx: Tx,
+  tenant: TenantContext,
+  items: SalesItemInput[],
+  customerDiscount: string,
+  options: PricingOptions = {},
+) {
   if (items.length === 0) throw badRequest("Kamida bitta mahsulot bo'lishi kerak");
   // Savdo buyurtmasi va POS cheki: cheklangan xodim faqat o'z kategoriyalaridagi mahsulotni sotadi
   await assertProductsInScope(tx, tenant, items.map((i) => i.productId));
@@ -162,7 +173,9 @@ export async function prepareSalesItems(tx: Tx, tenant: TenantContext, items: Sa
     const discountPercent = item.discountPercent ?? customerDiscount;
     const changed =
       toMinor(unitPrice, 4) !== toMinor(listPrice, 4) || toMinor(discountPercent, 2) !== toMinor(customerDiscount, 2);
-    if (changed && !canOverride) throw forbidden("Narx yoki chegirmani o'zgartirish uchun ruxsat yo'q: sales.edit");
+    if (changed && !canOverride && !options.trustedPricing) {
+      throw forbidden("Narx yoki chegirmani o'zgartirish uchun ruxsat yo'q: sales.edit");
+    }
 
     const amounts = computeLine({
       quantity: item.quantity,
@@ -508,11 +521,17 @@ export async function salesStats(conn: DbOrTx, tenant: TenantContext) {
 
 // ─── Hayot sikli ─────────────────────────────────────────────────────────────
 
-export async function createOrder(tx: Tx, tenant: TenantContext, input: SalesOrderInput, meta: RequestMeta) {
+export async function createOrder(
+  tx: Tx,
+  tenant: TenantContext,
+  input: SalesOrderInput,
+  meta: RequestMeta,
+  options: PricingOptions = {},
+) {
   const companyId = tenant.company.id;
   const customerDiscount = await customerDiscountFor(tx, companyId, input.customerId);
   await assertWarehouse(tx, tenant, input.warehouseId);
-  const { items, totals } = await prepareSalesItems(tx, tenant, input.items, customerDiscount);
+  const { items, totals } = await prepareSalesItems(tx, tenant, input.items, customerDiscount, options);
   const baseCurrency = await companyCurrency(tx, companyId);
   if (input.saleCurrencies?.length) {
     await assignSaleCurrencies(tx, companyId, baseCurrency, [...new Set(input.saleCurrencies)], items);
@@ -559,6 +578,7 @@ export async function updateOrder(
   orderId: string,
   patch: Partial<SalesOrderInput>,
   meta: RequestMeta,
+  options: PricingOptions = {},
 ) {
   const companyId = tenant.company.id;
   const order = await lockOrder(tx, tenant, orderId);
@@ -572,7 +592,7 @@ export async function updateOrder(
 
   let totals = {};
   if (patch.items) {
-    const prepared = await prepareSalesItems(tx, tenant, patch.items, customerDiscount);
+    const prepared = await prepareSalesItems(tx, tenant, patch.items, customerDiscount, options);
     if (patch.saleCurrencies?.length) {
       const baseCurrency = await companyCurrency(tx, companyId);
       await assignSaleCurrencies(tx, companyId, baseCurrency, [...new Set(patch.saleCurrencies)], prepared.items);

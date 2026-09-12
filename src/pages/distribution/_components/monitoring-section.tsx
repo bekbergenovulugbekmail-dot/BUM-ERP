@@ -12,7 +12,20 @@ import type { LatLng, MapMarker } from "@/lib/maps/index.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { cn } from "@/lib/utils.ts";
 import { todayLocal } from "@/pages/sales/_lib/types.ts";
-import type { AgentLocationHistory, LiveLocations, LocationEvent, SupervisedAgent } from "../_lib/types.ts";
+import type { AgentDetail, AgentLocationHistory, LiveLocations, LocationEvent, StoreVisitStatus, SupervisedAgent } from "../_lib/types.ts";
+
+const STORE_TONES: Record<StoreVisitStatus, string> = {
+  waiting: "bg-muted text-muted-foreground",
+  in_progress: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
+  ordered: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  visited_no_order: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+};
+const STORE_MARKER_TONES: Record<StoreVisitStatus, MapMarker["tone"]> = {
+  waiting: "offline",
+  in_progress: "primary",
+  ordered: "online",
+  visited_no_order: "warning",
+};
 
 const LIVE_REFRESH_MS = 15_000;
 const AGENTS_REFRESH_MS = 60_000;
@@ -83,6 +96,11 @@ export default function MonitoringSection() {
     { refetchInterval: AGENTS_REFRESH_MS },
   ).data?.events;
 
+  const detailData = useApiQuery<AgentDetail>(selectedId ? `/api/sales-agent/supervisor/agents/${selectedId}` : null, undefined, {
+    refetchInterval: AGENTS_REFRESH_MS,
+  }).data;
+  const detail = detailData && detailData.agent.id === selectedId ? detailData : null;
+
   const agents = useMemo(() => withLive(agentsQuery.data?.agents ?? [], live), [agentsQuery.data, live]);
   const onlineCount = agents.filter((agent) => agent.online).length;
   const selected = agents.find((agent) => agent.id === selectedId) ?? null;
@@ -99,10 +117,17 @@ export default function MonitoringSection() {
   );
 
   const markers = useMemo<MapMarker[]>(() => {
+    // Tanlangan agentning bugungi do'konlari — tashrif holati rangida
+    const storeMarkers: MapMarker[] = (detail?.stores ?? []).flatMap((store) => {
+      const point = pointOf(store.latitude, store.longitude);
+      return point
+        ? [{ id: `store-${store.id}`, ...point, label: store.name, description: t(`monitoring.store_status.${store.visitStatus}`), tone: STORE_MARKER_TONES[store.visitStatus] }]
+        : [];
+    });
     if (showHistory && history) {
       const first = history.points[0];
       const last = history.points.at(-1);
-      const result: MapMarker[] = [];
+      const result: MapMarker[] = [...storeMarkers];
       if (first && last && first !== last) {
         result.push({ id: "start", latitude: Number(first.latitude), longitude: Number(first.longitude), label: t("monitoring.start"), description: formatTime(first.recordedAt), tone: "primary" });
       }
@@ -115,18 +140,23 @@ export default function MonitoringSection() {
       }
       return result;
     }
-    return agents.flatMap((agent) => {
-      const point = pointOf(agent.latitude, agent.longitude);
-      if (!point) return [];
-      return [{
-        id: agent.id,
-        ...point,
-        label: agent.name,
-        description: agent.recordedAt ? t("monitoring.last_seen", { time: formatTime(agent.recordedAt) }) : undefined,
-        tone: agent.suspicious ? "warning" : agent.online ? "online" : "offline",
-      } satisfies MapMarker];
-    });
-  }, [showHistory, history, agents, formatTime, t]);
+    const agentMarkers = agents
+      .filter((agent) => !selectedId || agent.id === selectedId)
+      .flatMap((agent) => {
+        const point = pointOf(agent.latitude, agent.longitude);
+        if (!point) return [];
+        return [{
+          id: agent.id,
+          ...point,
+          label: agent.name,
+          description: agent.recordedAt ? t("monitoring.last_seen", { time: formatTime(agent.recordedAt) }) : undefined,
+          tone: agent.suspicious ? "warning" : agent.online ? "online" : "offline",
+        } satisfies MapMarker];
+      });
+    return [...storeMarkers, ...agentMarkers];
+  }, [showHistory, history, agents, selectedId, detail, formatTime, t]);
+
+  const money = useMemo(() => new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 0 }), [i18n.language]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -214,6 +244,51 @@ export default function MonitoringSection() {
               </Button>
             )}
             {selected && <p className="basis-full text-[11px] text-muted-foreground">{t("monitoring.history_audit")}</p>}
+          </div>
+        )}
+
+        {detail && (
+          <div className="space-y-2 rounded-2xl border border-border bg-card p-3 text-sm">
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <p className="text-xs text-muted-foreground">{t("monitoring.detail.sales")}</p>
+                <p className="font-semibold">{money.format(Number(detail.today.salesAmount))} {detail.currency}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">{t("monitoring.detail.orders")}</p>
+                <p className="font-semibold">{detail.today.orderCount}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">
+                  {t("monitoring.detail.visits", { done: detail.today.visitsCompleted, total: detail.stores.length })}
+                </p>
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-primary"
+                    style={{ width: `${detail.stores.length ? (detail.today.visitsCompleted / detail.stores.length) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+            {detail.currentVisit && (
+              <p className="text-xs text-blue-600">{t("monitoring.detail.current", { store: detail.currentVisit.customerName })}</p>
+            )}
+            {detail.stores.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">{t("monitoring.detail.stores")}</p>
+                <div className="flex flex-wrap gap-1">
+                  {detail.stores.map((store) => (
+                    <span
+                      key={store.id}
+                      title={t(`monitoring.store_status.${store.visitStatus}`)}
+                      className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STORE_TONES[store.visitStatus])}
+                    >
+                      {store.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

@@ -24,6 +24,7 @@ import AgentStoresPage from "./pages/sales-agent/stores/page.tsx";
 import AgentStorePage from "./pages/sales-agent/stores/store-page.tsx";
 import AgentOrderPage from "./pages/sales-agent/stores/order-page.tsx";
 import AgentPromotionsPage from "./pages/sales-agent/promotions/page.tsx";
+import AgentProspectsPage from "./pages/sales-agent/prospects/page.tsx";
 import ManufacturingPage from "./pages/manufacturing/page.tsx";
 import HRPage from "./pages/hr/page.tsx";
 import AnalyticsPage from "./pages/analytics/page.tsx";
@@ -134,6 +135,7 @@ function MainApp() {
             <Route path="stores/:customerId" element={<AgentStorePage />} />
             <Route path="stores/:customerId/order" element={<AgentOrderPage />} />
             <Route path="promotions" element={<AgentPromotionsPage />} />
+            <Route path="prospects" element={<AgentProspectsPage />} />
           </Route>
 
           {/* ERP App with layout */}

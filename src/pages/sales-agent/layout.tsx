@@ -7,7 +7,7 @@
 import { NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
-  LayoutDashboard, ShoppingCart, Wallet, Store, BadgePercent, LogOut, Globe, UserX, RefreshCw, MapPin, MapPinOff,
+  LayoutDashboard, ShoppingCart, Wallet, Store, BadgePercent, LogOut, Globe, UserX, RefreshCw, MapPin, MapPinOff, WifiOff,
   type LucideIcon,
 } from "lucide-react";
 import { DEFAULT_SALES_AGENT_POLICY, type SalesAgentPolicy } from "@bum/shared";
@@ -23,6 +23,7 @@ import {
 import { SUPPORTED_LOCALES, SUPPORTED_LOCALES_ARRAY, setLocaleInPath } from "@/i18n.ts";
 import { AgentLocationContext } from "./_lib/agent-location.ts";
 import { useLocationTracking, type AgentLocation } from "./_lib/use-location-tracking.ts";
+import { useOnline } from "./_lib/use-online.ts";
 import type { AgentMe } from "./_lib/types.ts";
 
 const NAV: { path: string; labelKey: string; icon: LucideIcon }[] = [
@@ -125,6 +126,7 @@ export default function SalesAgentLayout() {
     Boolean(meQuery.data),
     policy?.trackingIntervalSeconds ?? DEFAULT_SALES_AGENT_POLICY.trackingIntervalSeconds,
   );
+  const online = useOnline();
 
   if (currentUser === null) return <Navigate to={`/${lng}/login`} replace />;
   if (currentUser === undefined) return <Spinner />;
@@ -173,6 +175,11 @@ export default function SalesAgentLayout() {
     <AgentLocationContext.Provider value={location}>
       <div className="min-h-screen bg-background flex flex-col">
         {header}
+        {!online && (
+          <div role="status" className="sticky top-14 z-20 flex items-center gap-2 bg-amber-500 px-4 py-2 text-xs font-medium text-white">
+            <WifiOff className="h-4 w-4 shrink-0" /> {t("offline.banner")}
+          </div>
+        )}
         <main className="flex-1 pb-24">
           {!meQuery.data ? (
             <Spinner />

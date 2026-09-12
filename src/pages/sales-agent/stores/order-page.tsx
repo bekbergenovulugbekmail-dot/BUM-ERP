@@ -21,10 +21,12 @@ import { freshPosition, visitErrorMessage } from "../_lib/visit-api.ts";
 import {
   formatDistance,
   num,
+  promotionRule,
   type AgentMe,
   type AgentOrder,
   type CatalogProduct,
   type PaymentType,
+  type Promotion,
   type StoreProfile,
 } from "../_lib/types.ts";
 
@@ -32,7 +34,7 @@ const PAGE_SIZE = 30;
 const PAYMENT_TYPES: PaymentType[] = ["cash", "card", "credit"];
 const shiftIso = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
-type RowProduct = Omit<DraftLine, "pieces" | "boxes"> & { hasImage: boolean; available: string | null };
+type RowProduct = Omit<DraftLine, "pieces" | "boxes"> & { hasImage: boolean; available: string | null; promotions: Promotion[] };
 
 function QtyStepper({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
   return (
@@ -91,6 +93,12 @@ function ProductRow({
         </button>
         <div className="min-w-0 flex-1">
           <p className="font-medium leading-tight">{product.name}</p>
+          {product.promotions.length > 0 && (
+            <p className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-medium text-destructive">
+              <span className="rounded bg-destructive px-1.5 py-0.5 text-[10px] font-bold text-destructive-foreground">{t("promo.badge")}</span>
+              {product.promotions.map((promotion) => promotionRule(promotion, t)).join(" · ")}
+            </p>
+          )}
           <p className="text-xs text-muted-foreground mt-0.5">
             {t("order.piece")}: {money(product.piecePrice)}
             {product.box && ` · ${t("order.box")}: ${money(product.box.price)}`}
@@ -156,7 +164,7 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
   const setQty = (product: RowProduct, field: "pieces" | "boxes", value: number) => {
     const clean = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
     const existing = draft.lines.find((line) => line.productId === product.productId);
-    const { hasImage: _hasImage, available: _available, ...base } = product;
+    const { hasImage: _hasImage, available: _available, promotions: _promotions, ...base } = product;
     const line: DraftLine = { ...(existing ?? { ...base, pieces: 0, boxes: 0 }), [field]: clean };
     const lines = existing
       ? draft.lines.map((row) => (row.productId === product.productId ? line : row))
@@ -236,6 +244,7 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
     box: product.box ? { unitName: product.box.unitName, factor: product.box.factor, price: product.box.price } : null,
     hasImage: product.hasImage,
     available: product.available,
+    promotions: product.promotions,
   }));
   const shownIds = new Set(catalogRows.map((row) => row.productId));
   const selectedOnly = draft.lines.filter((line) => !shownIds.has(line.productId));
@@ -329,7 +338,7 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("order.selected")}</p>
             {selectedOnly.map((line) => {
-              const product: RowProduct = { ...line, hasImage: false, available: null };
+              const product: RowProduct = { ...line, hasImage: false, available: null, promotions: [] };
               return (
                 <ProductRow
                   key={line.productId}
@@ -434,6 +443,21 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
                   </div>
                 ))}
               </div>
+              {saved.promotions && saved.promotions.length > 0 && (
+                <div className="space-y-1 rounded-xl bg-destructive/5 px-3 py-2">
+                  <p className="text-xs font-semibold text-destructive">{t("order.promotions")}</p>
+                  {saved.promotions.map((promotion) => (
+                    <div key={`${promotion.promotionId}-${promotion.productId}`} className="flex justify-between gap-3 text-xs">
+                      <span className="min-w-0 truncate">{promotion.rule.name}</span>
+                      <span className="font-medium">
+                        {num(promotion.freeQuantity) > 0
+                          ? t("order.promo_free", { count: num(promotion.freeQuantity) })
+                          : t("order.promo_discount", { amount: money(promotion.discountAmount) })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <SummaryRow label={t("order.total")} value={money(saved.totalAmount)} strong />
             </div>
           )}

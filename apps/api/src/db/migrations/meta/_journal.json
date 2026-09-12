@@ -176,6 +176,20 @@
       "when": 1789170679443,
       "tag": "0024_agent_orders",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789172256722,
+      "tag": "0025_promotions",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789173177509,
+      "tag": "0026_agent_prospects",
+      "breakpoints": true
     }
   ]
 }

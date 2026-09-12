@@ -2,7 +2,7 @@ import { useState } from "react";
 import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import {
-  Truck, Route, Users, CalendarRange, Radar, SlidersHorizontal, ClipboardCheck, ShoppingCart,
+  Truck, Route, Users, CalendarRange, Radar, SlidersHorizontal, ClipboardCheck, ShoppingCart, BadgePercent, UserPlus,
   MapPinned, UserCheck, CalendarCheck, CircleDollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
@@ -14,12 +14,14 @@ import SalesRepsSection from "./_components/sales-reps-section.tsx";
 import MonitoringSection from "./_components/monitoring-section.tsx";
 import VisitsSection from "./_components/visits-section.tsx";
 import OrdersSection from "./_components/orders-section.tsx";
+import PromotionsSection from "./_components/promotions-section.tsx";
+import ProspectsSection from "./_components/prospects-section.tsx";
 import AgentPolicySection from "./_components/agent-policy-section.tsx";
 import { num, type DistributionRoute, type SalesRepStats } from "./_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
-type TabKey = "routes" | "assignments" | "reps" | "orders" | "visits" | "monitoring" | "policy";
+type TabKey = "routes" | "assignments" | "reps" | "orders" | "visits" | "prospects" | "promotions" | "monitoring" | "policy";
 
 export default function DistributionPage() {
   const { t } = useTranslation("distribution");
@@ -33,6 +35,8 @@ export default function DistributionPage() {
     // Tashriflar va siyosat — nazorat ruxsati; lokatsiya — alohida ruxsat (Supervayzer)
     { key: "orders" as const, icon: ShoppingCart, visible: can("sales_agent.supervise") },
     { key: "visits" as const, icon: ClipboardCheck, visible: can("sales_agent.supervise") },
+    { key: "prospects" as const, icon: UserPlus, visible: can("sales_agent.supervise") },
+    { key: "promotions" as const, icon: BadgePercent, visible: can("promotions.manage") },
     { key: "monitoring" as const, icon: Radar, visible: can("sales_agent.location.view") },
     { key: "policy" as const, icon: SlidersHorizontal, visible: can("sales_agent.supervise") },
   ].filter((item) => item.visible);
@@ -157,6 +161,8 @@ export default function DistributionPage() {
         {activeTab === "reps" && <SalesRepsSection />}
         {activeTab === "orders" && <OrdersSection />}
         {activeTab === "visits" && <VisitsSection />}
+        {activeTab === "prospects" && <ProspectsSection />}
+        {activeTab === "promotions" && <PromotionsSection />}
         {activeTab === "monitoring" && <MonitoringSection />}
         {activeTab === "policy" && <AgentPolicySection />}
       </motion.div>

@@ -175,6 +175,50 @@ export type VisitsSummary = {
   reasons: Partial<Record<NoOrderReason, number>>;
 };
 
+export type StoreVisitStatus = "waiting" | "in_progress" | "ordered" | "visited_no_order";
+
+/** `GET /supervisor/agents/:salesRepId` — agent tafsiloti (bugun). */
+export type AgentDetail = {
+  agent: { id: string; name: string; code: string; phone: string | null; region: string | null };
+  currency: string;
+  routes: { id: string; name: string; deliveryDate: string | null }[];
+  stores: { id: string; name: string; address: string | null; latitude: string | null; longitude: string | null; visitStatus: StoreVisitStatus }[];
+  currentVisit: { id: string; customerId: string; customerName: string; startedAt: string } | null;
+  today: { salesAmount: string; orderCount: number; visitsCompleted: number; visitsRemaining: number };
+};
+
+/** `GET /supervisor/prospects` — agent topgan potentsial do'konlar. */
+export type DistProspect = {
+  id: string;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  comment: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  status: "new" | "converted" | "rejected";
+  customerId: string | null;
+  rejectionReason: string | null;
+  salesRepName: string;
+  createdAt: string;
+};
+
+/** `GET /supervisor/promotions` — miqdorlar asosiy birlikda. */
+export type DistPromotion = {
+  id: string;
+  name: string;
+  description: string | null;
+  type: "buy_x_get_y" | "percent_discount";
+  productId: string;
+  productName: string;
+  minQuantity: string;
+  freeQuantity: string | null;
+  discountPercent: string | null;
+  startsAt: string;
+  endsAt: string;
+  isActive: boolean;
+};
+
 /** `GET /supervisor/orders` — agent yuborgan buyurtmalar. */
 export type SupervisorOrder = {
   id: string;

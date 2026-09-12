@@ -25,7 +25,8 @@ import {
 import { distributionRoutes, salesReps } from "./crm.js";
 import { companies, users } from "./platform.js";
 import { customers, salesOrders } from "./sales.js";
-import { pk, timestamps } from "./_shared.js";
+import { products } from "./catalog.js";
+import { money, percent, pk, qty, timestamps } from "./_shared.js";
 
 export const agentLocationEventType = pgEnum("agent_location_event_type", [
   "permission_denied",
@@ -248,4 +249,112 @@ export const agentOrders = pgTable(
     index("ao_company_approval_idx").on(t.companyId, t.approvalStatus),
     index("ao_visit_idx").on(t.visitId),
   ],
+);
+
+// ─── Yangi mijozlar (prospekt) ───────────────────────────────────────────────
+
+export const prospectStatus = pgEnum("prospect_status", ["new", "converted", "rejected"]);
+
+/** Agent topgan potentsial do'kon: supervayzer mijozga aylantiradi yoki sabab bilan rad etadi. */
+export const agentProspects = pgTable(
+  "agent_prospects",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    salesRepId: uuid("sales_rep_id").notNull().references(() => salesReps.id, { onDelete: "restrict" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    name: varchar("name", { length: 200 }).notNull(),
+    phone: varchar("phone", { length: 20 }),
+    address: text("address"),
+    comment: text("comment"),
+    latitude: numeric("latitude", { precision: 9, scale: 6 }),
+    longitude: numeric("longitude", { precision: 9, scale: 6 }),
+    accuracy: numeric("accuracy", { precision: 8, scale: 2 }),
+    status: prospectStatus("status").notNull().default("new"),
+    customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    reviewedBy: uuid("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    rejectionReason: text("rejection_reason"),
+    ...timestamps(),
+  },
+  (t) => [
+    index("apr_company_status_idx").on(t.companyId, t.status, t.createdAt),
+    index("apr_company_rep_idx").on(t.companyId, t.salesRepId, t.createdAt),
+  ],
+);
+
+// ─── Aksiyalar ───────────────────────────────────────────────────────────────
+
+/** buy_x_get_y — har `minQuantity` uchun `freeQuantity` bepul; percent_discount — `minQuantity` dan foiz chegirma. */
+export const promotionType = pgEnum("promotion_type", ["buy_x_get_y", "percent_discount"]);
+
+export const promotions = pgTable(
+  "promotions",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 200 }).notNull(),
+    description: text("description"),
+    type: promotionType("type").notNull(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** Asosiy birlikda. */
+    minQuantity: qty("min_quantity").notNull(),
+    freeQuantity: qty("free_quantity"),
+    discountPercent: percent("discount_percent"),
+    startsAt: date("starts_at").notNull(),
+    endsAt: date("ends_at").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    index("promo_company_period_idx").on(t.companyId, t.isActive, t.startsAt, t.endsAt),
+    index("promo_company_product_idx").on(t.companyId, t.productId),
+    check("promo_dates_check", sql`${t.endsAt} >= ${t.startsAt}`),
+    check(
+      "promo_rule_check",
+      sql`${t.minQuantity} > 0 and ((${t.type} = 'buy_x_get_y' and ${t.freeQuantity} > 0) or (${t.type} = 'percent_discount' and ${t.discountPercent} > 0 and ${t.discountPercent} <= 100))`,
+    ),
+  ],
+);
+
+/** Buyurtmada qo'llangan qoida nusxasi — aksiya keyin o'zgarsa ham tarix saqlanadi. */
+export type PromotionRule = {
+  name: string;
+  type: "buy_x_get_y" | "percent_discount";
+  minQuantity: string;
+  freeQuantity: string | null;
+  discountPercent: string | null;
+};
+
+export const orderPromotions = pgTable(
+  "order_promotions",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => salesOrders.id, { onDelete: "cascade" }),
+    promotionId: uuid("promotion_id")
+      .notNull()
+      .references(() => promotions.id, { onDelete: "restrict" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "restrict" }),
+    rule: jsonb("rule").$type<PromotionRule>().notNull(),
+    paidQuantity: qty("paid_quantity").notNull(),
+    freeQuantity: qty("free_quantity").notNull().default("0"),
+    /** Bepul tovar qiymati yoki foiz chegirma summasi (prays-list narxida). */
+    discountAmount: money("discount_amount").notNull().default("0"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("op_order_idx").on(t.orderId), index("op_company_promotion_idx").on(t.companyId, t.promotionId)],
 );

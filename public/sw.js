@@ -1,4 +1,6 @@
-const CACHE_NAME = "erp-assets-v1";
+// v2: v1 API javoblarini ham keshlab qo'yardi (tizimdan chiqqandan keyin ham qolardi) — nomi almashgani uchun o'chadi
+const CACHE_NAME = "erp-assets-v2";
+const AGENT_API_CACHE = "agent-api-v1";
 const OFFLINE_URL = "/offline.html";
 
 const urlsToCache = [
@@ -8,6 +10,13 @@ const urlsToCache = [
   "/icon/icon-maskable-192.png",
   "/icon/icon-maskable-512.png",
 ];
+
+// Sotuv agenti o'qish ma'lumotlari (profil, siyosat, bugungi marshrut, do'konlar, katalog, qarzdorlar, aksiyalar,
+// bosh sahifa, buyurtmalar, ochiq tashrif, yangi mijozlar): tarmoq birinchi, internet bo'lmasa oxirgi nusxa.
+// Yozish so'rovlari (buyurtma yuborish, lokatsiya, tashrif) hech qachon keshlanmaydi va navbatga qo'yilmaydi —
+// geofence va kredit serverda, internet bilan tekshiriladi. Supervayzer ma'lumotlari va rasm havolalari keshlanmaydi.
+const AGENT_READ = /^\/api\/sales-agent\/(me|policy|today|stores|catalog|debtors|promotions|dashboard|orders|visits\/current|prospects)(\/|$)/;
+const NOT_CACHED = /\/(image|url)$/;
 
 // Install — cache offline page and icons
 self.addEventListener("install", (event) => {
@@ -27,13 +36,43 @@ self.addEventListener("activate", (event) => {
       .then((cacheNames) =>
         Promise.all(
           cacheNames.map((name) => {
-            if (name !== CACHE_NAME) return caches.delete(name);
+            if (name !== CACHE_NAME && name !== AGENT_API_CACHE) return caches.delete(name);
           }),
         ),
       )
       .then(() => self.clients.claim()),
   );
 });
+
+// Tizimdan chiqishda agent ma'lumotlari keshi tozalanadi (keyingi foydalanuvchiga qolmasin)
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "clear-agent-cache") event.waitUntil(caches.delete(AGENT_API_CACHE));
+});
+
+function agentRead(request) {
+  return fetch(request)
+    .then((response) => {
+      if (response.ok) {
+        const clone = response.clone();
+        caches.open(AGENT_API_CACHE).then((cache) => cache.put(request, clone));
+      }
+      return response;
+    })
+    .catch(() =>
+      caches
+        .open(AGENT_API_CACHE)
+        // Aynan shu so'rov, bo'lmasa shu yo'lning boshqa parametrli nusxasi (masalan, boshqa joydan masofa bilan)
+        .then((cache) => cache.match(request).then((exact) => exact ?? cache.match(request, { ignoreSearch: true })))
+        .then(
+          (cached) =>
+            cached ??
+            new Response(JSON.stringify({ code: "NETWORK", message: "Internet yo'q" }), {
+              status: 503,
+              headers: { "content-type": "application/json" },
+            }),
+        ),
+    );
+}
 
 // Fetch — network-first, offline fallback for navigation
 self.addEventListener("fetch", (event) => {
@@ -51,6 +90,12 @@ self.addEventListener("fetch", (event) => {
 
   // Never intercept auth paths
   if (url.pathname.startsWith("/auth")) return;
+
+  // API: faqat agent o'qish ma'lumotlari oflayn uchun keshlanadi, qolgani — to'g'ridan-to'g'ri tarmoq
+  if (url.pathname.startsWith("/api/")) {
+    if (AGENT_READ.test(url.pathname) && !NOT_CACHED.test(url.pathname)) event.respondWith(agentRead(event.request));
+    return;
+  }
 
   // Navigation requests: network-first, fall back to offline.html
   if (event.request.mode === "navigate") {

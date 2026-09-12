@@ -101,6 +101,8 @@ export function useAuth() {
   );
 
   const signout = useCallback(() => {
+    // Agent ish joyining oflayn keshi (do'konlar, katalog, buyurtmalar) keyingi foydalanuvchiga qolmasin
+    if (typeof navigator !== "undefined") navigator.serviceWorker?.controller?.postMessage({ type: "clear-agent-cache" });
     void api
       .post("/api/auth/logout")
       .catch(() => undefined)

@@ -20,11 +20,16 @@
  *   PUT  /orders/drafts/:clientRequestId            qoralama (idempotent: bir identifikator — bitta buyurtma)
  *   POST /orders/:orderId/submit                    yuborish (geofence, kredit, qoldiq — atomar)
  *   POST /orders/:orderId/cancel                    yuborilmagan / tasdiq kutayotganini bekor qilish
+ *   GET  /promotions (?filter=active|upcoming|ending_soon)     aksiyalar (hisoblash buyurtmada, serverda)
+ *   GET  /dashboard                                 bugungi savdo va plan, tashriflar, oylik plan, o'rin
+ *   GET  /prospects, POST /prospects                yangi mijoz topish (o'zi yuborganlari)
  * Siyosat:
  *   GET  /policy                                    sales_agent.use yoki sales_agent.supervise
  *   PUT  /policy                                    sales_agent.supervise
  * Supervayzer:
  *   GET  /supervisor/agents                         sales_agent.location.view — holat, oxirgi joy, bugungi marshrut
+ *   GET  /supervisor/agents/:salesRepId             sales_agent.location.view — bugungi do'konlar, tashrif holati, savdo
+ *   GET  /supervisor/prospects, POST /supervisor/prospects/:id/convert|reject   sales_agent.supervise
  *   GET  /supervisor/live (?since=)                 sales_agent.location.live — yangilangan joylar
  *   GET  /supervisor/agents/:salesRepId/history (?date=)   sales_agent.location.history (audit)
  *   GET  /supervisor/events (?date=&type=&salesRepId=&limit=)   sales_agent.supervise
@@ -32,6 +37,7 @@
  *   GET  /supervisor/visits/:visitId/photos/:photoId/url       sales_agent.supervise
  *   GET  /supervisor/orders (?approval=&date=&salesRepId=)     sales_agent.supervise — agent buyurtmalari
  *   POST /supervisor/orders/:orderId/approve|reject            sales_agent.supervise — kredit limiti tasdig'i
+ *   GET/POST /supervisor/promotions, PATCH/DELETE /supervisor/promotions/:promotionId   promotions.manage
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
@@ -39,10 +45,17 @@ import { z } from "zod";
 import { forbidden, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { companies } from "../../db/schema/platform.js";
-import { agentLocationEvents, agentOrders, agentVisitPhotos, agentVisits } from "../../db/schema/sales-agent.js";
+import {
+  agentLocationEvents,
+  agentOrders,
+  agentProspects,
+  agentVisitPhotos,
+  agentVisits,
+  promotions,
+} from "../../db/schema/sales-agent.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
-import { qtySchema } from "../../shared/decimal.js";
+import { percentSchema, qtySchema } from "../../shared/decimal.js";
 import type { GeoPoint } from "../../shared/geo.js";
 import { storageProvider } from "../../shared/storage.js";
 import { authOf, requireAuth } from "../auth/guard.js";
@@ -69,8 +82,17 @@ import {
 } from "./agent-orders.service.js";
 import { recordAgentLocation, reportLocationProblem } from "./location.service.js";
 import { getSalesAgentPolicy, salesAgentPolicySchema, saveSalesAgentPolicy } from "./policy.service.js";
+import { agentPromotions, createPromotion, deletePromotion, listPromotions, updatePromotion } from "./promotions.service.js";
+import { agentDashboard } from "./dashboard.service.js";
+import { convertProspect, createProspect, listAgentProspects, rejectProspect, supervisorProspects } from "./prospects.service.js";
 import { agentDebtors, agentStore, agentStores, agentToday } from "./stores.service.js";
-import { agentLocationHistory, locationEvents, supervisorAgents, supervisorLive } from "./supervisor.service.js";
+import {
+  agentLocationHistory,
+  locationEvents,
+  supervisorAgentDetail,
+  supervisorAgents,
+  supervisorLive,
+} from "./supervisor.service.js";
 import {
   addVisitPhoto,
   agentVisitsOn,
@@ -192,6 +214,40 @@ const supervisorOrdersQuery = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
 const rejectBody = z.strictObject({ reason: z.string().trim().min(3).max(500) });
+
+const prospectBody = z
+  .strictObject({
+    name: z.string().trim().min(1).max(200),
+    phone: z.string().trim().max(20).nullable().optional(),
+    address: z.string().trim().max(500).nullable().optional(),
+    comment: z.string().trim().max(1000).nullable().optional(),
+    latitude: z.number().min(-90).max(90).optional(),
+    longitude: z.number().min(-180).max(180).optional(),
+    accuracy: z.number().min(0).max(100_000).nullable().optional(),
+  })
+  .refine((body) => (body.latitude === undefined) === (body.longitude === undefined), {
+    message: "latitude va longitude birga beriladi",
+  });
+const prospectsQuery = z.object({ status: z.enum(agentProspects.status.enumValues).optional() });
+const prospectParams = z.object({ prospectId: z.uuid() });
+const convertBody = z.strictObject({ routeId: z.uuid().nullable().optional() });
+const agentPromotionsQuery = z.object({ filter: z.enum(["active", "upcoming", "ending_soon"]).default("active") });
+const managePromotionsQuery = z.object({ status: z.enum(["active", "upcoming", "ended", "all"]).default("all") });
+const promotionParams = z.object({ promotionId: z.uuid() });
+const promotionShape = {
+  name: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(1000).nullable().optional(),
+  type: z.enum(promotions.type.enumValues),
+  productId: z.uuid(),
+  minQuantity: qtySchema,
+  freeQuantity: qtySchema.nullable().optional(),
+  discountPercent: percentSchema.nullable().optional(),
+  startsAt: isoDate,
+  endsAt: isoDate,
+  isActive: z.boolean().optional(),
+};
+const promotionBody = z.strictObject(promotionShape);
+const promotionPatch = z.strictObject(promotionShape).partial();
 
 const originOf = (query: { lat?: number; lng?: number }): GeoPoint | null =>
   query.lat !== undefined && query.lng !== undefined ? { latitude: query.lat, longitude: query.lng } : null;
@@ -374,6 +430,89 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
     return { order: await writeAgent(req, (tx, context) => cancelAgentOrder(tx, context, orderId, reason ?? null, requestMeta(req))) };
   });
 
+  // ─── Bosh sahifa va yangi mijozlar ───────────────────────────────────────
+
+  app.get("/dashboard", async (req) => agentDashboard(db, await readAgent(req)));
+
+  app.get("/prospects", async (req) => ({ prospects: await listAgentProspects(db, await readAgent(req)) }));
+
+  app.post("/prospects", async (req, reply) => {
+    const body = prospectBody.parse(req.body);
+    const prospect = await writeAgent(req, (tx, context) => createProspect(tx, context, body, requestMeta(req)));
+    reply.status(201);
+    return { prospect };
+  });
+
+  app.get("/supervisor/prospects", async (req) => {
+    const { status } = prospectsQuery.parse(req.query);
+    return { prospects: await supervisorProspects(db, await readTenantWith(req, "sales_agent.supervise"), status) };
+  });
+
+  app.post("/supervisor/prospects/:prospectId/convert", async (req) => {
+    const { prospectId } = prospectParams.parse(req.params);
+    const body = convertBody.parse(req.body ?? {});
+    return withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      await requirePermission(tx, tenant, "sales_agent.supervise");
+      return convertProspect(tx, tenant, prospectId, body, requestMeta(req));
+    });
+  });
+
+  app.post("/supervisor/prospects/:prospectId/reject", async (req) => {
+    const { prospectId } = prospectParams.parse(req.params);
+    const { reason } = rejectBody.parse(req.body);
+    const prospect = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      await requirePermission(tx, tenant, "sales_agent.supervise");
+      return rejectProspect(tx, tenant, prospectId, reason, requestMeta(req));
+    });
+    return { prospect };
+  });
+
+  // ─── Aksiyalar ───────────────────────────────────────────────────────────
+
+  app.get("/promotions", async (req) => {
+    const { filter } = agentPromotionsQuery.parse(req.query);
+    return { promotions: await agentPromotions(db, await readAgent(req), filter) };
+  });
+
+  app.get("/supervisor/promotions", async (req) => {
+    const { status } = managePromotionsQuery.parse(req.query);
+    return { promotions: await listPromotions(db, await readTenantWith(req, "promotions.manage"), status) };
+  });
+
+  app.post("/supervisor/promotions", async (req, reply) => {
+    const body = promotionBody.parse(req.body);
+    const promotion = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      await requirePermission(tx, tenant, "promotions.manage");
+      return createPromotion(tx, tenant, body, requestMeta(req));
+    });
+    reply.status(201);
+    return { promotion };
+  });
+
+  app.patch("/supervisor/promotions/:promotionId", async (req) => {
+    const { promotionId } = promotionParams.parse(req.params);
+    const body = promotionPatch.parse(req.body);
+    const promotion = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      await requirePermission(tx, tenant, "promotions.manage");
+      return updatePromotion(tx, tenant, promotionId, body, requestMeta(req));
+    });
+    return { promotion };
+  });
+
+  app.delete("/supervisor/promotions/:promotionId", async (req, reply) => {
+    const { promotionId } = promotionParams.parse(req.params);
+    await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      await requirePermission(tx, tenant, "promotions.manage");
+      await deletePromotion(tx, tenant, promotionId, requestMeta(req));
+    });
+    return reply.status(204).send();
+  });
+
   // ─── Siyosat ─────────────────────────────────────────────────────────────
 
   app.get("/policy", async (req) => {
@@ -400,6 +539,11 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
   app.get("/supervisor/agents", async (req) => ({
     agents: await supervisorAgents(db, await readTenantWith(req, "sales_agent.location.view")),
   }));
+
+  app.get("/supervisor/agents/:salesRepId", async (req) => {
+    const { salesRepId } = historyParams.parse(req.params);
+    return supervisorAgentDetail(db, await readTenantWith(req, "sales_agent.location.view"), salesRepId);
+  });
 
   app.get("/supervisor/live", async (req) => {
     const { since } = liveQuery.parse(req.query);

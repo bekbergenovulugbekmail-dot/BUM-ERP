@@ -96,6 +96,82 @@ export const num = (value: string | number | null | undefined): number => Number
 
 export type PaymentType = "cash" | "card" | "credit";
 
+/** `GET /api/sales-agent/dashboard` — summalar asosiy valyutada (agent yuborgan, bekor qilinmagan buyurtmalar). */
+export type AgentDashboard = {
+  date: string;
+  currency: string;
+  today: {
+    salesAmount: string;
+    orderCount: number;
+    creditSalesAmount: string;
+    collectedAmount: string;
+    plannedStores: number;
+    visitedStores: number;
+    orderedStores: number;
+    remainingStores: number;
+    dailyTarget: string;
+    remainingToday: string;
+  };
+  month: {
+    target: string;
+    achieved: string;
+    percent: number;
+    remaining: string;
+    remainingDays: number;
+    requiredDaily: string;
+    orderCount: number;
+    bestDay: { date: string; amount: string } | null;
+  };
+  rank: { position: number; total: number } | null;
+  prospectsThisMonth: number;
+};
+
+export type ProspectStatus = "new" | "converted" | "rejected";
+
+/** `/api/sales-agent/prospects` — agent topgan potentsial do'kon. */
+export type Prospect = {
+  id: string;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  comment: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  status: ProspectStatus;
+  customerId: string | null;
+  rejectionReason: string | null;
+  salesRepName: string;
+  createdAt: string;
+};
+
+export type PromotionType = "buy_x_get_y" | "percent_discount";
+
+/** `GET /api/sales-agent/promotions` va katalogdagi mahsulot aksiyalari (miqdor — asosiy birlikda). */
+export type Promotion = {
+  id: string;
+  name: string;
+  description: string | null;
+  type: PromotionType;
+  productId: string;
+  productName: string;
+  minQuantity: string;
+  freeQuantity: string | null;
+  discountPercent: string | null;
+  startsAt: string;
+  endsAt: string;
+  isActive: boolean;
+};
+
+/** "10 ta olsangiz 1 ta bepul", "5 tadan 10% chegirma". */
+export function promotionRule(
+  promotion: Pick<Promotion, "type" | "minQuantity" | "freeQuantity" | "discountPercent">,
+  t: TFunction<"agent">,
+): string {
+  return promotion.type === "buy_x_get_y"
+    ? t("promo.rule.bxgy", { min: num(promotion.minQuantity), free: num(promotion.freeQuantity) })
+    : t("promo.rule.percent", { min: num(promotion.minQuantity), percent: num(promotion.discountPercent) });
+}
+
 /** `GET /api/sales-agent/catalog` — narxlar asosiy valyutada, qoldiq asosiy birlikda. */
 export type CatalogProduct = {
   id: string;
@@ -107,6 +183,7 @@ export type CatalogProduct = {
   available: string;
   piecePrice: string;
   box: { unitId: string; unitName: string; factor: string; price: string } | null;
+  promotions: Promotion[];
 };
 
 export type AgentOrderLine = { productId: string; pieces: string; boxes: string; boxUnitId: string | null; boxFactor: string | null };
@@ -135,6 +212,15 @@ export type AgentOrder = {
   rejectionReason: string | null;
   updatedAt: string;
   items?: { productId: string; productName: string; quantity: string; unitPrice: string; discountPercent: string; lineTotal: string }[];
+  /** Server qo'llagan aksiyalar (qoida nusxasi bilan). */
+  promotions?: {
+    promotionId: string;
+    productId: string;
+    rule: { name: string; type: PromotionType; minQuantity: string; freeQuantity: string | null; discountPercent: string | null };
+    paidQuantity: string;
+    freeQuantity: string;
+    discountAmount: string;
+  }[];
 };
 
 /** Taymer: "4:05", "1:02:09". */

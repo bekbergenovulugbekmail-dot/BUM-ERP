@@ -3,16 +3,21 @@
  * lokatsiya tarixi va hodisalar. Faqat tenant ichida; tarixni ko'rish audit qilinadi.
  * Kun chegarasi — O'zbekiston vaqti (UTC+5).
  */
-import { and, asc, desc, eq, gt, gte, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { AGENT_ONLINE_MINUTES, notFound } from "@bum/shared";
 import { salesReps } from "../../db/schema/crm.js";
-import { agentLocationEvents, agentLocationLatest, agentLocations } from "../../db/schema/sales-agent.js";
+import { companies } from "../../db/schema/platform.js";
+import { salesOrders } from "../../db/schema/sales.js";
+import { agentLocationEvents, agentLocationLatest, agentLocations, agentOrders } from "../../db/schema/sales-agent.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import type { TenantContext } from "../company/tenant.js";
 import { todayIso } from "../finance/cash.service.js";
+import type { AgentContext } from "./agent-context.js";
+import { SOLD_STATUSES } from "./dashboard.service.js";
 import type { LocationEventType } from "./location.service.js";
-import { routesForAgent } from "./stores.service.js";
+import { agentToday, routesForAgent } from "./stores.service.js";
+import { currentVisit, storeVisitStatuses } from "./visits.service.js";
 
 const HISTORY_POINT_LIMIT = 5000;
 const DAY_MS = 86_400_000;
@@ -64,6 +69,64 @@ export async function supervisorAgents(conn: DbOrTx, tenant: TenantContext) {
       })),
     })),
   );
+}
+
+/** Agent tafsiloti (bugun): marshrut do'konlari va tashrif holati, ochiq tashrif, savdo va buyurtmalar. */
+export async function supervisorAgentDetail(conn: DbOrTx, tenant: TenantContext, salesRepId: string) {
+  const [agent] = await conn
+    .select({
+      id: salesReps.id,
+      name: salesReps.name,
+      code: salesReps.code,
+      phone: salesReps.phone,
+      region: salesReps.region,
+      monthlyTarget: salesReps.monthlyTarget,
+    })
+    .from(salesReps)
+    .where(and(eq(salesReps.id, salesRepId), eq(salesReps.companyId, tenant.company.id)))
+    .limit(1);
+  if (!agent) throw notFound("Savdo agenti topilmadi");
+
+  const context: AgentContext = { ...tenant, agent };
+  const plan = await agentToday(conn, context, null);
+  const statuses = await storeVisitStatuses(conn, context, plan.stores.map((store) => store.id), plan.date);
+  const open = await currentVisit(conn, context);
+  const [sales] = await conn
+    .select({
+      amount: sql<string>`coalesce(sum(${salesOrders.totalAmount}), 0)::numeric(18,2)::text`,
+      orders: sql<number>`count(*)::int`,
+    })
+    .from(agentOrders)
+    .innerJoin(salesOrders, eq(salesOrders.id, agentOrders.orderId))
+    .where(
+      and(
+        eq(agentOrders.companyId, tenant.company.id),
+        eq(agentOrders.salesRepId, agent.id),
+        isNotNull(agentOrders.submittedAt),
+        inArray(salesOrders.status, [...SOLD_STATUSES]),
+        eq(salesOrders.orderDate, plan.date),
+      ),
+    );
+  const [company] = await conn.select({ currency: companies.currency }).from(companies).where(eq(companies.id, tenant.company.id)).limit(1);
+
+  const stores = plan.stores.map((store) => ({
+    id: store.id,
+    name: store.name,
+    address: store.address,
+    latitude: store.latitude,
+    longitude: store.longitude,
+    visitStatus: statuses.get(store.id) ?? ("waiting" as const),
+  }));
+  const done = stores.filter((store) => store.visitStatus === "ordered" || store.visitStatus === "visited_no_order").length;
+  const { monthlyTarget: _monthlyTarget, ...profile } = agent;
+  return {
+    agent: profile,
+    currency: company?.currency ?? "UZS",
+    routes: plan.routes.map((route) => ({ id: route.id, name: route.name, deliveryDate: route.deliveryDate })),
+    stores,
+    currentVisit: open ? { id: open.id, customerId: open.customerId, customerName: open.customerName, startedAt: open.startedAt } : null,
+    today: { salesAmount: sales?.amount ?? "0.00", orderCount: sales?.orders ?? 0, visitsCompleted: done, visitsRemaining: stores.length - done },
+  };
 }
 
 /** Jonli xarita: `since` dan keyin yangilangan oxirgi joylar. */
