@@ -11,6 +11,7 @@
 import { createHash } from "node:crypto";
 import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { POS_APPEARANCE_KEY, parsePosAppearance } from "@bum/shared";
 import { brands, categories, products, unitConversions, units } from "../../db/schema/catalog.js";
 import { companyCurrencies } from "../../db/schema/finance.js";
 import { stockLevels, warehouses } from "../../db/schema/inventory.js";
@@ -69,13 +70,15 @@ export async function posConfig(conn: DbOrTx, companyId: string) {
   const printRows = await conn
     .select({ key: settings.key, value: settings.value })
     .from(settings)
-    .where(and(eq(settings.companyId, companyId), inArray(settings.key, [RECEIPT_SETTING_KEY, LABELS_SETTING_KEY])));
+    .where(and(eq(settings.companyId, companyId), inArray(settings.key, [RECEIPT_SETTING_KEY, LABELS_SETTING_KEY, POS_APPEARANCE_KEY])));
   const printValue = (key: string) => printRows.find((row) => row.key === key)?.value;
   const body = {
     company: company!,
     cashback: await getCashbackSettings(conn, companyId),
     receipt: parseReceiptTemplate(printValue(RECEIPT_SETTING_KEY)),
     labels: parseLabelSettings(printValue(LABELS_SETTING_KEY)),
+    /** Kassa mavzusi qulfi (web: Sozlamalar → Kassa qurilmalari). */
+    appearance: parsePosAppearance(printValue(POS_APPEARANCE_KEY)),
   };
   return { hash: createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 32), ...body };
 }

@@ -1049,7 +1049,7 @@ Talablar hujjati: `BUMERP_DESKTOP.docx` — aralash to'lov, tezkor sotuv, 9 mavz
 | K1 | Davom ettiriladigan o'rnatuvchi: bo'laklab yuklash, HTTP Range bilan yuklab olish, `.part` | ✅ |
 | K2 | Aralash to'lov (naqd + karta + bank) — server, offline sinxron, qaytarishda tarkib, smena yig'indilari, idempotentlik | ✅ |
 | K3 | Valyuta kurslari — ruxsatlar, tarix (eski → yangi), kassadan tahrirlash, offline holat | ✅ |
-| K4 | 9 mavzu, kassir tanlovi, kompaniya qulfi | ⏳ |
+| K4 | 9 mavzu, kassir tanlovi, kompaniya qulfi | ✅ |
 | K5 | Tezkor sotuv — assortiment, 7/30/90 kunlik top, rasm keshi, kategoriya, aksiya narxi | ⏳ |
 | K6 | Tarozi — ScaleProvider adapterlari, sozlamalar, sinxron navbati, og'irlik (protokol hujjati bo'lmasa — simulyator va aniq hisobot, soxta "ulandi" yo'q) | ⏳ |
 
@@ -1083,6 +1083,15 @@ Talablar hujjati: `BUMERP_DESKTOP.docx` — aralash to'lov, tezkor sotuv, 9 mavz
 - web Sozlamalar → Valyutalar: kurs o'zgarishlari tarixi jadvali (eski/yangi, manba, kim, kassa); `settings.manage` bo'lmasa ham `currency_rates.manage` bilan — bitta kursni o'zgartirish
 - to'liq API: 293/293 (76 fayl); desktop 28/28
 - testlar: `currency-rates` (2) — ruxsatlar, tarix (eski → yangi, kim), takror kurs, 400/404, boshqa kompaniya, audit, eski savdo summasi o'zgarmaydi va yangi savdo yangi kurs bilan; pull maydonlari, `currency.rate` qo'llanishi, nomuvofiqlik, ruxsatsiz rad, qurilma tarixi (kassa nomi). Desktop: kassadan kurs (ruxsat, asosiy valyuta, noto'g'ri kurs, lokal holat, tarix offline, navbat payload)
+
+**K4 — kassa mavzulari** (migratsiyasiz — kompaniya sozlamasi `pos.appearance`):
+- 9 mavzu: Yorug', Qorong'i, Ko'k, Yashil, Binafsha, To'q sariq, Yuqori kontrast (qora fon, oq matn, sariq asosiy rang, aniq chegaralar), Klassik POS (kulrang fon, to'rtburchak burchaklar), Windows bo'yicha (tizim yorug'/qorong'i rejimini kuzatadi). `packages/shared` `POS_THEMES` va desktop `shared/themes.ts` — bir xil ro'yxat
+- qo'llanishi: desktop `renderer/index.css` dagi `[data-theme]` bloklari — faqat rang tokenlari (fon, matn, karta, asosiy, chegara, sidebar …), har mavzu to'liq to'plam; `html[data-theme]` va qorong'i mavzularda `.dark` — POS, sidebar, kartalar, savat, tugmalar, oynalar, jadvallar, formalar hammasi tokenlar orqali. Hisob, qoldiq, to'lov, sinxronga ta'sir qilmaydi; chop etiladigan chek o'z CSS'i bilan
+- kassir tanlovi: qurilmada kassir bo'yicha (`cashierPrefs:<userId>`) — qayta kirganda tiklanadi; kassir kirmagan — qurilma standarti. Kompaniya qulfi (`config.appearance`, pull xeshi o'zgarsa keladi) hammasidan ustun: kassada o'zgartirib bo'lmaydi (`FORBIDDEN`), qulf olinsa kassirning o'z tanlovi qaytadi
+- desktop Sozlamalar → Tashqi ko'rinish: 9 ta oldindan ko'rish kartasi (har karta o'z mavzusi tokenlari bilan chiziladi, "Windows bo'yicha" — yorug' va qorong'i yarmi), qulflangan bo'lsa ogohlantirish va kartalar o'chiq
+- web Sozlamalar → Kassa qurilmalari → "Kassa ko'rinishi": qulflash va mavzu tanlash; API `GET/PUT /api/pos/devices/appearance` (`pos.devices.manage`)
+- to'liq API: 294/294 (77 fayl); desktop 29/29
+- testlar: `pos-appearance` (1) — standart, ruxsat, noto'g'ri mavzu, qurilma config va xesh; desktop — kassir tanlovi va tiklanishi, qurilma standarti, qulf ustunligi va rad, qulf olinishi
 
 ### Distributsiya (`/api/distribution`)
 

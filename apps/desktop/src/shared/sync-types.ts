@@ -458,6 +458,8 @@ export type PosConfig = {
   receipt: Record<string, unknown>;
   /** Etiketka shablonlari (`LabelSettings`, web: Sozlamalar → Etiketka); eski server — yo'q. */
   labels?: unknown;
+  /** Kassa mavzusi qulfi (web: Sozlamalar → Kassa qurilmalari); eski server — yo'q. */
+  appearance?: { locked: boolean; theme: string };
 };
 
 export type WireOperation = {

@@ -6,6 +6,7 @@
  */
 import { useState } from "react";
 import { toast } from "sonner";
+import { POS_THEMES, POS_THEME_LABELS, type PosAppearance } from "@bum/shared";
 import { AlertTriangle, CheckCircle2, Download, Monitor, Pencil, Save, X } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -18,6 +19,7 @@ import { usePermissions } from "@/hooks/use-company.ts";
 import { SettingsGroup } from "./form-controls.tsx";
 
 const DEVICES_PATH = "/api/pos/devices";
+const APPEARANCE_PATH = "/api/pos/devices/appearance";
 const CONFLICTS_PATH = "/api/pos/devices/conflicts";
 
 type Device = {
@@ -139,6 +141,45 @@ function InstallerCard() {
           <Download className="h-4 w-4 mr-1.5" /> Yuklab olish
         </a>
       </Button>
+    </div>
+  );
+}
+
+/** Kassa mavzusi: qulf yoqilsa hamma kassada tanlangan mavzu, kassirlar o'zgartira olmaydi. */
+function AppearanceCard() {
+  const appearance = useApiQuery<{ appearance: PosAppearance }>(APPEARANCE_PATH).data?.appearance;
+  const save = useApiMutation((body: PosAppearance) => api.put<{ appearance: PosAppearance }>(APPEARANCE_PATH, body), { invalidate: [APPEARANCE_PATH] });
+  if (!appearance) return <Skeleton className="h-16 rounded-xl" />;
+  const update = async (patch: Partial<PosAppearance>) => {
+    try {
+      await save.mutateAsync({ ...appearance, ...patch });
+      toast.success("Kassa mavzusi saqlandi — kassalarga sinxronda boradi");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+  return (
+    <div className="space-y-3">
+      <label htmlFor="pos-theme-lock" className="flex items-center justify-between gap-3">
+        <span className="text-sm">
+          Mavzuni hamma kassada qulflash
+          <span className="block text-xs text-muted-foreground">O'chiq bo'lsa har kassir o'z mavzusini tanlaydi</span>
+        </span>
+        <Switch id="pos-theme-lock" checked={appearance.locked} disabled={save.isPending} onCheckedChange={(locked) => void update({ locked })} />
+      </label>
+      <div className="flex flex-wrap gap-1">
+        {POS_THEMES.map((theme) => (
+          <Button
+            key={theme}
+            size="sm"
+            variant={appearance.theme === theme ? "default" : "secondary"}
+            disabled={save.isPending}
+            onClick={() => void update({ theme })}
+          >
+            {POS_THEME_LABELS[theme]}
+          </Button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -369,6 +410,9 @@ export default function PosDevicesSection() {
         <>
           <SettingsGroup title="Ilovani o'rnatish" description="Kassa kompyuteriga o'rnating va server manzili, rahbar telefoni va paroli bilan bir marta ro'yxatdan o'tkazing">
             <InstallerCard />
+          </SettingsGroup>
+          <SettingsGroup title="Kassa ko'rinishi" description="Mavzu faqat ko'rinish: hisob, qoldiq va to'lovga ta'sir qilmaydi">
+            <AppearanceCard />
           </SettingsGroup>
           <SettingsGroup title="Qurilmalar" description="O'chirilgan qurilma serverga ulana olmaydi; qayta yoqilganda offline navbatini yuboradi">
             <DevicesTable />

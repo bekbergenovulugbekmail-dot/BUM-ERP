@@ -15,6 +15,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_PATTERN } from "../shared/hotkeys.js";
+import { isPosTheme } from "../shared/themes.js";
 import type {
   AppStatus,
   CartLineInput,
@@ -149,6 +150,7 @@ export type AppUpdater = { install(file: string): Promise<void> };
 export const DEFAULT_PREFS: DevicePrefs = {
   language: "uz-Latn",
   theme: "light",
+  themeLock: null,
   fontScale: "normal",
   hotkeys: { ...DEFAULT_HOTKEYS },
   blockNegativeStock: false,
@@ -3075,14 +3077,30 @@ export class KassaService {
 
   // ─── Qurilma sozlamalari, printer, pul qutisi ───────────────────────────
 
+  /**
+   * Qurilma sozlamalari; mavzu: kompaniya qulfi (pull `config.appearance`) → joriy kassirning tanlovi → qurilma standarti.
+   * Kassir mavzusi qurilmada kassir bo'yicha saqlanadi — qayta kirganda tiklanadi.
+   */
   prefs(): DevicePrefs {
     const stored = this.store.getMeta<Partial<DevicePrefs>>("devicePrefs") ?? {};
-    return { ...DEFAULT_PREFS, ...stored, hotkeys: { ...DEFAULT_HOTKEYS, ...(stored.hotkeys ?? {}) } };
+    const base = { ...DEFAULT_PREFS, ...stored, hotkeys: { ...DEFAULT_HOTKEYS, ...(stored.hotkeys ?? {}) } };
+    const appearance = this.config()?.appearance;
+    const lock = appearance?.locked && isPosTheme(appearance.theme) ? appearance.theme : null;
+    const own = this.cashier ? this.store.getMeta<{ theme?: string }>(`cashierPrefs:${this.cashier.userId}`)?.theme : undefined;
+    const theme = lock ?? (isPosTheme(own) ? own : isPosTheme(base.theme) ? base.theme : "light");
+    return { ...base, theme, themeLock: lock };
   }
 
   savePrefs(input: DevicePrefs): DevicePrefs {
-    this.requireCashier();
+    const cashier = this.requireCashier();
     const current = this.prefs();
+    // Mavzu — joriy kassirniki (qurilma standarti o'zgarmaydi); kompaniya qulflagan bo'lsa o'zgartirib bo'lmaydi
+    const theme = isPosTheme(input.theme) ? input.theme : current.theme;
+    if (theme !== current.theme) {
+      if (current.themeLock) throw new KassaError("FORBIDDEN", "Mavzu kompaniya tomonidan qulflangan");
+      this.store.setMeta(`cashierPrefs:${cashier.userId}`, { theme });
+    }
+    const deviceTheme = this.store.getMeta<Partial<DevicePrefs>>("devicePrefs")?.theme;
     const methods = Array.isArray(input.enabledPaymentMethods)
       ? [...new Set(input.enabledPaymentMethods.filter((method) => PAYMENT_METHODS.includes(method)))]
       : current.enabledPaymentMethods;
@@ -3098,7 +3116,8 @@ export class KassaService {
     }
     const prefs: DevicePrefs = {
       language: input.language === "uz-Cyrl" || input.language === "ru" ? input.language : "uz-Latn",
-      theme: input.theme === "dark" || input.theme === "system" ? input.theme : "light",
+      theme: isPosTheme(deviceTheme) ? deviceTheme : "light",
+      themeLock: null,
       fontScale: input.fontScale === "large" ? "large" : "normal",
       hotkeys,
       blockNegativeStock: !!input.blockNegativeStock,
@@ -3122,7 +3141,7 @@ export class KassaService {
     if (invalid) throw new KassaError("BAD_REQUEST", invalid);
     this.store.setMeta("devicePrefs", prefs);
     if (this.timer && prefs.syncIntervalSec * 1000 !== this.intervalMs) this.start(prefs.syncIntervalSec * 1000);
-    return prefs;
+    return this.prefs();
   }
 
   // ─── Sozlamalar: PIN, umumiy ma'lumotlar, yangilanish ───────────────────

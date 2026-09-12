@@ -21,6 +21,7 @@
  * /api/pos/devices — web (sessiya, `pos.devices.manage`):
  *   GET  /                         qurilmalar ro'yxati va e'lon qilingan o'rnatuvchi (`installer`)
  *   GET  /installer/:id/download   o'rnatuvchini yuklab olish (yangi kassa o'rnatish uchun)
+ *   GET  /appearance, PUT /appearance   kassa mavzusi: kompaniya qulfi va qulflangan mavzu
  *   PATCH /:deviceId               nomi, o'chirish/yoqish
  *   GET  /conflicts                offline sinxron nomuvofiqliklari (`resolved=true` — yopilganlari)
  *   POST /conflicts/:conflictId/resolve   ko'rib chiqildi
@@ -29,7 +30,8 @@ import { Readable } from "node:stream";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { badRequest } from "@bum/shared";
+import { POS_THEMES, badRequest } from "@bum/shared";
+import { getPosAppearance, savePosAppearance } from "./appearance.service.js";
 import { db } from "../../db/client.js";
 import { stockMovementType } from "../../db/schema/inventory.js";
 import { posDevices } from "../../db/schema/pos.js";
@@ -90,6 +92,7 @@ const movementsQuery = z.object({
 });
 const productParams = z.object({ productId: z.uuid() });
 const releaseParams = z.object({ releaseId: z.uuid() });
+const appearanceBody = z.strictObject({ locked: z.boolean(), theme: z.enum(POS_THEMES) });
 const currencyHistoryQuery = z.object({
   cashierId: z.uuid(),
   code: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional(),
@@ -309,6 +312,22 @@ export async function posDevicesAdminRoutes(app: FastifyInstance): Promise<void>
         ? { id: release.id, version: release.version, fileName: release.fileName, size: release.size, sha256: release.sha256, notes: release.notes, publishedAt: release.publishedAt }
         : null,
     };
+  });
+
+  app.get("/appearance", async (req) => {
+    const tenant = await requireTenant(db, authOf(req).user);
+    await requirePermission(db, tenant, "pos.devices.manage");
+    return { appearance: await getPosAppearance(db, tenant.company.id) };
+  });
+
+  app.put("/appearance", async (req) => {
+    const body = appearanceBody.parse(req.body);
+    const appearance = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      await requirePermission(tx, tenant, "pos.devices.manage");
+      return savePosAppearance(tx, tenant, body, requestMeta(req));
+    });
+    return { appearance };
   });
 
   app.get("/installer/:releaseId/download", async (req, reply) => {

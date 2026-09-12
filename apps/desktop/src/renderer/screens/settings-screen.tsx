@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch.tsx";
 import type { AppStatus, CurrencyHistory, CurrencyRow, DevicePrefs, HotkeyAction, PosContext, SettingsOverview, UpdateInfo } from "../../shared/kassa-api.js";
 import type { PaymentMethod } from "../../shared/sync-types.js";
 import { DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_LABELS, keyName } from "../../shared/hotkeys.js";
+import { POS_THEMES, THEME_LABELS, isDarkTheme, type PosTheme } from "../../shared/themes.js";
 import { PAYMENT_LABELS, fmtMoney, fmtTime } from "../format.ts";
 import { call, errorText } from "../kassa.ts";
 import PrefsDialog from "../pos/prefs-dialog.tsx";
@@ -200,21 +201,59 @@ function LanguagePanel({ prefs, save }: { prefs: DevicePrefs; save: SaveFn }) {
   );
 }
 
+/** Mavzu kartasi uchun kichik ekran: o'sha mavzu tokenlari bilan (`data-theme` faqat shu karta ichida). */
+function ThemeMiniScreen({ theme }: { theme: Exclude<PosTheme, "system"> }) {
+  return (
+    <div data-theme={theme} className={`flex h-full gap-1 bg-background p-1.5 ${isDarkTheme(theme) ? "dark" : ""}`}>
+      <div className="w-1/4 rounded-sm bg-sidebar" />
+      <div className="flex flex-1 flex-col gap-1">
+        <div className="h-2 w-3/4 rounded-sm bg-foreground/70" />
+        <div className="flex-1 rounded-sm border border-border bg-card p-1">
+          <div className="h-1.5 w-1/2 rounded-sm bg-muted-foreground/60" />
+        </div>
+        <div className="h-3 rounded-sm bg-primary" />
+      </div>
+    </div>
+  );
+}
+
 function AppearancePanel({ prefs, save }: { prefs: DevicePrefs; save: SaveFn }) {
+  const locked = prefs.themeLock !== null;
   return (
     <>
-      <Title>Tashqi ko'rinish</Title>
-      <Row label="Mavzu">
-        <Choice
-          value={prefs.theme}
-          options={[
-            { value: "light", label: "Yorug'" },
-            { value: "dark", label: "Qorong'i" },
-            { value: "system", label: "Windows bo'yicha" },
-          ]}
-          onChange={(theme) => void save({ theme })}
-        />
-      </Row>
+      <Title hint="Mavzu faqat ko'rinish — hisob, qoldiq, to'lov va sinxronga ta'sir qilmaydi. Har kassir o'z mavzusini tanlaydi va u saqlanib qoladi.">
+        Tashqi ko'rinish
+      </Title>
+      {locked && (
+        <p className="mb-3 max-w-4xl rounded-md bg-muted px-3 py-2 text-sm">
+          Kompaniya mavzuni qulflagan: <span className="font-medium">{THEME_LABELS[prefs.themeLock!]}</span> — kassada o'zgartirib bo'lmaydi.
+        </p>
+      )}
+      <div className="grid max-w-4xl grid-cols-2 gap-3 pb-4 sm:grid-cols-3 lg:grid-cols-5">
+        {POS_THEMES.map((theme) => (
+          <button
+            key={theme}
+            type="button"
+            disabled={locked}
+            onClick={() => void save({ theme })}
+            className={`rounded-xl border-2 p-1 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+              prefs.theme === theme ? "border-primary" : "border-transparent hover:border-border"
+            }`}
+          >
+            <div className="h-20 overflow-hidden rounded-lg border border-border">
+              {theme === "system" ? (
+                <div className="grid h-full grid-cols-2">
+                  <ThemeMiniScreen theme="light" />
+                  <ThemeMiniScreen theme="dark" />
+                </div>
+              ) : (
+                <ThemeMiniScreen theme={theme} />
+              )}
+            </div>
+            <span className="mt-1 block px-1 text-sm font-medium">{THEME_LABELS[theme]}</span>
+          </button>
+        ))}
+      </div>
       <Row label="Shrift o'lchami" hint="Katta — sensorli ekran va uzoqdan ko'rish uchun">
         <Choice
           value={prefs.fontScale}

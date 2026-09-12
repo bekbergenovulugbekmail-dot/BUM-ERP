@@ -182,6 +182,32 @@ describe("Kassa xizmati (main jarayon)", () => {
     await expect(kassa.register({ apiUrl: "https://bum-erp.uz", phone: "x", password: "right", warehouseId: "w1", name: "K" })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
+  it("mavzu: kassir tanlovi saqlanadi va qayta kirganda tiklanadi; kassir yo'q — qurilma standarti; kompaniya qulfi ustun", async () => {
+    const api = fakeApi();
+    const kassa = service(api);
+    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    const userId = kassa.status().cashier!.userId;
+    expect(kassa.prefs()).toMatchObject({ theme: "light", themeLock: null });
+    expect(kassa.savePrefs({ ...kassa.prefs(), theme: "green" })).toMatchObject({ theme: "green", themeLock: null });
+    expect(kassa.savePrefs({ ...kassa.prefs(), theme: "neon" as never }).theme).toBe("green");
+
+    kassa.logout();
+    expect(kassa.prefs().theme).toBe("light");
+    await kassa.unlock({ userId, pin: "1234" });
+    expect(kassa.prefs().theme).toBe("green");
+
+    // Kompaniya qulfi (pull config): hamma kassirda shu mavzu, o'zgartirib bo'lmaydi; boshqa sozlamalar saqlanadi
+    store.setMeta("config", { ...(store.getMeta<Record<string, unknown>>("config") ?? {}), appearance: { locked: true, theme: "high-contrast" } });
+    expect(kassa.prefs()).toMatchObject({ theme: "high-contrast", themeLock: "high-contrast" });
+    expect(() => kassa.savePrefs({ ...kassa.prefs(), theme: "dark" })).toThrow("qulflangan");
+    expect(kassa.savePrefs({ ...kassa.prefs(), fontScale: "large" })).toMatchObject({ theme: "high-contrast", fontScale: "large" });
+
+    // Qulf olindi — kassirning o'z tanlovi qaytadi
+    store.setMeta("config", { ...(store.getMeta<Record<string, unknown>>("config") ?? {}), appearance: { locked: false, theme: "high-contrast" } });
+    expect(kassa.prefs()).toMatchObject({ theme: "green", themeLock: null });
+  });
+
   it("server manzili: sxemasiz — https qo'shiladi; sertifikat mos emas yoki domen topilmadi — aniq xabar", async () => {
     const api = fakeApi();
     const requested: string[] = [];

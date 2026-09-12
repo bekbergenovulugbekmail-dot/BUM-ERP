@@ -17,6 +17,7 @@ import type {
   RemoteWarehouseStock,
   SyncStatus,
 } from "./sync-types.js";
+import type { PosTheme } from "./themes.js";
 
 export type KassaError = { code: string; message: string; details?: unknown };
 export type KassaResult<T> = { ok: true; data: T } | { ok: false; error: KassaError };
@@ -585,7 +586,10 @@ export type HotkeyAction =
 export type DevicePrefs = {
   /** Dastur tili: o'zbek lotin, kirill (avtomatik o'giriladi) yoki rus (lug'at bo'yicha). */
   language: "uz-Latn" | "uz-Cyrl" | "ru";
-  theme: "light" | "dark" | "system";
+  /** Joriy kassirning mavzusi (tanlanmagan bo'lsa — qurilma standarti); kompaniya qulflagan bo'lsa — qulflangan mavzu. */
+  theme: PosTheme;
+  /** Faqat o'qish: kompaniya qulflagan mavzu (null — qulf yo'q, kassir o'zi tanlaydi). */
+  themeLock: PosTheme | null;
   fontScale: "normal" | "large";
   hotkeys: Record<HotkeyAction, string>;
   /** Qoldiq yetmasa sotishni taqiqlash (standart — ogohlantirib sotiladi, server nomuvofiqlik qayd etadi). */
