@@ -233,6 +233,11 @@ export class LocalStore {
   }
 
   /** Kassir birinchi onlayn kirishida kelgan profil (keyingi pull'gacha ham ro'yxatda bo'lsin). */
+  /** Kassada o'zgartirilgan valyuta kursi (keyingi pull server qiymatini yozadi). */
+  saveCurrency(row: { id: string } & Record<string, unknown>): void {
+    this.putRecord("currencies", row.id, JSON.stringify(row));
+  }
+
   saveCashier(cashier: CashierRecord): void {
     this.putRecord("cashiers", cashier.userId, JSON.stringify(cashier));
   }

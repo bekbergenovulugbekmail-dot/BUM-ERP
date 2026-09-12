@@ -20,7 +20,7 @@ import { inventoryCounts } from "../../db/schema/inventory.js";
 import { posSyncConflicts, posSyncOperations, type PosSyncError } from "../../db/schema/pos.js";
 import { applyDeviceCount, transferStockItems, writeOffStock } from "../inventory/stock-documents.service.js";
 import { compensateCountedMovements } from "../inventory/stock.service.js";
-import { mergeCustomerChanges, mergeProductPrices, mergeSupplierChanges } from "./record-merge.service.js";
+import { mergeCurrencyRate, mergeCustomerChanges, mergeProductPrices, mergeSupplierChanges } from "./record-merge.service.js";
 import { purchaseOrderItems, purchaseOrders, purchaseReturns, suppliers } from "../../db/schema/purchase.js";
 import { completeDirectPurchase } from "../purchase/direct-purchase.service.js";
 import { recordSupplierPayment } from "../purchase/payments.service.js";
@@ -215,6 +215,16 @@ export const syncOperationSchema = z.discriminatedUnion("type", [
     payload: z.strictObject({
       supplierId: z.uuid(),
       changes: nonEmpty(z.strictObject({ ...partyChanges, contactPerson: changeText(200) }).partial()),
+    }),
+  }),
+  z.strictObject({
+    ...common,
+    type: z.literal("currency.rate"),
+    payload: z.strictObject({
+      code: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Valyuta kodi 3 harf"),
+      /** Kassa ko'rgan kurs va yangi kurs (asosiy valyutada). */
+      from: decimalSchema({ scale: 4, positive: true }),
+      to: decimalSchema({ scale: 4, positive: true }),
     }),
   }),
   z.strictObject({
@@ -557,6 +567,13 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
       const result = await mergeSupplierChanges(tx, tenant, payload.supplierId, payload.changes, meta);
       await recordConflicts(tx, context, op, { type: "supplier", id: payload.supplierId }, result.conflicts);
       return { supplierId: payload.supplierId, applied: result.applied, skipped: result.skipped, conflicts: result.conflicts.map((item) => item.kind) };
+    }
+    case "currency.rate": {
+      const payload = op.payload;
+      await requirePermission(tx, tenant, "currency_rates.manage");
+      const result = await mergeCurrencyRate(tx, tenant, { ...payload, deviceId: context.device.id }, meta);
+      await recordConflicts(tx, context, op, { type: "company_currency", id: result.id }, result.conflicts);
+      return { code: payload.code, applied: result.applied, conflicts: result.conflicts.map((item) => item.kind) };
     }
     case "product.prices": {
       const payload = op.payload;

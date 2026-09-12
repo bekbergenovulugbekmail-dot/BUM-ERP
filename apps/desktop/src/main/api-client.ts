@@ -15,6 +15,7 @@ import type {
   RemoteReceipt,
   RemoteSale,
   RemoteUpdate,
+  RemoteRateChange,
   RemoteWarehouseStock,
   WireOperation,
 } from "../shared/sync-types.js";
@@ -148,6 +149,9 @@ export function createApiClient(options: {
     /** Kassir ruxsati (`analytics.view`) serverda tekshiriladi. */
     analytics: (query: { from: string; to: string; cashierId: string }) =>
       request<Omit<AnalyticsReport, "source">>("GET", `/api/pos-device/analytics?${searchParams(query)}`),
+    /** Kurs o'zgarishlari tarixi; kassir ruxsati (`currency_rates.view`) serverda tekshiriladi. */
+    currencyHistory: (cashierId: string, code?: string) =>
+      request<{ history: RemoteRateChange[] }>("GET", `/api/pos-device/currencies/history?${searchParams({ cashierId, code })}`),
   };
 }
 

@@ -38,6 +38,19 @@ export type CurrencySettings = {
   currencies: CompanyCurrency[];
 };
 
+/** Kurs o'zgarishi tarixi: kim, qachon, qaysi valyuta, eski va yangi kurs (kassadan bo'lsa — qurilma). */
+export type CurrencyRateChange = {
+  id: string;
+  code: string;
+  oldRate: string | null;
+  rate: string;
+  source: CurrencyRateSource;
+  rateDate: string;
+  createdAt: string;
+  createdByName: string | null;
+  deviceName: string | null;
+};
+
 /** Markaziy bank kursi: 1 birlik uchun (nominal hisobga olingan). */
 export type CbuRate = { code: string; rate: string; date: string };
 

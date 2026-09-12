@@ -19,6 +19,8 @@
  *   GET    /currencies                                         a'zo (valyutalar va kurslar; CBU kursi kunda bir yangilanadi)
  *   GET    /currencies/cbu                                     a'zo (Markaziy bank kurslari; 503 — olib bo'lmasa)
  *   PUT    /currencies, POST /currencies/refresh               settings.manage
+ *   PUT    /currencies/:code/rate                              currency_rates.manage (bitta kurs; tarix va audit)
+ *   GET    /currencies/history (?code=&limit=)                 currency_rates.view (eski → yangi kurs, kim, qaysi kassa)
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -58,9 +60,11 @@ import {
 import {
   getCbuRates,
   getCurrencySettings,
+  listRateHistory,
   refreshCbuRates,
   refreshStaleCbuRates,
   saveCurrencySettings,
+  setCurrencyRate,
 } from "./currencies.service.js";
 import { createManualEntry, getJournalEntry, listJournal, voidManualEntry } from "./journal.service.js";
 
@@ -206,6 +210,14 @@ const entryParams = z.object({ entryId: z.uuid() });
 const cashAccountParams = z.object({ cashAccountId: z.uuid() });
 const expenseParams = z.object({ expenseId: z.uuid() });
 const includeInactiveQuery = z.object({ includeInactive: boolQuery });
+
+const currencyCodeSchema = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Valyuta kodi 3 harf (ISO 4217)");
+const currencyParams = z.object({ code: currencyCodeSchema });
+const currencyRateBody = z.strictObject({ rate: decimalSchema({ scale: 4, positive: true }) });
+const rateHistoryQuery = z.object({
+  code: currencyCodeSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
 
 async function readTenant(req: FastifyRequest, permission: Permission): Promise<TenantContext> {
   const tenant = await requireTenant(db, authOf(req).user);
@@ -374,6 +386,20 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
   app.post("/currencies/refresh", async (req) =>
     writeInTenant(req, "settings.manage", (tx, tenant) => refreshCbuRates(tx, tenant, requestMeta(req))),
   );
+
+  // Bitta valyuta kursi — sozlamalarni boshqarish huquqisiz ham (`currency_rates.manage`)
+  app.put("/currencies/:code/rate", async (req) => {
+    const { code } = currencyParams.parse(req.params);
+    const { rate } = currencyRateBody.parse(req.body);
+    const currency = await writeInTenant(req, "currency_rates.manage", (tx, tenant) => setCurrencyRate(tx, tenant, { code, rate }, requestMeta(req)));
+    return { currency };
+  });
+
+  app.get("/currencies/history", async (req) => {
+    const query = rateHistoryQuery.parse(req.query);
+    const tenant = await readTenant(req, "currency_rates.view");
+    return { history: await listRateHistory(db, tenant.company.id, query) };
+  });
 
   // ─── Xarajatlar ──────────────────────────────────────────────────────────
 

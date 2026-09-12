@@ -143,6 +143,8 @@ function registerIpc(service: KassaService) {
     "cashier:logout": () => service.logout(),
     "cashier:change-pin": (input) => service.changePin(input),
     "settings:overview": () => service.settingsOverview(),
+    "settings:currency-rate": (input) => service.updateCurrencyRate(input),
+    "settings:currency-history": (input) => service.currencyHistory(input),
     "update:check": () => service.checkUpdate(),
     "update:download": () => service.downloadUpdate(),
     "update:install": () => service.installUpdate(),

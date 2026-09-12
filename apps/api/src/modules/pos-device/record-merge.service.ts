@@ -10,6 +10,7 @@
 import { and, eq } from "drizzle-orm";
 import { badRequest, notFound } from "@bum/shared";
 import { products } from "../../db/schema/catalog.js";
+import { companyCurrencies } from "../../db/schema/finance.js";
 import { suppliers } from "../../db/schema/purchase.js";
 import { customers } from "../../db/schema/sales.js";
 import type { Tx } from "../../db/transaction.js";
@@ -17,6 +18,7 @@ import type { RequestMeta } from "../../shared/audit.js";
 import { toMinor } from "../../shared/decimal.js";
 import { updateProduct } from "../catalog/products.service.js";
 import type { TenantContext } from "../company/tenant.js";
+import { setCurrencyRate } from "../finance/currencies.service.js";
 import { updateSupplier } from "../purchase/suppliers.service.js";
 import { updateCustomer } from "../sales/customers.service.js";
 import type { SaleConflict } from "../sales/pos.service.js";
@@ -88,6 +90,29 @@ export async function mergeSupplierChanges(tx: Tx, tenant: TenantContext, suppli
   if ("name" in patch && !patch.name) throw badRequest("Ta'minotchi nomi bo'sh bo'lmasin");
   if (Object.keys(patch).length > 0) await updateSupplier(tx, tenant, supplierId, patch as Parameters<typeof updateSupplier>[3], meta);
   return mergeResult("supplier", supplierId, patch, skipped);
+}
+
+/**
+ * Kassada (offline ham) o'zgartirilgan valyuta kursi: server kursi allaqachon `to` — hech narsa; hali `from` — `to`
+ * yoziladi (tarix va audit qurilma bilan); aks holda server kursi qoladi va `record_changed`.
+ */
+export async function mergeCurrencyRate(tx: Tx, tenant: TenantContext, input: { code: string; from: string; to: string; deviceId: string }, meta: RequestMeta) {
+  const [current] = await tx
+    .select({ id: companyCurrencies.id, rate: companyCurrencies.rate })
+    .from(companyCurrencies)
+    .where(and(eq(companyCurrencies.companyId, tenant.company.id), eq(companyCurrencies.code, input.code)))
+    .limit(1);
+  if (!current) throw notFound(`${input.code} valyutasi topilmadi`);
+  const server = toMinor(current.rate, 4);
+  if (server === toMinor(input.to, 4)) return { id: current.id, applied: false, conflicts: [] as SaleConflict[] };
+  if (server !== toMinor(input.from, 4)) {
+    const conflicts: SaleConflict[] = [
+      { kind: "record_changed", details: { entity: "currency", id: input.code, fields: [{ field: "rate", base: input.from, device: input.to, server: current.rate }] } },
+    ];
+    return { id: current.id, applied: false, conflicts };
+  }
+  await setCurrencyRate(tx, tenant, { code: input.code, rate: input.to, deviceId: input.deviceId }, meta);
+  return { id: current.id, applied: true, conflicts: [] as SaleConflict[] };
 }
 
 export async function mergeProductPrices(tx: Tx, tenant: TenantContext, productId: string, changes: Partial<Record<string, FieldChange>>, meta: RequestMeta) {

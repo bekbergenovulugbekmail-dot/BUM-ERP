@@ -80,7 +80,24 @@ export type SyncOperationType =
   | "stock.count"
   | "customer.update"
   | "supplier.update"
-  | "product.prices";
+  | "product.prices"
+  | "currency.rate";
+
+/** `currency.rate` — kassada o'zgartirilgan valyuta kursi: ko'rgan va yangi kurs (orada serverda o'zgarsa — nomuvofiqlik). */
+export type CurrencyRatePayload = { code: string; from: string; to: string };
+
+/** `GET /currencies/history` — kurs o'zgarishi (serverdagi tarix). */
+export type RemoteRateChange = {
+  id: string;
+  code: string;
+  oldRate: string | null;
+  rate: string;
+  source: "manual" | "cbu";
+  rateDate: string;
+  createdAt: string;
+  createdByName: string | null;
+  deviceName: string | null;
+};
 
 export type PartyType = "individual" | "legal";
 

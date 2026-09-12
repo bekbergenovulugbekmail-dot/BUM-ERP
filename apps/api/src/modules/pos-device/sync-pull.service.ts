@@ -236,9 +236,14 @@ export async function pullChanges(
       rate: companyCurrencies.rate,
       rateDate: companyCurrencies.rateDate,
       isActive: companyCurrencies.isActive,
+      /** Kassada ko'rinadi: manba (qo'lda / Markaziy bank), oxirgi o'zgarish vaqti va kim o'zgartirgan. */
+      source: companyCurrencies.source,
+      updatedAt: companyCurrencies.updatedAt,
+      updatedByName: users.name,
       cursorAt: cursorText(companyCurrencies.updatedAt),
     })
     .from(companyCurrencies)
+    .leftJoin(users, eq(users.id, companyCurrencies.updatedBy))
     .where(and(eq(companyCurrencies.companyId, companyId), afterCursor(companyCurrencies.updatedAt, companyCurrencies.id, cursors.currencies)))
     .orderBy(asc(companyCurrencies.updatedAt), asc(companyCurrencies.id))
     .limit(take);

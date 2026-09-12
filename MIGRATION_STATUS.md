@@ -1048,7 +1048,7 @@ Talablar hujjati: `BUMERP_DESKTOP.docx` — aralash to'lov, tezkor sotuv, 9 mavz
 |---|---------|-------|
 | K1 | Davom ettiriladigan o'rnatuvchi: bo'laklab yuklash, HTTP Range bilan yuklab olish, `.part` | ✅ |
 | K2 | Aralash to'lov (naqd + karta + bank) — server, offline sinxron, qaytarishda tarkib, smena yig'indilari, idempotentlik | ✅ |
-| K3 | Valyuta kurslari — ruxsatlar, tarix (eski → yangi), kassadan tahrirlash, offline holat | ⏳ |
+| K3 | Valyuta kurslari — ruxsatlar, tarix (eski → yangi), kassadan tahrirlash, offline holat | ✅ |
 | K4 | 9 mavzu, kassir tanlovi, kompaniya qulfi | ⏳ |
 | K5 | Tezkor sotuv — assortiment, 7/30/90 kunlik top, rasm keshi, kategoriya, aksiya narxi | ⏳ |
 | K6 | Tarozi — ScaleProvider adapterlari, sozlamalar, sinxron navbati, og'irlik (protokol hujjati bo'lmasa — simulyator va aniq hisobot, soxta "ulandi" yo'q) | ⏳ |
@@ -1073,6 +1073,16 @@ Talablar hujjati: `BUMERP_DESKTOP.docx` — aralash to'lov, tezkor sotuv, 9 mavz
 - desktop: `sale-calc` server bilan bir xil (summa null — shu usulga qoldiq); kassa oynasida Naqd / Karta / Bank qatorlari (har birida summa, "qoldiq" tugmasi), To'lanadi / To'langan / Qoldiq, qaytim faqat naqddan; hech narsa kiritilmasa — tanlangan usulda aniq summa (tez yakunlash, F-tugmalar); summa kiritilgan bo'lsa F-tugma qolgan summani shu usulga yozadi; "Qarzga (mijoz hisobiga)"; yoqilmagan usul qabul qilinmaydi. Chek hujjatida `payments`, chop etiladigan chekda va chek oynasida har usul alohida, pul qutisi naqd qismi bo'lsa ochiladi. Qaytarish oynasi: chekdagi to'lov tarkibi, "Usullarga taqsimlash" (standart — naqd, karta, bank tartibida to'langanigacha), yig'indi va chegaralar tekshiruvi. X/Z-hisobot: tushum va qaytarish usul bo'yicha (bank ham), kutilgan naqd — faqat naqd qismlari
 - to'liq API: 291/291 (75 fayl); desktop 28/28
 - testlar: `pos-mixed-payment` (3) — rad etishlar (karta/bank ortiqcha, qoldiq, takroriy usul, to'lovsiz), naqd + karta + bank va qaytim, `customer_payments`, kassa/bank qoldiqlari, 1010/1020/1100/4000, takroriy `clientRequestId`, smena yig'indilari, eski usul va bank; qaytarish taqsimoti, usul chegarasi, yig'indi, ikkinchi qaytarish, to'liq qaytarish tarkibi; offline `sale.complete`/`sale.return` va ulush bo'yicha moslash. Desktop: `sale-calc` (7 kombinatsiya, qoldiq usuli, ortiqcha, qaytim, qarz, takroriy), `kassa-service` (aralash chek, taqsimlangan qaytarish, `refundable`, X-hisobot, smena yig'indilari)
+
+**K3 — valyuta kurslari** (migratsiya 0039 — `exchange_rates.old_rate`, `device_id` va mavjud rollarga ruxsatlar):
+- ruxsatlar: `currency_rates.view` (Kassir, Savdo menejeri, Auditor, Ko'ruvchi, Buxgalter, Moliya menejeri, Direktor), `currency_rates.manage` (Buxgalter, Moliya menejeri, Direktor; egalar — hammasi); yangi kompaniyalar — standart rollarda, mavjudlari — migratsiyada
+- tarix: har o'zgarishda eski kurs, yangi kurs, kim, qachon, manba (qo'lda / Markaziy bank), kassadan bo'lsa qurilma; `CURRENCIES_UPDATED` auditida kurs o'zgarishlari, bitta kurs — `CURRENCY_RATE_CHANGED` (`oldRate`, `newRate`, qurilma)
+- API: `PUT /api/finance/currencies/:code/rate` (`currency_rates.manage`; asosiy valyuta 400, qo'shilmagan 404, o'chirilgani 400, xuddi shu kurs — yozilmaydi), `GET /api/finance/currencies/history?code&limit` (`currency_rates.view`); eski hujjatlar o'z kursi va asosiy valyutadagi summasini saqlaydi — kurs o'zgarsa qayta hisoblanmaydi (sotuv qatori `lineTotal`/`unitPrice` test bilan tekshirildi); tashqi kurs API'siga bog'liqlik yo'q (Markaziy bank — ixtiyoriy, avvalgidek)
+- kassa: pull `currencies` da manba, oxirgi o'zgarish vaqti va kim; offline `currency.rate` op (ko'rgan va yangi kurs): server kursi hali ko'rgani — yoziladi (tarixda qurilma), allaqachon yangisi — hech narsa, boshqa — server kursi qoladi va `record_changed` nomuvofiqligi; `GET /api/pos-device/currencies/history?cashierId&code` (kassirda `currency_rates.view`)
+- desktop Sozlamalar → Valyuta kurslari: ko'rish ruxsati bilan; kurs, oxirgi o'zgarish (vaqt, kim), manba yoki "kassada o'zgartirildi (yuborilmagan)", internet yo'q bo'lsa — "oxirgi saqlangan kurslar ishlatilmoqda" va oxirgi sinxron vaqti; `currency_rates.manage` bilan — yangi kurs va Saqlash (lokal kurs darhol, keyingi cheklar yangi kurs bilan, navbatga `currency.rate`); tarix — server (internet bilan) va shu kassaning yuborilmaganlari
+- web Sozlamalar → Valyutalar: kurs o'zgarishlari tarixi jadvali (eski/yangi, manba, kim, kassa); `settings.manage` bo'lmasa ham `currency_rates.manage` bilan — bitta kursni o'zgartirish
+- to'liq API: 293/293 (76 fayl); desktop 28/28
+- testlar: `currency-rates` (2) — ruxsatlar, tarix (eski → yangi, kim), takror kurs, 400/404, boshqa kompaniya, audit, eski savdo summasi o'zgarmaydi va yangi savdo yangi kurs bilan; pull maydonlari, `currency.rate` qo'llanishi, nomuvofiqlik, ruxsatsiz rad, qurilma tarixi (kassa nomi). Desktop: kassadan kurs (ruxsat, asosiy valyuta, noto'g'ri kurs, lokal holat, tarix offline, navbat payload)
 
 ### Distributsiya (`/api/distribution`)
 

@@ -4,10 +4,10 @@ import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
-import type { AppStatus, DevicePrefs, HotkeyAction, PosContext, SettingsOverview, UpdateInfo } from "../../shared/kassa-api.js";
+import type { AppStatus, CurrencyHistory, CurrencyRow, DevicePrefs, HotkeyAction, PosContext, SettingsOverview, UpdateInfo } from "../../shared/kassa-api.js";
 import type { PaymentMethod } from "../../shared/sync-types.js";
 import { DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_LABELS, keyName } from "../../shared/hotkeys.js";
-import { PAYMENT_LABELS, fmtMoney } from "../format.ts";
+import { PAYMENT_LABELS, fmtMoney, fmtTime } from "../format.ts";
 import { call, errorText } from "../kassa.ts";
 import PrefsDialog from "../pos/prefs-dialog.tsx";
 
@@ -229,40 +229,183 @@ function AppearancePanel({ prefs, save }: { prefs: DevicePrefs; save: SaveFn }) 
   );
 }
 
+const SOURCE_LABELS: Record<string, string> = { manual: "qo'lda", cbu: "Markaziy bank" };
+
 function CurrenciesPanel({ overview }: { overview: SettingsOverview }) {
+  const canView = overview.permissions.includes("currency_rates.view");
+  const canManage = canView && overview.permissions.includes("currency_rates.manage");
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [changed, setChanged] = useState<Record<string, CurrencyRow>>({});
+  const [base, setBase] = useState(overview);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ tone: "error" | "info"; text: string } | null>(null);
+  const [history, setHistory] = useState<CurrencyHistory | null>(null);
+  // Sinxrondan yangi ma'lumot kelsa — kassadagi vaqtinchalik ko'rinish tozalanadi
+  if (overview !== base) {
+    setBase(overview);
+    setChanged({});
+  }
+  const rows = overview.currencies.map((row) => changed[row.code] ?? row);
+  const offline = overview.sync.state === "offline";
+
+  const save = async (code: string) => {
+    setBusy(code);
+    setMessage(null);
+    try {
+      const row = await call("settings:currency-rate", { code, rate: draft[code] ?? "" });
+      setChanged((current) => ({ ...current, [code]: row }));
+      setDraft(({ [code]: _saved, ...rest }) => rest);
+      setMessage({ tone: "info", text: `${code} kursi saqlandi — keyingi cheklar yangi kurs bilan; serverga sinxronda yuboriladi` });
+    } catch (err) {
+      setMessage({ tone: "error", text: errorText(err) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const loadHistory = async () => {
+    setBusy("history");
+    try {
+      setHistory(await call("settings:currency-history", {}));
+    } catch (err) {
+      setMessage({ tone: "error", text: errorText(err) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!canView) {
+    return (
+      <>
+        <Title>Valyuta kurslari</Title>
+        <p className="text-sm text-muted-foreground">Kurslarni ko'rish uchun ruxsat kerak: currency_rates.view</p>
+      </>
+    );
+  }
+
   return (
     <>
-      <Title hint="Kurslar web'da (Moliya → Valyutalar) o'zgartiriladi va sinxronda keladi; offline chek oxirgi kurs bilan.">Valyutalar</Title>
-      <p className="mb-3 text-sm">
+      <Title hint="Eski savdolar o'z kursini saqlaydi — yangi kurs faqat keyingi cheklarga qo'llanadi. Internet bo'lmasa oxirgi saqlangan kurs ishlatiladi.">
+        Valyuta kurslari
+      </Title>
+      <p className="mb-2 text-sm">
         Asosiy valyuta: <span className="font-semibold">{overview.baseCurrency}</span>
       </p>
-      <table className="w-full max-w-lg text-sm">
+      {offline && (
+        <p className="mb-3 max-w-3xl rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-700">
+          Internet yo'q — oxirgi saqlangan kurslar ishlatilmoqda
+          {overview.sync.lastSyncAt ? ` (oxirgi sinxron: ${fmtTime(overview.sync.lastSyncAt)})` : ""}.
+        </p>
+      )}
+      <table className="w-full max-w-4xl text-sm">
         <thead className="text-left text-xs text-muted-foreground">
           <tr>
             <th className="py-1">Valyuta</th>
             <th className="py-1 text-right">Kurs ({overview.baseCurrency})</th>
-            <th className="py-1">Sana</th>
-            <th className="py-1">Holati</th>
+            <th className="py-1 pl-4">Oxirgi o'zgarish</th>
+            <th className="py-1">Manba</th>
+            {canManage && <th className="py-1 text-right">Yangi kurs</th>}
           </tr>
         </thead>
         <tbody>
-          {overview.currencies.map((row) => (
-            <tr key={row.code} className="border-t border-border">
-              <td className="py-1.5 font-medium">{row.code}</td>
+          {rows.map((row) => (
+            <tr key={row.code} className={`border-t border-border ${row.isActive ? "" : "text-muted-foreground"}`}>
+              <td className="py-1.5 font-medium">
+                {row.code}
+                {!row.isActive && <span className="ml-1 text-xs">(o'chiq)</span>}
+              </td>
               <td className="py-1.5 text-right tabular-nums">{fmtMoney(row.rate, overview.baseCurrency)}</td>
-              <td className="py-1.5 text-muted-foreground">{row.rateDate ?? "—"}</td>
-              <td className={`py-1.5 ${row.isActive ? "text-emerald-700" : "text-muted-foreground"}`}>{row.isActive ? "yoqilgan" : "o'chiq"}</td>
+              <td className="py-1.5 pl-4 text-xs text-muted-foreground">
+                {row.updatedAt ? fmtTime(row.updatedAt) : (row.rateDate ?? "—")}
+                {row.updatedByName && <> · {row.updatedByName}</>}
+              </td>
+              <td className="py-1.5 text-xs">
+                {row.pending ? <span className="text-amber-700">kassada o'zgartirildi (yuborilmagan)</span> : (SOURCE_LABELS[row.source ?? ""] ?? "—")}
+              </td>
+              {canManage && (
+                <td className="py-1.5">
+                  {row.isActive && (
+                    <div className="flex justify-end gap-1">
+                      <Input
+                        id={`rate-${row.code}`}
+                        className="h-8 w-32 text-right"
+                        inputMode="decimal"
+                        placeholder={row.rate}
+                        value={draft[row.code] ?? ""}
+                        onChange={(e) => setDraft((current) => ({ ...current, [row.code]: e.target.value.replace(",", ".").replace(/[^\d.]/g, "") }))}
+                      />
+                      <Button size="sm" disabled={busy !== null || !draft[row.code]} onClick={() => void save(row.code)}>
+                        Saqlash
+                      </Button>
+                    </div>
+                  )}
+                </td>
+              )}
             </tr>
           ))}
-          {overview.currencies.length === 0 && (
+          {rows.length === 0 && (
             <tr>
-              <td colSpan={4} className="py-3 text-muted-foreground">
+              <td colSpan={canManage ? 5 : 4} className="py-3 text-muted-foreground">
                 Qo'shimcha valyuta yo'q
               </td>
             </tr>
           )}
         </tbody>
       </table>
+      {!canManage && <p className="mt-2 text-xs text-muted-foreground">Kursni o'zgartirish uchun ruxsat kerak: currency_rates.manage</p>}
+      {message && <p className={`mt-3 text-sm ${message.tone === "error" ? "text-destructive" : "text-emerald-700"}`}>{message.text}</p>}
+
+      <div className="mt-6 max-w-4xl">
+        <div className="flex items-center gap-3">
+          <p className="font-medium">O'zgarishlar tarixi</p>
+          <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void loadHistory()}>
+            {busy === "history" ? "Yuklanmoqda…" : history ? "Yangilash" : "Ko'rsatish"}
+          </Button>
+        </div>
+        {history && (
+          <table className="mt-2 w-full text-sm">
+            <thead className="text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="py-1">Sana</th>
+                <th className="py-1">Valyuta</th>
+                <th className="py-1 text-right">Eski</th>
+                <th className="py-1 text-right">Yangi</th>
+                <th className="py-1 pl-4">Kim</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.pending.map((row) => (
+                <tr key={`pending-${row.createdAt}-${row.code}`} className="border-t border-border text-amber-700">
+                  <td className="py-1.5">{fmtTime(row.createdAt)}</td>
+                  <td className="py-1.5 font-medium">{row.code}</td>
+                  <td className="py-1.5 text-right tabular-nums">{row.from}</td>
+                  <td className="py-1.5 text-right tabular-nums">{row.to}</td>
+                  <td className="py-1.5 pl-4 text-xs">shu kassa — yuborilmagan</td>
+                </tr>
+              ))}
+              {history.history.map((row) => (
+                <tr key={row.id} className="border-t border-border">
+                  <td className="py-1.5">{fmtTime(row.createdAt)}</td>
+                  <td className="py-1.5 font-medium">{row.code}</td>
+                  <td className="py-1.5 text-right tabular-nums text-muted-foreground">{row.oldRate ?? "—"}</td>
+                  <td className="py-1.5 text-right tabular-nums">{row.rate}</td>
+                  <td className="py-1.5 pl-4 text-xs">
+                    {row.createdByName ?? (row.source === "cbu" ? "Markaziy bank" : "—")}
+                    {row.deviceName && <span className="text-muted-foreground"> · {row.deviceName}</span>}
+                  </td>
+                </tr>
+              ))}
+              {history.pending.length === 0 && history.history.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-3 text-muted-foreground">
+                    {history.online ? "O'zgarish yo'q" : "Server tarixi uchun internet kerak"}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
+      </div>
     </>
   );
 }

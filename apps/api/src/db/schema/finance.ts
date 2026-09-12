@@ -281,10 +281,14 @@ export const exchangeRates = pgTable(
       .notNull()
       .references(() => companies.id, { onDelete: "cascade" }),
     code: varchar("code", { length: 3 }).notNull(),
+    /** Oldingi kurs (birinchi yozuvda null). */
+    oldRate: price("old_rate"),
     rate: price("rate").notNull(),
     source: currencyRateSource("source").notNull(),
     rateDate: date("rate_date").notNull(),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    /** Kassadan o'zgartirilgan bo'lsa — qurilma (sxemalar aylanma bog'lanmasin: FK yo'q). */
+    deviceId: uuid("device_id"),
     createdAt: timestamps().createdAt,
   },
   (t) => [

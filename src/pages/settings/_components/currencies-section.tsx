@@ -5,10 +5,10 @@
  */
 import { useState } from "react";
 import { toast } from "sonner";
-import { Coins, Landmark, Plus, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
+import { Coins, History, Landmark, Plus, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
 import {
   CURRENCY_OPTIONS, MAX_COMPANY_CURRENCIES,
-  type CbuRate, type CurrencyRateSource, type CurrencySettings,
+  type CbuRate, type CurrencyRateChange, type CurrencyRateSource, type CurrencySettings,
 } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -22,6 +22,9 @@ import { SettingsGroup, ToggleRow } from "./form-controls.tsx";
 
 const CURRENCIES_PATH = "/api/finance/currencies";
 const CBU_PATH = "/api/finance/currencies/cbu";
+const HISTORY_PATH = "/api/finance/currencies/history";
+
+const fmtDateTime = (value: string) => new Date(value).toLocaleString("uz-UZ", { dateStyle: "short", timeStyle: "short" });
 
 type Row = { code: string; rate: string; source: CurrencyRateSource; isActive: boolean; rateDate?: string };
 type Draft = { cbuEnabled: boolean; currencies: Row[] };
@@ -72,6 +75,15 @@ export default function CurrenciesSection() {
   const refresh = useApiMutation(() => api.post<CurrencySettings>(`${CURRENCIES_PATH}/refresh`), {
     invalidate: [CURRENCIES_PATH],
   });
+  // Kurs tarixi va bitta kursni o'zgartirish (sozlamalarni boshqarish huquqisiz ham — `currency_rates.manage`)
+  const canEditRates = can("currency_rates.manage");
+  const canViewHistory = canManage || canEditRates || can("currency_rates.view");
+  const historyQuery = useApiQuery<{ history: CurrencyRateChange[] }>(canViewHistory ? HISTORY_PATH : null, { limit: 50 });
+  const [quickRates, setQuickRates] = useState<Record<string, string>>({});
+  const setRate = useApiMutation(
+    ({ code, rate }: { code: string; rate: string }) => api.put(`${CURRENCIES_PATH}/${code}/rate`, { rate }),
+    { invalidate: [CURRENCIES_PATH] },
+  );
 
   if (!state || !saved) return <Skeleton className="h-[420px] rounded-2xl" />;
 
@@ -272,6 +284,86 @@ export default function CurrenciesSection() {
           </Button>
         </SettingsGroup>
       </fieldset>
+
+      {!canManage && canEditRates && saved.currencies.some((currency) => currency.isActive) && (
+        <SettingsGroup title="Kursni o'zgartirish" description="Yangi kurs keyingi hujjatlarga qo'llanadi; oldingi savdolar o'z kursini saqlaydi">
+          <div className="space-y-2">
+            {saved.currencies.filter((currency) => currency.isActive).map((currency) => (
+              <div key={currency.code} className="flex flex-wrap items-center gap-2">
+                <span className="w-16 font-medium">{currency.code}</span>
+                <span className="w-32 text-sm text-muted-foreground tabular-nums">{fmtRate(currency.rate)} {baseCurrency}</span>
+                <Input
+                  id={`quick-rate-${currency.code}`}
+                  type="number"
+                  min={0}
+                  step="any"
+                  className="w-36"
+                  placeholder="Yangi kurs"
+                  value={quickRates[currency.code] ?? ""}
+                  onChange={(e) => setQuickRates((current) => ({ ...current, [currency.code]: e.target.value }))}
+                />
+                <Button
+                  size="sm"
+                  disabled={setRate.isPending || !(Number(quickRates[currency.code]) > 0)}
+                  onClick={() => {
+                    void setRate
+                      .mutateAsync({ code: currency.code, rate: quickRates[currency.code]! })
+                      .then(() => {
+                        setQuickRates(({ [currency.code]: _done, ...rest }) => rest);
+                        toast.success(`${currency.code} kursi saqlandi`);
+                      })
+                      .catch((err: unknown) => toast.error(errorMessage(err)));
+                  }}
+                >
+                  <Save className="h-4 w-4 mr-1.5" /> Saqlash
+                </Button>
+              </div>
+            ))}
+          </div>
+        </SettingsGroup>
+      )}
+
+      {canViewHistory && (
+        <SettingsGroup title="Kurs o'zgarishlari tarixi" description="Kim, qachon, qaysi valyuta, eski va yangi kurs (kassadan o'zgartirilgan bo'lsa — kassa nomi)">
+          {historyQuery.error ? (
+            <p className="text-xs text-destructive">{errorMessage(historyQuery.error)}</p>
+          ) : !historyQuery.data ? (
+            <Skeleton className="h-24 rounded-xl" />
+          ) : historyQuery.data.history.length === 0 ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground"><History className="h-4 w-4" /> Hali o'zgarish yo'q</p>
+          ) : (
+            <div className="overflow-x-auto -mx-1">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-muted-foreground">
+                    <th className="text-left font-medium px-1 py-1.5">Sana</th>
+                    <th className="text-left font-medium px-1 py-1.5">Valyuta</th>
+                    <th className="text-right font-medium px-1 py-1.5">Eski kurs</th>
+                    <th className="text-right font-medium px-1 py-1.5">Yangi kurs</th>
+                    <th className="text-left font-medium px-1 py-1.5">Manba</th>
+                    <th className="text-left font-medium px-1 py-1.5">Kim</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyQuery.data.history.map((row) => (
+                    <tr key={row.id} className="border-t border-border/60">
+                      <td className="px-1 py-1.5 whitespace-nowrap tabular-nums">{fmtDateTime(row.createdAt)}</td>
+                      <td className="px-1 py-1.5 font-medium">{row.code}</td>
+                      <td className="px-1 py-1.5 text-right tabular-nums text-muted-foreground">{row.oldRate ? fmtRate(row.oldRate) : "—"}</td>
+                      <td className="px-1 py-1.5 text-right tabular-nums">{fmtRate(row.rate)}</td>
+                      <td className="px-1 py-1.5">{row.source === "cbu" ? "Markaziy bank" : "Qo'lda"}</td>
+                      <td className="px-1 py-1.5 text-xs">
+                        {row.createdByName ?? (row.source === "cbu" ? "avtomatik" : "—")}
+                        {row.deviceName && <span className="text-muted-foreground"> · {row.deviceName}</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SettingsGroup>
+      )}
 
       {canManage && (
         <div className="flex flex-wrap items-center gap-2">

@@ -600,9 +600,22 @@ describe("Kassa xizmati (main jarayon)", () => {
     expect(kassa.purchases({})).toHaveLength(1);
     expect(kassa.purchaseReturns({})).toHaveLength(1);
 
+    // Valyuta kursi kassadan (offline): ruxsatsiz — rad; ruxsat bilan lokal kurs darhol yangi, navbatga ko'rgan/yangi kurs
+    expect(() => kassa.updateCurrencyRate({ code: "USD", rate: "12700" })).toThrow("currency_rates");
+    store.saveCashier({
+      ...cashier,
+      permissions: ["pos.use", "purchase.create", "warehouse.receive", "purchase.approve", "purchase.return", "currency_rates.view", "currency_rates.manage"],
+    });
+    expect(() => kassa.updateCurrencyRate({ code: "UZS", rate: "2" })).toThrow("asosiy valyuta");
+    expect(() => kassa.updateCurrencyRate({ code: "USD", rate: "0" })).toThrow("musbat");
+    expect(kassa.updateCurrencyRate({ code: "usd", rate: "12700" })).toMatchObject({ code: "USD", rate: "12700.0000", source: "manual", pending: true, updatedByName: "Ali" });
+    expect(kassa.settingsOverview().currencies[0]).toMatchObject({ code: "USD", rate: "12700.0000", pending: true });
+    await expect(kassa.currencyHistory({ code: "USD" })).resolves.toMatchObject({ online: false, history: [], pending: [{ code: "USD", from: "12500.0000", to: "12700.0000" }] });
+
     api.state.online = true;
     await kassa.syncNow();
-    expect(api.state.pushed.map((op) => op.type)).toEqual(["shift.open", "supplier.create", "purchase.complete", "purchase.return", "supplier.payment"]);
+    expect(api.state.pushed.map((op) => op.type)).toEqual(["shift.open", "supplier.create", "purchase.complete", "purchase.return", "supplier.payment", "currency.rate"]);
+    expect(api.state.pushed[5]!.payload).toEqual({ code: "USD", from: "12500.0000", to: "12700.0000" });
     expect(api.state.pushed[2]!.payload).toMatchObject({
       number: "K01-P000001",
       supplierId: supplier.id,

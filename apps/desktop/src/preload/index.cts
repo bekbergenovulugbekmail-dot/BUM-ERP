@@ -17,6 +17,8 @@ const CHANNELS = new Set([
   "cashier:logout",
   "cashier:change-pin",
   "settings:overview",
+  "settings:currency-rate",
+  "settings:currency-history",
   "update:check",
   "update:download",
   "update:install",

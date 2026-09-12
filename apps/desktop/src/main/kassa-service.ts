@@ -19,6 +19,8 @@ import type {
   AppStatus,
   CartLineInput,
   CountDraft,
+  CurrencyHistory,
+  CurrencyRow,
   CustomerInput,
   DevicePrefs,
   DocumentSync,
@@ -87,6 +89,7 @@ import type {
   PaymentMethod,
   PriceField,
   ProductPricesPayload,
+  CurrencyRatePayload,
   SupplierField,
   SupplierUpdatePayload,
   PosConfig,
@@ -170,6 +173,17 @@ const LABEL_MM = { min: 10, max: 300 };
 const MAX_LABELS_HTML = 30_000_000;
 
 type ProductRow = CalcProduct & { sku: string; barcode: string | null; isActive: boolean; isSaleable: boolean };
+/** Pull'dan kelgan (yoki kassada o'zgartirilgan) valyuta. */
+type LocalCurrencyRow = {
+  id: string;
+  code: string;
+  rate: string;
+  rateDate?: string | null;
+  isActive: boolean;
+  source?: "manual" | "cbu";
+  updatedAt?: string | null;
+  updatedByName?: string | null;
+};
 type CustomerRow = {
   id: string;
   name: string;
@@ -580,6 +594,8 @@ export class KassaService {
         return this.store.supplier<SupplierRow>(String(op.payload.supplierId))?.name ?? null;
       case "product.prices":
         return this.store.product<ProductRow>(String(op.payload.productId))?.name ?? null;
+      case "currency.rate":
+        return `${String(op.payload.code)}: ${String(op.payload.from)} → ${String(op.payload.to)}`;
       default:
         return null;
     }
@@ -1933,6 +1949,67 @@ export class KassaService {
     return this.toPriceRows([updated], cashier)[0]!;
   }
 
+  // ─── Valyuta kurslari ───────────────────────────────────────────────────
+
+  private toCurrencyRows(rows: LocalCurrencyRow[]): CurrencyRow[] {
+    const pending = this.store.pendingPayloadIds("currency.rate", "code");
+    return rows.map((row) => ({
+      code: row.code,
+      rate: row.rate,
+      rateDate: row.rateDate ?? null,
+      isActive: row.isActive,
+      source: row.source ?? null,
+      updatedAt: row.updatedAt ?? null,
+      updatedByName: row.updatedByName ?? null,
+      pending: pending.has(row.code),
+    }));
+  }
+
+  /**
+   * Kursni kassadan o'zgartirish (`currency_rates.manage`): lokal kurs darhol yangi — keyingi cheklar shu kurs bilan;
+   * serverga `currency.rate` ko'rgan va yangi kurs bilan (orada serverda o'zgargan bo'lsa — server kursi qoladi,
+   * nomuvofiqlik). Eski cheklar o'z kursini saqlaydi.
+   */
+  updateCurrencyRate(input: { code: string; rate: string }): CurrencyRow {
+    const cashier = this.requireCashierWith("currency_rates.view", "currency_rates.manage");
+    const code = String(input.code ?? "").trim().toUpperCase();
+    const rate = String(input.rate ?? "").trim();
+    if (!QTY.test(rate) || toMinor(rate, 4) <= 0n) throw new KassaError("BAD_REQUEST", "Kurs musbat son bo'lsin (4 kasrgacha)");
+    if (code === this.baseCurrency()) throw new KassaError("BAD_REQUEST", `${code} — asosiy valyuta, kursi doim 1`);
+    const row = this.store.records<LocalCurrencyRow>("currencies").find((item) => item.code === code);
+    if (!row) throw new KassaError("NOT_FOUND", `${code} valyutasi yo'q`);
+    if (!row.isActive) throw new KassaError("BAD_REQUEST", `${code} valyutasi o'chirilgan`);
+    const next = fromMinor(toMinor(rate, 4), 4);
+    if (toMinor(row.rate, 4) === toMinor(next, 4)) return this.toCurrencyRows([row])[0]!;
+    const now = new Date();
+    const updated: LocalCurrencyRow = { ...row, rate: next, source: "manual", rateDate: now.toISOString().slice(0, 10), updatedAt: now.toISOString(), updatedByName: cashier.name };
+    this.store.inTransaction(() => {
+      const payload: CurrencyRatePayload = { code, from: row.rate, to: next };
+      this.store.enqueue({ type: "currency.rate", cashierId: cashier.userId, payload }, now);
+      this.store.saveCurrency(updated);
+    });
+    this.engine?.schedule();
+    return this.toCurrencyRows([updated])[0]!;
+  }
+
+  /** Kurs o'zgarishlari: server tarixi (internet bilan) va kassadagi hali yuborilmaganlari. */
+  async currencyHistory(input: { code?: string }): Promise<CurrencyHistory> {
+    const cashier = this.requireCashierWith("currency_rates.view");
+    const code = input?.code ? String(input.code).trim().toUpperCase() : undefined;
+    const pending = this.store
+      .pendingOps(1000)
+      .filter((op) => op.type === "currency.rate" && (!code || op.payload.code === code))
+      .map((op) => ({ code: String(op.payload.code), from: String(op.payload.from), to: String(op.payload.to), createdAt: op.createdAt }));
+    if (!this.api) return { online: false, history: [], pending };
+    try {
+      const { history } = await this.api.currencyHistory(cashier.userId, code);
+      return { online: true, history, pending };
+    } catch (error) {
+      if (error instanceof OfflineError) return { online: false, history: [], pending };
+      throw error;
+    }
+  }
+
   private toPurchaseProducts(rows: PurchaseProductRow[]): PurchaseProduct[] {
     const byId = new Map(rows.map((row) => [row.id, row]));
     return this.toPosProducts(rows).map((product) => {
@@ -3074,9 +3151,7 @@ export class KassaService {
       company: config?.company ?? null,
       subscription: { status: company?.status ?? null, trialEndsAt: company?.trialEndsAt ?? null },
       baseCurrency: this.baseCurrency(),
-      currencies: this.store
-        .records<{ code: string; rate: string; rateDate?: string | null; isActive: boolean }>("currencies")
-        .map((row) => ({ code: row.code, rate: row.rate, rateDate: row.rateDate ?? null, isActive: row.isActive })),
+      currencies: this.toCurrencyRows(this.store.records<LocalCurrencyRow>("currencies")),
       cashback: config?.cashback ?? null,
       warehouses: this.store
         .records<{ id: string; name: string; code: string; isDefault?: boolean; isActive: boolean }>("warehouses")

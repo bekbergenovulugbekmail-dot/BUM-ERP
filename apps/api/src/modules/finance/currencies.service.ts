@@ -7,10 +7,11 @@
  * manbasi "cbu" valyutalar kursi kuniga bir marta — birinchi o'qishda — yangilanadi.
  * Har kurs o'zgarishi `exchange_rates` tarixiga yoziladi.
  */
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import {
   MAX_COMPANY_CURRENCIES,
   badRequest,
+  notFound,
   type CbuRate,
   type CompanyCurrency,
   type CurrencyRateSource,
@@ -18,11 +19,12 @@ import {
 } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { companyCurrencies, exchangeRates } from "../../db/schema/finance.js";
-import { settings } from "../../db/schema/platform.js";
+import { settings, users } from "../../db/schema/platform.js";
+import { posDevices } from "../../db/schema/pos.js";
 import { withTransaction, type DbOrTx, type Tx } from "../../db/transaction.js";
 import { env } from "../../env.js";
 import type { RequestMeta } from "../../shared/audit.js";
-import { toMinor } from "../../shared/decimal.js";
+import { fromMinor, toMinor } from "../../shared/decimal.js";
 import { upsertCompanySetting } from "../company/settings.service.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency, financeAudit } from "./accounts.service.js";
@@ -149,7 +151,8 @@ async function applyRate(
   companyId: string,
   input: { code: string; rate: string; source: CurrencyRateSource; rateDate: string; isActive?: boolean },
   userId: string | null,
-) {
+  deviceId: string | null = null,
+): Promise<{ changed: boolean; oldRate: string | null }> {
   const [current] = await tx
     .select({ rate: companyCurrencies.rate, rateDate: companyCurrencies.rateDate, source: companyCurrencies.source })
     .from(companyCurrencies)
@@ -186,12 +189,68 @@ async function applyRate(
     await tx.insert(exchangeRates).values({
       companyId,
       code: input.code,
+      oldRate: current?.rate ?? null,
       rate: input.rate,
       source: input.source,
       rateDate: input.rateDate,
       createdBy: userId,
+      deviceId,
     });
   }
+  return { changed, oldRate: current?.rate ?? null };
+}
+
+/**
+ * Bitta valyuta kursini qo'lda o'zgartirish (web yoki kassa, `currency_rates.manage`): manba — qo'lda, sana — bugun.
+ * Kurs o'zgarmasa hech narsa yozilmaydi. Eski hujjatlar o'z kursini saqlaydi — qayta hisoblanmaydi.
+ */
+export async function setCurrencyRate(tx: Tx, tenant: TenantContext, input: { code: string; rate: string; deviceId?: string | null }, meta: RequestMeta) {
+  const companyId = tenant.company.id;
+  const code = input.code.trim().toUpperCase();
+  if (code === (await companyCurrency(tx, companyId))) throw badRequest(`${code} — asosiy valyuta, kursi doim 1`);
+  const next = toMinor(input.rate, 4);
+  if (next <= 0n) throw badRequest("Kurs musbat bo'lishi kerak");
+  const [row] = await tx
+    .select({ rate: companyCurrencies.rate, isActive: companyCurrencies.isActive })
+    .from(companyCurrencies)
+    .where(and(eq(companyCurrencies.companyId, companyId), eq(companyCurrencies.code, code)))
+    .limit(1)
+    .for("update");
+  if (!row) throw notFound(`${code} valyutasi qo'shilmagan — Sozlamalar → Valyutalar`);
+  if (!row.isActive) throw badRequest(`${code} valyutasi o'chirilgan`);
+  const rate = fromMinor(next, 4);
+  if (toMinor(row.rate, 4) !== next) {
+    const result = await applyRate(tx, companyId, { code, rate, source: "manual", rateDate: todayIso() }, tenant.user.id, input.deviceId ?? null);
+    await financeAudit(tx, tenant, meta, {
+      action: "CURRENCY_RATE_CHANGED",
+      resource: "company_currencies",
+      resourceId: companyId,
+      details: { code, oldRate: result.oldRate, newRate: rate, source: "manual", ...(input.deviceId ? { deviceId: input.deviceId } : {}) },
+    });
+  }
+  return (await getCurrencySettings(tx, companyId)).currencies.find((currency) => currency.code === code)!;
+}
+
+/** Kurs o'zgarishlari tarixi (yangisi birinchi), kim o'zgartirgan va qaysi kassadan. */
+export async function listRateHistory(conn: DbOrTx, companyId: string, options: { code?: string; limit: number }) {
+  return conn
+    .select({
+      id: exchangeRates.id,
+      code: exchangeRates.code,
+      oldRate: exchangeRates.oldRate,
+      rate: exchangeRates.rate,
+      source: exchangeRates.source,
+      rateDate: exchangeRates.rateDate,
+      createdAt: exchangeRates.createdAt,
+      createdByName: users.name,
+      deviceName: posDevices.name,
+    })
+    .from(exchangeRates)
+    .leftJoin(users, eq(users.id, exchangeRates.createdBy))
+    .leftJoin(posDevices, eq(posDevices.id, exchangeRates.deviceId))
+    .where(and(eq(exchangeRates.companyId, companyId), options.code ? eq(exchangeRates.code, options.code) : undefined))
+    .orderBy(desc(exchangeRates.createdAt), desc(exchangeRates.id))
+    .limit(options.limit);
 }
 
 async function requireCbuRates(fresh = false) {
@@ -219,12 +278,16 @@ export async function saveCurrencySettings(tx: Tx, tenant: TenantContext, input:
   if (usesCbu && !input.cbuEnabled) throw badRequest("Markaziy bank kursidan foydalanish uchun uni yoqing");
   const cbuRates = usesCbu ? await requireCbuRates() : [];
   const today = todayIso();
+  const rateChanges: { code: string; oldRate: string | null; newRate: string }[] = [];
+  const track = (code: string, newRate: string, result: { changed: boolean; oldRate: string | null }) => {
+    if (result.changed && (result.oldRate === null || toMinor(result.oldRate, 4) !== toMinor(newRate, 4))) rateChanges.push({ code, oldRate: result.oldRate, newRate });
+  };
 
   for (const currency of input.currencies) {
     if (currency.source === "cbu") {
       const cbu = cbuRates.find((r) => r.code === currency.code);
       if (!cbu) throw badRequest(`${currency.code}: Markaziy bankda bu valyuta kursi yo'q`);
-      await applyRate(tx, companyId, { ...currency, rate: cbu.rate, rateDate: cbu.date }, tenant.user.id);
+      track(currency.code, cbu.rate, await applyRate(tx, companyId, { ...currency, rate: cbu.rate, rateDate: cbu.date }, tenant.user.id));
     } else {
       if (!currency.rate || toMinor(currency.rate, 4) <= 0n) throw badRequest(`${currency.code}: kurs kiritilishi kerak`);
       const [existing] = await tx
@@ -234,11 +297,10 @@ export async function saveCurrencySettings(tx: Tx, tenant: TenantContext, input:
         .limit(1);
       // Kurs o'zgarmagan bo'lsa sanasi ham o'zgarmaydi (tarixga yozilmaydi)
       const unchanged = existing && toMinor(existing.rate, 4) === toMinor(currency.rate, 4);
-      await applyRate(
-        tx,
-        companyId,
-        { ...currency, rate: currency.rate, rateDate: unchanged ? existing.rateDate : today },
-        tenant.user.id,
+      track(
+        currency.code,
+        currency.rate,
+        await applyRate(tx, companyId, { ...currency, rate: currency.rate, rateDate: unchanged ? existing.rateDate : today }, tenant.user.id),
       );
     }
   }
@@ -270,6 +332,7 @@ export async function saveCurrencySettings(tx: Tx, tenant: TenantContext, input:
     details: {
       cbuEnabled: input.cbuEnabled,
       currencies: input.currencies.map((c) => ({ code: c.code, source: c.source, isActive: c.isActive })),
+      ...(rateChanges.length > 0 ? { rateChanges } : {}),
     },
   });
   return getCurrencySettings(tx, companyId);

@@ -43,6 +43,7 @@ export const OP_LABELS: Record<string, string> = {
   "customer.update": "Mijoz tahriri",
   "supplier.update": "Ta'minotchi tahriri",
   "product.prices": "Narx o'zgarishi",
+  "currency.rate": "Valyuta kursi",
 };
 
 export const PARTY_TYPE_LABELS: Record<string, string> = { individual: "Jismoniy shaxs", legal: "Yuridik shaxs" };

@@ -53,6 +53,10 @@ export const PERMISSIONS = {
   "finance.manage":       { label: "Moliyani boshqarish",          group: "Moliya" },
   "finance.approve":      { label: "Xarajat tasdiqlash",           group: "Moliya" },
   "finance.export":       { label: "Moliyaviy eksport",            group: "Moliya" },
+  /** Valyuta kurslari va ularning o'zgarish tarixini ko'rish (web va kassa). */
+  "currency_rates.view":  { label: "Valyuta kurslarini ko'rish",   group: "Moliya" },
+  /** Bitta valyuta kursini o'zgartirish — web yoki kassadan (tarix va audit bilan). */
+  "currency_rates.manage":{ label: "Valyuta kursini o'zgartirish", group: "Moliya" },
 
   // ─── CRM ───────────────────────────────────────────────────────────────────
   "crm.view":             { label: "CRM ko'rish",                  group: "CRM" },
@@ -169,6 +173,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "sales.view", "sales.approve",
       "purchase.view", "purchase.create", "purchase.edit", "purchase.approve",
       "finance.view", "finance.manage", "finance.approve", "finance.export",
+      "currency_rates.view", "currency_rates.manage",
       "hr.view", "hr.salary", "hr.approve",
       "analytics.view", "analytics.export",
       "settings.view",
@@ -185,6 +190,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "sales.view", "sales.approve",
       "purchase.view", "purchase.approve",
       "finance.view", "finance.manage", "finance.approve", "finance.export",
+      "currency_rates.view", "currency_rates.manage",
       "hr.view", "hr.salary", "hr.approve",
       "analytics.view", "analytics.export",
       "settings.view",
@@ -201,6 +207,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "pos.use",
       "warehouse.view",
       "finance.view",
+      "currency_rates.view",
       "crm.view", "crm.manage",
       "distribution.view", "distribution.manage",
       "sales_agent.supervise", "promotions.manage", "sales_agent.agents.manage",
@@ -256,6 +263,8 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "sales.view", "sales.create",
       "pos.use",
       "warehouse.view",
+      // Kassada kursni ko'radi; o'zgartirish (`currency_rates.manage`) — rahbar beradi
+      "currency_rates.view",
     ],
   },
   {

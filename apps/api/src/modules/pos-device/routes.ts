@@ -14,6 +14,7 @@
  *   GET  /movements                (token) mahsulot harakati — qurilma ombori (?productId, type, kursor)
  *   GET  /stock/:productId         (token) mahsulot qoldig'i kompaniyaning faol omborlarida
  *   GET  /analytics                (token) analitika ?from&to&cashierId — kassirda `analytics.view`
+ *   GET  /currencies/history       (token) kurs o'zgarishlari tarixi ?cashierId&code — kassirda `currency_rates.view`
  *   GET  /app-update               (token) yangi versiya bormi (joriy — `x-app-version`), o'rnatuvchi manzili va SHA-256
  *   GET  /releases/:id/download    (token) e'lon qilingan desktop relizini yuklab olish (bo'laklab oqim)
  *
@@ -38,6 +39,7 @@ import { authenticate } from "../auth/auth.service.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 import { assertCompanyWritable, effectivePermissions, requirePermission, requireTenant, requireTenantForWrite } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
+import { listRateHistory } from "../finance/currencies.service.js";
 import { listConflicts, resolveConflict } from "./conflicts.service.js";
 import { currentRelease, downloadableRelease, parseByteRange, releaseByteRange, releaseChunks } from "../platform/desktop-releases.service.js";
 import { desktopUpdate } from "./app-update.service.js";
@@ -88,6 +90,11 @@ const movementsQuery = z.object({
 });
 const productParams = z.object({ productId: z.uuid() });
 const releaseParams = z.object({ releaseId: z.uuid() });
+const currencyHistoryQuery = z.object({
+  cashierId: z.uuid(),
+  code: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
 
 /**
  * O'rnatuvchini bazadagi bo'laklardan oqim bilan yuborish (xotirada bitta bo'lak). HTTP Range: uzilgan yuklab olish
@@ -276,6 +283,14 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
       const tenant = await cashierTenant(db, context, cashierId);
       await requirePermission(db, tenant, "analytics.view");
       return deviceAnalytics(db, context, range);
+    });
+
+    scoped.get("/currencies/history", async (req) => {
+      const { cashierId, code, limit } = currencyHistoryQuery.parse(req.query);
+      const context = deviceOf(req);
+      const tenant = await cashierTenant(db, context, cashierId);
+      await requirePermission(db, tenant, "currency_rates.view");
+      return { history: await listRateHistory(db, context.company.id, { code, limit }) };
     });
   });
 }

@@ -12,6 +12,7 @@ import type {
   PaymentMethod,
   PosConfig,
   RefundMethod,
+  RemoteRateChange,
   RemoteSale,
   RemoteWarehouseStock,
   SyncStatus,
@@ -621,6 +622,25 @@ export type UpdateInfo = {
   partialBytes: number;
 };
 
+/** Qurilmadagi valyuta kursi: manba (serverdan), oxirgi o'zgarish, kim; `pending` — kassada o'zgartirilgan, hali yuborilmagan. */
+export type CurrencyRow = {
+  code: string;
+  rate: string;
+  rateDate: string | null;
+  isActive: boolean;
+  source: "manual" | "cbu" | null;
+  updatedAt: string | null;
+  updatedByName: string | null;
+  pending: boolean;
+};
+
+/** Kurs o'zgarishlari: server tarixi (internet bilan) va kassadagi yuborilmagan o'zgarishlar. */
+export type CurrencyHistory = {
+  online: boolean;
+  history: RemoteRateChange[];
+  pending: { code: string; from: string; to: string; createdAt: string }[];
+};
+
 /** Sozlamalar oynasi uchun qurilmadagi ma'lumotlar (offline ham). */
 export type SettingsOverview = {
   appVersion: string;
@@ -629,7 +649,7 @@ export type SettingsOverview = {
   company: PosConfig["company"] | null;
   subscription: { status: string | null; trialEndsAt: string | null };
   baseCurrency: string;
-  currencies: { code: string; rate: string; rateDate: string | null; isActive: boolean }[];
+  currencies: CurrencyRow[];
   cashback: PosConfig["cashback"] | null;
   warehouses: { id: string; name: string; code: string; isDefault: boolean; isActive: boolean; current: boolean }[];
   cashiers: { userId: string; name: string | null; phone: string; role: string; active: boolean; hasPin: boolean }[];
@@ -650,6 +670,8 @@ export type KassaChannels = {
   "cashier:logout": { input: void; output: AppStatus };
   "cashier:change-pin": { input: { oldPin: string; newPin: string }; output: void };
   "settings:overview": { input: void; output: SettingsOverview };
+  "settings:currency-rate": { input: { code: string; rate: string }; output: CurrencyRow };
+  "settings:currency-history": { input: { code?: string }; output: CurrencyHistory };
   "update:check": { input: void; output: UpdateInfo };
   "update:download": { input: void; output: UpdateInfo };
   "update:install": { input: void; output: void };
