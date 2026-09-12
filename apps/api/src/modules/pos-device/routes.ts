@@ -6,12 +6,15 @@
  *   POST /setup/register           qurilmani ro'yxatdan o'tkazish → token (bir marta), qurilma, kompaniya
  *   GET  /session                  (token) qurilma, kompaniya, server vaqti
  *   POST /cashiers/login           (token) kassirning birinchi kirishi: telefon + parol → profil va ruxsatlar
- *   POST /pull                     (token) o'zgarishlar: kursorlar bo'yicha sahifalab
- *   POST /push                     (token) offline amallar navbati: bir martalik (opId)
+ *   POST /pull                     (token) o'zgarishlar: kursorlar bo'yicha sahifalab; sozlamalar xeshi o'zgarsa `config`
+ *   POST /push                     (token) offline amallar navbati: bir martalik (opId) — smena, chek, qaytarish, mijoz
+ *   GET  /receipts/:number         (token) qaytarish uchun chek (qurilma omboridagi, qaytarilgan miqdorlar bilan)
  *
  * /api/pos/devices — web (sessiya, `pos.devices.manage`):
  *   GET  /                         qurilmalar ro'yxati
  *   PATCH /:deviceId               nomi, o'chirish/yoqish
+ *   GET  /conflicts                offline sinxron nomuvofiqliklari (`resolved=true` — yopilganlari)
+ *   POST /conflicts/:conflictId/resolve   ko'rib chiqildi
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
@@ -25,8 +28,10 @@ import { authenticate } from "../auth/auth.service.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 import { assertCompanyWritable, effectivePermissions, requirePermission, requireTenant, requireTenantForWrite } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
+import { listConflicts, resolveConflict } from "./conflicts.service.js";
 import { cashierTenant, deviceOf, requireDevice } from "./device-auth.js";
 import { deviceWarehouses, listDevices, registerDevice, setupTenant, updateDevice } from "./devices.service.js";
+import { findDeviceReceipt } from "./receipts.service.js";
 import { DEFAULT_PULL_LIMIT, PULL_ENTITIES, pullChanges } from "./sync-pull.service.js";
 import { MAX_OPS_PER_PUSH, pushOperations } from "./sync-push.service.js";
 
@@ -51,9 +56,17 @@ const cursorSchema = z.strictObject({
 const pullBody = z.strictObject({
   cursors: z.partialRecord(z.enum(PULL_ENTITIES), cursorSchema).optional(),
   limit: z.number().int().min(1).max(1000).optional(),
+  /** Qurilmadagi sozlamalar xeshi — bir xil bo'lsa `config: null`. */
+  configHash: z.string().max(64).optional(),
 });
 const pushBody = z.strictObject({ ops: z.array(z.unknown()).min(1).max(MAX_OPS_PER_PUSH) });
+const receiptParams = z.object({ number: z.string().trim().min(1).max(32) });
 const deviceParams = z.object({ deviceId: z.uuid() });
+const conflictParams = z.object({ conflictId: z.uuid() });
+const conflictsQuery = z.object({
+  resolved: z.enum(["true", "false"]).transform((value) => value === "true").optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
 const devicePatchBody = z.strictObject({ name: z.string().trim().min(1).max(100).optional(), isActive: z.boolean().optional() });
 
 const appVersionOf = (req: FastifyRequest) => {
@@ -136,7 +149,7 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
     scoped.post("/pull", async (req) => {
       const body = pullBody.parse(req.body ?? {});
       const context = deviceOf(req);
-      const changes = await pullChanges(db, context, body.cursors ?? {}, body.limit ?? DEFAULT_PULL_LIMIT);
+      const changes = await pullChanges(db, context, body.cursors ?? {}, body.limit ?? DEFAULT_PULL_LIMIT, body.configHash);
       const now = new Date();
       await db
         .update(posDevices)
@@ -158,6 +171,11 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
         .where(eq(posDevices.id, context.device.id));
       return { results };
     });
+
+    scoped.get("/receipts/:number", async (req) => {
+      const { number } = receiptParams.parse(req.params);
+      return { receipt: await findDeviceReceipt(db, deviceOf(req), number) };
+    });
   });
 }
 
@@ -168,6 +186,23 @@ export async function posDevicesAdminRoutes(app: FastifyInstance): Promise<void>
     const tenant = await requireTenant(db, authOf(req).user);
     await requirePermission(db, tenant, "pos.devices.manage");
     return { devices: await listDevices(db, tenant) };
+  });
+
+  app.get("/conflicts", async (req) => {
+    const query = conflictsQuery.parse(req.query);
+    const tenant = await requireTenant(db, authOf(req).user);
+    await requirePermission(db, tenant, "pos.devices.manage");
+    return { conflicts: await listConflicts(db, tenant, query) };
+  });
+
+  app.post("/conflicts/:conflictId/resolve", async (req) => {
+    const { conflictId } = conflictParams.parse(req.params);
+    const conflict = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      await requirePermission(tx, tenant, "pos.devices.manage");
+      return resolveConflict(tx, tenant, conflictId, requestMeta(req));
+    });
+    return { conflict };
   });
 
   app.patch("/:deviceId", async (req) => {

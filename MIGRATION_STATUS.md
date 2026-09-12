@@ -863,8 +863,8 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 
 | # | Bosqich | Holat |
 |---|---|---|
-| D0 | Poydevor: qurilma va token, kassir PIN, lokal SQLite, pull/push sinxron, offline smena | ⏳ server ✅, desktop skeleti yozildi |
-| D1 | POS: yuqori menyu, shtrix-kod, tezkor tugmalar, valyutalar, kechiktirilgan/qisman qaytarish, chek printeri, offline sotuv sinxroni (qoldiq ziddiyati) | ⏳ |
+| D0 | Poydevor: qurilma va token, kassir PIN, lokal SQLite, pull/push sinxron, offline smena | ✅ commit `92cf40a`, API deploy (production `/api/pos-device/session` → 401) |
+| D1 | POS: yuqori menyu, shtrix-kod, tezkor tugmalar, valyutalar, kechiktirilgan/qisman qaytarish, chek printeri, offline sotuv sinxroni (qoldiq ziddiyati) | ✅ (pastda) |
 | D2 | Sotuv tarixi, kassa (inkassatsiya, smena/kassir/to'lov turi hisobotlari) | ⏳ |
 | D3–D9 | Xarid, ombor, inventarizatsiya, etiketka, ma'lumotlar, analitika, sozlamalar va avtomatik yangilanish, offline testlar | ⏳ |
 
@@ -887,6 +887,27 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 - kassir: birinchi marta onlayn (telefon + parol) → shu qurilma uchun PIN (argon2id, hash-wasm); keyin offline PIN bilan almashish, 5 xatodan keyin 5 daqiqa qulf; server o'chirgan kassir kira olmaydi
 - ekranlar: ro'yxatdan o'tkazish (server, rahbar, kompaniya, ombor, kassa nomi), kassir (PIN / birinchi kirish), bosh ekran (sinxron holati, navbat, rad etilgan amallar, offline smena ochish/yopish, keyingi bo'limlar)
 - Windows o'rnatuvchi: `electron-builder` NSIS (`pnpm --filter @bum/desktop dist:win`)
+
+**D1 — server** (migratsiya 0032, faqat qo'shimcha; `stock_levels` dagi `quantity >= 0` CHECK olib tashlandi — ma'lumot o'chirilmaydi):
+- `push` yangi amallari: `sale.complete` (qurilmadagi chek ID, raqam `K01-000123`, qator ID'lari, narx, chegirma, sotuv lahzasidagi kurslar, yopilgan vaqt), `sale.return` (qisman qaytarish, `K01-Q000004`, `sales.refund`), `customer.create` (qurilmadagi mijoz ID'si)
+- offline chek rad etilmaydi (tovar va pul allaqachon berilgan) — nomuvofiqlik `pos_sync_conflicts` ga yoziladi: `stock_shortage` (qoldiq manfiy bo'ladi; faqat shu yo'lda), `price_changed` (kassirda `sales.edit` yo'q, narx prays-listdan farq qilgan), `rate_changed`, `customer_inactive`, `credit_limit`, `balance_insufficient` / `cashback_insufficient` (yetmagani mijoz qarziga), `shift_closed`, `customer_duplicate_phone`
+- manfiy qoldiqdan keyingi kirimda o'rtacha tannarx — kirim tannarxi; hech qachon kirim bo'lmagan mahsulot offline sotilsa COGS — xarid narxi
+- cheklov buzilishi (23xxx) ham amalni rad etadi (navbat to'xtab qolmaydi); chek/qaytarish/qator ID yoki raqami band — `CONFLICT`
+- qisman qaytarish (`sales_returns`, `sales_return_items`, `sales_order_items.returned_qty`): zaxira sotuvdagi tannarx ulushida qaytadi, jurnal (sotuv/debitor, zaxira/tannarx), mijoz qarzi kamayadi, pul faqat to'langani qolgan chek summasidan oshsa qaytadi, balans va keshbekdan to'langani ulushi bilan o'z hisobiga, berilgan keshbek ulushi bekor qilinadi; oxirgi qoldiq aniq summa; hammasi qaytsa `returned`. Smena: `total_returns`, naqd/karta tushumdan ayriladi. Qisman qaytarilgan chekni to'liq qaytarib bo'lmaydi
+- web: `POST /api/sales/orders/:id/return-items` (`sales.refund`, raqam `QR-2026-0001`), buyurtmada `returns` ro'yxati; desktop smenasini web'dan yopib bo'lmaydi
+- `pull` javobida `config` (kompaniya rekvizitlari, keshbek sozlamasi, chek shabloni) — qurilmadagi xesh bilan bir xil bo'lsa `null`
+- `GET /api/pos-device/receipts/:number` — qurilma omboridagi chek (boshqa kassa yoki web) qaytarilgan miqdorlar bilan
+- web `GET /api/pos/devices/conflicts` (`resolved=true`), `POST /api/pos/devices/conflicts/:id/resolve` (`pos.devices.manage`, audit)
+- testlar: `pos-sale-sync` (4) — offline chek va qoldiq/narx nomuvofiqligi, takror va band raqam; qisman qaytarish va ruxsat, web qaytarish; mijoz, balans va kredit limiti; config xeshi, chekni topish, nomuvofiqliklar. To'liq API: 269/269
+
+**D1 — desktop:**
+- chek hisobi `shared/sale-calc.ts` — serverdagi `completeSale` bilan bir xil (qator, soliq ichida/ustiga, sotuv valyutalari, balans avval asosiy qismni, keshbek chegarasi, qaytim, qarz); renderer oldindan ko'rish va main yozuvi bir funksiyadan
+- lokal baza v2: cheklar va qaytarishlar (chop etish, tarix), kechiktirilgan cheklar, sinxron bo'lmagan zaxira farqi (ko'rinadigan qoldiq = server + navbatdagi hujjatlar; bajarilgan/rad etilganda tozalanadi)
+- kassa ekrani: qidiruv va skaner (USB/Bluetooth), savat (miqdor, `sales.edit` bo'lsa narx), mijoz tanlash/yangi mijoz (offline), balans/keshbekdan to'lov, qaytim balansga, naqd/karta/bank, sotuv valyutalari va chet valyuta qismlari, qoldiq yetmasa ogohlantirish (sotuv yoziladi)
+- yuqori menyu: ombor, sotuv valyutasi, sinxron bo'lmagan cheklar (qayta yuborish; bekor qilish — `sales.approve`), mahsulotni qaytarish (shu kassa cheki offline, boshqa kassa/web cheki internet bilan), kechiktirilgan cheklar, pul qutisi, smenani yopish (kutilgan naqd va farq), printer, tugmalar, kassirni almashtirish
+- tezkor tugmalar F1–F12, ↑↓, +/−, Delete (Electron standart menyusi o'chirilgan)
+- chek: web bilan bir xil termal shablon, dialogsiz tanlangan printerga (58/80 mm, balandlik mazmun bo'yicha), avtomatik chop etish; pul qutisi — drayver, tarmoq printeri (9100) yoki Windows ulashilgan printer (ESC/POS impulsi, shell'siz)
+- testlar: 15 (lokal ombor, sinxron, PIN, xizmat — offline chek, kechiktirish, qaytarish, rad etish/qayta yuborish/bekor qilish; chek hisobi — valyuta va balans)
 
 ### Distributsiya (`/api/distribution`)
 

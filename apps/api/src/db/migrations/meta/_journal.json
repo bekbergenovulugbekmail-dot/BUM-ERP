@@ -225,6 +225,13 @@
       "when": 1789190617646,
       "tag": "0031_pos_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1789194016765,
+      "tag": "0032_pos_sales_sync",
+      "breakpoints": true
     }
   ]
 }

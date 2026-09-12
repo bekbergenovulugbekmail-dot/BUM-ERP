@@ -16,8 +16,8 @@ const SYNC_LABEL: Record<SyncState, { text: string; tone: string }> = {
 
 const SECTIONS = ["Kassa (POS)", "Sotuv tarixi", "Kassa hisobi", "Xarid", "Ombor", "Mahsulot harakati", "Inventarizatsiya", "Etiketka", "Ma'lumotlar", "Analitika", "Sozlamalar"];
 
-/** Bosh ekran (D0): qurilma, kassir, sinxron holati va navbat, smena. Bo'limlar keyingi bosqichlarda. */
-export default function HomeScreen({ status, onChange }: { status: AppStatus; onChange: (status: AppStatus) => void }) {
+/** Bosh ekran: qurilma, kassir, sinxron holati va navbat, smena; bo'limlar (Kassa — ishlaydi, qolganlari keyingi bosqichlarda). */
+export default function HomeScreen({ status, onChange, onOpenPos }: { status: AppStatus; onChange: (status: AppStatus) => void; onOpenPos: () => void }) {
   const [cash, setCash] = useState("");
   const [rejected, setRejected] = useState<RejectedOperation[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -111,7 +111,11 @@ export default function HomeScreen({ status, onChange }: { status: AppStatus; on
         </section>
 
         <section className="grid content-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {SECTIONS.map((title) => (
+          <button type="button" onClick={onOpenPos} className="rounded-2xl border border-primary/40 bg-primary/5 p-5 text-left transition-colors hover:bg-primary/10">
+            <p className="font-medium">{SECTIONS[0]}</p>
+            <p className="text-xs text-muted-foreground">Sotuv, qaytarish, kechiktirilgan cheklar — internet bo'lmasa ham</p>
+          </button>
+          {SECTIONS.slice(1).map((title) => (
             <div key={title} className="rounded-2xl border border-dashed border-border bg-card/60 p-5">
               <p className="font-medium">{title}</p>
               <p className="text-xs text-muted-foreground">Keyingi bosqichda</p>

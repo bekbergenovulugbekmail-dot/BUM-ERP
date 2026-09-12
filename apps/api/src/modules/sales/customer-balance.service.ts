@@ -105,13 +105,15 @@ export async function depositToBalance(
     posShiftId?: string | null;
     notes?: string | null;
     date?: string;
+    /** Offline kassa cheki qaytimi — mijoz sinxrongacha faolsizlantirilgan bo'lsa ham yoziladi. */
+    allowInactive?: boolean;
   },
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
   const amount = positiveAmount(input.amount);
   const customer = await lockCustomer(tx, companyId, input.customerId);
-  if (!customer.isActive) throw badRequest("Mijoz faol emas");
+  if (!customer.isActive && !input.allowInactive) throw badRequest("Mijoz faol emas");
 
   const id = randomUUID();
   const date = input.date ?? todayIso();

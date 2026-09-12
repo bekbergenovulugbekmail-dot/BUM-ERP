@@ -83,6 +83,41 @@ export type ReturnPayload = {
 /** `customer.create` — kassada yangi mijoz (offline). */
 export type CustomerPayload = { customerId: string; name: string; phone?: string | null };
 
+/** Serverdagi chek (`GET /receipts/:number`) — boshqa kassa yoki web'da sotilganini qaytarish uchun. */
+export type RemoteReceipt = {
+  id: string;
+  number: string;
+  status: string;
+  isPos: boolean;
+  deviceId: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  customerPhone: string | null;
+  currency: string;
+  subtotal: string;
+  taxAmount: string;
+  discountAmount: string;
+  totalAmount: string;
+  paidAmount: string;
+  createdAt: string;
+  items: {
+    id: string;
+    productId: string;
+    productName: string;
+    productSku: string;
+    unitId: string;
+    unitName: string;
+    quantity: string;
+    returnedQty: string;
+    unitPrice: string;
+    discountPercent: string;
+    taxRate: string;
+    lineTotal: string;
+    priceCurrency: string | null;
+    currencyTotal: string;
+  }[];
+};
+
 /** Sinxronda server qayd etgan nomuvofiqlik (sotuv baribir yoziladi). */
 export type SyncConflict = { kind: string; details: Record<string, unknown> };
 

@@ -81,9 +81,12 @@ const MIGRATIONS: string[] = [
     customer_id TEXT,
     total TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    -- Rad etilgan chek kassir/rahbar qarori bilan bekor qilingan (navbatdan olingan)
+    discarded_at TEXT,
     data TEXT NOT NULL
   );
   CREATE INDEX sales_created_idx ON sales (created_at);
+  CREATE INDEX sales_op_idx ON sales (op_id);
   CREATE INDEX sales_shift_idx ON sales (shift_id);
 
   CREATE TABLE sale_returns (
@@ -95,9 +98,11 @@ const MIGRATIONS: string[] = [
     cashier_id TEXT NOT NULL,
     total TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    discarded_at TEXT,
     data TEXT NOT NULL
   );
   CREATE INDEX sale_returns_order_idx ON sale_returns (order_id);
+  CREATE INDEX sale_returns_op_idx ON sale_returns (op_id);
 
   CREATE TABLE held_receipts (
     id TEXT PRIMARY KEY,

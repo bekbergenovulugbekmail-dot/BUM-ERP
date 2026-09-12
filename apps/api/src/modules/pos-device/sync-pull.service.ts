@@ -6,16 +6,20 @@
  *    qatorlar qurilmada `id` bo'yicha upsert qilinadi, takror kelishi zararsiz.
  *  - Faqat qurilma kompaniyasi; qoldiq — faqat qurilma ombori. Kassirlar: a'zolik yoki foydalanuvchi o'zgarsa qayta
  *    keladi (faolsizlantirilgani `active: false` bilan), ruxsatlari bilan; parol/PIN xeshlari hech qachon yuborilmaydi.
+ *  - Kompaniya sozlamalari (rekvizitlar, keshbek, chek shabloni) — xeshi qurilmadagidan farq qilsagina (`config`).
  */
+import { createHash } from "node:crypto";
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { brands, categories, products, unitConversions, units } from "../../db/schema/catalog.js";
 import { companyCurrencies } from "../../db/schema/finance.js";
 import { stockLevels, warehouses } from "../../db/schema/inventory.js";
-import { companyMembers, users } from "../../db/schema/platform.js";
+import { companies, companyMembers, settings, users } from "../../db/schema/platform.js";
 import { customers } from "../../db/schema/sales.js";
 import type { DbOrTx } from "../../db/transaction.js";
+import { RECEIPT_SETTING_KEY, parseReceiptTemplate } from "../company/print-settings.service.js";
 import { membershipPermissions } from "../company/tenant.js";
+import { getCashbackSettings } from "../sales/cashback.service.js";
 import type { DeviceContext } from "./device-auth.js";
 
 export const PULL_ENTITIES = [
@@ -50,11 +54,32 @@ function toPage<T extends { cursorAt: string; id: string }>(rows: T[], limit: nu
   };
 }
 
+/** Kassa uchun kompaniya sozlamalari va ularning xeshi (o'zgarmagan bo'lsa qurilmaga qayta yuborilmaydi). */
+export async function posConfig(conn: DbOrTx, companyId: string) {
+  const [company] = await conn
+    .select({ name: companies.name, address: companies.address, phone: companies.phone, taxId: companies.taxId, currency: companies.currency })
+    .from(companies)
+    .where(eq(companies.id, companyId))
+    .limit(1);
+  const [receipt] = await conn
+    .select({ value: settings.value })
+    .from(settings)
+    .where(and(eq(settings.companyId, companyId), eq(settings.key, RECEIPT_SETTING_KEY)))
+    .limit(1);
+  const body = {
+    company: company!,
+    cashback: await getCashbackSettings(conn, companyId),
+    receipt: parseReceiptTemplate(receipt?.value),
+  };
+  return { hash: createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 32), ...body };
+}
+
 export async function pullChanges(
   conn: DbOrTx,
   context: DeviceContext,
   cursors: Partial<Record<PullEntity, PullCursor>>,
   limit = DEFAULT_PULL_LIMIT,
+  configHash?: string,
 ) {
   const companyId = context.company.id;
   const take = limit + 1;
@@ -250,11 +275,13 @@ export async function pullChanges(
     cashiers: toPage(cashierRows, limit, cursors.cashiers),
   } satisfies Record<PullEntity, Page<unknown>>;
 
+  const config = await posConfig(conn, companyId);
   return {
     serverTime: new Date().toISOString(),
     company: { id: companyId, name: context.company.name, currency: context.company.currency },
     device: context.device,
     entities,
     more: Object.values(entities).some((page) => page.more),
+    config: config.hash === configHash ? null : config,
   };
 }

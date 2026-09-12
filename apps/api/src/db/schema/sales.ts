@@ -135,6 +135,8 @@ export const posShifts = pgTable(
     totalSales: money("total_sales").notNull().default("0"),
     totalCash: money("total_cash").notNull().default("0"),
     totalCard: money("total_card").notNull().default("0"),
+    /** Shu smenada qaytarilgan mahsulotlar summasi (qisman qaytarishlar). */
+    totalReturns: money("total_returns").notNull().default("0"),
     receiptCount: integer("receipt_count").notNull().default(0),
     /** Chet valyuta bo'yicha (`{ USD: "20.00" }`): boshlang'ich naqd, naqd va karta tushumi, yopilishda sanalgan naqd. */
     openingForeignCash: jsonb("opening_foreign_cash").$type<Record<string, string>>().notNull().default({}),
@@ -189,6 +191,8 @@ export const salesOrders = pgTable(
 
     isPos: boolean("is_pos").notNull().default(false),
     posShiftId: uuid("pos_shift_id").references(() => posShifts.id, { onDelete: "set null" }),
+    /** Desktop kassa qurilmasi (offline chek); `created_at` — chek qurilmada yopilgan vaqt. */
+    deviceId: uuid("device_id").references(() => posDevices.id, { onDelete: "set null" }),
 
     notes: text("notes"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -232,6 +236,8 @@ export const salesOrderItems = pgTable(
     priceCurrency: varchar("price_currency", { length: 3 }),
     priceRate: price("price_rate").notNull().default("1"),
     currencyTotal: money("currency_total").notNull().default("0"),
+    /** Qisman qaytarishlar bilan qaytarilgan miqdor (qator birligida). */
+    returnedQty: qty("returned_qty").notNull().default("0"),
 
     notes: text("notes"),
     ...timestamps(),
@@ -240,6 +246,7 @@ export const salesOrderItems = pgTable(
     index("soi_order_idx").on(t.orderId),
     index("soi_company_product_idx").on(t.companyId, t.productId),
     check("soi_qty_positive", sql`${t.quantity} > 0`),
+    check("soi_returned_qty_range", sql`${t.returnedQty} >= 0 AND ${t.returnedQty} <= ${t.quantity}`),
     check("soi_price_non_negative", sql`${t.unitPrice} >= 0 AND ${t.costPrice} >= 0`),
   ],
 );
@@ -350,6 +357,74 @@ export const customerCashbackTransactions = pgTable(
     index("cct_order_idx").on(t.orderId),
     check("cct_amount_non_zero", sql`${t.amount} <> 0`),
     check("cct_balance_after_non_negative", sql`${t.balanceAfter} >= 0`),
+  ],
+);
+
+// ─── sales_returns ───────────────────────────────────────────────────────────
+
+/**
+ * Chekdagi mahsulotlarni qisman qaytarish (kassa yoki web). To'liq qaytarish (`returnOrder`) buyurtma holatini
+ * o'zgartiradi va bu jadvalga yozilmaydi; qisman qaytarilgan chekni to'liq qaytarib bo'lmaydi.
+ *   total      — qaytarilgan qatorlar summasi (sotuv narxida)
+ *   refund*    — mijozga qaytgan pul: tanlangan usulda (`refund_method`), balans va keshbekdan to'langan ulushi
+ *                o'z hisobiga; mijoz qarzi bo'lsa avval qarz kamayadi
+ */
+export const salesReturns = pgTable(
+  "sales_returns",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    orderId: uuid("order_id").notNull().references(() => salesOrders.id, { onDelete: "restrict" }),
+    number: varchar("number", { length: 32 }).notNull(),
+    posShiftId: uuid("pos_shift_id").references(() => posShifts.id, { onDelete: "set null" }),
+    deviceId: uuid("device_id").references(() => posDevices.id, { onDelete: "set null" }),
+
+    totalAmount: money("total_amount").notNull(),
+    cogs: money("cogs").notNull().default("0"),
+    refundMethod: varchar("refund_method", { length: 16 }).notNull(),
+    refundAmount: money("refund_amount").notNull().default("0"),
+    balanceRestored: money("balance_restored").notNull().default("0"),
+    cashbackRestored: money("cashback_restored").notNull().default("0"),
+    cashbackReversed: money("cashback_reversed").notNull().default("0"),
+
+    reason: text("reason"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("sr_company_number_key").on(t.companyId, t.number),
+    index("sr_order_idx").on(t.orderId),
+    index("sr_shift_idx").on(t.posShiftId),
+    index("sr_company_created_idx").on(t.companyId, t.createdAt),
+    check("sr_refund_method", sql`${t.refundMethod} in ('cash', 'card', 'balance')`),
+    check(
+      "sr_amounts_non_negative",
+      sql`${t.totalAmount} >= 0 AND ${t.refundAmount} >= 0 AND ${t.balanceRestored} >= 0 AND ${t.cashbackRestored} >= 0 AND ${t.cashbackReversed} >= 0`,
+    ),
+  ],
+);
+
+export const salesReturnItems = pgTable(
+  "sales_return_items",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    returnId: uuid("return_id").notNull().references(() => salesReturns.id, { onDelete: "cascade" }),
+    orderItemId: uuid("order_item_id").notNull().references(() => salesOrderItems.id, { onDelete: "restrict" }),
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+    quantity: qty("quantity").notNull(),
+    lineTotal: money("line_total").notNull(),
+    cogs: money("cogs").notNull().default("0"),
+    ...timestamps(),
+  },
+  (t) => [
+    index("sri_return_idx").on(t.returnId),
+    index("sri_order_item_idx").on(t.orderItemId),
+    check("sri_qty_positive", sql`${t.quantity} > 0`),
   ],
 );
 

@@ -131,7 +131,8 @@ export const stockLevels = pgTable(
       t.warehouseId,
     ),
     index("stock_levels_company_warehouse_idx").on(t.companyId, t.warehouseId),
-    check("stock_levels_quantity_non_negative", sql`${t.quantity} >= 0`),
+    // Qoldiq manfiy bo'lishi mumkin faqat desktop kassaning offline sotuvi sinxronida (tovar jismonan sotilgan,
+    // hisobdagi qoldiq kam edi) — nomuvofiqlik `pos_sync_conflicts` da. Boshqa chiqimlar `moveStock` da >= 0 shart bilan.
     check("stock_levels_reserved_non_negative", sql`${t.reservedQty} >= 0`),
     check("stock_levels_cost_non_negative", sql`${t.avgCostPrice} >= 0`),
   ],

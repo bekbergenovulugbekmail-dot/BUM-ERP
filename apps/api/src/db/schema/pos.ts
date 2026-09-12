@@ -73,3 +73,33 @@ export const posSyncOperations = pgTable(
     index("pso_device_status_idx").on(t.deviceId, t.status),
   ],
 );
+
+/**
+ * Offline amal sinxronida aniqlangan nomuvofiqlik — amal baribir bajarilgan (sotuv jismonan bo'lgan), rahbar ko'rib
+ * chiqadi: zaxira yetmadi (qoldiq manfiy), narx yoki kurs o'zgargan, mijoz faol emas, kredit limiti, balans/keshbek
+ * yetmadi (farqi qarzga), yopilgan smenaga chek, takroriy telefonli mijoz.
+ */
+export const posSyncConflicts = pgTable(
+  "pos_sync_conflicts",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    deviceId: uuid("device_id")
+      .notNull()
+      .references(() => posDevices.id, { onDelete: "cascade" }),
+    opId: uuid("op_id").notNull(),
+    kind: varchar("kind", { length: 40 }).notNull(),
+    referenceType: varchar("reference_type", { length: 40 }),
+    referenceId: uuid("reference_id"),
+    details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: uuid("resolved_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (t) => [
+    index("psc_company_open_idx").on(t.companyId, t.resolvedAt, t.createdAt),
+    index("psc_device_op_idx").on(t.deviceId, t.opId),
+  ],
+);

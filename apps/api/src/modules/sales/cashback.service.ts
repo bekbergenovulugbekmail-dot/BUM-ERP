@@ -412,19 +412,38 @@ export async function reverseOrderCashback(
       ),
     );
   const earned = toMinor(earnedRow!.total);
-  if (earned <= 0n && input.redeemed <= 0n) return { redeemedRefunded: 0n, earnedReversed: 0n };
+  return reverseCashback(
+    tx,
+    tenant,
+    { customerId: input.customerId, orderId: input.orderId, label: input.orderNumber, restore: input.redeemed, reverse: earned, date: input.date },
+    meta,
+  );
+}
+
+/**
+ * Keshbekni qaytarish (to'liq va qisman qaytarishda umumiy): `restore` — chekda ishlatilgan keshbek mijozga qaytadi;
+ * `reverse` — chekdan berilgan keshbek bekor qilinadi, mijoz sarflagan bo'lsa qolgan keshbek miqdorida.
+ */
+export async function reverseCashback(
+  tx: Tx,
+  tenant: TenantContext,
+  input: { customerId: string; orderId: string; label: string; restore: bigint; reverse: bigint; date?: string },
+  meta: RequestMeta,
+) {
+  const companyId = tenant.company.id;
+  if (input.reverse <= 0n && input.restore <= 0n) return { redeemedRefunded: 0n, earnedReversed: 0n };
 
   const customer = await lockCustomer(tx, companyId, input.customerId);
   const date = input.date ?? todayIso();
   const liability = await ensureAccountBySubtype(tx, companyId, "cashback_liability");
   let balance = toMinor(customer.cashbackBalance);
 
-  if (input.redeemed > 0n) {
+  if (input.restore > 0n) {
     const id = randomUUID();
-    const amount = fromMinor(input.redeemed);
+    const amount = fromMinor(input.restore);
     const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
       entryDate: date,
-      description: `Keshbek qaytarildi: ${input.orderNumber}`,
+      description: `Keshbek qaytarildi: ${input.label}`,
       referenceType: "cashback",
       referenceId: id,
       lines: [
@@ -432,7 +451,7 @@ export async function reverseOrderCashback(
         { accountId: liability, credit: amount },
       ],
     });
-    balance += input.redeemed;
+    balance += input.restore;
     await tx
       .update(customers)
       .set({ totalDebt: sql`${customers.totalDebt} + ${amount}::numeric`, updatedAt: new Date() })
@@ -448,13 +467,13 @@ export async function reverseOrderCashback(
     });
   }
 
-  const reversible = earned < balance ? earned : balance;
+  const reversible = input.reverse < balance ? input.reverse : balance;
   if (reversible > 0n) {
     const id = randomUUID();
     const amount = fromMinor(reversible);
     const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
       entryDate: date,
-      description: `Keshbek bekor qilindi: ${input.orderNumber}`,
+      description: `Keshbek bekor qilindi: ${input.label}`,
       referenceType: "cashback",
       referenceId: id,
       lines: [
@@ -484,12 +503,12 @@ export async function reverseOrderCashback(
     resourceId: customer.id,
     details: {
       orderId: input.orderId,
-      redeemedRefunded: fromMinor(input.redeemed),
+      redeemedRefunded: fromMinor(input.restore),
       earnedReversed: fromMinor(reversible),
       balanceAfter: fromMinor(balance),
     },
   });
-  return { redeemedRefunded: input.redeemed, earnedReversed: reversible };
+  return { redeemedRefunded: input.restore, earnedReversed: reversible };
 }
 
 export async function listCashbackTransactions(conn: DbOrTx, tenant: TenantContext, customerId: string, limit: number) {

@@ -2,7 +2,16 @@
  * Server bilan aloqa (faqat main jarayonda — token renderer'ga chiqmaydi).
  * Tarmoq xatosi yoki vaqt tugashi — `OfflineError` (navbat saqlanadi, keyinroq qayta urinish).
  */
-import type { CashierRecord, CompanyInfo, DeviceInfo, PullCursors, PullResponse, PushResult, WireOperation } from "../shared/sync-types.js";
+import type {
+  CashierRecord,
+  CompanyInfo,
+  DeviceInfo,
+  PullCursors,
+  PullResponse,
+  PushResult,
+  RemoteReceipt,
+  WireOperation,
+} from "../shared/sync-types.js";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -96,7 +105,9 @@ export function createApiClient(options: {
     session: () => request<{ device: DeviceInfo; company: CompanyInfo; serverTime: string }>("GET", "/api/pos-device/session"),
     cashierLogin: (phone: string, password: string) =>
       request<{ cashier: Omit<CashierRecord, "userId" | "active"> & { id: string } }>("POST", "/api/pos-device/cashiers/login", credentials(phone, password)),
-    pull: (cursors: PullCursors, limit?: number) => request<PullResponse>("POST", "/api/pos-device/pull", { cursors, ...(limit ? { limit } : {}) }),
+    pull: (cursors: PullCursors, limit?: number, configHash?: string) =>
+      request<PullResponse>("POST", "/api/pos-device/pull", { cursors, ...(limit ? { limit } : {}), ...(configHash ? { configHash } : {}) }),
     push: (ops: WireOperation[]) => request<{ results: PushResult[] }>("POST", "/api/pos-device/push", { ops }),
+    receipt: (number: string) => request<{ receipt: RemoteReceipt }>("GET", `/api/pos-device/receipts/${encodeURIComponent(number)}`),
   };
 }

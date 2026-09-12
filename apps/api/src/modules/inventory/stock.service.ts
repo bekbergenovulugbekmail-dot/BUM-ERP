@@ -55,6 +55,11 @@ export type StockMove = {
   referenceId?: string | null;
   notes?: string | null;
   occurredAt?: Date;
+  /**
+   * Faqat desktop kassaning offline sotuvi sinxronida: tovar jismonan sotilgan — qoldiq yetmasa ham chiqim yoziladi
+   * (qoldiq manfiy bo'ladi, chaqiruvchi nomuvofiqlikni qayd etadi). Tannarx 0 bo'lsa — mahsulot xarid narxi.
+   */
+  allowNegative?: boolean;
 };
 
 async function lockLevel(tx: Tx, companyId: string, productId: string, warehouseId: string) {
@@ -84,7 +89,12 @@ export async function moveStock(tx: Tx, companyId: string, performedBy: string |
   const incoming = !delta.startsWith("-");
 
   const [product] = await tx
-    .select({ id: products.id, baseUnitId: products.baseUnitId })
+    .select({
+      id: products.id,
+      baseUnitId: products.baseUnitId,
+      purchasePrice: products.purchasePrice,
+      purchaseCurrency: products.purchaseCurrency,
+    })
     .from(products)
     .where(and(eq(products.id, move.productId), eq(products.companyId, companyId)))
     .limit(1);
@@ -109,12 +119,13 @@ export async function moveStock(tx: Tx, companyId: string, performedBy: string |
 
   let level = await lockLevel(tx, companyId, product.id, warehouse.id);
   if (!level) {
-    if (!incoming) throw badRequest("Bu mahsulot omborda mavjud emas");
+    if (!incoming && !move.allowNegative) throw badRequest("Bu mahsulot omborda mavjud emas");
     await tx.insert(stockLevels).values({ companyId, productId: product.id, warehouseId: warehouse.id }).onConflictDoNothing();
     level = await lockLevel(tx, companyId, product.id, warehouse.id);
   }
 
-  // Nol tannarxli kirim (bepul tovar) ham o'rtachani kamaytiradi; tannarx berilmasa o'zgarmaydi
+  // Nol tannarxli kirim (bepul tovar) ham o'rtachani kamaytiradi; tannarx berilmasa o'zgarmaydi.
+  // Qoldiq nol yoki manfiy bo'lsa (offline sotuvdan keyin) o'rtacha — kirim tannarxi (manfiy miqdor bilan tortish ma'nosiz).
   const updatesCost = INCOMING.has(move.type) && move.costPrice != null;
   const [updated] = await tx
     .update(stockLevels)
@@ -122,14 +133,26 @@ export async function moveStock(tx: Tx, companyId: string, performedBy: string |
       quantity: sql`${stockLevels.quantity} + ${delta}::numeric`,
       ...(updatesCost
         ? {
-            avgCostPrice: sql`round((${stockLevels.quantity} * ${stockLevels.avgCostPrice} + ${delta}::numeric * ${move.costPrice}::numeric) / (${stockLevels.quantity} + ${delta}::numeric), 4)`,
+            avgCostPrice: sql`case when ${stockLevels.quantity} <= 0 then round(${move.costPrice}::numeric, 4)
+              else round((${stockLevels.quantity} * ${stockLevels.avgCostPrice} + ${delta}::numeric * ${move.costPrice}::numeric) / (${stockLevels.quantity} + ${delta}::numeric), 4) end`,
           }
         : {}),
       updatedAt: new Date(),
     })
-    .where(and(eq(stockLevels.id, level!.id), sql`${stockLevels.quantity} + ${delta}::numeric >= 0`))
+    .where(
+      and(
+        eq(stockLevels.id, level!.id),
+        move.allowNegative && !incoming ? undefined : sql`${stockLevels.quantity} + ${delta}::numeric >= 0`,
+      ),
+    )
     .returning({ quantity: stockLevels.quantity, avgCostPrice: stockLevels.avgCostPrice });
   if (!updated) throw badRequest("Yetarli zaxira mavjud emas");
+
+  // Hech qachon kirim bo'lmagan mahsulot offline sotilsa — tannarx xarid narxidan (asosiy valyutada bo'lsa)
+  let issueCost = level!.avgCostPrice;
+  if (move.allowNegative && !incoming && toMinor(issueCost, 4) === 0n && !product.purchaseCurrency) {
+    issueCost = product.purchasePrice;
+  }
 
   const [movement] = await tx
     .insert(stockMovements)
@@ -142,7 +165,7 @@ export async function moveStock(tx: Tx, companyId: string, performedBy: string |
       batchId: move.batchId ?? null,
       quantity: delta,
       unitId: product.baseUnitId,
-      costPrice: updatesCost ? move.costPrice! : level!.avgCostPrice,
+      costPrice: updatesCost ? move.costPrice! : issueCost,
       referenceType: move.referenceType ?? null,
       referenceId: move.referenceId ?? null,
       notes: move.notes ?? null,

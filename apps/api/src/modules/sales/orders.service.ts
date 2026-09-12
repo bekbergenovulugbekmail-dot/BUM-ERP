@@ -36,6 +36,7 @@ import {
   posShifts,
   salesOrderItems,
   salesOrders,
+  salesReturns,
 } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
@@ -107,6 +108,18 @@ export type DispatchableOrder = {
 export type PricingOptions = {
   /** Narx va chegirmani server o'zi hisoblagan (masalan, aksiya) — `sales.edit` talab qilinmaydi. */
   trustedPricing?: boolean;
+  /** Offline kassa: sotuv lahzasidagi kurslar (joriy kurs o'rniga). */
+  rates?: Record<string, string>;
+};
+
+/** `sales.edit` ruxsatisiz, lekin ishonchli narxlashda prays-listdan farq qilgan qator (offline kassa nomuvofiqligi). */
+export type PriceChange = {
+  productId: string;
+  name: string;
+  unitPrice: string;
+  listPrice: string;
+  discountPercent: string;
+  customerDiscount: string;
 };
 
 export async function prepareSalesItems(
@@ -142,7 +155,7 @@ export async function prepareSalesItems(
   const rates = new Map<string, string>();
   const basePrice = async (salesPrice: string, currency: string | null) => {
     if (!currency) return salesPrice;
-    if (!rates.has(currency)) rates.set(currency, await currencyRate(tx, companyId, currency));
+    if (!rates.has(currency)) rates.set(currency, options.rates?.[currency] ?? (await currencyRate(tx, companyId, currency)));
     return fromMinor(rescale(toMinor(salesPrice, 4) * toMinor(rates.get(currency)!, 4), 8, 4), 4);
   };
 
@@ -159,6 +172,7 @@ export async function prepareSalesItems(
     lineTotal: string;
     notes: string | null;
   }[] = [];
+  const priceChanges: PriceChange[] = [];
 
   for (const item of items) {
     const product = byId.get(item.productId);
@@ -173,8 +187,9 @@ export async function prepareSalesItems(
     const discountPercent = item.discountPercent ?? customerDiscount;
     const changed =
       toMinor(unitPrice, 4) !== toMinor(listPrice, 4) || toMinor(discountPercent, 2) !== toMinor(customerDiscount, 2);
-    if (changed && !canOverride && !options.trustedPricing) {
-      throw forbidden("Narx yoki chegirmani o'zgartirish uchun ruxsat yo'q: sales.edit");
+    if (changed && !canOverride) {
+      if (!options.trustedPricing) throw forbidden("Narx yoki chegirmani o'zgartirish uchun ruxsat yo'q: sales.edit");
+      priceChanges.push({ productId: product.id, name: product.name, unitPrice, listPrice, discountPercent, customerDiscount });
     }
 
     const amounts = computeLine({
@@ -207,11 +222,14 @@ export async function prepareSalesItems(
       discountAmount: fromMinor(discountAmount),
       totalAmount: fromMinor(subtotal + taxAmount),
     },
+    priceChanges,
   };
 }
 
 /** Qator + (POS sotuv valyutalarida) chek valyutasi, kurs va valyutadagi summa. */
 export type SalesItemRow = Awaited<ReturnType<typeof prepareSalesItems>>["items"][number] & {
+  /** Offline kassa: qurilmada yaratilgan qator ID'si (qaytarishda shunga bog'lanadi). */
+  id?: string;
   priceCurrency?: string | null;
   priceRate?: string;
   currencyTotal?: string;
@@ -234,10 +252,12 @@ export async function assignSaleCurrencies(
   baseCurrency: string,
   saleCurrencies: string[],
   items: SalesItemRow[],
+  /** Offline kassa: sotuv lahzasidagi kurslar. */
+  rateOverrides?: Record<string, string>,
 ) {
   const rates = new Map<string, string>([[baseCurrency, "1.0000"]]);
   for (const code of saleCurrencies) {
-    if (!rates.has(code)) rates.set(code, await currencyRate(tx, companyId, code));
+    if (!rates.has(code)) rates.set(code, rateOverrides?.[code] ?? (await currencyRate(tx, companyId, code)));
   }
   const productRows = await tx
     .select({ id: products.id, salesCurrency: products.salesCurrency })
@@ -430,7 +450,21 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
     .from(customerCashbackTransactions)
     .where(and(eq(customerCashbackTransactions.orderId, orderId), eq(customerCashbackTransactions.type, "earn")));
 
-  return { ...order, currencyTotals, cashbackEarned: earned!.total, items, payments };
+  const returns = await conn
+    .select({
+      id: salesReturns.id,
+      number: salesReturns.number,
+      totalAmount: salesReturns.totalAmount,
+      refundMethod: salesReturns.refundMethod,
+      refundAmount: salesReturns.refundAmount,
+      reason: salesReturns.reason,
+      createdAt: salesReturns.createdAt,
+    })
+    .from(salesReturns)
+    .where(eq(salesReturns.orderId, orderId))
+    .orderBy(asc(salesReturns.createdAt));
+
+  return { ...order, currencyTotals, cashbackEarned: earned!.total, items, payments, returns };
 }
 
 export async function listOrders(
@@ -664,15 +698,28 @@ export async function cancelOrder(tx: Tx, tenant: TenantContext, orderId: string
  * Zaxira chiqimi, tannarx, mijoz qarzi va sotuv jurnali. `upcomingPayment` — shu
  * tranzaksiyada keyin yoziladigan to'lov (POS cheki): kredit limiti va mijozsiz sotuv shunga qarab tekshiriladi.
  */
+export type DispatchOptions = {
+  /** Offline kassa sinxroni: qoldiq yetmasa ham chiqim (manfiy qoldiq) — `shortages` da qaytadi. */
+  allowNegativeStock?: boolean;
+  /** Offline kassa sinxroni: kredit limitidan oshsa ham — `creditLimit` da qaytadi. */
+  skipCreditLimit?: boolean;
+  /** Zaxira harakati vaqti (offline chek yopilgan vaqt). */
+  occurredAt?: Date;
+};
+
+export type StockShortage = { productId: string; name: string; requested: string; available: string };
+
 export async function dispatchOrder(
   tx: Tx,
   tenant: TenantContext,
   order: DispatchableOrder,
   entryDate: string,
   upcomingPayment = 0n,
+  options: DispatchOptions = {},
 ) {
   const companyId = tenant.company.id;
   const total = toMinor(order.totalAmount);
+  let creditLimit: { limit: string; debtAfter: string } | null = null;
 
   if (order.customerId) {
     const [customer] = await tx
@@ -684,7 +731,10 @@ export async function dispatchOrder(
     const limit = toMinor(customer!.creditLimit);
     const debtAfter = toMinor(customer!.totalDebt) + total - upcomingPayment;
     if (limit > 0n && debtAfter > limit) {
-      throw badRequest(`Mijoz kredit limitidan oshadi (limit ${fromMinor(limit)}, qarz ${fromMinor(debtAfter)})`);
+      if (!options.skipCreditLimit) {
+        throw badRequest(`Mijoz kredit limitidan oshadi (limit ${fromMinor(limit)}, qarz ${fromMinor(debtAfter)})`);
+      }
+      creditLimit = { limit: fromMinor(limit), debtAfter: fromMinor(debtAfter) };
     }
   } else if (toMinor(order.paidAmount) + upcomingPayment < total) {
     throw badRequest("Mijozsiz sotuv jo'natishdan oldin to'liq to'lanishi kerak");
@@ -702,13 +752,14 @@ export async function dispatchOrder(
   const productById = new Map(productRows.map((p) => [p.id, p]));
 
   let cogs = 0n;
+  const shortages: StockShortage[] = [];
   for (const item of items) {
     const product = productById.get(item.productId)!;
     const factor = toMinor(await unitFactorToBase(tx, companyId, product, item.unitId), 4);
     const quantity = toMinor(item.quantity, 4);
     const baseQty = rescale(quantity * factor, 8, 4);
 
-    const { movement } = await moveStock(tx, companyId, tenant.user.id, {
+    const { movement, level } = await moveStock(tx, companyId, tenant.user.id, {
       type: "issue",
       productId: product.id,
       warehouseId: order.warehouseId,
@@ -716,7 +767,19 @@ export async function dispatchOrder(
       referenceType: order.isPos ? "pos_sale" : "sales_order",
       referenceId: order.id,
       notes: `Sotuv: ${order.number}`,
+      allowNegative: options.allowNegativeStock,
+      occurredAt: options.occurredAt,
     });
+    const after = toMinor(level.quantity, 4);
+    if (after < 0n) {
+      const before = after + baseQty;
+      shortages.push({
+        productId: product.id,
+        name: product.name,
+        requested: fromMinor(baseQty, 4),
+        available: fromMinor(before > 0n ? before : 0n, 4),
+      });
+    }
     const unitCost = rescale(toMinor(movement.costPrice, 4) * factor, 8, 4);
     cogs += rescale(quantity * unitCost, 8, 2);
     await tx
@@ -758,7 +821,7 @@ export async function dispatchOrder(
       lines,
     });
   }
-  return { cogs: fromMinor(cogs) };
+  return { cogs: fromMinor(cogs), shortages, creditLimit };
 }
 
 export async function shipOrder(tx: Tx, tenant: TenantContext, orderId: string, meta: RequestMeta) {
@@ -794,6 +857,8 @@ export async function returnOrder(
   if (order.status !== "shipped" && order.status !== "delivered") throw badRequest("Faqat jo'natilgan buyurtma qaytariladi");
   assertWarehouseAccess(tenant, order.warehouseId);
   await assertOrderInScope(tx, tenant, orderId);
+  const partial = await tx.$count(salesReturns, eq(salesReturns.orderId, orderId));
+  if (partial > 0) throw badRequest("Chek qisman qaytarilgan — qolgan mahsulotlarni qisman qaytarish orqali qaytaring");
 
   const refund = input.refund ?? true;
   const paid = toMinor(order.paidAmount);

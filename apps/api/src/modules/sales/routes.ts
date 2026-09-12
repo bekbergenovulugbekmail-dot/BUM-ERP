@@ -10,6 +10,7 @@
  *   POST   /orders/:orderId/confirm, /orders/:orderId/ship   sales.approve (+ ombor ruxsati)
  *   POST   /orders/:orderId/cancel                        sales.cancel
  *   POST   /orders/:orderId/return                        sales.refund
+ *   POST   /orders/:orderId/return-items                  sales.refund   (qisman qaytarish)
  *   GET    /payments (?customerId=&orderId=&limit=&cursor=)   sales.view
  *   POST   /payments                                      finance.manage (201 yangi / 200 takroriy reference)
  *   GET    /pos/shifts (?warehouseId=&status=&limit=), /pos/shifts/open?warehouseId=, /pos/shifts/:shiftId   pos.use
@@ -61,6 +62,7 @@ import {
   openShift,
   posCustomerPayment,
 } from "./pos.service.js";
+import { REFUND_METHODS, returnSaleItems } from "./returns.service.js";
 
 const nullableText = (max: number) =>
   z
@@ -140,6 +142,14 @@ const returnBody = z
     cashAccountId: z.uuid().nullable().optional(),
   })
   .optional();
+
+const returnItemsBody = z.strictObject({
+  items: z.array(z.strictObject({ orderItemId: z.uuid(), quantity: positiveQty })).min(1).max(500),
+  refundMethod: z.enum(REFUND_METHODS).default("cash"),
+  reason: nullableText(1000),
+  /** Pul qaytaradigan ochiq web kassa smenasi (ixtiyoriy). */
+  shiftId: z.uuid().nullable().optional(),
+});
 
 const paymentBody = z.strictObject({
   customerId: z.uuid().nullable().optional(),
@@ -357,6 +367,16 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     return writeInTenant(req, "sales.refund", (tx, tenant) =>
       returnOrder(tx, tenant, orderId, body, requestMeta(req)),
     );
+  });
+
+  app.post("/orders/:orderId/return-items", async (req, reply) => {
+    const { orderId } = orderParams.parse(req.params);
+    const body = returnItemsBody.parse(req.body);
+    const result = await writeInTenant(req, "sales.refund", (tx, tenant) =>
+      returnSaleItems(tx, tenant, orderId, body, requestMeta(req)),
+    );
+    reply.status(201);
+    return result;
   });
 
   // ─── To'lovlar ───────────────────────────────────────────────────────────

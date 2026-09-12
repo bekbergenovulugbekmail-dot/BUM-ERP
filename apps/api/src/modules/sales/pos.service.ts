@@ -16,7 +16,7 @@
  *  - `getShifts` / `getOpenShift` ruxsat tekshirmasdi — `pos.use`
  */
 import { and, desc, eq, getTableColumns, isNull, sql } from "drizzle-orm";
-import { badRequest, conflict, forbidden, notFound } from "@bum/shared";
+import { AppError, badRequest, conflict, forbidden, notFound } from "@bum/shared";
 import { warehouses } from "../../db/schema/inventory.js";
 import { customers, posShifts, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -204,13 +204,18 @@ export async function closeShift(
     /** Kassada sanalgan chet valyuta naqdi; smenada shu valyutada naqd bo'lsa — majburiy. */
     closingForeignCash?: { currency: string; amount: string }[];
     notes?: string | null;
-    /** Desktop kassa (sinxron): smena qurilmada yopilgan vaqt. */
+    /** Desktop kassa (sinxron): smena qurilmada yopilgan vaqt va qurilma. */
     closedAt?: Date;
+    deviceId?: string;
   },
   meta: RequestMeta,
 ) {
   const shift = await lockShift(tx, tenant, shiftId);
   if (shift.status !== "open") throw badRequest("Smena allaqachon yopilgan");
+  // Desktop smenasini web'dan yopib bo'lmaydi: qurilmada hali sinxron bo'lmagan cheklar bo'lishi mumkin
+  if ((shift.deviceId ?? null) !== (input.deviceId ?? null)) {
+    throw badRequest(shift.deviceId ? "Kassa qurilmasi smenasi faqat o'sha kassada yopiladi" : "Bu smena web kassaniki");
+  }
   await assertShiftOperator(tx, tenant, shift.cashierId);
 
   const expected = toMinor(shift.openingCash) + toMinor(shift.totalCash);
@@ -270,6 +275,21 @@ export async function closeShift(
   };
 }
 
+/** Desktop kassaning offline cheki: qurilmadagi ID, raqam (`K01-000123`), yopilgan vaqt, qator ID'lari va kurslar. */
+export type OfflineSale = {
+  id: string;
+  number: string;
+  soldAt: Date;
+  deviceId: string;
+  itemIds: string[];
+  rates?: Record<string, string>;
+};
+
+/** Offline chek sinxronidagi nomuvofiqlik — chek baribir yoziladi, rahbar ko'rib chiqadi. */
+export type SaleConflict = { kind: string; details: Record<string, unknown> };
+
+const minBigInt = (...values: bigint[]) => values.reduce((a, b) => (b < a ? b : a));
+
 export async function completeSale(
   tx: Tx,
   tenant: TenantContext,
@@ -293,12 +313,23 @@ export async function completeSale(
      */
     currencyPayments?: { currency: string; amount: string; method?: "cash" | "card" }[];
     notes?: string | null;
+    /**
+     * Desktop kassa sinxroni. Chek qurilmada allaqachon yopilgan (tovar va pul berilgan) — server rad etish o'rniga
+     * nomuvofiqlikni qayd etadi: zaxira yetmasa (manfiy qoldiq), narx/kurs o'zgargan, mijoz faol emas, kredit limiti,
+     * balans yoki keshbek yetmasa (farqi qarzga), smena yopilgan.
+     */
+    offline?: OfflineSale;
   },
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
+  const offline = input.offline;
+  const conflicts: SaleConflict[] = [];
   const shift = await lockShift(tx, tenant, input.shiftId);
-  if (shift.status !== "open") throw badRequest("Smena yopilgan");
+  if (shift.status !== "open") {
+    if (!offline) throw badRequest("Smena yopilgan");
+    conflicts.push({ kind: "shift_closed", details: { shiftId: shift.id } });
+  }
   await assertShiftOperator(tx, tenant, shift.cashierId);
   assertWarehouseAccess(tenant, shift.warehouseId);
 
@@ -317,24 +348,57 @@ export async function completeSale(
       .where(and(eq(customers.id, input.customerId), eq(customers.companyId, companyId)))
       .limit(1);
     if (!customer) throw badRequest("Mijoz topilmadi");
-    if (!customer.isActive) throw badRequest("Mijoz faol emas");
+    if (!customer.isActive) {
+      if (!offline) throw badRequest("Mijoz faol emas");
+      conflicts.push({ kind: "customer_inactive", details: { customerId: input.customerId } });
+    }
     customerDiscount = customer.discountPercent;
     customerBalance = toMinor(customer.balance);
     customerCashback = toMinor(customer.cashbackBalance);
   }
 
-  const { items, totals } = await prepareSalesItems(tx, tenant, input.items, customerDiscount);
+  if (offline && offline.itemIds.length !== input.items.length) throw badRequest("Chek qatorlari identifikatori noto'g'ri");
+  // Offline chek: narx va chegirma qurilmadagi shartda (prays-listdan farqi — nomuvofiqlik), kurs — sotuv lahzasidagi
+  const { items, totals, priceChanges } = await prepareSalesItems(
+    tx,
+    tenant,
+    input.items,
+    customerDiscount,
+    offline ? { trustedPricing: true, rates: offline.rates } : {},
+  );
+  if (priceChanges.length > 0) conflicts.push({ kind: "price_changed", details: { items: priceChanges } });
   const total = toMinor(totals.totalAmount);
   const cashbackSettings = input.customerId ? await getCashbackSettings(tx, companyId) : null;
 
   // Chek valyutalari; buxgalteriya asosiy valyutada, to'lov har valyuta bo'yicha
   const baseCurrency = await companyCurrency(tx, companyId);
   const saleCurrencies = [...new Set(input.saleCurrencies?.length ? input.saleCurrencies : [baseCurrency])];
-  const saleItems: SalesItemRow[] = items;
-  const buckets = await assignSaleCurrencies(tx, companyId, baseCurrency, saleCurrencies, saleItems);
+  if (offline?.rates) {
+    for (const [code, deviceRate] of Object.entries(offline.rates)) {
+      if (code === baseCurrency) continue;
+      const serverRate = await currencyRate(tx, companyId, code).catch((error: unknown) => {
+        if (error instanceof AppError) return null;
+        throw error;
+      });
+      if (serverRate === null || toMinor(serverRate, 4) !== toMinor(deviceRate, 4)) {
+        conflicts.push({ kind: "rate_changed", details: { currency: code, deviceRate, serverRate } });
+      }
+    }
+  }
+  const saleItems: SalesItemRow[] = offline ? items.map((item, index) => ({ ...item, id: offline.itemIds[index]! })) : items;
+  const buckets = await assignSaleCurrencies(tx, companyId, baseCurrency, saleCurrencies, saleItems, offline?.rates);
   const baseTotal = buckets.get(baseCurrency)?.base ?? 0n;
 
-  const fromCashback = input.cashbackAmount ? toMinor(input.cashbackAmount) : 0n;
+  let fromCashback = input.cashbackAmount ? toMinor(input.cashbackAmount) : 0n;
+  if (offline && fromCashback > 0n) {
+    // Offline: keshbek boshqa kassada ishlatilgan yoki sozlama o'zgargan bo'lishi mumkin — yetmagani qarzga
+    const limit = cashbackSettings?.enabled ? maxCashbackUsage(cashbackSettings, total) : 0n;
+    const allowed = minBigInt(fromCashback, customerCashback, limit);
+    if (allowed < fromCashback) {
+      conflicts.push({ kind: "cashback_insufficient", details: { requested: fromMinor(fromCashback), applied: fromMinor(allowed) } });
+      fromCashback = allowed;
+    }
+  }
   if (fromCashback > 0n) {
     if (!input.customerId || !cashbackSettings) throw badRequest("Keshbekdan foydalanish uchun mijoz tanlanishi kerak");
     if (!cashbackSettings.enabled) throw badRequest("Keshbek tizimi o'chirilgan");
@@ -347,7 +411,15 @@ export async function completeSale(
     }
   }
 
-  const fromBalance = input.balanceAmount ? toMinor(input.balanceAmount) : 0n;
+  let fromBalance = input.balanceAmount ? toMinor(input.balanceAmount) : 0n;
+  if (offline && fromBalance > 0n && input.customerId) {
+    // Offline: balans boshqa kassada sarflangan bo'lishi mumkin — yetmagani qarzga
+    const allowed = minBigInt(fromBalance, customerBalance, total - fromCashback);
+    if (allowed < fromBalance) {
+      conflicts.push({ kind: "balance_insufficient", details: { requested: fromMinor(fromBalance), applied: fromMinor(allowed) } });
+      fromBalance = allowed;
+    }
+  }
   if ((fromBalance > 0n || input.changeToBalance) && !input.customerId) {
     throw badRequest("Mijoz balansidan foydalanish uchun mijoz tanlanishi kerak");
   }
@@ -426,15 +498,17 @@ export async function completeSale(
   }
   const foreignPaidBase = foreignParts.reduce((sum, part) => sum + part.paidBase, 0n);
 
-  const today = todayIso();
-  const number = await nextDocumentNumber(tx, {
-    table: salesOrders,
-    column: salesOrders.number,
-    companyColumn: salesOrders.companyId,
-    companyId,
-    prefix: `SO-${today.slice(0, 4)}-`,
-    width: 4,
-  });
+  const today = offline ? offline.soldAt.toISOString().slice(0, 10) : todayIso();
+  const number = offline
+    ? offline.number
+    : await nextDocumentNumber(tx, {
+        table: salesOrders,
+        column: salesOrders.number,
+        companyColumn: salesOrders.companyId,
+        companyId,
+        prefix: `SO-${today.slice(0, 4)}-`,
+        width: 4,
+      });
 
   const [order] = await tx
     .insert(salesOrders)
@@ -451,6 +525,7 @@ export async function completeSale(
       posShiftId: shift.id,
       notes: input.notes ?? null,
       createdBy: tenant.user.id,
+      ...(offline ? { id: offline.id, deviceId: offline.deviceId, createdAt: offline.soldAt } : {}),
     })
     .returning({
       id: salesOrders.id,
@@ -461,9 +536,20 @@ export async function completeSale(
       paidAmount: salesOrders.paidAmount,
       isPos: salesOrders.isPos,
     });
-  await insertSalesItems(tx, companyId, order!.id, items);
+  await insertSalesItems(tx, companyId, order!.id, saleItems);
 
-  await dispatchOrder(tx, tenant, order!, today, paid + fromBalance + fromCashback + foreignPaidBase);
+  const dispatched = await dispatchOrder(
+    tx,
+    tenant,
+    order!,
+    today,
+    paid + fromBalance + fromCashback + foreignPaidBase,
+    offline ? { allowNegativeStock: true, skipCreditLimit: true, occurredAt: offline.soldAt } : {},
+  );
+  if (dispatched.shortages.length > 0) {
+    conflicts.push({ kind: "stock_shortage", details: { warehouseId: shift.warehouseId, items: dispatched.shortages } });
+  }
+  if (dispatched.creditLimit) conflicts.push({ kind: "credit_limit", details: { customerId: input.customerId, ...dispatched.creditLimit } });
   await tx
     .update(salesOrders)
     .set({ status: total === 0n ? "delivered" : "shipped", updatedAt: new Date() })
@@ -525,6 +611,8 @@ export async function completeSale(
         orderId: order!.id,
         posShiftId: shift.id,
         date: today,
+        // Offline chek: qaytim kassada qolgan va mijozga va'da qilingan — mijoz keyin faolsizlantirilgan bo'lsa ham
+        allowInactive: offline !== undefined,
       },
       meta,
     );
@@ -603,9 +691,12 @@ export async function completeSale(
       cashbackUsed: fromMinor(fromCashback),
       cashbackEarned: fromMinor(cashbackEarned),
       ...(currencyTotals.length > 0 ? { currencyTotals } : {}),
+      ...(offline ? { deviceId: offline.deviceId, soldAt: offline.soldAt.toISOString(), conflicts: conflicts.map((c) => c.kind) } : {}),
     },
   });
   return {
+    /** Offline chek sinxronidagi nomuvofiqliklar (web kassada doim bo'sh). */
+    conflicts,
     order: await getOrder(tx, tenant, order!.id),
     paid: paidText,
     /** Mijozga qo'lda qaytariladigan qaytim (balansga o'tgani ayirilgan). */

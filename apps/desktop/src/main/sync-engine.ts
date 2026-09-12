@@ -6,7 +6,7 @@
  *    o'tkazib yuborilmaydi; saqlangan kursor esa hech qachon orqaga ketmaydi (`laterCursor`).
  *  - Aloqa yo'q — holat `offline`, navbat saqlanadi; 401 — qurilma o'chirilgan (`unauthorized`).
  */
-import type { PullCursor, PullCursors, PullEntity, SyncStatus, WireOperation } from "../shared/sync-types.js";
+import type { PosConfig, PullCursor, PullCursors, PullEntity, SyncStatus, WireOperation } from "../shared/sync-types.js";
 import { PULL_ENTITIES } from "../shared/sync-types.js";
 import { ApiError, OfflineError, type ApiClient } from "./api-client.js";
 import type { LocalStore, OutboxOp } from "./local-store.js";
@@ -107,7 +107,7 @@ export class SyncEngine {
     const totals: Partial<Record<PullEntity, number>> = {};
     let cursors = rewindCursors(this.store.getCursors());
     for (let round = 0; round < MAX_PULL_ROUNDS; round++) {
-      const response = await this.api.pull(cursors);
+      const response = await this.api.pull(cursors, undefined, this.store.getMeta<PosConfig>("config")?.hash);
       const counts = this.store.applyPull(response);
       for (const entity of PULL_ENTITIES) totals[entity] = (totals[entity] ?? 0) + counts[entity];
       if (!response.more) break;

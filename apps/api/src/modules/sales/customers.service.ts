@@ -33,6 +33,8 @@ export function salesAudit(
 }
 
 export type CustomerInput = {
+  /** Faqat desktop kassa sinxroni: qurilmada yaratilgan mijoz ID'si (offline cheklar shunga bog'langan). */
+  id?: string;
   name: string;
   phone?: string | null;
   email?: string | null;

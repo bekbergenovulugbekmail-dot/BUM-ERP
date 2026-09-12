@@ -126,6 +126,11 @@ export type CashMove = {
   referenceId?: string | null;
   /** Summa qaysi valyutada; kassa shu valyutada bo'lishi shart. Standart — asosiy valyuta. */
   currency?: string;
+  /**
+   * Faqat desktop kassaning offline amali sinxronida: pul jismonan berilgan — hisobdagi qoldiq yetmasa ham chiqim
+   * yoziladi (qoldiq manfiy). Boshqa hollarda qoldiq manfiy bo'lmaydi.
+   */
+  allowOverdraft?: boolean;
 };
 
 export async function recordCashTransaction(tx: Tx, companyId: string, createdBy: string | null, move: CashMove) {
@@ -173,7 +178,12 @@ export async function recordCashTransaction(tx: Tx, companyId: string, createdBy
   const [updated] = await tx
     .update(cashAccounts)
     .set({ balance: sql`${cashAccounts.balance} + ${delta}::numeric`, updatedAt: new Date() })
-    .where(and(eq(cashAccounts.id, account.id), sql`${cashAccounts.balance} + ${delta}::numeric >= 0`))
+    .where(
+      and(
+        eq(cashAccounts.id, account.id),
+        move.allowOverdraft && move.type === "out" ? undefined : sql`${cashAccounts.balance} + ${delta}::numeric >= 0`,
+      ),
+    )
     .returning({ balance: cashAccounts.balance });
   if (!updated) throw badRequest("Kassada yetarli mablag' yo'q");
 

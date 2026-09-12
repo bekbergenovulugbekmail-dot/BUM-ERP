@@ -14,7 +14,26 @@ import type {
   WireOperation,
 } from "../shared/sync-types.js";
 import { PULL_ENTITIES } from "../shared/sync-types.js";
+import { toMinor } from "../shared/money.js";
 import { transaction, type LocalDb } from "./local-db.js";
+
+/** Chek/qaytarishning zaxiraga ta'siri (asosiy birlikda, ishorali). */
+export type StockDelta = { productId: string; quantity: string };
+
+export type OutboxError = { code: string; message: string; details?: unknown };
+
+/** Lokal hujjat (chek yoki qaytarish) va uning navbatdagi holati. */
+export type StoredDocument<T> = {
+  doc: T;
+  opId: string;
+  state: "pending" | "applied" | "rejected" | "discarded";
+  error: OutboxError | null;
+  result: Record<string, unknown> | null;
+};
+
+type DocumentRow = { data: string; op_id: string; discarded_at: string | null; status: string | null; error: string | null; result: string | null };
+
+type Param = string | number | null;
 
 export type OutboxOp = WireOperation & {
   seq: number;
@@ -104,6 +123,7 @@ export class LocalStore {
       this.setMeta("company", response.company);
       this.setMeta("device", response.device);
       this.setMeta("serverTime", response.serverTime);
+      if (response.config) this.setMeta("config", response.config);
       return counts;
     });
   }
@@ -243,11 +263,268 @@ export class LocalStore {
         const status = result.status === "applied" ? "applied" : "rejected";
         if (status === "applied") applied += 1;
         else rejected += 1;
+        // Bajarilgan — server qoldig'i keyingi pull'da keladi; rad etilgan — zaxira serverda o'zgarmagan
+        this.db.prepare("DELETE FROM stock_pending WHERE op_id = ?").run(op.opId);
         this.db
           .prepare("UPDATE outbox SET status = ?, result = ?, error = ?, attempts = attempts + 1, last_attempt_at = ? WHERE op_id = ?")
           .run(status, result.result ? JSON.stringify(result.result) : null, result.error ? JSON.stringify(result.error) : null, now.toISOString(), op.opId);
       }
       return { applied, rejected };
+    });
+  }
+
+  inTransaction<T>(fn: () => T): T {
+    return transaction(this.db, fn);
+  }
+
+  // ─── Katalog va mijozlar ────────────────────────────────────────────────
+
+  private dataRow<T>(sql: string, ...params: Param[]): T | null {
+    const row = this.db.prepare(sql).get(...params) as { data: string } | undefined;
+    return row ? (JSON.parse(row.data) as T) : null;
+  }
+
+  product<T = Record<string, unknown>>(id: string): T | null {
+    return this.dataRow<T>("SELECT data FROM products WHERE id = ?", id);
+  }
+
+  /** Skaner: shtrix-kod yoki SKU aniq mos, sotiladigan faol mahsulot. */
+  productByCode<T = Record<string, unknown>>(code: string): T | null {
+    const needle = code.trim();
+    if (!needle) return null;
+    return this.dataRow<T>(
+      "SELECT data FROM products WHERE is_active = 1 AND is_saleable = 1 AND (barcode = ? OR sku = ?) ORDER BY CASE WHEN barcode = ? THEN 0 ELSE 1 END LIMIT 1",
+      needle,
+      needle,
+      needle,
+    );
+  }
+
+  /** Ko'rinadigan qoldiq (4 kasr, butun sonda): server qoldig'i + sinxron bo'lmagan hujjatlar ta'siri. */
+  stockMap(productIds: string[]): Map<string, bigint> {
+    const result = new Map<string, bigint>();
+    const ids = [...new Set(productIds)];
+    if (ids.length === 0) return result;
+    const placeholders = ids.map(() => "?").join(", ");
+    const add = (rows: { product_id: string; quantity: string }[]) => {
+      for (const row of rows) result.set(row.product_id, (result.get(row.product_id) ?? 0n) + toMinor(row.quantity, 4));
+    };
+    add(this.db.prepare(`SELECT product_id, quantity FROM stock_levels WHERE product_id IN (${placeholders})`).all(...ids) as { product_id: string; quantity: string }[]);
+    add(this.db.prepare(`SELECT product_id, quantity FROM stock_pending WHERE product_id IN (${placeholders})`).all(...ids) as { product_id: string; quantity: string }[]);
+    return result;
+  }
+
+  customer<T = Record<string, unknown>>(id: string): T | null {
+    return this.dataRow<T>("SELECT data FROM customers WHERE id = ?", id);
+  }
+
+  searchCustomers<T = Record<string, unknown>>(query: string, limit = 30): T[] {
+    const needle = query.trim().toLowerCase();
+    const digits = query.replace(/\D/g, "");
+    let rows: { data: string }[];
+    if (!needle) {
+      rows = this.db.prepare("SELECT data FROM customers WHERE is_active = 1 ORDER BY name LIMIT ?").all(limit) as { data: string }[];
+    } else if (digits.length >= 3) {
+      rows = this.db
+        .prepare("SELECT data FROM customers WHERE is_active = 1 AND (search LIKE ? OR phone_digits LIKE ?) ORDER BY name LIMIT ?")
+        .all(`%${needle.replace(/[%_]/g, "")}%`, `%${digits}%`, limit) as { data: string }[];
+    } else {
+      rows = this.db
+        .prepare("SELECT data FROM customers WHERE is_active = 1 AND search LIKE ? ORDER BY name LIMIT ?")
+        .all(`%${needle.replace(/[%_]/g, "")}%`, limit) as { data: string }[];
+    }
+    return rows.map((row) => JSON.parse(row.data) as T);
+  }
+
+  /** Kassada yaratilgan yoki qurilmada o'zgargan (balans, qarz) mijoz — keyingi pull server qiymati bilan almashtiradi. */
+  saveCustomer(row: Record<string, unknown>): void {
+    this.upsert("customers", row);
+  }
+
+  pendingCustomerIds(): Set<string> {
+    const rows = this.db.prepare("SELECT payload FROM outbox WHERE type = 'customer.create' AND status = 'pending'").all() as { payload: string }[];
+    return new Set(rows.map((row) => String((JSON.parse(row.payload) as { customerId?: string }).customerId ?? "")));
+  }
+
+  // ─── Cheklar va qaytarishlar ────────────────────────────────────────────
+
+  /** Hujjat raqami ketma-ketligi (tranzaksiya ichida chaqiriladi). */
+  nextSequence(key: string): number {
+    const next = (this.getMeta<number>(`seq:${key}`) ?? 0) + 1;
+    this.setMeta(`seq:${key}`, next);
+    return next;
+  }
+
+  private addPendingStock(opId: string, deltas: StockDelta[]): void {
+    const statement = this.db.prepare(
+      "INSERT INTO stock_pending (op_id, product_id, quantity) VALUES (?, ?, ?) ON CONFLICT (op_id, product_id) DO UPDATE SET quantity = excluded.quantity",
+    );
+    for (const delta of deltas) {
+      if (toMinor(delta.quantity, 4) !== 0n) statement.run(opId, delta.productId, delta.quantity);
+    }
+  }
+
+  insertSale(input: {
+    id: string;
+    number: string;
+    opId: string;
+    shiftId: string;
+    cashierId: string;
+    customerId: string | null;
+    total: string;
+    createdAt: string;
+    doc: unknown;
+    stockDeltas: StockDelta[];
+  }): void {
+    this.db
+      .prepare("INSERT INTO sales (id, number, op_id, shift_id, cashier_id, customer_id, total, created_at, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(
+        input.id,
+        input.number,
+        input.opId,
+        input.shiftId,
+        input.cashierId,
+        input.customerId,
+        input.total,
+        input.createdAt,
+        JSON.stringify({ doc: input.doc, stockDeltas: input.stockDeltas }),
+      );
+    this.addPendingStock(input.opId, input.stockDeltas);
+  }
+
+  insertReturn(input: {
+    id: string;
+    number: string;
+    opId: string;
+    orderId: string;
+    shiftId: string;
+    cashierId: string;
+    total: string;
+    createdAt: string;
+    doc: unknown;
+    stockDeltas: StockDelta[];
+  }): void {
+    this.db
+      .prepare("INSERT INTO sale_returns (id, number, op_id, order_id, shift_id, cashier_id, total, created_at, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(
+        input.id,
+        input.number,
+        input.opId,
+        input.orderId,
+        input.shiftId,
+        input.cashierId,
+        input.total,
+        input.createdAt,
+        JSON.stringify({ doc: input.doc, stockDeltas: input.stockDeltas }),
+      );
+    this.addPendingStock(input.opId, input.stockDeltas);
+  }
+
+  private documents<T>(table: "sales" | "sale_returns", where: string, params: Param[], limit: number): StoredDocument<T>[] {
+    const rows = this.db
+      .prepare(
+        `SELECT d.data, d.op_id, d.discarded_at, o.status, o.error, o.result FROM ${table} d LEFT JOIN outbox o ON o.op_id = d.op_id
+         ${where} ORDER BY d.created_at DESC LIMIT ?`,
+      )
+      .all(...params, limit) as DocumentRow[];
+    return rows.map((row) => ({
+      doc: (JSON.parse(row.data) as { doc: T }).doc,
+      opId: row.op_id,
+      state: row.discarded_at ? "discarded" : ((row.status as StoredDocument<T>["state"] | null) ?? "applied"),
+      error: row.error ? (JSON.parse(row.error) as OutboxError) : null,
+      result: row.result ? (JSON.parse(row.result) as Record<string, unknown>) : null,
+    }));
+  }
+
+  sales<T>(options: { limit: number; shiftId?: string }): StoredDocument<T>[] {
+    return options.shiftId
+      ? this.documents<T>("sales", "WHERE d.shift_id = ?", [options.shiftId], options.limit)
+      : this.documents<T>("sales", "", [], options.limit);
+  }
+
+  saleById<T>(id: string): StoredDocument<T> | null {
+    return this.documents<T>("sales", "WHERE d.id = ?", [id], 1)[0] ?? null;
+  }
+
+  saleByNumber<T>(number: string): StoredDocument<T> | null {
+    return this.documents<T>("sales", "WHERE d.number = ?", [number], 1)[0] ?? null;
+  }
+
+  returns<T>(options: { limit: number; shiftId?: string }): StoredDocument<T>[] {
+    return options.shiftId
+      ? this.documents<T>("sale_returns", "WHERE d.shift_id = ?", [options.shiftId], options.limit)
+      : this.documents<T>("sale_returns", "", [], options.limit);
+  }
+
+  /** Chek bo'yicha qurilmadagi (bekor qilinmagan) qaytarishlar. */
+  returnsForOrder<T>(orderId: string): StoredDocument<T>[] {
+    return this.documents<T>("sale_returns", "WHERE d.order_id = ? AND d.discarded_at IS NULL", [orderId], 1000);
+  }
+
+  // ─── Kechiktirilgan cheklar ─────────────────────────────────────────────
+
+  holdReceipt(input: { id: string; cashierId: string; label: string; total: string; createdAt: string; data: unknown }): void {
+    this.db
+      .prepare("INSERT INTO held_receipts (id, cashier_id, label, total, created_at, data) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(input.id, input.cashierId, input.label, input.total, input.createdAt, JSON.stringify(input.data));
+  }
+
+  heldReceipts<T>(): { id: string; cashierId: string; label: string; total: string; createdAt: string; data: T }[] {
+    const rows = this.db.prepare("SELECT * FROM held_receipts ORDER BY created_at").all() as {
+      id: string;
+      cashier_id: string;
+      label: string;
+      total: string;
+      created_at: string;
+      data: string;
+    }[];
+    return rows.map((row) => ({ id: row.id, cashierId: row.cashier_id, label: row.label, total: row.total, createdAt: row.created_at, data: JSON.parse(row.data) as T }));
+  }
+
+  deleteHeld(id: string): boolean {
+    return this.db.prepare("DELETE FROM held_receipts WHERE id = ?").run(id).changes > 0;
+  }
+
+  // ─── Sinxron bo'lmagan amallar ──────────────────────────────────────────
+
+  unsyncedOps(): (OutboxOp & { number: string | null; total: string | null })[] {
+    const rows = this.db
+      .prepare(
+        `SELECT o.*, COALESCE(s.number, r.number) AS doc_number, COALESCE(s.total, r.total) AS doc_total
+         FROM outbox o LEFT JOIN sales s ON s.op_id = o.op_id LEFT JOIN sale_returns r ON r.op_id = o.op_id
+         WHERE o.status IN ('pending', 'rejected') ORDER BY o.seq`,
+      )
+      .all() as (OutboxRow & { doc_number: string | null; doc_total: string | null })[];
+    return rows.map((row) => ({ ...toOp(row), number: row.doc_number, total: row.doc_total }));
+  }
+
+  private documentDeltas(opId: string): StockDelta[] {
+    const row = this.db
+      .prepare("SELECT data FROM sales WHERE op_id = ? AND discarded_at IS NULL UNION ALL SELECT data FROM sale_returns WHERE op_id = ? AND discarded_at IS NULL")
+      .get(opId, opId) as { data: string } | undefined;
+    return row ? ((JSON.parse(row.data) as { stockDeltas?: StockDelta[] }).stockDeltas ?? []) : [];
+  }
+
+  /** Rad etilgan amalni qayta navbatga qo'yish (masalan, rahbar serverda sababni tuzatgach). */
+  retryOp(opId: string): boolean {
+    return transaction(this.db, () => {
+      const changed = this.db.prepare("UPDATE outbox SET status = 'pending', error = NULL, result = NULL WHERE op_id = ? AND status = 'rejected'").run(opId).changes;
+      if (changed === 0) return false;
+      this.addPendingStock(opId, this.documentDeltas(opId));
+      return true;
+    });
+  }
+
+  /** Rad etilgan amalni bekor qilish: navbatdan olinadi, lokal hujjat "bekor qilingan" bo'lib qoladi. */
+  discardOp(opId: string, now = new Date()): boolean {
+    return transaction(this.db, () => {
+      const op = this.operation(opId);
+      if (!op || op.status !== "rejected") return false;
+      this.db.prepare("DELETE FROM stock_pending WHERE op_id = ?").run(opId);
+      this.db.prepare("UPDATE sales SET discarded_at = ? WHERE op_id = ?").run(now.toISOString(), opId);
+      this.db.prepare("UPDATE sale_returns SET discarded_at = ? WHERE op_id = ?").run(now.toISOString(), opId);
+      this.db.prepare("DELETE FROM outbox WHERE op_id = ?").run(opId);
+      return true;
     });
   }
 

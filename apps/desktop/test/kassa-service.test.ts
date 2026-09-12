@@ -8,7 +8,7 @@ import { deviceInfo, company, product, pullResponse } from "./fixtures.js";
 
 /** Soxta `/api/pos-device` serveri (fetch darajasida). */
 function fakeApi() {
-  const state = { token: "bumpos_test-token", online: true, pushed: [] as WireOperation[], pulls: 0 };
+  const state = { token: "bumpos_test-token", online: true, pushed: [] as WireOperation[], pulls: 0, rejectTypes: [] as string[] };
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const fetchImpl = (async (input: URL | RequestInfo, init?: RequestInit) => {
     if (!state.online) throw new TypeError("fetch failed");
@@ -35,7 +35,11 @@ function fakeApi() {
         if (!authed) return json(401, { code: "UNAUTHENTICATED", message: "token" });
         const ops = body.ops as WireOperation[];
         state.pushed.push(...ops);
-        const results: PushResult[] = ops.map((op) => ({ opId: op.opId, status: "applied", result: { shiftId: op.payload.shiftId } }));
+        const results: PushResult[] = ops.map((op) =>
+          state.rejectTypes.includes(op.type)
+            ? { opId: op.opId, status: "rejected", error: { code: "BAD_REQUEST", message: "Sinov rad etishi" } }
+            : { opId: op.opId, status: "applied", result: { shiftId: op.payload.shiftId } },
+        );
         return json(200, { results });
       }
       default:
@@ -122,5 +126,89 @@ describe("Kassa xizmati (main jarayon)", () => {
     store.saveCashier({ id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", permissions: ["pos.use"], active: false });
     await expect(kassa.unlock({ userId: "u1", pin: "1234" })).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(() => kassa.openShift({ openingCash: "1" })).toThrow(KassaError);
+  });
+
+  it("chek offline: K01 raqami, qoldiq kutilmoqda, qaytim, kechiktirish, qaytarish, rad etilganini qayta yuborish va bekor qilish", async () => {
+    const api = fakeApi();
+    const kassa = service(api);
+    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
+    store.saveCashier({ ...cashier, permissions: ["pos.use"] });
+    store.applyPull(
+      pullResponse({
+        units: { rows: [{ id: "unit-d", name: "Dona", shortName: "dona", isBase: true, isActive: true }] },
+        products: { rows: [product("p1", "Cola")] },
+        stockLevels: { rows: [{ id: "s1", productId: "p1", warehouseId: "w1", quantity: "5.0000", reservedQty: "0.0000" }] },
+      }),
+    );
+
+    api.state.online = false;
+    kassa.openShift({ openingCash: "0" });
+    const saleInput = (quantity: string, amountPaid: string | null, extra: Partial<Parameters<typeof kassa.completeSale>[0]> = {}) => ({
+      customerId: null,
+      lines: [{ productId: "p1", unitId: "unit-d", quantity }],
+      saleCurrencies: [],
+      paymentMethod: "cash" as const,
+      amountPaid,
+      cashbackAmount: null,
+      balanceAmount: null,
+      changeToBalance: false,
+      currencyPayments: [],
+      ...extra,
+    });
+
+    // Mijozsiz to'liq to'lanmagan chek va ruxsatsiz narx o'zgartirish — rad
+    expect(() => kassa.completeSale(saleInput("2", "1000"))).toThrow("Mijozsiz sotuvda chek to'liq to'lanishi kerak");
+    expect(() => kassa.completeSale({ ...saleInput("1", null), lines: [{ productId: "p1", unitId: "unit-d", quantity: "1", unitPrice: "5000" }] })).toThrow(
+      "sales.edit",
+    );
+
+    const sale = kassa.completeSale(saleInput("2", "25000"));
+    expect(sale).toMatchObject({ number: "K01-000001", total: "20000.00", paid: "20000.00", change: "5000.00", sync: { state: "pending" } });
+    expect(kassa.products({ query: "cola" })[0]!.stock).toBe("3.0000");
+
+    // Kechiktirish va qaytarib olish
+    const held = kassa.hold({ cart: { customerId: null, lines: [{ productId: "p1", unitId: "unit-d", quantity: "1" }], saleCurrencies: [] } });
+    expect(held.total).toBe("10000.00");
+    expect(() => kassa.closeShift({ closingCash: "0" })).toThrow("Kechiktirilgan cheklar bor");
+    expect(kassa.takeHeld({ id: held.id }).cart.lines).toHaveLength(1);
+    expect(kassa.held()).toEqual([]);
+
+    // Qaytarish: ruxsat, qolganidan ko'p emas, qoldiq qaytadi, smena yig'indisi
+    await expect(kassa.returnItems({ number: "K01-000001", items: [{ orderItemId: sale.lines[0]!.id, quantity: "1" }], refundMethod: "cash" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    store.saveCashier({ ...cashier, permissions: ["pos.use", "sales.refund", "sales.approve"] });
+    const returned = await kassa.returnItems({ number: "k01-000001", items: [{ orderItemId: sale.lines[0]!.id, quantity: "1" }], refundMethod: "cash" });
+    expect(returned).toMatchObject({ number: "K01-Q000001", orderId: sale.id, total: "10000.00", refundEstimate: "10000.00" });
+    expect((await kassa.findReceipt({ number: "K01-000001" })).lines[0]).toMatchObject({ quantity: "2", returned: "1.0000" });
+    await expect(kassa.returnItems({ number: "K01-000001", items: [{ orderItemId: sale.lines[0]!.id, quantity: "2" }], refundMethod: "cash" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    expect(kassa.products({ query: "cola" })[0]!.stock).toBe("4.0000");
+    expect(kassa.status().shift!.totals).toEqual({ sales: "20000.00", cash: "10000.00", card: "0.00", returns: "10000.00", receipts: 1 });
+
+    // Internet qaytdi: navbat tartibda, qoldiq farqi tozalanadi
+    api.state.online = true;
+    expect((await kassa.syncNow()).sync).toMatchObject({ state: "idle", pending: 0 });
+    expect(api.state.pushed.map((op) => op.type)).toEqual(["shift.open", "sale.complete", "sale.return"]);
+    expect(api.state.pushed[1]!.payload).toMatchObject({ saleId: sale.id, number: "K01-000001", amountPaid: "25000.00", items: [{ id: sale.lines[0]!.id, quantity: "2" }] });
+    expect(kassa.products({ query: "cola" })[0]!.stock).toBe("5.0000");
+
+    // Server rad etdi: qoldiq farqi olinadi; qayta yuborish qaytaradi; bekor qilish yakunlaydi
+    api.state.rejectTypes = ["sale.complete"];
+    const second = kassa.completeSale(saleInput("1", null));
+    await kassa.syncNow();
+    expect(kassa.unsynced()).toEqual([expect.objectContaining({ status: "rejected", number: second.number, total: "10000.00" })]);
+    expect(kassa.products({ query: "cola" })[0]!.stock).toBe("5.0000");
+    const [rejectedOp] = kassa.unsynced();
+    kassa.retry({ opId: rejectedOp!.opId });
+    expect(kassa.products({ query: "cola" })[0]!.stock).toBe("4.0000");
+    await kassa.syncNow();
+    kassa.discard({ opId: rejectedOp!.opId });
+    expect(kassa.unsynced()).toEqual([]);
+    expect(kassa.sales({}).find((row) => row.id === second.id)!.sync.state).toBe("discarded");
+    expect(kassa.products({ query: "cola" })[0]!.stock).toBe("5.0000");
   });
 });

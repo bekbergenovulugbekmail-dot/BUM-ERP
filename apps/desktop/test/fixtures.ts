@@ -22,6 +22,7 @@ export function pullResponse(pages: Pages, previous: Partial<Record<PullEntity, 
     device: deviceInfo,
     entities,
     more: Object.values(entities).some((page) => page.more),
+    config: null,
   };
 }
 
@@ -30,7 +31,12 @@ export const product = (id: string, name: string, extra: Record<string, unknown>
   name,
   sku: name.toUpperCase().replace(/\s+/g, "-"),
   barcode: null,
+  categoryId: null,
+  baseUnitId: "unit-d",
   salesPrice: "10000.0000",
+  salesCurrency: null,
+  taxRate: "0.00",
+  taxIncluded: false,
   isActive: true,
   isSaleable: true,
   ...extra,
