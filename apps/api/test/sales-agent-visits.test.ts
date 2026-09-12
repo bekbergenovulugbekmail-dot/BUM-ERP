@@ -9,6 +9,7 @@ import { agentLocationEvents } from "../src/db/schema/sales-agent.js";
 import { todayIso } from "../src/modules/finance/cash.service.js";
 import { buildServer } from "../src/server.js";
 import { storageProvider, type StorageClient, type StoredObject } from "../src/shared/storage.js";
+import { LEGACY_VISIT_POLICY, setAgentPolicy } from "./agent-policy.js";
 import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
@@ -43,6 +44,8 @@ beforeEach(async () => {
   await resetDatabase();
   adminCookie = (await signedIn(app, { isPlatformAdmin: true })).cookie;
   company = await createCompany(app, adminCookie, { name: "Distribyutor" });
+  // Boshlash/yakunlash va S3 rasm qoidalari; vitrina, minimal vaqt, hududdan chiqish — sales-agent-visit-flow
+  await setAgentPolicy(company.companyId, LEGACY_VISIT_POLICY);
   objects = new Map();
   storageProvider.client = fakeStorage;
 });
@@ -162,14 +165,14 @@ describe("Tashriflar", () => {
     const baraka = await store({ name: "Baraka", ...shop });
     await route(ali.repId, [baraka]);
     const supervisor = await addEmployee(app, company, "Supervayzer");
-    expect((await call(supervisor.cookie, "PUT", "/api/sales-agent/policy", { ...DEFAULT_SALES_AGENT_POLICY, photoRequired: true })).statusCode).toBe(200);
+    expect((await call(supervisor.cookie, "PUT", "/api/sales-agent/policy", { ...DEFAULT_SALES_AGENT_POLICY, ...LEGACY_VISIT_POLICY, shelfPhotoRequired: true })).statusCode).toBe(200);
 
     const visit = (
       await call(ali.cookie, "POST", "/api/sales-agent/visits/start", { customerId: baraka, ...near, accuracy: 10, recordedAt: iso() })
     ).json().visit;
     const finish = () =>
       call(ali.cookie, "POST", `/api/sales-agent/visits/${visit.id}/complete`, { ...near, accuracy: 10, recordedAt: iso(), noOrderReason: "price" });
-    expect((await finish()).json().details).toEqual({ reason: "photo_required" });
+    expect((await finish()).json().details).toEqual({ reason: "shelf_photo_required" });
 
     const uploads = `/api/sales-agent/visits/${visit.id}/photos/uploads`;
     expect((await call(ali.cookie, "POST", uploads, { contentType: "application/pdf", size: 100 })).statusCode).toBe(400);

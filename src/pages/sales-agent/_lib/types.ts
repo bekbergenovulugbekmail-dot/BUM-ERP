@@ -40,7 +40,17 @@ export type AgentStore = {
 /** Bugungi marshrutdagi do'kon holati. */
 export type StoreVisitStatus = "waiting" | "in_progress" | "ordered" | "visited_no_order";
 
-export const NO_ORDER_REASONS = ["no_money", "has_stock", "has_debt", "owner_absent", "competitor", "price", "other"] as const;
+export const NO_ORDER_REASONS = [
+  "no_money",
+  "has_stock",
+  "not_needed",
+  "has_debt",
+  "owner_absent",
+  "store_closed",
+  "competitor",
+  "price",
+  "other",
+] as const;
 export type NoOrderReason = (typeof NO_ORDER_REASONS)[number];
 
 export const PHOTO_KINDS = ["storefront", "shelf", "placement", "promotion"] as const;
@@ -58,6 +68,14 @@ export type AgentVisit = {
   startedAt: string;
   completedAt: string | null;
   durationSeconds: number | null;
+  /** Vitrina rasmi olingan vaqt — taymer va minimal vaqt shundan. */
+  timerStartedAt: string | null;
+  /** "pause" siyosatida hududdan tashqarida o'tgan vaqt, soniya. */
+  pausedSeconds: number;
+  outsideSince: string | null;
+  outsideCount: number;
+  /** "invalidate" siyosatida hududdan chiqilgan — buyurtmaga yaroqsiz. */
+  invalidatedAt: string | null;
   startDistanceMeters: number | null;
   endDistanceMeters: number | null;
   noOrderReason: NoOrderReason | null;

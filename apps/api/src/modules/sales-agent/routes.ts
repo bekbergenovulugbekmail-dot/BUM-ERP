@@ -11,10 +11,12 @@
  *   POST /location/events                           ruxsat berilmadi / aniqlab bo'lmadi
  *   GET  /visits/current, GET /visits (?date=)      ochiq tashrif, kunlik tashriflar
  *   POST /visits/start                              tashrifni boshlash (joy sifati va geofence)
- *   POST /visits/:visitId/complete                  yakunlash (buyurtmasiz sabab, siyosat bo'yicha rasm)
- *   POST /visits/:visitId/photos/uploads            rasm uchun imzolangan yuklash URL
- *   POST /visits/:visitId/photos                    yuklangan rasmni biriktirish
- *   GET  /visits/:visitId/photos/:photoId/url       rasmni ko'rish (imzolangan, 5 daqiqa)
+ *   POST /visits/:visitId/complete                  BUYURTMA YO'Q (sabab; rasmlar va minimal vaqt siyosat bo'yicha)
+ *   POST /visits/:visitId/photos/uploads            rasm uchun imzolangan yuklash URL (S3)
+ *   POST /visits/:visitId/photos                    yuklangan rasmni biriktirish (do'kon hududida)
+ *   POST /visits/:visitId/photos/direct             S3 sozlanmaganda: rasm bazaga (base64, 3 MB gacha)
+ *   GET  /visits/:visitId/photos/:photoId/url       rasmni ko'rish havolasi (imzolangan 5 daqiqa yoki /content)
+ *   GET  /visits/:visitId/photos/:photoId/content   bazadagi rasm
  *   GET  /catalog (?search=&categoryId=&limit=&offset=), GET /catalog/:productId/image   katalog (dona/blok, qoldiq)
  *   GET  /orders (?state=draft|submitted&customerId=), GET /orders/:orderId              o'z buyurtmalari
  *   PUT  /orders/drafts/:clientRequestId            qoralama (idempotent: bir identifikator — bitta buyurtma)
@@ -66,6 +68,7 @@ import {
   requireTenantForWrite,
   type TenantContext,
 } from "../company/tenant.js";
+import { VIEW_TTL } from "../files/files.service.js";
 import { todayIso } from "../finance/cash.service.js";
 import { requireAgent, type AgentContext } from "./agent-context.js";
 import {
@@ -96,6 +99,7 @@ import {
   supervisorLive,
 } from "./supervisor.service.js";
 import {
+  addDirectVisitPhoto,
   addVisitPhoto,
   agentVisitsOn,
   completeVisit,
@@ -105,7 +109,8 @@ import {
   startVisit,
   storeVisitStatuses,
   supervisorVisits,
-  visitPhotoUrl,
+  visitPhotoContent,
+  visitPhotoRef,
   type VisitOutcome,
 } from "./visits.service.js";
 
@@ -164,17 +169,23 @@ const photoUploadBody = z.strictObject({
   contentType: z.string().trim().toLowerCase().max(100),
   size: z.number().int().positive(),
 });
-const photoBody = z
-  .strictObject({
-    key: z.string().trim().min(1).max(300),
-    kind: z.enum(agentVisitPhotos.kind.enumValues),
-    latitude: z.number().min(-90).max(90).optional(),
-    longitude: z.number().min(-180).max(180).optional(),
-    accuracy: z.number().min(0).max(100_000).nullable().optional(),
-  })
-  .refine((body) => (body.latitude === undefined) === (body.longitude === undefined), {
-    message: "latitude va longitude birga beriladi",
-  });
+/** Rasm joyi majburiy — server rasm do'kon hududida olinganini tekshiradi. */
+const photoPlace = {
+  kind: z.enum(agentVisitPhotos.kind.enumValues),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  accuracy: z.number().min(0).max(100_000),
+  recordedAt: z.iso.datetime({ offset: true }).transform((value) => new Date(value)).optional(),
+};
+const photoBody = z.strictObject({ key: z.string().trim().min(1).max(300), ...photoPlace });
+const directPhotoBody = z.strictObject({
+  ...photoPlace,
+  contentType: z.string().trim().toLowerCase().max(100),
+  /** Base64; turi va hajmi serverda baytlardan tekshiriladi. */
+  data: z.string().min(8).max(4_100_000).regex(/^[A-Za-z0-9+/]+={0,2}$/, "base64 emas"),
+});
+/** JSON'dagi base64 rasm uchun (3 MB → ~4 MB matn). */
+const DIRECT_PHOTO_BODY_LIMIT = 6 * 1024 * 1024;
 
 const isoDate = z.iso.date();
 const dateQuery = z.object({ date: isoDate.optional() });
@@ -311,6 +322,26 @@ function storageUnavailable(reply: FastifyReply) {
   return reply.status(503).send({ code: "SERVICE_UNAVAILABLE", message: "Fayl saqlash sozlanmagan (STORAGE_*)" });
 }
 
+/** Rasm havolasi: bazadagi rasm — shu API'ning autentifikatsiyali `/content` yo'li, S3 dagisi — imzolangan havola. */
+async function photoLink(
+  reply: FastifyReply,
+  ref: { key: string; inDatabase: boolean },
+  contentPath: string,
+): Promise<{ url: string; expiresIn: number } | FastifyReply> {
+  if (ref.inDatabase) return { url: contentPath, expiresIn: VIEW_TTL };
+  const client = storageProvider.client;
+  if (!client) return storageUnavailable(reply);
+  return { url: client.signedUrl("GET", ref.key, VIEW_TTL), expiresIn: VIEW_TTL };
+}
+
+function sendPhoto(reply: FastifyReply, photo: { content: Buffer; contentType: string }) {
+  return reply
+    .header("content-type", photo.contentType)
+    .header("cache-control", "private, no-store")
+    .header("x-content-type-options", "nosniff")
+    .send(photo.content);
+}
+
 export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", requireAuth);
 
@@ -423,12 +454,26 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
     return { photo };
   });
 
+  app.post("/visits/:visitId/photos/direct", { bodyLimit: DIRECT_PHOTO_BODY_LIMIT }, async (req, reply) => {
+    const { visitId } = visitParams.parse(req.params);
+    const { data, contentType: _declared, ...body } = directPhotoBody.parse(req.body);
+    const bytes = Buffer.from(data, "base64");
+    const photo = await writeAgent(req, (tx, context) => addDirectVisitPhoto(tx, context, visitId, { ...body, data: bytes }, requestMeta(req)));
+    reply.status(201);
+    return { photo };
+  });
+
   app.get("/visits/:visitId/photos/:photoId/url", async (req, reply) => {
     const ids = photoParams.parse(req.params);
-    const client = storageProvider.client;
-    if (!client) return storageUnavailable(reply);
     const context = await readAgent(req);
-    return visitPhotoUrl(db, context.company.id, ids, client, context.agent.id);
+    const ref = await visitPhotoRef(db, context.company.id, ids, context.agent.id);
+    return photoLink(reply, ref, `/api/sales-agent/visits/${ids.visitId}/photos/${ids.photoId}/content`);
+  });
+
+  app.get("/visits/:visitId/photos/:photoId/content", async (req, reply) => {
+    const ids = photoParams.parse(req.params);
+    const context = await readAgent(req);
+    return sendPhoto(reply, await visitPhotoContent(db, context.company.id, ids, context.agent.id));
   });
 
   // ─── Katalog va buyurtmalar ──────────────────────────────────────────────
@@ -674,9 +719,14 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/supervisor/visits/:visitId/photos/:photoId/url", async (req, reply) => {
     const ids = photoParams.parse(req.params);
-    const client = storageProvider.client;
-    if (!client) return storageUnavailable(reply);
     const tenant = await readTenantWith(req, "sales_agent.supervise");
-    return visitPhotoUrl(db, tenant.company.id, ids, client);
+    const ref = await visitPhotoRef(db, tenant.company.id, ids);
+    return photoLink(reply, ref, `/api/sales-agent/supervisor/visits/${ids.visitId}/photos/${ids.photoId}/content`);
+  });
+
+  app.get("/supervisor/visits/:visitId/photos/:photoId/content", async (req, reply) => {
+    const ids = photoParams.parse(req.params);
+    const tenant = await readTenantWith(req, "sales_agent.supervise");
+    return sendPhoto(reply, await visitPhotoContent(db, tenant.company.id, ids));
   });
 }

@@ -777,7 +777,7 @@ Foydalanuvchi `BUMERP_SOTUVAGE.docx` (68 bo'lim) yubordi: pullik xarita API'si y
 | V1 | Xodimlar → "Sotuv agenti qo'shish" (xodim + login + rol + a'zolik + agent bir tranzaksiyada); faolsizlantirish/ishdan bo'shatish kirishni bloklaydi | ✅ |
 | V2 | Pullik xarita API'si olib tashlandi: sxematik SVG xarita, "Xaritada ochish" — qurilma ilovasi | ✅ |
 | V3 | Ish sessiyasi: "Ishni boshlash/yakunlash", lokatsiya faqat ish vaqtida | ✅ |
-| V4 | Tashrif v2: majburiy vitrina/polka rasmi (kamera), minimal vaqt, hududdan chiqish siyosati, BUYURTMA / BUYURTMA YO'Q | ⏳ |
+| V4 | Tashrif v2: majburiy vitrina/polka rasmi (kamera), minimal vaqt, hududdan chiqish siyosati, BUYURTMA / BUYURTMA YO'Q | ✅ |
 | V5 | Mijozlar bo'limi (tarix, tahrirlash, joylashuv, rasm), 5 bandli menyu | ⏳ |
 | V6 | Katalog UX (brend, rasm, mahsulot oynasi, pastki "Buyurtmani yakunlash") | ⏳ |
 | V7 | Hisobotlar (FROM/TO), bildirishnoma qabul qiluvchilari, radius 100/200/300/500 | ⏳ |
@@ -804,6 +804,19 @@ Foydalanuvchi `BUMERP_SOTUVAGE.docx` (68 bo'lim) yubordi: pullik xarita API'si y
 - supervayzer: agentlar ro'yxatida "Ishda · HH:MM dan" / "Ish vaqti emas", agent tafsiloti va lokatsiya tarixida kunlik ish sessiyalari
 - web agent: bosh sahifada "Ishni boshlash/yakunlash" kartasi, Sotuv va do'kon sahifasida ixcham holat; lokatsiya kuzatuvi faqat faol sessiyada ishlaydi
 - testlar: `sales-agent-team` (2), `sales-agent-work-session` (2); agent testlari ish sessiyasini boshlab ishlaydi
+- **V1–V3** commit `2ac23ab`, production'ga deploy qilindi (API va web SUCCESS). Lokal: API 251/251 (57 fayl), web tsc va lint o'tdi
+
+**V4 — Tashrif oqimi v2** (migratsiya 0029):
+- siyosat: `minVisitMinutes` (standart 10), `storefrontPhotoRequired` va `shelfPhotoRequired` (standart yoqilgan), `visitExitPolicy` (`pause` standart / `invalidate` / `flag`), `orderRequiresVisit` (standart yoqilgan); eski `photoRequired` o'rniga. Geofence radiusi uchun 100/200/300/500 m tugmalari
+- `agent_visits`: `timer_started_at` (vitrina rasmi), `paused_seconds`, `outside_since`, `outside_count`, `invalidated_at`; sabablar `not_needed` ("Mahsulot kerak emas"), `store_closed` ("Do'kon yopiq"); hodisa turi `visit_exit`
+- rasm: faqat ochiq tashrifda, do'kon hududida (joy majburiy, sifat va geofence serverda), avval vitrina — taymer shundan boshlanadi; mijozning `insideGeofence` kabi maydonlari rad (strict). Fayl saqlash (S3) sozlanmagan bo'lsa `POST /visits/:id/photos/direct` — base64, 3 MB gacha, turi baytlardan (JPEG/PNG/WebP), bazada (`agent_visit_photos.content`); ko'rish `.../content` (agent — o'ziniki, supervayzer — kompaniya; `private, no-store`)
+- hududdan chiqish: lokatsiya nuqtalaridan (shubhali nuqtalar hisobga olinmaydi) — chiqishda hodisa `visit_exit` va audit `VISIT_OUTSIDE_GEOFENCE`; `pause` — tashqaridagi vaqt tashrif vaqtidan chiqariladi, `invalidate` — tashrifga rasm/buyurtma yo'q, faqat yopiladi, `flag` — qayd
+- BUYURTMA: `submit` — shu do'konda ochiq tashrif (`visit_required`), bekor emas (`visit_invalid`), vitrina va polka rasmi, minimal vaqt (`visit_too_short`, qolgan soniya bilan) — hammasi serverda; muvaffaqiyatli yuborishda tashrif `ordered` natija bilan yopiladi
+- BUYURTMA YO'Q: sabab majburiy; vitrina rasmi har doim, polka va minimal vaqt — "Do'kon yopiq" dan tashqari; bekor bo'lgan tashrif sababsiz yopiladi
+- web agent: tashrif paneli — qadamlar (vitrina → polka → qo'shimcha rasmlar, faqat kamera `capture="environment"`), vitrinadan taymer va minimal vaqtgacha qolgan vaqt, hududdan chiqish ogohlantirishi, BUYURTMA / BUYURTMA YO'Q tugmalari; yuborish yoki yopishdan keyin bugungi marshrutga qaytadi
+- web Distributsiya: siyosatda "Tashrif" bo'limi; Tashriflar jadvalida "bekor", hududdan chiqishlar soni va tashqaridagi daqiqalar
+- cheklov: brauzer galereyadan tanlashni to'liq taqiqlay olmaydi (`capture` — Android Chrome va iOS Safari'da kamerani ochadi, ba'zi brauzerlarda galereya ham taklif qilinadi); rasm vaqti va joyi server tomonidan yoziladi, EXIF'ga ishonilmaydi
+- testlar: `sales-agent-visit-flow` (2) — standart siyosat bilan to'liq oqim; boshqa agent testlari tashrif oqimisiz siyosat bilan (`test/agent-policy.ts`); frontend `visit-timer` (3)
 
 ### Distributsiya (`/api/distribution`)
 
@@ -828,7 +841,8 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
 | POST | `/location` (faqat faol ish sessiyasida), `/location/events` | `sales_agent.use` |
 | GET / POST / PATCH | `/team`, `/team/supervisors`, `/team/:salesRepId` | `sales_agent.agents.manage` |
 | GET | `/visits/current`, `/visits` (`?date=`), `/visits/:visitId/photos/:photoId/url` | `sales_agent.use` (o'z tashriflari) |
-| POST | `/visits/start`, `/visits/:visitId/complete`, `/visits/:visitId/photos/uploads`, `/visits/:visitId/photos` | `sales_agent.use` |
+| POST | `/visits/start`, `/visits/:visitId/complete`, `/visits/:visitId/photos/uploads`, `/visits/:visitId/photos`, `/visits/:visitId/photos/direct` | `sales_agent.use` |
+| GET | `/visits/:visitId/photos/:photoId/content`, `/supervisor/visits/:visitId/photos/:photoId/content` | agent — o'z tashrifi; supervayzer — `sales_agent.supervise` |
 | GET | `/catalog` (`?search=&categoryId=&limit=&offset=`), `/catalog/:productId/image`, `/orders` (`?state=&customerId=`), `/orders/:orderId` | `sales_agent.use` |
 | PUT / POST | `/orders/drafts/:clientRequestId`, `/orders/:orderId/submit`, `/orders/:orderId/cancel` | `sales_agent.use` |
 | GET / PUT | `/policy` | o'qish — agent yoki `sales_agent.supervise`; yozish — `sales_agent.supervise` |

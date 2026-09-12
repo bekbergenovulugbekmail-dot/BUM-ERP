@@ -35,6 +35,7 @@ import { checkLocationQuality, insertLocationEvent, type LocationInput } from ".
 import { getSalesAgentPolicy } from "./policy.service.js";
 import { activePromotions, applyPromotions, saveOrderPromotions } from "./promotions.service.js";
 import { accessibleStore, todayRoutes } from "./stores.service.js";
+import { assertVisitReady, finishVisitWithOrder, openStoreVisit } from "./visits.service.js";
 import { requireWorkSession } from "./work-session.repo.js";
 
 export type PaymentType = (typeof agentOrders.paymentType.enumValues)[number];
@@ -591,6 +592,18 @@ export async function submitAgentOrder(
     };
   }
 
+  // Tashrif: shu do'konda ochiq, hududdan chiqib bekor bo'lmagan, rasmlar va minimal vaqt (siyosat bo'yicha)
+  const storeVisit = policy.orderRequiresVisit ? await openStoreVisit(tx, context.agent.id, row.customerId) : null;
+  if (policy.orderRequiresVisit) {
+    if (!storeVisit) {
+      throw badRequest("Buyurtma do'kondagi tashrifda yuboriladi — avval tashrifni boshlang", { reason: "visit_required" });
+    }
+    if (storeVisit.invalidatedAt) {
+      throw badRequest("Tashrif do'kon hududidan chiqilgani uchun bekor qilingan — yangi tashrif boshlang", { reason: "visit_invalid" });
+    }
+    await assertVisitReady(tx, storeVisit, policy, { shelf: true, duration: true });
+  }
+
   const deliveryDate = await resolveDeliveryDate(tx, context, row.customerId, policy, row.deliveryDate, true);
   if (row.paymentType === "credit") {
     if (policy.creditDueDateRequired && !row.paymentDueDate) {
@@ -645,11 +658,13 @@ export async function submitAgentOrder(
     }
   }
 
-  const [openVisit] = await tx
-    .select({ id: agentVisits.id })
-    .from(agentVisits)
-    .where(and(eq(agentVisits.salesRepId, context.agent.id), eq(agentVisits.customerId, row.customerId), eq(agentVisits.status, "in_progress")))
-    .limit(1);
+  const [openVisit] = storeVisit
+    ? [storeVisit]
+    : await tx
+        .select({ id: agentVisits.id })
+        .from(agentVisits)
+        .where(and(eq(agentVisits.salesRepId, context.agent.id), eq(agentVisits.customerId, row.customerId), eq(agentVisits.status, "in_progress")))
+        .limit(1);
   const now = new Date();
   await tx
     .update(agentOrders)
@@ -705,6 +720,8 @@ export async function submitAgentOrder(
       details: { number: row.number, totalAmount: order!.totalAmount, paymentDueDate: row.paymentDueDate },
     });
   }
+  // Tashrif buyurtma bilan yakunlanadi — agent bugungi marshrutga qaytadi
+  if (storeVisit) await finishVisitWithOrder(tx, context, storeVisit, policy, input, distance, meta);
   return { order: await orderView(tx, companyId, orderId, context.agent.id) };
 }
 

@@ -1,6 +1,6 @@
 /**
  * Tashrif amallari yordamchilari: yangi GPS o'lchovi (tashrif boshlash/yakunlashda eskirgan nuqta yuborilmaydi),
- * rasmni siqib saqlashga yuklash va server xatolarini agent tilidagi xabarga aylantirish.
+ * rasmni siqib yuklash va server xatolarini agent tilidagi xabarga aylantirish.
  */
 import type { TFunction } from "i18next";
 import { api, ApiError, errorMessage } from "@/lib/api.ts";
@@ -30,37 +30,57 @@ export function freshPosition(): Promise<LocationPayload> {
   });
 }
 
-const MAX_SIDE = 1600;
-
-/** Telefon rasmi odatda 3–10 MB: 1600 px JPEG ga siqiladi (mobil internet uchun). Xato bo'lsa — asl fayl. */
-async function compressImage(file: File): Promise<Blob> {
+/** Telefon rasmi odatda 3–10 MB: JPEG ga siqiladi (mobil internet uchun). Xato bo'lsa — asl fayl. */
+async function compressImage(file: File, maxSide: number, quality: number): Promise<Blob> {
   try {
     const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(bitmap.width * scale);
     canvas.height = Math.round(bitmap.height * scale);
     canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
     return blob ?? file;
   } catch {
     return file;
   }
 }
 
-type SignedUpload = { key: string; uploadUrl: string; method: "PUT"; headers: Record<string, string> };
+async function base64Of(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
 
-/** Rasm: imzolangan URL → saqlashga PUT → tashrifga biriktirish (server kalit, hajm va turni tekshiradi). */
-export async function uploadVisitPhoto(
-  visitId: string,
-  file: File,
-  kind: PhotoKind,
-  point: { latitude: number; longitude: number; accuracy: number | null } | null,
-): Promise<AgentVisit["photos"][number]> {
-  const blob = await compressImage(file);
+type SignedUpload = { key: string; uploadUrl: string; method: "PUT"; headers: Record<string, string> };
+type VisitPhoto = AgentVisit["photos"][number];
+
+/**
+ * Rasm: fayl saqlash (S3) sozlangan bo'lsa — imzolangan URL → PUT → biriktirish; sozlanmagan bo'lsa (503) — kichikroq
+ * JPEG to'g'ridan-to'g'ri API'ga (bazada saqlanadi). Joy har doim yuboriladi: server rasm do'kon hududida olinganini tekshiradi.
+ */
+export async function uploadVisitPhoto(visitId: string, file: File, kind: PhotoKind, point: LocationPayload): Promise<VisitPhoto> {
+  const blob = await compressImage(file, 1600, 0.82);
   const contentType = blob.type || file.type;
-  const upload = await api.post<SignedUpload>(`/api/sales-agent/visits/${visitId}/photos/uploads`, { contentType, size: blob.size });
+  let upload: SignedUpload | null = null;
+  try {
+    upload = await api.post<SignedUpload>(`/api/sales-agent/visits/${visitId}/photos/uploads`, { contentType, size: blob.size });
+  } catch (err) {
+    if (!(err instanceof ApiError && err.status === 503)) throw err;
+  }
+
+  if (!upload) {
+    const small = await compressImage(file, 1280, 0.72);
+    const { photo } = await api.post<{ photo: VisitPhoto }>(`/api/sales-agent/visits/${visitId}/photos/direct`, {
+      kind,
+      contentType: small.type || "image/jpeg",
+      data: await base64Of(small),
+      ...point,
+    });
+    return photo;
+  }
 
   let response: Response;
   try {
@@ -70,15 +90,21 @@ export async function uploadVisitPhoto(
   }
   if (!response.ok) throw new ApiError(response.status, "UPLOAD_FAILED", "");
 
-  const { photo } = await api.post<{ photo: AgentVisit["photos"][number] }>(`/api/sales-agent/visits/${visitId}/photos`, {
-    key: upload.key,
-    kind,
-    ...(point ? { latitude: point.latitude, longitude: point.longitude, accuracy: point.accuracy } : {}),
-  });
+  const { photo } = await api.post<{ photo: VisitPhoto }>(`/api/sales-agent/visits/${visitId}/photos`, { key: upload.key, kind, ...point });
   return photo;
 }
 
 const LOCATION_REASONS = new Set(["low_accuracy", "stale", "invalid"]);
+const VISIT_REASONS = new Set([
+  "storefront_photo_required",
+  "shelf_photo_required",
+  "visit_too_short",
+  "visit_required",
+  "visit_invalid",
+  "work_session_required",
+  "photo_invalid",
+  "visit_in_progress",
+]);
 const ORDER_REASONS = new Set([
   "credit_limit",
   "out_of_stock",
@@ -100,12 +126,16 @@ export function visitErrorMessage(error: unknown, t: TFunction<"agent">, action:
       limit?: string;
       exposure?: string;
       available?: string;
+      remainingSeconds?: number;
     };
     if (details.reason === "geofence" && typeof details.distanceMeters === "number") {
       return t(`${action}.geofence`, { distance: details.distanceMeters, radius: details.radiusMeters });
     }
     if (details.reason && LOCATION_REASONS.has(details.reason)) return t(`location.rejected.${details.reason}`);
     if (details.reason === "photo_required") return t("visit.photo.required");
+    if (details.reason && VISIT_REASONS.has(details.reason)) {
+      return t(`visit.error.${details.reason}`, { minutes: Math.max(1, Math.ceil((details.remainingSeconds ?? 0) / 60)) });
+    }
     if (details.reason && ORDER_REASONS.has(details.reason)) {
       return t(`order.error.${details.reason}`, { limit: details.limit, exposure: details.exposure, available: details.available });
     }

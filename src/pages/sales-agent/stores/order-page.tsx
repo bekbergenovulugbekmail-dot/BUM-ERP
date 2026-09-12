@@ -221,7 +221,8 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
       clearLocalDraft(customerId);
       setConfirming(false);
       toast.success(order.approvalStatus === "pending" ? t("order.pending_approval") : t("order.submitted", { number: order.number }));
-      navigate(`/${lng}/sales-agent/stores/${customerId}`);
+      // Tashrif buyurtma bilan yakunlandi — bugungi marshrutga qaytish
+      navigate(`/${lng}/sales-agent/sales`);
     } catch (err) {
       toast.error(visitErrorMessage(err, t, "order"));
     }

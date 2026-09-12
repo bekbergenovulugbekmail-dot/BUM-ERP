@@ -1,6 +1,7 @@
 /**
  * Sotuv agenti siyosati — kompaniya sozlamasi `sales_agent.policy` (JSON):
- * geofence, lokatsiya sifati va kuzatuv, saqlash muddati, tashrif rasmi, yetkazish kuni va nasiya qoidalari.
+ * geofence, lokatsiya sifati va kuzatuv, saqlash muddati, tashrif (rasmlar, minimal vaqt, hududdan chiqish),
+ * yetkazish kuni va nasiya qoidalari.
  * Saqlangan qiymat standart bilan birlashtiriladi — yangi maydon qo'shilsa eski sozlama buzilmaydi.
  */
 
@@ -9,6 +10,12 @@ export type DeliveryDateMode = "assigned" | "choose";
 
 /** Kredit limitidan oshsa: buyurtma rad etiladi yoki supervayzer tasdig'iga yuboriladi. */
 export type CreditLimitPolicy = "block" | "approval";
+
+/**
+ * Tashrif paytida agent do'kon hududidan chiqsa: pause — tashqaridagi vaqt hisoblanmaydi; invalidate — tashrif
+ * bekor (buyurtmaga yaroqsiz, faqat yopiladi); flag — vaqt hisoblanadi, chiqish qayd etiladi.
+ */
+export type VisitExitPolicy = "pause" | "invalidate" | "flag";
 
 export type SalesAgentPolicy = {
   /** Buyurtma berish uchun do'kondan ruxsat etilgan masofa, metr. */
@@ -23,8 +30,15 @@ export type SalesAgentPolicy = {
   maxJumpSpeedKmh: number;
   /** Lokatsiya tarixi saqlanadigan kunlar (keyin avtomatik o'chiriladi). */
   locationRetentionDays: number;
-  /** Tashrifni yakunlashdan oldin do'kon rasmi majburiy. */
-  photoRequired: boolean;
+  /** Tashrifning minimal davomiyligi (vitrina rasmidan), daqiqa; "Do'kon yopiq" uchun talab qilinmaydi. */
+  minVisitMinutes: number;
+  /** Tashrif vitrina rasmidan boshlanadi (taymer shundan). */
+  storefrontPhotoRequired: boolean;
+  /** Buyurtma yoki buyurtmasiz yakunlashdan oldin polka rasmi. */
+  shelfPhotoRequired: boolean;
+  visitExitPolicy: VisitExitPolicy;
+  /** Buyurtma faqat do'kondagi ochiq tashrifda (rasmlar va minimal vaqtdan keyin) yuboriladi. */
+  orderRequiresVisit: boolean;
   deliveryDateMode: DeliveryDateMode;
   /** `choose` rejimida bugundan necha kungacha yetkazish kuni tanlanadi. */
   maxDeliveryDays: number;
@@ -41,8 +55,12 @@ export const SALES_AGENT_POLICY_LIMITS = {
   trackingIntervalSeconds: [15, 3600],
   maxJumpSpeedKmh: [30, 1000],
   locationRetentionDays: [7, 730],
+  minVisitMinutes: [0, 120],
   maxDeliveryDays: [0, 60],
 } as const;
+
+/** Sozlamada tez tanlanadigan geofence radiuslari, metr. */
+export const GEOFENCE_RADIUS_PRESETS = [100, 200, 300, 500] as const;
 
 export const DEFAULT_SALES_AGENT_POLICY: SalesAgentPolicy = {
   geofenceRadiusMeters: 200,
@@ -51,7 +69,11 @@ export const DEFAULT_SALES_AGENT_POLICY: SalesAgentPolicy = {
   trackingIntervalSeconds: 60,
   maxJumpSpeedKmh: 150,
   locationRetentionDays: 90,
-  photoRequired: false,
+  minVisitMinutes: 10,
+  storefrontPhotoRequired: true,
+  shelfPhotoRequired: true,
+  visitExitPolicy: "pause",
+  orderRequiresVisit: true,
   deliveryDateMode: "assigned",
   maxDeliveryDays: 7,
   creditDueDateRequired: true,

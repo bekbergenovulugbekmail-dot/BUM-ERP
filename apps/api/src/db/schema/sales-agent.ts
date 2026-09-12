@@ -9,6 +9,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  customType,
   date,
   index,
   integer,
@@ -28,6 +29,8 @@ import { customers, salesOrders } from "./sales.js";
 import { products } from "./catalog.js";
 import { money, percent, pk, qty, timestamps } from "./_shared.js";
 
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
 export const agentLocationEventType = pgEnum("agent_location_event_type", [
   "permission_denied",
   "update_failure",
@@ -37,6 +40,7 @@ export const agentLocationEventType = pgEnum("agent_location_event_type", [
   "jump",
   "mock",
   "geofence_block",
+  "visit_exit", // tashrif paytida do'kon hududidan chiqdi
 ]);
 
 export const agentLocations = pgTable(
@@ -157,6 +161,8 @@ export const visitNoOrderReason = pgEnum("visit_no_order_reason", [
   "competitor", //   raqobatchidan olgan
   "price", //        narx mos emas
   "other", //        boshqa (izoh majburiy)
+  "not_needed", //   mahsulot kerak emas
+  "store_closed", // do'kon yopiq (polka rasmi va minimal vaqt talab qilinmaydi)
 ]);
 export const visitPhotoKind = pgEnum("visit_photo_kind", ["storefront", "shelf", "placement", "promotion"]);
 
@@ -194,6 +200,16 @@ export const agentVisits = pgTable(
     endDistanceMeters: integer("end_distance_meters"),
     durationSeconds: integer("duration_seconds"),
 
+    /** Taymer vitrina rasmidan boshlanadi — minimal vaqt shundan hisoblanadi. */
+    timerStartedAt: timestamp("timer_started_at", { withTimezone: true }),
+    /** "pause" siyosatida hududdan tashqarida o'tgan (hisoblanmaydigan) vaqt, soniya. */
+    pausedSeconds: integer("paused_seconds").notNull().default(0),
+    /** Hozir hududdan tashqarida bo'lsa — chiqqan vaqt (lokatsiya nuqtalaridan). */
+    outsideSince: timestamp("outside_since", { withTimezone: true }),
+    outsideCount: integer("outside_count").notNull().default(0),
+    /** "invalidate" siyosatida hududdan chiqqan vaqt — tashrif buyurtmaga yaroqsiz. */
+    invalidatedAt: timestamp("invalidated_at", { withTimezone: true }),
+
     noOrderReason: visitNoOrderReason("no_order_reason"),
     noOrderComment: text("no_order_comment"),
     notes: text("notes"),
@@ -226,6 +242,9 @@ export const agentVisitPhotos = pgTable(
     kind: visitPhotoKind("kind").notNull(),
     storageKey: varchar("storage_key", { length: 300 }).notNull(),
     sizeBytes: integer("size_bytes").notNull(),
+    /** Fayl saqlash (S3) sozlanmaganda rasm bazada (`storage_key` — `db/<uuid>`); ko'rish — autentifikatsiyali endpoint. */
+    content: bytea("content"),
+    contentType: varchar("content_type", { length: 50 }),
     latitude: numeric("latitude", { precision: 9, scale: 6 }),
     longitude: numeric("longitude", { precision: 9, scale: 6 }),
     accuracy: numeric("accuracy", { precision: 8, scale: 2 }),

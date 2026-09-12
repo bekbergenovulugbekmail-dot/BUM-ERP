@@ -144,6 +144,23 @@ export default function VisitsSection() {
                           "—"
                         )}
                         {visit.notes && <p className="text-xs text-muted-foreground">{visit.notes}</p>}
+                        <div className="flex flex-wrap gap-1 mt-1 empty:hidden">
+                          {visit.invalidatedAt && (
+                            <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive">
+                              {t("visits.flag.invalid")}
+                            </span>
+                          )}
+                          {visit.outsideCount > 0 && (
+                            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                              {t("visits.flag.outside", { count: visit.outsideCount })}
+                            </span>
+                          )}
+                          {visit.pausedSeconds >= 60 && (
+                            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                              {t("visits.flag.paused", { count: Math.round(visit.pausedSeconds / 60) })}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-3 py-2 text-right whitespace-nowrap text-muted-foreground">
                         {visit.startDistanceMeters !== null ? `${visit.startDistanceMeters} m` : "—"}

@@ -96,7 +96,8 @@ export type LocationEventType =
   | "invalid"
   | "jump"
   | "mock"
-  | "geofence_block";
+  | "geofence_block"
+  | "visit_exit";
 
 /** `GET /supervisor/agents` — faol agent, oxirgi joyi (bo'lmasa null) va bugungi marshruti. */
 export type SupervisedAgent = {
@@ -145,7 +146,16 @@ export type LocationEvent = {
   occurredAt: string;
 };
 
-export type NoOrderReason = "no_money" | "has_stock" | "has_debt" | "owner_absent" | "competitor" | "price" | "other";
+export type NoOrderReason =
+  | "no_money"
+  | "has_stock"
+  | "not_needed"
+  | "has_debt"
+  | "owner_absent"
+  | "store_closed"
+  | "competitor"
+  | "price"
+  | "other";
 export type VisitPhotoKind = "storefront" | "shelf" | "placement" | "promotion";
 
 /** `GET /supervisor/visits` — do'konga tashriflar. */
@@ -161,6 +171,11 @@ export type SupervisorVisit = {
   startedAt: string;
   completedAt: string | null;
   durationSeconds: number | null;
+  timerStartedAt: string | null;
+  pausedSeconds: number;
+  outsideSince: string | null;
+  outsideCount: number;
+  invalidatedAt: string | null;
   startDistanceMeters: number | null;
   endDistanceMeters: number | null;
   noOrderReason: NoOrderReason | null;

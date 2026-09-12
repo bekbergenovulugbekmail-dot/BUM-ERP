@@ -9,9 +9,10 @@
  *    nuqta saqlanadi, lekin shubhali deb belgilanadi. Soxta GPS'ni 100% aniqlab bo'lmaydi.
  * Rad etilgan va shubhali holatlar `agent_location_events` ga yoziladi (supervayzer ko'radi).
  */
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { DEFAULT_SALES_AGENT_POLICY, rateLimited, type SalesAgentPolicy } from "@bum/shared";
-import { agentLocationEvents, agentLocationLatest, agentLocations } from "../../db/schema/sales-agent.js";
+import { customers } from "../../db/schema/sales.js";
+import { agentLocationEvents, agentLocationLatest, agentLocations, agentVisits } from "../../db/schema/sales-agent.js";
 import type { Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { distanceMeters, isValidCoordinate, pointOf } from "../../shared/geo.js";
@@ -142,7 +143,76 @@ export async function recordAgentLocation(tx: Tx, context: AgentContext, input: 
       .values({ companyId: context.company.id, salesRepId: context.agent.id, ...values, receivedAt: now })
       .onConflictDoUpdate({ target: agentLocationLatest.salesRepId, set: { ...values, receivedAt: now } });
   }
+  // Shubhali (sakrash, soxta GPS) nuqta tashrif holatini o'zgartirmaydi
+  if (flags.length === 0) await trackVisitGeofence(tx, context, policy, input);
   return { accepted: true, suspicious: flags.length > 0, flags, nextIntervalSeconds: policy.trackingIntervalSeconds };
+}
+
+/**
+ * Ochiq tashrif paytida do'kon hududidan chiqish va qaytish: chiqishda hodisa `visit_exit` va audit
+ * `VISIT_OUTSIDE_GEOFENCE`; "pause" — tashqaridagi vaqt tashrif vaqtidan chiqariladi, "invalidate" — tashrif
+ * buyurtmaga yaroqsiz bo'ladi, "flag" — faqat qayd.
+ */
+async function trackVisitGeofence(tx: Tx, context: AgentContext, policy: SalesAgentPolicy, input: LocationInput) {
+  const [visit] = await tx
+    .select({
+      id: agentVisits.id,
+      customerId: agentVisits.customerId,
+      outsideSince: agentVisits.outsideSince,
+      invalidatedAt: agentVisits.invalidatedAt,
+      storeLatitude: customers.latitude,
+      storeLongitude: customers.longitude,
+    })
+    .from(agentVisits)
+    .innerJoin(customers, eq(customers.id, agentVisits.customerId))
+    .where(and(eq(agentVisits.salesRepId, context.agent.id), eq(agentVisits.status, "in_progress")))
+    .limit(1)
+    .for("update", { of: agentVisits });
+  if (!visit || visit.invalidatedAt) return;
+  const store = pointOf(visit.storeLatitude, visit.storeLongitude);
+  if (!store) return;
+
+  const distance = Math.round(distanceMeters(input, store));
+  const outside = distance > policy.geofenceRadiusMeters;
+  const now = new Date();
+  if (outside && !visit.outsideSince) {
+    await tx
+      .update(agentVisits)
+      .set({
+        outsideSince: now,
+        outsideCount: sql`${agentVisits.outsideCount} + 1`,
+        invalidatedAt: policy.visitExitPolicy === "invalidate" ? now : null,
+        updatedAt: now,
+      })
+      .where(eq(agentVisits.id, visit.id));
+    const details = {
+      visitId: visit.id,
+      customerId: visit.customerId,
+      distanceMeters: distance,
+      radiusMeters: policy.geofenceRadiusMeters,
+      exitPolicy: policy.visitExitPolicy,
+    };
+    await insertLocationEvent(tx, context, "visit_exit", input, details);
+    await writeAuditLog(
+      {
+        userId: context.user.id,
+        userName: context.user.name,
+        companyId: context.company.id,
+        action: "VISIT_OUTSIDE_GEOFENCE",
+        resource: "agent_visits",
+        resourceId: visit.id,
+        severity: "warning",
+        details,
+      },
+      tx,
+    );
+  } else if (!outside && visit.outsideSince) {
+    const paused = policy.visitExitPolicy === "pause" ? Math.max(0, Math.round((now.getTime() - visit.outsideSince.getTime()) / 1000)) : 0;
+    await tx
+      .update(agentVisits)
+      .set({ outsideSince: null, pausedSeconds: sql`${agentVisits.pausedSeconds} + ${paused}`, updatedAt: now })
+      .where(eq(agentVisits.id, visit.id));
+  }
 }
 
 /** Agent qurilmasi xabari: lokatsiyaga ruxsat berilmadi yoki aniqlab bo'lmadi. */

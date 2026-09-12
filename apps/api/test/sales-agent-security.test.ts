@@ -7,6 +7,7 @@ import { units } from "../src/db/schema/catalog.js";
 import { warehouses } from "../src/db/schema/inventory.js";
 import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
 import { buildServer } from "../src/server.js";
+import { LEGACY_VISIT_POLICY, setAgentPolicy } from "./agent-policy.js";
 import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
@@ -37,6 +38,7 @@ beforeEach(async () => {
   const piece = (await db.select().from(units).where(eq(units.shortName, "d")))[0]!.id;
   adminCookie = (await signedIn(app, { isPlatformAdmin: true })).cookie;
   company = await createCompany(app, adminCookie, { name: "Distribyutor" });
+  await setAgentPolicy(company.companyId, LEGACY_VISIT_POLICY);
   const mainWh = (await db.select().from(warehouses).where(eq(warehouses.companyId, company.companyId)))[0]!.id;
   productId = (
     await call(company.ownerCookie, "POST", "/api/catalog/products", { name: "Coca Cola 1L", sku: "COLA", baseUnitId: piece, salesPrice: "10000", taxRate: "0" })

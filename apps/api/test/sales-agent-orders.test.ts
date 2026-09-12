@@ -13,6 +13,7 @@ import { agentLocationEvents } from "../src/db/schema/sales-agent.js";
 import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
 import { todayIso } from "../src/modules/finance/cash.service.js";
 import { buildServer } from "../src/server.js";
+import { LEGACY_VISIT_POLICY, setAgentPolicy } from "./agent-policy.js";
 import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
@@ -45,6 +46,8 @@ beforeEach(async () => {
   blok = unitRows.find((unit) => unit.shortName === "bl")!.id;
   const admin = await signedIn(app, { isPlatformAdmin: true });
   company = await createCompany(app, admin.cookie, { name: "Distribyutor" });
+  // Buyurtma qoidalari tashrif oqimisiz sinaladi (tashrif oqimi — sales-agent-visit-flow)
+  await setAgentPolicy(company.companyId, LEGACY_VISIT_POLICY);
   const mainWh = (await db.select().from(warehouses).where(eq(warehouses.companyId, company.companyId)))[0]!.id;
   productId = (
     await call(company.ownerCookie, "POST", "/api/catalog/products", { name: "Coca Cola 1L", sku: "COLA", baseUnitId: piece, salesPrice: "10000", taxRate: "0" })
@@ -229,7 +232,7 @@ describe("Agent buyurtmalari", () => {
     const over = (await save(randomUUID(), { paymentType: "credit", paymentDueDate: tomorrow, items: [{ productId, pieces: "15" }] })).json().order;
     expect((await submit(over.id)).json().details).toEqual({ reason: "credit_limit", limit: "300000.00", exposure: "350000.00" });
 
-    expect((await call(supervisor.cookie, "PUT", "/api/sales-agent/policy", { ...DEFAULT_SALES_AGENT_POLICY, creditLimitPolicy: "approval" })).statusCode).toBe(200);
+    expect((await call(supervisor.cookie, "PUT", "/api/sales-agent/policy", { ...DEFAULT_SALES_AGENT_POLICY, ...LEGACY_VISIT_POLICY, creditLimitPolicy: "approval" })).statusCode).toBe(200);
     const pending = await submit(over.id);
     expect(pending.statusCode).toBe(200);
     expect(pending.json().order).toMatchObject({ status: "draft", approvalStatus: "pending" });
@@ -258,7 +261,7 @@ describe("Agent buyurtmalari", () => {
     expect(await actionCount("VISIT_NO_ORDER")).toBe(0);
 
     // Agent yetkazish kunini tanlaydi — faqat ruxsat etilgan oraliqda
-    await call(supervisor.cookie, "PUT", "/api/sales-agent/policy", { ...DEFAULT_SALES_AGENT_POLICY, deliveryDateMode: "choose", maxDeliveryDays: 2 });
+    await call(supervisor.cookie, "PUT", "/api/sales-agent/policy", { ...DEFAULT_SALES_AGENT_POLICY, ...LEGACY_VISIT_POLICY, deliveryDateMode: "choose", maxDeliveryDays: 2 });
     const outOfRange = await save(randomUUID(), { paymentType: "cash", deliveryDate: shift(today, 5), items: [{ productId, pieces: "1" }] });
     expect(outOfRange.json().details).toEqual({ reason: "delivery_date_out_of_range" });
     const chosenId = randomUUID();

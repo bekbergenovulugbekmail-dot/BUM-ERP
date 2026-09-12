@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Save } from "lucide-react";
-import { SALES_AGENT_POLICY_LIMITS, type SalesAgentPolicy } from "@bum/shared";
+import { GEOFENCE_RADIUS_PRESETS, SALES_AGENT_POLICY_LIMITS, type SalesAgentPolicy } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -11,12 +11,13 @@ import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { cn } from "@/lib/utils.ts";
 
 type NumericField = keyof typeof SALES_AGENT_POLICY_LIMITS;
 type Options = Omit<SalesAgentPolicy, NumericField>;
+type SwitchField = { [K in keyof Options]: Options[K] extends boolean ? K : never }[keyof Options];
 
 const LOCATION_FIELDS: NumericField[] = [
-  "geofenceRadiusMeters",
   "maxAccuracyMeters",
   "maxLocationAgeSeconds",
   "trackingIntervalSeconds",
@@ -37,12 +38,11 @@ function PolicyForm({ initial }: { initial: SalesAgentPolicy }) {
   const [numbers, setNumbers] = useState(
     () => Object.fromEntries(NUMERIC_FIELDS.map((field) => [field, String(initial[field])])) as Record<NumericField, string>,
   );
-  const [options, setOptions] = useState<Options>(() => ({
-    photoRequired: initial.photoRequired,
-    deliveryDateMode: initial.deliveryDateMode,
-    creditDueDateRequired: initial.creditDueDateRequired,
-    creditLimitPolicy: initial.creditLimitPolicy,
-  }));
+  const [options, setOptions] = useState<Options>(() => {
+    const picked = { ...initial } as Partial<SalesAgentPolicy>;
+    for (const field of NUMERIC_FIELDS) delete picked[field];
+    return picked as Options;
+  });
   const save = useApiMutation((body: SalesAgentPolicy) => api.put("/api/sales-agent/policy", body), {
     invalidate: ["/api/sales-agent/policy"],
   });
@@ -59,12 +59,14 @@ function PolicyForm({ initial }: { initial: SalesAgentPolicy }) {
       parsed[field] = value;
     }
     try {
-      await save.mutateAsync({ ...parsed, ...options });
+      await save.mutateAsync({ ...options, ...parsed });
       toast.success(t("policy.saved"));
     } catch (err) {
       toast.error(errorMessage(err));
     }
   };
+
+  const setNumber = (field: NumericField, value: string) => setNumbers((current) => ({ ...current, [field]: value }));
 
   const numberField = (field: NumericField) => {
     const [min, max] = SALES_AGENT_POLICY_LIMITS[field];
@@ -79,7 +81,7 @@ function PolicyForm({ initial }: { initial: SalesAgentPolicy }) {
           max={max}
           step={1}
           value={numbers[field]}
-          onChange={(e) => setNumbers((current) => ({ ...current, [field]: e.target.value }))}
+          onChange={(e) => setNumber(field, e.target.value)}
         />
         <p className="text-[11px] text-muted-foreground">
           {t(`policy.hint.${field}`)} · {min}–{max}
@@ -88,11 +90,25 @@ function PolicyForm({ initial }: { initial: SalesAgentPolicy }) {
     );
   };
 
-  const switchRow = (key: "photoRequired" | "creditDueDateRequired") => (
-    <label className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2.5 cursor-pointer">
+  const switchRow = (key: SwitchField) => (
+    <label key={key} className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2.5 cursor-pointer">
       <span className="text-sm">{t(`policy.${key}`)}</span>
       <Switch checked={options[key]} onCheckedChange={(checked) => setOptions((current) => ({ ...current, [key]: checked }))} />
     </label>
+  );
+
+  const selectRow = <K extends "deliveryDateMode" | "creditLimitPolicy" | "visitExitPolicy">(key: K, values: readonly Options[K][]) => (
+    <div key={key} className="space-y-1">
+      <Label>{t(`policy.${key}`)}</Label>
+      <Select value={options[key]} onValueChange={(value) => setOptions((current) => ({ ...current, [key]: value as Options[K] }))}>
+        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {values.map((value) => (
+            <SelectItem key={value} value={value}>{t(`policy.option.${value}`)}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
 
   return (
@@ -104,41 +120,55 @@ function PolicyForm({ initial }: { initial: SalesAgentPolicy }) {
 
       <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
         <p className="text-sm font-semibold">{t("policy.section.location")}</p>
+        <div className="space-y-2">
+          <Label htmlFor="policy-geofenceRadiusMeters">{t("policy.field.geofenceRadiusMeters")}</Label>
+          <div className="flex flex-wrap items-center gap-2">
+            {GEOFENCE_RADIUS_PRESETS.map((preset) => (
+              <Button
+                key={preset}
+                type="button"
+                size="sm"
+                variant={numbers.geofenceRadiusMeters === String(preset) ? "default" : "secondary"}
+                className={cn("tabular-nums min-w-16")}
+                onClick={() => setNumber("geofenceRadiusMeters", String(preset))}
+              >
+                {preset} m
+              </Button>
+            ))}
+            <Input
+              id="policy-geofenceRadiusMeters"
+              type="number"
+              inputMode="numeric"
+              className="w-28"
+              min={SALES_AGENT_POLICY_LIMITS.geofenceRadiusMeters[0]}
+              max={SALES_AGENT_POLICY_LIMITS.geofenceRadiusMeters[1]}
+              value={numbers.geofenceRadiusMeters}
+              onChange={(e) => setNumber("geofenceRadiusMeters", e.target.value)}
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground">{t("policy.hint.geofenceRadiusMeters")}</p>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{LOCATION_FIELDS.map(numberField)}</div>
+      </div>
+
+      <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+        <p className="text-sm font-semibold">{t("policy.section.visits")}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {numberField("minVisitMinutes")}
+          {selectRow("visitExitPolicy", ["pause", "invalidate", "flag"])}
+          {switchRow("storefrontPhotoRequired")}
+          {switchRow("shelfPhotoRequired")}
+          {switchRow("orderRequiresVisit")}
+        </div>
       </div>
 
       <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
         <p className="text-sm font-semibold">{t("policy.section.orders")}</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {switchRow("photoRequired")}
-          {switchRow("creditDueDateRequired")}
-          <div className="space-y-1">
-            <Label>{t("policy.deliveryDateMode")}</Label>
-            <Select
-              value={options.deliveryDateMode}
-              onValueChange={(value) => setOptions((current) => ({ ...current, deliveryDateMode: value as Options["deliveryDateMode"] }))}
-            >
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="assigned">{t("policy.option.assigned")}</SelectItem>
-                <SelectItem value="choose">{t("policy.option.choose")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {selectRow("deliveryDateMode", ["assigned", "choose"])}
           {numberField("maxDeliveryDays")}
-          <div className="space-y-1">
-            <Label>{t("policy.creditLimitPolicy")}</Label>
-            <Select
-              value={options.creditLimitPolicy}
-              onValueChange={(value) => setOptions((current) => ({ ...current, creditLimitPolicy: value as Options["creditLimitPolicy"] }))}
-            >
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="block">{t("policy.option.block")}</SelectItem>
-                <SelectItem value="approval">{t("policy.option.approval")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {switchRow("creditDueDateRequired")}
+          {selectRow("creditLimitPolicy", ["block", "approval"])}
         </div>
       </div>
 

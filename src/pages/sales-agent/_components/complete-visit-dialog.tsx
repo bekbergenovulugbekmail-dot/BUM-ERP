@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2 } from "lucide-react";
+import type { SalesAgentPolicy } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -10,22 +12,32 @@ import { Textarea } from "@/components/ui/textarea.tsx";
 import { api } from "@/lib/api.ts";
 import { useApiMutation } from "@/lib/query.ts";
 import { cn } from "@/lib/utils.ts";
+import { useNow } from "../_lib/use-now.ts";
 import { freshPosition, visitErrorMessage } from "../_lib/visit-api.ts";
-import { NO_ORDER_REASONS, type AgentVisit, type NoOrderReason } from "../_lib/types.ts";
+import { remainingVisitSeconds } from "../_lib/visit-timer.ts";
+import { NO_ORDER_REASONS, formatClock, type AgentVisit, type NoOrderReason } from "../_lib/types.ts";
 
 type Props = {
   visit: AgentVisit;
+  policy: SalesAgentPolicy;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  photoRequired: boolean;
 };
 
-/** Tashrifni yakunlash: buyurtma bo'lmasa sabab majburiy ("Boshqa" — izoh bilan); siyosat talab qilsa — rasm. */
-export default function CompleteVisitDialog({ visit, open, onOpenChange, photoRequired }: Props) {
+/**
+ * "BUYURTMA YO'Q": sabab majburiy ("Boshqa" — izoh bilan). Vitrina rasmi har doim, polka rasmi va minimal vaqt —
+ * "Do'kon yopiq" dan tashqari (server ham tekshiradi). Hududdan chiqib bekor bo'lgan tashrif — sababsiz yopiladi.
+ * Keyin bugungi marshrutga qaytiladi.
+ */
+export default function CompleteVisitDialog({ visit, policy, open, onOpenChange }: Props) {
   const { t } = useTranslation("agent");
+  const { lng = "uz" } = useParams<{ lng: string }>();
+  const navigate = useNavigate();
+  const now = useNow(1000);
   const [reason, setReason] = useState<NoOrderReason | "">("");
   const [comment, setComment] = useState("");
   const [notes, setNotes] = useState("");
+  const invalid = visit.invalidatedAt !== null;
   const complete = useApiMutation(
     async () =>
       api.post<{ visit: AgentVisit }>(`/api/sales-agent/visits/${visit.id}/complete`, {
@@ -34,16 +46,15 @@ export default function CompleteVisitDialog({ visit, open, onOpenChange, photoRe
         noOrderComment: comment.trim() || undefined,
         notes: notes.trim() || undefined,
       }),
-    { invalidate: ["/api/sales-agent/visits", "/api/sales-agent/stores", "/api/sales-agent/today"] },
+    { invalidate: ["/api/sales-agent/visits", "/api/sales-agent/stores", "/api/sales-agent/today", "/api/sales-agent/dashboard"] },
   );
-  const missingPhoto = photoRequired && visit.photos.length === 0;
+
+  const exempt = invalid || reason === "store_closed";
+  const missingShelf = !exempt && policy.shelfPhotoRequired && !visit.photos.some((photo) => photo.kind === "shelf");
+  const remaining = exempt ? 0 : remainingVisitSeconds(visit, now, policy.visitExitPolicy, policy.minVisitMinutes);
 
   const submit = async () => {
-    if (missingPhoto) {
-      toast.error(t("visit.photo.required"));
-      return;
-    }
-    if (!reason) {
+    if (!invalid && !reason) {
       toast.error(t("visit.reason.required"));
       return;
     }
@@ -55,6 +66,7 @@ export default function CompleteVisitDialog({ visit, open, onOpenChange, photoRe
       await complete.mutateAsync();
       toast.success(t("visit.done"));
       onOpenChange(false);
+      navigate(`/${lng}/sales-agent/sales`);
     } catch (err) {
       toast.error(visitErrorMessage(err, t));
     }
@@ -64,13 +76,14 @@ export default function CompleteVisitDialog({ visit, open, onOpenChange, photoRe
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{t("visit.complete")}</DialogTitle>
+          <DialogTitle>{invalid ? t("visit.close_invalid") : t("visit.no_order")}</DialogTitle>
           <DialogDescription>{visit.customerName}</DialogDescription>
         </DialogHeader>
 
-        {missingPhoto && (
+        {(missingShelf || remaining > 0) && (
           <p className="flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
-            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> {t("visit.photo.required")}
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            {missingShelf ? t("visit.error.shelf_photo_required") : t("visit.min_remaining", { time: formatClock(remaining) })}
           </p>
         )}
 
@@ -108,7 +121,7 @@ export default function CompleteVisitDialog({ visit, open, onOpenChange, photoRe
           <Button variant="secondary" className="h-12" onClick={() => onOpenChange(false)}>
             {t("visit.cancel")}
           </Button>
-          <Button className="h-12" disabled={complete.isPending} onClick={() => void submit()}>
+          <Button className="h-12" disabled={complete.isPending || missingShelf || remaining > 0} onClick={() => void submit()}>
             {complete.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             {t("visit.complete")}
           </Button>
