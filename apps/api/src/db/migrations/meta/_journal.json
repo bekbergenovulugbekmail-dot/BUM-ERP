@@ -232,6 +232,13 @@
       "when": 1789194016765,
       "tag": "0032_pos_sales_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1789196076185,
+      "tag": "0033_pos_cash_movements",
+      "breakpoints": true
     }
   ]
 }

@@ -45,7 +45,8 @@ import { recordCustomerPayment } from "./payments.service.js";
 import { addCurrencyAmounts } from "./shift-totals.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...shiftFields } = getTableColumns(posShifts);
-const expectedCashSql = sql<string>`(${posShifts.openingCash} + ${posShifts.totalCash})::numeric(18,2)`;
+/** Kassada bo'lishi kerak: boshlang'ich + naqd tushum + kassaga kirimlar − chiqimlar (inkassatsiya, xarajat). */
+const expectedCashSql = sql<string>`(${posShifts.openingCash} + ${posShifts.totalCash} + ${posShifts.cashIn} - ${posShifts.cashOut})::numeric(18,2)`;
 
 export type ShiftStatus = (typeof posShifts.status.enumValues)[number];
 
@@ -176,7 +177,7 @@ export async function openShift(
   return getShift(tx, tenant, shift!.id);
 }
 
-async function lockShift(tx: Tx, tenant: TenantContext, shiftId: string) {
+export async function lockShift(tx: Tx, tenant: TenantContext, shiftId: string) {
   const [shift] = await tx
     .select(shiftFields)
     .from(posShifts)
@@ -188,7 +189,7 @@ async function lockShift(tx: Tx, tenant: TenantContext, shiftId: string) {
 }
 
 /** Smenada kassirning o'zi yoki `sales.approve` ruxsatli menejer ishlaydi. */
-async function assertShiftOperator(conn: DbOrTx, tenant: TenantContext, cashierId: string | null) {
+export async function assertShiftOperator(conn: DbOrTx, tenant: TenantContext, cashierId: string | null) {
   if (cashierId === tenant.user.id) return;
   if (!(await effectivePermissions(conn, tenant)).includes("sales.approve")) {
     throw forbidden("Bu smena boshqa kassirga tegishli");
@@ -218,7 +219,7 @@ export async function closeShift(
   }
   await assertShiftOperator(tx, tenant, shift.cashierId);
 
-  const expected = toMinor(shift.openingCash) + toMinor(shift.totalCash);
+  const expected = toMinor(shift.openingCash) + toMinor(shift.totalCash) + toMinor(shift.cashIn) - toMinor(shift.cashOut);
   const difference = toMinor(input.closingCash) - expected;
 
   // Har chet valyuta alohida sanaladi: kutilgan = boshlang'ich + naqd tushum
@@ -330,6 +331,8 @@ export async function completeSale(
     if (!offline) throw badRequest("Smena yopilgan");
     conflicts.push({ kind: "shift_closed", details: { shiftId: shift.id } });
   }
+  // Web kassa desktop smenasiga (va aksincha) chek yoza olmaydi
+  if ((shift.deviceId ?? null) !== (offline?.deviceId ?? null)) throw notFound("Smena topilmadi");
   await assertShiftOperator(tx, tenant, shift.cashierId);
   assertWarehouseAccess(tenant, shift.warehouseId);
 
@@ -748,14 +751,26 @@ export type PosCustomerPaymentInput = {
   /** `balance` — qarzni mijoz balansidan yopish (kassaga pul tushmaydi). */
   method: PaymentMethod | "balance";
   notes?: string | null;
+  /**
+   * Desktop kassa sinxroni: pul qurilmada qabul qilingan. Qarz boshqa kassada to'langan bo'lsa — qarzdan ortig'i
+   * mijoz balansiga (`debt_overpaid` nomuvofiqligi); yopilgan smena — `shift_closed`.
+   */
+  offline?: { occurredAt: Date; deviceId: string };
 };
 
 /** Kassada mijoz balansini to'ldirish yoki qarzini to'lash; naqd/karta smena yig'indisiga qo'shiladi. */
 export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: PosCustomerPaymentInput, meta: RequestMeta) {
+  const offline = input.offline;
+  const conflicts: SaleConflict[] = [];
   const shift = await lockShift(tx, tenant, input.shiftId);
-  if (shift.status !== "open") throw badRequest("Smena yopilgan");
+  if ((shift.deviceId ?? null) !== (offline?.deviceId ?? null)) throw notFound("Smena topilmadi");
+  if (shift.status !== "open") {
+    if (!offline) throw badRequest("Smena yopilgan");
+    conflicts.push({ kind: "shift_closed", details: { shiftId: shift.id } });
+  }
   await assertShiftOperator(tx, tenant, shift.cashierId);
   assertWarehouseAccess(tenant, shift.warehouseId);
+  const date = offline ? offline.occurredAt.toISOString().slice(0, 10) : undefined;
 
   const notes = input.notes ?? null;
   if (input.method === "balance") {
@@ -765,11 +780,43 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
     await depositToBalance(
       tx,
       tenant,
-      { customerId: input.customerId, type: "deposit", amount: input.amount, method: input.method, posShiftId: shift.id, notes },
+      { customerId: input.customerId, type: "deposit", amount: input.amount, method: input.method, posShiftId: shift.id, notes, date, allowInactive: offline !== undefined },
       meta,
     );
   } else {
-    await recordCustomerPayment(tx, tenant, { customerId: input.customerId, amount: input.amount, method: input.method, notes }, meta);
+    let payAmount = toMinor(input.amount);
+    if (offline) {
+      const [row] = await tx
+        .select({ totalDebt: customers.totalDebt })
+        .from(customers)
+        .where(and(eq(customers.id, input.customerId), eq(customers.companyId, tenant.company.id)))
+        .limit(1)
+        .for("update");
+      if (!row) throw notFound("Mijoz topilmadi");
+      const debt = toMinor(row.totalDebt) > 0n ? toMinor(row.totalDebt) : 0n;
+      if (payAmount > debt) {
+        const excess = payAmount - debt;
+        conflicts.push({
+          kind: "debt_overpaid",
+          details: { customerId: input.customerId, requested: input.amount, applied: fromMinor(debt), deposited: fromMinor(excess) },
+        });
+        await depositToBalance(
+          tx,
+          tenant,
+          { customerId: input.customerId, type: "deposit", amount: fromMinor(excess), method: input.method, posShiftId: shift.id, notes, date, allowInactive: true },
+          meta,
+        );
+        payAmount = debt;
+      }
+    }
+    if (payAmount > 0n) {
+      await recordCustomerPayment(
+        tx,
+        tenant,
+        { customerId: input.customerId, amount: fromMinor(payAmount), method: input.method, notes, ...(date ? { paymentDate: date } : {}) },
+        meta,
+      );
+    }
   }
 
   if (input.method === "cash" || input.method === "card") {
@@ -786,5 +833,6 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
   return {
     customer: await customerSummary(tx, tenant.company.id, input.customerId),
     shift: await getShift(tx, tenant, shift.id),
+    conflicts,
   };
 }

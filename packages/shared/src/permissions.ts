@@ -28,6 +28,8 @@ export const PERMISSIONS = {
   "pos.use":              { label: "Kassa (POS) ishlatish",        group: "Savdo" },
   /** Desktop kassa qurilmasini ro'yxatdan o'tkazish va o'chirish. */
   "pos.devices.manage":   { label: "Kassa qurilmalarini boshqarish", group: "Savdo" },
+  /** Kassa qutisidan xarajat to'lash (smena naqdidan, "to'langan" xarajat hujjati). */
+  "pos.cash.expense":     { label: "Kassadan xarajat to'lash",     group: "Savdo" },
 
   // ─── Ombor ─────────────────────────────────────────────────────────────────
   "warehouse.view":       { label: "Omborni ko'rish",              group: "Ombor" },

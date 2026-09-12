@@ -202,6 +202,49 @@ export async function updateExpense(
   return updated!;
 }
 
+/**
+ * Xarajat to'lovi: kassa (bank) chiqimi + DR xarajat hisobi / CR kassa (bank). Web'da "to'landi" holati va kassadan
+ * xarajat (POS smenasi) shu yerdan. `allowOverdraft` — faqat offline kassa sinxroni (pul allaqachon berilgan).
+ */
+export async function postExpensePayment(
+  tx: Tx,
+  tenant: TenantContext,
+  expense: { id: string; number: string; description: string; category: string; amount: string; currency: string; accountId: string | null },
+  input: { cashAccountId?: string | null; paidDate: string; allowOverdraft?: boolean },
+) {
+  const companyId = tenant.company.id;
+  const { transaction, account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
+    cashAccountId: input.cashAccountId ?? null,
+    type: "out",
+    amount: expense.amount,
+    txDate: input.paidDate,
+    description: `${expense.number}: ${expense.description}`,
+    category: expense.category,
+    referenceType: "expense",
+    referenceId: expense.id,
+    allowOverdraft: input.allowOverdraft,
+  });
+  if (account.currency !== expense.currency) throw badRequest("Kassa valyutasi xarajat valyutasiga mos emas");
+
+  const mapped = CATEGORY_SUBTYPES[expense.category];
+  const debitAccount =
+    expense.accountId ??
+    (mapped ? await findAccountBySubtype(tx, companyId, mapped, "expense") : null) ??
+    (await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"));
+
+  const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+    entryDate: input.paidDate,
+    description: `Xarajat ${expense.number}: ${expense.description}`,
+    referenceType: "expense",
+    referenceId: expense.id,
+    lines: [
+      { accountId: debitAccount, debit: expense.amount, description: expense.category },
+      { accountId: await ledgerAccountFor(tx, companyId, account.type), credit: expense.amount },
+    ],
+  });
+  return { cashTransactionId: transaction.id, journalEntryId: entry.id };
+}
+
 export async function setExpenseStatus(
   tx: Tx,
   tenant: TenantContext,
@@ -217,36 +260,7 @@ export async function setExpenseStatus(
 
   let payment: { cashTransactionId: string; journalEntryId: string } | null = null;
   if (input.status === "paid") {
-    const paidDate = input.paidDate ?? todayIso();
-    const { transaction, account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
-      cashAccountId: input.cashAccountId ?? null,
-      type: "out",
-      amount: expense.amount,
-      txDate: paidDate,
-      description: `${expense.number}: ${expense.description}`,
-      category: expense.category,
-      referenceType: "expense",
-      referenceId: expense.id,
-    });
-    if (account.currency !== expense.currency) throw badRequest("Kassa valyutasi xarajat valyutasiga mos emas");
-
-    const mapped = CATEGORY_SUBTYPES[expense.category];
-    const debitAccount =
-      expense.accountId ??
-      (mapped ? await findAccountBySubtype(tx, companyId, mapped, "expense") : null) ??
-      (await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"));
-
-    const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
-      entryDate: paidDate,
-      description: `Xarajat ${expense.number}: ${expense.description}`,
-      referenceType: "expense",
-      referenceId: expense.id,
-      lines: [
-        { accountId: debitAccount, debit: expense.amount, description: expense.category },
-        { accountId: await ledgerAccountFor(tx, companyId, account.type), credit: expense.amount },
-      ],
-    });
-    payment = { cashTransactionId: transaction.id, journalEntryId: entry.id };
+    payment = await postExpensePayment(tx, tenant, expense, { cashAccountId: input.cashAccountId, paidDate: input.paidDate ?? todayIso() });
   }
 
   const [updated] = await tx

@@ -16,12 +16,13 @@ import { z } from "zod";
 import { AppError, badRequest, conflict, notFound } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { posSyncConflicts, posSyncOperations, type PosSyncError } from "../../db/schema/pos.js";
-import { customers, posShifts, salesOrderItems, salesOrders, salesReturns } from "../../db/schema/sales.js";
+import { customers, posCashMovements, posShifts, salesOrderItems, salesOrders, salesReturns } from "../../db/schema/sales.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { decimalSchema, moneySchema, percentSchema, priceSchema } from "../../shared/decimal.js";
 import { requirePermission } from "../company/tenant.js";
-import { closeShift, completeSale, openShift, type SaleConflict } from "../sales/pos.service.js";
+import { closeShift, completeSale, openShift, posCustomerPayment, type SaleConflict } from "../sales/pos.service.js";
+import { CASH_MOVEMENT_KINDS, posCashMovement } from "../sales/pos-cash.service.js";
 import { createCustomer } from "../sales/customers.service.js";
 import { REFUND_METHODS, returnSaleItems } from "../sales/returns.service.js";
 import { cashierTenant, type DeviceContext } from "./device-auth.js";
@@ -113,6 +114,31 @@ export const syncOperationSchema = z.discriminatedUnion("type", [
       customerId: z.uuid(),
       name: z.string().trim().min(1).max(200),
       phone: z.string().trim().max(20).nullable().optional(),
+    }),
+  }),
+  z.strictObject({
+    ...common,
+    type: z.literal("cash.movement"),
+    payload: z.strictObject({
+      movementId: z.uuid(),
+      shiftId: z.uuid(),
+      kind: z.enum(CASH_MOVEMENT_KINDS),
+      amount: decimalSchema({ scale: 2, positive: true }),
+      category: z.string().trim().max(64).nullable().optional(),
+      notes,
+    }),
+  }),
+  z.strictObject({
+    ...common,
+    type: z.literal("customer.payment"),
+    payload: z.strictObject({
+      paymentId: z.uuid(),
+      shiftId: z.uuid(),
+      customerId: z.uuid(),
+      purpose: z.enum(["deposit", "debt"]),
+      amount: decimalSchema({ scale: 2, positive: true }),
+      method: z.enum(["cash", "card"]),
+      notes,
     }),
   }),
 ]);
@@ -317,6 +343,54 @@ async function applyOperation(tx: Tx, context: DeviceContext, op: SyncOperation,
       const customer = await createCustomer(tx, tenant, { id: payload.customerId, name: payload.name, phone: payload.phone ?? null }, meta);
       await recordConflicts(tx, context, op, { type: "customer", id: customer.id }, found);
       return { customerId: customer.id, code: customer.code, conflicts: found.map((item) => item.kind) };
+    }
+    case "cash.movement": {
+      const payload = op.payload;
+      await deviceShift(tx, context, payload.shiftId);
+      const [taken] = await tx.select({ id: posCashMovements.id }).from(posCashMovements).where(eq(posCashMovements.id, payload.movementId)).limit(1);
+      if (taken) throw conflict("Kassa harakati identifikatori band");
+      const result = await posCashMovement(
+        tx,
+        tenant,
+        {
+          shiftId: payload.shiftId,
+          kind: payload.kind,
+          amount: payload.amount,
+          category: payload.category ?? null,
+          notes: payload.notes ?? null,
+          offline: { id: payload.movementId, occurredAt: op.createdAt, deviceId: context.device.id },
+        },
+        meta,
+      );
+      await recordConflicts(tx, context, op, { type: "pos_cash_movement", id: payload.movementId }, result.conflicts);
+      return {
+        movementId: result.movement.id,
+        kind: result.movement.kind,
+        amount: result.movement.amount,
+        expenseId: result.movement.expenseId,
+        expectedCash: result.shift.expectedCash,
+        conflicts: result.conflicts.map((item) => item.kind),
+      };
+    }
+    case "customer.payment": {
+      const payload = op.payload;
+      await deviceShift(tx, context, payload.shiftId);
+      const result = await posCustomerPayment(
+        tx,
+        tenant,
+        {
+          shiftId: payload.shiftId,
+          customerId: payload.customerId,
+          purpose: payload.purpose,
+          amount: payload.amount,
+          method: payload.method,
+          notes: payload.notes ?? null,
+          offline: { occurredAt: op.createdAt, deviceId: context.device.id },
+        },
+        meta,
+      );
+      await recordConflicts(tx, context, op, { type: "customer", id: payload.customerId }, result.conflicts);
+      return { paymentId: payload.paymentId, customer: result.customer, conflicts: result.conflicts.map((item) => item.kind) };
     }
   }
 }

@@ -29,7 +29,7 @@ import { companies, users } from "./platform.js";
 import { products, units } from "./catalog.js";
 import { warehouses } from "./inventory.js";
 import { posDevices } from "./pos.js";
-import { cashAccounts, journalEntries } from "./finance.js";
+import { cashAccounts, expenses, journalEntries } from "./finance.js";
 import { paymentMethod } from "./purchase.js";
 import { legacyId, money, percent, pk, price, qty, timestamps } from "./_shared.js";
 
@@ -137,6 +137,9 @@ export const posShifts = pgTable(
     totalCard: money("total_card").notNull().default("0"),
     /** Shu smenada qaytarilgan mahsulotlar summasi (qisman qaytarishlar). */
     totalReturns: money("total_returns").notNull().default("0"),
+    /** Kassaga kirim (almashtirish puli va h.k.) va chiqim (inkassatsiya, xarajat) — kutilgan naqdda hisobga olinadi. */
+    cashIn: money("cash_in").notNull().default("0"),
+    cashOut: money("cash_out").notNull().default("0"),
     receiptCount: integer("receipt_count").notNull().default(0),
     /** Chet valyuta bo'yicha (`{ USD: "20.00" }`): boshlang'ich naqd, naqd va karta tushumi, yopilishda sanalgan naqd. */
     openingForeignCash: jsonb("opening_foreign_cash").$type<Record<string, string>>().notNull().default({}),
@@ -425,6 +428,42 @@ export const salesReturnItems = pgTable(
     index("sri_return_idx").on(t.returnId),
     index("sri_order_item_idx").on(t.orderItemId),
     check("sri_qty_positive", sql`${t.quantity} > 0`),
+  ],
+);
+
+// ─── pos_cash_movements ──────────────────────────────────────────────────────
+
+/**
+ * Kassa smenasidagi naqd harakati: inkassatsiya (naqdni seyf/bankka olish), almashtirish puli, kassadan xarajat,
+ * boshqa kirim/chiqim. Xarajat — `expenses` hujjati (to'langan) bilan bog'lanadi.
+ */
+export const posCashMovements = pgTable(
+  "pos_cash_movements",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    shiftId: uuid("shift_id").notNull().references(() => posShifts.id, { onDelete: "restrict" }),
+    deviceId: uuid("device_id").references(() => posDevices.id, { onDelete: "set null" }),
+    type: varchar("type", { length: 8 }).notNull(),
+    kind: varchar("kind", { length: 16 }).notNull(),
+    amount: money("amount").notNull(),
+    category: varchar("category", { length: 64 }),
+    notes: text("notes"),
+    expenseId: uuid("expense_id").references(() => expenses.id, { onDelete: "set null" }),
+    cashierId: uuid("cashier_id").references(() => users.id, { onDelete: "set null" }),
+    cashierName: varchar("cashier_name", { length: 200 }),
+    /** Qurilmada bajarilgan vaqt (offline bo'lishi mumkin). */
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    ...timestamps(),
+  },
+  (t) => [
+    index("pcm_shift_idx").on(t.shiftId, t.occurredAt),
+    index("pcm_company_occurred_idx").on(t.companyId, t.occurredAt),
+    check("pcm_type", sql`${t.type} in ('in', 'out')`),
+    check("pcm_kind", sql`${t.kind} in ('collection', 'change_fund', 'expense', 'other_in', 'other_out')`),
+    check("pcm_amount_positive", sql`${t.amount} > 0`),
   ],
 );
 

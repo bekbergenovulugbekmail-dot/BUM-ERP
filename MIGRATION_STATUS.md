@@ -864,8 +864,8 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 | # | Bosqich | Holat |
 |---|---|---|
 | D0 | Poydevor: qurilma va token, kassir PIN, lokal SQLite, pull/push sinxron, offline smena | ✅ commit `92cf40a`, API deploy (production `/api/pos-device/session` → 401) |
-| D1 | POS: yuqori menyu, shtrix-kod, tezkor tugmalar, valyutalar, kechiktirilgan/qisman qaytarish, chek printeri, offline sotuv sinxroni (qoldiq ziddiyati) | ✅ (pastda) |
-| D2 | Sotuv tarixi, kassa (inkassatsiya, smena/kassir/to'lov turi hisobotlari) | ⏳ |
+| D1 | POS: yuqori menyu, shtrix-kod, tezkor tugmalar, valyutalar, kechiktirilgan/qisman qaytarish, chek printeri, offline sotuv sinxroni (qoldiq ziddiyati) | ✅ commit `f4fbd55`, API deploy (yangi endpointlar production'da 401) |
+| D2 | Sotuv tarixi, kassa (inkassatsiya, smena/kassir/to'lov turi hisobotlari) | ✅ (pastda) |
 | D3–D9 | Xarid, ombor, inventarizatsiya, etiketka, ma'lumotlar, analitika, sozlamalar va avtomatik yangilanish, offline testlar | ⏳ |
 
 **D0 — server** (migratsiya 0031):
@@ -908,6 +908,23 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 - tezkor tugmalar F1–F12, ↑↓, +/−, Delete (Electron standart menyusi o'chirilgan)
 - chek: web bilan bir xil termal shablon, dialogsiz tanlangan printerga (58/80 mm, balandlik mazmun bo'yicha), avtomatik chop etish; pul qutisi — drayver, tarmoq printeri (9100) yoki Windows ulashilgan printer (ESC/POS impulsi, shell'siz)
 - testlar: 15 (lokal ombor, sinxron, PIN, xizmat — offline chek, kechiktirish, qaytarish, rad etish/qayta yuborish/bekor qilish; chek hisobi — valyuta va balans)
+
+**D2 — server** (migratsiya 0033, faqat qo'shimcha):
+- `pos_cash_movements` (smena, qurilma, `in`/`out`, tur, summa, kategoriya, izoh, xarajat hujjati, kassir, qurilmadagi vaqt) va `pos_shifts.cash_in` / `cash_out`; kutilgan naqd = boshlang'ich + naqd tushum + kirim − chiqim (web kassa smena yopish oynasi ham shu qiymatni ko'radi)
+- turlar: inkassatsiya, almashtirish puli, boshqa kirim/chiqim — buxgalteriyada harakat emas (POS naqdi kompaniya asosiy kassasida); web'da inkassatsiyani bank/boshqa kassaga o'tkazish (`targetAccountId` → `transferCash`); kassadan xarajat — "to'langan" `EXP-…` hujjati, asosiy kassadan chiqim va jurnal (`postExpensePayment`, web xarajat to'lovi bilan umumiy)
+- ruxsat `pos.cash.expense` (Direktor; migratsiya mavjud Direktor rollariga qo'shadi) yoki `finance.manage`
+- `push`: `cash.movement`, `customer.payment` (qarz to'lovi qarzdan oshsa — ortig'i balansga, `debt_overpaid`; yopilgan smena — `shift_closed`)
+- web kassa desktop smenasiga chek, mijoz to'lovi va naqd harakati yoza olmaydi (va aksincha)
+- web: `GET/POST /api/sales/pos/shifts/:shiftId/cash-movements` (`pos.use`)
+- qurilma: `GET /api/pos-device/sales?from&to&cursor` — qurilma omboridagi barcha kassa cheklari (kassa kodi, kassir, mijoz)
+- testlar: `pos-kassa-sync` (3) — kirim/chiqim, xarajat ruxsati va hujjati, kutilgan naqd va smena farqi, web harakati; qarzdan ortiq to'lov balansga; sotuv tarixi sahifalab va ombor izolyatsiyasi. To'liq API: 272/272 (65 fayl)
+- server qismi alohida commit va API deploy; desktop D2 kodi D3 bilan birga commit qilinadi (bir xil fayllarda)
+
+**D2 — desktop** (lokal baza v3: naqd harakatlari, mijoz to'lovlari, yopilgan smenalar):
+- kassa bo'limi: X-hisobot qurilmadagi hujjatlardan (tushum turi — naqd/karta/bank/o'tkazma/balans/keshbek/qarz/chet valyuta, qaytarishlar, mijoz to'lovlari, naqd harakatlari, kassirlar, kutilgan naqd, serverga yuborilmaganlar soni); kirim/chiqim (xarajat — ruxsat bilan), mijoz to'lovi (qarz/balans, naqd/karta), smenani yopish — Z-hisobot tarixda saqlanadi, termal chop etiladi
+- sotuv tarixi: shu kassa cheklari va qaytarishlari (offline, sana oralig'i, qidiruv, holat), chek tafsiloti, qayta chop etish, tarixdan qaytarishga o'tish; barcha kassalar cheklari — serverdan (internet bilan, sahifalab)
+- kassa ekrani menyusidan va bosh sahifadan bo'limlarga o'tish
+- testlar: 16
 
 ### Distributsiya (`/api/distribution`)
 

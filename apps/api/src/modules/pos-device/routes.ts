@@ -9,6 +9,7 @@
  *   POST /pull                     (token) o'zgarishlar: kursorlar bo'yicha sahifalab; sozlamalar xeshi o'zgarsa `config`
  *   POST /push                     (token) offline amallar navbati: bir martalik (opId) — smena, chek, qaytarish, mijoz
  *   GET  /receipts/:number         (token) qaytarish uchun chek (qurilma omboridagi, qaytarilgan miqdorlar bilan)
+ *   GET  /sales                    (token) sotuv tarixi: qurilma omboridagi barcha kassa cheklari (sana, kursor)
  *
  * /api/pos/devices — web (sessiya, `pos.devices.manage`):
  *   GET  /                         qurilmalar ro'yxati
@@ -31,7 +32,7 @@ import { companyCurrency } from "../finance/accounts.service.js";
 import { listConflicts, resolveConflict } from "./conflicts.service.js";
 import { cashierTenant, deviceOf, requireDevice } from "./device-auth.js";
 import { deviceWarehouses, listDevices, registerDevice, setupTenant, updateDevice } from "./devices.service.js";
-import { findDeviceReceipt } from "./receipts.service.js";
+import { findDeviceReceipt, listDeviceSales } from "./receipts.service.js";
 import { DEFAULT_PULL_LIMIT, PULL_ENTITIES, pullChanges } from "./sync-pull.service.js";
 import { MAX_OPS_PER_PUSH, pushOperations } from "./sync-push.service.js";
 
@@ -61,6 +62,12 @@ const pullBody = z.strictObject({
 });
 const pushBody = z.strictObject({ ops: z.array(z.unknown()).min(1).max(MAX_OPS_PER_PUSH) });
 const receiptParams = z.object({ number: z.string().trim().min(1).max(32) });
+const salesQuery = z.object({
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  cursor: z.string().max(500).optional(),
+});
 const deviceParams = z.object({ deviceId: z.uuid() });
 const conflictParams = z.object({ conflictId: z.uuid() });
 const conflictsQuery = z.object({
@@ -175,6 +182,11 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
     scoped.get("/receipts/:number", async (req) => {
       const { number } = receiptParams.parse(req.params);
       return { receipt: await findDeviceReceipt(db, deviceOf(req), number) };
+    });
+
+    scoped.get("/sales", async (req) => {
+      const query = salesQuery.parse(req.query);
+      return listDeviceSales(db, deviceOf(req), query);
     });
   });
 }

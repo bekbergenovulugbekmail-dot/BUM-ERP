@@ -62,6 +62,7 @@ import {
   openShift,
   posCustomerPayment,
 } from "./pos.service.js";
+import { CASH_MOVEMENT_KINDS, listCashMovements, posCashMovement } from "./pos-cash.service.js";
 import { REFUND_METHODS, returnSaleItems } from "./returns.service.js";
 
 const nullableText = (max: number) =>
@@ -207,6 +208,14 @@ const posSaleBody = z.strictObject({
     .max(6)
     .optional(),
   notes: nullableText(1000),
+});
+const cashMovementBody = z.strictObject({
+  kind: z.enum(CASH_MOVEMENT_KINDS),
+  amount: positiveMoney,
+  category: nullableText(64),
+  notes: nullableText(500),
+  /** Inkassatsiyani bank yoki boshqa kassaga o'tkazish. */
+  targetAccountId: z.uuid().nullable().optional(),
 });
 const posCustomerBody = z.strictObject({
   name: z.string().trim().min(1).max(200),
@@ -423,6 +432,19 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     const { shiftId } = shiftParams.parse(req.params);
     const body = closeShiftBody.parse(req.body);
     return writeInTenant(req, "pos.use", (tx, tenant) => closeShift(tx, tenant, shiftId, body, requestMeta(req)));
+  });
+
+  app.get("/pos/shifts/:shiftId/cash-movements", async (req) => {
+    const { shiftId } = shiftParams.parse(req.params);
+    return { movements: await listCashMovements(db, await readTenant(req, "pos.use"), shiftId) };
+  });
+
+  app.post("/pos/shifts/:shiftId/cash-movements", async (req, reply) => {
+    const { shiftId } = shiftParams.parse(req.params);
+    const body = cashMovementBody.parse(req.body);
+    const result = await writeInTenant(req, "pos.use", (tx, tenant) => posCashMovement(tx, tenant, { ...body, shiftId }, requestMeta(req)));
+    reply.status(201);
+    return { movement: result.movement, shift: result.shift };
   });
 
   app.post("/pos/sales", async (req, reply) => {

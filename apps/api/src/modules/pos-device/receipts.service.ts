@@ -2,12 +2,58 @@
  * Kassada qaytarish uchun chekni raqam bo'yicha topish (boshqa kassa yoki web'da sotilgan chek ham) — faqat qurilma
  * omboridagi sotuv. Qatorlar qaytarilgan miqdori bilan: qurilma qolganini qaytara oladi.
  */
-import { and, asc, eq } from "drizzle-orm";
-import { notFound } from "@bum/shared";
+import { and, asc, desc, eq, gte, lt, lte, or } from "drizzle-orm";
+import { badRequest, notFound } from "@bum/shared";
 import { products, units } from "../../db/schema/catalog.js";
+import { users } from "../../db/schema/platform.js";
+import { posDevices } from "../../db/schema/pos.js";
 import { customers, salesOrderItems, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx } from "../../db/transaction.js";
+import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import type { DeviceContext } from "./device-auth.js";
+
+/** Sotuv tarixi (internet bilan): qurilma omboridagi barcha kassa cheklari — boshqa kassalar va web ham. */
+export async function listDeviceSales(conn: DbOrTx, context: DeviceContext, options: { from?: string; to?: string; limit: number; cursor?: string }) {
+  let after: { at: Date; id: string } | null = null;
+  if (options.cursor) {
+    const [iso, id] = decodeCursor(options.cursor, 2) as [string, string];
+    const at = new Date(iso);
+    if (Number.isNaN(at.getTime()) || !UUID_RE.test(id)) throw badRequest("Kursor noto'g'ri");
+    after = { at, id };
+  }
+  const rows = await conn
+    .select({
+      id: salesOrders.id,
+      number: salesOrders.number,
+      status: salesOrders.status,
+      orderDate: salesOrders.orderDate,
+      totalAmount: salesOrders.totalAmount,
+      paidAmount: salesOrders.paidAmount,
+      createdAt: salesOrders.createdAt,
+      customerName: customers.name,
+      deviceCode: posDevices.code,
+      cashierName: users.name,
+    })
+    .from(salesOrders)
+    .leftJoin(customers, eq(customers.id, salesOrders.customerId))
+    .leftJoin(posDevices, eq(posDevices.id, salesOrders.deviceId))
+    .leftJoin(users, eq(users.id, salesOrders.createdBy))
+    .where(
+      and(
+        eq(salesOrders.companyId, context.company.id),
+        eq(salesOrders.warehouseId, context.device.warehouseId),
+        eq(salesOrders.isPos, true),
+        options.from ? gte(salesOrders.orderDate, options.from) : undefined,
+        options.to ? lte(salesOrders.orderDate, options.to) : undefined,
+        after ? or(lt(salesOrders.createdAt, after.at), and(eq(salesOrders.createdAt, after.at), lt(salesOrders.id, after.id))) : undefined,
+      ),
+    )
+    .orderBy(desc(salesOrders.createdAt), desc(salesOrders.id))
+    .limit(options.limit + 1);
+  const page = rows.slice(0, options.limit);
+  const last = page.at(-1);
+  return { sales: page, nextCursor: rows.length > options.limit && last ? encodeCursor([last.createdAt.toISOString(), last.id]) : null };
+}
 
 export async function findDeviceReceipt(conn: DbOrTx, context: DeviceContext, number: string) {
   const [order] = await conn
