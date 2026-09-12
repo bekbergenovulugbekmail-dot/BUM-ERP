@@ -150,6 +150,8 @@ const returnBody = z
 const returnItemsBody = z.strictObject({
   items: z.array(z.strictObject({ orderItemId: z.uuid(), quantity: positiveQty })).min(1).max(500),
   refundMethod: z.enum(REFUND_METHODS).default("cash"),
+  /** Pulni usullar bo'yicha qaytarish (aralash to'lovli chek): yig'indisi qaytadigan pulga teng, har usul chekda to'langanidan oshmaydi. */
+  refunds: z.array(z.strictObject({ method: z.enum(REFUND_METHODS), amount: moneySchema })).min(1).max(4).optional(),
   reason: nullableText(1000),
   /** Pul qaytaradigan ochiq web kassa smenasi (ixtiyoriy). */
   shiftId: z.uuid().nullable().optional(),
@@ -199,7 +201,11 @@ const posSaleBody = z.strictObject({
   customerId: z.uuid().nullable().optional(),
   items: z.array(salesItem).min(1).max(500),
   paymentMethod: paymentMethod.default("cash"),
-  amountPaid: moneySchema,
+  amountPaid: moneySchema.optional(),
+  /** Aralash to'lov: naqd + karta + bank (asosiy valyutada, har usul bir marta) — berilsa paymentMethod/amountPaid o'rniga. */
+  payments: z.array(z.strictObject({ method: z.enum(["cash", "card", "bank"]), amount: moneySchema })).min(1).max(3).optional(),
+  /** So'rov kaliti — takroriy yuborishda ikkinchi chek yozilmaydi. */
+  clientRequestId: z.uuid().optional(),
   cashbackAmount: moneySchema.optional(),
   balanceAmount: moneySchema.optional(),
   changeToBalance: z.boolean().optional(),
@@ -211,7 +217,7 @@ const posSaleBody = z.strictObject({
     .max(6)
     .optional(),
   notes: nullableText(1000),
-});
+}).refine((body) => body.amountPaid !== undefined || body.payments !== undefined, "To'lov summasi (amountPaid) yoki to'lov qismlari (payments) kiritilsin");
 const cashMovementBody = z.strictObject({
   kind: z.enum(CASH_MOVEMENT_KINDS),
   amount: positiveMoney,

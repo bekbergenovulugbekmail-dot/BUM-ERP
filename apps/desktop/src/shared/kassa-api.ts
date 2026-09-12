@@ -21,7 +21,7 @@ export type KassaError = { code: string; message: string; details?: unknown };
 export type KassaResult<T> = { ok: true; data: T } | { ok: false; error: KassaError };
 
 /** Smena yig'indilari qurilmada (offline) — kassa hisobi va smena yopishda ko'rinadi. */
-export type ShiftTotals = { sales: string; cash: string; card: string; returns: string; receipts: number; cashIn?: string; cashOut?: string };
+export type ShiftTotals = { sales: string; cash: string; card: string; bank?: string; returns: string; receipts: number; cashIn?: string; cashOut?: string };
 
 export type LocalShift = {
   id: string;
@@ -130,6 +130,8 @@ export type SaleInput = {
   paymentMethod: PaymentMethod;
   /** null — aniq summa. */
   amountPaid: string | null;
+  /** Aralash to'lov: naqd, karta, bank (har usul bir marta); summa null — qoldiq shu usulga. Berilsa paymentMethod/amountPaid o'rniga. */
+  payments?: { method: "cash" | "card" | "bank"; amount: string | null }[];
   /** null — ishlatilmaydi; "" — mavjudining hammasi (chegarada). */
   cashbackAmount: string | null;
   balanceAmount: string | null;
@@ -169,7 +171,10 @@ export type LocalSale = {
   tax: string;
   discount: string;
   total: string;
+  /** Asosiy usul (aralash to'lovda — eng katta qism). */
   paymentMethod: PaymentMethod;
+  /** Usullar bo'yicha: berilgan (naqdda — qaytim bilan) va qabul qilingan. Eski cheklarda yo'q. */
+  payments?: { method: PaymentMethod; tendered: string; paid: string }[];
   /** Mijoz bergan summa (asosiy valyutada). */
   tendered: string;
   paid: string;
@@ -195,6 +200,8 @@ export type ReturnableReceipt = {
   customer: { id: string; name: string } | null;
   total: string;
   paid: string;
+  /** Usullar bo'yicha hali qaytarilishi mumkin bo'lgan pul (aralash to'lovli chek — standart taqsimot). */
+  refundable: { method: RefundMethod; amount: string }[];
   lines: {
     id: string;
     productId: string;
@@ -213,6 +220,8 @@ export type ReturnInput = {
   number: string;
   items: { orderItemId: string; quantity: string }[];
   refundMethod: RefundMethod;
+  /** Pul usullar bo'yicha (aralash to'lovli chek) — yig'indisi qaytadigan pulga teng. */
+  refunds?: { method: RefundMethod; amount: string }[];
   reason?: string | null;
 };
 
@@ -228,6 +237,8 @@ export type LocalReturn = {
   lines: { orderItemId: string; name: string; quantity: string; lineTotal: string }[];
   total: string;
   refundMethod: RefundMethod;
+  /** Usullar bo'yicha (taqsimlangan qaytarish). */
+  refunds?: { method: RefundMethod; amount: string }[];
   /** Taxminiy qaytadigan pul (mijoz qarzi bo'lsa kamroq) — yakuniysi serverda. */
   refundEstimate: string;
   reason: string | null;
@@ -294,7 +305,7 @@ export type ShiftReport = {
   discount: string;
   /** Tushum turi bo'yicha: naqd, karta, bank, o'tkazma, balansdan, keshbekdan, qarzga. */
   byMethod: { key: string; label: string; amount: string }[];
-  returns: { count: number; total: string; cash: string; card: string; balance: string };
+  returns: { count: number; total: string; cash: string; card: string; bank: string; balance: string };
   customerPayments: { count: number; debtCash: string; debtCard: string; depositCash: string; depositCard: string };
   cashMovements: { kind: CashMovementKind; label: string; count: number; amount: string }[];
   cashIn: string;

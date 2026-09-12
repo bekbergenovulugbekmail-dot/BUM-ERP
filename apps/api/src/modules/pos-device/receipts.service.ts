@@ -12,6 +12,8 @@ import { purchaseOrderItems, purchaseOrders, purchaseReturns, suppliers } from "
 import { customers, salesOrderItems, salesOrders, salesReturns } from "../../db/schema/sales.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
+import { fromMinor } from "../../shared/decimal.js";
+import { refundableByMethod } from "../sales/returns.service.js";
 import type { DeviceContext } from "./device-auth.js";
 
 /** Ta'minotchiga qaytarish uchun xarid (raqam bo'yicha, qurilma omboridagi): qabul va qaytarilgan miqdorlar bilan. */
@@ -236,5 +238,7 @@ export async function findDeviceReceipt(conn: DbOrTx, context: DeviceContext, nu
     .where(eq(salesOrderItems.orderId, order.id))
     .orderBy(asc(salesOrderItems.createdAt), asc(salesOrderItems.id));
 
-  return { ...order, items };
+  // Aralash to'lovli chekni qaytarish: usullar bo'yicha qolgan qaytariladigan pul (kassada standart taqsimot)
+  const refundable = [...(await refundableByMethod(conn, order.id))].map(([method, amount]) => ({ method, amount: fromMinor(amount > 0n ? amount : 0n) }));
+  return { ...order, items, refundable };
 }

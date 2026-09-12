@@ -128,7 +128,7 @@ const MONEY = /^\d{1,16}(\.\d{1,2})?$/;
 const QTY = /^\d{1,14}(\.\d{1,4})?$/;
 const PERCENT = /^\d{1,3}(\.\d{1,2})?$/;
 const PAYMENT_METHODS: PaymentMethod[] = ["cash", "card", "bank", "transfer"];
-const REFUND_METHODS: RefundMethod[] = ["cash", "card", "balance"];
+const REFUND_METHODS: RefundMethod[] = ["cash", "card", "bank", "balance"];
 
 export type TokenVault = { save(token: string): void; load(): string | null; clear(): void };
 
@@ -264,7 +264,7 @@ function fieldChanges<F extends string>(current: object, next: Partial<Record<F,
 
 const withoutNulls = (values: Record<string, string | null | undefined>) => Object.fromEntries(Object.entries(values).filter(([, value]) => value != null));
 
-const EMPTY_TOTALS: ShiftTotals = { sales: "0.00", cash: "0.00", card: "0.00", returns: "0.00", receipts: 0, cashIn: "0.00", cashOut: "0.00" };
+const EMPTY_TOTALS: ShiftTotals = { sales: "0.00", cash: "0.00", card: "0.00", bank: "0.00", returns: "0.00", receipts: 0, cashIn: "0.00", cashOut: "0.00" };
 
 export const CASH_KINDS: Record<CashMovementKind, { type: "in" | "out"; label: string }> = {
   collection: { type: "out", label: "Inkassatsiya" },
@@ -886,10 +886,19 @@ export class KassaService {
     const shift = this.requireShift(cashier);
     const device = this.store.getMeta<DeviceInfo>("device");
     if (!device) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
-    if (!PAYMENT_METHODS.includes(input.paymentMethod)) throw new KassaError("BAD_REQUEST", "To'lov usuli noto'g'ri");
+    // Aralash to'lov: naqd, karta, bank (har usul bir marta, summa null — qoldiq); har usul shu kassada yoqilgan bo'lsin
+    const mixed = Array.isArray(input.payments) && input.payments.length > 0;
+    if (mixed && input.payments!.length > 3) throw new KassaError("BAD_REQUEST", "To'lov usuli noto'g'ri");
+    const methods = mixed ? input.payments!.map((part) => part.method) : [input.paymentMethod];
     const prefs = this.prefs();
-    if (!prefs.enabledPaymentMethods.includes(input.paymentMethod)) {
-      throw new KassaError("BAD_REQUEST", `${METHOD_LABELS[input.paymentMethod] ?? input.paymentMethod} to'lovi bu kassada o'chirilgan (Sozlamalar → To'lov)`);
+    for (const method of methods) {
+      if (!PAYMENT_METHODS.includes(method) || (mixed && method === ("transfer" as PaymentMethod))) throw new KassaError("BAD_REQUEST", "To'lov usuli noto'g'ri");
+      if (!prefs.enabledPaymentMethods.includes(method)) {
+        throw new KassaError("BAD_REQUEST", `${METHOD_LABELS[method] ?? method} to'lovi bu kassada o'chirilgan (Sozlamalar → To'lov)`);
+      }
+    }
+    if (mixed && input.payments!.some((part) => part.amount !== null && !MONEY.test(String(part.amount)))) {
+      throw new KassaError("BAD_REQUEST", "To'lov summasi noto'g'ri");
     }
 
     let customer: CustomerRow | null = null;
@@ -932,12 +941,18 @@ export class KassaService {
       cashback: config?.cashback ?? null,
       paymentMethod: input.paymentMethod,
       amountPaid: input.amountPaid,
+      ...(mixed ? { payments: input.payments!.map((part) => ({ method: part.method, amount: part.amount === null ? null : String(part.amount) })) } : {}),
       cashbackAmount: input.cashbackAmount,
       balanceAmount: input.balanceAmount,
       changeToBalance: !!input.changeToBalance,
       currencyPayments: (input.currencyPayments ?? []).map((part) => ({ currency: String(part.currency), amount: part.amount, method: part.method === "card" ? "card" : "cash" })),
     });
     if (calc.errors.length > 0) throw new KassaError("BAD_REQUEST", calc.errors[0]!, { errors: calc.errors });
+    // Chekning asosiy usuli (hisobot va pul qutisi uchun) — eng katta qism
+    const primaryMethod = mixed
+      ? ([...calc.payments].sort((a, b) => (b.paid > a.paid ? 1 : b.paid < a.paid ? -1 : 0))[0]?.method ?? input.paymentMethod)
+      : input.paymentMethod;
+    const sentParts = calc.payments.filter((part) => part.tendered > 0n);
 
     const currencyMode = calc.buckets.length > 1 || !calc.hasBaseBucket;
     const usedRates: Record<string, string> = {};
@@ -974,8 +989,11 @@ export class KassaService {
           unitPrice: line.unitPrice,
           discountPercent: line.discountPercent,
         })),
-        paymentMethod: input.paymentMethod,
+        paymentMethod: primaryMethod,
         amountPaid: fromMinor(calc.tendered),
+        ...(mixed && sentParts.length > 0
+          ? { payments: sentParts.map((part) => ({ method: part.method as "cash" | "card" | "bank", amount: fromMinor(part.tendered) })) }
+          : {}),
         ...(calc.cashbackUsed > 0n ? { cashbackAmount: fromMinor(calc.cashbackUsed) } : {}),
         ...(calc.balanceUsed > 0n ? { balanceAmount: fromMinor(calc.balanceUsed) } : {}),
         ...(calc.changeKept > 0n ? { changeToBalance: true } : {}),
@@ -1016,7 +1034,8 @@ export class KassaService {
         tax: fromMinor(calc.tax),
         discount: fromMinor(calc.discount),
         total: fromMinor(calc.total),
-        paymentMethod: input.paymentMethod,
+        paymentMethod: primaryMethod,
+        payments: calc.payments.map((part) => ({ method: part.method, tendered: fromMinor(part.tendered), paid: fromMinor(part.paid) })),
         tendered: fromMinor(calc.tendered),
         paid: fromMinor(calc.paid),
         change: fromMinor(calc.change - calc.changeKept),
@@ -1062,13 +1081,15 @@ export class KassaService {
       }
       // Smena yig'indilari (kassa hisobi)
       const totals = shift.totals ?? { ...EMPTY_TOTALS };
-      const cashIn = input.paymentMethod === "cash" ? calc.paid + calc.changeKept : 0n;
+      const paidBy = (...kinds: PaymentMethod[]) => calc.payments.reduce((sum, part) => sum + (kinds.includes(part.method) ? part.paid : 0n), 0n);
       this.store.setMeta("shift", {
         ...shift,
         totals: {
+          ...totals,
           sales: addMoney(totals.sales, calc.total),
-          cash: addMoney(totals.cash, cashIn),
-          card: addMoney(totals.card, input.paymentMethod === "card" ? calc.paid : 0n),
+          cash: addMoney(totals.cash, calc.cashPaid + calc.changeKept),
+          card: addMoney(totals.card, paidBy("card")),
+          bank: addMoney(totals.bank ?? "0.00", paidBy("bank", "transfer")),
           returns: totals.returns,
           receipts: totals.receipts + 1,
         },
@@ -1178,6 +1199,21 @@ export class KassaService {
     return returned;
   }
 
+  /** Naqd/karta/bank bo'yicha qolgan qaytariladigan pul: berilgan qismlar − qaytarishlarda shu usulda qaytgani. */
+  private static refundableAfter(parts: { method: string; amount: string }[], returns: { state: string; doc: LocalReturn }[]) {
+    const left = new Map<RefundMethod, bigint>();
+    for (const part of parts) {
+      const key = part.method === "transfer" ? "bank" : part.method;
+      if (key === "cash" || key === "card" || key === "bank") left.set(key, (left.get(key) ?? 0n) + toMinor(part.amount));
+    }
+    for (const stored of returns) {
+      if (stored.state === "rejected") continue;
+      const refunds = stored.doc.refunds?.length ? stored.doc.refunds : [{ method: stored.doc.refundMethod, amount: stored.doc.refundEstimate }];
+      for (const part of refunds) if (left.has(part.method)) left.set(part.method, left.get(part.method)! - toMinor(part.amount));
+    }
+    return [...left].map(([method, amount]) => ({ method, amount: fromMinor(amount > 0n ? amount : 0n) }));
+  }
+
   async findReceipt(input: { number: string }): Promise<ReturnableReceipt> {
     this.requireCashier();
     const number = String(input.number ?? "").trim().toUpperCase();
@@ -1186,6 +1222,11 @@ export class KassaService {
     const local = this.store.saleByNumber<LocalSale>(number);
     if (local) {
       const returned = this.localReturned(local.doc.id);
+      // Usullar bo'yicha qolgan qaytariladigan pul: chek to'lovlari − shu kassaning oldingi qaytarishlari
+      const paidParts = local.doc.payments?.length
+        ? local.doc.payments.map((part) => ({ method: part.method, amount: part.paid }))
+        : [{ method: local.doc.paymentMethod, amount: local.doc.paid }];
+      const refundable = KassaService.refundableAfter(paidParts, this.store.returnsForOrder<LocalReturn>(local.doc.id));
       return {
         source: "local",
         orderId: local.doc.id,
@@ -1195,6 +1236,7 @@ export class KassaService {
         customer: local.doc.customer ? { id: local.doc.customer.id, name: local.doc.customer.name } : null,
         total: local.doc.total,
         paid: fromMinor(toMinor(local.doc.paid) + toMinor(local.doc.balanceUsed) + toMinor(local.doc.cashbackUsed)),
+        refundable,
         lines: local.doc.lines.map((line) => ({
           id: line.id,
           productId: line.productId,
@@ -1232,6 +1274,8 @@ export class KassaService {
       customer: receipt.customerId ? { id: receipt.customerId, name: receipt.customerName ?? "" } : null,
       total: receipt.totalAmount,
       paid: receipt.paidAmount,
+      // Server qaytargani (eski server — bo'sh) minus shu kassaning hali yuborilmagan qaytarishlari
+      refundable: receipt.refundable ? KassaService.refundableAfter(receipt.refundable, pendingReturns) : [],
       lines: receipt.items.map((item) => ({
         id: item.id,
         productId: item.productId,
@@ -1251,13 +1295,18 @@ export class KassaService {
     const shift = this.requireShift(cashier);
     const device = this.store.getMeta<DeviceInfo>("device");
     if (!device) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
-    if (!REFUND_METHODS.includes(input.refundMethod)) throw new KassaError("BAD_REQUEST", "Pul qaytarish usuli noto'g'ri");
+    const refundInput = Array.isArray(input.refunds) ? input.refunds.map((part) => ({ method: part.method, amount: String(part.amount ?? "") })) : [];
+    if (!REFUND_METHODS.includes(input.refundMethod) || refundInput.some((part) => !REFUND_METHODS.includes(part.method) || !MONEY.test(part.amount))) {
+      throw new KassaError("BAD_REQUEST", "Pul qaytarish usuli noto'g'ri");
+    }
+    if (new Set(refundInput.map((part) => part.method)).size !== refundInput.length) throw new KassaError("BAD_REQUEST", "Qaytarish usuli takrorlangan");
     const receipt = await this.findReceipt({ number: input.number });
     if (receipt.status === "rejected" || receipt.status === "discarded") throw new KassaError("CONFLICT", "Chek serverga yozilmagan — qaytarib bo'lmaydi");
     if (receipt.source === "server" && receipt.status !== "shipped" && receipt.status !== "delivered") {
       throw new KassaError("CONFLICT", "Faqat yakunlangan chekdagi mahsulot qaytariladi");
     }
-    if (input.refundMethod === "balance" && !receipt.customer) throw new KassaError("BAD_REQUEST", "Balansga qaytarish uchun chekda mijoz bo'lishi kerak");
+    const usesBalance = refundInput.length > 0 ? refundInput.some((part) => part.method === "balance") : input.refundMethod === "balance";
+    if (usesBalance && !receipt.customer) throw new KassaError("BAD_REQUEST", "Balansga qaytarish uchun chekda mijoz bo'lishi kerak");
     if (!Array.isArray(input.items) || input.items.length === 0) throw new KassaError("BAD_REQUEST", "Qaytariladigan mahsulotni tanlang");
 
     const lineById = new Map(receipt.lines.map((line) => [line.id, line]));
@@ -1289,6 +1338,25 @@ export class KassaService {
     const paid = toMinor(receipt.paid);
     const refundable = paid > netAfter ? paid - netAfter : 0n;
     const refundEstimate = total < refundable ? total : refundable;
+    // Taqsimot (aralash to'lovli chek): yig'indisi qaytadigan pulga teng, har usul chekda shu usulda to'langanidan oshmaydi
+    const refundParts = refundInput.map((part) => ({ method: part.method, amount: toMinor(part.amount) })).filter((part) => part.amount > 0n);
+    if (refundParts.length > 0) {
+      const sum = refundParts.reduce((acc, part) => acc + part.amount, 0n);
+      if (sum !== refundEstimate) throw new KassaError("BAD_REQUEST", `Qaytariladigan pul ${fromMinor(refundEstimate)} — taqsimot yig'indisi ${fromMinor(sum)}`);
+      if (receipt.refundable.length > 0) {
+        for (const part of refundParts) {
+          if (part.method === "balance") continue;
+          const left = toMinor(receipt.refundable.find((row) => row.method === part.method)?.amount ?? "0");
+          if (part.amount > left) {
+            throw new KassaError("BAD_REQUEST", `${METHOD_LABELS[part.method] ?? part.method}: ko'pi bilan ${fromMinor(left)} qaytariladi (chekda shu usulda to'langan)`);
+          }
+        }
+      }
+    }
+    const refundMethod = refundParts.length > 0 ? [...refundParts].sort((a, b) => (b.amount > a.amount ? 1 : b.amount < a.amount ? -1 : 0))[0]!.method : input.refundMethod;
+    const refundsDoc = refundParts.map((part) => ({ method: part.method, amount: fromMinor(part.amount) }));
+    const refundedBy = (method: RefundMethod) =>
+      refundParts.length > 0 ? refundParts.reduce((acc, part) => acc + (part.method === method ? part.amount : 0n), 0n) : input.refundMethod === method ? refundEstimate : 0n;
 
     const now = new Date();
     const returnId = randomUUID();
@@ -1300,7 +1368,8 @@ export class KassaService {
         shiftId: shift.id,
         number,
         items: lines.map((line) => ({ orderItemId: line.orderItemId, quantity: line.quantity })),
-        refundMethod: input.refundMethod,
+        refundMethod,
+        ...(refundsDoc.length > 0 ? { refunds: refundsDoc } : {}),
         reason: input.reason ? String(input.reason).slice(0, 500) : null,
       };
       const op = this.store.enqueue({ type: "sale.return", cashierId: cashier.userId, payload }, now);
@@ -1315,7 +1384,8 @@ export class KassaService {
         createdAt: now.toISOString(),
         lines,
         total: fromMinor(total),
-        refundMethod: input.refundMethod,
+        refundMethod,
+        ...(refundsDoc.length > 0 ? { refunds: refundsDoc } : {}),
         refundEstimate: fromMinor(refundEstimate),
         reason: payload.reason ?? null,
         sync: { state: "pending", error: null, conflicts: [] },
@@ -1338,8 +1408,9 @@ export class KassaService {
         totals: {
           ...totals,
           returns: addMoney(totals.returns, total),
-          cash: addMoney(totals.cash, input.refundMethod === "cash" ? -refundEstimate : 0n),
-          card: addMoney(totals.card, input.refundMethod === "card" ? -refundEstimate : 0n),
+          cash: addMoney(totals.cash, -refundedBy("cash")),
+          card: addMoney(totals.card, -refundedBy("card")),
+          bank: addMoney(totals.bank ?? "0.00", -refundedBy("bank")),
         },
       } satisfies LocalShift);
       return localReturn;
@@ -1525,12 +1596,19 @@ export class KassaService {
       salesTotal += toMinor(doc.total);
       tax += toMinor(doc.tax);
       discount += toMinor(doc.discount);
-      add(doc.paymentMethod, toMinor(doc.paid));
+      if (doc.payments?.length) {
+        // Aralash to'lov: har usul o'z qatorida; kassadagi naqd — naqd qismi va balansga qolgan qaytim
+        for (const part of doc.payments) add(part.method, toMinor(part.paid));
+        const cashPart = doc.payments.find((part) => part.method === "cash");
+        if (cashPart) cashFromSales += toMinor(cashPart.paid) + toMinor(doc.changeToBalance);
+      } else {
+        add(doc.paymentMethod, toMinor(doc.paid));
+        if (doc.paymentMethod === "cash") cashFromSales += toMinor(doc.paid) + toMinor(doc.changeToBalance);
+      }
       add("balance", toMinor(doc.balanceUsed));
       add("cashback", toMinor(doc.cashbackUsed));
       add("debt", toMinor(doc.debt));
       add("change_to_balance", toMinor(doc.changeToBalance));
-      if (doc.paymentMethod === "cash") cashFromSales += toMinor(doc.paid) + toMinor(doc.changeToBalance);
       for (const part of doc.currencyTotals) {
         if (part.currency !== base) add(`fx:${part.currency}`, toMinor(part.paid));
       }
@@ -1539,10 +1617,11 @@ export class KassaService {
       cashiers.set(name, { receipts: current.receipts + 1, total: current.total + toMinor(doc.total) });
     }
 
-    const refunds = { total: 0n, cash: 0n, card: 0n, balance: 0n };
+    const refunds = { total: 0n, cash: 0n, card: 0n, bank: 0n, balance: 0n };
     for (const { doc } of returns) {
       refunds.total += toMinor(doc.total);
-      refunds[doc.refundMethod] += toMinor(doc.refundEstimate);
+      if (doc.refunds?.length) for (const part of doc.refunds) refunds[part.method] += toMinor(part.amount);
+      else refunds[doc.refundMethod] += toMinor(doc.refundEstimate);
     }
     const paid = { debtCash: 0n, debtCard: 0n, depositCash: 0n, depositCard: 0n };
     for (const { doc } of payments) {
@@ -1591,7 +1670,14 @@ export class KassaService {
         label: key.startsWith("fx:") ? `${key.slice(3)} (valyutada)` : (METHOD_LABELS[key] ?? key),
         amount: fromMinor(amount),
       })),
-      returns: { count: returns.length, total: fromMinor(refunds.total), cash: fromMinor(refunds.cash), card: fromMinor(refunds.card), balance: fromMinor(refunds.balance) },
+      returns: {
+        count: returns.length,
+        total: fromMinor(refunds.total),
+        cash: fromMinor(refunds.cash),
+        card: fromMinor(refunds.card),
+        bank: fromMinor(refunds.bank),
+        balance: fromMinor(refunds.balance),
+      },
       customerPayments: {
         count: payments.length,
         debtCash: fromMinor(paid.debtCash),

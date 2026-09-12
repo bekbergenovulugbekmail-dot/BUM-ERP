@@ -63,6 +63,11 @@ export type SaleCalcInput = {
   paymentMethod: PaymentMethod;
   /** null — aniq to'lanadigan summa. */
   amountPaid: string | null;
+  /**
+   * Aralash to'lov (asosiy valyutada): naqd, karta, bank — har usul bir marta; summa null — shu usulga qolgan qoldiq
+   * (faqat bitta usulda). Berilsa `paymentMethod`/`amountPaid` e'tiborsiz.
+   */
+  payments?: { method: "cash" | "card" | "bank"; amount: string | null }[];
   /** null — ishlatilmaydi; "" yoki son — so'ralgan summa (chegaraga qisqartiriladi). */
   cashbackAmount: string | null;
   balanceAmount: string | null;
@@ -100,6 +105,9 @@ export type SaleCalc = {
   due: bigint;
   tendered: bigint;
   paid: bigint;
+  /** Asosiy valyutadagi to'lov qismlari: berilgan (naqdda — qaytim bilan) va qabul qilingan. */
+  payments: { method: PaymentMethod; tendered: bigint; paid: bigint }[];
+  cashPaid: bigint;
   change: bigint;
   changeKept: bigint;
   foreign: ForeignPart[];
@@ -117,6 +125,40 @@ const safeMinor = (text: string | null, scale = 2) => {
     return null;
   }
 };
+
+const METHOD_NAMES: Record<string, string> = { cash: "Naqd", card: "Karta", bank: "Bank", transfer: "O'tkazma" };
+
+/** Asosiy valyutadagi to'lov qismlari: aralash (`payments`, null — qoldiq) yoki bitta usul (`amountPaid`, null — aniq). */
+function paymentParts(input: SaleCalcInput, due: bigint, errors: string[]): { method: PaymentMethod; tendered: bigint }[] {
+  if (!input.payments || input.payments.length === 0) {
+    const tendered = input.amountPaid === null ? due : (safeMinor(input.amountPaid) ?? 0n);
+    if (tendered < 0n) errors.push("To'lov summasi manfiy bo'lmasin");
+    return [{ method: input.paymentMethod, tendered }];
+  }
+  const seen = new Set<string>();
+  let known = 0n;
+  let openParts = 0;
+  for (const part of input.payments) {
+    if (seen.has(part.method)) errors.push(`${METHOD_NAMES[part.method] ?? part.method} to'lovi bir marta kiritiladi`);
+    seen.add(part.method);
+    if (part.amount === null) {
+      openParts += 1;
+      continue;
+    }
+    const value = safeMinor(part.amount) ?? 0n;
+    if (value < 0n) errors.push("To'lov summasi manfiy bo'lmasin");
+    known += value;
+  }
+  if (openParts > 1) errors.push("Qoldiq faqat bitta to'lov usuliga yoziladi");
+  const rest = due > known ? due - known : 0n;
+  let restGiven = false;
+  return input.payments.map((part) => {
+    if (part.amount !== null) return { method: part.method, tendered: safeMinor(part.amount) ?? 0n };
+    const tendered = restGiven ? 0n : rest;
+    restGiven = true;
+    return { method: part.method, tendered };
+  });
+}
 
 export function computeSale(input: SaleCalcInput): SaleCalc {
   const errors: string[] = [];
@@ -169,12 +211,18 @@ export function computeSale(input: SaleCalcInput): SaleCalc {
   let uncovered = nonCash - baseCovered;
   const due = baseTotal - baseCovered;
   const hasBaseBucket = bucketMap.has(base);
-  const tendered = input.amountPaid === null ? due : (safeMinor(input.amountPaid) ?? 0n);
-  if (tendered < 0n) errors.push("To'lov summasi manfiy bo'lmasin");
+  // Server bilan bir xil: karta va bank qoldiqdan oshmaydi, ortig'i faqat naqddan — qaytim
+  const parts = paymentParts(input, due, errors);
+  const tendered = parts.reduce((sum, part) => sum + part.tendered, 0n);
   if (!hasBaseBucket && tendered > 0n) errors.push(`Chekda ${base} dagi mahsulot yo'q — to'lov valyuta bo'yicha kiritiladi`);
-  if (input.paymentMethod !== "cash" && tendered > due) errors.push("Karta yoki bank to'lovi chek summasidan oshmasligi kerak");
-  const paid = tendered < due ? tendered : due;
-  const change = tendered - paid;
+  const cardBank = parts.reduce((sum, part) => sum + (part.method === "cash" ? 0n : part.tendered), 0n);
+  if (cardBank > due) errors.push("Karta yoki bank to'lovi chek summasidan oshmasligi kerak");
+  const cardBankPaid = cardBank < due ? cardBank : due;
+  const cashTendered = parts.find((part) => part.method === "cash")?.tendered ?? 0n;
+  const cashPaid = cashTendered < due - cardBankPaid ? cashTendered : due - cardBankPaid;
+  const change = cashTendered - cashPaid;
+  const paid = cardBankPaid + cashPaid;
+  const payments = parts.map((part) => ({ method: part.method, tendered: part.tendered, paid: part.method === "cash" ? cashPaid : part.tendered }));
   if (!input.customer && paid < due) errors.push("Mijozsiz sotuvda chek to'liq to'lanishi kerak");
 
   const tenderedByCurrency = new Map(input.currencyPayments.map((p) => [p.currency, p]));
@@ -210,7 +258,7 @@ export function computeSale(input: SaleCalcInput): SaleCalc {
     if (!input.customer && paidHere < dueInCurrency) errors.push(`Mijozsiz sotuvda ${bucket.currency} qismi to'liq to'lanishi kerak`);
   }
   const foreignPaidBase = foreign.reduce((sum, part) => sum + part.paidBase, 0n);
-  const changeKept = input.changeToBalance && input.customer && input.paymentMethod === "cash" && change > 0n ? change : 0n;
+  const changeKept = input.changeToBalance && input.customer && change > 0n ? change : 0n;
   const debt = due - paid + foreign.reduce((sum, part) => sum + (part.dueBase - part.paidBase), 0n);
   if (input.lines.length === 0) errors.push("Savatcha bo'sh");
 
@@ -229,6 +277,8 @@ export function computeSale(input: SaleCalcInput): SaleCalc {
     due,
     tendered,
     paid,
+    payments,
+    cashPaid,
     change,
     changeKept,
     foreign,

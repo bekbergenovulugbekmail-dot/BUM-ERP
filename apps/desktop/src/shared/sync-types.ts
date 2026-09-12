@@ -345,6 +345,8 @@ export type SalePayload = {
   }[];
   paymentMethod: PaymentMethod;
   amountPaid: string;
+  /** Aralash to'lov (naqd + karta + bank) — berilsa server paymentMethod/amountPaid o'rniga shuni oladi. */
+  payments?: { method: "cash" | "card" | "bank"; amount: string }[];
   cashbackAmount?: string;
   balanceAmount?: string;
   changeToBalance?: boolean;
@@ -355,7 +357,7 @@ export type SalePayload = {
   notes?: string | null;
 };
 
-export type RefundMethod = "cash" | "card" | "balance";
+export type RefundMethod = "cash" | "card" | "bank" | "balance";
 
 /** `sale.return` — chekdagi mahsulotlarni (qisman) qaytarish. */
 export type ReturnPayload = {
@@ -365,6 +367,8 @@ export type ReturnPayload = {
   number: string;
   items: { orderItemId: string; quantity: string }[];
   refundMethod: RefundMethod;
+  /** Pul usullar bo'yicha (aralash to'lovli chek). */
+  refunds?: { method: RefundMethod; amount: string }[];
   reason?: string | null;
 };
 
@@ -385,6 +389,8 @@ export type CustomerPayload = {
 
 /** Serverdagi chek (`GET /receipts/:number`) — boshqa kassa yoki web'da sotilganini qaytarish uchun. */
 export type RemoteReceipt = {
+  /** Usullar bo'yicha hali qaytarilishi mumkin bo'lgan pul (eski server — yo'q). */
+  refundable?: { method: RefundMethod; amount: string }[];
   id: string;
   number: string;
   status: string;

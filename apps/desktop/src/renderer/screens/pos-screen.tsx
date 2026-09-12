@@ -50,7 +50,10 @@ type DialogName = "customer" | "return" | "unsynced" | "held" | "shift" | "prefs
 
 const QTY = /^\d{1,14}(\.\d{1,4})?$/;
 
-const PAY_METHODS: { key: PaymentMethod; label: string; action: "payCash" | "payCard" | "payBank" }[] = [
+type PayKey = "cash" | "card" | "bank";
+const EMPTY_TENDER: Record<PayKey, string> = { cash: "", card: "", bank: "" };
+
+const PAY_METHODS: { key: PayKey; label: string; action: "payCash" | "payCard" | "payBank" }[] = [
   { key: "cash", label: "Naqd", action: "payCash" },
   { key: "card", label: "Karta", action: "payCard" },
   { key: "bank", label: "Bank", action: "payBank" },
@@ -100,7 +103,8 @@ export default function PosScreen({
   const [customer, setCustomer] = useState<PosCustomer | null>(null);
   const [saleCurrencies, setSaleCurrencies] = useState<string[]>([]);
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
-  const [amountPaid, setAmountPaid] = useState("");
+  /** Aralash to'lov: usul bo'yicha kiritilgan summa; hammasi bo'sh — tanlangan usulda aniq summa (tez yakunlash). */
+  const [tender, setTender] = useState<Record<PayKey, string>>(EMPTY_TENDER);
   const [useBalance, setUseBalance] = useState(false);
   const [balanceInput, setBalanceInput] = useState("");
   const [useCashback, setUseCashback] = useState(false);
@@ -156,6 +160,11 @@ export default function PosScreen({
   const foreignInput = activeCurrencies
     .filter((code) => code !== base)
     .map((code) => ({ currency: code, amount: foreignTender[code]?.trim() ? foreignTender[code]! : null, method: foreignMethod[code] ?? ("cash" as const) }));
+  const typedMethods = PAY_METHODS.map((method) => method.key).filter((key) => tender[key].trim() !== "");
+  const paymentsInput: { method: PayKey; amount: string | null }[] =
+    typedMethods.length === 0
+      ? [{ method: payMethod === "transfer" ? "bank" : payMethod, amount: null }]
+      : typedMethods.map((key) => ({ method: key, amount: tender[key].trim() }));
 
   const linesValid = cart.every((line) => QTY.test(line.quantity) && toMinor(line.quantity, 4) > 0n && (line.priceOverride === null || QTY.test(line.priceOverride)));
   let calc: SaleCalc | null = null;
@@ -179,7 +188,8 @@ export default function PosScreen({
         customer: customer ? { balance: customer.balance, cashbackBalance: customer.cashbackBalance } : null,
         cashback: context.cashback,
         paymentMethod: payMethod,
-        amountPaid: payMethod === "cash" && amountPaid.trim() !== "" ? amountPaid.trim() : null,
+        amountPaid: null,
+        payments: paymentsInput,
         cashbackAmount: useCashback ? cashbackInput.trim() : null,
         balanceAmount: useBalance ? balanceInput.trim() : null,
         changeToBalance,
@@ -196,7 +206,7 @@ export default function PosScreen({
     setSelected(0);
     setCustomer(null);
     setPayMethod(prefs?.defaultPaymentMethod ?? "cash");
-    setAmountPaid("");
+    setTender(EMPTY_TENDER);
     setUseBalance(false);
     setBalanceInput("");
     setUseCashback(false);
@@ -279,6 +289,14 @@ export default function PosScreen({
     setForeignMethod({});
   };
 
+  /** Qolgan summani shu usulga yozish (boshqa usullarda kiritilgani ayiriladi) — aralash to'lov. */
+  const fillRest = (method: PayKey) => {
+    setPayMethod(method);
+    const due = calc?.due ?? 0n;
+    const others = typedMethods.filter((key) => key !== method).reduce((sum, key) => sum + (QTY.test(tender[key]) ? toMinor(tender[key]) : 0n), 0n);
+    setTender((current) => ({ ...current, [method]: trimDecimal(fromMinor(due > others ? due - others : 0n)) }));
+  };
+
   const complete = async () => {
     if (busy || cart.length === 0) return;
     if (!calc) {
@@ -297,7 +315,8 @@ export default function PosScreen({
         lines: cartInput(cart),
         saleCurrencies: activeCurrencies,
         paymentMethod: payMethod,
-        amountPaid: payMethod === "cash" && amountPaid.trim() !== "" ? amountPaid.trim() : null,
+        amountPaid: null,
+        payments: paymentsInput,
         cashbackAmount: useCashback ? cashbackInput.trim() : null,
         balanceAmount: useBalance ? balanceInput.trim() : null,
         changeToBalance,
@@ -310,7 +329,8 @@ export default function PosScreen({
       if (prefs?.autoPrint) {
         printSale(sale, context, prefs).catch((err: unknown) => setNotice({ tone: "error", text: `Chek chop etilmadi: ${errorText(err)}` }));
       }
-      if (prefs?.openDrawerOnCash && sale.paymentMethod === "cash" && (prefs.drawer.mode === "tcp" || prefs.drawer.mode === "share")) {
+      const cashTaken = sale.payments?.some((part) => part.method === "cash" && num(part.paid) > 0) ?? sale.paymentMethod === "cash";
+      if (prefs?.openDrawerOnCash && cashTaken && (prefs.drawer.mode === "tcp" || prefs.drawer.mode === "share")) {
         call("device:open-drawer").catch((err: unknown) => setNotice({ tone: "error", text: errorText(err) }));
       }
     } catch (err) {
@@ -379,8 +399,11 @@ export default function PosScreen({
 
   const handleKey = (event: KeyboardEvent) => {
     if (dialog || receipt) return;
-    const pickMethod = (method: PaymentMethod) => {
-      if (enabledMethods.some((item) => item.key === method)) setPayMethod(method);
+    const pickMethod = (method: PayKey) => {
+      if (!enabledMethods.some((item) => item.key === method)) return;
+      // Summa kiritilgan bo'lsa — qolgan summa shu usulga (aralash to'lov); aks holda usul tanlanadi (aniq summa)
+      if (typedMethods.length > 0) fillRest(method);
+      else setPayMethod(method);
     };
     const handlers: Record<(typeof HOTKEY_ACTIONS)[number], () => void> = {
       help: () => setDialog("help"),
@@ -840,32 +863,56 @@ export default function PosScreen({
             )}
 
             {(!calc || calc.hasBaseBucket) && (
-              <>
-                <div className="grid grid-cols-3 gap-1">
-                  {enabledMethods.map((method) => (
-                    <Button key={method.key} variant={payMethod === method.key ? "default" : "secondary"} onClick={() => setPayMethod(method.key)}>
-                      {method.label} <span className="ml-1 text-xs opacity-70">{hotkeys[method.action]}</span>
+              <div className="space-y-1.5 rounded-lg border border-border p-2">
+                {enabledMethods.map((method) => (
+                  <div key={method.key} className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      className="w-28 justify-between"
+                      variant={payMethod === method.key ? "default" : "secondary"}
+                      onClick={() => (typedMethods.length > 0 ? fillRest(method.key) : setPayMethod(method.key))}
+                    >
+                      {method.label} <span className="text-[10px] opacity-70">{hotkeys[method.action]}</span>
                     </Button>
-                  ))}
-                </div>
-                {payMethod === "cash" && (
-                  <div className="flex items-center gap-2">
                     <Input
-                      id="pay-amount"
-                      className="h-11 text-right text-lg font-semibold"
+                      id={`pay-${method.key}`}
+                      className="h-9 text-right font-semibold"
                       inputMode="decimal"
-                      placeholder={calc ? trimDecimal(fromMinor(calc.due)) : "Berilgan summa"}
-                      value={amountPaid}
-                      onChange={(e) => setAmountPaid(decimalInput(e.target.value))}
+                      placeholder={typedMethods.length === 0 && payMethod === method.key && calc ? trimDecimal(fromMinor(calc.due)) : "0"}
+                      value={tender[method.key]}
+                      onChange={(e) => setTender((current) => ({ ...current, [method.key]: decimalInput(e.target.value) }))}
                     />
-                    {customer && calc && calc.due > 0n && (
-                      <Button size="sm" variant="ghost" className="text-amber-600" onClick={() => setAmountPaid("0")}>
-                        Qarzga
+                    {calc && calc.due > 0n && (
+                      <Button size="sm" variant="ghost" className="h-9 px-2 text-xs" title="Qolgan summani shu usulga" onClick={() => fillRest(method.key)}>
+                        qoldiq
                       </Button>
                     )}
                   </div>
+                ))}
+                {calc && (
+                  <dl className="grid grid-cols-3 gap-1 pt-1 text-center text-xs">
+                    <div>
+                      <dt className="text-muted-foreground">To'lanadi</dt>
+                      <dd className="font-semibold tabular-nums">{fmtMoney(fromMinor(calc.due), base)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">To'langan</dt>
+                      <dd className="font-semibold tabular-nums">{fmtMoney(fromMinor(calc.paid), base)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">Qoldiq</dt>
+                      <dd className={`font-semibold tabular-nums ${calc.due > calc.paid ? "text-destructive" : "text-emerald-600"}`}>
+                        {fmtMoney(fromMinor(calc.due > calc.paid ? calc.due - calc.paid : 0n), base)}
+                      </dd>
+                    </div>
+                  </dl>
                 )}
-              </>
+                {customer && calc && calc.due > 0n && (
+                  <Button size="sm" variant="ghost" className="w-full text-amber-600" onClick={() => setTender({ ...EMPTY_TENDER, cash: "0" })}>
+                    Qarzga (mijoz hisobiga)
+                  </Button>
+                )}
+              </div>
             )}
 
             {calc?.foreign.map((part) => (
@@ -897,7 +944,7 @@ export default function PosScreen({
               <div className="flex items-center justify-between rounded-lg bg-emerald-500/10 px-3 py-2 font-semibold text-emerald-700">
                 <span>{calc.changeKept > 0n ? "Qaytim balansga" : "Qaytim"}</span>
                 <span className="tabular-nums">{fmtMoney(fromMinor(calc.change), base)}</span>
-                {customer && payMethod === "cash" && (
+                {customer && (
                   <Button size="sm" variant="ghost" className="h-7" onClick={() => setChangeToBalance((value) => !value)}>
                     {changeToBalance ? "Qaytimni berish" : "Balansga"}
                   </Button>

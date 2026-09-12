@@ -28,7 +28,7 @@ import {
   salesReturnItems,
   salesReturns,
 } from "../../db/schema/sales.js";
-import type { Tx } from "../../db/transaction.js";
+import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
@@ -44,12 +44,16 @@ import { refundToBalance } from "./customer-balance.service.js";
 import { salesAudit } from "./customers.service.js";
 import { getOrder } from "./orders.service.js";
 
-export const REFUND_METHODS = ["cash", "card", "balance"] as const;
+export const REFUND_METHODS = ["cash", "card", "bank", "balance"] as const;
 export type RefundMethod = (typeof REFUND_METHODS)[number];
+type RefundPart = { method: RefundMethod; amount: bigint };
+const REFUND_LABELS: Record<RefundMethod, string> = { cash: "Naqd", card: "Karta", bank: "Bank", balance: "Balans" };
 
 export type ReturnItemsInput = {
   items: { orderItemId: string; quantity: string }[];
   refundMethod: RefundMethod;
+  /** Pul usullar bo'yicha (aralash to'lovli chek); berilsa `refundMethod` o'rniga. */
+  refunds?: { method: RefundMethod; amount: string }[];
   reason?: string | null;
   /** Pul qaytaradigan ochiq kassa smenasi; web'da berilmasa — asosiy kassa yoki bankdan, smenaga yozilmaydi. */
   shiftId?: string | null;
@@ -60,6 +64,67 @@ export type ReturnItemsInput = {
 const minBig = (a: bigint, b: bigint) => (a < b ? a : b);
 const positive = (value: bigint) => (value > 0n ? value : 0n);
 const sumMoney = (column: AnyPgColumn) => sql<string>`coalesce(sum(${column}), 0)::numeric(18,2)`;
+
+const refundKey = (method: string): Exclude<RefundMethod, "balance"> | null =>
+  method === "cash" ? "cash" : method === "card" ? "card" : method === "bank" || method === "transfer" ? "bank" : null;
+
+/**
+ * Chek bo'yicha usullarda hali qaytarilishi mumkin bo'lgan pul: shu usulda to'langani − oldingi qaytarishlarda shu usulda
+ * qaytgani (eski yozuvlarda — `refund_method` / `refund_amount`). Balans va keshbek bu yerda emas.
+ */
+export async function refundableByMethod(conn: DbOrTx, orderId: string) {
+  const available = new Map<Exclude<RefundMethod, "balance">, bigint>();
+  const add = (method: string, amount: bigint) => {
+    const key = refundKey(method);
+    if (key) available.set(key, (available.get(key) ?? 0n) + amount);
+  };
+  const paid = await conn
+    .select({ method: customerPayments.method, amount: sumMoney(customerPayments.amount) })
+    .from(customerPayments)
+    .where(eq(customerPayments.orderId, orderId))
+    .groupBy(customerPayments.method);
+  for (const row of paid) add(row.method, toMinor(row.amount));
+  const previous = await conn
+    .select({ method: salesReturns.refundMethod, amount: salesReturns.refundAmount, refunds: salesReturns.refunds })
+    .from(salesReturns)
+    .where(eq(salesReturns.orderId, orderId));
+  for (const row of previous) {
+    for (const part of row.refunds ?? [{ method: row.method, amount: row.amount }]) add(part.method, -toMinor(part.amount));
+  }
+  return available;
+}
+
+/** Qaytadigan pul usullar bo'yicha: bitta usul (eski) yoki taqsimot — yig'indi aynan qaytadigan pulga teng. */
+async function refundParts(tx: Tx, orderId: string, input: ReturnItemsInput, money: bigint, offline: boolean): Promise<RefundPart[]> {
+  if (money <= 0n) return [];
+  const requested = (input.refunds ?? []).map((part) => ({ method: part.method, amount: toMinor(part.amount) })).filter((part) => part.amount > 0n);
+  if (requested.length === 0) return [{ method: input.refundMethod, amount: money }];
+  const sum = requested.reduce((total, part) => total + part.amount, 0n);
+  if (sum !== money) {
+    // Offline: pul kassada allaqachon berilgan, serverdagi hisob (masalan, avval qarz yopiladi) farq qilishi mumkin — ulush bo'yicha
+    if (!offline) throw badRequest(`Qaytariladigan pul ${fromMinor(money)} — taqsimot yig'indisi ${fromMinor(sum)}`, { refundable: fromMinor(money) });
+    let left = money;
+    return requested
+      .map((part, index) => {
+        const amount = index === requested.length - 1 ? left : (money * part.amount) / sum;
+        left -= amount;
+        return { method: part.method, amount };
+      })
+      .filter((part) => part.amount > 0n);
+  }
+  if (!offline) {
+    const available = await refundableByMethod(tx, orderId);
+    for (const part of requested) {
+      const key = refundKey(part.method);
+      if (!key) continue;
+      const left = available.get(key) ?? 0n;
+      if (part.amount > left) {
+        throw badRequest(`${REFUND_LABELS[part.method]}: ko'pi bilan ${fromMinor(left > 0n ? left : 0n)} qaytariladi (chekda shu usulda to'langan)`);
+      }
+    }
+  }
+  return requested;
+}
 
 export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: string, input: ReturnItemsInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
@@ -86,7 +151,9 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
   const ids = input.items.map((item) => item.orderItemId);
   if (ids.length === 0) throw badRequest("Qaytariladigan mahsulotni tanlang");
   if (new Set(ids).size !== ids.length) throw badRequest("Mahsulot qatori takrorlangan");
-  if (input.refundMethod === "balance" && !order.customerId) throw badRequest("Balansga qaytarish uchun chekda mijoz bo'lishi kerak");
+  const refundMethods = input.refunds?.length ? input.refunds.map((part) => part.method) : [input.refundMethod];
+  if (refundMethods.includes("balance") && !order.customerId) throw badRequest("Balansga qaytarish uchun chekda mijoz bo'lishi kerak");
+  if (new Set(refundMethods).size !== refundMethods.length) throw badRequest("Qaytarish usuli takrorlangan");
 
   const allItems = await tx
     .select({
@@ -208,6 +275,9 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
   const balanceBack = paid > 0n ? minBig(balanceLeft, mulDivRound(balanceLeft, refund, paid)) : 0n;
   const cashbackBack = paid > 0n ? minBig(cashbackLeft, mulDivRound(cashbackLeft, refund, paid)) : 0n;
   const money = refund - balanceBack - cashbackBack;
+  const parts = await refundParts(tx, orderId, input, money, offline !== undefined);
+  const refundMethodValue = parts.length > 1 ? "mixed" : (parts[0]?.method ?? input.refundMethod);
+  const refundsValue = parts.map((part) => ({ method: part.method, amount: fromMinor(part.amount) }));
 
   // Shu chekdan berilgan keshbekning ulushi (oxirgi qaytarishda — qolgani)
   let reverse = 0n;
@@ -229,7 +299,8 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
     deviceId: offline?.deviceId ?? null,
     totalAmount: fromMinor(totalValue),
     cogs: fromMinor(totalCogs),
-    refundMethod: input.refundMethod,
+    refundMethod: refundMethodValue,
+    refunds: parts.length > 0 ? refundsValue : null,
     reason: input.reason ?? null,
     createdBy: tenant.user.id,
     ...(offline ? { createdAt: offline.returnedAt } : {}),
@@ -297,32 +368,31 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
       .where(eq(customers.id, order.customerId));
   }
 
-  // Pul qaytishi: tanlangan usulda; balans va keshbek ulushi o'z hisobiga
-  if (money > 0n && input.refundMethod === "balance") {
-    await refundToBalance(
-      tx,
-      tenant,
-      { customerId: order.customerId!, orderId, orderNumber: number, amount: fromMinor(money), posShiftId: shift?.id ?? null, date },
-      meta,
-    );
-  } else if (money > 0n) {
-    const amount = fromMinor(money);
+  // Pul qaytishi usullar bo'yicha (bitta yoki taqsimot); balans va keshbek ulushi o'z hisobiga.
+  // Bir nechta qism — har biriga alohida havola (kassa harakati va jurnal takrorlanishdan himoyasi havola bo'yicha)
+  for (const part of parts) {
+    const amount = fromMinor(part.amount);
+    if (part.method === "balance") {
+      await refundToBalance(tx, tenant, { customerId: order.customerId!, orderId, orderNumber: number, amount, posShiftId: shift?.id ?? null, date }, meta);
+      continue;
+    }
+    const suffix = parts.length > 1 ? `_${part.method}` : "";
     const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
-      cashAccountId: await resolvePaymentAccount(tx, companyId, input.refundMethod === "card" ? "card" : "cash"),
+      cashAccountId: await resolvePaymentAccount(tx, companyId, part.method),
       type: "out",
       amount,
       txDate: date,
       description: `Qaytarish: ${number} (${order.number})`,
       category: "sales_refund",
-      referenceType: "sales_return",
+      referenceType: `sales_return${suffix}`,
       referenceId: returnId,
       // Offline kassada pul allaqachon berilgan — hisobdagi qoldiq yetmasa ham yoziladi
       allowOverdraft: offline !== undefined,
     });
     await postJournalEntry(tx, companyId, tenant.user.id, {
       entryDate: date,
-      description: `Pul qaytarish: ${number}`,
-      referenceType: "sales_return_refund",
+      description: `Pul qaytarish: ${number}${suffix ? ` (${REFUND_LABELS[part.method]})` : ""}`,
+      referenceType: `sales_return_refund${suffix}`,
       referenceId: returnId,
       lines: [
         { accountId: await requireAccountBySubtype(tx, companyId, "receivable", "asset", "Debitorlar"), debit: amount },
@@ -350,12 +420,17 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
       : { redeemedRefunded: 0n, earnedReversed: 0n };
 
   if (shift) {
+    const refundedBy = (method: RefundMethod) => parts.reduce((sum, part) => sum + (part.method === method ? part.amount : 0n), 0n);
+    const cashOut = refundedBy("cash");
+    const cardOut = refundedBy("card");
+    const bankOut = refundedBy("bank");
     await tx
       .update(posShifts)
       .set({
         totalReturns: sql`${posShifts.totalReturns} + ${fromMinor(totalValue)}::numeric`,
-        ...(money > 0n && input.refundMethod === "cash" ? { totalCash: sql`${posShifts.totalCash} - ${fromMinor(money)}::numeric` } : {}),
-        ...(money > 0n && input.refundMethod === "card" ? { totalCard: sql`${posShifts.totalCard} - ${fromMinor(money)}::numeric` } : {}),
+        ...(cashOut > 0n ? { totalCash: sql`${posShifts.totalCash} - ${fromMinor(cashOut)}::numeric` } : {}),
+        ...(cardOut > 0n ? { totalCard: sql`${posShifts.totalCard} - ${fromMinor(cardOut)}::numeric` } : {}),
+        ...(bankOut > 0n ? { totalBank: sql`${posShifts.totalBank} - ${fromMinor(bankOut)}::numeric` } : {}),
         updatedAt: new Date(),
       })
       .where(eq(posShifts.id, shift.id));
@@ -372,8 +447,10 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
     id: returnId,
     number,
     totalAmount: fromMinor(totalValue),
-    refundMethod: input.refundMethod,
+    refundMethod: refundMethodValue,
     refundAmount: fromMinor(money),
+    /** Qaytgan pul usullar bo'yicha. */
+    refunds: refundsValue,
     balanceRestored: fromMinor(balanceBack),
     cashbackRestored: fromMinor(cashback.redeemedRefunded),
     cashbackReversed: fromMinor(cashback.earnedReversed),

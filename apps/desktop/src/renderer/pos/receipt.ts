@@ -40,7 +40,10 @@ export function saleDocument(sale: LocalSale, context: PosContext | null): Recei
     payments: [
       { label: "Keshbekdan", amount: num(sale.cashbackUsed) },
       { label: "Balansdan", amount: num(sale.balanceUsed) },
-      { label: PAYMENT_LABELS[sale.paymentMethod] ?? sale.paymentMethod, amount: num(sale.tendered) },
+      // Aralash to'lov — har usul alohida qatorda (berilgan summa, naqdda qaytim bilan)
+      ...(sale.payments?.length
+        ? sale.payments.map((part) => ({ label: PAYMENT_LABELS[part.method] ?? part.method, amount: num(part.tendered) }))
+        : [{ label: PAYMENT_LABELS[sale.paymentMethod] ?? sale.paymentMethod, amount: num(sale.tendered) }]),
     ],
     change: num(sale.change),
     changeToBalance: num(sale.changeToBalance),

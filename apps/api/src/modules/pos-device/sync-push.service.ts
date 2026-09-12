@@ -123,6 +123,8 @@ export const syncOperationSchema = z.discriminatedUnion("type", [
         .refine((items) => new Set(items.map((item) => item.id)).size === items.length, "Chek qatori identifikatori takrorlangan"),
       paymentMethod: z.enum(["cash", "card", "bank", "transfer"]),
       amountPaid: moneySchema,
+      /** Aralash to'lov (naqd + karta + bank) — berilsa paymentMethod/amountPaid o'rniga. */
+      payments: z.array(z.strictObject({ method: z.enum(["cash", "card", "bank"]), amount: moneySchema })).min(1).max(3).optional(),
       cashbackAmount: moneySchema.optional(),
       balanceAmount: moneySchema.optional(),
       changeToBalance: z.boolean().optional(),
@@ -149,6 +151,8 @@ export const syncOperationSchema = z.discriminatedUnion("type", [
         .max(500)
         .refine((items) => new Set(items.map((item) => item.orderItemId)).size === items.length, "Mahsulot qatori takrorlangan"),
       refundMethod: z.enum(REFUND_METHODS),
+      /** Pul usullar bo'yicha (aralash to'lovli chek). */
+      refunds: z.array(z.strictObject({ method: z.enum(REFUND_METHODS), amount: moneySchema })).min(1).max(4).optional(),
       reason: notes,
     }),
   }),
@@ -451,6 +455,7 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
           items: payload.items.map(({ id: _id, ...item }) => item),
           paymentMethod: payload.paymentMethod,
           amountPaid: payload.amountPaid,
+          payments: payload.payments,
           cashbackAmount: payload.cashbackAmount,
           balanceAmount: payload.balanceAmount,
           changeToBalance: payload.changeToBalance,
@@ -474,6 +479,7 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
         number: sale.order.number,
         totalAmount: sale.order.totalAmount,
         paid: sale.paid,
+        payments: sale.payments,
         change: sale.change,
         debt: sale.debt,
         balanceUsed: sale.balanceUsed,
@@ -504,6 +510,7 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
         {
           items: payload.items,
           refundMethod: payload.refundMethod,
+          refunds: payload.refunds,
           reason: payload.reason ?? null,
           shiftId: payload.shiftId,
           offline: { id: payload.returnId, number: payload.number, returnedAt: op.createdAt, deviceId: context.device.id },

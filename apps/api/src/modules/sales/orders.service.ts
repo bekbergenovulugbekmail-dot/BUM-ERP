@@ -845,6 +845,37 @@ export async function shipOrder(tx: Tx, tenant: TenantContext, orderId: string, 
   return getOrder(tx, tenant, orderId);
 }
 
+/**
+ * Chekning asosiy valyutadagi naqd/karta/bank/o'tkazma to'lovlari tarkibi, `total` ga moslangan (farq bo'lsa — ulush
+ * bo'yicha, qoldig'i oxirgisiga). To'lov yozuvi yo'q bo'lsa — hammasi naqd.
+ */
+async function basePaymentComposition(tx: Tx, orderId: string, currency: string, total: bigint): Promise<{ method: PaymentMethod; amount: bigint }[]> {
+  if (total <= 0n) return [];
+  const rows = await tx
+    .select({ method: customerPayments.method, amount: sql<string>`coalesce(sum(${customerPayments.amount}), 0)::numeric(18,2)` })
+    .from(customerPayments)
+    .where(
+      and(
+        eq(customerPayments.orderId, orderId),
+        eq(customerPayments.currency, currency),
+        inArray(customerPayments.method, ["cash", "card", "bank", "transfer"]),
+      ),
+    )
+    .groupBy(customerPayments.method)
+    .orderBy(customerPayments.method);
+  // So'rov faqat naqd/karta/bank/o'tkazmani oladi (inArray) — tip shunga toraytiriladi
+  const parts = rows.map((row) => ({ method: row.method as PaymentMethod, amount: toMinor(row.amount) })).filter((part) => part.amount > 0n);
+  if (parts.length === 0) return [{ method: "cash", amount: total }];
+  const sum = parts.reduce((acc, part) => acc + part.amount, 0n);
+  if (sum === total) return parts;
+  let left = total;
+  return parts.map((part, index) => {
+    const amount = index === parts.length - 1 ? left : (total * part.amount) / sum;
+    left -= amount;
+    return { method: part.method, amount };
+  });
+}
+
 export async function returnOrder(
   tx: Tx,
   tenant: TenantContext,
@@ -961,40 +992,49 @@ export async function returnOrder(
     .where(and(eq(customerPayments.orderId, orderId), ne(customerPayments.currency, order.currency)));
   const foreignPaid = foreignPayments.reduce((sum, payment) => sum + toMinor(payment.amount), 0n);
   const cashPaid = paid - balancePaid - cashbackPaid - foreignPaid;
+  // Asosiy valyutadagi pul: usul ko'rsatilsa — shu usulda; aks holda asl to'lov tarkibi bo'yicha (aralash to'lovli chek:
+  // naqd — kassaga, karta va bank — bankdan). Asl sotuv hujjati o'zgarmaydi, har qism — alohida kassa harakati va jurnal
+  const baseParts = input.method ? [{ method: input.method, amount: cashPaid }] : await basePaymentComposition(tx, orderId, order.currency, cashPaid);
 
   let cashRefunded = 0n;
   let refundAccountId: string | null = null;
-  const method = input.method ?? "cash";
-  if (refund && cashPaid > 0n) {
-    const amount = fromMinor(cashPaid);
-    const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
-      cashAccountId: await resolvePaymentAccount(tx, companyId, method, input.cashAccountId),
-      type: "out",
-      amount,
-      txDate: today,
-      description: `Qaytarish: ${order.number}`,
-      category: "sales_refund",
-      referenceType: "sales_refund",
-      referenceId: order.id,
-    });
-    await postJournalEntry(tx, companyId, tenant.user.id, {
-      entryDate: today,
-      description: `Pul qaytarish: ${order.number}`,
-      referenceType: "sales_refund",
-      referenceId: order.id,
-      lines: [
-        { accountId: await requireAccountBySubtype(tx, companyId, "receivable", "asset", "Debitorlar"), debit: amount },
-        { accountId: await ledgerAccountFor(tx, companyId, account.type), credit: amount },
-      ],
-    });
-    if (order.customerId) {
-      await tx
-        .update(customers)
-        .set({ totalDebt: sql`${customers.totalDebt} + ${amount}::numeric`, updatedAt: new Date() })
-        .where(eq(customers.id, order.customerId));
+  const refundedByMethod = new Map<string, bigint>();
+  if (refund) {
+    for (const part of baseParts) {
+      if (part.amount <= 0n) continue;
+      const amount = fromMinor(part.amount);
+      const suffix = baseParts.length > 1 ? `_${part.method}` : "";
+      const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
+        cashAccountId: await resolvePaymentAccount(tx, companyId, part.method, input.method ? input.cashAccountId : null),
+        type: "out",
+        amount,
+        txDate: today,
+        description: `Qaytarish: ${order.number}`,
+        category: "sales_refund",
+        referenceType: `sales_refund${suffix}`,
+        referenceId: order.id,
+      });
+      await postJournalEntry(tx, companyId, tenant.user.id, {
+        entryDate: today,
+        description: `Pul qaytarish: ${order.number}`,
+        referenceType: `sales_refund${suffix}`,
+        referenceId: order.id,
+        lines: [
+          { accountId: await requireAccountBySubtype(tx, companyId, "receivable", "asset", "Debitorlar"), debit: amount },
+          { accountId: await ledgerAccountFor(tx, companyId, account.type), credit: amount },
+        ],
+      });
+      if (order.customerId) {
+        await tx
+          .update(customers)
+          .set({ totalDebt: sql`${customers.totalDebt} + ${amount}::numeric`, updatedAt: new Date() })
+          .where(eq(customers.id, order.customerId));
+      }
+      cashRefunded += part.amount;
+      const key = part.method === "transfer" ? "bank" : part.method;
+      refundedByMethod.set(key, (refundedByMethod.get(key) ?? 0n) + part.amount);
+      refundAccountId ??= account.id;
     }
-    cashRefunded = cashPaid;
-    refundAccountId = account.id;
   }
   if (refund && balancePaid > 0n) {
     await refundToBalance(
@@ -1072,13 +1112,14 @@ export async function returnOrder(
 
   // Ochiq smenada qaytarish kassir yig'indisidan ayriladi — smena yopilishida kassa farqi to'g'ri chiqsin
   if (order.posShiftId) {
-    const refundedText = fromMinor(cashRefunded);
+    const out = (key: string) => refundedByMethod.get(key) ?? 0n;
     await tx
       .update(posShifts)
       .set({
         totalSales: sql`${posShifts.totalSales} - ${order.totalAmount}::numeric`,
-        ...(method === "cash" ? { totalCash: sql`${posShifts.totalCash} - ${refundedText}::numeric` } : {}),
-        ...(method === "card" ? { totalCard: sql`${posShifts.totalCard} - ${refundedText}::numeric` } : {}),
+        ...(out("cash") > 0n ? { totalCash: sql`${posShifts.totalCash} - ${fromMinor(out("cash"))}::numeric` } : {}),
+        ...(out("card") > 0n ? { totalCard: sql`${posShifts.totalCard} - ${fromMinor(out("card"))}::numeric` } : {}),
+        ...(out("bank") > 0n ? { totalBank: sql`${posShifts.totalBank} - ${fromMinor(out("bank"))}::numeric` } : {}),
         updatedAt: new Date(),
       })
       .where(and(eq(posShifts.id, order.posShiftId), eq(posShifts.status, "open")));

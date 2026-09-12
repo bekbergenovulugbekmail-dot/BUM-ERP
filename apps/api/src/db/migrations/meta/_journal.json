@@ -267,6 +267,13 @@
       "when": 1789212888317,
       "tag": "0037_resumable_desktop_releases",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1789214142646,
+      "tag": "0038_pos_mixed_payment",
+      "breakpoints": true
     }
   ]
 }

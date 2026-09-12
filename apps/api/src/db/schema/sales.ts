@@ -141,6 +141,8 @@ export const posShifts = pgTable(
     totalSales: money("total_sales").notNull().default("0"),
     totalCash: money("total_cash").notNull().default("0"),
     totalCard: money("total_card").notNull().default("0"),
+    /** Bank (va o'tkazma) orqali tushum — aralash to'lovda naqd va kartadan alohida. */
+    totalBank: money("total_bank").notNull().default("0"),
     /** Shu smenada qaytarilgan mahsulotlar summasi (qisman qaytarishlar). */
     totalReturns: money("total_returns").notNull().default("0"),
     /** Kassaga kirim (almashtirish puli va h.k.) va chiqim (inkassatsiya, xarajat) — kutilgan naqdda hisobga olinadi. */
@@ -202,6 +204,8 @@ export const salesOrders = pgTable(
     posShiftId: uuid("pos_shift_id").references(() => posShifts.id, { onDelete: "set null" }),
     /** Desktop kassa qurilmasi (offline chek); `created_at` — chek qurilmada yopilgan vaqt. */
     deviceId: uuid("device_id").references(() => posDevices.id, { onDelete: "set null" }),
+    /** Web kassa so'rov kaliti (idempotentlik): takroriy yuborishda ikkinchi chek, to'lov va jurnal yozilmaydi. */
+    clientRequestId: uuid("client_request_id"),
 
     notes: text("notes"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -209,6 +213,7 @@ export const salesOrders = pgTable(
   },
   (t) => [
     uniqueIndex("so_company_number_key").on(t.companyId, t.number),
+    uniqueIndex("so_company_client_request_key").on(t.companyId, t.clientRequestId).where(sql`${t.clientRequestId} IS NOT NULL`),
     index("so_company_status_idx").on(t.companyId, t.status),
     index("so_company_customer_idx").on(t.companyId, t.customerId),
     index("so_company_date_idx").on(t.companyId, t.orderDate),
@@ -392,8 +397,11 @@ export const salesReturns = pgTable(
 
     totalAmount: money("total_amount").notNull(),
     cogs: money("cogs").notNull().default("0"),
+    /** cash | card | bank | balance; bir nechta usulga taqsimlangan bo'lsa — `mixed` (tarkibi `refunds` da). */
     refundMethod: varchar("refund_method", { length: 16 }).notNull(),
     refundAmount: money("refund_amount").notNull().default("0"),
+    /** Qaytgan pul usullar bo'yicha: `[{ method, amount }]` (aralash to'lovli chek). Eski yozuvlarda null. */
+    refunds: jsonb("refunds").$type<{ method: string; amount: string }[]>(),
     balanceRestored: money("balance_restored").notNull().default("0"),
     cashbackRestored: money("cashback_restored").notNull().default("0"),
     cashbackReversed: money("cashback_reversed").notNull().default("0"),
@@ -407,7 +415,7 @@ export const salesReturns = pgTable(
     index("sr_order_idx").on(t.orderId),
     index("sr_shift_idx").on(t.posShiftId),
     index("sr_company_created_idx").on(t.companyId, t.createdAt),
-    check("sr_refund_method", sql`${t.refundMethod} in ('cash', 'card', 'balance')`),
+    check("sr_refund_method", sql`${t.refundMethod} in ('cash', 'card', 'bank', 'balance', 'mixed')`),
     check(
       "sr_amounts_non_negative",
       sql`${t.totalAmount} >= 0 AND ${t.refundAmount} >= 0 AND ${t.balanceRestored} >= 0 AND ${t.cashbackRestored} >= 0 AND ${t.cashbackReversed} >= 0`,

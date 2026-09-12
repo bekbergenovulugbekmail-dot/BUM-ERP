@@ -70,10 +70,12 @@ export default function ReceiptDialog({
                   <dd className="tabular-nums">{fmtMoney(sale.cashbackUsed, base)}</dd>
                 </div>
               )}
-              <div className="flex justify-between text-muted-foreground">
-                <dt>Berildi</dt>
-                <dd className="tabular-nums">{fmtMoney(sale.tendered, base)}</dd>
-              </div>
+              {(sale.payments?.length ? sale.payments : [{ method: sale.paymentMethod, tendered: sale.tendered, paid: sale.paid }]).map((part) => (
+                <div key={part.method} className="flex justify-between text-muted-foreground">
+                  <dt>{PAYMENT_LABELS[part.method] ?? part.method}</dt>
+                  <dd className="tabular-nums">{fmtMoney(part.tendered, base)}</dd>
+                </div>
+              ))}
               {num(sale.debt) > 0 && (
                 <div className="flex justify-between font-medium text-amber-600">
                   <dt>Qarzga</dt>

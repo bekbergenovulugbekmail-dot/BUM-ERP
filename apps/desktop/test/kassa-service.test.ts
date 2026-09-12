@@ -307,7 +307,7 @@ describe("Kassa xizmati (main jarayon)", () => {
       code: "BAD_REQUEST",
     });
     expect(kassa.products({ query: "cola" })[0]!.stock).toBe("4.0000");
-    expect(kassa.status().shift!.totals).toEqual({ sales: "20000.00", cash: "10000.00", card: "0.00", returns: "10000.00", receipts: 1 });
+    expect(kassa.status().shift!.totals).toMatchObject({ sales: "20000.00", cash: "10000.00", card: "0.00", bank: "0.00", returns: "10000.00", receipts: 1 });
 
     // Internet qaytdi: navbat tartibda, qoldiq farqi tozalanadi
     api.state.online = true;
@@ -379,6 +379,17 @@ describe("Kassa xizmati (main jarayon)", () => {
       });
     sale("3", "cash");
     sale("1", "card");
+    const saleLike = () => ({
+      customerId: null,
+      lines: [{ productId: "p1", unitId: "unit-d", quantity: "2" }],
+      saleCurrencies: [],
+      paymentMethod: "cash" as const,
+      amountPaid: null,
+      cashbackAmount: null,
+      balanceAmount: null,
+      changeToBalance: false,
+      currencyPayments: [],
+    });
 
     expect(() => kassa.cashMovement({ kind: "expense", amount: "1000" })).toThrow("pos.cash.expense");
     expect(() => kassa.cashMovement({ kind: "collection", amount: "0" })).toThrow("Summa noto'g'ri");
@@ -406,15 +417,82 @@ describe("Kassa xizmati (main jarayon)", () => {
     expect(report.cashMovements).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "collection", count: 1, amount: "25000.00" })]));
     expect(kassa.status().shift!.totals).toMatchObject({ cash: "50000.00", card: "10000.00", cashIn: "5000.00", cashOut: "27000.00" });
 
+    // Aralash to'lov: 2 dona = 20000 → naqd 5000 + karta 5000 + bank (qoldiq, 10000)
+    const mixedSale = kassa.completeSale({
+      customerId: null,
+      lines: [{ productId: "p1", unitId: "unit-d", quantity: "2" }],
+      saleCurrencies: [],
+      paymentMethod: "cash",
+      amountPaid: null,
+      payments: [
+        { method: "cash", amount: "5000" },
+        { method: "card", amount: "5000" },
+        { method: "bank", amount: null },
+      ],
+      cashbackAmount: null,
+      balanceAmount: null,
+      changeToBalance: false,
+      currencyPayments: [],
+    });
+    expect(mixedSale).toMatchObject({
+      paymentMethod: "bank",
+      paid: "20000.00",
+      change: "0.00",
+      payments: [
+        { method: "cash", tendered: "5000.00", paid: "5000.00" },
+        { method: "card", tendered: "5000.00", paid: "5000.00" },
+        { method: "bank", tendered: "10000.00", paid: "10000.00" },
+      ],
+    });
+    expect(() =>
+      kassa.completeSale({ ...saleLike(), payments: [{ method: "card", amount: "15000" }, { method: "bank", amount: "10000" }] }),
+    ).toThrow("Karta yoki bank to'lovi chek summasidan oshmasligi kerak");
+
+    // Qaytarish (1 dona = 10000): usullar bo'yicha taqsimot; yig'indi va usul chegarasi tekshiriladi
+    store.saveCashier({ ...cashier, permissions: ["pos.use", "pos.cash.expense", "sales.refund"] });
+    const receiptOfMixed = await kassa.findReceipt({ number: mixedSale.number });
+    expect(receiptOfMixed.refundable).toEqual([
+      { method: "cash", amount: "5000.00" },
+      { method: "card", amount: "5000.00" },
+      { method: "bank", amount: "10000.00" },
+    ]);
+    const returnOne = (refunds: { method: "cash" | "card" | "bank"; amount: string }[]) =>
+      kassa.returnItems({ number: mixedSale.number, items: [{ orderItemId: mixedSale.lines[0]!.id, quantity: "1" }], refundMethod: "cash", refunds });
+    await expect(returnOne([{ method: "cash", amount: "1000" }])).rejects.toThrow("taqsimot yig'indisi");
+    await expect(returnOne([{ method: "card", amount: "10000" }])).rejects.toThrow("Karta: ko'pi bilan 5000.00");
+    const splitReturn = await returnOne([
+      { method: "cash", amount: "5000" },
+      { method: "bank", amount: "5000" },
+    ]);
+    expect(splitReturn).toMatchObject({ refundEstimate: "10000.00", refunds: [{ method: "cash", amount: "5000.00" }, { method: "bank", amount: "5000.00" }] });
+    expect((await kassa.findReceipt({ number: mixedSale.number })).refundable).toEqual([
+      { method: "cash", amount: "0.00" },
+      { method: "card", amount: "5000.00" },
+      { method: "bank", amount: "5000.00" },
+    ]);
+
+    // X-hisobot: usullar alohida; kutilgan naqd: +5000 sotuv − 5000 qaytarish = o'zgarmaydi
+    const mixedReport = kassa.shiftReport({});
+    expect(mixedReport).toMatchObject({ receipts: 3, salesTotal: "60000.00", expectedCash: "38000.00", returns: { cash: "5000.00", bank: "5000.00", card: "0.00" } });
+    expect(mixedReport.byMethod).toEqual(
+      expect.arrayContaining([
+        { key: "cash", label: "Naqd", amount: "35000.00" },
+        { key: "card", label: "Karta", amount: "15000.00" },
+        { key: "bank", label: "Bank", amount: "10000.00" },
+      ]),
+    );
+    expect(kassa.status().shift!.totals).toMatchObject({ cash: "50000.00", card: "15000.00", bank: "5000.00" });
+
     // Smena yopildi: Z-hisobot tarixda, farq sanalgan naqd bilan
     kassa.closeShift({ closingCash: "37500" });
     const [closed] = kassa.shiftHistory({});
-    expect(closed).toMatchObject({ receipts: 2, expectedCash: "38000.00", difference: "-500.00", shift: { closingCash: "37500.00" } });
+    expect(closed).toMatchObject({ receipts: 3, expectedCash: "38000.00", difference: "-500.00", shift: { closingCash: "37500.00" } });
     expect(kassa.shiftReport({ shiftId: closed!.shift.id }).shift.closedAt).not.toBeNull();
     expect(() => kassa.shiftReport({})).toThrow("Ochiq smena yo'q");
 
     // Tarix: sana oralig'i; server tarixi internet talab qiladi
-    expect(kassa.historySales({ from: new Date(Date.now() - 3_600_000).toISOString() })).toHaveLength(2);
+    // 2 oddiy va 1 aralash to'lovli chek
+    expect(kassa.historySales({ from: new Date(Date.now() - 3_600_000).toISOString() })).toHaveLength(3);
     expect(kassa.historySales({ from: new Date(Date.now() + 3_600_000).toISOString() })).toEqual([]);
     expect(() => kassa.historySales({ from: "kecha" })).toThrow("Sana noto'g'ri");
     await expect(kassa.historyServer({})).rejects.toMatchObject({ code: "OFFLINE" });
@@ -429,8 +507,26 @@ describe("Kassa xizmati (main jarayon)", () => {
       "cash.movement",
       "cash.movement",
       "customer.payment",
+      "sale.complete",
+      "sale.return",
       "shift.close",
     ]);
+    // Aralash chek va taqsimlangan qaytarish serverga tarkibi bilan ketadi
+    expect(api.state.pushed[7]!.payload).toMatchObject({
+      paymentMethod: "bank",
+      amountPaid: "20000.00",
+      payments: [
+        { method: "cash", amount: "5000.00" },
+        { method: "card", amount: "5000.00" },
+        { method: "bank", amount: "10000.00" },
+      ],
+    });
+    expect(api.state.pushed[8]!.payload).toMatchObject({
+      refunds: [
+        { method: "cash", amount: "5000.00" },
+        { method: "bank", amount: "5000.00" },
+      ],
+    });
   });
 
   it("xarid bo'limi: ta'minotchi (offline), xarid va qoldiq, darhol to'lov smenadan, qaytarish va qaytgan pul, ta'minotchiga to'lov, X-hisobot", async () => {

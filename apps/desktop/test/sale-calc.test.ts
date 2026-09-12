@@ -51,6 +51,38 @@ describe("Chek hisobi (serverdagi completeSale bilan bir xil)", () => {
     expect(computeSale(input({ lines: [line("112000", { taxRate: "12", taxIncluded: true })] }))).toMatchObject({ total: 11_200_000n, tax: 1_200_000n });
   });
 
+  it("aralash to'lov: 7 kombinatsiya, qoldiq usuli, ortiqcha karta/bank, qaytim faqat naqddan, qarz, takroriy usul", () => {
+    const sale = (payments: SaleCalcInput["payments"], extra: Partial<SaleCalcInput> = {}) => computeSale(input({ lines: [line("1000000")], payments, ...extra }));
+    const combos: [NonNullable<SaleCalcInput["payments"]>, Record<string, bigint>][] = [
+      [[{ method: "cash", amount: "1000000" }], { cash: 100_000_000n }],
+      [[{ method: "card", amount: "1000000" }], { card: 100_000_000n }],
+      [[{ method: "bank", amount: "1000000" }], { bank: 100_000_000n }],
+      [[{ method: "cash", amount: "400000" }, { method: "card", amount: "600000" }], { cash: 40_000_000n, card: 60_000_000n }],
+      [[{ method: "cash", amount: "300000" }, { method: "bank", amount: "700000" }], { cash: 30_000_000n, bank: 70_000_000n }],
+      [[{ method: "card", amount: "500000" }, { method: "bank", amount: "500000" }], { card: 50_000_000n, bank: 50_000_000n }],
+      [[{ method: "cash", amount: "300000" }, { method: "card", amount: "400000" }, { method: "bank", amount: "300000" }], { cash: 30_000_000n, card: 40_000_000n, bank: 30_000_000n }],
+    ];
+    for (const [payments, expected] of combos) {
+      const calc = sale(payments);
+      expect(calc.errors).toEqual([]);
+      expect(calc).toMatchObject({ paid: 100_000_000n, change: 0n, debt: 0n });
+      expect(Object.fromEntries(calc.payments.map((part) => [part.method, part.paid]))).toEqual(expected);
+    }
+    // null — qolgan summa shu usulga
+    expect(sale([{ method: "card", amount: "400000" }, { method: "cash", amount: null }]).payments).toEqual([
+      { method: "card", tendered: 40_000_000n, paid: 40_000_000n },
+      { method: "cash", tendered: 60_000_000n, paid: 60_000_000n },
+    ]);
+    // Naqd ortiqcha — qaytim (faqat naqddan); karta/bank ortiqcha — xato
+    expect(sale([{ method: "cash", amount: "500000" }, { method: "card", amount: "700000" }])).toMatchObject({ paid: 100_000_000n, cashPaid: 30_000_000n, change: 20_000_000n, errors: [] });
+    expect(sale([{ method: "card", amount: "700000" }, { method: "bank", amount: "400000" }]).errors).toContain("Karta yoki bank to'lovi chek summasidan oshmasligi kerak");
+    // Qoldiq > 0: mijozsiz — yakunlanmaydi; mijoz bilan — qarzga
+    expect(sale([{ method: "cash", amount: "300000" }, { method: "card", amount: "400000" }]).errors).toContain("Mijozsiz sotuvda chek to'liq to'lanishi kerak");
+    expect(sale([{ method: "cash", amount: "300000" }], { customer: { balance: "0", cashbackBalance: "0" } })).toMatchObject({ debt: 70_000_000n, errors: [] });
+    expect(sale([{ method: "cash", amount: "1000000" }, { method: "cash", amount: "1" }]).errors).toContain("Naqd to'lovi bir marta kiritiladi");
+    expect(sale([{ method: "cash", amount: null }, { method: "card", amount: null }]).errors).toContain("Qoldiq faqat bitta to'lov usuliga yoziladi");
+  });
+
   it("chet valyuta: qator valyutasi, balans avval asosiy qismni, qolgani valyuta qismini yopadi", () => {
     const usd = line("126500", { salesCurrency: "USD" });
     const paid = computeSale(input({ lines: [usd], saleCurrencies: ["UZS", "USD"], currencyPayments: [{ currency: "USD", amount: "20", method: "cash" }] }));

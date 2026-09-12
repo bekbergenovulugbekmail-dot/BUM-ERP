@@ -291,6 +291,24 @@ export type SaleConflict = { kind: string; details: Record<string, unknown> };
 
 const minBigInt = (...values: bigint[]) => values.reduce((a, b) => (b < a ? b : a));
 
+type BasePaymentMethod = "cash" | "card" | "bank" | "transfer";
+const BASE_METHOD_LABELS: Record<string, string> = { cash: "Naqd", card: "Karta", bank: "Bank", transfer: "O'tkazma" };
+
+/** Asosiy valyutadagi to'lov qismlari: aralash (`payments`) yoki bitta usul (`paymentMethod` + `amountPaid`). */
+function basePaymentParts(input: { payments?: { method: "cash" | "card" | "bank"; amount: string }[]; paymentMethod: PaymentMethod; amountPaid?: string }) {
+  if (!input.payments || input.payments.length === 0) {
+    return [{ method: input.paymentMethod as BasePaymentMethod, tendered: toMinor(input.amountPaid ?? "0") }];
+  }
+  const seen = new Set<string>();
+  return input.payments.map((payment) => {
+    if (seen.has(payment.method)) throw badRequest(`${BASE_METHOD_LABELS[payment.method] ?? payment.method} to'lovi bir marta kiritiladi`);
+    seen.add(payment.method);
+    const tendered = toMinor(payment.amount);
+    if (tendered < 0n) throw badRequest("To'lov summasi manfiy bo'lmasin");
+    return { method: payment.method as BasePaymentMethod, tendered };
+  });
+}
+
 export async function completeSale(
   tx: Tx,
   tenant: TenantContext,
@@ -299,7 +317,15 @@ export async function completeSale(
     customerId?: string | null;
     items: SalesItemInput[];
     paymentMethod: PaymentMethod;
-    amountPaid: string;
+    /** Bitta usulda berilgan summa (`payments` bo'lmasa). */
+    amountPaid?: string;
+    /**
+     * Aralash to'lov (asosiy valyutada): naqd, karta, bank — har usul bir marta; berilsa `paymentMethod`/`amountPaid`
+     * e'tiborsiz. Karta va bank qoldiqdan oshmaydi, ortig'i faqat naqddan — qaytim.
+     */
+    payments?: { method: "cash" | "card" | "bank"; amount: string }[];
+    /** Web kassa so'rov kaliti: takroriy yuborishda ikkinchi chek, to'lov va jurnal yozilmaydi (409, chek raqami bilan). */
+    clientRequestId?: string | null;
     /** Mijoz keshbekidan yechiladigan qism — sozlamadagi chek ulushi chegarasida. */
     cashbackAmount?: string | null;
     /** Mijoz balansidan yechiladigan qism — naqd/karta to'lovidan oldin qo'llanadi. */
@@ -335,6 +361,17 @@ export async function completeSale(
   if ((shift.deviceId ?? null) !== (offline?.deviceId ?? null)) throw notFound("Smena topilmadi");
   await assertShiftOperator(tx, tenant, shift.cashierId);
   assertWarehouseAccess(tenant, shift.warehouseId);
+  // Idempotentlik: bir xil so'rov smena qulfi ostida ketma-ket — ikkinchisi birinchi yozgan chekni ko'radi
+  if (input.clientRequestId && !offline) {
+    const [existing] = await tx
+      .select({ id: salesOrders.id, number: salesOrders.number })
+      .from(salesOrders)
+      .where(and(eq(salesOrders.companyId, companyId), eq(salesOrders.clientRequestId, input.clientRequestId)))
+      .limit(1);
+    if (existing) {
+      throw new AppError("CONFLICT", `Bu chek allaqachon yozilgan (${existing.number})`, { duplicate: true, orderId: existing.id, number: existing.number });
+    }
+  }
 
   let customerDiscount = "0";
   let customerBalance = 0n;
@@ -436,17 +473,23 @@ export async function completeSale(
   const baseCovered = nonCash < baseTotal ? nonCash : baseTotal;
   let uncovered = nonCash - baseCovered;
 
-  // Keshbek va balansdan keyin qolgani naqd/karta bilan to'lanadi; yetmagani mijoz qarziga yoziladi
+  // Keshbek va balansdan keyin qolgani naqd/karta/bank bilan (aralash ham) to'lanadi; yetmagani mijoz qarziga yoziladi.
+  // Karta va bank qoldiqdan oshmaydi, ortig'i faqat naqddan — qaytim
   const due = baseTotal - baseCovered;
-  const tendered = toMinor(input.amountPaid);
+  const parts = basePaymentParts(input);
+  const tendered = parts.reduce((sum, part) => sum + part.tendered, 0n);
   if (!buckets.has(baseCurrency) && tendered > 0n) {
     throw badRequest(`Chekda ${baseCurrency} dagi mahsulot yo'q — to'lov valyuta bo'yicha kiritiladi`);
   }
-  if (input.paymentMethod !== "cash" && tendered > due) {
-    throw badRequest("Karta yoki bank to'lovi chek summasidan oshmasligi kerak");
-  }
-  const paid = tendered < due ? tendered : due;
-  const change = tendered - paid;
+  const nonCashPaid = parts.reduce((sum, part) => sum + (part.method === "cash" ? 0n : part.tendered), 0n);
+  if (nonCashPaid > due) throw badRequest("Karta yoki bank to'lovi chek summasidan oshmasligi kerak");
+  const cashTendered = parts.find((part) => part.method === "cash")?.tendered ?? 0n;
+  const cashPaid = minBigInt(cashTendered, due - nonCashPaid);
+  const change = cashTendered - cashPaid;
+  const paid = nonCashPaid + cashPaid;
+  const allocations = parts
+    .map((part) => ({ method: part.method, amount: part.method === "cash" ? cashPaid : part.tendered }))
+    .filter((part) => part.amount > 0n);
   if (!input.customerId && paid < due) throw badRequest("Mijozsiz sotuvda chek to'liq to'lanishi kerak");
 
   // Chet valyutadagi qismlar: naqd (ortig'i — o'sha valyutada qaytim) yoki karta; shu valyutadagi kassa/bankka
@@ -529,6 +572,7 @@ export async function completeSale(
       notes: input.notes ?? null,
       createdBy: tenant.user.id,
       ...(offline ? { id: offline.id, deviceId: offline.deviceId, createdAt: offline.soldAt } : {}),
+      ...(input.clientRequestId && !offline ? { clientRequestId: input.clientRequestId } : {}),
     })
     .returning({
       id: salesOrders.id,
@@ -575,11 +619,12 @@ export async function completeSale(
     );
   }
   const paidText = fromMinor(paid);
-  if (paid > 0n) {
+  // Har usul — alohida to'lov: o'z kassa/bank hisobi, kassa harakati va jurnal yozuvi bilan
+  for (const part of allocations) {
     await recordCustomerPayment(
       tx,
       tenant,
-      { orderId: order!.id, amount: paidText, method: input.paymentMethod, paymentDate: today },
+      { orderId: order!.id, amount: fromMinor(part.amount), method: part.method, paymentDate: today },
       meta,
     );
   }
@@ -635,7 +680,10 @@ export async function completeSale(
     });
   }
 
-  const cashIn = input.paymentMethod === "cash" ? paid + changeKept : 0n;
+  const cashIn = cashPaid + changeKept;
+  const paidBy = (...methods: BasePaymentMethod[]) => allocations.reduce((sum, part) => sum + (methods.includes(part.method) ? part.amount : 0n), 0n);
+  const cardIn = paidBy("card");
+  const bankIn = paidBy("bank", "transfer");
   // Chet valyutadagi tushum smenada valyuta bo'yicha: naqd — kassa sanog'i uchun, karta — alohida
   const foreignIn = (method: "cash" | "card") =>
     new Map(foreignParts.filter((part) => part.method === method && part.paid > 0n).map((part) => [part.currency, part.paid]));
@@ -647,7 +695,8 @@ export async function completeSale(
     .set({
       totalSales: sql`${posShifts.totalSales} + ${totals.totalAmount}::numeric`,
       ...(cashIn > 0n ? { totalCash: sql`${posShifts.totalCash} + ${fromMinor(cashIn)}::numeric` } : {}),
-      ...(input.paymentMethod === "card" ? { totalCard: sql`${posShifts.totalCard} + ${paidText}::numeric` } : {}),
+      ...(cardIn > 0n ? { totalCard: sql`${posShifts.totalCard} + ${fromMinor(cardIn)}::numeric` } : {}),
+      ...(bankIn > 0n ? { totalBank: sql`${posShifts.totalBank} + ${fromMinor(bankIn)}::numeric` } : {}),
       ...(foreignCashIn.size > 0 ? { foreignCash: addCurrencyAmounts(posShifts.foreignCash, foreignCashIn) } : {}),
       ...(foreignCardIn.size > 0 ? { foreignCard: addCurrencyAmounts(posShifts.foreignCard, foreignCardIn) } : {}),
       receiptCount: sql`${posShifts.receiptCount} + 1`,
@@ -687,6 +736,7 @@ export async function completeSale(
       shiftId: shift.id,
       total: totals.totalAmount,
       paid: paidText,
+      payments: allocations.map((part) => ({ method: part.method, amount: fromMinor(part.amount) })),
       change: fromMinor(change),
       balanceUsed: fromMinor(fromBalance),
       changeToBalance: fromMinor(changeKept),
@@ -702,6 +752,8 @@ export async function completeSale(
     conflicts,
     order: await getOrder(tx, tenant, order!.id),
     paid: paidText,
+    /** Asosiy valyutadagi to'lov usullari bo'yicha qabul qilingan summa (qaytimsiz). */
+    payments: allocations.map((part) => ({ method: part.method, amount: fromMinor(part.amount) })),
     /** Mijozga qo'lda qaytariladigan qaytim (balansga o'tgani ayirilgan). */
     change: fromMinor(change - changeKept),
     balanceUsed: fromMinor(fromBalance),
