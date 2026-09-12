@@ -98,6 +98,9 @@ const text = (value: unknown) => (typeof value === "string" ? value : "");
 const searchText = (...parts: unknown[]) => parts.map(text).join(" ").toLowerCase();
 
 export class LocalStore {
+  /** Pull yoki kassada o'zgargan mahsulotlar — tarozi navbati o'qib oladi. */
+  private readonly changedProducts = new Set<string>();
+
   constructor(readonly db: LocalDb) {}
 
   // ─── Sozlamalar ──────────────────────────────────────────────────────────
@@ -169,6 +172,7 @@ export class LocalStore {
             typeof row.categoryId === "string" ? row.categoryId : null,
             data,
           );
+        this.changedProducts.add(text(row.id));
         return;
       case "customers":
         this.db
@@ -420,6 +424,24 @@ export class LocalStore {
   /** Kassada narxi o'zgargan mahsulot — keyingi pull server qiymati bilan almashtiradi. */
   saveProduct(row: Record<string, unknown>): void {
     this.upsert("products", row);
+  }
+
+  /** O'zgargan mahsulotlar (oxirgi chaqiruvdan beri) — o'qilgach tozalanadi. */
+  takeChangedProducts(): string[] {
+    const ids = [...this.changedProducts];
+    this.changedProducts.clear();
+    return ids;
+  }
+
+  /** Tortiladigan mahsulotlar (tarozi to'liq sinxroni va solishtirish). */
+  weightedProducts<T = Record<string, unknown>>(): T[] {
+    const rows = this.db.prepare("SELECT data FROM products WHERE json_extract(data, '$.isWeighted') = 1").all() as { data: string }[];
+    return rows.map((row) => JSON.parse(row.data) as T);
+  }
+
+  /** Tarozi etiketkasidagi PLU bo'yicha sotiladigan faol mahsulot (ifoda indeksi bilan). */
+  productByPlu<T = Record<string, unknown>>(plu: number): T | null {
+    return this.dataRow<T>("SELECT data FROM products WHERE json_extract(data, '$.pluCode') = ? AND is_active = 1 AND is_saleable = 1 LIMIT 1", plu);
   }
 
   /** Navbatdagi (yuborilmagan) shu turdagi amallar payload'idagi identifikatorlar. */

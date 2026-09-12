@@ -126,6 +126,10 @@ import { kickDrawer, validateDrawerPrefs } from "./drawer.js";
 import type { LocalStore, OutboxOp, StockDelta, StoredDocument } from "./local-store.js";
 import { PIN_PATTERN, checkPin, hashPin } from "./pin.js";
 import { SyncEngine } from "./sync-engine.js";
+import { parseWeightBarcode, type WeightBarcodeFormat } from "../shared/scale-barcode.js";
+import type { ScaleConfigInput, ScaleQueueStatus } from "../shared/scale-types.js";
+import { ScaleService, type ScaleCatalogItem } from "./scale/scale-service.js";
+import { ScaleError } from "./scale/transports.js";
 
 export class KassaError extends Error {
   readonly code: string;
@@ -186,7 +190,15 @@ const clampInt = (value: unknown, min: number, max: number, fallback: number) =>
 const LABEL_MM = { min: 10, max: 300 };
 const MAX_LABELS_HTML = 30_000_000;
 
-type ProductRow = CalcProduct & { sku: string; barcode: string | null; isActive: boolean; isSaleable: boolean; imageKey?: string | null };
+type ProductRow = CalcProduct & {
+  sku: string;
+  barcode: string | null;
+  isActive: boolean;
+  isSaleable: boolean;
+  imageKey?: string | null;
+  isWeighted?: boolean;
+  pluCode?: number | null;
+};
 type CategoryRow = { id: string; name: string; parentId: string | null; sortOrder?: number; isActive: boolean };
 
 const IMAGE_EXTENSIONS = [
@@ -417,6 +429,8 @@ function documentSync<T>(stored: StoredDocument<T>): DocumentSync {
 
 export class KassaService {
   private api: ApiClient | null = null;
+  /** Tarozilar: sozlama, og'irlik, PLU sinxron navbati (internetsiz ham — tarozi LAN yoki COM'da). */
+  readonly scales: ScaleService;
   private engine: SyncEngine | null = null;
   private cashier: CashierRecord | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -438,6 +452,17 @@ export class KassaService {
       imageDir?: string;
     },
   ) {
+    this.scales = new ScaleService(store, {
+      product: (productId) => {
+        const row = this.store.product<ProductRow>(productId);
+        return row ? this.toScaleItem(row, this.baseCurrency(), this.rates()) : null;
+      },
+      weighted: () => {
+        const base = this.baseCurrency();
+        const rates = this.rates();
+        return this.store.weightedProducts<ProductRow>().map((row) => this.toScaleItem(row, base, rates));
+      },
+    });
     this.connect();
   }
 
@@ -463,7 +488,11 @@ export class KassaService {
     const token = this.vault.load();
     if (!apiUrl || !token) return;
     this.api = createApiClient({ baseUrl: apiUrl, token, appVersion: this.options.appVersion, fetchImpl: this.options.fetchImpl });
-    this.engine = new SyncEngine(this.store, this.api, (status) => this.options.onSyncStatus?.(status));
+    this.engine = new SyncEngine(this.store, this.api, (status) => {
+      this.options.onSyncStatus?.(status);
+      // Har sinxron siklidan keyin (offline bo'lsa ham): o'zgargan mahsulotlar tarozi navbatiga, vaqti kelganlari yuboriladi
+      if (status.state !== "syncing") this.flushScaleChanges();
+    });
   }
 
   /** Davriy sinxron (qurilma sozlamasi, standart 30 soniya); ilova yopilganda `stop`. */
@@ -755,6 +784,8 @@ export class KassaService {
       taxIncluded: row.taxIncluded,
       stock: fromMinor(stock.get(row.id) ?? 0n, 4),
       imageVersion: imageVersionOf(row.imageKey),
+      isWeighted: row.isWeighted === true,
+      pluCode: typeof row.pluCode === "number" ? row.pluCode : null,
     }));
   }
 
@@ -897,8 +928,117 @@ export class KassaService {
 
   productByCode(input: { code: string }): PosProduct | null {
     this.requireCashier();
-    const row = this.store.productByCode<ProductRow>(String(input.code ?? ""));
-    return row ? this.toPosProducts([row])[0]! : null;
+    const code = String(input.code ?? "");
+    const row = this.store.productByCode<ProductRow>(code);
+    if (row) return this.toPosProducts([row])[0]!;
+    // Tarozi etiketkasi (EAN-13, 2x prefiks, nazorat raqami): PLU bo'yicha mahsulot, miqdor — etiketkadagi og'irlik
+    const label = parseWeightBarcode(code.trim(), this.scales.barcodeFormat());
+    const weighed = label ? this.store.productByPlu<ProductRow>(label.plu) : null;
+    return weighed && label ? { ...this.toPosProducts([weighed])[0]!, scannedQuantity: label.quantity } : null;
+  }
+
+  // ─── Tarozilar ──────────────────────────────────────────────────────────
+
+  /** Tarozi uchun mahsulot: 1 kg narxi asosiy valyutada (bugungi aksiya bilan), sotiladigan faol bo'lsa — aktiv. */
+  private toScaleItem(row: ProductRow, base: string, rates: Record<string, string>): ScaleCatalogItem {
+    return {
+      productId: row.id,
+      name: row.name,
+      plu: typeof row.pluCode === "number" ? row.pluCode : null,
+      price: listPrice(row, "1", base, rates, promoDateOf()),
+      weighted: row.isWeighted === true,
+      active: row.isActive && row.isSaleable,
+    };
+  }
+
+  /** O'zgargan mahsulotlar tarozi navbatiga; vaqti kelgan yozuvlar fonda yuboriladi. Tarozi xatosi kassani to'xtatmaydi. */
+  private flushScaleChanges(): void {
+    const changed = this.store.takeChangedProducts();
+    try {
+      if (changed.length > 0) this.scales.enqueueProducts(changed);
+    } catch {
+      // sozlama buzilgan bo'lsa ham sinxron davom etadi — xato navbat oynasida ko'rinadi
+    }
+    void this.scales.processQueue().catch(() => undefined);
+  }
+
+  private async scaleCall<T>(action: () => T | Promise<T>): Promise<T> {
+    try {
+      return await action();
+    } catch (error) {
+      if (error instanceof ScaleError) throw new KassaError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  scaleList() {
+    this.requireCashier("scale.view");
+    return this.scales.list();
+  }
+
+  scaleSave(input: ScaleConfigInput) {
+    this.requireCashier("scale.manage");
+    return this.scaleCall(() => this.scales.save(input));
+  }
+
+  scaleRemove(input: { id: string }) {
+    this.requireCashier("scale.manage");
+    return this.scaleCall(() => this.scales.remove(String(input.id ?? "")));
+  }
+
+  scaleTest(input: { id: string }) {
+    this.requireCashier("scale.view");
+    return this.scaleCall(() => this.scales.test(String(input.id ?? "")));
+  }
+
+  /** Sotuv uchun og'irlik — kassada ishlaydigan har kassir. */
+  scaleReadWeight(input: { id?: string }) {
+    this.requireCashier();
+    return this.scaleCall(() => this.scales.readWeight(input.id ? String(input.id) : undefined));
+  }
+
+  scaleFullSync(input: { id: string }) {
+    this.requireCashier("scale.sync");
+    return this.scaleCall(async () => {
+      const run = await this.scales.fullSync(String(input.id ?? ""));
+      void this.scales.processQueue(String(input.id)).catch(() => undefined);
+      return run;
+    });
+  }
+
+  scaleProcess(input: { id?: string }) {
+    this.requireCashier("scale.sync");
+    return this.scaleCall(() => this.scales.processQueue(input.id ? String(input.id) : undefined));
+  }
+
+  scaleQueue(input: { id: string; status?: ScaleQueueStatus }) {
+    this.requireCashier("scale.view");
+    const status = (["PENDING", "PROCESSING", "SUCCESS", "FAILED"] as const).find((value) => value === input.status);
+    return this.scaleCall(() => this.scales.queue(String(input.id ?? ""), { status }));
+  }
+
+  scaleRetry(input: { id: string; itemIds?: number[] }) {
+    this.requireCashier("scale.sync");
+    return this.scaleCall(() => {
+      const retried = this.scales.retry(String(input.id ?? ""), Array.isArray(input.itemIds) ? input.itemIds.map(Number) : undefined);
+      void this.scales.processQueue(String(input.id)).catch(() => undefined);
+      return retried;
+    });
+  }
+
+  scaleReconcile(input: { id: string }) {
+    this.requireCashier("scale.view");
+    return this.scaleCall(() => this.scales.reconcile(String(input.id ?? "")));
+  }
+
+  scaleBarcode(): WeightBarcodeFormat {
+    this.requireCashier();
+    return this.scales.barcodeFormat();
+  }
+
+  scaleSaveBarcode(input: WeightBarcodeFormat): WeightBarcodeFormat {
+    this.requireCashier("scale.manage");
+    return this.scales.saveBarcodeFormat(input);
   }
 
   private toPosCustomer(row: CustomerRow, pending: Set<string>): PosCustomer {

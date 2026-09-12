@@ -120,6 +120,7 @@ export default function PosScreen({
   const [quick, setQuick] = useState<QuickSaleView | null>(null);
   const [limit, setLimit] = useState(PAGE);
   const [detail, setDetail] = useState<PosProduct | null>(null);
+  const [weighing, setWeighing] = useState(false);
   const quickReady = useRef(false);
   const productsRequest = useRef(0);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -303,12 +304,45 @@ export default function PosScreen({
     setNotice(null);
   };
 
+  /** Tortiladigan mahsulot: og'irlik tarozidan (barqaror bo'lsa); tarozi sozlanmagan — 1 qo'shiladi, miqdorni kassir kiritadi. */
+  const addFromList = async (product: PosProduct) => {
+    if (!product.isWeighted) {
+      addProduct(product);
+      return;
+    }
+    if (weighing) return;
+    setWeighing(true);
+    try {
+      const reading = await call("scale:read-weight", {});
+      const grams = Math.round(Number(reading.weight) * 1000);
+      if (!reading.stable) setNotice({ tone: "error", text: `${reading.scaleName}: og'irlik barqaror emas (${reading.weight} kg) — kutib qayta bosing` });
+      else if (grams <= 0) setNotice({ tone: "error", text: `${reading.scaleName}: tarozi bo'sh` });
+      else {
+        addProduct(product, trimDecimal(fromMinor(BigInt(grams) * 10n, 4)));
+        setNotice({ tone: "info", text: `${product.name}: ${reading.weight} kg (${reading.scaleName})` });
+      }
+    } catch (err) {
+      if ((err as { code?: string } | null)?.code === "NOT_CONFIGURED") {
+        addProduct(product);
+        setNotice({ tone: "info", text: "Tarozi sozlanmagan — og'irlikni miqdor maydoniga kiriting" });
+      } else setNotice({ tone: "error", text: errorText(err) });
+    } finally {
+      setWeighing(false);
+    }
+  };
+
+  /** Skaner: tarozi etiketkasi — etiketkadagi og'irlik; tortiladigan mahsulotning oddiy kodi — tarozidan; boshqasi — 1. */
+  const addScanned = (product: PosProduct) => {
+    if (product.scannedQuantity) addProduct(product, product.scannedQuantity);
+    else void addFromList(product);
+  };
+
   const addByCode = async (code: string) => {
     try {
       const product = await call("pos:product-by-code", { code });
       if (product) {
         setReceipt(null);
-        actions.current.addProduct(product);
+        actions.current.addScanned(product);
         return true;
       }
       setNotice({ tone: "error", text: `"${code}" — mahsulot topilmadi` });
@@ -507,9 +541,9 @@ export default function PosScreen({
   };
 
   // Global tinglovchilar bir marta ulanadi — eng so'nggi funksiyalar ref orqali
-  const actions = useRef({ handleKey, addProduct, addByCode });
+  const actions = useRef({ handleKey, addProduct, addScanned, addByCode });
   useEffect(() => {
-    actions.current = { handleKey, addProduct, addByCode };
+    actions.current = { handleKey, addProduct, addScanned, addByCode };
   });
   useEffect(() => {
     const listener = (event: KeyboardEvent) => actions.current.handleKey(event);
@@ -793,7 +827,7 @@ export default function PosScreen({
                     base={base}
                     discountPercent={discountPercent}
                     inCart={cartQty.get(product.id) ?? 0}
-                    onAdd={(picked) => addProduct(picked)}
+                    onAdd={(picked) => void addFromList(picked)}
                     onDetails={setDetail}
                   />
                 ))}
@@ -812,7 +846,7 @@ export default function PosScreen({
                   {shownProducts.map((product) => {
                     const stock = num(product.stock);
                     return (
-                      <tr key={product.id} className="cursor-pointer border-t border-border hover:bg-primary/5" onClick={() => addProduct(product)}>
+                      <tr key={product.id} className="cursor-pointer border-t border-border hover:bg-primary/5" onClick={() => void addFromList(product)}>
                         <td className="px-3 py-1.5 font-medium">
                           <span className="flex items-center gap-2">
                             <ProductImage product={product} className="h-9 w-9 shrink-0 rounded-md text-xs" />

@@ -68,6 +68,9 @@ export type Product = {
   isManufactured: boolean;
   weight: string | null;
   weightUnit: string | null;
+  /** Tarozida tortiladi; PLU — etiketka shtrix-kodidagi kod. */
+  isWeighted: boolean;
+  pluCode: number | null;
   createdAt: string;
 };
 

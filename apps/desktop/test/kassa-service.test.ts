@@ -319,6 +319,48 @@ describe("Kassa xizmati (main jarayon)", () => {
     }
   });
 
+  it("tarozi: ruxsatlar, etiketka shtrix-kodi (PLU va og'irlik), simulyator og'irligi, o'zgargan mahsulot sinxrondan keyin taroziga", async () => {
+    const api = fakeApi();
+    const kassa = service(api);
+    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    store.applyPull(
+      pullResponse({
+        units: { rows: [{ id: "unit-d", name: "Kilogramm", shortName: "kg", isBase: true, isActive: true }] },
+        products: { rows: [product("w1", "Mol go'shti", { isWeighted: true, pluCode: 123, salesPrice: "95000.0000" }), product("w2", "Tuz")] },
+      }),
+    );
+    const format = { enabled: true, prefixes: ["22"], codeLength: 5, weightDecimals: 3 };
+    const label = (body: string) => {
+      let sum = 0;
+      for (let index = 0; index < 12; index++) sum += Number(body[index]) * (index % 2 === 0 ? 1 : 3);
+      return `${body}${(10 - (sum % 10)) % 10}`;
+    };
+
+    // Kassirda faqat pos.use — tarozi sozlamalari yopiq, og'irlik o'qish mumkin (tarozi yo'q — NOT_CONFIGURED)
+    expect(() => kassa.scaleList()).toThrow("scale.view");
+    expect(() => kassa.scaleSaveBarcode(format)).toThrow("scale.manage");
+    await expect(kassa.scaleReadWeight({})).rejects.toMatchObject({ code: "NOT_CONFIGURED" });
+    expect(kassa.productByCode({ code: label("220012301234") })).toBeNull();
+
+    store.saveCashier({ id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true, permissions: ["pos.use", "scale.view", "scale.manage", "scale.sync"] });
+    expect(kassa.scaleSaveBarcode(format)).toEqual(format);
+    expect(kassa.productByCode({ code: label("220012301234") })).toMatchObject({ id: "w1", isWeighted: true, pluCode: 123, scannedQuantity: "1.234" });
+    expect(kassa.productByCode({ code: label("229999900500") })).toBeNull();
+
+    const scale = await kassa.scaleSave({ name: "Tarozi", provider: "simulator", connection: { type: "none" }, enabled: true, autoSync: true, maxAttempts: 3, pollCommand: "", simulatedWeight: "0.750" });
+    expect(await kassa.scaleReadWeight({})).toMatchObject({ weight: "0.750", stable: true, scaleName: "Tarozi" });
+    await expect(kassa.scaleSave({ ...scale, provider: "shtrih-m" })).rejects.toMatchObject({ code: "BAD_CONFIG" });
+
+    // Pull'da o'zgargan tortiladigan mahsulot — sinxron siklidan keyin navbatga va simulyatorga
+    store.applyPull(pullResponse({ products: { rows: [product("w1", "Mol go'shti", { isWeighted: true, pluCode: 123, salesPrice: "99000.0000" })] } }));
+    await kassa.syncNow();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(kassa.scaleList()[0]!.queue).toMatchObject({ SUCCESS: 1, FAILED: 0, PENDING: 0 });
+    expect(store.getMeta(`scaleSimulator:${scale.id}`)).toEqual([{ plu: 123, productId: "w1", name: "Mol go'shti", price: "99000.0000" }]);
+    expect(await kassa.scaleReconcile({ id: scale.id })).toMatchObject({ source: "scale", inSync: 1, missingOnScale: [], extraOnScale: [] });
+  });
+
   it("server manzili: sxemasiz — https qo'shiladi; sertifikat mos emas yoki domen topilmadi — aniq xabar", async () => {
     const api = fakeApi();
     const requested: string[] = [];

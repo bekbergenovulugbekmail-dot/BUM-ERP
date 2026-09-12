@@ -240,6 +240,43 @@ const MIGRATIONS: string[] = [
   CREATE INDEX products_category_idx ON products (category_id, name);
   UPDATE meta SET value = json_remove(value, '$.products') WHERE key = 'cursors' AND json_valid(value);
   `,
+  // v7 — tarozilar: mahsulot (PLU) sinxron navbati va taroziga yuborilgan holat (qayta yubormaslik, solishtirish)
+  `
+  CREATE TABLE scale_sync_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scale_id TEXT NOT NULL,
+    product_id TEXT NOT NULL,
+    plu INTEGER NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('upsert', 'delete')),
+    status TEXT NOT NULL CHECK (status IN ('PENDING', 'PROCESSING', 'SUCCESS', 'FAILED')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL,
+    next_attempt_at TEXT NOT NULL,
+    last_error TEXT,
+    run_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX scale_sync_queue_due_idx ON scale_sync_queue (scale_id, status, next_attempt_at);
+  CREATE INDEX scale_sync_queue_plu_idx ON scale_sync_queue (scale_id, plu, status);
+  CREATE INDEX scale_sync_queue_run_idx ON scale_sync_queue (scale_id, run_id);
+
+  CREATE TABLE scale_plu_state (
+    scale_id TEXT NOT NULL,
+    plu INTEGER NOT NULL,
+    product_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    price TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    synced_at TEXT NOT NULL,
+    PRIMARY KEY (scale_id, plu)
+  );
+  CREATE INDEX scale_plu_state_product_idx ON scale_plu_state (scale_id, product_id);
+
+  -- Etiketka shtrix-kodi: PLU bo'yicha tez qidiruv; tortiladigan va PLU maydonlari pull'ga keyin qo'shilgani uchun mahsulotlar qayta olinadi
+  CREATE INDEX products_plu_idx ON products (json_extract(data, '$.pluCode'));
+  UPDATE meta SET value = json_remove(value, '$.products') WHERE key = 'cursors' AND json_valid(value);
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

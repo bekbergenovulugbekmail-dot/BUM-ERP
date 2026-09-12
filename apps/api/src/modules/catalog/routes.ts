@@ -147,6 +147,10 @@ const productBody = z.strictObject({
   isManufactured: z.boolean().optional(),
   weight: qtySchema.nullable().optional(),
   weightUnit: nullableText(16),
+  /** Tarozida tortiladi (miqdor — og'irlik). */
+  isWeighted: z.boolean().optional(),
+  /** Tarozi PLU kodi (etiketka shtrix-kodida), kompaniyada unikal. */
+  pluCode: z.number().int().min(1).max(999_999).nullable().optional(),
 });
 const productPatch = productBody.partial().extend({ isActive: z.boolean().optional() });
 

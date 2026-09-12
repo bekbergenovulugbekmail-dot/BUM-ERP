@@ -72,6 +72,8 @@ const schema = z.object({
   isPurchaseable: z.boolean(),
   isManufactured: z.boolean(),
   weight: z.number().optional(),
+  isWeighted: z.boolean(),
+  pluCode: z.number().int().min(1, "PLU 1–999999").max(999999, "PLU 1–999999").optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -90,6 +92,7 @@ const EMPTY_VALUES: FormValues = {
   minStock: 0,
   trackBatch: false, trackExpiry: false,
   isSaleable: true, isPurchaseable: true, isManufactured: false,
+  isWeighted: false,
 };
 
 /** Bo'sh qiymat — `null`: tahrirlashda maydonni tozalash ham shu yo'l bilan. */
@@ -129,6 +132,8 @@ function toPayload(values: FormValues) {
     isPurchaseable: values.isPurchaseable,
     isManufactured: values.isManufactured,
     weight: numOrNull(values.weight),
+    isWeighted: values.isWeighted,
+    pluCode: values.pluCode ?? null,
   };
 }
 
@@ -201,6 +206,8 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
         isPurchaseable: existingProduct.isPurchaseable,
         isManufactured: existingProduct.isManufactured,
         weight: optionalNumber(existingProduct.weight),
+        isWeighted: existingProduct.isWeighted ?? false,
+        pluCode: existingProduct.pluCode ?? undefined,
       });
     } else if (!editId) {
       form.reset(EMPTY_VALUES);
@@ -617,6 +624,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                       { name: "isSaleable" as const, label: "Sotiladi", desc: "Bu mahsulotni sotish mumkin" },
                       { name: "isPurchaseable" as const, label: "Xarid qilinadi", desc: "Bu mahsulotni xarid qilish mumkin" },
                       { name: "isManufactured" as const, label: "Ishlab chiqariladi", desc: "Bu mahsulot ishlab chiqariladi (BOM kerak)" },
+                      { name: "isWeighted" as const, label: "Tarozida tortiladi", desc: "Miqdor og'irlik (kg): kassada tarozidan yoki etiketka shtrix-kodidan olinadi" },
                     ] as const
                   ).map((flag) => (
                     <FormField key={flag.name} control={form.control} name={flag.name} render={({ field }) => (
@@ -639,6 +647,13 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                       <FormItem>
                         <FormLabel>Og'irligi (kg)</FormLabel>
                         <FormControl><Input type="number" step="0.001" min="0" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.valueAsNumber || undefined)} /></FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="pluCode" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Tarozi PLU kodi</FormLabel>
+                        <FormControl><Input type="number" step="1" min="1" max="999999" placeholder="123" {...field} value={field.value ?? ""} onChange={e => field.onChange(Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : undefined)} /></FormControl>
+                        <FormMessage />
                       </FormItem>
                     )} />
                   </div>

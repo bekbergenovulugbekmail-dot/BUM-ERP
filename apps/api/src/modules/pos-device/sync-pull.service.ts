@@ -167,6 +167,9 @@ export async function pullChanges(
       isActive: products.isActive,
       isSaleable: products.isSaleable,
       isPurchaseable: products.isPurchaseable,
+      /** Tarozi: tortiladigan mahsulot va PLU kodi (etiketka shtrix-kodi, taroziga yuborish). */
+      isWeighted: products.isWeighted,
+      pluCode: products.pluCode,
       cursorAt: cursorText(products.updatedAt),
     })
     .from(products)

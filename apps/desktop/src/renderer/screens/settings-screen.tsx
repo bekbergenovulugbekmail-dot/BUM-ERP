@@ -11,9 +11,10 @@ import { POS_THEMES, THEME_LABELS, isDarkTheme, type PosTheme } from "../../shar
 import { PAYMENT_LABELS, fmtMoney, fmtTime } from "../format.ts";
 import { call, errorText } from "../kassa.ts";
 import PrefsDialog from "../pos/prefs-dialog.tsx";
+import ScalesPanel from "../settings/scales-panel.tsx";
 
 type Tab = "settings" | "printer" | "marketing" | "warehouse" | "company" | "permissions" | "subscription";
-type Section = "language" | "appearance" | "currencies" | "hotkeys" | "sale" | "payment" | "general" | "security" | "version" | "logout";
+type Section = "language" | "appearance" | "currencies" | "hotkeys" | "sale" | "payment" | "scales" | "general" | "security" | "version" | "logout";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "settings", label: "Sozlamalar" },
@@ -32,6 +33,7 @@ const SECTIONS: { key: Section; label: string }[] = [
   { key: "hotkeys", label: "Qaynoq tugmalar" },
   { key: "sale", label: "Savdo sozlamalari" },
   { key: "payment", label: "To'lov sozlamalari" },
+  { key: "scales", label: "Tarozilar" },
   { key: "general", label: "Umumiy sozlamalar" },
   { key: "security", label: "Xavfsizlik sozlamalari" },
   { key: "version", label: "Ilova versiyasi" },
@@ -130,6 +132,7 @@ export default function SettingsScreen({
               {section === "hotkeys" && <HotkeysPanel prefs={prefs} save={save} />}
               {section === "sale" && <SalePanel prefs={prefs} save={save} />}
               {section === "payment" && <PaymentPanel prefs={prefs} save={save} />}
+              {section === "scales" && <ScalesPanel permissions={status.cashier?.permissions ?? []} />}
               {section === "general" && <GeneralPanel prefs={prefs} save={save} overview={overview} onStatus={onStatus} />}
               {section === "security" && <SecurityPanel prefs={prefs} save={save} />}
               {section === "version" && <VersionPanel overview={overview} pending={status.sync.pending} />}

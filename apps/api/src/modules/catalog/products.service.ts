@@ -219,6 +219,8 @@ export type ProductInput = {
   isManufactured?: boolean;
   weight?: string | null;
   weightUnit?: string | null;
+  isWeighted?: boolean;
+  pluCode?: number | null;
 };
 
 const FIRST_AUTO_SKU = 1001n;
@@ -300,12 +302,24 @@ async function loadProductForUpdate(tx: Tx, tenant: TenantContext, productId: st
   return product;
 }
 
+/** Tarozi PLU kodi kompaniyada band emas (unikal indeks — ikkinchi qatlam, bu yerda tushunarli xabar). */
+async function assertPluFree(tx: Tx, companyId: string, pluCode: number | null | undefined, exceptProductId?: string) {
+  if (pluCode === null || pluCode === undefined) return;
+  const [taken] = await tx
+    .select({ name: products.name })
+    .from(products)
+    .where(and(eq(products.companyId, companyId), eq(products.pluCode, pluCode), exceptProductId ? sql`${products.id} <> ${exceptProductId}` : undefined))
+    .limit(1);
+  if (taken) throw badRequest(`PLU ${pluCode} band: ${taken.name}`);
+}
+
 export async function createProduct(tx: Tx, tenant: TenantContext, rawInput: ProductInput, meta: RequestMeta) {
   assertCostingMethod(rawInput.costingMethod);
   await assertReferences(tx, tenant, rawInput);
   const input = await normalizeCurrencies(tx, tenant.company.id, rawInput);
   // Cheklangan xodim mahsulotni faqat o'z kategoriyasida yaratadi (kategoriyasiz — yo'q)
   assertCategoryInScope(await categoryScope(tx, tenant), input.categoryId);
+  await assertPluFree(tx, tenant.company.id, input.pluCode);
 
   const [product] = await tx
     .insert(products)
@@ -337,6 +351,7 @@ export async function updateProduct(
   assertCostingMethod(patch.costingMethod);
   await assertReferences(tx, tenant, patch);
   if (patch.categoryId !== undefined) assertCategoryInScope(await categoryScope(tx, tenant), patch.categoryId);
+  await assertPluFree(tx, tenant.company.id, patch.pluCode, current.id);
 
   const { costingMethod: _costing, ...fields } = await normalizeCurrencies(tx, tenant.company.id, patch);
   const [updated] = await tx

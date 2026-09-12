@@ -18,6 +18,8 @@ import type {
   SyncStatus,
 } from "./sync-types.js";
 import type { PosTheme } from "./themes.js";
+import type { WeightBarcodeFormat } from "./scale-barcode.js";
+import type { ScaleConfigInput, ScaleQueueItem, ScaleQueueStatus, ScaleReconcileResult, ScaleTestResult, ScaleView, WeightReading } from "./scale-types.js";
 
 export type KassaError = { code: string; message: string; details?: unknown };
 export type KassaResult<T> = { ok: true; data: T } | { ok: false; error: KassaError };
@@ -72,6 +74,11 @@ export type PosProduct = {
   stock: string;
   /** Rasm bor: `bum-image://product/<id>?v=<imageVersion>` (keshlanadi, offline — keshdagisi). */
   imageVersion: string | null;
+  /** Tarozida tortiladi: savatga qo'shishda og'irlik tarozidan o'qiladi. */
+  isWeighted: boolean;
+  pluCode: number | null;
+  /** Tarozi etiketkasi skanerlangan: etiketkadagi og'irlik (kg). */
+  scannedQuantity?: string;
 };
 
 export type PosCategory = { id: string; name: string; products: number };
@@ -703,6 +710,18 @@ export type KassaChannels = {
   "pos:products": { input: { query: string; limit?: number; offset?: number; categoryId?: string | null }; output: PosProduct[] };
   "pos:categories": { input: void; output: PosCategory[] };
   "pos:quick-sale": { input: { categoryId?: string | null; query?: string }; output: QuickSaleView };
+  "scale:list": { input: void; output: ScaleView[] };
+  "scale:save": { input: ScaleConfigInput; output: ScaleView };
+  "scale:remove": { input: { id: string }; output: void };
+  "scale:test": { input: { id: string }; output: ScaleTestResult };
+  "scale:read-weight": { input: { id?: string }; output: WeightReading & { scaleId: string; scaleName: string } };
+  "scale:full-sync": { input: { id: string }; output: { runId: string; total: number } };
+  "scale:process": { input: { id?: string }; output: { sent: number; failed: number; waiting: number } };
+  "scale:queue": { input: { id: string; status?: ScaleQueueStatus }; output: ScaleQueueItem[] };
+  "scale:retry": { input: { id: string; itemIds?: number[] }; output: number };
+  "scale:reconcile": { input: { id: string }; output: ScaleReconcileResult };
+  "scale:barcode": { input: void; output: WeightBarcodeFormat };
+  "scale:save-barcode": { input: WeightBarcodeFormat; output: WeightBarcodeFormat };
   "pos:product-by-code": { input: { code: string }; output: PosProduct | null };
   "pos:products-by-ids": { input: { ids: string[] }; output: PosProduct[] };
   "pos:customers": { input: { query: string }; output: PosCustomer[] };

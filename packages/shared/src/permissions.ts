@@ -30,6 +30,12 @@ export const PERMISSIONS = {
   "pos.devices.manage":   { label: "Kassa qurilmalarini boshqarish", group: "Savdo" },
   /** Kassa qutisidan xarajat to'lash (smena naqdidan, "to'langan" xarajat hujjati). */
   "pos.cash.expense":     { label: "Kassadan xarajat to'lash",     group: "Savdo" },
+  /** Kassa tarozilari: holat, sinxron navbati va solishtirishni ko'rish. */
+  "scale.view":           { label: "Tarozilarni ko'rish",          group: "Savdo" },
+  /** Tarozi qo'shish, ulanish sozlamalari, etiketka shtrix-kodi formati. */
+  "scale.manage":         { label: "Tarozilarni sozlash",          group: "Savdo" },
+  /** Mahsulotlarni taroziga yuborish, to'liq sinxron, xato yozuvlarni qayta yuborish. */
+  "scale.sync":           { label: "Taroziga mahsulot yuborish",   group: "Savdo" },
 
   // ─── Ombor ─────────────────────────────────────────────────────────────────
   "warehouse.view":       { label: "Omborni ko'rish",              group: "Ombor" },
@@ -205,6 +211,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "products.view", "products.create", "products.edit", "products.manage",
       "sales.view", "sales.create", "sales.edit", "sales.approve", "sales.cancel", "sales.refund",
       "pos.use",
+      "scale.view", "scale.sync",
       "warehouse.view",
       "finance.view",
       "currency_rates.view",
@@ -237,6 +244,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     permissions: [
       "products.view", "products.create", "products.edit", "products.manage",
       "warehouse.view", "warehouse.manage", "warehouse.transfer", "warehouse.count", "warehouse.receive",
+      "scale.view", "scale.manage", "scale.sync",
       "purchase.view",
       "analytics.view",
       "settings.view",
@@ -265,6 +273,8 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "warehouse.view",
       // Kassada kursni ko'radi; o'zgartirish (`currency_rates.manage`) — rahbar beradi
       "currency_rates.view",
+      // Tarozidan og'irlik o'qish va holatni ko'rish; sozlash va yuborish — rahbar yoki omborchi
+      "scale.view",
     ],
   },
   {

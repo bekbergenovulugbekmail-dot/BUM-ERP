@@ -187,6 +187,10 @@ export const products = pgTable(
 
     weight: qty("weight"),
     weightUnit: varchar("weight_unit", { length: 16 }),
+    /** Tarozida tortib sotiladi: miqdor — og'irlik (kassada tarozidan yoki etiketka shtrix-kodidan). */
+    isWeighted: boolean("is_weighted").notNull().default(false),
+    /** Tarozi PLU kodi — etiketka shtrix-kodidagi mahsulot kodi; kompaniyada unikal. */
+    pluCode: integer("plu_code"),
     ...timestamps(),
   },
   (t) => [
@@ -196,7 +200,9 @@ export const products = pgTable(
     index("products_company_brand_idx").on(t.companyId, t.brandId),
     index("products_company_active_idx").on(t.companyId, t.isActive),
     uniqueIndex("products_legacy_id_key").on(t.legacyId),
+    uniqueIndex("products_company_plu_key").on(t.companyId, t.pluCode).where(sql`${t.pluCode} is not null`),
     check("products_prices_non_negative", sql`${t.purchasePrice} >= 0 AND ${t.salesPrice} >= 0`),
+    check("products_plu_range", sql`${t.pluCode} is null or ${t.pluCode} between 1 and 999999`),
   ],
 );
 
