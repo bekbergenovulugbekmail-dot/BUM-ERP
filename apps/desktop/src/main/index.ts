@@ -6,6 +6,7 @@
  *  - Tashqi havolalar va yangi oynalar bloklanadi.
  */
 import { app, BrowserWindow, ipcMain, Menu, safeStorage, shell } from "electron";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -13,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import type { KassaChannel, KassaChannels } from "../shared/kassa-api.js";
 import { openLocalDb } from "./local-db.js";
 import { LocalStore } from "./local-store.js";
-import { KassaService, toKassaError, type ReceiptPrinter, type TokenVault } from "./kassa-service.js";
+import { KassaService, toKassaError, type AppUpdater, type ReceiptPrinter, type TokenVault } from "./kassa-service.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -93,6 +94,14 @@ const receiptPrinter: ReceiptPrinter = {
   },
 };
 
+/** NSIS o'rnatuvchi alohida jarayonda; ilova yopiladi (lokal baza foydalanuvchi papkasida saqlanadi). */
+const updater: AppUpdater = {
+  async install(file) {
+    spawn(file, [], { detached: true, stdio: "ignore" }).unref();
+    setTimeout(() => app.quit(), 500);
+  },
+};
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1366,
@@ -132,6 +141,11 @@ function registerIpc(service: KassaService) {
     "cashier:first-login": (input) => service.firstLogin(input),
     "cashier:unlock": (input) => service.unlock(input),
     "cashier:logout": () => service.logout(),
+    "cashier:change-pin": (input) => service.changePin(input),
+    "settings:overview": () => service.settingsOverview(),
+    "update:check": () => service.checkUpdate(),
+    "update:download": () => service.downloadUpdate(),
+    "update:install": () => service.installUpdate(),
     "sync:run": () => service.syncNow(),
     "sync:rejected": () => service.rejected(),
     "sync:unsynced": () => service.unsynced(),
@@ -145,6 +159,12 @@ function registerIpc(service: KassaService) {
     "pos:products-by-ids": (input) => service.productsByIds(input),
     "pos:customers": (input) => service.customers(input),
     "pos:customer-create": (input) => service.createCustomer(input),
+    "ref:customers": (input) => service.referenceCustomers(input),
+    "ref:customer-update": (input) => service.updateCustomer(input),
+    "ref:suppliers": (input) => service.referenceSuppliers(input),
+    "ref:supplier-update": (input) => service.updateSupplier(input),
+    "ref:prices": (input) => service.priceList(input),
+    "ref:price-update": (input) => service.updatePrices(input),
     "pos:complete-sale": (input) => service.completeSale(input),
     "pos:sales": (input) => service.sales(input),
     "pos:hold": (input) => service.hold(input),
@@ -186,6 +206,7 @@ function registerIpc(service: KassaService) {
     "count:remove": (input) => service.countRemove(input),
     "count:cancel": () => service.countCancel(),
     "count:complete": (input) => service.countComplete(input),
+    "analytics:report": (input) => service.analyticsReport(input),
     "device:prefs": () => service.prefs(),
     "device:save-prefs": (input) => service.savePrefs(input),
     "device:printers": () => service.printers(),
@@ -223,6 +244,8 @@ if (!app.requestSingleInstanceLock()) {
       platform: process.platform,
       onSyncStatus: (status) => mainWindow?.webContents.send("kassa:sync-status", status),
       printer: receiptPrinter,
+      updater,
+      downloadDir: app.getPath("temp"),
     });
     registerIpc(service);
     createWindow();

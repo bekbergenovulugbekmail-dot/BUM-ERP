@@ -20,16 +20,21 @@ type Props = { suppliers: Supplier[] | undefined };
 type SupplierForm = {
   name: string;
   code: string;
+  partyType: "individual" | "legal";
   contactPerson: string;
   phone: string;
   email: string;
   address: string;
+  taxId: string;
+  bankAccount: string;
+  bankMfo: string;
   paymentTermDays: number;
   notes: string;
 };
 
 const EMPTY_FORM: SupplierForm = {
-  name: "", code: "", contactPerson: "", phone: "", email: "", address: "", paymentTermDays: 30, notes: "",
+  name: "", code: "", partyType: "legal", contactPerson: "", phone: "", email: "", address: "",
+  taxId: "", bankAccount: "", bankMfo: "", paymentTermDays: 30, notes: "",
 };
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ", { notation: "compact" }).format(n) + " so'm";
@@ -46,10 +51,14 @@ export default function SuppliersTable({ suppliers }: Props) {
       name: body.name,
       // Bo'sh — serverda avtomatik (S-0001)
       code: body.code.trim() || undefined,
+      partyType: body.partyType,
       contactPerson: body.contactPerson || null,
       phone: body.phone || null,
       email: body.email || null,
       address: body.address || null,
+      taxId: body.taxId.trim() || null,
+      bankAccount: body.bankAccount.trim() || null,
+      bankMfo: body.bankMfo.trim() || null,
       paymentTermDays: body.paymentTermDays,
       notes: body.notes || null,
     }),
@@ -110,7 +119,10 @@ export default function SuppliersTable({ suppliers }: Props) {
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <h3 className="font-semibold text-sm">{s.name}</h3>
-                    <p className="text-xs text-muted-foreground font-mono">{s.code}</p>
+                    <p className="text-xs text-muted-foreground font-mono">
+                      {s.code} · <span className="font-sans">{s.partyType === "individual" ? "Jismoniy shaxs" : "Yuridik shaxs"}</span>
+                      {s.taxId && <span> · STIR {s.taxId}</span>}
+                    </p>
                   </div>
                   <Badge variant={s.isActive ? "secondary" : "outline"} className="text-[10px]">
                     {s.isActive ? "Faol" : "Nofaol"}
@@ -156,6 +168,27 @@ export default function SuppliersTable({ suppliers }: Props) {
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Yangi yetkazuvchi</DialogTitle></DialogHeader>
           <div className="space-y-3">
+            <div className="flex gap-1">
+              {(["legal", "individual"] as const).map((type) => (
+                <Button key={type} type="button" size="sm" variant={form.partyType === type ? "default" : "secondary"} onClick={() => setForm(p => ({ ...p, partyType: type }))}>
+                  {type === "legal" ? "Yuridik shaxs" : "Jismoniy shaxs"}
+                </Button>
+              ))}
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label>{form.partyType === "legal" ? "STIR" : "JSHSHIR / STIR"}</Label>
+                <Input value={form.taxId} maxLength={32} onChange={(e) => setForm(p => ({ ...p, taxId: e.target.value }))} />
+              </div>
+              <div>
+                <Label>Hisob raqami</Label>
+                <Input value={form.bankAccount} maxLength={64} onChange={(e) => setForm(p => ({ ...p, bankAccount: e.target.value }))} />
+              </div>
+              <div>
+                <Label>MFO</Label>
+                <Input value={form.bankMfo} maxLength={16} onChange={(e) => setForm(p => ({ ...p, bankMfo: e.target.value }))} />
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Nomi *</Label>

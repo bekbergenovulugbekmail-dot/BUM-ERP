@@ -13,7 +13,10 @@ export type Supplier = {
   email: string | null;
   address: string | null;
   taxId: string | null;
+  /** Jismoniy yoki yuridik shaxs. */
+  partyType: "individual" | "legal";
   bankAccount: string | null;
+  bankMfo: string | null;
   paymentTermDays: number;
   currency: string;
   /** Asosiy valyutada — barcha valyutalardagi qarzning kitob qiymati. */

@@ -869,7 +869,10 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 | D3 | Xarid (offline, ta'minotchiga qaytarish va to'lov) | ✅ server commit (migratsiya 0034), API deploy; desktop kodi — D4 commitida (bir xil fayllar) |
 | D4 | Ombor, mahsulot harakati, inventarizatsiya (offline) | ✅ (pastda) |
 | D5 | Etiketka (web shablonlari, etiketka printeri) | ✅ (pastda) |
-| D6–D9 | Ma'lumotlar, analitika, sozlamalar va avtomatik yangilanish, offline testlar | ⏳ |
+| D6 | Ma'lumotlar: jismoniy/yuridik shaxslar, rekvizitlar, narxlar (offline tahrir) | ✅ (pastda) |
+| D7 | Analitika: ko'rsatkichlar, savdo, kirim-chiqim, qarzdorlik-haqdorlik, mahsulot, kategoriya tannarxi | ✅ (pastda) |
+| D8 | Sozlamalar (skrinshot bo'yicha), yangilanish (SHA-256 tekshiruvi bilan) va o'rnatuvchi | ✅ (pastda) |
+| D9 | Offline testlar va yakuniy hisobot | ⏳ |
 
 **D0 — server** (migratsiya 0031):
 - jadvallar `pos_devices` (kompaniya, ombor, nomi, `code` K01/K02…, token SHA-256 xeshi, faollik, versiya, oxirgi pull/push) va `pos_sync_operations` (qurilma + `op_id` unikal, tur, kassir, `applied`/`rejected`, natija yoki xato, qurilmadagi vaqt); `pos_shifts.device_id`
@@ -952,7 +955,8 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 - kech yetib kelgan, lekin inventarizatsiyadan OLDIN bo'lgan hujjat (boshqa kassaning offline cheki, xarid, qaytarish, o'tgan sanali web kirim/chiqim yoki ko'chirish): sanoq bu tovarni allaqachon hisobga olgan — hujjat yoziladi, qoldiq esa inventarizatsiya nomidan teskari tuzatma bilan o'zgarmay qoladi (jurnal ham), nomuvofiqlik `count_late_document`. Tranzaksiyadagi harakatlar `moveStock` ichida yig'iladi (qo'shimcha so'rov faqat sinxron va o'tgan sanali harakatda)
 - offline chiqimda qoldiq yetmasa — manfiy qoldiq va `stock_shortage` (so'ralgan / bor edi)
 - qurilma: `GET /api/pos-device/movements` (qurilma ombori, mahsulot va tur bo'yicha, kursor; hujjat raqami — chek, xarid, qaytarish, inventarizatsiya), `GET /api/pos-device/stock/:productId` (faol omborlar bo'yicha qoldiq); pull qoldig'ida `avgCostPrice`
-- testlar: `pos-stock-sync` (2) — hisobdan chiqarish va ko'chirish (nomuvofiqlik, jurnal, tannarx, ruxsatlar, noto'g'ri raqam/ombor, harakatlar sahifalash, omborlar qoldig'i, pull); inventarizatsiya (sanash lahzasidagi farq, keyingi sotuv saqlanishi, kech kelgan oldingi chek va o'tgan sanali web kirim tuzatmasi, band ID, ruxsat, noma'lum mahsulot)
+- testlar: `pos-stock-sync` (2) — hisobdan chiqarish va ko'chirish (nomuvofiqlik, jurnal, tannarx, ruxsatlar, noto'g'ri raqam/ombor, harakatlar sahifalash, omborlar qoldig'i, pull); inventarizatsiya (sanash lahzasidagi farq, keyingi sotuv saqlanishi, kech kelgan oldingi chek va o'tgan sanali web kirim tuzatmasi, band ID, ruxsat, noma'lum mahsulot). To'liq API: 277/277 (67 fayl)
+- commit `e649576` (D4–D5 va desktop D2–D3), API deploy
 
 **D4 — desktop** (lokal baza v5: ombor hujjatlari):
 - Ombor: qoldiqlar (ko'rinadigan = server + yuborilmagan hujjatlar, "navbatda" farqi), filtrlar (bor, kam qolgan — minimal qoldiq bo'yicha, tugagan, manfiy) va sonlari, o'rtacha tannarx va ombor qiymati (faqat `warehouse.manage`), boshqa omborlardagi qoldiq (internet bilan)
@@ -967,6 +971,27 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 - desktop: Etiketka bo'limi — shablon tanlash (rulon yoki A4 ustunlar), mahsulot skaner/qidiruv (har o'qish +1 nusxa), bugungi xaridlardan (qabul qilingan miqdor bo'yicha nusxa), nusxa soni, jonli ko'rinish; shtrix-kod/QR va narx (asosiy valyutada) web bilan bir xil shablondan (`label-html`); internet shart emas
 - chop etish: alohida etiketka printeri (qurilma sozlamasi, kassa printer oynasida ham), dialogsiz; rulon — sahifa etiketka o'lchamida (mm), A4 — varaq; ko'p etiketka vaqtinchalik fayl orqali (data URL chegarasi yo'q), bir martada 2000 tagacha
 - testlar: 20
+
+**D6 — ma'lumotlar** (migratsiya 0035, faqat qo'shimcha ustunlar):
+- `customers.party_type` (standart `individual`), `bank_account`, `bank_mfo`; `suppliers.party_type` (standart `legal`), `bank_mfo`; CHECK `individual|legal`
+- web: mijoz va ta'minotchi formalarida jismoniy/yuridik shaxs, STIR (JSHSHIR), hisob raqami, MFO; kartochkada turi
+- `push`: `customer.create` / `supplier.create` rekvizitlar bilan; `customer.update` (`crm.manage`), `supplier.update` (`purchase.edit`), `product.prices` (`products.edit`) — maydonlar bo'yicha birlashtirish: qurilma har maydon uchun ko'rgan (`from`) va yangi (`to`) qiymatni yuboradi; server qiymati hali `from` bo'lsa yoziladi (xizmat funksiyasi orqali — tekshiruv va audit), allaqachon `to` bo'lsa o'tkaziladi, aks holda server qiymati qoladi va `record_changed` nomuvofiqligi (maydon, asl, qurilma, server qiymatlari). Telefon raqamlar, narx 4 kasrli son sifatida taqqoslanadi; `updated_at` ishlatilmaydi (qarz o'zgarishi ham yangilaydi)
+- `pull`: mijoz va ta'minotchida turi, email, manzil, STIR, mas'ul shaxs, rekvizitlar, izoh
+- desktop: Ma'lumotlar bo'limi — Mijozlar / Ta'minotchilar (jismoniy/yuridik filtri, qarz/balans/keshbek, rekvizitlar, yangi va tahrir oynasi — offline) va Narxlar (sotuv, chakana, ulgurji, aksiya va muddati, xarid — ruxsat bilan; o'zgarish kassada darhol, "narx navbatda"); tahrirda faqat o'zgargan maydonlar navbatga tushadi, o'zgarish bo'lmasa — hech narsa
+- testlar: `pos-reference-sync` (2); desktop 21
+
+**D7 — analitika:**
+- server `GET /api/pos-device/analytics?from&to&cashierId` (kassirda `analytics.view`, a'zolik qayta tekshiriladi; davr 366 kungacha): qurilma omboridagi savdo (barcha kassalar va web) — tushum, qaytarish, sotuv lahzasidagi AVCO tannarx va qaytarish tannarxi, yalpi foyda va marja, cheklar, o'rtacha chek, kunlar, kassirlar, to'lov turlari (smena naqd/karta, web to'lovlari, qarzga); to'liq qaytarilgan chek ikki marta ayirilmaydi; ombor — xaridlar, qoldiq qiymati, eng ko'p sotilgan va sotilmayotgan mahsulotlar, kategoriya bo'yicha sotilgan va qoldiq tannarxi; kompaniya — xarajatlar, kirim-chiqim (kassa/bank tranzaksiyalari manbalar bo'yicha, asosiy valyutada), mijozlar qarzi va balansi, ta'minotchilarga qarz va avans
+- desktop: Analitika bo'limi (Asosiy ko'rsatkichlar, Savdo, Kirim-chiqim, Qarzdorlik-haqdorlik, Mahsulotlar tahlili, Kategoriya bo'yicha tannarx), davr (bugun, 7/30 kun, bu oy, ixtiyoriy); internet bo'lmasa yoki "Faqat shu kassa" — qurilmadagi hujjatlardan (yuborilmaganlar ham, tannarx joriy o'rtacha bo'yicha taxminiy), manba va qamrov ekranda ko'rinadi
+- testlar: `pos-analytics` (1); desktop 22
+
+**D8 — sozlamalar va yangilanish:**
+- desktop Sozlamalar (skrinshotdagi tuzilma): yuqorida Sozlamalar / Printer / Marketing / Ombor / Tashkilot / Ruxsatlar / Obuna; "Sozlamalar" ichida chapda — Dastur tili (o'zbek lotin yoki kirill — ekran matni avtomatik o'giriladi, kodlar va raqamlar o'zgarmaydi), Tashqi ko'rinish (yorug'/qorong'i/Windows, shrift o'lchami), Valyutalar (kurslar), Qaynoq tugmalar (F1–F12 yoki Ctrl/Alt + harf, takror tekshiruvi, kassa ekranida darhol), Savdo (qoldiq yetmasa sotishni taqiqlash, avtomatik chop etish, pul qutisi), To'lov (usullarni yoqish/o'chirish — o'chirilgani kassada ko'rinmaydi va chekda qabul qilinmaydi; standart usul), Umumiy (sinxron oralig'i, holati, hozir sinxronlash), Xavfsizlik (harakatsizlikda bloklash — ochiq chek saqlanadi, PIN bilan ochiladi; PIN almashtirish), Ilova versiyasi (tekshirish, yuklab olish, o'rnatish), Tizimdan chiqish
+- Printer (chek, etiketka printeri, qog'oz, pul qutisi — sozlash va sinash), Marketing (keshbek qoidalari), Ombor (omborlar, shu kassa ombori), Tashkilot (rekvizitlar, qurilma), Ruxsatlar (joriy kassir ruxsatlari guruhlab, qurilmadagi kassirlar), Obuna (holat va sinov muddati — pull/sessiyadagi `company.status`, `trialEndsAt`)
+- server `GET /api/pos-device/app-update` (joriy versiya `x-app-version`): reliz Railway o'zgaruvchilarida — `DESKTOP_LATEST_VERSION`, `DESKTOP_DOWNLOAD_URL` (faqat https), `DESKTOP_SHA256`, ixtiyoriy `DESKTOP_MIN_VERSION` (majburiy yangilanish), `DESKTOP_RELEASE_NOTES`; to'liq sozlanmagan bo'lsa taklif qilinmaydi
+- desktop yangilanish: o'rnatuvchi yuklanadi, SHA-256 mos kelmasa saqlanmaydi, o'rnatishdan oldin fayl qayta tekshiriladi, NSIS o'rnatuvchi alohida jarayonda ishga tushadi va ilova yopiladi (lokal baza va navbat foydalanuvchi papkasida saqlanadi). Yangi paket qo'shilmagan
+- o'rnatuvchi: `pnpm --filter @bum/desktop dist:win` (electron-builder NSIS, `BUM-POS-KASSA-Setup-<versiya>.exe`); reliz uchun fayl SHA-256 ni `DESKTOP_SHA256` ga yozish kerak
+- testlar: `pos-app-update` (1); desktop 23. To'liq API: 281/281 (70 fayl)
 
 ### Distributsiya (`/api/distribution`)
 

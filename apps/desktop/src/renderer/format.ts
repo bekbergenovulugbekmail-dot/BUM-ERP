@@ -40,7 +40,12 @@ export const OP_LABELS: Record<string, string> = {
   "stock.writeoff": "Hisobdan chiqarish",
   "stock.transfer": "Ko'chirish",
   "stock.count": "Inventarizatsiya",
+  "customer.update": "Mijoz tahriri",
+  "supplier.update": "Ta'minotchi tahriri",
+  "product.prices": "Narx o'zgarishi",
 };
+
+export const PARTY_TYPE_LABELS: Record<string, string> = { individual: "Jismoniy shaxs", legal: "Yuridik shaxs" };
 
 /** Lokal hujjatning serverga yetib borish holati. */
 export const SYNC_STATE_TEXT: Record<string, { text: string; tone: string }> = {

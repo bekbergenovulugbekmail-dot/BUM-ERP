@@ -78,6 +78,11 @@ export const customers = pgTable(
     email: varchar("email", { length: 255 }),
     address: text("address"),
     taxId: varchar("tax_id", { length: 32 }),
+    /** Jismoniy (`individual`) yoki yuridik (`legal`) shaxs. */
+    partyType: varchar("party_type", { length: 16 }).notNull().default("individual"),
+    /** Yuridik shaxs bank rekvizitlari. */
+    bankAccount: varchar("bank_account", { length: 64 }),
+    bankMfo: varchar("bank_mfo", { length: 16 }),
     /** Do'kon egasi yoki mas'ul shaxs. */
     contactName: varchar("contact_name", { length: 200 }),
     /** Do'kon joylashuvi (WGS-84): agentga masofa va geofence uchun. */
@@ -106,6 +111,7 @@ export const customers = pgTable(
     index("customers_company_phone_idx").on(t.companyId, t.phone),
     check("customers_balance_non_negative", sql`${t.balance} >= 0`),
     check("customers_cashback_non_negative", sql`${t.cashbackBalance} >= 0`),
+    check("customers_party_type", sql`${t.partyType} in ('individual', 'legal')`),
   ],
 );
 

@@ -23,6 +23,7 @@ import { call, errorText } from "../kassa.ts";
 import CustomerDialog from "../pos/customer-dialog.tsx";
 import HeldDialog from "../pos/held-dialog.tsx";
 import PrefsDialog from "../pos/prefs-dialog.tsx";
+import { DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_LABELS, keyName } from "../../shared/hotkeys.js";
 import ReceiptDialog from "../pos/receipt-dialog.tsx";
 import { printSale } from "../pos/receipt.ts";
 import ReturnDialog from "../pos/return-dialog.tsx";
@@ -49,10 +50,10 @@ type DialogName = "customer" | "return" | "unsynced" | "held" | "shift" | "prefs
 
 const QTY = /^\d{1,14}(\.\d{1,4})?$/;
 
-const PAY_METHODS: { key: PaymentMethod; label: string; hotkey: string }[] = [
-  { key: "cash", label: "Naqd", hotkey: "F9" },
-  { key: "card", label: "Karta", hotkey: "F10" },
-  { key: "bank", label: "Bank", hotkey: "F11" },
+const PAY_METHODS: { key: PaymentMethod; label: string; action: "payCash" | "payCard" | "payBank" }[] = [
+  { key: "cash", label: "Naqd", action: "payCash" },
+  { key: "card", label: "Karta", action: "payCard" },
+  { key: "bank", label: "Bank", action: "payBank" },
 ];
 
 const SYNC_LABEL: Record<SyncState, { text: string; tone: string }> = {
@@ -63,17 +64,8 @@ const SYNC_LABEL: Record<SyncState, { text: string; tone: string }> = {
   error: { text: "Sinxron xatosi", tone: "bg-destructive" },
 };
 
-const HOTKEYS: [string, string][] = [
-  ["F1", "Tugmalar ro'yxati"],
-  ["F2", "Mahsulot qidirish / shtrix-kod"],
-  ["F3", "Tanlangan qator miqdori"],
-  ["F4", "Mijoz tanlash"],
-  ["F5", "Chekni kechiktirish"],
-  ["F6", "Kechiktirilgan cheklar"],
-  ["F7", "Mahsulotni qaytarish"],
-  ["F8", "Sinxron bo'lmagan cheklar"],
-  ["F9 / F10 / F11", "Naqd / Karta / Bank"],
-  ["F12", "Chekni yakunlash"],
+/** O'zgarmas tugmalar (qolganlari — Sozlamalar → Qaynoq tugmalar). */
+const FIXED_HOTKEYS: [string, string][] = [
   ["↑ ↓", "Qator tanlash"],
   ["+ / −", "Miqdorni oshirish / kamaytirish"],
   ["Delete", "Qatorni o'chirish"],
@@ -122,13 +114,26 @@ export default function PosScreen({
   const [busy, setBusy] = useState(false);
   const [openingCash, setOpeningCash] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const methodReady = useRef(false);
   const lastSyncAt = status.sync.lastSyncAt;
+  const hotkeys = prefs?.hotkeys ?? DEFAULT_HOTKEYS;
+  const enabledMethods = PAY_METHODS.filter((method) => !prefs || prefs.enabledPaymentMethods.includes(method.key));
+  const hotkeyList: [string, string][] = [
+    ...HOTKEY_ACTIONS.filter((action) => !PAY_METHODS.some((method) => method.action === action) || enabledMethods.some((method) => method.action === action)).map(
+      (action): [string, string] => [hotkeys[action], HOTKEY_LABELS[action]],
+    ),
+    ...FIXED_HOTKEYS,
+  ];
 
   useEffect(() => {
     Promise.all([call("pos:context"), call("device:prefs")]).then(
       ([loaded, devicePrefs]) => {
         setContext(loaded);
         setPrefs(devicePrefs);
+        // Birinchi yuklanishda — standart usul; keyin faqat joriy usul o'chirilgan bo'lsa
+        const first = !methodReady.current;
+        methodReady.current = true;
+        setPayMethod((current) => (first || !devicePrefs.enabledPaymentMethods.includes(current) ? devicePrefs.defaultPaymentMethod : current));
       },
       (err: unknown) => setNotice({ tone: "error", text: errorText(err) }),
     );
@@ -190,7 +195,7 @@ export default function PosScreen({
     setCart([]);
     setSelected(0);
     setCustomer(null);
-    setPayMethod("cash");
+    setPayMethod(prefs?.defaultPaymentMethod ?? "cash");
     setAmountPaid("");
     setUseBalance(false);
     setBalanceInput("");
@@ -374,24 +379,28 @@ export default function PosScreen({
 
   const handleKey = (event: KeyboardEvent) => {
     if (dialog || receipt) return;
-    const keys: Record<string, () => void> = {
-      F1: () => setDialog("help"),
-      F2: () => searchRef.current?.focus(),
-      F3: () => document.getElementById(`cart-qty-${selected}`)?.focus(),
-      F4: () => setDialog("customer"),
-      F5: () => void hold(),
-      F6: () => setDialog("held"),
-      F7: () => setDialog("return"),
-      F8: () => setDialog("unsynced"),
-      F9: () => setPayMethod("cash"),
-      F10: () => setPayMethod("card"),
-      F11: () => setPayMethod("bank"),
-      F12: () => void complete(),
+    const pickMethod = (method: PaymentMethod) => {
+      if (enabledMethods.some((item) => item.key === method)) setPayMethod(method);
     };
-    const action = keys[event.key];
+    const handlers: Record<(typeof HOTKEY_ACTIONS)[number], () => void> = {
+      help: () => setDialog("help"),
+      search: () => searchRef.current?.focus(),
+      quantity: () => document.getElementById(`cart-qty-${selected}`)?.focus(),
+      customer: () => setDialog("customer"),
+      hold: () => void hold(),
+      held: () => setDialog("held"),
+      return: () => setDialog("return"),
+      unsynced: () => setDialog("unsynced"),
+      payCash: () => pickMethod("cash"),
+      payCard: () => pickMethod("card"),
+      payBank: () => pickMethod("bank"),
+      complete: () => void complete(),
+    };
+    const pressed = keyName(event);
+    const action = pressed ? HOTKEY_ACTIONS.find((item) => hotkeys[item] === pressed) : undefined;
     if (action) {
       event.preventDefault();
-      action();
+      handlers[action]();
       return;
     }
     const tag = (event.target as HTMLElement | null)?.tagName ?? "";
@@ -551,7 +560,7 @@ export default function PosScreen({
             <DialogDescription>Kassani sichqonchasiz boshqarish.</DialogDescription>
           </DialogHeader>
           <dl className="space-y-1.5 text-sm">
-            {HOTKEYS.map(([key, label]) => (
+            {hotkeyList.map(([key, label]) => (
               <div key={key} className="flex items-center justify-between gap-3">
                 <dt>{label}</dt>
                 <dd>
@@ -833,9 +842,9 @@ export default function PosScreen({
             {(!calc || calc.hasBaseBucket) && (
               <>
                 <div className="grid grid-cols-3 gap-1">
-                  {PAY_METHODS.map((method) => (
+                  {enabledMethods.map((method) => (
                     <Button key={method.key} variant={payMethod === method.key ? "default" : "secondary"} onClick={() => setPayMethod(method.key)}>
-                      {method.label} <span className="ml-1 text-xs opacity-70">{method.hotkey}</span>
+                      {method.label} <span className="ml-1 text-xs opacity-70">{hotkeys[method.action]}</span>
                     </Button>
                   ))}
                 </div>

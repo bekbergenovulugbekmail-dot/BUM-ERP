@@ -3,6 +3,7 @@
  * Tarmoq xatosi yoki vaqt tugashi — `OfflineError` (navbat saqlanadi, keyinroq qayta urinish).
  */
 import type {
+  AnalyticsReport,
   CashierRecord,
   CompanyInfo,
   DeviceInfo,
@@ -13,6 +14,7 @@ import type {
   RemotePurchase,
   RemoteReceipt,
   RemoteSale,
+  RemoteUpdate,
   RemoteWarehouseStock,
   WireOperation,
 } from "../shared/sync-types.js";
@@ -119,6 +121,11 @@ export function createApiClient(options: {
     movements: (query: { productId?: string; type?: string; limit?: number; cursor?: string }) =>
       request<{ movements: RemoteMovement[]; nextCursor: string | null }>("GET", `/api/pos-device/movements?${searchParams(query)}`),
     productStock: (productId: string) => request<{ stock: RemoteWarehouseStock[] }>("GET", `/api/pos-device/stock/${encodeURIComponent(productId)}`),
+    /** Joriy versiya `x-app-version` sarlavhasida ketadi. */
+    appUpdate: () => request<{ update: RemoteUpdate }>("GET", "/api/pos-device/app-update"),
+    /** Kassir ruxsati (`analytics.view`) serverda tekshiriladi. */
+    analytics: (query: { from: string; to: string; cashierId: string }) =>
+      request<Omit<AnalyticsReport, "source">>("GET", `/api/pos-device/analytics?${searchParams(query)}`),
   };
 }
 

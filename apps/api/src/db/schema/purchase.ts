@@ -68,7 +68,10 @@ export const suppliers = pgTable(
     address: text("address"),
     /** STIR */
     taxId: varchar("tax_id", { length: 32 }),
+    /** Jismoniy (`individual`) yoki yuridik (`legal`) shaxs. */
+    partyType: varchar("party_type", { length: 16 }).notNull().default("legal"),
     bankAccount: varchar("bank_account", { length: 64 }),
+    bankMfo: varchar("bank_mfo", { length: 16 }),
     paymentTermDays: integer("payment_term_days").notNull().default(0),
     currency: varchar("currency", { length: 3 }).notNull().default("UZS"),
 
@@ -83,6 +86,7 @@ export const suppliers = pgTable(
   (t) => [
     uniqueIndex("suppliers_company_code_key").on(t.companyId, t.code),
     index("suppliers_company_active_idx").on(t.companyId, t.isActive),
+    check("suppliers_party_type", sql`${t.partyType} in ('individual', 'legal')`),
   ],
 );
 

@@ -20,6 +20,7 @@ import { inventoryCounts } from "../../db/schema/inventory.js";
 import { posSyncConflicts, posSyncOperations, type PosSyncError } from "../../db/schema/pos.js";
 import { applyDeviceCount, transferStockItems, writeOffStock } from "../inventory/stock-documents.service.js";
 import { compensateCountedMovements } from "../inventory/stock.service.js";
+import { mergeCustomerChanges, mergeProductPrices, mergeSupplierChanges } from "./record-merge.service.js";
 import { purchaseOrderItems, purchaseOrders, purchaseReturns, suppliers } from "../../db/schema/purchase.js";
 import { completeDirectPurchase } from "../purchase/direct-purchase.service.js";
 import { recordSupplierPayment } from "../purchase/payments.service.js";
@@ -51,6 +52,35 @@ const positiveQty = decimalSchema({ scale: 4, positive: true });
 /** Qurilma hujjat raqami: `K01-000123` (chek), `K01-Q000004` (qaytarish). */
 const deviceNumber = z.string().regex(/^[A-Z0-9]{1,8}-[A-Z]?\d{1,12}$/, "Hujjat raqami noto'g'ri");
 const common = { opId: z.uuid(), cashierId: z.uuid(), createdAt: clientTime };
+const partyText = (max: number) => z.string().trim().max(max).nullable().optional();
+const partyType = z.enum(["individual", "legal"]);
+/** Kassada yaratilgan mijoz/ta'minotchi rekvizitlari (hammasi ixtiyoriy). */
+const partyFields = {
+  phone: partyText(20),
+  partyType: partyType.optional(),
+  email: partyText(255),
+  address: partyText(1000),
+  taxId: partyText(32),
+  bankAccount: partyText(64),
+  bankMfo: partyText(16),
+  notes: partyText(2000),
+};
+/** Offline tahrir: qurilma ko'rgan (`from`) va yangi (`to`) qiymat. */
+const change = <T extends z.ZodType>(value: T) => z.strictObject({ from: value.nullable(), to: value.nullable() });
+const changeText = (max: number) => change(z.string().trim().max(max));
+const nonEmpty = <T extends z.ZodType<Record<string, unknown>>>(schema: T) =>
+  schema.refine((value) => Object.values(value).some((item) => item !== undefined), "O'zgarish yo'q");
+const partyChanges = {
+  name: changeText(200),
+  phone: changeText(20),
+  email: changeText(255),
+  address: changeText(1000),
+  taxId: changeText(32),
+  partyType: change(partyType),
+  bankAccount: changeText(64),
+  bankMfo: changeText(16),
+  notes: changeText(2000),
+};
 /** Ombor hujjati qatorlari: mahsulot bir marta. */
 const stockItems = z
   .array(z.strictObject({ productId: z.uuid(), unitId: z.uuid(), quantity: positiveQty }))
@@ -128,7 +158,16 @@ export const syncOperationSchema = z.discriminatedUnion("type", [
     payload: z.strictObject({
       customerId: z.uuid(),
       name: z.string().trim().min(1).max(200),
-      phone: z.string().trim().max(20).nullable().optional(),
+      ...partyFields,
+      contactName: partyText(200),
+    }),
+  }),
+  z.strictObject({
+    ...common,
+    type: z.literal("customer.update"),
+    payload: z.strictObject({
+      customerId: z.uuid(),
+      changes: nonEmpty(z.strictObject({ ...partyChanges, contactName: changeText(200) }).partial()),
     }),
   }),
   z.strictObject({
@@ -162,7 +201,35 @@ export const syncOperationSchema = z.discriminatedUnion("type", [
     payload: z.strictObject({
       supplierId: z.uuid(),
       name: z.string().trim().min(1).max(200),
-      phone: z.string().trim().max(20).nullable().optional(),
+      ...partyFields,
+      contactPerson: partyText(200),
+    }),
+  }),
+  z.strictObject({
+    ...common,
+    type: z.literal("supplier.update"),
+    payload: z.strictObject({
+      supplierId: z.uuid(),
+      changes: nonEmpty(z.strictObject({ ...partyChanges, contactPerson: changeText(200) }).partial()),
+    }),
+  }),
+  z.strictObject({
+    ...common,
+    type: z.literal("product.prices"),
+    payload: z.strictObject({
+      productId: z.uuid(),
+      changes: nonEmpty(
+        z
+          .strictObject({
+            salesPrice: change(priceSchema),
+            wholesalePrice: change(priceSchema),
+            retailPrice: change(priceSchema),
+            promoPrice: change(priceSchema),
+            promoPriceEnd: change(z.iso.date()),
+            purchasePrice: change(priceSchema),
+          })
+          .partial(),
+      ),
     }),
   }),
   z.strictObject({
@@ -465,9 +532,31 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
           .limit(1);
         if (existing) found.push({ kind: "customer_duplicate_phone", details: { existingId: existing.id, existingName: existing.name } });
       }
-      const customer = await createCustomer(tx, tenant, { id: payload.customerId, name: payload.name, phone: payload.phone ?? null }, meta);
+      const { customerId, ...fields } = payload;
+      const customer = await createCustomer(tx, tenant, { ...fields, id: customerId, phone: payload.phone ?? null }, meta);
       await recordConflicts(tx, context, op, { type: "customer", id: customer.id }, found);
       return { customerId: customer.id, code: customer.code, conflicts: found.map((item) => item.kind) };
+    }
+    case "customer.update": {
+      const payload = op.payload;
+      await requirePermission(tx, tenant, "crm.manage");
+      const result = await mergeCustomerChanges(tx, tenant, payload.customerId, payload.changes, meta);
+      await recordConflicts(tx, context, op, { type: "customer", id: payload.customerId }, result.conflicts);
+      return { customerId: payload.customerId, applied: result.applied, skipped: result.skipped, conflicts: result.conflicts.map((item) => item.kind) };
+    }
+    case "supplier.update": {
+      const payload = op.payload;
+      await requirePermission(tx, tenant, "purchase.edit");
+      const result = await mergeSupplierChanges(tx, tenant, payload.supplierId, payload.changes, meta);
+      await recordConflicts(tx, context, op, { type: "supplier", id: payload.supplierId }, result.conflicts);
+      return { supplierId: payload.supplierId, applied: result.applied, skipped: result.skipped, conflicts: result.conflicts.map((item) => item.kind) };
+    }
+    case "product.prices": {
+      const payload = op.payload;
+      await requirePermission(tx, tenant, "products.edit");
+      const result = await mergeProductPrices(tx, tenant, payload.productId, payload.changes, meta);
+      await recordConflicts(tx, context, op, { type: "product", id: payload.productId }, result.conflicts);
+      return { productId: payload.productId, applied: result.applied, skipped: result.skipped, conflicts: result.conflicts.map((item) => item.kind) };
     }
     case "cash.movement": {
       const payload = op.payload;
@@ -522,7 +611,8 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
       await requirePermission(tx, tenant, "purchase.create");
       const [taken] = await tx.select({ id: suppliers.id }).from(suppliers).where(eq(suppliers.id, payload.supplierId)).limit(1);
       if (taken) throw conflict("Ta'minotchi identifikatori band");
-      const supplier = await createSupplier(tx, tenant, { id: payload.supplierId, name: payload.name, phone: payload.phone ?? null }, meta);
+      const { supplierId, ...supplierFields } = payload;
+      const supplier = await createSupplier(tx, tenant, { ...supplierFields, id: supplierId, phone: payload.phone ?? null }, meta);
       return { supplierId: supplier.id, code: supplier.code };
     }
     case "purchase.complete": {

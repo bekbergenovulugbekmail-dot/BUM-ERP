@@ -25,7 +25,26 @@ export type PullCursors = Partial<Record<PullEntity, PullCursor>>;
 export type PullPage = { rows: Record<string, unknown>[]; cursor: PullCursor | null; more: boolean };
 
 export type DeviceInfo = { id: string; name: string; code: string; warehouseId: string; warehouseName: string };
-export type CompanyInfo = { id: string; name: string; currency: string };
+export type CompanyInfo = {
+  id: string;
+  name: string;
+  currency: string;
+  /** Obuna holati (eski server — yo'q). */
+  status?: string;
+  trialEndsAt?: string | null;
+};
+
+/** `GET /app-update` — yangi reliz (server muhit o'zgaruvchilaridan). */
+export type RemoteUpdate = {
+  configured: boolean;
+  available: boolean;
+  mandatory: boolean;
+  current: string | null;
+  latest: string | null;
+  url: string | null;
+  sha256: string | null;
+  notes: string | null;
+};
 
 export type PullResponse = {
   serverTime: string;
@@ -51,7 +70,33 @@ export type SyncOperationType =
   | "supplier.payment"
   | "stock.writeoff"
   | "stock.transfer"
-  | "stock.count";
+  | "stock.count"
+  | "customer.update"
+  | "supplier.update"
+  | "product.prices";
+
+export type PartyType = "individual" | "legal";
+
+/** Kassada tahrirlanadigan mijoz/ta'minotchi maydonlari (serverdagi push sxemasi bilan bir xil ro'yxat). */
+export const CUSTOMER_FIELDS = ["name", "phone", "email", "address", "taxId", "partyType", "contactName", "bankAccount", "bankMfo", "notes"] as const;
+export const SUPPLIER_FIELDS = ["name", "phone", "email", "address", "taxId", "partyType", "contactPerson", "bankAccount", "bankMfo", "notes"] as const;
+export const PRICE_FIELDS = ["salesPrice", "wholesalePrice", "retailPrice", "promoPrice", "promoPriceEnd", "purchasePrice"] as const;
+export type CustomerField = (typeof CUSTOMER_FIELDS)[number];
+export type SupplierField = (typeof SUPPLIER_FIELDS)[number];
+export type PriceField = (typeof PRICE_FIELDS)[number];
+
+/**
+ * Offline tahrir: qurilma ko'rgan qiymat (`from`) va yangisi (`to`). Server maydonni faqat hali `from` ga teng bo'lsa
+ * yozadi — orada web'da o'zgargan bo'lsa, server qiymati qoladi va nomuvofiqlik (`record_changed`) qayd etiladi.
+ */
+export type FieldChange = { from: string | null; to: string | null };
+
+/** `customer.update` — mijoz ma'lumotlari. */
+export type CustomerUpdatePayload = { customerId: string; changes: Partial<Record<CustomerField, FieldChange>> };
+/** `supplier.update` — ta'minotchi ma'lumotlari. */
+export type SupplierUpdatePayload = { supplierId: string; changes: Partial<Record<SupplierField, FieldChange>> };
+/** `product.prices` — narxlar (asosiy birlik uchun, mahsulot narx valyutasida). */
+export type ProductPricesPayload = { productId: string; changes: Partial<Record<PriceField, FieldChange>> };
 
 export type CashMovementKind = "collection" | "change_fund" | "expense" | "other_in" | "other_out";
 
@@ -77,7 +122,19 @@ export type CustomerPaymentPayload = {
 };
 
 /** `supplier.create` — kassada yangi ta'minotchi (offline). */
-export type SupplierPayload = { supplierId: string; name: string; phone?: string | null };
+export type SupplierPayload = {
+  supplierId: string;
+  name: string;
+  phone?: string | null;
+  partyType?: PartyType;
+  email?: string | null;
+  address?: string | null;
+  taxId?: string | null;
+  contactPerson?: string | null;
+  bankAccount?: string | null;
+  bankMfo?: string | null;
+  notes?: string | null;
+};
 
 /**
  * `purchase.complete` — kassada xarid: ta'minotchidan tovar qabul qilindi. Serverda tasdiqlangan va to'liq qabul
@@ -143,6 +200,63 @@ export type StockTransferPayload = { transferId: string; number: string; toWareh
  * Server farqni o'sha lahzadagi qoldiqqa nisbatan hisoblaydi (keyingi harakatlar saqlanadi).
  */
 export type StockCountPayload = { countId: string; number: string; items: { productId: string; countedQty: string }[]; notes?: string | null };
+
+// ─── Analitika ───────────────────────────────────────────────────────────────
+
+export type AmountLine = { key: string; label: string; amount: string };
+export type PartyBalance = { id: string; name: string; phone: string | null; amount: string };
+export type BalanceGroup = { total: string; count: number; top: PartyBalance[] };
+export type ProductStat = { productId: string; name: string; sku: string; quantity: string; revenue: string; cogs: string | null; profit: string | null };
+export type CategoryStat = {
+  categoryId: string | null;
+  name: string;
+  soldQty: string;
+  revenue: string;
+  cogs: string | null;
+  profit: string | null;
+  stockQty: string;
+  stockValue: string | null;
+};
+
+/** Analitika hisoboti: serverdan (`GET /analytics`, qurilma ombori) yoki qurilmadagi hujjatlardan (offline). */
+export type AnalyticsReport = {
+  source: "server" | "local";
+  period: { from: string; to: string };
+  generatedAt: string;
+  /** Qamrov izohi (qaysi ombor/kassa, nima taxminiy). */
+  scope: string;
+  kpis: {
+    revenue: string;
+    returns: string;
+    netRevenue: string;
+    cogs: string | null;
+    grossProfit: string | null;
+    /** Yalpi foyda ulushi, %. */
+    margin: string | null;
+    receipts: number;
+    averageReceipt: string;
+    itemsSold: string;
+    purchases: string;
+    expenses: string | null;
+    stockValue: string | null;
+    customers: number;
+  };
+  daily: { date: string; revenue: string; returns: string; profit: string | null; receipts: number }[];
+  payments: AmountLine[];
+  cashiers: { name: string; receipts: number; revenue: string }[];
+  /** Kirim-chiqim: tushum va to'lovlar manbalari bo'yicha. */
+  cashFlow: { income: AmountLine[]; expense: AmountLine[]; totalIncome: string; totalExpense: string; net: string };
+  /** Mijozlar qarzi (debitorlik). */
+  receivables: BalanceGroup;
+  /** Mijozlarning oldindan to'lagan puli (kompaniya qarzi). */
+  customerBalances: BalanceGroup;
+  /** Ta'minotchilarga qarzimiz (kreditorlik). */
+  payables: BalanceGroup;
+  /** Ta'minotchilarga berilgan avans. */
+  supplierAdvances: BalanceGroup;
+  products: { top: ProductStat[]; slow: { productId: string; name: string; sku: string; stock: string; value: string | null }[] };
+  categories: CategoryStat[];
+};
 
 /** Serverdagi zaxira harakati (`GET /movements`) — qurilma omboridagi. */
 export type RemoteMovement = {
@@ -248,7 +362,19 @@ export type ReturnPayload = {
 };
 
 /** `customer.create` — kassada yangi mijoz (offline). */
-export type CustomerPayload = { customerId: string; name: string; phone?: string | null };
+export type CustomerPayload = {
+  customerId: string;
+  name: string;
+  phone?: string | null;
+  partyType?: PartyType;
+  email?: string | null;
+  address?: string | null;
+  taxId?: string | null;
+  contactName?: string | null;
+  bankAccount?: string | null;
+  bankMfo?: string | null;
+  notes?: string | null;
+};
 
 /** Serverdagi chek (`GET /receipts/:number`) — boshqa kassa yoki web'da sotilganini qaytarish uchun. */
 export type RemoteReceipt = {

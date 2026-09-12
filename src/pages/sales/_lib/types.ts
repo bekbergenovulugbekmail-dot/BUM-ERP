@@ -16,6 +16,10 @@ export type Customer = {
   email: string | null;
   address: string | null;
   taxId: string | null;
+  /** Jismoniy yoki yuridik shaxs. */
+  partyType: "individual" | "legal";
+  bankAccount: string | null;
+  bankMfo: string | null;
   /** Do'kon egasi yoki mas'ul shaxs. */
   contactName: string | null;
   /** Do'kon joylashuvi (numeric satr); agent masofasi va geofence uchun. */

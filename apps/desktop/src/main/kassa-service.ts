@@ -7,14 +7,20 @@
  * bilan (`K01-000123`), navbatga `sale.complete` bo'lib tushadi. Qoldiq yetmasa ham sotiladi (server nomuvofiqlik
  * sifatida qayd etadi) — kassir ekranda ogohlantirishni ko'radi.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_PATTERN } from "../shared/hotkeys.js";
 import type {
   AppStatus,
   CartLineInput,
   CountDraft,
+  CustomerInput,
   DevicePrefs,
   DocumentSync,
   HeldCart,
+  HotkeyAction,
   LabelPrintInput,
   HeldReceipt,
   LocalCashMovement,
@@ -32,6 +38,8 @@ import type {
   PosCustomer,
   PosProduct,
   PosSupplier,
+  PriceInput,
+  PriceRow,
   PurchaseInput,
   PurchaseProduct,
   PurchaseReturnInput,
@@ -40,6 +48,7 @@ import type {
   ReturnablePurchase,
   ReturnInput,
   SaleInput,
+  SettingsOverview,
   ShiftReport,
   ShiftTotals,
   StockDocumentKind,
@@ -48,24 +57,42 @@ import type {
   StockList,
   StockRow,
   StockWarehouse,
+  SupplierInput,
   UnsyncedOperation,
+  UpdateInfo,
 } from "../shared/kassa-api.js";
+import { CUSTOMER_FIELDS, PRICE_FIELDS, SUPPLIER_FIELDS } from "../shared/sync-types.js";
 import { computeLine, fromMinor, mulDivRound, rescale, toMinor } from "../shared/money.js";
 import { computeSale, estimateCashback, listPrice, unitFactor, type CalcConversion, type CalcProduct } from "../shared/sale-calc.js";
 import type {
+  AmountLine,
+  AnalyticsReport,
+  BalanceGroup,
   CashierRecord,
   CashMovementKind,
   CashMovementPayload,
+  CategoryStat,
+  ProductStat,
   CompanyInfo,
+  CustomerField,
+  CustomerPayload,
   CustomerPaymentPayload,
+  CustomerUpdatePayload,
   DeviceInfo,
+  FieldChange,
+  PartyType,
   PaymentMethod,
+  PriceField,
+  ProductPricesPayload,
+  SupplierField,
+  SupplierUpdatePayload,
   PosConfig,
   PurchasePayload,
   PurchaseReturnPayload,
   RefundMethod,
   RemotePurchase,
   RemoteReceipt,
+  RemoteUpdate,
   RemoteWarehouseStock,
   ReturnPayload,
   SalePayload,
@@ -110,13 +137,30 @@ export type ReceiptPrinter = {
   printLabels(html: string, options: { printerName: string | null; layout: "roll" | "a4"; widthMm: number; heightMm: number }): Promise<void>;
 };
 
+/** Yangilanish o'rnatuvchisini ishga tushirish (Electron) — testlarda berilmaydi. */
+export type AppUpdater = { install(file: string): Promise<void> };
+
 export const DEFAULT_PREFS: DevicePrefs = {
+  language: "uz-Latn",
+  theme: "light",
+  fontScale: "normal",
+  hotkeys: { ...DEFAULT_HOTKEYS },
+  blockNegativeStock: false,
+  defaultPaymentMethod: "cash",
+  enabledPaymentMethods: ["cash", "card", "bank", "transfer"],
+  syncIntervalSec: 30,
+  autoLockMinutes: 0,
   printerName: null,
   paperWidth: 80,
   autoPrint: true,
   drawer: { mode: "none" },
   openDrawerOnCash: false,
   labelPrinterName: null,
+};
+
+const clampInt = (value: unknown, min: number, max: number, fallback: number) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.round(number))) : fallback;
 };
 
 const LABEL_MM = { min: 10, max: 300 };
@@ -136,7 +180,86 @@ type CustomerRow = {
   isActive: boolean;
   address?: string | null;
   taxId?: string | null;
+  partyType?: PartyType;
+  email?: string | null;
+  contactName?: string | null;
+  bankAccount?: string | null;
+  bankMfo?: string | null;
+  notes?: string | null;
 };
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PARTY_TEXT_LIMITS: Record<string, number> = {
+  name: 200,
+  phone: 20,
+  email: 255,
+  address: 1000,
+  taxId: 32,
+  contactName: 200,
+  contactPerson: 200,
+  bankAccount: 64,
+  bankMfo: 16,
+  notes: 2000,
+};
+const PARTY_FIELD_LABELS: Record<string, string> = {
+  phone: "Telefon",
+  email: "Email",
+  address: "Manzil",
+  taxId: "STIR",
+  contactName: "Mas'ul shaxs",
+  contactPerson: "Mas'ul shaxs",
+  bankAccount: "Hisob raqami",
+  bankMfo: "MFO",
+  notes: "Izoh",
+};
+const PRICE_LABELS: Record<PriceField, string> = {
+  salesPrice: "Sotuv narxi",
+  wholesalePrice: "Ulgurji narx",
+  retailPrice: "Chakana narx",
+  promoPrice: "Aksiya narxi",
+  promoPriceEnd: "Aksiya muddati",
+  purchasePrice: "Xarid narxi",
+};
+
+/** Mijoz/ta'minotchi maydoni: bo'sh — null (nomdan tashqari), uzunlik, telefon va email formati. */
+function partyValue(field: string, raw: unknown): string | null {
+  if (field === "partyType") {
+    if (raw !== "individual" && raw !== "legal") throw new KassaError("BAD_REQUEST", "Shaxs turi noto'g'ri");
+    return raw;
+  }
+  const text = raw == null ? "" : String(raw).trim();
+  if (field === "name") {
+    if (text.length === 0 || text.length > 200) throw new KassaError("BAD_REQUEST", "Nomi 1–200 belgi");
+    return text;
+  }
+  if (text.length === 0) return null;
+  if (text.length > (PARTY_TEXT_LIMITS[field] ?? 200)) throw new KassaError("BAD_REQUEST", `${PARTY_FIELD_LABELS[field] ?? field}: juda uzun`);
+  if (field === "phone" && text.replace(/\D/g, "").length < 9) throw new KassaError("BAD_REQUEST", "Telefon raqami noto'g'ri");
+  if (field === "email" && !EMAIL.test(text)) throw new KassaError("BAD_REQUEST", "Email noto'g'ri");
+  return text;
+}
+
+/** Kiritilgan maydonlar (undefined — o'zgarmaydi) tozalangan holda. */
+function partyInput<F extends string>(input: object, fields: readonly F[]): Partial<Record<F, string | null>> {
+  const source = input as Record<string, unknown>;
+  const values: Partial<Record<F, string | null>> = {};
+  for (const field of fields) if (source[field] !== undefined) values[field] = partyValue(field, source[field]);
+  return values;
+}
+
+/** Qurilmadagi qiymatdan farq qilgan maydonlar: `from` — qurilma ko'rgan, `to` — yangi. */
+function fieldChanges<F extends string>(current: object, next: Partial<Record<F, string | null>>): Partial<Record<F, FieldChange>> {
+  const source = current as Record<string, unknown>;
+  const changes: Partial<Record<F, FieldChange>> = {};
+  for (const [field, to] of Object.entries(next) as [F, string | null][]) {
+    const raw = source[field];
+    const from = raw == null || raw === "" ? null : String(raw);
+    if (from !== to) changes[field] = { from, to };
+  }
+  return changes;
+}
+
+const withoutNulls = (values: Record<string, string | null | undefined>) => Object.fromEntries(Object.entries(values).filter(([, value]) => value != null));
 
 const EMPTY_TOTALS: ShiftTotals = { sales: "0.00", cash: "0.00", card: "0.00", returns: "0.00", receipts: 0, cashIn: "0.00", cashOut: "0.00" };
 
@@ -162,7 +285,31 @@ const METHOD_LABELS: Record<string, string> = {
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-type SupplierRow = { id: string; name: string; code: string | null; phone: string | null; totalDebt: string; isActive: boolean; currency?: string };
+type SupplierRow = {
+  id: string;
+  name: string;
+  code: string | null;
+  phone: string | null;
+  totalDebt: string;
+  isActive: boolean;
+  currency?: string;
+  partyType?: PartyType;
+  contactPerson?: string | null;
+  email?: string | null;
+  address?: string | null;
+  taxId?: string | null;
+  bankAccount?: string | null;
+  bankMfo?: string | null;
+  notes?: string | null;
+};
+type PriceProductRow = ProductRow & {
+  wholesalePrice?: string | null;
+  retailPrice?: string | null;
+  promoPrice?: string | null;
+  promoPriceEnd?: string | null;
+  purchasePrice?: string | null;
+  purchaseCurrency?: string | null;
+};
 type PurchaseProductRow = ProductRow & {
   isPurchaseable: boolean;
   purchasePrice: string;
@@ -188,6 +335,29 @@ const pad6 = (value: number) => String(value).padStart(6, "0");
 const addMoney = (a: string, b: bigint) => fromMinor(toMinor(a) + b);
 const note = (value: unknown) => (value ? String(value).trim().slice(0, 500) || null : null);
 
+const pad2 = (value: number) => String(value).padStart(2, "0");
+/** Qurilma vaqt mintaqasidagi sana (YYYY-MM-DD). */
+const localDay = (iso: string) => {
+  const at = new Date(iso);
+  return `${at.getFullYear()}-${pad2(at.getMonth() + 1)}-${pad2(at.getDate())}`;
+};
+/** Ulush, % (2 kasr, ishorali). */
+function percentOf(part: bigint, whole: bigint): string | null {
+  if (whole <= 0n) return null;
+  const value = mulDivRound(part < 0n ? -part : part, 10_000n, whole);
+  return fromMinor(part < 0n ? -value : value);
+}
+function balanceGroup(rows: { id: string; name: string; phone: string | null; amount: bigint }[]): BalanceGroup {
+  const sorted = rows.filter((row) => row.amount > 0n).sort((a, b) => (b.amount > a.amount ? 1 : b.amount < a.amount ? -1 : 0));
+  return {
+    total: fromMinor(sorted.reduce((sum, row) => sum + row.amount, 0n)),
+    count: sorted.length,
+    top: sorted.slice(0, 10).map((row) => ({ id: row.id, name: row.name, phone: row.phone, amount: fromMinor(row.amount) })),
+  };
+}
+const amountLines = (entries: [string, string, bigint][]): AmountLine[] =>
+  entries.filter(([, , amount]) => amount !== 0n).map(([key, label, amount]) => ({ key, label, amount: fromMinor(amount) }));
+
 /** O'rtacha tannarxdagi qiymat (tiyin, miqdor ishorasi bilan): miqdor (4 kasr) × tannarx (4 kasr). */
 function costValue(costs: Map<string, string>, productId: string, quantity: bigint): bigint {
   const cost = costs.get(productId);
@@ -210,6 +380,7 @@ export class KassaService {
   private engine: SyncEngine | null = null;
   private cashier: CashierRecord | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private intervalMs = 0;
 
   constructor(
     private readonly store: LocalStore,
@@ -220,6 +391,9 @@ export class KassaService {
       fetchImpl?: typeof fetch;
       onSyncStatus?: (status: SyncStatus) => void;
       printer?: ReceiptPrinter;
+      updater?: AppUpdater;
+      /** Yangilanish o'rnatuvchisi yuklanadigan papka (standart — tizim vaqtinchalik papkasi). */
+      downloadDir?: string;
     },
   ) {
     this.connect();
@@ -250,9 +424,10 @@ export class KassaService {
     this.engine = new SyncEngine(this.store, this.api, (status) => this.options.onSyncStatus?.(status));
   }
 
-  /** Davriy sinxron (standart 30 soniya); ilova yopilganda `stop`. */
-  start(intervalMs = 30_000) {
+  /** Davriy sinxron (qurilma sozlamasi, standart 30 soniya); ilova yopilganda `stop`. */
+  start(intervalMs = this.prefs().syncIntervalSec * 1000) {
     this.stop();
+    this.intervalMs = intervalMs;
     this.engine?.schedule();
     this.timer = setInterval(() => void this.engine?.sync(), intervalMs);
   }
@@ -389,6 +564,12 @@ export class KassaService {
         return `→ ${warehouses.get(String(op.payload.toWarehouseId)) ?? "boshqa ombor"}`;
       case "stock.count":
         return `${Array.isArray(op.payload.items) ? op.payload.items.length : 0} mahsulot`;
+      case "customer.update":
+        return this.store.customer<CustomerRow>(String(op.payload.customerId))?.name ?? null;
+      case "supplier.update":
+        return this.store.supplier<SupplierRow>(String(op.payload.supplierId))?.name ?? null;
+      case "product.prices":
+        return this.store.product<ProductRow>(String(op.payload.productId))?.name ?? null;
       default:
         return null;
     }
@@ -552,6 +733,14 @@ export class KassaService {
       name: row.name,
       code: row.code ?? null,
       phone: row.phone ?? null,
+      contactName: row.contactName ?? null,
+      partyType: row.partyType ?? "individual",
+      email: row.email ?? null,
+      address: row.address ?? null,
+      taxId: row.taxId ?? null,
+      bankAccount: row.bankAccount ?? null,
+      bankMfo: row.bankMfo ?? null,
+      notes: row.notes ?? null,
       discountPercent: row.discountPercent,
       creditLimit: row.creditLimit,
       totalDebt: row.totalDebt,
@@ -568,12 +757,44 @@ export class KassaService {
     return this.store.searchCustomers<CustomerRow>(String(input.query ?? "")).map((row) => this.toPosCustomer(row, pending));
   }
 
-  createCustomer(input: { name: string; phone?: string | null }): PosCustomer {
+  /** Ma'lumotlar bo'limi: mijozlar ro'yxati (jismoniy/yuridik filtri bilan). */
+  referenceCustomers(input: { query: string; partyType?: PartyType; limit?: number }): PosCustomer[] {
+    this.requireCashier();
+    const pending = this.store.pendingCustomerIds();
+    const limit = Math.min(Math.max(Number(input.limit) || 500, 1), 5000);
+    return this.store
+      .searchCustomers<CustomerRow>(String(input.query ?? ""), limit)
+      .map((row) => this.toPosCustomer(row, pending))
+      .filter((customer) => !input.partyType || customer.partyType === input.partyType);
+  }
+
+  /**
+   * Mijozni tahrirlash (`crm.manage`, web bilan bir xil) — offline. Serverga faqat o'zgargan maydonlar qurilma ko'rgan
+   * qiymati bilan boradi: orada web'da o'zgargan maydon ustiga yozilmaydi.
+   */
+  updateCustomer(input: { customerId: string } & Partial<CustomerInput>): PosCustomer {
+    const cashier = this.requireCashierWith("crm.manage");
+    const row = this.store.customer<CustomerRow>(String(input.customerId ?? ""));
+    if (!row) throw new KassaError("NOT_FOUND", "Mijoz topilmadi");
+    const values = partyInput(input, CUSTOMER_FIELDS);
+    const changes = fieldChanges<CustomerField>({ ...row, partyType: row.partyType ?? "individual" }, values);
+    const pending = this.store.pendingCustomerIds();
+    if (Object.keys(changes).length === 0) return this.toPosCustomer(row, pending);
+    const updated: CustomerRow = { ...row, ...values } as CustomerRow;
+    this.store.inTransaction(() => {
+      const payload: CustomerUpdatePayload = { customerId: row.id, changes };
+      this.store.enqueue({ type: "customer.update", cashierId: cashier.userId, payload });
+      this.store.saveCustomer(updated);
+    });
+    this.engine?.schedule();
+    return this.toPosCustomer(updated, pending);
+  }
+
+  createCustomer(input: CustomerInput): PosCustomer {
     const cashier = this.requireCashier();
-    const name = String(input.name ?? "").trim();
-    const phone = input.phone ? String(input.phone).trim() : null;
-    if (name.length === 0 || name.length > 200) throw new KassaError("BAD_REQUEST", "Mijoz ismi 1–200 belgi");
-    if (phone && (phone.length > 20 || phone.replace(/\D/g, "").length < 9)) throw new KassaError("BAD_REQUEST", "Telefon raqami noto'g'ri");
+    const values = partyInput({ ...input, name: input.name ?? "" }, CUSTOMER_FIELDS);
+    const name = values.name!;
+    const phone = values.phone ?? null;
     if (phone) {
       const digits = phone.replace(/\D/g, "").slice(-9);
       const same = this.store.searchCustomers<CustomerRow>(digits, 5).find((row) => (row.phone ?? "").replace(/\D/g, "").endsWith(digits));
@@ -590,11 +811,25 @@ export class KassaService {
       balance: "0",
       cashbackBalance: "0",
       isActive: true,
-      address: null,
-      taxId: null,
+      address: values.address ?? null,
+      taxId: values.taxId ?? null,
+      partyType: (values.partyType as PartyType | undefined) ?? "individual",
+      email: values.email ?? null,
+      contactName: values.contactName ?? null,
+      bankAccount: values.bankAccount ?? null,
+      bankMfo: values.bankMfo ?? null,
+      notes: values.notes ?? null,
     };
     this.store.inTransaction(() => {
-      this.store.enqueue({ type: "customer.create", cashierId: cashier.userId, payload: { customerId: row.id, name, phone } });
+      // Standart qiymatlar yuborilmaydi (bo'sh maydon va jismoniy shaxs)
+      const payload: CustomerPayload = {
+        customerId: row.id,
+        name,
+        phone,
+        ...withoutNulls({ email: row.email, address: row.address, taxId: row.taxId, contactName: row.contactName, bankAccount: row.bankAccount, bankMfo: row.bankMfo, notes: row.notes }),
+        ...(row.partyType === "legal" ? { partyType: "legal" as const } : {}),
+      };
+      this.store.enqueue({ type: "customer.create", cashierId: cashier.userId, payload });
       this.store.saveCustomer(row);
     });
     this.engine?.schedule();
@@ -642,6 +877,10 @@ export class KassaService {
     const device = this.store.getMeta<DeviceInfo>("device");
     if (!device) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
     if (!PAYMENT_METHODS.includes(input.paymentMethod)) throw new KassaError("BAD_REQUEST", "To'lov usuli noto'g'ri");
+    const prefs = this.prefs();
+    if (!prefs.enabledPaymentMethods.includes(input.paymentMethod)) {
+      throw new KassaError("BAD_REQUEST", `${METHOD_LABELS[input.paymentMethod] ?? input.paymentMethod} to'lovi bu kassada o'chirilgan (Sozlamalar → To'lov)`);
+    }
 
     let customer: CustomerRow | null = null;
     if (input.customerId) {
@@ -650,6 +889,17 @@ export class KassaService {
       if (!customer.isActive) throw new KassaError("BAD_REQUEST", "Mijoz faol emas");
     }
     const { prepared, stockDeltas, base, rates } = this.prepareLines(input.lines, cashier, customer?.discountPercent ?? "0");
+    // Sozlama bo'yicha qoldiqsiz sotuv taqiqlangan (standart — ogohlantirib sotiladi, server nomuvofiqlik qayd etadi)
+    if (prefs.blockNegativeStock) {
+      const visible = this.store.stockMap([...stockDeltas.keys()]);
+      for (const [productId, needed] of stockDeltas) {
+        const have = visible.get(productId) ?? 0n;
+        if (needed > have) {
+          const name = prepared.find((line) => line.product.id === productId)?.product.name ?? "Mahsulot";
+          throw new KassaError("STOCK_SHORTAGE", `${name}: qoldiq yetmaydi (bor ${fromMinor(have > 0n ? have : 0n, 4)})`);
+        }
+      }
+    }
     const saleCurrencies = [...new Set((input.saleCurrencies ?? []).map(String))];
     for (const code of saleCurrencies) {
       if (code !== base && !rates[code]) throw new KassaError("BAD_REQUEST", `${code} valyutasi yoqilmagan`);
@@ -1419,6 +1669,14 @@ export class KassaService {
       name: row.name,
       code: row.code ?? null,
       phone: row.phone ?? null,
+      contactPerson: row.contactPerson ?? null,
+      partyType: row.partyType ?? "legal",
+      email: row.email ?? null,
+      address: row.address ?? null,
+      taxId: row.taxId ?? null,
+      bankAccount: row.bankAccount ?? null,
+      bankMfo: row.bankMfo ?? null,
+      notes: row.notes ?? null,
       totalDebt: row.totalDebt ?? "0.00",
       isActive: row.isActive,
       pending: pending.has(row.id),
@@ -1431,19 +1689,152 @@ export class KassaService {
     return this.store.searchSuppliers<SupplierRow>(String(input.query ?? "")).map((row) => this.toPosSupplier(row, pending));
   }
 
-  createSupplier(input: { name: string; phone?: string | null }): PosSupplier {
-    const cashier = this.requireCashierWith("purchase.create");
-    const name = String(input.name ?? "").trim();
-    const phone = input.phone ? String(input.phone).trim() : null;
-    if (name.length === 0 || name.length > 200) throw new KassaError("BAD_REQUEST", "Ta'minotchi nomi 1–200 belgi");
-    if (phone && (phone.length > 20 || phone.replace(/\D/g, "").length < 9)) throw new KassaError("BAD_REQUEST", "Telefon raqami noto'g'ri");
-    const row: SupplierRow = { id: randomUUID(), name, code: null, phone, totalDebt: "0.00", isActive: true, currency: this.baseCurrency() };
+  /** Ma'lumotlar bo'limi: ta'minotchilar (`purchase.view` yoki `purchase.create`). */
+  referenceSuppliers(input: { query: string; partyType?: PartyType; limit?: number }): PosSupplier[] {
+    const cashier = this.requireCashier();
+    if (!cashier.permissions.includes("purchase.view") && !cashier.permissions.includes("purchase.create")) {
+      throw new KassaError("FORBIDDEN", "Ruxsat yo'q: purchase.view");
+    }
+    const pending = this.store.pendingSupplierIds();
+    const limit = Math.min(Math.max(Number(input.limit) || 500, 1), 5000);
+    return this.store
+      .searchSuppliers<SupplierRow>(String(input.query ?? ""), limit)
+      .map((row) => this.toPosSupplier(row, pending))
+      .filter((supplier) => !input.partyType || supplier.partyType === input.partyType);
+  }
+
+  /** Ta'minotchini tahrirlash (`purchase.edit`) — offline, faqat o'zgargan maydonlar (mijoz tahriri kabi). */
+  updateSupplier(input: { supplierId: string } & Partial<SupplierInput>): PosSupplier {
+    const cashier = this.requireCashierWith("purchase.edit");
+    const row = this.store.supplier<SupplierRow>(String(input.supplierId ?? ""));
+    if (!row) throw new KassaError("NOT_FOUND", "Ta'minotchi topilmadi");
+    const values = partyInput(input, SUPPLIER_FIELDS);
+    const changes = fieldChanges<SupplierField>({ ...row, partyType: row.partyType ?? "legal" }, values);
+    const pending = this.store.pendingSupplierIds();
+    if (Object.keys(changes).length === 0) return this.toPosSupplier(row, pending);
+    const updated: SupplierRow = { ...row, ...values } as SupplierRow;
     this.store.inTransaction(() => {
-      this.store.enqueue({ type: "supplier.create", cashierId: cashier.userId, payload: { supplierId: row.id, name, phone } });
+      const payload: SupplierUpdatePayload = { supplierId: row.id, changes };
+      this.store.enqueue({ type: "supplier.update", cashierId: cashier.userId, payload });
+      this.store.saveSupplier(updated);
+    });
+    this.engine?.schedule();
+    return this.toPosSupplier(updated, pending);
+  }
+
+  createSupplier(input: SupplierInput): PosSupplier {
+    const cashier = this.requireCashierWith("purchase.create");
+    const values = partyInput({ ...input, name: input.name ?? "" }, SUPPLIER_FIELDS);
+    const row: SupplierRow = {
+      id: randomUUID(),
+      name: values.name!,
+      code: null,
+      phone: values.phone ?? null,
+      totalDebt: "0.00",
+      isActive: true,
+      currency: this.baseCurrency(),
+      partyType: (values.partyType as PartyType | undefined) ?? "legal",
+      contactPerson: values.contactPerson ?? null,
+      email: values.email ?? null,
+      address: values.address ?? null,
+      taxId: values.taxId ?? null,
+      bankAccount: values.bankAccount ?? null,
+      bankMfo: values.bankMfo ?? null,
+      notes: values.notes ?? null,
+    };
+    this.store.inTransaction(() => {
+      const payload = {
+        supplierId: row.id,
+        name: row.name,
+        phone: row.phone,
+        ...withoutNulls({ email: row.email, address: row.address, taxId: row.taxId, contactPerson: row.contactPerson, bankAccount: row.bankAccount, bankMfo: row.bankMfo, notes: row.notes }),
+        ...(row.partyType === "individual" ? { partyType: "individual" as const } : {}),
+      };
+      this.store.enqueue({ type: "supplier.create", cashierId: cashier.userId, payload });
       this.store.saveSupplier(row);
     });
     this.engine?.schedule();
     return this.toPosSupplier(row, new Set([row.id]));
+  }
+
+  // ─── Ma'lumotlar: narxlar ───────────────────────────────────────────────
+
+  private toPriceRows(rows: PriceProductRow[], cashier: CashierRecord): PriceRow[] {
+    const stock = this.store.stockMap(rows.map((row) => row.id));
+    const units = this.unitNames();
+    const pending = this.store.pendingPayloadIds("product.prices", "productId");
+    const showPurchase = cashier.permissions.includes("products.edit") || cashier.permissions.includes("purchase.create");
+    return rows.map((row) => ({
+      productId: row.id,
+      name: row.name,
+      sku: row.sku,
+      barcode: row.barcode ?? null,
+      unitName: units.get(row.baseUnitId) ?? "",
+      stock: fromMinor(stock.get(row.id) ?? 0n, 4),
+      salesPrice: row.salesPrice,
+      salesCurrency: row.salesCurrency ?? null,
+      wholesalePrice: row.wholesalePrice ?? null,
+      retailPrice: row.retailPrice ?? null,
+      promoPrice: row.promoPrice ?? null,
+      promoPriceEnd: row.promoPriceEnd ?? null,
+      purchasePrice: showPurchase ? (row.purchasePrice ?? "0.0000") : null,
+      purchaseCurrency: row.purchaseCurrency ?? null,
+      pending: pending.has(row.id),
+    }));
+  }
+
+  priceList(input: { query: string; limit?: number }): PriceRow[] {
+    const cashier = this.requireCashierWith("products.view");
+    const limit = Math.min(Math.max(Number(input.limit) || 300, 1), 2000);
+    return this.toPriceRows(this.store.searchProducts(String(input.query ?? ""), limit, { saleableOnly: false }) as PriceProductRow[], cashier);
+  }
+
+  /**
+   * Narxlarni o'zgartirish (`products.edit`) — offline: kassada darhol amal qiladi (chek shu narxda), serverga faqat
+   * o'zgargan narxlar qurilma ko'rgan qiymati bilan boradi.
+   */
+  updatePrices(input: PriceInput): PriceRow {
+    const cashier = this.requireCashierWith("products.view", "products.edit");
+    const row = this.store.product<PriceProductRow>(String(input.productId ?? ""));
+    if (!row) throw new KassaError("NOT_FOUND", "Mahsulot topilmadi");
+    const source = input as Record<string, unknown>;
+    const next: Partial<Record<PriceField, string | null>> = {};
+    for (const field of PRICE_FIELDS) {
+      const raw = source[field];
+      if (raw === undefined) continue;
+      if (field === "promoPriceEnd") {
+        const value = raw ? String(raw) : null;
+        if (value && !ISO_DATE.test(value)) throw new KassaError("BAD_REQUEST", `${PRICE_LABELS[field]} noto'g'ri`);
+        next[field] = value;
+        continue;
+      }
+      if (raw === null || raw === "") {
+        if (field === "salesPrice" || field === "purchasePrice") throw new KassaError("BAD_REQUEST", `${PRICE_LABELS[field]} kiritilishi shart`);
+        next[field] = null;
+        continue;
+      }
+      const text = String(raw);
+      if (!QTY.test(text)) throw new KassaError("BAD_REQUEST", `${PRICE_LABELS[field]} noto'g'ri`);
+      next[field] = fromMinor(toMinor(text, 4), 4);
+    }
+    if (next.purchasePrice !== undefined && !cashier.permissions.includes("products.edit")) throw new KassaError("FORBIDDEN", "Ruxsat yo'q: products.edit");
+
+    // Taqqoslash 4 kasrli ko'rinishda (serverdan "10000.0000" keladi)
+    const current: Record<string, string | null> = {};
+    for (const field of PRICE_FIELDS) {
+      const value = row[field as keyof PriceProductRow] as string | null | undefined;
+      current[field] = value == null ? null : field === "promoPriceEnd" ? value : fromMinor(toMinor(value, 4), 4);
+    }
+    const changes = fieldChanges<PriceField>(current, next);
+    if (Object.keys(changes).length === 0) return this.toPriceRows([row], cashier)[0]!;
+    const updated = { ...row, ...next } as PriceProductRow;
+    this.store.inTransaction(() => {
+      const payload: ProductPricesPayload = { productId: row.id, changes };
+      this.store.enqueue({ type: "product.prices", cashierId: cashier.userId, payload });
+      this.store.saveProduct(updated);
+    });
+    this.engine?.schedule();
+    return this.toPriceRows([updated], cashier)[0]!;
   }
 
   private toPurchaseProducts(rows: PurchaseProductRow[]): PurchaseProduct[] {
@@ -2264,15 +2655,284 @@ export class KassaService {
     }
   }
 
+  // ─── Analitika ──────────────────────────────────────────────────────────
+
+  /**
+   * Analitika (`analytics.view`): internet bo'lsa — serverdan (qurilma omboridagi barcha kassalar va web, haqiqiy
+   * tannarx, kompaniya kirim-chiqimi); bo'lmasa yoki `source: "local"` — shu kassadagi hujjatlardan (taxminiy tannarx).
+   */
+  async analyticsReport(input: { from: string; to: string; source?: "auto" | "local" }): Promise<AnalyticsReport> {
+    const cashier = this.requireCashierWith("analytics.view");
+    const from = String(input.from ?? "");
+    const to = String(input.to ?? "");
+    if (!ISO_DATE.test(from) || !ISO_DATE.test(to) || from > to) throw new KassaError("BAD_REQUEST", "Davr noto'g'ri");
+    if ((Date.parse(to) - Date.parse(from)) / 86_400_000 > 366) throw new KassaError("BAD_REQUEST", "Davr 366 kundan oshmasin");
+    if (input.source !== "local" && this.api) {
+      try {
+        return { ...(await this.api.analytics({ from, to, cashierId: cashier.userId })), source: "server" };
+      } catch (error) {
+        if (!(error instanceof OfflineError)) throw error;
+      }
+    }
+    return this.localAnalytics(from, to);
+  }
+
+  private localAnalytics(from: string, to: string): AnalyticsReport {
+    const device = this.store.getMeta<DeviceInfo>("device");
+    const start = new Date(`${from}T00:00:00`);
+    const end = new Date(`${to}T00:00:00`);
+    end.setDate(end.getDate() + 1);
+    const range = { from: start.toISOString(), to: end.toISOString(), limit: 100_000 };
+    const live = <T>(docs: StoredDocument<T>[]) => docs.filter((doc) => doc.state !== "rejected" && doc.state !== "discarded").map((doc) => doc.doc);
+    const sales = live(this.store.sales<LocalSale>(range));
+    const returns = live(this.store.returns<LocalReturn>(range));
+    const purchases = live(this.store.purchases<LocalPurchase>(range));
+    const movements = live(this.store.cashMovements<LocalCashMovement>(range));
+    const customerPayments = live(this.store.customerPayments<LocalCustomerPayment>(range));
+    const supplierPayments = live(this.store.supplierPayments<LocalSupplierPayment>(range));
+
+    const costs = this.store.stockLevelCosts();
+    const conversions = this.store.records<CalcConversion>("unitConversions");
+    const products = new Map<string, StockProductRow | null>();
+    const productOf = (id: string) => {
+      if (!products.has(id)) products.set(id, this.store.product<StockProductRow>(id));
+      return products.get(id) ?? null;
+    };
+    const baseQty = (productId: string, unitId: string, quantity: string) => {
+      const product = productOf(productId);
+      const factor = product ? unitFactor(product, unitId, conversions) : null;
+      return rescale(toMinor(quantity, 4) * toMinor(factor ?? "1", 4), 8, 4);
+    };
+
+    type Acc = { quantity: bigint; revenue: bigint; cogs: bigint };
+    const byProduct = new Map<string, Acc>();
+    const productAcc = (id: string) => {
+      let acc = byProduct.get(id);
+      if (!acc) byProduct.set(id, (acc = { quantity: 0n, revenue: 0n, cogs: 0n }));
+      return acc;
+    };
+    const days = new Map<string, { revenue: bigint; returns: bigint; cogs: bigint; receipts: number }>();
+    const dayAcc = (iso: string) => {
+      const key = localDay(iso);
+      let acc = days.get(key);
+      if (!acc) days.set(key, (acc = { revenue: 0n, returns: 0n, cogs: 0n, receipts: 0 }));
+      return acc;
+    };
+    const payments = new Map<string, bigint>();
+    const addPayment = (key: string, amount: bigint) => payments.set(key, (payments.get(key) ?? 0n) + amount);
+    const cashiers = new Map<string, { receipts: number; revenue: bigint }>();
+
+    let revenue = 0n;
+    let returned = 0n;
+    let cogs = 0n;
+    let items = 0n;
+    let salesMoney = 0n;
+    const saleLines = new Map<string, { productId: string; unitId: string }>();
+    for (const sale of sales) {
+      const total = toMinor(sale.total);
+      revenue += total;
+      const day = dayAcc(sale.createdAt);
+      day.revenue += total;
+      day.receipts += 1;
+      for (const line of sale.lines) {
+        saleLines.set(line.id, { productId: line.productId, unitId: line.unitId });
+        const qty = baseQty(line.productId, line.unitId, line.quantity);
+        const cost = costValue(costs, line.productId, qty);
+        const acc = productAcc(line.productId);
+        acc.quantity += qty;
+        acc.revenue += toMinor(line.lineTotal);
+        acc.cogs += cost;
+        cogs += cost;
+        items += qty;
+        day.cogs += cost;
+      }
+      const received = toMinor(sale.tendered) - toMinor(sale.change);
+      salesMoney += received;
+      addPayment(sale.paymentMethod, received);
+      addPayment("balance", toMinor(sale.balanceUsed));
+      addPayment("cashback", toMinor(sale.cashbackUsed));
+      addPayment("debt", toMinor(sale.debt));
+      const name = sale.cashierName ?? "—";
+      const cashierAcc = cashiers.get(name) ?? { receipts: 0, revenue: 0n };
+      cashiers.set(name, { receipts: cashierAcc.receipts + 1, revenue: cashierAcc.revenue + total });
+    }
+    let refunds = 0n;
+    for (const ret of returns) {
+      const total = toMinor(ret.total);
+      returned += total;
+      const day = dayAcc(ret.createdAt);
+      day.returns += total;
+      if (ret.refundMethod !== "balance") refunds += toMinor(ret.refundEstimate);
+      for (const line of ret.lines) {
+        const original = saleLines.get(line.orderItemId) ?? this.store.saleById<LocalSale>(ret.orderId)?.doc.lines.find((item) => item.id === line.orderItemId);
+        if (!original) continue;
+        const qty = baseQty(original.productId, original.unitId, line.quantity);
+        const cost = costValue(costs, original.productId, qty);
+        const acc = productAcc(original.productId);
+        acc.quantity -= qty;
+        acc.revenue -= toMinor(line.lineTotal);
+        acc.cogs -= cost;
+        cogs -= cost;
+        items -= qty;
+        day.cogs -= cost;
+      }
+    }
+
+    const netRevenue = revenue - returned;
+    const grossProfit = netRevenue - cogs;
+    const receipts = sales.length;
+    const stock = this.store.stockAll();
+    let stockValue = 0n;
+    for (const [productId, quantity] of stock) if (quantity > 0n) stockValue += costValue(costs, productId, quantity);
+    const expenses = movements.filter((movement) => movement.kind === "expense").reduce((sum, movement) => sum + toMinor(movement.amount), 0n);
+
+    const customers = this.store.searchCustomers<CustomerRow>("", 100_000);
+    const suppliers = this.store.searchSuppliers<SupplierRow>("", 100_000);
+    const cashIn = movements.filter((movement) => movement.type === "in").reduce((sum, movement) => sum + toMinor(movement.amount), 0n);
+    const cashOutOther = movements.filter((movement) => movement.type === "out" && movement.kind !== "expense").reduce((sum, movement) => sum + toMinor(movement.amount), 0n);
+    const customerMoney = customerPayments.reduce((sum, payment) => sum + toMinor(payment.amount), 0n);
+    const supplierMoney =
+      supplierPayments.reduce((sum, payment) => sum + toMinor(payment.amount), 0n) +
+      purchases.reduce((sum, purchase) => sum + (purchase.payment ? toMinor(purchase.payment.amount) : 0n), 0n);
+    const income = amountLines([
+      ["sales", "Savdo tushumi", salesMoney],
+      ["customer_payments", "Mijozlar to'lovi", customerMoney],
+      ["cash_in", "Kassaga kirim", cashIn],
+    ]);
+    const expense = amountLines([
+      ["suppliers", "Ta'minotchilarga to'lov", supplierMoney],
+      ["expenses", "Xarajatlar", expenses],
+      ["refunds", "Qaytarilgan pul", refunds],
+      ["cash_out", "Inkassatsiya va boshqa chiqim", cashOutOther],
+    ]);
+    const totalIncome = salesMoney + customerMoney + cashIn;
+    const totalExpense = supplierMoney + expenses + refunds + cashOutOther;
+
+    const top: ProductStat[] = [...byProduct.entries()]
+      .sort(([, a], [, b]) => (b.revenue > a.revenue ? 1 : b.revenue < a.revenue ? -1 : 0))
+      .slice(0, 20)
+      .map(([productId, acc]) => {
+        const product = productOf(productId);
+        return {
+          productId,
+          name: product?.name ?? "—",
+          sku: product?.sku ?? "",
+          quantity: fromMinor(acc.quantity, 4),
+          revenue: fromMinor(acc.revenue),
+          cogs: fromMinor(acc.cogs),
+          profit: fromMinor(acc.revenue - acc.cogs),
+        };
+      });
+    const slow = [...stock.entries()]
+      .filter(([productId, quantity]) => quantity > 0n && !byProduct.has(productId) && productOf(productId)?.isActive)
+      .map(([productId, quantity]) => ({ productId, quantity, value: costValue(costs, productId, quantity) }))
+      .sort((a, b) => (b.value > a.value ? 1 : b.value < a.value ? -1 : 0))
+      .slice(0, 20)
+      .map((row) => ({ productId: row.productId, name: productOf(row.productId)!.name, sku: productOf(row.productId)!.sku, stock: fromMinor(row.quantity, 4), value: fromMinor(row.value) }));
+
+    const categoryNames = new Map(this.store.records<{ id: string; name: string }>("categories").map((row) => [row.id, row.name]));
+    const byCategory = new Map<string, { soldQty: bigint; revenue: bigint; cogs: bigint; stockQty: bigint; stockValue: bigint }>();
+    const categoryAcc = (productId: string) => {
+      const key = productOf(productId)?.categoryId ?? "";
+      let acc = byCategory.get(key);
+      if (!acc) byCategory.set(key, (acc = { soldQty: 0n, revenue: 0n, cogs: 0n, stockQty: 0n, stockValue: 0n }));
+      return acc;
+    };
+    for (const [productId, acc] of byProduct) {
+      const category = categoryAcc(productId);
+      category.soldQty += acc.quantity;
+      category.revenue += acc.revenue;
+      category.cogs += acc.cogs;
+    }
+    for (const [productId, quantity] of stock) {
+      if (quantity <= 0n || !productOf(productId)) continue;
+      const category = categoryAcc(productId);
+      category.stockQty += quantity;
+      category.stockValue += costValue(costs, productId, quantity);
+    }
+    const categories: CategoryStat[] = [...byCategory.entries()]
+      .map(([key, acc]) => ({
+        categoryId: key || null,
+        name: key ? (categoryNames.get(key) ?? "—") : "Kategoriyasiz",
+        soldQty: fromMinor(acc.soldQty, 4),
+        revenue: fromMinor(acc.revenue),
+        cogs: fromMinor(acc.cogs),
+        profit: fromMinor(acc.revenue - acc.cogs),
+        stockQty: fromMinor(acc.stockQty, 4),
+        stockValue: fromMinor(acc.stockValue),
+      }))
+      .sort((a, b) => toMinor(b.stockValue ?? "0") - toMinor(a.stockValue ?? "0") > 0n ? 1 : -1);
+
+    return {
+      source: "local",
+      period: { from, to },
+      generatedAt: new Date().toISOString(),
+      scope: `Shu kassa (${device?.code ?? "—"}) hujjatlari, serverga yuborilmaganlar ham; tannarx — joriy o'rtacha bo'yicha taxminiy`,
+      kpis: {
+        revenue: fromMinor(revenue),
+        returns: fromMinor(returned),
+        netRevenue: fromMinor(netRevenue),
+        cogs: fromMinor(cogs),
+        grossProfit: fromMinor(grossProfit),
+        margin: percentOf(grossProfit, netRevenue),
+        receipts,
+        averageReceipt: fromMinor(receipts > 0 ? netRevenue / BigInt(receipts) : 0n),
+        itemsSold: fromMinor(items, 4),
+        purchases: fromMinor(purchases.reduce((sum, purchase) => sum + toMinor(purchase.total), 0n)),
+        expenses: fromMinor(expenses),
+        stockValue: fromMinor(stockValue),
+        customers: customers.length,
+      },
+      daily: [...days.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, acc]) => ({ date, revenue: fromMinor(acc.revenue), returns: fromMinor(acc.returns), profit: fromMinor(acc.revenue - acc.returns - acc.cogs), receipts: acc.receipts })),
+      payments: amountLines(
+        [...payments.entries()].sort(([, a], [, b]) => (b > a ? 1 : b < a ? -1 : 0)).map(([key, amount]) => [key, METHOD_LABELS[key] ?? key, amount]),
+      ),
+      cashiers: [...cashiers.entries()].map(([name, acc]) => ({ name, receipts: acc.receipts, revenue: fromMinor(acc.revenue) })),
+      cashFlow: { income, expense, totalIncome: fromMinor(totalIncome), totalExpense: fromMinor(totalExpense), net: fromMinor(totalIncome - totalExpense) },
+      receivables: balanceGroup(customers.map((row) => ({ id: row.id, name: row.name, phone: row.phone ?? null, amount: toMinor(row.totalDebt ?? "0") }))),
+      customerBalances: balanceGroup(customers.map((row) => ({ id: row.id, name: row.name, phone: row.phone ?? null, amount: toMinor(row.balance ?? "0") }))),
+      payables: balanceGroup(suppliers.map((row) => ({ id: row.id, name: row.name, phone: row.phone ?? null, amount: toMinor(row.totalDebt ?? "0") }))),
+      supplierAdvances: balanceGroup(suppliers.map((row) => ({ id: row.id, name: row.name, phone: row.phone ?? null, amount: -toMinor(row.totalDebt ?? "0") }))),
+      products: { top, slow },
+      categories,
+    };
+  }
+
   // ─── Qurilma sozlamalari, printer, pul qutisi ───────────────────────────
 
   prefs(): DevicePrefs {
-    return { ...DEFAULT_PREFS, ...(this.store.getMeta<Partial<DevicePrefs>>("devicePrefs") ?? {}) };
+    const stored = this.store.getMeta<Partial<DevicePrefs>>("devicePrefs") ?? {};
+    return { ...DEFAULT_PREFS, ...stored, hotkeys: { ...DEFAULT_HOTKEYS, ...(stored.hotkeys ?? {}) } };
   }
 
   savePrefs(input: DevicePrefs): DevicePrefs {
     this.requireCashier();
+    const current = this.prefs();
+    const methods = Array.isArray(input.enabledPaymentMethods)
+      ? [...new Set(input.enabledPaymentMethods.filter((method) => PAYMENT_METHODS.includes(method)))]
+      : current.enabledPaymentMethods;
+    if (methods.length === 0) throw new KassaError("BAD_REQUEST", "Kamida bitta to'lov usuli yoqilgan bo'lsin");
+    const hotkeys = { ...current.hotkeys };
+    const used = new Map<string, HotkeyAction>();
+    for (const action of HOTKEY_ACTIONS) {
+      const key = input.hotkeys?.[action] === undefined ? current.hotkeys[action] : String(input.hotkeys[action]);
+      if (!HOTKEY_PATTERN.test(key)) throw new KassaError("BAD_REQUEST", `Tugma noto'g'ri: ${key}`);
+      if (used.has(key)) throw new KassaError("BAD_REQUEST", `Tugma takrorlangan: ${key}`);
+      used.set(key, action);
+      hotkeys[action] = key;
+    }
     const prefs: DevicePrefs = {
+      language: input.language === "uz-Cyrl" ? "uz-Cyrl" : "uz-Latn",
+      theme: input.theme === "dark" || input.theme === "system" ? input.theme : "light",
+      fontScale: input.fontScale === "large" ? "large" : "normal",
+      hotkeys,
+      blockNegativeStock: !!input.blockNegativeStock,
+      enabledPaymentMethods: methods,
+      defaultPaymentMethod: methods.includes(input.defaultPaymentMethod) ? input.defaultPaymentMethod : methods[0]!,
+      syncIntervalSec: clampInt(input.syncIntervalSec, 10, 600, current.syncIntervalSec),
+      autoLockMinutes: clampInt(input.autoLockMinutes, 0, 240, current.autoLockMinutes),
       printerName: input.printerName ? String(input.printerName).slice(0, 200) : null,
       paperWidth: input.paperWidth === 58 ? 58 : 80,
       autoPrint: !!input.autoPrint,
@@ -2288,7 +2948,125 @@ export class KassaService {
     const invalid = validateDrawerPrefs(prefs.drawer);
     if (invalid) throw new KassaError("BAD_REQUEST", invalid);
     this.store.setMeta("devicePrefs", prefs);
+    if (this.timer && prefs.syncIntervalSec * 1000 !== this.intervalMs) this.start(prefs.syncIntervalSec * 1000);
     return prefs;
+  }
+
+  // ─── Sozlamalar: PIN, umumiy ma'lumotlar, yangilanish ───────────────────
+
+  /** Joriy kassir PIN'ini almashtirish (eski PIN bilan; 5 xatodan keyin qulf — kirishdagi kabi). */
+  async changePin(input: { oldPin: string; newPin: string }): Promise<void> {
+    const cashier = this.requireCashier();
+    const newPin = String(input.newPin ?? "");
+    if (!PIN_PATTERN.test(newPin)) throw new KassaError("BAD_REQUEST", "Yangi PIN 4–8 raqamdan iborat bo'lsin");
+    const check = await checkPin(this.store, cashier.userId, String(input.oldPin ?? ""));
+    if (!check.ok) {
+      throw check.reason === "locked" ? new KassaError("PIN_LOCKED", "PIN vaqtincha bloklangan — keyinroq urinib ko'ring") : new KassaError("PIN_INVALID", "Joriy PIN noto'g'ri");
+    }
+    this.store.setPinHash(cashier.userId, await hashPin(newPin));
+  }
+
+  settingsOverview(): SettingsOverview {
+    const cashier = this.requireCashier();
+    const config = this.config();
+    const company = this.store.getMeta<CompanyInfo>("company");
+    const device = this.store.getMeta<DeviceInfo>("device");
+    return {
+      appVersion: this.options.appVersion,
+      apiUrl: this.store.getMeta<string>("apiUrl"),
+      device,
+      company: config?.company ?? null,
+      subscription: { status: company?.status ?? null, trialEndsAt: company?.trialEndsAt ?? null },
+      baseCurrency: this.baseCurrency(),
+      currencies: this.store
+        .records<{ code: string; rate: string; rateDate?: string | null; isActive: boolean }>("currencies")
+        .map((row) => ({ code: row.code, rate: row.rate, rateDate: row.rateDate ?? null, isActive: row.isActive })),
+      cashback: config?.cashback ?? null,
+      warehouses: this.store
+        .records<{ id: string; name: string; code: string; isDefault?: boolean; isActive: boolean }>("warehouses")
+        .map((row) => ({ id: row.id, name: row.name, code: row.code, isDefault: !!row.isDefault, isActive: row.isActive, current: row.id === device?.warehouseId }))
+        .sort((a, b) => Number(b.current) - Number(a.current) || a.name.localeCompare(b.name)),
+      cashiers: this.cashiers().map((row) => ({ userId: row.userId, name: row.name, phone: row.phone, role: row.role, active: row.active, hasPin: row.hasPin })),
+      permissions: cashier.permissions,
+      sync: this.status().sync,
+    };
+  }
+
+  private savedUpdate() {
+    return this.store.getMeta<{ version: string; file: string; sha256: string }>("updateFile");
+  }
+
+  private async remoteUpdate(): Promise<RemoteUpdate> {
+    if (!this.api) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
+    try {
+      return (await this.api.appUpdate()).update;
+    } catch (error) {
+      if (error instanceof OfflineError) throw new KassaError("OFFLINE", "Yangilanishni tekshirish uchun internet kerak");
+      throw error;
+    }
+  }
+
+  private static async fileMatches(file: string, sha256: string) {
+    try {
+      return createHash("sha256").update(await readFile(file)).digest("hex") === sha256;
+    } catch {
+      return false;
+    }
+  }
+
+  private async toUpdateInfo(remote: RemoteUpdate): Promise<UpdateInfo> {
+    const saved = this.savedUpdate();
+    const downloaded =
+      remote.available && !!saved && saved.version === remote.latest && saved.sha256 === remote.sha256 && (await KassaService.fileMatches(saved.file, saved.sha256));
+    return {
+      configured: remote.configured,
+      available: remote.available,
+      mandatory: remote.mandatory,
+      current: this.options.appVersion,
+      latest: remote.latest,
+      notes: remote.notes,
+      downloaded,
+    };
+  }
+
+  async checkUpdate(): Promise<UpdateInfo> {
+    this.requireCashier();
+    return this.toUpdateInfo(await this.remoteUpdate());
+  }
+
+  /** O'rnatuvchini yuklab olish: faqat https, SHA-256 server bergan qiymatga mos kelsagina saqlanadi. */
+  async downloadUpdate(): Promise<UpdateInfo> {
+    this.requireCashier();
+    const remote = await this.remoteUpdate();
+    if (!remote.available || !remote.url || !remote.sha256 || !remote.latest) throw new KassaError("CONFLICT", "Yangi versiya yo'q");
+    if (!remote.url.startsWith("https://")) throw new KassaError("BAD_REQUEST", "Yangilanish manzili xavfsiz emas");
+    const info = await this.toUpdateInfo(remote);
+    if (info.downloaded) return info;
+    let response: Response;
+    try {
+      response = await (this.options.fetchImpl ?? fetch)(remote.url, { signal: AbortSignal.timeout(15 * 60_000) });
+    } catch {
+      throw new KassaError("OFFLINE", "Yangilanishni yuklab bo'lmadi — internetni tekshiring");
+    }
+    if (!response.ok) throw new KassaError("DOWNLOAD_FAILED", `Yangilanish yuklanmadi (HTTP ${response.status})`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (createHash("sha256").update(bytes).digest("hex") !== remote.sha256) {
+      throw new KassaError("CHECKSUM_MISMATCH", "Yuklangan fayl nazorat yig'indisi mos emas — o'rnatilmaydi");
+    }
+    const file = path.join(this.options.downloadDir ?? tmpdir(), `BUM-POS-KASSA-Setup-${remote.latest}.exe`);
+    await writeFile(file, bytes);
+    this.store.setMeta("updateFile", { version: remote.latest, file, sha256: remote.sha256 });
+    return { ...info, downloaded: true };
+  }
+
+  /** Yuklangan o'rnatuvchini ishga tushirish (fayl qayta tekshiriladi). Lokal baza va navbat saqlanib qoladi. */
+  async installUpdate(): Promise<void> {
+    this.requireCashier();
+    const saved = this.savedUpdate();
+    if (!saved) throw new KassaError("CONFLICT", "Avval yangilanishni yuklab oling");
+    if (!(await KassaService.fileMatches(saved.file, saved.sha256))) throw new KassaError("CHECKSUM_MISMATCH", "O'rnatuvchi fayl o'zgargan yoki o'chirilgan — qayta yuklab oling");
+    if (!this.options.updater) throw new KassaError("UNAVAILABLE", "O'rnatish bu muhitda mavjud emas");
+    await this.options.updater.install(saved.file);
   }
 
   async printers() {

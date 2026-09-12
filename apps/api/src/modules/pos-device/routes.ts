@@ -13,6 +13,8 @@
  *   GET  /purchases/:number        (token) ta'minotchiga qaytarish uchun xarid (qabul va qaytarilgan miqdorlar)
  *   GET  /movements                (token) mahsulot harakati — qurilma ombori (?productId, type, kursor)
  *   GET  /stock/:productId         (token) mahsulot qoldig'i kompaniyaning faol omborlarida
+ *   GET  /analytics                (token) analitika ?from&to&cashierId — kassirda `analytics.view`
+ *   GET  /app-update               (token) yangi versiya bormi (joriy — `x-app-version`), o'rnatuvchi manzili va SHA-256
  *
  * /api/pos/devices — web (sessiya, `pos.devices.manage`):
  *   GET  /                         qurilmalar ro'yxati
@@ -34,6 +36,8 @@ import { authOf, requireAuth } from "../auth/guard.js";
 import { assertCompanyWritable, effectivePermissions, requirePermission, requireTenant, requireTenantForWrite } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { listConflicts, resolveConflict } from "./conflicts.service.js";
+import { desktopUpdate } from "./app-update.service.js";
+import { deviceAnalytics } from "./device-analytics.service.js";
 import { cashierTenant, deviceOf, requireDevice } from "./device-auth.js";
 import { deviceWarehouses, listDevices, registerDevice, setupTenant, updateDevice } from "./devices.service.js";
 import { deviceProductStock, findDevicePurchase, findDeviceReceipt, listDeviceMovements, listDeviceSales } from "./receipts.service.js";
@@ -79,6 +83,12 @@ const movementsQuery = z.object({
   cursor: z.string().max(500).optional(),
 });
 const productParams = z.object({ productId: z.uuid() });
+const analyticsQuery = z
+  .object({ from: z.iso.date(), to: z.iso.date(), cashierId: z.uuid() })
+  .refine((range) => range.from <= range.to && (Date.parse(range.to) - Date.parse(range.from)) / 86_400_000 <= 366, {
+    message: "Davr noto'g'ri (366 kungacha)",
+    path: ["to"],
+  });
 const deviceParams = z.object({ deviceId: z.uuid() });
 const conflictParams = z.object({ conflictId: z.uuid() });
 const conflictsQuery = z.object({
@@ -132,10 +142,18 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
       await db.update(posDevices).set({ lastSeenAt: new Date(), appVersion: appVersionOf(req) }).where(eq(posDevices.id, context.device.id));
       return {
         device: context.device,
-        company: { id: context.company.id, name: context.company.name, currency: context.company.currency },
+        company: {
+          id: context.company.id,
+          name: context.company.name,
+          currency: context.company.currency,
+          status: context.company.status,
+          trialEndsAt: context.company.trialEndsAt?.toISOString() ?? null,
+        },
         serverTime: new Date().toISOString(),
       };
     });
+
+    scoped.get("/app-update", async (req) => ({ update: desktopUpdate(appVersionOf(req)) }));
 
     scoped.post("/cashiers/login", async (req) => {
       const body = cashierLoginBody.parse(req.body);
@@ -213,6 +231,15 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
     scoped.get("/stock/:productId", async (req) => {
       const { productId } = productParams.parse(req.params);
       return { stock: await deviceProductStock(db, deviceOf(req), productId) };
+    });
+
+    scoped.get("/analytics", async (req) => {
+      const { cashierId, ...range } = analyticsQuery.parse(req.query);
+      const context = deviceOf(req);
+      // Kassir qurilmada PIN bilan kirgan; server a'zolik va ruxsatni qayta tekshiradi
+      const tenant = await cashierTenant(db, context, cashierId);
+      await requirePermission(db, tenant, "analytics.view");
+      return deviceAnalytics(db, context, range);
     });
   });
 }

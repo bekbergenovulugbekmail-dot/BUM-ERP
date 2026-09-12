@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { KassaError, KassaService, type TokenVault } from "../src/main/kassa-service.js";
@@ -8,11 +12,22 @@ import { deviceInfo, company, product, pullResponse } from "./fixtures.js";
 
 /** Soxta `/api/pos-device` serveri (fetch darajasida). */
 function fakeApi() {
-  const state = { token: "bumpos_test-token", online: true, pushed: [] as WireOperation[], pulls: 0, rejectTypes: [] as string[] };
+  const state = {
+    token: "bumpos_test-token",
+    online: true,
+    pushed: [] as WireOperation[],
+    pulls: 0,
+    rejectTypes: [] as string[],
+    analyticsQuery: null as Record<string, string> | null,
+    update: { configured: false, available: false, mandatory: false, current: null, latest: null, url: null, sha256: null, notes: null } as Record<string, unknown>,
+    installer: Buffer.alloc(0),
+  };
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const fetchImpl = (async (input: URL | RequestInfo, init?: RequestInit) => {
     if (!state.online) throw new TypeError("fetch failed");
     const url = new URL(String(input));
+    // Yangilanish o'rnatuvchisi — tashqi https manzil (token yuborilmaydi)
+    if (url.hostname === "releases.test") return new Response(state.installer);
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
     const authed = (init?.headers as Record<string, string>).authorization === `Bearer ${state.token}`;
     switch (url.pathname) {
@@ -65,6 +80,13 @@ function fakeApi() {
           ],
           nextCursor: "c1",
         });
+      case "/api/pos-device/app-update":
+        if (!authed) return json(401, { code: "UNAUTHENTICATED", message: "token" });
+        return json(200, { update: state.update });
+      case "/api/pos-device/analytics":
+        if (!authed) return json(401, { code: "UNAUTHENTICATED", message: "token" });
+        state.analyticsQuery = Object.fromEntries(url.searchParams.entries());
+        return json(200, { period: { from: url.searchParams.get("from"), to: url.searchParams.get("to") }, scope: "Ombor: Asosiy", kpis: { revenue: "99.00" } });
       case "/api/pos-device/stock/p2":
         if (!authed) return json(401, { code: "UNAUTHENTICATED", message: "token" });
         return json(200, {
@@ -424,6 +446,252 @@ describe("Kassa xizmati (main jarayon)", () => {
       rates: { USD: "12500.0000" },
       payment: { amount: "50000.00", method: "cash" },
     });
+  });
+
+  it("ma'lumotlar: jismoniy/yuridik mijoz va ta'minotchi, offline tahrir faqat o'zgargan maydonlar bilan, narxlar va ruxsatlar", async () => {
+    const api = fakeApi();
+    const kassa = service(api);
+    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
+    store.saveCashier({ ...cashier, permissions: ["pos.use"] });
+    api.state.online = false;
+    store.applyPull(
+      pullResponse({
+        units: { rows: [{ id: "unit-d", name: "Dona", shortName: "dona", isBase: true, isActive: true }] },
+        products: { rows: [product("p1", "Cola", { purchasePrice: "7000.0000", purchaseCurrency: null, wholesalePrice: null, retailPrice: "10500.0000" })] },
+        customers: {
+          rows: [
+            {
+              id: "c1",
+              name: "Vali",
+              code: "C-0001",
+              phone: "+998901234567",
+              discountPercent: "0.00",
+              creditLimit: "0.00",
+              totalDebt: "0.00",
+              balance: "0.00",
+              cashbackBalance: "0.00",
+              isActive: true,
+            },
+          ],
+        },
+        suppliers: { rows: [{ id: "s1", name: "Olma savdo", code: "S-0001", phone: null, currency: "UZS", totalDebt: "0.00", isActive: true, partyType: "legal", taxId: "301234567" }] },
+      }),
+    );
+
+    // Yangi yuridik mijoz (offline): rekvizitlar, format tekshiruvi
+    expect(() => kassa.createCustomer({ name: "MChJ Rizo", partyType: "legal", email: "rizo" })).toThrow("Email noto'g'ri");
+    const legal = kassa.createCustomer({ name: "MChJ Rizo", partyType: "legal", taxId: "302345678", bankAccount: "20208000900123456001", bankMfo: "00873", phone: "" });
+    expect(legal).toMatchObject({ partyType: "legal", taxId: "302345678", bankMfo: "00873", phone: null, pending: true });
+    expect(kassa.referenceCustomers({ query: "", partyType: "legal" }).map((row) => row.id)).toEqual([legal.id]);
+    expect(kassa.referenceCustomers({ query: "", partyType: "individual" }).map((row) => row.id)).toEqual(["c1"]);
+
+    // Tahrir: ruxsat; faqat o'zgargan maydonlar; o'zgarish yo'q — navbatga tushmaydi
+    expect(() => kassa.updateCustomer({ customerId: "c1", phone: "+998901234599" })).toThrow("crm.manage");
+    store.saveCashier({ ...cashier, permissions: ["pos.use", "crm.manage", "purchase.view", "purchase.edit", "products.view", "products.edit"] });
+    expect(kassa.updateCustomer({ customerId: "c1", name: "Vali", phone: "+998901234599", address: "Chilonzor" })).toMatchObject({ phone: "+998901234599", address: "Chilonzor" });
+    kassa.updateCustomer({ customerId: "c1", name: "Vali", phone: "+998901234599" });
+    expect(kassa.referenceSuppliers({ query: "olma" })[0]).toMatchObject({ partyType: "legal", taxId: "301234567" });
+    expect(kassa.updateSupplier({ supplierId: "s1", partyType: "legal", taxId: "301234567", bankMfo: "00444" })).toMatchObject({ bankMfo: "00444" });
+
+    // Narxlar: xarid narxi ruxsat bilan ko'rinadi, faqat o'zgarganlari; sotuv narxi majburiy; kassada darhol
+    expect(kassa.priceList({ query: "cola" })[0]).toMatchObject({ salesPrice: "10000.0000", retailPrice: "10500.0000", wholesalePrice: null, purchasePrice: "7000.0000", pending: false });
+    expect(() => kassa.updatePrices({ productId: "p1", salesPrice: "" })).toThrow("Sotuv narxi kiritilishi shart");
+    const priced = kassa.updatePrices({ productId: "p1", salesPrice: "12000", wholesalePrice: "11000", retailPrice: "10500", purchasePrice: "7000" });
+    expect(priced).toMatchObject({ salesPrice: "12000.0000", wholesalePrice: "11000.0000", pending: true });
+    expect(Number(kassa.products({ query: "cola" })[0]!.price)).toBe(12000);
+
+    expect(kassa.unsynced().map((op) => [op.type, op.label])).toEqual([
+      ["customer.create", "MChJ Rizo"],
+      ["customer.update", "Vali"],
+      ["supplier.update", "Olma savdo"],
+      ["product.prices", "Cola"],
+    ]);
+
+    api.state.online = true;
+    await kassa.syncNow();
+    expect(api.state.pushed.map((op) => op.type)).toEqual(["customer.create", "customer.update", "supplier.update", "product.prices"]);
+    expect(api.state.pushed[0]!.payload).toEqual({ customerId: legal.id, name: "MChJ Rizo", phone: null, taxId: "302345678", bankAccount: "20208000900123456001", bankMfo: "00873", partyType: "legal" });
+    expect(api.state.pushed[1]!.payload).toEqual({
+      customerId: "c1",
+      changes: { phone: { from: "+998901234567", to: "+998901234599" }, address: { from: null, to: "Chilonzor" } },
+    });
+    expect(api.state.pushed[2]!.payload).toEqual({ supplierId: "s1", changes: { bankMfo: { from: null, to: "00444" } } });
+    expect(api.state.pushed[3]!.payload).toEqual({
+      productId: "p1",
+      changes: { salesPrice: { from: "10000.0000", to: "12000.0000" }, wholesalePrice: { from: null, to: "11000.0000" } },
+    });
+  });
+
+  it("sozlamalar: qurilma sozlamalari tekshiruvi, o'chirilgan to'lov usuli, qoldiqsiz sotuv taqiqi, PIN almashtirish, umumiy ma'lumot, yangilanish (SHA-256) va o'rnatish", async () => {
+    const api = fakeApi();
+    const installed: string[] = [];
+    const kassa = new KassaService(store, vault, {
+      appVersion: "0.1.0",
+      platform: "win32",
+      fetchImpl: api.fetchImpl,
+      updater: {
+        install: async (file) => {
+          installed.push(file);
+        },
+      },
+      downloadDir: tmpdir(),
+    });
+    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    api.state.online = false;
+    store.applyPull(
+      pullResponse({
+        units: { rows: [{ id: "unit-d", name: "Dona", shortName: "dona", isBase: true, isActive: true }] },
+        products: { rows: [product("p1", "Cola")] },
+        stockLevels: { rows: [{ id: "s1", productId: "p1", warehouseId: "w1", quantity: "2.0000", reservedQty: "0.0000" }] },
+      }),
+    );
+
+    // Standart sozlamalar va tekshiruv
+    expect(kassa.prefs()).toMatchObject({ theme: "light", language: "uz-Latn", syncIntervalSec: 30, autoLockMinutes: 0, hotkeys: { complete: "F12" }, enabledPaymentMethods: ["cash", "card", "bank", "transfer"] });
+    expect(() => kassa.savePrefs({ ...kassa.prefs(), enabledPaymentMethods: [] })).toThrow("Kamida bitta");
+    expect(() => kassa.savePrefs({ ...kassa.prefs(), hotkeys: { ...kassa.prefs().hotkeys, help: "F12" } })).toThrow("Tugma takrorlangan: F12");
+    expect(() => kassa.savePrefs({ ...kassa.prefs(), hotkeys: { ...kassa.prefs().hotkeys, help: "Q" } })).toThrow("Tugma noto'g'ri");
+    const saved = kassa.savePrefs({
+      ...kassa.prefs(),
+      enabledPaymentMethods: ["cash"],
+      defaultPaymentMethod: "card",
+      syncIntervalSec: 5,
+      autoLockMinutes: 999,
+      theme: "dark",
+      language: "uz-Cyrl",
+      blockNegativeStock: true,
+      hotkeys: { ...kassa.prefs().hotkeys, help: "Ctrl+H" },
+    });
+    expect(saved).toMatchObject({ enabledPaymentMethods: ["cash"], defaultPaymentMethod: "cash", syncIntervalSec: 10, autoLockMinutes: 240, theme: "dark", language: "uz-Cyrl", blockNegativeStock: true, hotkeys: { help: "Ctrl+H", complete: "F12" } });
+    expect(kassa.prefs()).toEqual(saved);
+
+    // O'chirilgan usul va qoldiqsiz sotuv taqiqi
+    kassa.openShift({ openingCash: "0" });
+    const sale = (quantity: string, paymentMethod: "cash" | "card") =>
+      kassa.completeSale({ customerId: null, lines: [{ productId: "p1", unitId: "unit-d", quantity }], saleCurrencies: [], paymentMethod, amountPaid: null, cashbackAmount: null, balanceAmount: null, changeToBalance: false, currencyPayments: [] });
+    expect(() => sale("1", "card")).toThrow("o'chirilgan");
+    expect(() => sale("3", "cash")).toThrow("qoldiq yetmaydi (bor 2.0000)");
+    expect(sale("2", "cash").number).toBe("K01-000001");
+    expect(() => sale("1", "cash")).toThrow("bor 0.0000");
+
+    // PIN almashtirish
+    await expect(kassa.changePin({ oldPin: "1234", newPin: "12" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(kassa.changePin({ oldPin: "0000", newPin: "5678" })).rejects.toMatchObject({ code: "PIN_INVALID" });
+    await kassa.changePin({ oldPin: "1234", newPin: "5678" });
+    kassa.logout();
+    await expect(kassa.unlock({ userId: "u1", pin: "1234" })).rejects.toMatchObject({ code: "PIN_INVALID" });
+    expect((await kassa.unlock({ userId: "u1", pin: "5678" })).cashier?.userId).toBe("u1");
+
+    expect(kassa.settingsOverview()).toMatchObject({
+      appVersion: "0.1.0",
+      apiUrl: "https://bum-erp.uz",
+      device: { code: "K01" },
+      baseCurrency: "UZS",
+      permissions: ["pos.use"],
+      cashiers: [expect.objectContaining({ userId: "u1", hasPin: true })],
+      sync: { pending: 2 },
+    });
+
+    // Yangilanish: sozlanmagan; SHA-256 mos emas — saqlanmaydi; mos — yuklanadi va o'rnatuvchi ishga tushadi
+    api.state.online = true;
+    await expect(kassa.checkUpdate()).resolves.toMatchObject({ configured: false, available: false, current: "0.1.0", downloaded: false });
+    const bytes = Buffer.from("BUM POS KASSA setup");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    api.state.installer = bytes;
+    api.state.update = { configured: true, available: true, mandatory: false, current: "0.1.0", latest: "0.2.0", url: "https://releases.test/setup.exe", sha256: "0".repeat(64), notes: "Yangi" };
+    await expect(kassa.downloadUpdate()).rejects.toMatchObject({ code: "CHECKSUM_MISMATCH" });
+    await expect(kassa.installUpdate()).rejects.toMatchObject({ code: "CONFLICT" });
+    api.state.update = { ...api.state.update, sha256 };
+    const file = path.join(tmpdir(), "BUM-POS-KASSA-Setup-0.2.0.exe");
+    try {
+      await expect(kassa.downloadUpdate()).resolves.toMatchObject({ available: true, latest: "0.2.0", notes: "Yangi", downloaded: true });
+      await expect(kassa.checkUpdate()).resolves.toMatchObject({ downloaded: true });
+      await kassa.installUpdate();
+      expect(installed).toEqual([file]);
+    } finally {
+      await rm(file, { force: true });
+    }
+    await expect(kassa.installUpdate()).rejects.toMatchObject({ code: "CHECKSUM_MISMATCH" });
+  });
+
+  it("analitika: offline — shu kassa hujjatlaridan (tushum, qaytarish, taxminiy foyda, to'lov turlari, qarzdorlik, mahsulot va kategoriya); onlayn — serverdan", async () => {
+    const api = fakeApi();
+    const kassa = service(api);
+    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
+    store.saveCashier({ ...cashier, permissions: ["pos.use", "sales.refund"] });
+    api.state.online = false;
+    const party = (id: string, name: string, extra: Record<string, unknown>) => ({ id, name, code: null, phone: null, isActive: true, discountPercent: "0.00", creditLimit: "0.00", balance: "0.00", cashbackBalance: "0.00", totalDebt: "0.00", ...extra });
+    store.applyPull(
+      pullResponse({
+        units: { rows: [{ id: "unit-d", name: "Dona", shortName: "dona", isBase: true, isActive: true }] },
+        categories: { rows: [{ id: "cat1", name: "Ichimliklar", parentId: null, sortOrder: 0, isActive: true }] },
+        products: { rows: [product("p1", "Cola", { categoryId: "cat1" }), product("p2", "Choy")] },
+        stockLevels: {
+          rows: [
+            { id: "s1", productId: "p1", warehouseId: "w1", quantity: "10.0000", reservedQty: "0.0000", avgCostPrice: "6000.0000" },
+            { id: "s2", productId: "p2", warehouseId: "w1", quantity: "5.0000", reservedQty: "0.0000", avgCostPrice: "2000.0000" },
+          ],
+        },
+        customers: { rows: [party("c1", "Vali", { totalDebt: "15000.00" }), party("c2", "Hasan", { balance: "3000.00" })] },
+        suppliers: { rows: [party("s1", "Olma", { totalDebt: "20000.00", currency: "UZS" }), party("s2", "Nok", { totalDebt: "-5000.00", currency: "UZS" })] },
+      }),
+    );
+    const at = new Date();
+    const today = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
+
+    kassa.openShift({ openingCash: "0" });
+    const sale = (quantity: string, paymentMethod: "cash" | "card") =>
+      kassa.completeSale({
+        customerId: null,
+        lines: [{ productId: "p1", unitId: "unit-d", quantity }],
+        saleCurrencies: [],
+        paymentMethod,
+        amountPaid: null,
+        cashbackAmount: null,
+        balanceAmount: null,
+        changeToBalance: false,
+        currencyPayments: [],
+      });
+    const first = sale("3", "cash");
+    sale("1", "card");
+    await kassa.returnItems({ number: first.number, items: [{ orderItemId: first.lines[0]!.id, quantity: "1" }], refundMethod: "cash" });
+
+    await expect(kassa.analyticsReport({ from: today, to: today })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    store.saveCashier({ ...cashier, permissions: ["pos.use", "sales.refund", "analytics.view"] });
+    await expect(kassa.analyticsReport({ from: today, to: "2020-01-01" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    // 4 × 10000 = 40000, qaytarish 10000; tannarx (4 − 1) × 6000 = 18000
+    const report = await kassa.analyticsReport({ from: today, to: today });
+    expect(report).toMatchObject({
+      source: "local",
+      kpis: { revenue: "40000.00", returns: "10000.00", netRevenue: "30000.00", cogs: "18000.00", grossProfit: "12000.00", margin: "40.00", receipts: 2, averageReceipt: "15000.00", itemsSold: "3.0000", customers: 2 },
+      receivables: { total: "15000.00", count: 1 },
+      customerBalances: { total: "3000.00", count: 1 },
+      payables: { total: "20000.00", count: 1, top: [expect.objectContaining({ name: "Olma" })] },
+      supplierAdvances: { total: "5000.00", count: 1 },
+    });
+    expect(report.kpis.stockValue).toBe("52000.00");
+    expect(report.payments).toEqual([
+      { key: "cash", label: "Naqd", amount: "30000.00" },
+      { key: "card", label: "Karta", amount: "10000.00" },
+    ]);
+    expect(report.cashFlow).toMatchObject({ totalIncome: "40000.00", totalExpense: "10000.00", net: "30000.00" });
+    expect(report.daily).toEqual([{ date: today, revenue: "40000.00", returns: "10000.00", profit: "12000.00", receipts: 2 }]);
+    expect(report.products.top).toEqual([{ productId: "p1", name: "Cola", sku: "COLA", quantity: "3.0000", revenue: "30000.00", cogs: "18000.00", profit: "12000.00" }]);
+    expect(report.products.slow.map((row) => row.productId)).toEqual(["p2"]);
+    expect(report.categories.find((row) => row.categoryId === "cat1")).toMatchObject({ name: "Ichimliklar", revenue: "30000.00", profit: "12000.00" });
+    expect(report.categories.find((row) => row.categoryId === null)).toMatchObject({ name: "Kategoriyasiz", stockValue: "10000.00" });
+
+    // Onlayn — serverdan, kassir identifikatori bilan; majburan faqat shu kassa
+    api.state.online = true;
+    expect(await kassa.analyticsReport({ from: today, to: today })).toMatchObject({ source: "server", kpis: { revenue: "99.00" } });
+    expect(api.state.analyticsQuery).toEqual({ from: today, to: today, cashierId: "u1" });
+    expect((await kassa.analyticsReport({ from: today, to: today, source: "local" })).source).toBe("local");
   });
 
   it("etiketka: kontekstda shablonlar, mahsulotlar ID bo'yicha, etiketka printeri sozlamasi, o'lcham tekshiruvi va chop etish", async () => {

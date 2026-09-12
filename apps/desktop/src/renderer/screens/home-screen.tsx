@@ -130,6 +130,9 @@ export default function HomeScreen({
               ["movements", SECTIONS[5], "Kirim-chiqim tarixi: barcha kassalar va yuborilmagan hujjatlar"],
               ["count", SECTIONS[6], "Skaner bilan sanash, farq va qoldiqni tenglashtirish — offline ham"],
               ["labels", SECTIONS[7], "Shtrix-kod/QR etiketkalar, bugungi xaridlardan — etiketka printeriga"],
+              ["references", SECTIONS[8], "Mijozlar, ta'minotchilar (jismoniy/yuridik shaxslar), narxlar — offline tahrir"],
+              ["analytics", SECTIONS[9], "Ko'rsatkichlar, savdo, kirim-chiqim, qarzdorlik, mahsulot va kategoriya tahlili"],
+              ["settings", SECTIONS[10], "Til, ko'rinish, tugmalar, savdo va to'lov, xavfsizlik, printer, yangilanish"],
             ] as const
           ).map(([view, title, hint]) => (
             <button
@@ -142,7 +145,7 @@ export default function HomeScreen({
               <p className="text-xs text-muted-foreground">{hint}</p>
             </button>
           ))}
-          {SECTIONS.slice(8).map((title) => (
+          {SECTIONS.slice(11).map((title) => (
             <div key={title} className="rounded-2xl border border-dashed border-border bg-card/60 p-5">
               <p className="font-medium">{title}</p>
               <p className="text-xs text-muted-foreground">Keyingi bosqichda</p>

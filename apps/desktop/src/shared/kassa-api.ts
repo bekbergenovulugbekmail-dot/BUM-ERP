@@ -3,10 +3,12 @@
  * obyektlarini serializatsiyada buzmasligi uchun.
  */
 import type {
+  AnalyticsReport,
   CashierRecord,
   CashMovementKind,
   CompanyInfo,
   DeviceInfo,
+  PartyType,
   PaymentMethod,
   PosConfig,
   RefundMethod,
@@ -64,11 +66,39 @@ export type PosProduct = {
   stock: string;
 };
 
-export type PosCustomer = {
+/** Jismoniy/yuridik shaxs rekvizitlari (mijoz va ta'minotchi uchun umumiy). */
+export type PartyDetails = {
+  partyType: PartyType;
+  email: string | null;
+  address: string | null;
+  /** STIR (yuridik) yoki JSHSHIR (jismoniy). */
+  taxId: string | null;
+  bankAccount: string | null;
+  bankMfo: string | null;
+  notes: string | null;
+};
+
+export type CustomerInput = {
+  name: string;
+  phone?: string | null;
+  partyType?: PartyType;
+  email?: string | null;
+  address?: string | null;
+  taxId?: string | null;
+  contactName?: string | null;
+  bankAccount?: string | null;
+  bankMfo?: string | null;
+  notes?: string | null;
+};
+
+export type SupplierInput = Omit<CustomerInput, "contactName"> & { contactPerson?: string | null };
+
+export type PosCustomer = PartyDetails & {
   id: string;
   name: string;
   code: string | null;
   phone: string | null;
+  contactName: string | null;
   discountPercent: string;
   creditLimit: string;
   totalDebt: string;
@@ -279,11 +309,12 @@ export type ShiftReport = {
 
 // ─── Xarid ───────────────────────────────────────────────────────────────────
 
-export type PosSupplier = {
+export type PosSupplier = PartyDetails & {
   id: string;
   name: string;
   code: string | null;
   phone: string | null;
+  contactPerson: string | null;
   /** Asosiy valyutadagi kitob qiymati (qurilmadagi taxminiy holat). */
   totalDebt: string;
   isActive: boolean;
@@ -489,9 +520,70 @@ export type MovementRow = {
 
 export type MovementPage = { rows: MovementRow[]; nextCursor: string | null; offline: boolean };
 
+// ─── Ma'lumotlar: narxlar ────────────────────────────────────────────────────
+
+export type PriceRow = {
+  productId: string;
+  name: string;
+  sku: string;
+  barcode: string | null;
+  unitName: string;
+  stock: string;
+  /** Narxlar mahsulot valyutasida (asosiy birlik uchun). */
+  salesPrice: string;
+  salesCurrency: string | null;
+  wholesalePrice: string | null;
+  retailPrice: string | null;
+  promoPrice: string | null;
+  promoPriceEnd: string | null;
+  /** Xarid narxi — faqat `products.edit` yoki `purchase.create` ruxsati bilan. */
+  purchasePrice: string | null;
+  purchaseCurrency: string | null;
+  /** Yuborilmagan narx o'zgarishi bor. */
+  pending: boolean;
+};
+
+export type PriceInput = {
+  productId: string;
+  salesPrice?: string;
+  wholesalePrice?: string | null;
+  retailPrice?: string | null;
+  promoPrice?: string | null;
+  promoPriceEnd?: string | null;
+  purchasePrice?: string;
+};
+
 export type DrawerPrefs = { mode: "none" | "driver" | "tcp" | "share"; host?: string; port?: number; share?: string };
 
+/** Kassa ekranidagi tezkor tugma bilan bajariladigan amallar. */
+export type HotkeyAction =
+  | "help"
+  | "search"
+  | "quantity"
+  | "customer"
+  | "hold"
+  | "held"
+  | "return"
+  | "unsynced"
+  | "payCash"
+  | "payCard"
+  | "payBank"
+  | "complete";
+
 export type DevicePrefs = {
+  /** Dastur tili: o'zbek lotin yoki kirill (kirill — ekran matni avtomatik o'giriladi). */
+  language: "uz-Latn" | "uz-Cyrl";
+  theme: "light" | "dark" | "system";
+  fontScale: "normal" | "large";
+  hotkeys: Record<HotkeyAction, string>;
+  /** Qoldiq yetmasa sotishni taqiqlash (standart — ogohlantirib sotiladi, server nomuvofiqlik qayd etadi). */
+  blockNegativeStock: boolean;
+  defaultPaymentMethod: PaymentMethod;
+  enabledPaymentMethods: PaymentMethod[];
+  /** Davriy sinxron oralig'i, soniya. */
+  syncIntervalSec: number;
+  /** Harakatsizlikdan keyin kassirni bloklash (PIN so'raladi), daqiqa; 0 — o'chiq. */
+  autoLockMinutes: number;
   printerName: string | null;
   paperWidth: 58 | 80;
   /** Chek yakunlanishi bilan chop etish. */
@@ -505,6 +597,33 @@ export type DevicePrefs = {
 
 export type LabelPrintInput = { html: string; layout: "roll" | "a4"; widthMm: number; heightMm: number };
 
+export type UpdateInfo = {
+  configured: boolean;
+  available: boolean;
+  mandatory: boolean;
+  current: string;
+  latest: string | null;
+  notes: string | null;
+  /** Yuklab olingan va SHA-256 tekshirilgan o'rnatuvchi tayyor. */
+  downloaded: boolean;
+};
+
+/** Sozlamalar oynasi uchun qurilmadagi ma'lumotlar (offline ham). */
+export type SettingsOverview = {
+  appVersion: string;
+  apiUrl: string | null;
+  device: DeviceInfo | null;
+  company: PosConfig["company"] | null;
+  subscription: { status: string | null; trialEndsAt: string | null };
+  baseCurrency: string;
+  currencies: { code: string; rate: string; rateDate: string | null; isActive: boolean }[];
+  cashback: PosConfig["cashback"] | null;
+  warehouses: { id: string; name: string; code: string; isDefault: boolean; isActive: boolean; current: boolean }[];
+  cashiers: { userId: string; name: string | null; phone: string; role: string; active: boolean; hasPin: boolean }[];
+  permissions: string[];
+  sync: SyncStatus;
+};
+
 export type KassaChannels = {
   "app:status": { input: void; output: AppStatus };
   "setup:options": {
@@ -516,6 +635,11 @@ export type KassaChannels = {
   "cashier:first-login": { input: { phone: string; password: string; pin: string }; output: AppStatus };
   "cashier:unlock": { input: { userId: string; pin: string }; output: AppStatus };
   "cashier:logout": { input: void; output: AppStatus };
+  "cashier:change-pin": { input: { oldPin: string; newPin: string }; output: void };
+  "settings:overview": { input: void; output: SettingsOverview };
+  "update:check": { input: void; output: UpdateInfo };
+  "update:download": { input: void; output: UpdateInfo };
+  "update:install": { input: void; output: void };
   "sync:run": { input: void; output: AppStatus };
   "sync:rejected": { input: void; output: RejectedOperation[] };
   "sync:unsynced": { input: void; output: UnsyncedOperation[] };
@@ -528,7 +652,13 @@ export type KassaChannels = {
   "pos:product-by-code": { input: { code: string }; output: PosProduct | null };
   "pos:products-by-ids": { input: { ids: string[] }; output: PosProduct[] };
   "pos:customers": { input: { query: string }; output: PosCustomer[] };
-  "pos:customer-create": { input: { name: string; phone?: string | null }; output: PosCustomer };
+  "pos:customer-create": { input: CustomerInput; output: PosCustomer };
+  "ref:customers": { input: { query: string; partyType?: PartyType; limit?: number }; output: PosCustomer[] };
+  "ref:customer-update": { input: { customerId: string } & Partial<CustomerInput>; output: PosCustomer };
+  "ref:suppliers": { input: { query: string; partyType?: PartyType; limit?: number }; output: PosSupplier[] };
+  "ref:supplier-update": { input: { supplierId: string } & Partial<SupplierInput>; output: PosSupplier };
+  "ref:prices": { input: { query: string; limit?: number }; output: PriceRow[] };
+  "ref:price-update": { input: PriceInput; output: PriceRow };
   "pos:complete-sale": { input: SaleInput; output: LocalSale };
   "pos:sales": { input: { limit?: number; shiftOnly?: boolean }; output: LocalSale[] };
   "pos:hold": { input: { label?: string; cart: HeldCart }; output: HeldReceipt };
@@ -550,7 +680,7 @@ export type KassaChannels = {
   "history:returns": { input: { from?: string; to?: string; limit?: number }; output: LocalReturn[] };
   "history:server": { input: { from?: string; to?: string; cursor?: string }; output: { sales: RemoteSale[]; nextCursor: string | null } };
   "purchase:suppliers": { input: { query: string }; output: PosSupplier[] };
-  "purchase:supplier-create": { input: { name: string; phone?: string | null }; output: PosSupplier };
+  "purchase:supplier-create": { input: SupplierInput; output: PosSupplier };
   "purchase:products": { input: { query: string }; output: PurchaseProduct[] };
   "purchase:product-by-code": { input: { code: string }; output: PurchaseProduct | null };
   "purchase:complete": { input: PurchaseInput; output: LocalPurchase };
@@ -573,6 +703,7 @@ export type KassaChannels = {
   "count:remove": { input: { productId: string }; output: CountDraft | null };
   "count:cancel": { input: void; output: void };
   "count:complete": { input: { notes?: string | null; zeroMissing?: boolean }; output: LocalStockDocument };
+  "analytics:report": { input: { from: string; to: string; source?: "auto" | "local" }; output: AnalyticsReport };
   "device:prefs": { input: void; output: DevicePrefs };
   "device:save-prefs": { input: DevicePrefs; output: DevicePrefs };
   "device:printers": { input: void; output: { name: string; displayName: string }[] };

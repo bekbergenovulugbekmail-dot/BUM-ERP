@@ -18,10 +18,14 @@ const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
 type CustomerForm = {
   name: string;
+  partyType: "individual" | "legal";
   phone: string;
   email: string;
   address: string;
   contactName: string;
+  taxId: string;
+  bankAccount: string;
+  bankMfo: string;
   latitude: string;
   longitude: string;
   creditLimit: string;
@@ -29,16 +33,21 @@ type CustomerForm = {
 };
 
 const emptyForm = (): CustomerForm => ({
-  name: "", phone: "", email: "", address: "", contactName: "",
+  name: "", partyType: "individual", phone: "", email: "", address: "", contactName: "",
+  taxId: "", bankAccount: "", bankMfo: "",
   latitude: "", longitude: "", creditLimit: "", paymentTermDays: "",
 });
 
 const formOf = (c: Customer): CustomerForm => ({
   name: c.name,
+  partyType: c.partyType ?? "individual",
   phone: c.phone ?? "",
   email: c.email ?? "",
   address: c.address ?? "",
   contactName: c.contactName ?? "",
+  taxId: c.taxId ?? "",
+  bankAccount: c.bankAccount ?? "",
+  bankMfo: c.bankMfo ?? "",
   latitude: c.latitude ?? "",
   longitude: c.longitude ?? "",
   creditLimit: num(c.creditLimit) > 0 ? String(num(c.creditLimit)) : "",
@@ -79,10 +88,15 @@ export default function CustomersSection() {
         id: dialog.mode === "edit" ? dialog.id : undefined,
         body: {
           name: form.name.trim(),
+          partyType: form.partyType,
           phone: form.phone.trim() || null,
           email: form.email.trim() || null,
           address: form.address.trim() || null,
           contactName: form.contactName.trim() || null,
+          taxId: form.taxId.trim() || null,
+          // Jismoniy shaxsda bank rekvizitlari saqlanmaydi
+          bankAccount: form.partyType === "legal" ? form.bankAccount.trim() || null : null,
+          bankMfo: form.partyType === "legal" ? form.bankMfo.trim() || null : null,
           // Bo'sh — koordinata o'chiriladi
           latitude: hasLatitude ? Number(form.latitude) : null,
           longitude: hasLongitude ? Number(form.longitude) : null,
@@ -156,7 +170,10 @@ export default function CustomersSection() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="font-semibold truncate">{c.name}</p>
-                    <p className="text-xs font-mono text-muted-foreground">{c.code}</p>
+                    <p className="text-xs font-mono text-muted-foreground">
+                      {c.code}
+                      {c.partyType === "legal" && <span className="ml-2 font-sans text-primary">Yuridik shaxs</span>}
+                    </p>
                   </div>
                   <div className="flex items-start gap-1">
                     <div className="flex flex-col items-end gap-1">
@@ -227,9 +244,34 @@ export default function CustomersSection() {
               <DialogTitle>{dialog.mode === "edit" ? "Mijozni tahrirlash" : "Yangi mijoz"}</DialogTitle>
             </DialogHeader>
             <div className="space-y-3">
+              <div className="flex gap-1">
+                {(["individual", "legal"] as const).map((type) => (
+                  <Button key={type} type="button" size="sm" variant={form.partyType === type ? "default" : "secondary"} onClick={() => set({ partyType: type })}>
+                    {type === "individual" ? "Jismoniy shaxs" : "Yuridik shaxs"}
+                  </Button>
+                ))}
+              </div>
               <div>
-                <Label>Ism *</Label>
-                <Input value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="Mijoz yoki do'kon nomi" />
+                <Label>{form.partyType === "legal" ? "Tashkilot nomi *" : "Ism *"}</Label>
+                <Input value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder={form.partyType === "legal" ? "MChJ \"Rizo Trade\"" : "Mijoz yoki do'kon nomi"} />
+              </div>
+              <div className={form.partyType === "legal" ? "grid grid-cols-3 gap-3" : ""}>
+                <div>
+                  <Label>{form.partyType === "legal" ? "STIR" : "JSHSHIR / STIR"}</Label>
+                  <Input value={form.taxId} maxLength={32} onChange={(e) => set({ taxId: e.target.value })} placeholder={form.partyType === "legal" ? "9 xonali" : "Ixtiyoriy"} />
+                </div>
+                {form.partyType === "legal" && (
+                  <>
+                    <div>
+                      <Label>Hisob raqami</Label>
+                      <Input value={form.bankAccount} maxLength={64} onChange={(e) => set({ bankAccount: e.target.value })} placeholder="20 xonali" />
+                    </div>
+                    <div>
+                      <Label>MFO</Label>
+                      <Input value={form.bankMfo} maxLength={16} onChange={(e) => set({ bankMfo: e.target.value })} placeholder="00000" />
+                    </div>
+                  </>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

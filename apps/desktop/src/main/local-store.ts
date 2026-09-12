@@ -382,6 +382,17 @@ export class LocalStore {
     this.upsert("suppliers", row);
   }
 
+  /** Kassada narxi o'zgargan mahsulot — keyingi pull server qiymati bilan almashtiradi. */
+  saveProduct(row: Record<string, unknown>): void {
+    this.upsert("products", row);
+  }
+
+  /** Navbatdagi (yuborilmagan) shu turdagi amallar payload'idagi identifikatorlar. */
+  pendingPayloadIds(type: SyncOperationType, key: string): Set<string> {
+    const rows = this.db.prepare("SELECT payload FROM outbox WHERE type = ? AND status = 'pending'").all(type) as { payload: string }[];
+    return new Set(rows.map((row) => String((JSON.parse(row.payload) as Record<string, unknown>)[key] ?? "")));
+  }
+
   pendingSupplierIds(): Set<string> {
     const rows = this.db.prepare("SELECT payload FROM outbox WHERE type = 'supplier.create' AND status = 'pending'").all() as { payload: string }[];
     return new Set(rows.map((row) => String((JSON.parse(row.payload) as { supplierId?: string }).supplierId ?? "")));

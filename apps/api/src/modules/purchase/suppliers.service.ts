@@ -46,7 +46,9 @@ export type SupplierInput = {
   email?: string | null;
   address?: string | null;
   taxId?: string | null;
+  partyType?: "individual" | "legal";
   bankAccount?: string | null;
+  bankMfo?: string | null;
   paymentTermDays?: number;
   currency?: string;
   notes?: string | null;
