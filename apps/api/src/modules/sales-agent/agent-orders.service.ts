@@ -35,6 +35,7 @@ import { checkLocationQuality, insertLocationEvent, type LocationInput } from ".
 import { getSalesAgentPolicy } from "./policy.service.js";
 import { activePromotions, applyPromotions, saveOrderPromotions } from "./promotions.service.js";
 import { accessibleStore, todayRoutes } from "./stores.service.js";
+import { requireWorkSession } from "./work-session.repo.js";
 
 export type PaymentType = (typeof agentOrders.paymentType.enumValues)[number];
 export type ApprovalStatus = (typeof agentOrders.approvalStatus.enumValues)[number];
@@ -541,6 +542,7 @@ export async function submitAgentOrder(
   // Takroriy yuborish (javob yetib kelmay qayta urinish) — natija o'zgarmaydi
   if (row.submittedAt) return { order: await orderView(tx, companyId, orderId, context.agent.id) };
   if (row.status !== "draft") throw conflict("Buyurtma qoralama emas");
+  await requireWorkSession(tx, context.agent.id);
 
   const store = await accessibleStore(tx, context, row.customerId);
   const policy = await getSalesAgentPolicy(tx, companyId);

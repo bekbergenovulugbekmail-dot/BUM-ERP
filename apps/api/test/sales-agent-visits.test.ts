@@ -54,6 +54,10 @@ async function agent(name: string) {
   const employee = await addEmployee(app, company, "Sotuv agenti");
   const rep = await call(company.ownerCookie, "POST", "/api/distribution/sales-reps", { name, userId: employee.id });
   expect(rep.statusCode).toBe(201);
+  expect(
+    (await call(employee.cookie, "POST", "/api/sales-agent/work-session/start", { latitude: 41.3115, longitude: 69.2406, accuracy: 10, recordedAt: new Date().toISOString() }))
+      .statusCode,
+  ).toBe(201);
   return { cookie: employee.cookie, repId: rep.json().salesRep.id as string };
 }
 

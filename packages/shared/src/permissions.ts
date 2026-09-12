@@ -66,6 +66,12 @@ export const PERMISSIONS = {
   "sales_agent.location.live":    { label: "Jonli kuzatuv xaritasi",       group: "Sotuv agenti" },
   "sales_agent.location.history": { label: "Lokatsiya tarixi",             group: "Sotuv agenti" },
   "promotions.manage":            { label: "Aksiyalarni boshqarish",       group: "Sotuv agenti" },
+  /** Xodim + login + rol + agent profilini bitta jarayonda yaratish, faolsizlantirish. */
+  "sales_agent.agents.manage":    { label: "Sotuv agentlarini qo'shish",   group: "Sotuv agenti" },
+  /** Agentga ixtiyoriy beriladi: mijoz aloqa ma'lumotlari (moliyaviy maydonlarsiz). */
+  "sales_agent.customer.edit":           { label: "Agent mijozni tahrirlaydi",       group: "Sotuv agenti" },
+  "sales_agent.customer.location.edit":  { label: "Agent mijoz lokatsiyasini saqlaydi", group: "Sotuv agenti" },
+  "sales_agent.customer.photo.create":   { label: "Agent do'kon rasmini qo'shadi",   group: "Sotuv agenti" },
 
   // ─── Ishlab chiqarish ──────────────────────────────────────────────────────
   "manufacturing.view":   { label: "Ishlab chiqarishni ko'rish",    group: "Ishlab chiqarish" },
@@ -191,7 +197,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "finance.view",
       "crm.view", "crm.manage",
       "distribution.view", "distribution.manage",
-      "sales_agent.supervise", "promotions.manage",
+      "sales_agent.supervise", "promotions.manage", "sales_agent.agents.manage",
       "analytics.view",
       "settings.view",
     ],
@@ -255,6 +261,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     // uni o'zi tasdiqlamasligi kerak (vazifalar ajratimi).
     permissions: [
       "hr.view", "hr.manage", "hr.salary", "hr.attendance",
+      "sales_agent.agents.manage",
       "analytics.view",
       "settings.view",
     ],
@@ -292,7 +299,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "distribution.view", "distribution.manage",
       "sales_agent.supervise",
       "sales_agent.location.view", "sales_agent.location.live", "sales_agent.location.history",
-      "promotions.manage",
+      "promotions.manage", "sales_agent.agents.manage",
       "analytics.view",
     ],
   },

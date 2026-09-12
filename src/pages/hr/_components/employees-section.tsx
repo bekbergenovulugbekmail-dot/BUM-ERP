@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
+import CreateAgentDialog from "@/components/sales-agent/create-agent-dialog.tsx";
 import {
   fmt, localIsoDate,
   type Department, type Employee, type EmployeeStatus, type Position, type SalaryType,
@@ -63,6 +64,8 @@ type EmployeeBody = ReturnType<typeof toBody>;
 export default function EmployeesSection() {
   const { can } = usePermissions();
   const canManage = can("hr.manage");
+  const canAddAgent = can("sales_agent.agents.manage");
+  const [agentOpen, setAgentOpen] = useState(false);
 
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState<string>("all");
@@ -165,7 +168,13 @@ export default function EmployeesSection() {
             <Plus className="h-3.5 w-3.5 mr-1" /> Xodim qo'shish
           </Button>
         )}
+        {canAddAgent && (
+          <Button size="sm" variant="secondary" onClick={() => setAgentOpen(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> Sotuv agenti qo'shish
+          </Button>
+        )}
       </div>
+      {agentOpen && <CreateAgentDialog onClose={() => setAgentOpen(false)} />}
 
       {/* List */}
       {!employees ? (

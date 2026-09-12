@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { formatMoney } from "@/hooks/use-currencies.ts";
 import { useApiQuery } from "@/lib/query.ts";
+import WorkSessionCard from "../_components/work-session-card.tsx";
 import { num, type AgentDashboard, type AgentMe } from "../_lib/types.ts";
 
 function Progress({ value }: { value: number }) {
@@ -35,6 +36,8 @@ export default function AgentDashboardPage() {
           {agent.region ? ` · ${agent.region}` : ""}
         </p>
       </div>
+
+      <WorkSessionCard />
 
       {!data ? (
         <div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}</div>

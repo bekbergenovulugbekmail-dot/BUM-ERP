@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { mapAppUrl } from "@/lib/maps/index.ts";
 import type { DistProspect, DistributionRoute } from "../_lib/types.ts";
 
 type Status = "new" | "converted" | "rejected" | "all";
@@ -121,7 +122,7 @@ export default function ProspectsSection() {
                       {prospect.latitude && prospect.longitude ? (
                         <a
                           className="inline-flex items-center gap-1 text-primary hover:underline"
-                          href={`https://yandex.uz/maps/?pt=${prospect.longitude},${prospect.latitude}&z=17&l=map`}
+                          href={mapAppUrl(prospect.latitude, prospect.longitude, prospect.name)}
                           target="_blank"
                           rel="noreferrer"
                         >

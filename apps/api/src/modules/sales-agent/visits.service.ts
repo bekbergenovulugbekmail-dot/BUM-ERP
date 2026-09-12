@@ -25,6 +25,7 @@ import type { AgentContext } from "./agent-context.js";
 import { checkLocationQuality, insertLocationEvent, type LocationInput } from "./location.service.js";
 import { getSalesAgentPolicy } from "./policy.service.js";
 import { accessibleStore } from "./stores.service.js";
+import { requireWorkSession } from "./work-session.repo.js";
 
 export type NoOrderReason = (typeof agentVisits.noOrderReason.enumValues)[number];
 export type VisitPhotoKind = (typeof agentVisitPhotos.kind.enumValues)[number];
@@ -122,6 +123,7 @@ export async function startVisit(
   meta: RequestMeta,
 ): Promise<VisitOutcome<VisitView>> {
   const store = await accessibleStore(tx, context, input.customerId);
+  await requireWorkSession(tx, context.agent.id);
   // Bir agentning parallel "boshlash" so'rovlari navbatma-navbat
   await tx.select({ id: salesReps.id }).from(salesReps).where(eq(salesReps.id, context.agent.id)).for("update");
   const policy = await getSalesAgentPolicy(tx, context.company.id);
@@ -195,6 +197,7 @@ export async function completeVisit(
     .for("update");
   if (!visit) throw notFound("Tashrif topilmadi");
   if (visit.status !== "in_progress") throw conflict("Tashrif allaqachon yakunlangan");
+  await requireWorkSession(tx, context.agent.id);
 
   const policy = await getSalesAgentPolicy(tx, context.company.id);
   const rejection = checkLocationQuality(policy, input);
@@ -320,6 +323,7 @@ async function ownOpenVisit(conn: DbOrTx, context: AgentContext, visitId: string
   const [visit] = lock ? await query.for("update") : await query;
   if (!visit) throw notFound("Tashrif topilmadi");
   if (visit.status !== "in_progress") throw conflict("Yakunlangan tashrifga rasm qo'shib bo'lmaydi");
+  await requireWorkSession(conn, context.agent.id);
   return visit;
 }
 

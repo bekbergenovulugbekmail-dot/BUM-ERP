@@ -8,7 +8,7 @@ import { AGENT_ONLINE_MINUTES, notFound } from "@bum/shared";
 import { salesReps } from "../../db/schema/crm.js";
 import { companies } from "../../db/schema/platform.js";
 import { salesOrders } from "../../db/schema/sales.js";
-import { agentLocationEvents, agentLocationLatest, agentLocations, agentOrders } from "../../db/schema/sales-agent.js";
+import { agentLocationEvents, agentLocationLatest, agentLocations, agentOrders, agentWorkSessions } from "../../db/schema/sales-agent.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import type { TenantContext } from "../company/tenant.js";
@@ -18,6 +18,7 @@ import { SOLD_STATUSES } from "./dashboard.service.js";
 import type { LocationEventType } from "./location.service.js";
 import { agentToday, routesForAgent } from "./stores.service.js";
 import { currentVisit, storeVisitStatuses } from "./visits.service.js";
+import { sessionsSince } from "./work-session.service.js";
 
 const HISTORY_POINT_LIMIT = 5000;
 const DAY_MS = 86_400_000;
@@ -48,10 +49,12 @@ export async function supervisorAgents(conn: DbOrTx, tenant: TenantContext) {
       phone: salesReps.phone,
       region: salesReps.region,
       linked: salesReps.userId,
+      workSessionStartedAt: agentWorkSessions.startedAt,
       ...latestFields,
     })
     .from(salesReps)
     .leftJoin(agentLocationLatest, eq(agentLocationLatest.salesRepId, salesReps.id))
+    .leftJoin(agentWorkSessions, and(eq(agentWorkSessions.salesRepId, salesReps.id), eq(agentWorkSessions.status, "active")))
     .where(and(eq(salesReps.companyId, tenant.company.id), eq(salesReps.isActive, true)))
     .orderBy(asc(salesReps.name));
 
@@ -108,6 +111,7 @@ export async function supervisorAgentDetail(conn: DbOrTx, tenant: TenantContext,
       ),
     );
   const [company] = await conn.select({ currency: companies.currency }).from(companies).where(eq(companies.id, tenant.company.id)).limit(1);
+  const workSessions = await sessionsSince(conn, tenant.company.id, agent.id, dayRange(plan.date).from);
 
   const stores = plan.stores.map((store) => ({
     id: store.id,
@@ -125,6 +129,7 @@ export async function supervisorAgentDetail(conn: DbOrTx, tenant: TenantContext,
     routes: plan.routes.map((route) => ({ id: route.id, name: route.name, deliveryDate: route.deliveryDate })),
     stores,
     currentVisit: open ? { id: open.id, customerId: open.customerId, customerName: open.customerName, startedAt: open.startedAt } : null,
+    workSessions,
     today: { salesAmount: sales?.amount ?? "0.00", orderCount: sales?.orders ?? 0, visitsCompleted: done, visitsRemaining: stores.length - done },
   };
 }
@@ -196,6 +201,10 @@ export async function agentLocationHistory(
     .orderBy(asc(agentLocationEvents.occurredAt))
     .limit(500);
 
+  const workSessions = await sessionsSince(conn, tenant.company.id, agent.id, from).then((rows) =>
+    rows.filter((session) => session.startedAt < to),
+  );
+
   await writeAuditLog({
     userId: tenant.user.id,
     userName: tenant.user.name,
@@ -206,7 +215,7 @@ export async function agentLocationHistory(
     details: { date, points: points.length },
     ...meta,
   });
-  return { agent, date, points, events, truncated: points.length === HISTORY_POINT_LIMIT };
+  return { agent, date, points, events, workSessions, truncated: points.length === HISTORY_POINT_LIMIT };
 }
 
 /** Lokatsiya hodisalari (sifat rad etishlari, ruxsat, sakrash, geofence) — kun bo'yicha. */

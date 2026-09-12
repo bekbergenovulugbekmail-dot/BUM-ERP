@@ -1,5 +1,9 @@
 {
-  "not_configured.title": "Карта кілті бапталмаған",
-  "not_configured.message": "Yandex Maps API кілтін VITE_YANDEX_MAPS_API_KEY ретінде баптаңыз. Тізім картасыз да жұмыс істейді.",
-  "load_failed": "Картаны жүктеу мүмкін болмады"
+  "schematic": "Сызба · сыртқы карта қызметінсіз",
+  "empty": "Көрсетуге орналасу жоқ",
+  "open": "Картада ашу",
+  "point": "Нүкте",
+  "close": "Жабу",
+  "scale_m": "{{value}} м",
+  "scale_km": "{{value}} км"
 }

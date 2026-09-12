@@ -48,6 +48,8 @@ export const agentLocations = pgTable(
       .references(() => companies.id, { onDelete: "cascade" }),
     salesRepId: uuid("sales_rep_id").notNull().references(() => salesReps.id, { onDelete: "cascade" }),
     userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Nuqta faqat ish sessiyasida qabul qilinadi (eski yozuvlarda bo'sh). */
+    workSessionId: uuid("work_session_id").references(() => agentWorkSessions.id, { onDelete: "set null" }),
     latitude: numeric("latitude", { precision: 9, scale: 6 }).notNull(),
     longitude: numeric("longitude", { precision: 9, scale: 6 }).notNull(),
     /** GPS aniqlik radiusi, metr. */
@@ -103,6 +105,43 @@ export const agentLocationEvents = pgTable(
   (t) => [
     index("ale_company_occurred_idx").on(t.companyId, t.occurredAt),
     index("ale_company_rep_occurred_idx").on(t.companyId, t.salesRepId, t.occurredAt),
+  ],
+);
+
+// ─── Ish sessiyasi ───────────────────────────────────────────────────────────
+
+export const workSessionStatus = pgEnum("agent_work_session_status", ["active", "ended"]);
+/** agent — o'zi yakunladi; auto — uzoq ochiq qolgan sessiya yopildi; deactivated — agent faolsizlantirildi. */
+export const workSessionEndReason = pgEnum("agent_work_session_end_reason", ["agent", "auto", "deactivated"]);
+
+/**
+ * Ish vaqti: lokatsiya faqat faol sessiyada qabul qilinadi va saqlanadi; sessiya yopilganda jonli joy o'chiriladi.
+ * Bir agentda bir vaqtda bitta faol sessiya.
+ */
+export const agentWorkSessions = pgTable(
+  "agent_work_sessions",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    salesRepId: uuid("sales_rep_id").notNull().references(() => salesReps.id, { onDelete: "restrict" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    status: workSessionStatus("status").notNull().default("active"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    startLatitude: numeric("start_latitude", { precision: 9, scale: 6 }).notNull(),
+    startLongitude: numeric("start_longitude", { precision: 9, scale: 6 }).notNull(),
+    startAccuracy: numeric("start_accuracy", { precision: 8, scale: 2 }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    endLatitude: numeric("end_latitude", { precision: 9, scale: 6 }),
+    endLongitude: numeric("end_longitude", { precision: 9, scale: 6 }),
+    endAccuracy: numeric("end_accuracy", { precision: 8, scale: 2 }),
+    endReason: workSessionEndReason("end_reason"),
+    ...timestamps(),
+  },
+  (t) => [
+    index("aws_company_rep_started_idx").on(t.companyId, t.salesRepId, t.startedAt),
+    uniqueIndex("aws_rep_active_key").on(t.salesRepId).where(sql`${t.status} = 'active'`),
   ],
 );
 

@@ -18,6 +18,7 @@ import { distanceMeters, isValidCoordinate, pointOf } from "../../shared/geo.js"
 import { recordHit } from "../../shared/rate-limit.js";
 import type { AgentContext } from "./agent-context.js";
 import { SALES_AGENT_POLICY_KEY, getSalesAgentPolicy } from "./policy.service.js";
+import { requireWorkSession } from "./work-session.repo.js";
 
 export type LocationEventType = (typeof agentLocationEvents.type.enumValues)[number];
 
@@ -83,6 +84,8 @@ export async function insertLocationEvent(
 
 export async function recordAgentLocation(tx: Tx, context: AgentContext, input: LocationInput): Promise<LocationResult> {
   if ((await recordHit(`agent-location:${context.agent.id}`, 60)) > LOCATIONS_PER_MINUTE) throw rateLimited();
+  // Shaxsiy vaqtdagi lokatsiya hech qachon saqlanmaydi
+  const session = await requireWorkSession(tx, context.agent.id);
   const policy = await getSalesAgentPolicy(tx, context.company.id);
 
   const rejection = checkLocationQuality(policy, input);
@@ -128,6 +131,7 @@ export async function recordAgentLocation(tx: Tx, context: AgentContext, input: 
     companyId: context.company.id,
     salesRepId: context.agent.id,
     userId: context.user.id,
+    workSessionId: session.id,
     ...values,
   });
   // Kechikib kelgan (eskiroq) nuqta oxirgi joyni almashtirmaydi

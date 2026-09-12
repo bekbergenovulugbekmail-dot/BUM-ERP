@@ -1,5 +1,9 @@
 {
-  "not_configured.title": "Ключ карты не настроен",
-  "not_configured.message": "Укажите ключ Yandex Maps API в VITE_YANDEX_MAPS_API_KEY. Список работает и без карты.",
-  "load_failed": "Не удалось загрузить карту"
+  "schematic": "Схема · без внешнего картографического сервиса",
+  "empty": "Нет местоположений для отображения",
+  "open": "Открыть на карте",
+  "point": "Точка",
+  "close": "Закрыть",
+  "scale_m": "{{value}} м",
+  "scale_km": "{{value}} км"
 }

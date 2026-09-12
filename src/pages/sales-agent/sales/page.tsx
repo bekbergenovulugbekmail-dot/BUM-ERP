@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { useApiQuery } from "@/lib/query.ts";
 import EmptyState from "../_components/empty-state.tsx";
 import LocationBanner from "../_components/location-banner.tsx";
+import WorkSessionCard from "../_components/work-session-card.tsx";
 import StoreCard from "../_components/store-card.tsx";
 import { originParams, useAgentLocation } from "../_lib/agent-location.ts";
 import type { AgentMe, AgentToday, AgentVisit } from "../_lib/types.ts";
@@ -25,6 +26,7 @@ export default function AgentSalesPage() {
 
   return (
     <div className="p-4 space-y-4">
+      <WorkSessionCard variant="compact" />
       <LocationBanner location={position} />
       {openVisit && (
         <Link

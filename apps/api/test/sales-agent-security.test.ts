@@ -48,6 +48,10 @@ async function agent(owner: Company, name: string) {
   const employee = await addEmployee(app, owner, "Sotuv agenti");
   const rep = await call(owner.ownerCookie, "POST", "/api/distribution/sales-reps", { name, userId: employee.id });
   expect(rep.statusCode).toBe(201);
+  expect(
+    (await call(employee.cookie, "POST", "/api/sales-agent/work-session/start", { latitude: 41.3115, longitude: 69.2406, accuracy: 10, recordedAt: new Date().toISOString() }))
+      .statusCode,
+  ).toBe(201);
   return { cookie: employee.cookie, repId: rep.json().salesRep.id as string };
 }
 
@@ -70,7 +74,7 @@ describe("Sotuv agenti xavfsizligi", () => {
     const ali = await agent(company, "Ali");
     const vali = await agent(company, "Vali");
 
-    const agentPaths = ["/me", "/today", "/stores", "/catalog", "/orders", "/dashboard", "/promotions", "/prospects", "/visits/current"];
+    const agentPaths = ["/me", "/today", "/stores", "/catalog", "/orders", "/dashboard", "/promotions", "/prospects", "/visits/current", "/work-session"];
     const supervisorPaths = ["/agents", "/live", "/events", "/visits", "/orders", "/prospects", "/promotions", `/agents/${vali.repId}`, `/agents/${vali.repId}/history`];
     for (const path of [...agentPaths.map((p) => `/api/sales-agent${p}`), ...supervisorPaths.map((p) => `/api/sales-agent/supervisor${p}`)]) {
       expect((await app.inject({ method: "GET", url: path })).statusCode, path).toBe(401);

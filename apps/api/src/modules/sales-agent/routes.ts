@@ -55,7 +55,7 @@ import {
 } from "../../db/schema/sales-agent.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
-import { percentSchema, qtySchema } from "../../shared/decimal.js";
+import { moneySchema, percentSchema, qtySchema } from "../../shared/decimal.js";
 import type { GeoPoint } from "../../shared/geo.js";
 import { storageProvider } from "../../shared/storage.js";
 import { authOf, requireAuth } from "../auth/guard.js";
@@ -84,6 +84,8 @@ import { recordAgentLocation, reportLocationProblem } from "./location.service.j
 import { getSalesAgentPolicy, salesAgentPolicySchema, saveSalesAgentPolicy } from "./policy.service.js";
 import { agentPromotions, createPromotion, deletePromotion, listPromotions, updatePromotion } from "./promotions.service.js";
 import { agentDashboard } from "./dashboard.service.js";
+import { createSalesAgent, listTeam, supervisorCandidates, updateTeamMember } from "./team.service.js";
+import { currentWorkSession, endWorkSession, startWorkSession } from "./work-session.service.js";
 import { convertProspect, createProspect, listAgentProspects, rejectProspect, supervisorProspects } from "./prospects.service.js";
 import { agentDebtors, agentStore, agentStores, agentToday } from "./stores.service.js";
 import {
@@ -134,6 +136,16 @@ const locationFields = {
   recordedAt: z.iso.datetime({ offset: true }).transform((value) => new Date(value)),
 };
 const locationBody = z.strictObject({ ...locationFields, mocked: z.boolean().optional() });
+const sessionEndBody = z
+  .strictObject({
+    latitude: z.number().min(-90).max(90).optional(),
+    longitude: z.number().min(-180).max(180).optional(),
+    accuracy: z.number().min(0).max(100_000).optional(),
+    recordedAt: z.iso.datetime({ offset: true }).transform((value) => new Date(value)).optional(),
+  })
+  .refine((body) => (body.latitude === undefined) === (body.longitude === undefined), {
+    message: "latitude va longitude birga beriladi",
+  });
 const problemBody = z.strictObject({
   type: z.enum(["permission_denied", "update_failure"]),
   message: z.string().trim().max(500).nullable().optional(),
@@ -215,6 +227,23 @@ const supervisorOrdersQuery = z.object({
 });
 const rejectBody = z.strictObject({ reason: z.string().trim().min(3).max(500) });
 
+const teamCreateBody = z.strictObject({
+  name: z.string().trim().min(1).max(200),
+  phone: z.string().trim().min(1).max(32),
+  password: z.string().min(1).max(256),
+  region: z.string().trim().max(100).nullable().optional(),
+  supervisorUserId: z.uuid().nullable().optional(),
+  monthlyTarget: moneySchema.optional(),
+  hireDate: isoDate.optional(),
+});
+const teamPatchBody = z.strictObject({
+  name: z.string().trim().min(1).max(200).optional(),
+  region: z.string().trim().max(100).nullable().optional(),
+  supervisorUserId: z.uuid().nullable().optional(),
+  monthlyTarget: moneySchema.optional(),
+  isActive: z.boolean().optional(),
+});
+const teamParams = z.object({ salesRepId: z.uuid() });
 const prospectBody = z
   .strictObject({
     name: z.string().trim().min(1).max(200),
@@ -323,6 +352,22 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
     return { debtors: await agentDebtors(db, await readAgent(req), { filter: query.filter, origin: originOf(query) }) };
   });
 
+  // ─── Ish sessiyasi ───────────────────────────────────────────────────────
+
+  app.get("/work-session", async (req) => ({ session: await currentWorkSession(db, await readAgent(req)) }));
+
+  app.post("/work-session/start", async (req, reply) => {
+    const body = locationBody.parse(req.body);
+    const result = await writeAgent(req, (tx, context) => startWorkSession(tx, context, body, requestMeta(req)));
+    reply.status(result.created ? 201 : 200);
+    return { session: result.session };
+  });
+
+  app.post("/work-session/end", async (req) => {
+    const body = sessionEndBody.parse(req.body ?? {});
+    return { session: await writeAgent(req, (tx, context) => endWorkSession(tx, context, body, requestMeta(req))) };
+  });
+
   // ─── Lokatsiya ───────────────────────────────────────────────────────────
 
   app.post("/location", async (req) => {
@@ -428,6 +473,37 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
     const { orderId } = orderParams.parse(req.params);
     const { reason } = cancelBody.parse(req.body ?? {});
     return { order: await writeAgent(req, (tx, context) => cancelAgentOrder(tx, context, orderId, reason ?? null, requestMeta(req))) };
+  });
+
+  // ─── Agentlar jamoasi ("Sotuv agenti qo'shish") ──────────────────────────
+
+  app.get("/team", async (req) => ({ agents: await listTeam(db, await readTenantWith(req, "sales_agent.agents.manage")) }));
+
+  app.get("/team/supervisors", async (req) => {
+    const tenant = await readTenantWith(req, "sales_agent.agents.manage");
+    return { supervisors: await supervisorCandidates(db, tenant.company.id) };
+  });
+
+  app.post("/team", async (req, reply) => {
+    const body = teamCreateBody.parse(req.body);
+    const agent = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      await requirePermission(tx, tenant, "sales_agent.agents.manage");
+      return createSalesAgent(tx, tenant, body, requestMeta(req));
+    });
+    reply.status(201);
+    return { agent };
+  });
+
+  app.patch("/team/:salesRepId", async (req) => {
+    const { salesRepId } = teamParams.parse(req.params);
+    const body = teamPatchBody.parse(req.body);
+    const agent = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      await requirePermission(tx, tenant, "sales_agent.agents.manage");
+      return updateTeamMember(tx, tenant, salesRepId, body, requestMeta(req));
+    });
+    return { agent };
   });
 
   // ─── Bosh sahifa va yangi mijozlar ───────────────────────────────────────

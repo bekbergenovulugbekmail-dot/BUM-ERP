@@ -96,6 +96,15 @@ export const num = (value: string | number | null | undefined): number => Number
 
 export type PaymentType = "cash" | "card" | "credit";
 
+/** `GET /api/sales-agent/work-session` — ish vaqti: lokatsiya faqat faol sessiyada olinadi va saqlanadi. */
+export type WorkSession = {
+  id: string;
+  status: "active" | "ended";
+  startedAt: string;
+  endedAt: string | null;
+  endReason: "agent" | "auto" | "deactivated" | null;
+};
+
 /** `GET /api/sales-agent/dashboard` — summalar asosiy valyutada (agent yuborgan, bekor qilinmagan buyurtmalar). */
 export type AgentDashboard = {
   date: string;

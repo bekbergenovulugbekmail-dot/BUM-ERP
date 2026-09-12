@@ -15,6 +15,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+import { employees } from "./hr.js";
 import { companies, users } from "./platform.js";
 import { customers } from "./sales.js";
 import { legacyId, money, percent, pk, timestamps } from "./_shared.js";
@@ -70,6 +71,10 @@ export const salesReps = pgTable(
     phone: varchar("phone", { length: 20 }),
     email: varchar("email", { length: 255 }),
     userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    /** HR xodimi (agent "Sotuv agenti qo'shish" orqali yaratilganda bog'lanadi). */
+    employeeId: uuid("employee_id").references(() => employees.id, { onDelete: "set null" }),
+    /** Mas'ul supervayzer (tizim foydalanuvchisi). */
+    supervisorUserId: uuid("supervisor_user_id").references(() => users.id, { onDelete: "set null" }),
     region: varchar("region", { length: 100 }),
 
     monthlyTarget: money("monthly_target").notNull().default("0"),

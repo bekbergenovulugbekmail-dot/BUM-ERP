@@ -99,9 +99,18 @@ describe("Sotuv agenti roli va ish joyi", () => {
       .set({ permissions: ["crm.view"] })
       .where(and(eq(roles.companyId, company.companyId), eq(roles.name, "Direktor")));
 
-    const migration = await readFile(new URL("../src/db/migrations/0020_sales_agent_roles.sql", import.meta.url), "utf8");
+    // 0020 (rollar) va 0027 (agent qo'shish ruxsati) — ketma-ket, ikki marta
+    const migrations = await Promise.all(
+      ["0020_sales_agent_roles.sql", "0027_sales_agent_team.sql"].map((file) =>
+        readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), "utf8"),
+      ),
+    );
+    const permissionStatements = (sqlText: string) =>
+      sqlText.split("--> statement-breakpoint").filter((statement) => !/ALTER TABLE/i.test(statement));
     const run = async () => {
-      for (const statement of migration.split("--> statement-breakpoint")) await db.execute(sql.raw(statement));
+      for (const migration of migrations) {
+        for (const statement of permissionStatements(migration)) await db.execute(sql.raw(statement));
+      }
     };
     await run();
     await run();
@@ -115,6 +124,9 @@ describe("Sotuv agenti roli va ish joyi", () => {
     const direktor = byName.get("Direktor")!.permissions;
     expect(direktor[0]).toBe("crm.view");
     expect(direktor.filter((p) => p === "sales_agent.supervise")).toHaveLength(1);
-    expect(direktor).toEqual(expect.arrayContaining(["sales_agent.location.history", "promotions.manage"]));
+    expect(direktor.filter((p) => p === "sales_agent.agents.manage")).toHaveLength(1);
+    expect(direktor).toEqual(
+      expect.arrayContaining(["sales_agent.location.history", "promotions.manage", "sales_agent.customer.location.edit"]),
+    );
   });
 });

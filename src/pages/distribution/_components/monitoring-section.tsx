@@ -203,6 +203,11 @@ export default function MonitoringSection() {
                   {agent.todayRoutes.length > 0 ? agent.todayRoutes.map((route) => route.name).join(", ") : t("monitoring.no_route")}
                 </p>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                  <span className={cn(agent.workSessionStartedAt && "text-emerald-700")}>
+                    {agent.workSessionStartedAt
+                      ? t("monitoring.on_duty", { time: formatTime(agent.workSessionStartedAt) })
+                      : t("monitoring.off_duty")}
+                  </span>
                   <span>{agent.recordedAt ? t("monitoring.last_seen", { time: formatTime(agent.recordedAt) }) : t("monitoring.never")}</span>
                   {agent.accuracy !== null && <span>{t("monitoring.accuracy", { value: Math.round(Number(agent.accuracy)) })}</span>}
                   {agent.suspicious && (
@@ -273,6 +278,25 @@ export default function MonitoringSection() {
             {detail.currentVisit && (
               <p className="text-xs text-blue-600">{t("monitoring.detail.current", { store: detail.currentVisit.customerName })}</p>
             )}
+            <div className="flex flex-wrap items-center gap-1 text-[11px]">
+              <span className="text-muted-foreground">{t("monitoring.detail.sessions")}:</span>
+              {detail.workSessions.length === 0 ? (
+                <span className="text-muted-foreground">{t("monitoring.detail.no_sessions")}</span>
+              ) : (
+                detail.workSessions.map((session) => (
+                  <span
+                    key={session.id}
+                    className={cn(
+                      "rounded-full px-2 py-0.5 font-medium tabular-nums",
+                      session.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {formatTime(session.startedAt)} — {session.endedAt ? formatTime(session.endedAt) : t("monitoring.detail.session_now")}
+                    {session.endReason && session.endReason !== "agent" && ` · ${t(`monitoring.detail.session_end.${session.endReason}`)}`}
+                  </span>
+                ))
+              )}
+            </div>
             {detail.stores.length > 0 && (
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground">{t("monitoring.detail.stores")}</p>

@@ -47,6 +47,7 @@ describe("davriy tozalash", () => {
       rateLimits: 1,
       agentLocations: 0,
       agentLocationEvents: 0,
+      workSessionsEnded: 0,
     });
     expect(await db.$count(sessions)).toBe(3);
     expect(await db.$count(passwordResetCodes)).toBe(2);
@@ -59,6 +60,7 @@ describe("davriy tozalash", () => {
       rateLimits: 0,
       agentLocations: 0,
       agentLocationEvents: 0,
+      workSessionsEnded: 0,
     });
   });
 

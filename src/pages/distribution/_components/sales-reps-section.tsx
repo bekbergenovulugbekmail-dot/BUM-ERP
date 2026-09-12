@@ -10,6 +10,9 @@ import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
+import { useTranslation } from "react-i18next";
+import CreateAgentDialog from "@/components/sales-agent/create-agent-dialog.tsx";
 import { num, type SalesRep } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
@@ -22,6 +25,9 @@ const emptyForm = () => ({ name: "", phone: "", email: "", region: "", monthlyTa
 type EmployeeOption = { id: string; name: string | null; phone: string; companyRole: string; membershipActive: boolean };
 
 export default function SalesRepsSection() {
+  const { t } = useTranslation("distribution");
+  const { can } = usePermissions();
+  const [agentOpen, setAgentOpen] = useState(false);
   const reps = useApiQuery<{ salesReps: SalesRep[] }>("/api/distribution/sales-reps", { includeInactive: true }).data?.salesReps;
   // `users.view` bo'lmasa ro'yxat kelmaydi — bog'lash maydoni ko'rsatilmaydi
   const employees = useApiQuery<{ employees: EmployeeOption[] }>("/api/company/employees").data?.employees;
@@ -105,10 +111,18 @@ export default function SalesRepsSection() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">Savdo vakillari</h3>
-        <Button size="sm" onClick={() => { resetForm(); setCreateOpen(true); }}>
-          <Plus className="h-3.5 w-3.5 mr-1" /> Qo'shish
-        </Button>
+        <div className="flex gap-2">
+          {can("sales_agent.agents.manage") && (
+            <Button size="sm" onClick={() => setAgentOpen(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1" /> {t("team.add")}
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" onClick={() => { resetForm(); setCreateOpen(true); }}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> Qo'shish
+          </Button>
+        </div>
       </div>
+      {agentOpen && <CreateAgentDialog onClose={() => setAgentOpen(false)} />}
 
       {!reps ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">

@@ -7,9 +7,11 @@ import { ApiError } from "@/lib/api.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { formatMoney } from "@/hooks/use-currencies.ts";
 import { cn } from "@/lib/utils.ts";
+import { mapAppUrl } from "@/lib/maps/index.ts";
 import EmptyState from "../_components/empty-state.tsx";
 import LocationBanner from "../_components/location-banner.tsx";
 import OrderEntry from "../_components/order-entry.tsx";
+import WorkSessionCard from "../_components/work-session-card.tsx";
 import VisitPanel from "../_components/visit-panel.tsx";
 import { originParams, useAgentLocation } from "../_lib/agent-location.ts";
 import { formatDistance, num, type AgentMe, type StoreProfile } from "../_lib/types.ts";
@@ -58,7 +60,7 @@ export default function AgentStorePage() {
   const distance = formatDistance(store.distanceMeters, t);
   const mapUrl =
     store.latitude && store.longitude
-      ? `https://yandex.uz/maps/?pt=${store.longitude},${store.latitude}&z=17&l=map`
+      ? mapAppUrl(store.latitude, store.longitude, store.name)
       : null;
 
   return (
@@ -69,6 +71,7 @@ export default function AgentStorePage() {
         <p className="text-xs text-muted-foreground">{store.code} · {store.routes.map((route) => route.name).join(", ")}</p>
       </div>
 
+      <WorkSessionCard variant="compact" />
       <LocationBanner location={position} />
       <VisitPanel store={store} />
       <OrderEntry customerId={store.id} />

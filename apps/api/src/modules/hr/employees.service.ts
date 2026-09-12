@@ -12,8 +12,11 @@
  */
 import { and, asc, eq, getTableColumns, ilike, ne, or, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
+import { salesReps } from "../../db/schema/crm.js";
 import { attendances, departments, employees, leaves, positions, salaryPayments } from "../../db/schema/hr.js";
 import { companyMembers } from "../../db/schema/platform.js";
+import { endSessionsForUser } from "../sales-agent/work-session.repo.js";
+import { setMemberAccess } from "../users/member-access.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
@@ -218,7 +221,13 @@ export async function updateEmployee(
 ) {
   const companyId = tenant.company.id;
   const [current] = await tx
-    .select({ id: employees.id, departmentId: employees.departmentId, positionId: employees.positionId })
+    .select({
+      id: employees.id,
+      departmentId: employees.departmentId,
+      positionId: employees.positionId,
+      status: employees.status,
+      userId: employees.userId,
+    })
     .from(employees)
     .where(and(eq(employees.id, employeeId), eq(employees.companyId, companyId)))
     .limit(1)
@@ -230,6 +239,18 @@ export async function updateEmployee(
     .update(employees)
     .set({ ...patch, ...references, updatedAt: new Date() })
     .where(eq(employees.id, employeeId));
+
+  // Ishdan bo'shatilgan xodimning logini va agent ish joyi bloklanadi; qayta ishga olinsa — ochiladi
+  const userId = patch.userId !== undefined ? patch.userId : current.userId;
+  if (userId && patch.status && patch.status !== current.status && (patch.status === "terminated" || current.status === "terminated")) {
+    const active = patch.status !== "terminated";
+    await setMemberAccess(tx, companyId, userId, active);
+    if (!active) await endSessionsForUser(tx, companyId, userId);
+    await tx
+      .update(salesReps)
+      .set({ isActive: active, updatedAt: new Date() })
+      .where(and(eq(salesReps.companyId, companyId), eq(salesReps.userId, userId)));
+  }
 
   // Maosh va bank ma'lumotlari o'zgarishi auditda maydon nomi bilan qoladi, qiymati bilan emas
   await hrAudit(tx, tenant, meta, {
@@ -243,7 +264,7 @@ export async function updateEmployee(
 
 export async function deleteEmployee(tx: Tx, tenant: TenantContext, employeeId: string, meta: RequestMeta) {
   const [employee] = await tx
-    .select({ id: employees.id, code: employees.code })
+    .select({ id: employees.id, code: employees.code, userId: employees.userId })
     .from(employees)
     .where(and(eq(employees.id, employeeId), eq(employees.companyId, tenant.company.id)))
     .limit(1)
@@ -259,6 +280,15 @@ export async function deleteEmployee(tx: Tx, tenant: TenantContext, employeeId: 
     .from(sql`(select 1) as probe`);
   if (usage?.used) throw conflict("Xodimning davomat, ta'til yoki maosh tarixi bor — ishdan bo'shating");
 
+  // O'chirilgan xodimning hisobi yetim bo'lib qolmasin — login va agent ish joyi bloklanadi
+  if (employee.userId) {
+    await setMemberAccess(tx, tenant.company.id, employee.userId, false);
+    await endSessionsForUser(tx, tenant.company.id, employee.userId);
+    await tx
+      .update(salesReps)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(and(eq(salesReps.companyId, tenant.company.id), eq(salesReps.userId, employee.userId)));
+  }
   await tx.delete(employees).where(eq(employees.id, employeeId));
   await hrAudit(tx, tenant, meta, {
     action: "EMPLOYEE_DELETED",

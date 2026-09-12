@@ -1,5 +1,9 @@
 {
-  "not_configured.title": "Xarita kaliti sozlanmagan",
-  "not_configured.message": "Yandex Maps API kalitini VITE_YANDEX_MAPS_API_KEY sifatida sozlang. Ro'yxat xaritasiz ishlayveradi.",
-  "load_failed": "Xaritani yuklab bo'lmadi"
+  "schematic": "Sxematik ko'rinish · tashqi xarita xizmatisiz",
+  "empty": "Ko'rsatish uchun lokatsiya yo'q",
+  "open": "Xaritada ochish",
+  "point": "Nuqta",
+  "close": "Yopish",
+  "scale_m": "{{value}} m",
+  "scale_km": "{{value}} km"
 }

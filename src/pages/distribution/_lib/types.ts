@@ -112,6 +112,8 @@ export type SupervisedAgent = {
   receivedAt: string | null;
   suspicious: boolean | null;
   hasLogin: boolean;
+  /** Faol ish sessiyasi boshlangan vaqt; ish vaqti bo'lmasa `null` (lokatsiya olinmaydi). */
+  workSessionStartedAt: string | null;
   online: boolean;
   todayRoutes: { id: string; name: string; deliveryDate: string | null }[];
 };
@@ -177,8 +179,18 @@ export type VisitsSummary = {
 
 export type StoreVisitStatus = "waiting" | "in_progress" | "ordered" | "visited_no_order";
 
+/** Agentning ish sessiyasi ("Ishni boshlash" — "Ishni yakunlash"). */
+export type AgentWorkSession = {
+  id: string;
+  status: "active" | "ended";
+  startedAt: string;
+  endedAt: string | null;
+  endReason: "agent" | "auto" | "deactivated" | null;
+};
+
 /** `GET /supervisor/agents/:salesRepId` — agent tafsiloti (bugun). */
 export type AgentDetail = {
+  workSessions: AgentWorkSession[];
   agent: { id: string; name: string; code: string; phone: string | null; region: string | null };
   currency: string;
   routes: { id: string; name: string; deliveryDate: string | null }[];
@@ -244,6 +256,7 @@ export type AgentLocationHistory = {
   date: string;
   points: { latitude: string; longitude: string; accuracy: string | null; recordedAt: string; suspicious: boolean }[];
   events: LocationEvent[];
+  workSessions: AgentWorkSession[];
   truncated: boolean;
 };
 

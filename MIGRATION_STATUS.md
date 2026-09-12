@@ -768,6 +768,43 @@ xarita — Yandex Maps (`MapProvider` orqasida, kalit env'da), lokatsiya — avv
 - brauzer E2E (Playwright) — o'rnatilmagan va bajarilmagan; API oqimlari `app.inject` integratsiya testlarida HTTP darajasida tekshirilgan
 - **G–I** commit `4fd9e13`, production'ga deploy qilindi (API va web SUCCESS; `/dashboard`, `/prospects`, `/supervisor/promotions`, `/supervisor/prospects` 401; bundle'da yangi ekranlar; `sw.js` — `erp-assets-v2`). Lokal: API 247/247 (55 fayl, `--maxWorkers=2`), frontend unit 11/11, web tsc, lint va `vite build` o'tdi
 
+### Sotuv agenti tizimi — MASTER IMPLEMENTATION PROMPT (2026-09-12)
+
+Foydalanuvchi `BUMERP_SOTUVAGE.docx` (68 bo'lim) yubordi: pullik xarita API'si yo'q, agent Xodimlar bo'limidan yaratiladi, ish sessiyasi, majburiy rasmlar va minimal tashrif vaqti, Mijozlar bo'limi, hisobotlar, kengaytirilgan xavfsizlik testlari. Hujjat o'zi tasdiq: audit → reja → BLOCKER bo'lmasa to'xtamasdan. Production ma'lumotini o'chirish, destruktiv migratsiya — alohida tasdiqsiz qilinmaydi.
+
+| # | Bosqich | Holat |
+|---|---|---|
+| V1 | Xodimlar → "Sotuv agenti qo'shish" (xodim + login + rol + a'zolik + agent bir tranzaksiyada); faolsizlantirish/ishdan bo'shatish kirishni bloklaydi | ✅ |
+| V2 | Pullik xarita API'si olib tashlandi: sxematik SVG xarita, "Xaritada ochish" — qurilma ilovasi | ✅ |
+| V3 | Ish sessiyasi: "Ishni boshlash/yakunlash", lokatsiya faqat ish vaqtida | ✅ |
+| V4 | Tashrif v2: majburiy vitrina/polka rasmi (kamera), minimal vaqt, hududdan chiqish siyosati, BUYURTMA / BUYURTMA YO'Q | ⏳ |
+| V5 | Mijozlar bo'limi (tarix, tahrirlash, joylashuv, rasm), 5 bandli menyu | ⏳ |
+| V6 | Katalog UX (brend, rasm, mahsulot oynasi, pastki "Buyurtmani yakunlash") | ⏳ |
+| V7 | Hisobotlar (FROM/TO), bildirishnoma qabul qiluvchilari, radius 100/200/300/500 | ⏳ |
+| V8 | Audit nomlari, chegara/xavfsizlik/buxgalteriya testlari, yakuniy hisobot | ⏳ |
+
+**V1 — Agentni Xodimlar bo'limidan yaratish** (migratsiya 0027):
+- ruxsat `sales_agent.agents.manage` (Direktor, Supervayzer, Savdo menejeri, HR menejeri); Direktorga `sales_agent.customer.edit`, `customer.location.edit`, `customer.photo.create` (V5 da ishlatiladi). Migratsiya mavjud rollarga takror ishlasa o'zgarmaydigan qilib qo'shadi
+- `sales_reps.employee_id` (HR xodimi) va `supervisor_user_id`
+- `POST /api/sales-agent/team` — bitta tranzaksiyada: foydalanuvchi (telefon login, parol hash, "Sotuv agenti" roli va kompaniya a'zoligi), HR xodimi ("Savdo" bo'limi, "Sotuv agenti" lavozimi — bo'lmasa yaratiladi), savdo agenti (hudud, supervayzer, oylik plan). Telefon band — 409, hech narsa yaratilmaydi. Audit `SALES_AGENT_CREATED` (parolsiz)
+- `GET /team` (lavozim, holat, hudud, supervayzer, login holati), `GET /team/supervisors`, `PATCH /team/:salesRepId` — faolsizlantirish: HR holati `terminated`, kompaniya a'zoligi o'chadi, sessiyalar bekor qilinadi, boshqa faol a'zoligi bo'lmasa foydalanuvchi bloklanadi (eski cookie 401, kirish 403); qayta faollashtirish tiklaydi. Audit `SALES_AGENT_DEACTIVATED/ACTIVATED/UPDATED`
+- HR: xodim `terminated` qilinsa yoki o'chirilsa — bog'langan login bloklanadi, savdo agenti faolsizlanadi (yetim foydalanuvchi qolmaydi)
+- web: HR → Xodimlar va Distributsiya → Savdo agentlari oynalarida "Sotuv agenti qo'shish" (uz/ru/kk)
+
+**V2 — Pullik xarita API'siz:**
+- Yandex Maps va `VITE_YANDEX_MAPS_API_KEY` olib tashlandi. `MapView` — tashqi so'rovsiz SVG sxema (nuqtalar, yo'l, geofence doiralari, masshtab), nuqta tanlanganda "Xaritada ochish"
+- `mapAppUrl()` — Android `geo:`, iOS Apple Maps, boshqalarda OpenStreetMap havolasi (API kaliti yo'q)
+- GPS — telefon brauzeridan; geofence faqat serverda
+
+**V3 — Ish sessiyasi** (migratsiya 0028):
+- jadval `agent_work_sessions` (boshlanish/tugash vaqti va joyi, holat `active`/`ended`, sabab `agent`/`auto`/`deactivated`; bir agentda bitta faol — `aws_rep_active_key`); `agent_locations.work_session_id`
+- `GET /api/sales-agent/work-session`, `POST /work-session/start` (yangi GPS, sifat siyosat bo'yicha; takror — o'sha sessiya 200), `POST /work-session/end` (ochiq tashrif bo'lsa 409; jonli joy o'chiriladi). Audit `WORK_SESSION_START/END`
+- ish vaqtidan tashqarida: `POST /location` — 409 `work_session_required`, nuqta saqlanmaydi; tashrif boshlash/yakunlash, rasm va buyurtma yuborish ham 409
+- 16 soatdan uzoq ochiq sessiya soatlik tozalashda yopiladi (`auto`); agent faolsizlantirilsa yoki HR'da ishdan bo'shatilsa — `deactivated`
+- supervayzer: agentlar ro'yxatida "Ishda · HH:MM dan" / "Ish vaqti emas", agent tafsiloti va lokatsiya tarixida kunlik ish sessiyalari
+- web agent: bosh sahifada "Ishni boshlash/yakunlash" kartasi, Sotuv va do'kon sahifasida ixcham holat; lokatsiya kuzatuvi faqat faol sessiyada ishlaydi
+- testlar: `sales-agent-team` (2), `sales-agent-work-session` (2); agent testlari ish sessiyasini boshlab ishlaydi
+
 ### Distributsiya (`/api/distribution`)
 
 O'qish — `distribution.view`, yozish — `distribution.manage`.
@@ -787,7 +824,9 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
 | Metod | Yo'l | Ruxsat |
 |---|---|---|
 | GET | `/me`, `/today`, `/stores`, `/stores/:customerId`, `/debtors` (`?lat=&lng=`) | `sales_agent.use` |
-| POST | `/location`, `/location/events` | `sales_agent.use` |
+| GET / POST | `/work-session`, `/work-session/start`, `/work-session/end` | `sales_agent.use` |
+| POST | `/location` (faqat faol ish sessiyasida), `/location/events` | `sales_agent.use` |
+| GET / POST / PATCH | `/team`, `/team/supervisors`, `/team/:salesRepId` | `sales_agent.agents.manage` |
 | GET | `/visits/current`, `/visits` (`?date=`), `/visits/:visitId/photos/:photoId/url` | `sales_agent.use` (o'z tashriflari) |
 | POST | `/visits/start`, `/visits/:visitId/complete`, `/visits/:visitId/photos/uploads`, `/visits/:visitId/photos` | `sales_agent.use` |
 | GET | `/catalog` (`?search=&categoryId=&limit=&offset=`), `/catalog/:productId/image`, `/orders` (`?state=&customerId=`), `/orders/:orderId` | `sales_agent.use` |
@@ -832,6 +871,6 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
      - Railway tarifida bir xizmatga 2 ta shaxsiy domen — `admin.bum-erp.uz` qo'shilmadi; admin panel `https://bum-erp.uz/uz/admin`. Kirish sahifasidagi "admin.bum-erp.uz" havolasi yangilanishi kerak
      - logto o'chirilgach `auth.bum-erp.uz` va `logto-admin.bum-erp.uz` CNAME yozuvlarini ham o'chirish (osilib qolgan CNAME — subdomen egallash xavfi)
      - fayl saqlash (S3) sozlanmagan — rasm/chek yuklash 503; SMS (Eskiz) va AI kalitlari yo'q — tegishli funksiyalar o'chiq
-     - xarita: `bum-web` o'zgaruvchisi `VITE_YANDEX_MAPS_API_KEY` (Yandex kabinetida `bum-erp.uz` domeniga cheklangan JavaScript API kaliti) qo'shilib, web qayta deploy qilinishi kerak — hozir Monitoring xaritasi o'rniga tushuntirish ko'rinadi
+     - xarita: kalit kerak emas (V2 — sxematik xarita va qurilmaning xarita ilovasi)
      - Convex RBAC tuzatishi (`main` `3f958f1`) — Convex ishlatilmasa kerak emas
 3. **PR:** `feat/postgres-migration` → `main` — production'ga o'tish kuni kelishilgach

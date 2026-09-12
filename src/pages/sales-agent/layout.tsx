@@ -24,7 +24,7 @@ import { SUPPORTED_LOCALES, SUPPORTED_LOCALES_ARRAY, setLocaleInPath } from "@/i
 import { AgentLocationContext } from "./_lib/agent-location.ts";
 import { useLocationTracking, type AgentLocation } from "./_lib/use-location-tracking.ts";
 import { useOnline } from "./_lib/use-online.ts";
-import type { AgentMe } from "./_lib/types.ts";
+import type { AgentMe, WorkSession } from "./_lib/types.ts";
 
 const NAV: { path: string; labelKey: string; icon: LucideIcon }[] = [
   { path: "dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard },
@@ -70,11 +70,13 @@ function LanguageMenu() {
 }
 
 /** Sarlavhadagi lokatsiya belgisi: yashil — faol, sariq — server rad etdi, qizil — o'chiq. */
-function LocationIndicator({ location }: { location: AgentLocation }) {
+function LocationIndicator({ location, onDuty }: { location: AgentLocation; onDuty: boolean }) {
   const { t } = useTranslation("agent");
-  const off = location.status === "denied" || location.status === "unavailable";
-  const label = off
-    ? t("location.status.off")
+  const off = !onDuty || location.status === "denied" || location.status === "unavailable";
+  const label = !onDuty
+    ? t("location.status.off_duty")
+    : off
+      ? t("location.status.off")
     : location.status === "active"
       ? t("location.status.active")
       : location.status === "rejected"
@@ -88,7 +90,7 @@ function LocationIndicator({ location }: { location: AgentLocation }) {
       title={label}
       className={cn(
         "flex h-10 w-10 items-center justify-center",
-        off ? "text-destructive" : location.status === "active" ? "text-emerald-600" : location.status === "rejected" ? "text-amber-600" : "text-muted-foreground",
+        !onDuty ? "text-muted-foreground" : off ? "text-destructive" : location.status === "active" ? "text-emerald-600" : location.status === "rejected" ? "text-amber-600" : "text-muted-foreground",
       )}
     >
       <Icon className={cn("h-5 w-5", location.status === "locating" && "animate-pulse")} />
@@ -122,8 +124,13 @@ export default function SalesAgentLayout() {
   const allowed = can("sales_agent.use");
   const meQuery = useApiQuery<AgentMe>(allowed ? "/api/sales-agent/me" : null);
   const policy = useApiQuery<{ policy: SalesAgentPolicy }>(meQuery.data ? "/api/sales-agent/policy" : null).data?.policy;
+  // Lokatsiya faqat ish vaqtida (faol ish sessiyasi) kuzatiladi — shaxsiy vaqtda brauzer GPS'i so'ralmaydi
+  const workSession = useApiQuery<{ session: WorkSession | null }>(meQuery.data ? "/api/sales-agent/work-session" : null, undefined, {
+    refetchInterval: 60_000,
+  }).data?.session;
+  const onDuty = workSession?.status === "active";
   const location = useLocationTracking(
-    Boolean(meQuery.data),
+    onDuty,
     policy?.trackingIntervalSeconds ?? DEFAULT_SALES_AGENT_POLICY.trackingIntervalSeconds,
   );
   const online = useOnline();
@@ -140,7 +147,7 @@ export default function SalesAgentLayout() {
         <p className="text-sm font-semibold truncate">{meQuery.data?.agent.name ?? currentUser.name ?? t("title")}</p>
         <p className="text-[11px] text-muted-foreground truncate">{currentUser.companyName}</p>
       </div>
-      {meQuery.data && <LocationIndicator location={location} />}
+      {meQuery.data && <LocationIndicator location={location} onDuty={onDuty} />}
       <LanguageMenu />
       <Button variant="ghost" size="icon" className="h-10 w-10" title={t("logout")} onClick={() => signout()}>
         <LogOut className="h-5 w-5" />
@@ -183,7 +190,7 @@ export default function SalesAgentLayout() {
         <main className="flex-1 pb-24">
           {!meQuery.data ? (
             <Spinner />
-          ) : location.status === "denied" ? (
+          ) : onDuty && location.status === "denied" ? (
             <LocationRequired onRequest={location.request} />
           ) : (
             <Outlet context={meQuery.data} />
