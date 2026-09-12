@@ -10,178 +10,657 @@ body,
 }
 
 /*
- * Kassa mavzulari: `data-theme` html'da (butun ilova) yoki oldindan ko'rish kartasida (faqat o'sha karta). Faqat rang
- * tokenlari — komponentlar `bg-background`, `text-foreground`, `bg-primary` … orqali oladi. Har mavzu to'liq to'plam
- * beradi: kartadagi ko'rinish ilovaning joriy mavzusiga bog'liq bo'lmasin.
+ * ─── Kassa mavzu tizimi ─────────────────────────────────────────────────────────────────────────────────────────────
+ * `data-theme` html'da (butun ilova) yoki oldindan ko'rish oynasida (faqat o'sha blok). Har mavzu — to'liq token
+ * to'plami: asosiy (shadcn: --background, --card, --primary …) + kassa (--pos-*: yuqori panel, savat, jami, to'lov
+ * tugmasi, kategoriya, narx, aksiya, qoldiq, fokus, soya). Semantik ranglar (muvaffaqiyat, ogohlantirish, xato, ma'lumot,
+ * aksiya) har mavzuda ma'nosini saqlaydi — mavzu faqat ohangni moslaydi. Komponentlar faqat tokenlar orqali rang oladi.
  */
-[data-theme="light"],
-[data-theme="blue"],
-[data-theme="green"],
-[data-theme="purple"],
-[data-theme="orange"],
-[data-theme="classic"] {
-  --background: oklch(0.98 0.004 240);
-  --foreground: oklch(0.15 0.02 250);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.15 0.02 250);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.15 0.02 250);
-  --primary: oklch(0.45 0.18 260);
+
+@theme inline {
+  --color-pos-surface: var(--pos-surface);
+  --color-pos-topbar: var(--pos-topbar);
+  --color-pos-topbar-foreground: var(--pos-topbar-foreground);
+  --color-pos-cart: var(--pos-cart);
+  --color-pos-total: var(--pos-total);
+  --color-pos-total-foreground: var(--pos-total-foreground);
+  --color-pos-category: var(--pos-category);
+  --color-pos-category-foreground: var(--pos-category-foreground);
+  --color-pos-category-active: var(--pos-category-active);
+  --color-pos-category-active-foreground: var(--pos-category-active-foreground);
+  --color-pos-action: var(--pos-action);
+  --color-pos-action-foreground: var(--pos-action-foreground);
+  --color-pos-action-hover: var(--pos-action-hover);
+  --color-pos-primary-hover: var(--pos-primary-hover);
+  --color-pos-selected: var(--pos-selected);
+  --color-pos-price: var(--pos-price);
+  --color-pos-focus: var(--pos-focus);
+  --color-pos-success: var(--pos-success);
+  --color-pos-success-foreground: var(--pos-success-foreground);
+  --color-pos-warning: var(--pos-warning);
+  --color-pos-warning-foreground: var(--pos-warning-foreground);
+  --color-pos-danger: var(--pos-danger);
+  --color-pos-danger-foreground: var(--pos-danger-foreground);
+  --color-pos-info: var(--pos-info);
+  --color-pos-info-foreground: var(--pos-info-foreground);
+  --color-pos-promotion: var(--pos-promotion);
+  --color-pos-promotion-foreground: var(--pos-promotion-foreground);
+  --color-pos-stock-ok: var(--pos-stock-ok);
+  --color-pos-stock-low: var(--pos-stock-low);
+  --color-pos-stock-out: var(--pos-stock-out);
+}
+
+@utility shadow-pos {
+  box-shadow: var(--pos-shadow);
+}
+
+@utility shadow-pos-hover {
+  box-shadow: var(--pos-shadow-hover);
+}
+
+@utility pos-glass {
+  backdrop-filter: blur(var(--pos-glass-blur)) saturate(1.1);
+}
+
+/* Umumiy standartlar: kassa tokenlari asosiy tokenlardan olinadi (mavzu bloki kerakli joyini qayta belgilaydi) */
+:root,
+[data-theme] {
+  --pos-surface: var(--card);
+  --pos-topbar: var(--card);
+  --pos-topbar-foreground: var(--card-foreground);
+  --pos-cart: var(--card);
+  --pos-total: color-mix(in oklab, var(--primary) 8%, var(--card));
+  --pos-total-foreground: var(--card-foreground);
+  --pos-category: var(--secondary);
+  --pos-category-foreground: var(--secondary-foreground);
+  --pos-category-active: var(--primary);
+  --pos-category-active-foreground: var(--primary-foreground);
+  --pos-action: var(--primary);
+  --pos-action-foreground: var(--primary-foreground);
+  --pos-action-hover: color-mix(in oklab, var(--pos-action) 86%, black);
+  --pos-primary-hover: color-mix(in oklab, var(--primary) 86%, black);
+  --pos-selected: color-mix(in oklab, var(--primary) 12%, var(--card));
+  --pos-price: var(--card-foreground);
+  --pos-focus: var(--ring);
+  --pos-shadow: 0 1px 2px rgb(15 23 42 / 0.05), 0 1px 6px rgb(15 23 42 / 0.05);
+  --pos-shadow-hover: 0 4px 10px rgb(15 23 42 / 0.1), 0 10px 24px rgb(15 23 42 / 0.08);
+  --pos-backdrop: var(--background);
+  --pos-glass-blur: 0px;
+  --pos-boost: 0rem;
+  --pos-card-extra: 0rem;
+
+  /* Semantik ranglar — yorug' asos (matn sifatida ham, to'ldirilgan belgi sifatida ham o'qiladi) */
+  --pos-success: oklch(0.52 0.13 150);
+  --pos-success-foreground: oklch(0.99 0 0);
+  --pos-warning: oklch(0.55 0.12 65);
+  --pos-warning-foreground: oklch(0.99 0 0);
+  --pos-danger: oklch(0.55 0.2 27);
+  --pos-danger-foreground: oklch(0.99 0 0);
+  --pos-info: oklch(0.52 0.13 245);
+  --pos-info-foreground: oklch(0.99 0 0);
+  --pos-promotion: oklch(0.55 0.2 350);
+  --pos-promotion-foreground: oklch(0.99 0 0);
+  --pos-stock-ok: var(--pos-success);
+  --pos-stock-low: var(--pos-warning);
+  --pos-stock-out: var(--pos-danger);
+}
+
+/* Zichlik (html `data-density`): tugma balandligi, mahsulot kartasi o'lchami, oraliq */
+:root {
+  --pos-tap: 2.75rem;
+  --pos-card-min: 10rem;
+  --pos-quick-card-min: 11.5rem;
+  --pos-gap: 0.5rem;
+  --pos-tap-size: calc(var(--pos-tap) + var(--pos-boost));
+  --pos-card-size: calc(var(--pos-card-min) + var(--pos-card-extra));
+  --pos-quick-card-size: calc(var(--pos-quick-card-min) + var(--pos-card-extra));
+}
+
+[data-density="compact"] {
+  --pos-tap: 2.25rem;
+  --pos-card-min: 8.75rem;
+  --pos-quick-card-min: 10rem;
+  --pos-gap: 0.375rem;
+}
+
+[data-density="touch"] {
+  --pos-tap: 3.25rem;
+  --pos-card-min: 12rem;
+  --pos-quick-card-min: 13.5rem;
+  --pos-gap: 0.75rem;
+}
+
+/* Ingichka, mavzu rangidagi aylantirish chiziqlari (qorong'i mavzularda oq chiziq chiqmaydi) */
+[data-theme] * {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent) transparent;
+}
+
+/* Kategoriya tablari: chiziq ko'rinmaydi — g'ildirak, klaviatura (← →) va barmoq bilan aylantiriladi */
+.pos-scroll-x {
+  scrollbar-width: none;
+  /* O'ng chetda yumshoq so'nish — davomi borligini bildiradi */
+  mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent);
+}
+
+/* ❄️ Snow POS — minimalistik yorug', lekin toza oq emas */
+[data-theme="snow"] {
+  --radius: 0.625rem;
+  --background: oklch(0.965 0.005 250);
+  --foreground: oklch(0.2 0.02 255);
+  --card: oklch(0.995 0.002 250);
+  --card-foreground: oklch(0.2 0.02 255);
+  --popover: oklch(0.995 0.002 250);
+  --popover-foreground: oklch(0.2 0.02 255);
+  --primary: oklch(0.5 0.15 262);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.94 0.01 240);
-  --secondary-foreground: oklch(0.3 0.02 250);
-  --muted: oklch(0.94 0.01 240);
-  --muted-foreground: oklch(0.52 0.02 250);
-  --accent: oklch(0.92 0.03 255);
-  --accent-foreground: oklch(0.3 0.08 260);
-  --destructive: oklch(0.58 0.22 25);
-  --border: oklch(0.88 0.01 240);
-  --input: oklch(0.9 0.01 240);
-  --ring: oklch(0.55 0.15 260);
-  --sidebar: oklch(0.18 0.03 255);
-  --sidebar-foreground: oklch(0.92 0.01 240);
-  --sidebar-primary: oklch(0.58 0.2 255);
-  --sidebar-accent: oklch(0.26 0.04 255);
-  --sidebar-border: oklch(0.28 0.04 255);
+  --secondary: oklch(0.93 0.008 250);
+  --secondary-foreground: oklch(0.28 0.02 255);
+  --muted: oklch(0.935 0.006 250);
+  --muted-foreground: oklch(0.5 0.02 255);
+  --accent: oklch(0.93 0.03 262);
+  --accent-foreground: oklch(0.32 0.09 262);
+  --destructive: oklch(0.56 0.2 27);
+  --border: oklch(0.885 0.008 250);
+  --input: oklch(0.87 0.01 250);
+  --ring: oklch(0.55 0.14 262);
+  --sidebar: oklch(0.93 0.006 250);
+  --sidebar-foreground: oklch(0.25 0.02 255);
+  --sidebar-primary: oklch(0.5 0.15 262);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.885 0.012 255);
+  --sidebar-accent-foreground: oklch(0.2 0.02 255);
+  --sidebar-border: oklch(0.87 0.008 250);
+  --sidebar-ring: oklch(0.55 0.14 262);
 }
 
-[data-theme="blue"] {
-  --background: oklch(0.97 0.014 240);
-  --primary: oklch(0.55 0.17 240);
-  --secondary: oklch(0.92 0.035 240);
-  --muted: oklch(0.93 0.025 240);
-  --accent: oklch(0.9 0.05 240);
-  --accent-foreground: oklch(0.32 0.11 245);
-  --border: oklch(0.85 0.04 240);
-  --input: oklch(0.87 0.04 240);
-  --ring: oklch(0.58 0.16 240);
-  --sidebar: oklch(0.3 0.1 245);
-  --sidebar-accent: oklch(0.38 0.1 245);
-  --sidebar-border: oklch(0.4 0.09 245);
-}
-
-[data-theme="green"] {
-  --background: oklch(0.975 0.014 155);
-  --primary: oklch(0.52 0.14 155);
-  --secondary: oklch(0.92 0.035 155);
-  --muted: oklch(0.93 0.025 155);
-  --accent: oklch(0.9 0.05 155);
-  --accent-foreground: oklch(0.3 0.09 155);
-  --border: oklch(0.85 0.04 155);
-  --input: oklch(0.87 0.04 155);
-  --ring: oklch(0.55 0.14 155);
-  --sidebar: oklch(0.28 0.07 160);
-  --sidebar-accent: oklch(0.36 0.07 160);
-  --sidebar-border: oklch(0.38 0.06 160);
-}
-
-[data-theme="purple"] {
-  --background: oklch(0.975 0.014 300);
-  --primary: oklch(0.5 0.18 300);
-  --secondary: oklch(0.92 0.035 300);
-  --muted: oklch(0.93 0.025 300);
-  --accent: oklch(0.9 0.05 300);
-  --accent-foreground: oklch(0.32 0.12 300);
-  --border: oklch(0.85 0.04 300);
-  --input: oklch(0.87 0.04 300);
-  --ring: oklch(0.55 0.17 300);
-  --sidebar: oklch(0.28 0.1 300);
-  --sidebar-accent: oklch(0.36 0.1 300);
-  --sidebar-border: oklch(0.38 0.09 300);
-}
-
-[data-theme="orange"] {
-  --background: oklch(0.98 0.015 70);
-  --primary: oklch(0.62 0.18 50);
+/* 🌊 Ocean Blue — professional ko'k, chuqur ko'k yon panel va jami bloki */
+[data-theme="ocean"] {
+  --radius: 0.625rem;
+  --background: oklch(0.955 0.018 238);
+  --foreground: oklch(0.21 0.04 250);
+  --card: oklch(0.995 0.004 238);
+  --card-foreground: oklch(0.21 0.04 250);
+  --popover: oklch(0.995 0.004 238);
+  --popover-foreground: oklch(0.21 0.04 250);
+  --primary: oklch(0.5 0.14 250);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.93 0.04 70);
-  --muted: oklch(0.94 0.03 70);
-  --accent: oklch(0.91 0.06 65);
-  --accent-foreground: oklch(0.38 0.11 50);
-  --border: oklch(0.86 0.05 70);
-  --input: oklch(0.88 0.05 70);
-  --ring: oklch(0.65 0.17 50);
-  --sidebar: oklch(0.32 0.08 45);
-  --sidebar-accent: oklch(0.4 0.09 45);
-  --sidebar-border: oklch(0.42 0.08 45);
+  --secondary: oklch(0.915 0.03 240);
+  --secondary-foreground: oklch(0.3 0.06 250);
+  --muted: oklch(0.93 0.02 240);
+  --muted-foreground: oklch(0.48 0.04 250);
+  --accent: oklch(0.9 0.045 240);
+  --accent-foreground: oklch(0.33 0.1 250);
+  --destructive: oklch(0.55 0.2 27);
+  --border: oklch(0.86 0.03 240);
+  --input: oklch(0.85 0.03 240);
+  --ring: oklch(0.55 0.14 250);
+  --sidebar: oklch(0.3 0.08 252);
+  --sidebar-foreground: oklch(0.95 0.01 240);
+  --sidebar-primary: oklch(0.72 0.12 235);
+  --sidebar-primary-foreground: oklch(0.2 0.05 250);
+  --sidebar-accent: oklch(0.38 0.085 252);
+  --sidebar-accent-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(0.36 0.08 252);
+  --sidebar-ring: oklch(0.72 0.12 235);
+  --pos-total: oklch(0.32 0.085 252);
+  --pos-total-foreground: oklch(0.98 0.005 240);
 }
 
-/* Klassik POS: kulrang fon, ko'k-yashil asosiy rang, to'rtburchak burchaklar */
+/* 💚 Emerald — asosiy rang zumrad (ko'k-yashil), muvaffaqiyat — alohida sariq-yashil token */
+[data-theme="emerald"] {
+  --radius: 0.625rem;
+  --background: oklch(0.962 0.016 165);
+  --foreground: oklch(0.21 0.03 170);
+  --card: oklch(0.995 0.004 165);
+  --card-foreground: oklch(0.21 0.03 170);
+  --popover: oklch(0.995 0.004 165);
+  --popover-foreground: oklch(0.21 0.03 170);
+  --primary: oklch(0.48 0.1 178);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.92 0.03 165);
+  --secondary-foreground: oklch(0.3 0.05 170);
+  --muted: oklch(0.93 0.02 165);
+  --muted-foreground: oklch(0.47 0.04 170);
+  --accent: oklch(0.9 0.045 170);
+  --accent-foreground: oklch(0.32 0.08 175);
+  --destructive: oklch(0.55 0.2 27);
+  --border: oklch(0.86 0.03 165);
+  --input: oklch(0.85 0.03 165);
+  --ring: oklch(0.52 0.1 178);
+  --sidebar: oklch(0.28 0.055 178);
+  --sidebar-foreground: oklch(0.95 0.01 165);
+  --sidebar-primary: oklch(0.75 0.11 170);
+  --sidebar-primary-foreground: oklch(0.2 0.04 175);
+  --sidebar-accent: oklch(0.36 0.06 178);
+  --sidebar-accent-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(0.34 0.055 178);
+  --sidebar-ring: oklch(0.75 0.11 170);
+  --pos-total: oklch(0.3 0.06 178);
+  --pos-total-foreground: oklch(0.98 0.005 165);
+  --pos-success: oklch(0.53 0.15 132);
+}
+
+/* 💜 Royal Purple — zamonaviy binafsha; aksiya — qizil-pushti (binafshadan ajraladi) */
+[data-theme="royal"] {
+  --radius: 0.75rem;
+  --background: oklch(0.962 0.014 300);
+  --foreground: oklch(0.21 0.03 300);
+  --card: oklch(0.995 0.004 300);
+  --card-foreground: oklch(0.21 0.03 300);
+  --popover: oklch(0.995 0.004 300);
+  --popover-foreground: oklch(0.21 0.03 300);
+  --primary: oklch(0.5 0.16 298);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.92 0.03 300);
+  --secondary-foreground: oklch(0.3 0.06 300);
+  --muted: oklch(0.93 0.02 300);
+  --muted-foreground: oklch(0.48 0.04 300);
+  --accent: oklch(0.9 0.045 300);
+  --accent-foreground: oklch(0.34 0.11 300);
+  --destructive: oklch(0.55 0.2 27);
+  --border: oklch(0.86 0.03 300);
+  --input: oklch(0.85 0.03 300);
+  --ring: oklch(0.55 0.15 298);
+  --sidebar: oklch(0.28 0.08 295);
+  --sidebar-foreground: oklch(0.96 0.01 300);
+  --sidebar-primary: oklch(0.76 0.12 300);
+  --sidebar-primary-foreground: oklch(0.2 0.05 300);
+  --sidebar-accent: oklch(0.36 0.09 295);
+  --sidebar-accent-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(0.35 0.08 295);
+  --sidebar-ring: oklch(0.76 0.12 300);
+  --pos-total: oklch(0.31 0.09 296);
+  --pos-total-foreground: oklch(0.98 0.005 300);
+  --pos-promotion: oklch(0.55 0.2 15);
+}
+
+/* 🟠 Sunset Orange — energiyali; ogohlantirish (zaytun-sariq) va xato (qizil) to'q sariqdan ajraladi */
+[data-theme="sunset"] {
+  --radius: 0.625rem;
+  --background: oklch(0.968 0.016 70);
+  --foreground: oklch(0.22 0.03 50);
+  --card: oklch(0.995 0.005 70);
+  --card-foreground: oklch(0.22 0.03 50);
+  --popover: oklch(0.995 0.005 70);
+  --popover-foreground: oklch(0.22 0.03 50);
+  --primary: oklch(0.52 0.15 42);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.925 0.03 70);
+  --secondary-foreground: oklch(0.32 0.06 50);
+  --muted: oklch(0.935 0.02 70);
+  --muted-foreground: oklch(0.48 0.04 55);
+  --accent: oklch(0.91 0.05 65);
+  --accent-foreground: oklch(0.36 0.1 45);
+  --destructive: oklch(0.53 0.21 25);
+  --border: oklch(0.87 0.035 70);
+  --input: oklch(0.86 0.035 70);
+  --ring: oklch(0.58 0.15 45);
+  --sidebar: oklch(0.29 0.05 45);
+  --sidebar-foreground: oklch(0.96 0.01 70);
+  --sidebar-primary: oklch(0.75 0.14 55);
+  --sidebar-primary-foreground: oklch(0.2 0.05 45);
+  --sidebar-accent: oklch(0.37 0.06 45);
+  --sidebar-accent-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(0.35 0.05 45);
+  --sidebar-ring: oklch(0.75 0.14 55);
+  --pos-total: oklch(0.33 0.07 45);
+  --pos-total-foreground: oklch(0.98 0.005 70);
+  --pos-warning: oklch(0.52 0.11 100);
+  --pos-danger: oklch(0.53 0.21 25);
+}
+
+/* ✨ Glass POS — yengil fon gradienti, shaffof paneller; narx va matn o'qilishi uchun savat va kartalar deyarli to'liq */
+[data-theme="glass"] {
+  --radius: 0.875rem;
+  --background: oklch(0.93 0.025 265);
+  --foreground: oklch(0.2 0.03 265);
+  --card: oklch(1 0 0 / 82%);
+  --card-foreground: oklch(0.2 0.03 265);
+  --popover: oklch(0.99 0.005 265 / 92%);
+  --popover-foreground: oklch(0.2 0.03 265);
+  --primary: oklch(0.5 0.15 268);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.93 0.02 265 / 80%);
+  --secondary-foreground: oklch(0.28 0.03 265);
+  --muted: oklch(1 0 0 / 50%);
+  --muted-foreground: oklch(0.44 0.03 265);
+  --accent: oklch(0.95 0.03 268 / 85%);
+  --accent-foreground: oklch(0.32 0.1 268);
+  --destructive: oklch(0.55 0.2 27);
+  --border: oklch(1 0 0 / 70%);
+  --input: oklch(0.4 0.03 265 / 24%);
+  --ring: oklch(0.55 0.15 268);
+  --sidebar: oklch(1 0 0 / 55%);
+  --sidebar-foreground: oklch(0.22 0.03 265);
+  --sidebar-primary: oklch(0.5 0.15 268);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(1 0 0 / 75%);
+  --sidebar-accent-foreground: oklch(0.2 0.03 265);
+  --sidebar-border: oklch(1 0 0 / 70%);
+  --sidebar-ring: oklch(0.55 0.15 268);
+  --pos-surface: oklch(1 0 0 / 72%);
+  --pos-topbar: oklch(1 0 0 / 62%);
+  --pos-cart: oklch(1 0 0 / 86%);
+  --pos-total: oklch(0.97 0.02 268 / 94%);
+  --pos-selected: oklch(0.9 0.05 268 / 70%);
+  --pos-glass-blur: 12px;
+  --pos-backdrop:
+    radial-gradient(circle at 12% 8%, oklch(0.88 0.07 230 / 70%) 0%, transparent 42%),
+    radial-gradient(circle at 88% 92%, oklch(0.88 0.07 320 / 60%) 0%, transparent 45%), linear-gradient(135deg, oklch(0.95 0.02 250), oklch(0.93 0.03 300));
+  --pos-shadow: 0 1px 2px rgb(40 40 90 / 0.06), 0 6px 20px rgb(40 40 90 / 0.07);
+  --pos-shadow-hover: 0 6px 16px rgb(40 40 90 / 0.12), 0 14px 34px rgb(40 40 90 / 0.1);
+}
+
+/* 🛒 Classic Supermarket — eng amaliy: katta elementlar, qorong'i yuqori panel, yashil katta to'lov tugmasi, animatsiyasiz */
 [data-theme="classic"] {
-  --radius: 0.125rem;
+  --radius: 0.25rem;
   --background: oklch(0.9 0.006 250);
-  --card: oklch(0.97 0.002 250);
-  --popover: oklch(0.97 0.002 250);
-  --primary: oklch(0.45 0.09 200);
-  --secondary: oklch(0.84 0.01 250);
-  --muted: oklch(0.87 0.006 250);
-  --muted-foreground: oklch(0.4 0.012 250);
-  --accent: oklch(0.84 0.04 200);
-  --accent-foreground: oklch(0.28 0.06 200);
-  --border: oklch(0.68 0.012 250);
-  --input: oklch(0.72 0.012 250);
-  --ring: oklch(0.48 0.09 200);
-  --sidebar: oklch(0.34 0.05 220);
-}
-
-[data-theme="dark"] {
-  --background: oklch(0.13 0.02 255);
-  --foreground: oklch(0.93 0.01 240);
-  --card: oklch(0.17 0.025 255);
-  --card-foreground: oklch(0.93 0.01 240);
-  --popover: oklch(0.17 0.025 255);
-  --popover-foreground: oklch(0.93 0.01 240);
-  --primary: oklch(0.62 0.19 255);
+  --foreground: oklch(0.18 0.01 250);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.01 250);
+  --popover: oklch(0.99 0 0);
+  --popover-foreground: oklch(0.18 0.01 250);
+  --primary: oklch(0.45 0.13 255);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.23 0.03 255);
-  --secondary-foreground: oklch(0.93 0.01 240);
-  --muted: oklch(0.23 0.03 255);
-  --muted-foreground: oklch(0.62 0.02 250);
-  --accent: oklch(0.26 0.04 255);
-  --accent-foreground: oklch(0.88 0.03 250);
-  --destructive: oklch(0.65 0.22 25);
-  --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.55 0.15 260);
-  --sidebar: oklch(0.12 0.025 255);
-  --sidebar-foreground: oklch(0.88 0.01 240);
-  --sidebar-primary: oklch(0.62 0.2 255);
-  --sidebar-accent: oklch(0.2 0.035 255);
-  --sidebar-border: oklch(1 0 0 / 8%);
+  --secondary: oklch(0.84 0.01 250);
+  --secondary-foreground: oklch(0.2 0.01 250);
+  --muted: oklch(0.87 0.006 250);
+  --muted-foreground: oklch(0.38 0.01 250);
+  --accent: oklch(0.86 0.04 255);
+  --accent-foreground: oklch(0.25 0.08 255);
+  --destructive: oklch(0.52 0.21 27);
+  --border: oklch(0.7 0.01 250);
+  --input: oklch(0.68 0.01 250);
+  --ring: oklch(0.45 0.13 255);
+  --sidebar: oklch(0.3 0.05 255);
+  --sidebar-foreground: oklch(0.97 0 0);
+  --sidebar-primary: oklch(0.75 0.12 245);
+  --sidebar-primary-foreground: oklch(0.15 0.02 255);
+  --sidebar-accent: oklch(0.38 0.06 255);
+  --sidebar-accent-foreground: oklch(0.99 0 0);
+  --sidebar-border: oklch(0.36 0.05 255);
+  --sidebar-ring: oklch(0.75 0.12 245);
+  --pos-topbar: oklch(0.3 0.05 255);
+  --pos-topbar-foreground: oklch(0.97 0 0);
+  --pos-total: oklch(0.22 0.01 250);
+  --pos-total-foreground: oklch(0.97 0 0);
+  --pos-action: oklch(0.5 0.14 150);
+  --pos-action-foreground: oklch(0.99 0 0);
+  --pos-boost: 0.5rem;
+  --pos-card-extra: 1.5rem;
+  --pos-shadow: none;
+  --pos-shadow-hover: 0 0 0 2px var(--primary);
 }
 
-/* Yuqori kontrast: qora fon, oq matn, sariq asosiy rang, aniq chegaralar */
+/* Qorong'i mavzular uchun semantik ranglar (yorqinroq, qorong'i fonda o'qiladi) */
+[data-theme="midnight"],
+[data-theme="graphite"],
+[data-theme="neon"],
+[data-theme="custom"].dark {
+  --pos-success: oklch(0.76 0.15 150);
+  --pos-success-foreground: oklch(0.18 0.03 150);
+  --pos-warning: oklch(0.82 0.14 80);
+  --pos-warning-foreground: oklch(0.22 0.04 70);
+  --pos-danger: oklch(0.72 0.18 27);
+  --pos-danger-foreground: oklch(0.16 0.02 27);
+  --pos-info: oklch(0.77 0.12 240);
+  --pos-info-foreground: oklch(0.17 0.03 250);
+  --pos-promotion: oklch(0.75 0.18 350);
+  --pos-promotion-foreground: oklch(0.17 0.03 350);
+  --pos-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 8px rgb(0 0 0 / 0.2);
+  --pos-shadow-hover: 0 6px 16px rgb(0 0 0 / 0.35), 0 12px 28px rgb(0 0 0 / 0.3);
+}
+
+/* 🌑 Midnight POS — yumshoq qorong'i (qora emas), kechki smena uchun */
+[data-theme="midnight"] {
+  --radius: 0.75rem;
+  --background: oklch(0.2 0.022 262);
+  --foreground: oklch(0.94 0.01 255);
+  --card: oklch(0.245 0.024 262);
+  --card-foreground: oklch(0.94 0.01 255);
+  --popover: oklch(0.26 0.025 262);
+  --popover-foreground: oklch(0.94 0.01 255);
+  --primary: oklch(0.7 0.13 255);
+  --primary-foreground: oklch(0.17 0.03 262);
+  --secondary: oklch(0.3 0.025 262);
+  --secondary-foreground: oklch(0.92 0.01 255);
+  --muted: oklch(0.285 0.022 262);
+  --muted-foreground: oklch(0.73 0.02 255);
+  --accent: oklch(0.32 0.04 262);
+  --accent-foreground: oklch(0.93 0.01 255);
+  --destructive: oklch(0.66 0.19 27);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.7 0.13 255);
+  --sidebar: oklch(0.17 0.022 262);
+  --sidebar-foreground: oklch(0.88 0.01 255);
+  --sidebar-primary: oklch(0.7 0.13 255);
+  --sidebar-primary-foreground: oklch(0.17 0.03 262);
+  --sidebar-accent: oklch(0.25 0.03 262);
+  --sidebar-accent-foreground: oklch(0.95 0.01 255);
+  --sidebar-border: oklch(1 0 0 / 7%);
+  --sidebar-ring: oklch(0.7 0.13 255);
+  --pos-topbar: oklch(0.225 0.024 262);
+  --pos-cart: oklch(0.225 0.024 262);
+  --pos-total: oklch(0.29 0.045 262);
+  --pos-total-foreground: oklch(0.97 0.01 255);
+  --pos-price: oklch(0.97 0.01 255);
+}
+
+/* 🩶 Graphite — neytral kulrang (qora emas), minimal vizual shovqin */
+[data-theme="graphite"] {
+  --radius: 0.625rem;
+  --background: oklch(0.265 0.005 260);
+  --foreground: oklch(0.93 0.004 260);
+  --card: oklch(0.305 0.005 260);
+  --card-foreground: oklch(0.93 0.004 260);
+  --popover: oklch(0.32 0.006 260);
+  --popover-foreground: oklch(0.93 0.004 260);
+  --primary: oklch(0.78 0.07 225);
+  --primary-foreground: oklch(0.2 0.01 260);
+  --secondary: oklch(0.355 0.006 260);
+  --secondary-foreground: oklch(0.92 0.004 260);
+  --muted: oklch(0.34 0.005 260);
+  --muted-foreground: oklch(0.75 0.005 260);
+  --accent: oklch(0.38 0.01 250);
+  --accent-foreground: oklch(0.94 0.004 260);
+  --destructive: oklch(0.68 0.17 27);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.78 0.07 225);
+  --sidebar: oklch(0.225 0.005 260);
+  --sidebar-foreground: oklch(0.88 0.004 260);
+  --sidebar-primary: oklch(0.78 0.07 225);
+  --sidebar-primary-foreground: oklch(0.2 0.01 260);
+  --sidebar-accent: oklch(0.3 0.006 260);
+  --sidebar-accent-foreground: oklch(0.95 0.004 260);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.78 0.07 225);
+  --pos-topbar: oklch(0.285 0.005 260);
+  --pos-cart: oklch(0.285 0.005 260);
+  --pos-total: oklch(0.35 0.012 250);
+  --pos-total-foreground: oklch(0.97 0.004 260);
+  --pos-price: oklch(0.97 0.004 260);
+}
+
+/* ⚡ Neon Night — qorong'i futuristik, yorqin urg'u faqat kerakli joyda (fokus, tanlangan, to'lov) */
+[data-theme="neon"] {
+  --radius: 0.75rem;
+  --background: oklch(0.17 0.035 285);
+  --foreground: oklch(0.95 0.01 280);
+  --card: oklch(0.215 0.04 285);
+  --card-foreground: oklch(0.95 0.01 280);
+  --popover: oklch(0.235 0.045 285);
+  --popover-foreground: oklch(0.95 0.01 280);
+  --primary: oklch(0.8 0.14 195);
+  --primary-foreground: oklch(0.17 0.04 285);
+  --secondary: oklch(0.27 0.045 285);
+  --secondary-foreground: oklch(0.93 0.01 280);
+  --muted: oklch(0.26 0.04 285);
+  --muted-foreground: oklch(0.75 0.03 280);
+  --accent: oklch(0.3 0.06 300);
+  --accent-foreground: oklch(0.95 0.01 280);
+  --destructive: oklch(0.68 0.21 20);
+  --border: oklch(0.8 0.14 195 / 18%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.8 0.14 195);
+  --sidebar: oklch(0.14 0.03 285);
+  --sidebar-foreground: oklch(0.9 0.01 280);
+  --sidebar-primary: oklch(0.8 0.14 195);
+  --sidebar-primary-foreground: oklch(0.17 0.04 285);
+  --sidebar-accent: oklch(0.22 0.045 285);
+  --sidebar-accent-foreground: oklch(0.95 0.01 280);
+  --sidebar-border: oklch(0.8 0.14 195 / 14%);
+  --sidebar-ring: oklch(0.8 0.14 195);
+  --pos-topbar: oklch(0.19 0.04 285);
+  --pos-cart: oklch(0.19 0.04 285);
+  --pos-total: oklch(0.25 0.06 290);
+  --pos-total-foreground: oklch(0.97 0.01 280);
+  --pos-price: oklch(0.97 0.01 280);
+  --pos-promotion: oklch(0.75 0.2 340);
+  --pos-shadow-hover: 0 0 0 1px oklch(0.8 0.14 195 / 45%), 0 0 18px oklch(0.8 0.14 195 / 18%);
+}
+
+/* 👁️ High Contrast — WCAG: qora fon, oq matn, sariq asosiy rang, aniq chegaralar, qalin fokus, katta elementlar */
 [data-theme="high-contrast"] {
+  --radius: 0.375rem;
   --background: oklch(0 0 0);
   --foreground: oklch(1 0 0);
-  --card: oklch(0.12 0 0);
+  --card: oklch(0.13 0 0);
   --card-foreground: oklch(1 0 0);
-  --popover: oklch(0.12 0 0);
+  --popover: oklch(0.13 0 0);
   --popover-foreground: oklch(1 0 0);
   --primary: oklch(0.9 0.18 100);
   --primary-foreground: oklch(0 0 0);
   --secondary: oklch(0.25 0 0);
   --secondary-foreground: oklch(1 0 0);
   --muted: oklch(0.2 0 0);
-  --muted-foreground: oklch(0.92 0 0);
+  --muted-foreground: oklch(0.93 0 0);
   --accent: oklch(0.32 0 0);
   --accent-foreground: oklch(1 0 0);
   --destructive: oklch(0.72 0.24 30);
-  --border: oklch(1 0 0 / 75%);
-  --input: oklch(1 0 0 / 75%);
+  --border: oklch(1 0 0 / 85%);
+  --input: oklch(1 0 0 / 85%);
   --ring: oklch(0.9 0.18 100);
   --sidebar: oklch(0 0 0);
   --sidebar-foreground: oklch(1 0 0);
   --sidebar-primary: oklch(0.9 0.18 100);
+  --sidebar-primary-foreground: oklch(0 0 0);
   --sidebar-accent: oklch(0.25 0 0);
-  --sidebar-border: oklch(1 0 0 / 75%);
+  --sidebar-accent-foreground: oklch(1 0 0);
+  --sidebar-border: oklch(1 0 0 / 85%);
+  --sidebar-ring: oklch(0.9 0.18 100);
+  --pos-topbar: oklch(0.08 0 0);
+  --pos-cart: oklch(0.08 0 0);
+  --pos-total: oklch(0.16 0 0);
+  --pos-total-foreground: oklch(1 0 0);
+  --pos-selected: oklch(0.9 0.18 100 / 22%);
+  --pos-price: oklch(1 0 0);
+  --pos-success: oklch(0.85 0.2 145);
+  --pos-success-foreground: oklch(0 0 0);
+  --pos-warning: oklch(0.9 0.17 95);
+  --pos-warning-foreground: oklch(0 0 0);
+  --pos-danger: oklch(0.75 0.22 30);
+  --pos-danger-foreground: oklch(0 0 0);
+  --pos-info: oklch(0.82 0.12 230);
+  --pos-info-foreground: oklch(0 0 0);
+  --pos-promotion: oklch(0.8 0.18 340);
+  --pos-promotion-foreground: oklch(0 0 0);
+  --pos-shadow: none;
+  --pos-shadow-hover: 0 0 0 2px var(--primary);
+  --pos-boost: 0.25rem;
+}
+
+.dark {
+  color-scheme: dark;
 }
 
 body {
   user-select: none;
+  background: var(--pos-backdrop);
 }
 
 input,
 textarea {
   user-select: text;
+}
+
+/* Glass: faqat bir nechta katta sirtda (modal, menyu) — ko'p kartada blur ishlashni sekinlashtiradi */
+[data-theme="glass"] [data-slot="dialog-content"],
+[data-theme="glass"] [data-slot="dropdown-menu-content"],
+[data-theme="glass"] [data-slot="dropdown-menu-sub-content"] {
+  backdrop-filter: blur(16px) saturate(1.15);
+}
+
+/* Klaviatura fokusi: o'z halqasi bo'lmagan elementlarda (kartalar, tablar); yuqori kontrastda qalinroq */
+[data-theme] :focus-visible:not([data-slot]) {
+  outline: 2px solid var(--pos-focus);
+  outline-offset: 2px;
+}
+
+[data-theme="high-contrast"] :focus-visible {
+  outline: 3px solid var(--pos-focus);
+  outline-offset: 3px;
+}
+
+/* Harakat — qisqa va kichik; Klassik, Yuqori kontrast va tizimda "harakatni kamaytirish" yoqilganda o'chadi */
+@keyframes pos-pop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(0.96);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes pos-flash {
+  from {
+    background-color: var(--pos-selected);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+@keyframes pos-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pos-pop {
+  animation: pos-pop 160ms ease-out;
+}
+
+.pos-flash {
+  animation: pos-flash 900ms ease-out;
+}
+
+.pos-rise {
+  animation: pos-rise 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pos-motion,
+  .pos-pop,
+  .pos-flash,
+  .pos-rise {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+[data-theme="classic"] :is(.pos-motion, .pos-pop, .pos-flash, .pos-rise),
+[data-theme="high-contrast"] :is(.pos-motion, .pos-pop, .pos-flash, .pos-rise) {
+  animation: none !important;
+  transition: none !important;
 }

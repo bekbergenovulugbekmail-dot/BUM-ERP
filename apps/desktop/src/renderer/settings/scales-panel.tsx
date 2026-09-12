@@ -23,11 +23,11 @@ import { call, errorText } from "../kassa.ts";
 type Notice = { tone: "error" | "info"; text: string } | null;
 
 const TEST_STATUS: Record<ScaleTestStatus, { text: string; tone: string }> = {
-  simulator: { text: "Simulyator", tone: "bg-sky-500/15 text-sky-700 dark:text-sky-300" },
-  connected: { text: "Ulangan — og'irlik o'qildi", tone: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
-  port_reachable: { text: "Port ochiq — protokol tasdiqlanmagan", tone: "bg-amber-500/15 text-amber-700 dark:text-amber-300" },
+  simulator: { text: "Simulyator", tone: "bg-pos-info/15 text-pos-info" },
+  connected: { text: "Ulangan — og'irlik o'qildi", tone: "bg-pos-success/15 text-pos-success" },
+  port_reachable: { text: "Port ochiq — protokol tasdiqlanmagan", tone: "bg-pos-warning/15 text-pos-warning" },
   unreachable: { text: "Ulanib bo'lmadi", tone: "bg-destructive/15 text-destructive" },
-  docs_required: { text: "Protokol hujjati kerak", tone: "bg-amber-500/15 text-amber-700 dark:text-amber-300" },
+  docs_required: { text: "Protokol hujjati kerak", tone: "bg-pos-warning/15 text-pos-warning" },
   error: { text: "Xato", tone: "bg-destructive/15 text-destructive" },
 };
 
@@ -126,7 +126,7 @@ export default function ScalesPanel({ permissions }: { permissions: string[] }) 
         {canManage && !form && <Button onClick={() => setForm(EMPTY_FORM)}>Tarozi qo'shish</Button>}
       </div>
 
-      {notice && <p className={`rounded-lg px-3 py-2 text-sm ${notice.tone === "error" ? "bg-destructive/10 text-destructive" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"}`}>{notice.text}</p>}
+      {notice && <p className={`rounded-lg px-3 py-2 text-sm ${notice.tone === "error" ? "bg-destructive/10 text-destructive" : "bg-pos-success/10 text-pos-success"}`}>{notice.text}</p>}
 
       {form && (
         <ScaleForm
@@ -250,7 +250,7 @@ function ScaleCard({
       </div>
 
       {info.docsRequired ? (
-        <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+        <p className="rounded-lg bg-pos-warning/10 px-3 py-2 text-xs text-pos-warning">
           <b>Protokol hujjati kerak.</b> {info.docsRequired} {info.note}
         </p>
       ) : (
@@ -288,7 +288,7 @@ function ScaleCard({
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-muted">
             <div
-              className={`h-full transition-[width] ${lastRun.counts.FAILED > 0 ? "bg-amber-500" : "bg-primary"}`}
+              className={`h-full transition-[width] ${lastRun.counts.FAILED > 0 ? "bg-pos-warning" : "bg-primary"}`}
               style={{ width: `${lastRun.total > 0 ? Math.round((runDone / lastRun.total) * 100) : 100}%` }}
             />
           </div>
@@ -377,7 +377,7 @@ function ScaleForm({
             </Button>
           ))}
         </div>
-        <p className={`text-xs ${info.docsRequired ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>
+        <p className={`text-xs ${info.docsRequired ? "text-pos-warning" : "text-muted-foreground"}`}>
           {info.docsRequired ? `${info.note} ${info.docsRequired}` : info.note}
         </p>
       </div>
@@ -579,7 +579,7 @@ function QueuePanel({ scale, canSync, onClose, onChanged }: { scale: ScaleView; 
                 <td className="px-2 py-1.5">{item.productName ?? item.productId}</td>
                 <td className="px-2 py-1.5 tabular-nums">{item.plu}</td>
                 <td className="px-2 py-1.5">{item.action === "upsert" ? "Yuborish" : "O'chirish"}</td>
-                <td className={`px-2 py-1.5 ${item.status === "FAILED" ? "text-destructive" : item.status === "SUCCESS" ? "text-emerald-700 dark:text-emerald-300" : ""}`}>
+                <td className={`px-2 py-1.5 ${item.status === "FAILED" ? "text-destructive" : item.status === "SUCCESS" ? "text-pos-success" : ""}`}>
                   {QUEUE_LABELS[item.status]}
                 </td>
                 <td className="px-2 py-1.5 tabular-nums">
@@ -615,7 +615,7 @@ function ReconcileBox({ result }: { result: ScaleReconcileResult }) {
         Mos: {result.inSync} · taroziga yetmagan: {result.missingOnScale.length} · tarozida ortiqcha: {result.extraOnScale.length} · farqli: {result.mismatched.length}
       </p>
       {clean ? (
-        <p className="text-emerald-700 dark:text-emerald-300">Farq yo'q</p>
+        <p className="text-pos-success">Farq yo'q</p>
       ) : (
         <>
           <ul className="max-h-40 list-disc overflow-auto pl-4">
@@ -725,7 +725,7 @@ function BarcodeFormatCard({ canManage }: { canManage: boolean }) {
             Saqlash
           </Button>
         )}
-        {notice && <span className={`text-sm ${notice.tone === "error" ? "text-destructive" : "text-emerald-700 dark:text-emerald-300"}`}>{notice.text}</span>}
+        {notice && <span className={`text-sm ${notice.tone === "error" ? "text-destructive" : "text-pos-success"}`}>{notice.text}</span>}
       </div>
     </section>
   );

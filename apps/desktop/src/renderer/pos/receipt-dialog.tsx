@@ -77,21 +77,21 @@ export default function ReceiptDialog({
                 </div>
               ))}
               {num(sale.debt) > 0 && (
-                <div className="flex justify-between font-medium text-amber-600">
+                <div className="flex justify-between font-medium text-pos-warning">
                   <dt>Qarzga</dt>
                   <dd className="tabular-nums">{fmtMoney(sale.debt, base)}</dd>
                 </div>
               )}
               {num(sale.changeToBalance) > 0 && (
-                <div className="flex justify-between font-medium text-emerald-600">
+                <div className="flex justify-between font-medium text-pos-success">
                   <dt>Qaytim balansga</dt>
                   <dd className="tabular-nums">{fmtMoney(sale.changeToBalance, base)}</dd>
                 </div>
               )}
             </dl>
-            <div className="rounded-xl bg-emerald-500/10 px-4 py-3 text-center">
-              <p className="text-xs uppercase tracking-wide text-emerald-700">Qaytim</p>
-              <p className="text-3xl font-bold tabular-nums text-emerald-700">{fmtMoney(sale.change, base)}</p>
+            <div className="rounded-xl bg-pos-success/10 px-4 py-3 text-center">
+              <p className="text-xs uppercase tracking-wide text-pos-success">Qaytim</p>
+              <p className="text-3xl font-bold tabular-nums text-pos-success">{fmtMoney(sale.change, base)}</p>
             </div>
             <p className="text-center text-xs text-muted-foreground">
               {sale.sync.state === "applied" ? "Serverga yozildi" : "Internet bo'lganda serverga yuboriladi"}

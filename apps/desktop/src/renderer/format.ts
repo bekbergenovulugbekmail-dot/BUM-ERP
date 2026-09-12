@@ -50,9 +50,9 @@ export const PARTY_TYPE_LABELS: Record<string, string> = { individual: "Jismoniy
 
 /** Lokal hujjatning serverga yetib borish holati. */
 export const SYNC_STATE_TEXT: Record<string, { text: string; tone: string }> = {
-  pending: { text: "navbatda", tone: "text-amber-600" },
+  pending: { text: "navbatda", tone: "text-pos-warning" },
   rejected: { text: "rad etildi", tone: "text-destructive" },
-  applied: { text: "serverda", tone: "text-emerald-600" },
+  applied: { text: "serverda", tone: "text-pos-success" },
   discarded: { text: "bekor qilingan", tone: "text-muted-foreground" },
 };
 

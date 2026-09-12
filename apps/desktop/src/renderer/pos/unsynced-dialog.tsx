@@ -60,7 +60,7 @@ export default function UnsyncedDialog({
         <ul className="max-h-96 divide-y divide-border overflow-y-auto rounded-lg border border-border">
           {ops.map((op) => (
             <li key={op.opId} className="flex items-start gap-3 px-3 py-2 text-sm">
-              <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${op.status === "rejected" ? "bg-destructive" : "bg-amber-500"}`} />
+              <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${op.status === "rejected" ? "bg-destructive" : "bg-pos-warning"}`} />
               <div className="min-w-0 flex-1">
                 <p className="font-medium">
                   {OP_LABELS[op.type] ?? op.type} {op.number ?? op.label ?? ""}

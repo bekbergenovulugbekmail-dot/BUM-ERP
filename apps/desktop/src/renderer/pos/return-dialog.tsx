@@ -150,14 +150,14 @@ export default function ReturnDialog({
         </DialogHeader>
 
         {!canRefund ? (
-          <p className="rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-700">Qaytarish uchun ruxsat kerak: sales.refund — rahbar kassir sifatida kirsin.</p>
+          <p className="rounded-md bg-pos-warning/10 px-3 py-2 text-sm text-pos-warning">Qaytarish uchun ruxsat kerak: sales.refund — rahbar kassir sifatida kirsin.</p>
         ) : result ? (
           <div className="space-y-3">
             <p className="text-lg font-semibold">Qaytarish {result.number} yozildi</p>
             <p className="text-sm text-muted-foreground">
               Chek {result.orderNumber} · {result.lines.length} qator · {fmtMoney(result.total, baseCurrency)}
             </p>
-            <div className="rounded-lg bg-emerald-500/10 px-3 py-2 font-medium text-emerald-700">
+            <div className="rounded-lg bg-pos-success/10 px-3 py-2 font-medium text-pos-success">
               {(result.refunds?.length ? result.refunds : [{ method: result.refundMethod, amount: result.refundEstimate }]).map((part) => (
                 <p key={part.method}>
                   {PAYMENT_LABELS[part.method]}: {fmtMoney(part.amount, baseCurrency)}
@@ -300,7 +300,7 @@ export default function ReturnDialog({
                             </div>
                           );
                         })}
-                        <p className={`text-xs ${splitSum === estimate ? "text-emerald-600" : "text-amber-600"}`}>
+                        <p className={`text-xs ${splitSum === estimate ? "text-pos-success" : "text-pos-warning"}`}>
                           Taqsimot: {fmtMoney(fromMinor(splitSum), baseCurrency)} / {fmtMoney(fromMinor(estimate), baseCurrency)}
                         </p>
                         <Button size="sm" variant="ghost" onClick={() => setSplit(null)}>

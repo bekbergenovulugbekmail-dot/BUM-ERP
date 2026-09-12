@@ -31,6 +31,8 @@ export default function App() {
   const [movementProduct, setMovementProduct] = useState<{ id: string; name: string } | null>(null);
   const [prefs, setPrefs] = useState<DevicePrefs | null>(null);
   const [locked, setLocked] = useState(false);
+  /** Kassa ekrani bir marta ochilgach o'chirilmaydi (yashiriladi): boshqa bo'limga o'tib qaytganda savat, joriy sotuv, to'lov va tezkor sotuv holati saqlanadi. */
+  const [posOpened, setPosOpened] = useState(false);
 
   const refresh = useCallback(() => {
     call("app:status").then(setStatus, (err: unknown) => setError(errorText(err)));
@@ -44,13 +46,14 @@ export default function App() {
     });
   }, [refresh]);
 
-  // Qurilma sozlamalari: mavzu, shrift, til (kirill), avtomatik blok
+  // Qurilma sozlamalari: mavzu, shrift, til (kirill), avtomatik blok; sinxrondan keyin ham (kompaniya mavzusi yoki qulfi o'zgargan bo'lishi mumkin)
   const registered = status?.registered ?? false;
   const cashierId = status?.cashier?.userId ?? null;
+  const lastSyncAt = status?.sync.lastSyncAt ?? null;
   useEffect(() => {
     if (!registered) return;
     call("device:prefs").then(setPrefs, () => undefined);
-  }, [registered, cashierId]);
+  }, [registered, cashierId, lastSyncAt]);
 
   useEffect(() => {
     if (!prefs) return;
@@ -84,10 +87,15 @@ export default function App() {
   if (!status.cashier) return <CashierScreen status={status} onDone={afterLogin} />;
 
   const home = () => setView("home");
+  const open = (next: View) => {
+    if (next === "pos") setPosOpened(true);
+    if (next !== "movements") setMovementProduct(null);
+    setView(next);
+  };
   const renderView = (): ReactNode => {
     switch (view) {
       case "pos":
-        return <PosScreen status={status} onStatus={setStatus} onExit={home} onNavigate={setView} />;
+        return null;
       case "history":
         return <HistoryScreen status={status} onExit={home} />;
       case "kassa":
@@ -120,21 +128,28 @@ export default function App() {
         return <SettingsScreen status={status} prefs={prefs} onPrefs={setPrefs} onStatus={setStatus} onExit={home} />;
       default:
         return (
-          <HomeScreen
-            status={status}
-            onChange={setStatus}
-            onOpen={(next) => {
-              setMovementProduct(null);
-              setView(next);
-            }}
-          />
+          <HomeScreen status={status} onChange={setStatus} onOpen={open} />
         );
     }
   };
 
   return (
     <>
-      {renderView()}
+      {posOpened && (
+        <div className={view === "pos" ? "h-full" : "hidden"}>
+          <PosScreen
+            key={cashierId ?? "none"}
+            active={view === "pos" && !locked}
+            status={status}
+            appPrefs={prefs}
+            onPrefs={setPrefs}
+            onStatus={setStatus}
+            onExit={home}
+            onNavigate={open}
+          />
+        </div>
+      )}
+      {view !== "pos" && renderView()}
       {locked && <LockOverlay status={status} onUnlocked={afterLogin} onSwitched={afterLogin} />}
     </>
   );

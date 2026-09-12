@@ -98,12 +98,12 @@ export default function SupplierDialog({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium">
                         {supplier.name}
-                        {supplier.pending && <span className="ml-2 text-xs text-amber-600">sinxron kutilmoqda</span>}
+                        {supplier.pending && <span className="ml-2 text-xs text-pos-warning">sinxron kutilmoqda</span>}
                       </span>
                       <span className="text-xs text-muted-foreground">{[supplier.phone, supplier.code].filter(Boolean).join(" · ")}</span>
                     </span>
                     {num(supplier.totalDebt) !== 0 && (
-                      <span className={`text-right text-xs tabular-nums ${num(supplier.totalDebt) > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                      <span className={`text-right text-xs tabular-nums ${num(supplier.totalDebt) > 0 ? "text-pos-warning" : "text-pos-success"}`}>
                         {num(supplier.totalDebt) > 0 ? "qarzimiz" : "avans"} {fmtMoney(Math.abs(num(supplier.totalDebt)), baseCurrency)}
                       </span>
                     )}

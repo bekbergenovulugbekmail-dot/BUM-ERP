@@ -85,7 +85,7 @@ export default function ShiftCloseDialog({
           <Label htmlFor="closing-cash">Kassadagi naqd (sanalgan)</Label>
           <Input id="closing-cash" autoFocus inputMode="decimal" value={counted} onChange={(e) => setCounted(decimalInput(e.target.value))} />
           {counted !== "" && (
-            <p className={`text-sm ${num(counted) - expected === 0 ? "text-emerald-600" : "text-amber-600"}`}>
+            <p className={`text-sm ${num(counted) - expected === 0 ? "text-pos-success" : "text-pos-warning"}`}>
               Farq: {fmtMoney(num(counted) - expected, baseCurrency)}
             </p>
           )}

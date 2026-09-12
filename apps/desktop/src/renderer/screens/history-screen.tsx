@@ -20,9 +20,9 @@ const PRESETS: { key: Preset; label: string }[] = [
 ];
 
 const STATE_LABEL: Record<string, { text: string; tone: string }> = {
-  pending: { text: "navbatda", tone: "text-amber-600" },
+  pending: { text: "navbatda", tone: "text-pos-warning" },
   rejected: { text: "rad etildi", tone: "text-destructive" },
-  applied: { text: "serverda", tone: "text-emerald-600" },
+  applied: { text: "serverda", tone: "text-pos-success" },
   discarded: { text: "bekor qilingan", tone: "text-muted-foreground line-through" },
 };
 
@@ -169,7 +169,7 @@ export default function HistoryScreen({ status, onExit }: { status: AppStatus; o
                     <td className="px-3 py-2">{sale.customer?.name ?? "—"}</td>
                     <td className="px-3 py-2">
                       {PAYMENT_LABELS[sale.paymentMethod]}
-                      {num(sale.debt) > 0 && <span className="ml-1 text-amber-600">+ qarz</span>}
+                      {num(sale.debt) > 0 && <span className="ml-1 text-pos-warning">+ qarz</span>}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(sale.total, base)}</td>
                     <td className={`px-3 py-2 text-right text-xs ${STATE_LABEL[sale.sync.state]?.tone ?? ""}`}>{STATE_LABEL[sale.sync.state]?.text}</td>
@@ -326,7 +326,7 @@ export default function HistoryScreen({ status, onExit }: { status: AppStatus; o
                   </dd>
                 </div>
                 {num(selected.debt) > 0 && (
-                  <div className="flex justify-between text-amber-600">
+                  <div className="flex justify-between text-pos-warning">
                     <dt>Qarzga</dt>
                     <dd className="tabular-nums">{fmtMoney(selected.debt, base)}</dd>
                   </div>

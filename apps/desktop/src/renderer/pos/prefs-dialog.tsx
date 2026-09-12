@@ -170,7 +170,7 @@ export default function PrefsDialog({
           </div>
         )}
         {message && (
-          <p className={`rounded-md px-3 py-2 text-sm ${message.tone === "error" ? "bg-destructive/10 text-destructive" : "bg-emerald-500/10 text-emerald-700"}`}>{message.text}</p>
+          <p className={`rounded-md px-3 py-2 text-sm ${message.tone === "error" ? "bg-destructive/10 text-destructive" : "bg-pos-success/10 text-pos-success"}`}>{message.text}</p>
         )}
       </DialogContent>
     </Dialog>

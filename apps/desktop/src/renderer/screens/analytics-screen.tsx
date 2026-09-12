@@ -122,14 +122,14 @@ export default function AnalyticsScreen({ status, onExit }: { status: AppStatus;
           </Button>
         ))}
         {report && (
-          <span className={`ml-auto text-xs ${report.source === "server" ? "text-emerald-700" : "text-amber-700"}`}>
+          <span className={`ml-auto text-xs ${report.source === "server" ? "text-pos-success" : "text-pos-warning"}`}>
             {report.source === "server" ? "Server" : "Offline"} · {report.scope}
           </span>
         )}
       </nav>
 
       <div className="min-h-0 overflow-auto p-3">
-        {!allowed && <p className="rounded-lg bg-amber-500/10 px-4 py-3 text-amber-700">Analitika uchun ruxsat kerak: analytics.view.</p>}
+        {!allowed && <p className="rounded-lg bg-pos-warning/10 px-4 py-3 text-pos-warning">Analitika uchun ruxsat kerak: analytics.view.</p>}
         {error && <p className="mb-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
         {report && tab === "kpi" && <KpiTab report={report} money={money} />}
         {report && tab === "sales" && <SalesTab report={report} money={money} />}
@@ -159,7 +159,7 @@ function KpiTab({ report, money }: { report: AnalyticsReport; money: Money }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <Tile label="Sof tushum" value={money(k.netRevenue)} hint={`Savdo ${money(k.revenue)} − qaytarish ${money(k.returns)}`} />
-      <Tile label="Yalpi foyda" value={money(k.grossProfit)} hint={k.margin ? `Marja ${k.margin}% · tannarx ${money(k.cogs)}` : undefined} tone={num(k.grossProfit) < 0 ? "text-destructive" : "text-emerald-700"} />
+      <Tile label="Yalpi foyda" value={money(k.grossProfit)} hint={k.margin ? `Marja ${k.margin}% · tannarx ${money(k.cogs)}` : undefined} tone={num(k.grossProfit) < 0 ? "text-destructive" : "text-pos-success"} />
       <Tile label="Cheklar" value={String(k.receipts)} hint={`O'rtacha chek ${money(k.averageReceipt)}`} />
       <Tile label="Sotilgan mahsulot" value={fmtQty(k.itemsSold)} hint="asosiy birlikda" />
       <Tile label="Xaridlar" value={money(k.purchases)} />
@@ -267,7 +267,7 @@ function CashTab({ report, money }: { report: AnalyticsReport; money: Money }) {
   return (
     <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-3">
-        <Tile label="Kirim" value={money(flow.totalIncome)} tone="text-emerald-700" />
+        <Tile label="Kirim" value={money(flow.totalIncome)} tone="text-pos-success" />
         <Tile label="Chiqim" value={money(flow.totalExpense)} tone="text-destructive" />
         <Tile label="Sof pul oqimi" value={money(flow.net)} tone={num(flow.net) < 0 ? "text-destructive" : ""} />
       </div>
@@ -308,10 +308,10 @@ function BalanceCard({ title, hint, group, money, tone }: { title: string; hint:
 function DebtsTab({ report, money }: { report: AnalyticsReport; money: Money }) {
   return (
     <div className="grid gap-3 lg:grid-cols-2">
-      <BalanceCard title="Qarzdorlik: mijozlar qarzi" hint="bizga to'lashi kerak" group={report.receivables} money={money} tone="text-amber-600" />
+      <BalanceCard title="Qarzdorlik: mijozlar qarzi" hint="bizga to'lashi kerak" group={report.receivables} money={money} tone="text-pos-warning" />
       <BalanceCard title="Haqdorlik: ta'minotchilarga qarzimiz" hint="biz to'lashimiz kerak" group={report.payables} money={money} tone="text-destructive" />
       <BalanceCard title="Mijozlar balansi (oldindan to'lov)" hint="mijozlar oldidagi majburiyat" group={report.customerBalances} money={money} tone="" />
-      <BalanceCard title="Ta'minotchilarga avans" hint="ta'minotchilar bizga qarzdor" group={report.supplierAdvances} money={money} tone="text-emerald-700" />
+      <BalanceCard title="Ta'minotchilarga avans" hint="ta'minotchilar bizga qarzdor" group={report.supplierAdvances} money={money} tone="text-pos-success" />
     </div>
   );
 }

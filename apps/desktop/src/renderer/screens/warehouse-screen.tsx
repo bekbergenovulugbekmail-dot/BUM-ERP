@@ -72,7 +72,7 @@ export default function WarehouseScreen({
     return (
       <main className="flex h-full flex-col bg-muted/40">
         {header}
-        <p className="m-6 rounded-lg bg-amber-500/10 px-4 py-3 text-amber-700">Ombor bo'limi uchun ruxsat kerak: warehouse.view — rahbar kassir sifatida kirsin.</p>
+        <p className="m-6 rounded-lg bg-pos-warning/10 px-4 py-3 text-pos-warning">Ombor bo'limi uchun ruxsat kerak: warehouse.view — rahbar kassir sifatida kirsin.</p>
       </main>
     );
   }
@@ -169,11 +169,11 @@ function StockTab({ baseCurrency, refreshKey, onMovements }: { baseCurrency: str
                       </p>
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">
-                      <span className={`font-semibold ${negative ? "text-destructive" : row.isLow ? "text-amber-600" : ""}`}>
+                      <span className={`font-semibold ${negative ? "text-destructive" : row.isLow ? "text-pos-warning" : ""}`}>
                         {fmtQty(row.quantity)} {row.unitName}
                       </span>
                       {row.pending !== "0.0000" && (
-                        <span className="block text-xs text-amber-600" title="Serverga hali yetib bormagan hujjatlar ta'siri">
+                        <span className="block text-xs text-pos-warning" title="Serverga hali yetib bormagan hujjatlar ta'siri">
                           navbatda {row.pending.startsWith("-") ? "" : "+"}
                           {fmtQty(row.pending)}
                         </span>
@@ -272,7 +272,7 @@ function DocumentsTab({ baseCurrency, refreshKey }: { baseCurrency: string; refr
             {open === doc.id && (
               <div className="space-y-1 bg-muted/30 px-3 py-2">
                 {doc.sync.error && <p className="text-xs text-destructive">{doc.sync.error}</p>}
-                {doc.sync.conflicts.length > 0 && <p className="text-xs text-amber-700">Serverdagi nomuvofiqlik: {doc.sync.conflicts.join(", ")}</p>}
+                {doc.sync.conflicts.length > 0 && <p className="text-xs text-pos-warning">Serverdagi nomuvofiqlik: {doc.sync.conflicts.join(", ")}</p>}
                 <table className="w-full text-xs">
                   <thead className="text-left text-muted-foreground">
                     <tr>
@@ -293,7 +293,7 @@ function DocumentsTab({ baseCurrency, refreshKey }: { baseCurrency: string; refr
                           {fmtQty(line.quantity)} {line.unitName}
                         </td>
                         {doc.kind === "count" && (
-                          <td className={`py-1 text-right tabular-nums ${line.difference?.startsWith("-") ? "text-destructive" : line.difference === "0.0000" ? "" : "text-emerald-600"}`}>
+                          <td className={`py-1 text-right tabular-nums ${line.difference?.startsWith("-") ? "text-destructive" : line.difference === "0.0000" ? "" : "text-pos-success"}`}>
                             {fmtQty(line.difference)}
                           </td>
                         )}

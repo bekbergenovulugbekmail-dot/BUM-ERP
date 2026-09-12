@@ -33,9 +33,9 @@ const QTY = /^\d{1,14}(\.\d{1,4})?$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const STATE_TEXT: Record<string, { text: string; tone: string }> = {
-  pending: { text: "navbatda", tone: "text-amber-600" },
+  pending: { text: "navbatda", tone: "text-pos-warning" },
   rejected: { text: "rad etildi", tone: "text-destructive" },
-  applied: { text: "serverda", tone: "text-emerald-600" },
+  applied: { text: "serverda", tone: "text-pos-success" },
   discarded: { text: "bekor qilingan", tone: "text-muted-foreground" },
 };
 
@@ -225,7 +225,7 @@ export default function PurchaseScreen({ status, onStatus, onExit }: { status: A
     return (
       <main className="flex h-full flex-col bg-muted/40">
         {header}
-        <p className="m-6 rounded-lg bg-amber-500/10 px-4 py-3 text-amber-700">Xarid uchun ruxsat kerak: purchase.create va warehouse.receive — rahbar kassir sifatida kirsin.</p>
+        <p className="m-6 rounded-lg bg-pos-warning/10 px-4 py-3 text-pos-warning">Xarid uchun ruxsat kerak: purchase.create va warehouse.receive — rahbar kassir sifatida kirsin.</p>
       </main>
     );
   }
@@ -462,7 +462,7 @@ export default function PurchaseScreen({ status, onStatus, onExit }: { status: A
             </div>
             {lines.length > 0 && !valid && <p className="text-sm text-destructive">Miqdor, narx, partiya yoki yaroqlilik muddatini tekshiring</p>}
             {notice && (
-              <p className={`rounded-lg px-3 py-2 text-sm ${notice.tone === "error" ? "bg-destructive/10 text-destructive" : "bg-emerald-500/10 text-emerald-700"}`}>{notice.text}</p>
+              <p className={`rounded-lg px-3 py-2 text-sm ${notice.tone === "error" ? "bg-destructive/10 text-destructive" : "bg-pos-success/10 text-pos-success"}`}>{notice.text}</p>
             )}
             <Button className="h-12 w-full text-base font-bold" disabled={busy || !supplier || !valid || (payNow && num(payAmount || fromMinor(baseBucket)) <= 0)} onClick={() => void complete()}>
               Xaridni yozish (tovar qabul qilindi)

@@ -213,7 +213,7 @@ export default function LabelsScreen({ status, onExit }: { status: AppStatus; on
             web'da: Sozlamalar → Etiketka.
           </p>
           {notice && (
-            <p className={`rounded-lg px-3 py-2 text-sm ${notice.tone === "error" ? "bg-destructive/10 text-destructive" : "bg-emerald-500/10 text-emerald-700"}`}>{notice.text}</p>
+            <p className={`rounded-lg px-3 py-2 text-sm ${notice.tone === "error" ? "bg-destructive/10 text-destructive" : "bg-pos-success/10 text-pos-success"}`}>{notice.text}</p>
           )}
           <Button className="h-12 w-full text-base font-bold" disabled={busy || total === 0} onClick={() => void print()}>
             {total} ta etiketka chop etish

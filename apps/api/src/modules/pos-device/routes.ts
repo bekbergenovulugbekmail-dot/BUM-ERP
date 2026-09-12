@@ -33,7 +33,18 @@ import { Readable } from "node:stream";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { MAX_QUICK_SALE_ITEMS, POS_THEMES, badRequest, notFound, type QuickSalePeriod } from "@bum/shared";
+import {
+  CUSTOM_POS_THEME,
+  MAX_QUICK_SALE_ITEMS,
+  POS_DENSITIES,
+  POS_FONT_SCALES,
+  POS_SHADOWS,
+  POS_THEMES,
+  badRequest,
+  notFound,
+  type PosThemeChoice,
+  type QuickSalePeriod,
+} from "@bum/shared";
 import { getPosAppearance, savePosAppearance } from "./appearance.service.js";
 import { quickSaleAssortment, quickSaleSuggestions, savePosQuickSale } from "./quick-sale.service.js";
 import { VIEW_TTL, loadProductImage } from "../files/files.service.js";
@@ -99,7 +110,28 @@ const movementsQuery = z.object({
 });
 const productParams = z.object({ productId: z.uuid() });
 const releaseParams = z.object({ releaseId: z.uuid() });
-const appearanceBody = z.strictObject({ locked: z.boolean(), theme: z.enum(POS_THEMES) });
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Rang #RRGGBB ko'rinishida");
+const customThemeBody = z.strictObject({
+  name: z.string().trim().min(1).max(40),
+  base: z.enum(["light", "dark"]),
+  primary: hexColor,
+  secondary: hexColor,
+  background: hexColor,
+  surface: hexColor,
+  card: hexColor,
+  button: hexColor,
+  sidebar: hexColor,
+  accent: hexColor,
+  radius: z.number().int().min(0).max(24),
+  shadow: z.enum(POS_SHADOWS),
+  density: z.enum(POS_DENSITIES),
+  fontScale: z.enum(POS_FONT_SCALES),
+});
+const appearanceBody = z.strictObject({
+  locked: z.boolean(),
+  theme: z.enum([...POS_THEMES, CUSTOM_POS_THEME] as unknown as readonly [PosThemeChoice, ...PosThemeChoice[]]),
+  custom: customThemeBody.nullable().optional(),
+});
 const quickSaleBody = z.strictObject({ productIds: z.array(z.uuid()).max(MAX_QUICK_SALE_ITEMS) });
 const suggestionsQuery = z.object({
   days: z

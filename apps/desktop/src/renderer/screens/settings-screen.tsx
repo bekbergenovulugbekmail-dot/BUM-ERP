@@ -7,11 +7,24 @@ import { Switch } from "@/components/ui/switch.tsx";
 import type { AppStatus, CurrencyHistory, CurrencyRow, DevicePrefs, HotkeyAction, PosContext, SettingsOverview, UpdateInfo } from "../../shared/kassa-api.js";
 import type { PaymentMethod } from "../../shared/sync-types.js";
 import { DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_LABELS, keyName } from "../../shared/hotkeys.js";
-import { POS_THEMES, THEME_LABELS, isDarkTheme, type PosTheme } from "../../shared/themes.js";
+import {
+  DENSITY_LABELS,
+  FONT_SCALE_LABELS,
+  POS_DENSITIES,
+  POS_FONT_SCALES,
+  POS_THEMES,
+  THEME_HINTS,
+  THEME_ICONS,
+  THEME_LABELS,
+  type PosThemeChoice,
+  type ThemeSource,
+} from "../../shared/themes.js";
 import { PAYMENT_LABELS, fmtMoney, fmtTime } from "../format.ts";
 import { call, errorText } from "../kassa.ts";
 import PrefsDialog from "../pos/prefs-dialog.tsx";
 import ScalesPanel from "../settings/scales-panel.tsx";
+import { usePrefersDark } from "../settings/prefers-dark.ts";
+import { PosThemePreview } from "../settings/theme-preview.tsx";
 
 type Tab = "settings" | "printer" | "marketing" | "warehouse" | "company" | "permissions" | "subscription";
 type Section = "language" | "appearance" | "currencies" | "hotkeys" | "sale" | "payment" | "scales" | "general" | "security" | "version" | "logout";
@@ -102,7 +115,7 @@ export default function SettingsScreen({
             </Button>
           ))}
         </nav>
-        {notice && <span className={`ml-auto text-sm ${notice.tone === "error" ? "text-destructive" : "text-emerald-700"}`}>{notice.text}</span>}
+        {notice && <span className={`ml-auto text-sm ${notice.tone === "error" ? "text-destructive" : "text-pos-success"}`}>{notice.text}</span>}
       </header>
 
       <div className="min-h-0 overflow-auto p-4">
@@ -204,68 +217,108 @@ function LanguagePanel({ prefs, save }: { prefs: DevicePrefs; save: SaveFn }) {
   );
 }
 
-/** Mavzu kartasi uchun kichik ekran: o'sha mavzu tokenlari bilan (`data-theme` faqat shu karta ichida). */
-function ThemeMiniScreen({ theme }: { theme: Exclude<PosTheme, "system"> }) {
-  return (
-    <div data-theme={theme} className={`flex h-full gap-1 bg-background p-1.5 ${isDarkTheme(theme) ? "dark" : ""}`}>
-      <div className="w-1/4 rounded-sm bg-sidebar" />
-      <div className="flex flex-1 flex-col gap-1">
-        <div className="h-2 w-3/4 rounded-sm bg-foreground/70" />
-        <div className="flex-1 rounded-sm border border-border bg-card p-1">
-          <div className="h-1.5 w-1/2 rounded-sm bg-muted-foreground/60" />
-        </div>
-        <div className="h-3 rounded-sm bg-primary" />
-      </div>
-    </div>
-  );
-}
+const THEME_SOURCE_LABELS: Record<ThemeSource, string> = {
+  "company-lock": "kompaniya qulflagan",
+  cashier: "sizning tanlovingiz",
+  "company-default": "kompaniya standarti",
+  system: "Windows sozlamasi bo'yicha",
+};
 
+/**
+ * Tashqi ko'rinish: mavzular galereyasi (haqiqiy kassa ko'rinishi), bosilganda katta jonli ko'rinish, "Qo'llash" — saqlaydi.
+ * Zichlik va shrift — kassir bo'yicha. Mavzu faqat CSS: savat, sotuv va sinxronga tegmaydi.
+ */
 function AppearancePanel({ prefs, save }: { prefs: DevicePrefs; save: SaveFn }) {
   const locked = prefs.themeLock !== null;
+  const prefersDark = usePrefersDark();
+  const [preview, setPreview] = useState<PosThemeChoice>(prefs.theme);
+  // Mavzu saqlangan yoki sinxronda o'zgargan — ko'rinish joriy mavzuga qaytadi
+  const [appliedTheme, setAppliedTheme] = useState(prefs.theme);
+  if (appliedTheme !== prefs.theme) {
+    setAppliedTheme(prefs.theme);
+    setPreview(prefs.theme);
+  }
+  const choices: PosThemeChoice[] = prefs.customTheme ? [...POS_THEMES, "custom"] : [...POS_THEMES];
+  const label = (theme: PosThemeChoice) => (theme === "custom" && prefs.customTheme ? prefs.customTheme.name : THEME_LABELS[theme]);
+  const dirty = preview !== prefs.theme;
   return (
     <>
-      <Title hint="Mavzu faqat ko'rinish — hisob, qoldiq, to'lov va sinxronga ta'sir qilmaydi. Har kassir o'z mavzusini tanlaydi va u saqlanib qoladi.">
+      <Title hint="Mavzu faqat ko'rinish — savat, joriy sotuv, to'lov, qoldiq va sinxronga ta'sir qilmaydi. Tanlov shu kassada sizga saqlanadi.">
         Tashqi ko'rinish
       </Title>
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+        <span>
+          Hozir: <span aria-hidden>{THEME_ICONS[prefs.theme]}</span> <span className="font-medium">{label(prefs.theme)}</span>
+        </span>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{THEME_SOURCE_LABELS[prefs.themeSource]}</span>
+        {prefs.cashierTheme !== null && !locked && (
+          <Button size="sm" variant="ghost" onClick={() => void save({ cashierTheme: null })}>
+            Kompaniya standartiga qaytarish
+          </Button>
+        )}
+      </div>
       {locked && (
-        <p className="mb-3 max-w-4xl rounded-md bg-muted px-3 py-2 text-sm">
-          Kompaniya mavzuni qulflagan: <span className="font-medium">{THEME_LABELS[prefs.themeLock!]}</span> — kassada o'zgartirib bo'lmaydi.
+        <p className="mb-3 rounded-md bg-muted px-3 py-2 text-sm">
+          Kompaniya mavzuni qulflagan: <span className="font-medium">{label(prefs.themeLock!)}</span> — kassada o'zgartirib bo'lmaydi.
         </p>
       )}
-      <div className="grid max-w-4xl grid-cols-2 gap-3 pb-4 sm:grid-cols-3 lg:grid-cols-5">
-        {POS_THEMES.map((theme) => (
-          <button
-            key={theme}
-            type="button"
-            disabled={locked}
-            onClick={() => void save({ theme })}
-            className={`rounded-xl border-2 p-1 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-              prefs.theme === theme ? "border-primary" : "border-transparent hover:border-border"
-            }`}
-          >
-            <div className="h-20 overflow-hidden rounded-lg border border-border">
-              {theme === "system" ? (
-                <div className="grid h-full grid-cols-2">
-                  <ThemeMiniScreen theme="light" />
-                  <ThemeMiniScreen theme="dark" />
-                </div>
-              ) : (
-                <ThemeMiniScreen theme={theme} />
-              )}
-            </div>
-            <span className="mt-1 block px-1 text-sm font-medium">{THEME_LABELS[theme]}</span>
-          </button>
-        ))}
+      <div className="grid gap-5 pb-4 2xl:grid-cols-[minmax(0,1fr)_minmax(0,36rem)]">
+        <div className="grid content-start grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4" role="radiogroup" aria-label="Mavzular">
+          {choices.map((theme) => (
+            <button
+              key={theme}
+              type="button"
+              role="radio"
+              aria-checked={preview === theme}
+              disabled={locked}
+              onClick={() => setPreview(theme)}
+              onDoubleClick={() => void save({ theme })}
+              className={`rounded-xl border-2 p-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                preview === theme ? "border-primary bg-primary/5" : "border-transparent hover:border-border"
+              }`}
+            >
+              <div className="h-24 overflow-hidden rounded-lg border border-border">
+                {theme === "system" ? (
+                  <div className="grid h-full grid-cols-2">
+                    <PosThemePreview theme="snow" mini />
+                    <PosThemePreview theme="midnight" mini />
+                  </div>
+                ) : (
+                  <PosThemePreview theme={theme} custom={prefs.customTheme} mini />
+                )}
+              </div>
+              <span className="mt-1.5 flex items-center gap-1.5 px-1 text-sm font-medium">
+                <span aria-hidden>{THEME_ICONS[theme]}</span>
+                <span className="truncate">{label(theme)}</span>
+                {prefs.theme === theme && <span className="ml-auto rounded bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">faol</span>}
+              </span>
+              <span className="block px-1 text-xs text-muted-foreground">{THEME_HINTS[theme]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="space-y-3 self-start 2xl:sticky 2xl:top-0">
+          <p className="text-sm font-medium">
+            Ko'rinish: <span aria-hidden>{THEME_ICONS[preview]}</span> {label(preview)}
+          </p>
+          <div className="aspect-[16/10] max-w-3xl overflow-hidden rounded-xl border border-border shadow-sm">
+            <PosThemePreview theme={preview} custom={prefs.customTheme} prefersDark={prefersDark} />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button className="h-10 px-6" disabled={locked || !dirty} onClick={() => void save({ theme: preview })}>
+              Qo'llash
+            </Button>
+            <Button className="h-10" variant="ghost" disabled={!dirty} onClick={() => setPreview(prefs.theme)}>
+              Bekor qilish
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">Kassa ekranida Menyu → Ko'rinish orqali ham almashtiriladi — savat va joriy sotuv saqlanadi.</p>
+        </div>
       </div>
-      <Row label="Shrift o'lchami" hint="Katta — sensorli ekran va uzoqdan ko'rish uchun">
-        <Choice
-          value={prefs.fontScale}
-          options={[
-            { value: "normal", label: "Oddiy" },
-            { value: "large", label: "Katta" },
-          ]}
-          onChange={(fontScale) => void save({ fontScale })}
-        />
+      <Row label="Zichlik" hint="Sensorli ekran — katta tugmalar va mahsulot kartalari; ixcham — kichik ekran uchun">
+        <Choice value={prefs.density} options={POS_DENSITIES.map((value) => ({ value, label: DENSITY_LABELS[value] }))} onChange={(density) => void save({ density })} />
+      </Row>
+      <Row label="Shrift o'lchami" hint="Butun interfeys mutanosib kattalashadi">
+        <Choice value={prefs.fontScale} options={POS_FONT_SCALES.map((value) => ({ value, label: FONT_SCALE_LABELS[value] }))} onChange={(fontScale) => void save({ fontScale })} />
       </Row>
     </>
   );
@@ -334,7 +387,7 @@ function CurrenciesPanel({ overview }: { overview: SettingsOverview }) {
         Asosiy valyuta: <span className="font-semibold">{overview.baseCurrency}</span>
       </p>
       {offline && (
-        <p className="mb-3 max-w-3xl rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-700">
+        <p className="mb-3 max-w-3xl rounded-md bg-pos-warning/10 px-3 py-2 text-sm text-pos-warning">
           Internet yo'q — oxirgi saqlangan kurslar ishlatilmoqda
           {overview.sync.lastSyncAt ? ` (oxirgi sinxron: ${fmtTime(overview.sync.lastSyncAt)})` : ""}.
         </p>
@@ -362,7 +415,7 @@ function CurrenciesPanel({ overview }: { overview: SettingsOverview }) {
                 {row.updatedByName && <> · {row.updatedByName}</>}
               </td>
               <td className="py-1.5 text-xs">
-                {row.pending ? <span className="text-amber-700">kassada o'zgartirildi (yuborilmagan)</span> : (SOURCE_LABELS[row.source ?? ""] ?? "—")}
+                {row.pending ? <span className="text-pos-warning">kassada o'zgartirildi (yuborilmagan)</span> : (SOURCE_LABELS[row.source ?? ""] ?? "—")}
               </td>
               {canManage && (
                 <td className="py-1.5">
@@ -395,7 +448,7 @@ function CurrenciesPanel({ overview }: { overview: SettingsOverview }) {
         </tbody>
       </table>
       {!canManage && <p className="mt-2 text-xs text-muted-foreground">Kursni o'zgartirish uchun ruxsat kerak: currency_rates.manage</p>}
-      {message && <p className={`mt-3 text-sm ${message.tone === "error" ? "text-destructive" : "text-emerald-700"}`}>{message.text}</p>}
+      {message && <p className={`mt-3 text-sm ${message.tone === "error" ? "text-destructive" : "text-pos-success"}`}>{message.text}</p>}
 
       <div className="mt-6 max-w-4xl">
         <div className="flex items-center gap-3">
@@ -417,7 +470,7 @@ function CurrenciesPanel({ overview }: { overview: SettingsOverview }) {
             </thead>
             <tbody>
               {history.pending.map((row) => (
-                <tr key={`pending-${row.createdAt}-${row.code}`} className="border-t border-border text-amber-700">
+                <tr key={`pending-${row.createdAt}-${row.code}`} className="border-t border-border text-pos-warning">
                   <td className="py-1.5">{fmtTime(row.createdAt)}</td>
                   <td className="py-1.5 font-medium">{row.code}</td>
                   <td className="py-1.5 text-right tabular-nums">{row.from}</td>
@@ -652,7 +705,7 @@ function SecurityPanel({ prefs, save }: { prefs: DevicePrefs; save: SaveFn }) {
             <Input id={`pin-${key}`} type="password" inputMode="numeric" value={form[key]} onChange={(e) => setForm((current) => ({ ...current, [key]: digits(e.target.value) }))} />
           </div>
         ))}
-        {message && <p className={`text-sm ${message.tone === "error" ? "text-destructive" : "text-emerald-700"}`}>{message.text}</p>}
+        {message && <p className={`text-sm ${message.tone === "error" ? "text-destructive" : "text-pos-success"}`}>{message.text}</p>}
         <Button type="submit" disabled={busy || form.oldPin.length < 4 || form.newPin.length < 4}>
           Almashtirish
         </Button>
@@ -695,7 +748,7 @@ function VersionPanel({ overview, pending }: { overview: SettingsOverview; pendi
       {info && (
         <div className="mt-4 max-w-2xl space-y-3 rounded-lg bg-muted/50 p-4 text-sm">
           {!info.configured && <p>Serverda yangilanish sozlanmagan — administrator bilan bog'laning.</p>}
-          {info.configured && !info.available && <p className="text-emerald-700">Eng so'nggi versiya o'rnatilgan ({info.current}).</p>}
+          {info.configured && !info.available && <p className="text-pos-success">Eng so'nggi versiya o'rnatilgan ({info.current}).</p>}
           {info.available && (
             <>
               <p className="font-medium">
@@ -706,7 +759,7 @@ function VersionPanel({ overview, pending }: { overview: SettingsOverview; pendi
               {!info.downloaded && info.partialBytes > 0 && (
                 <p className="text-muted-foreground">Oldingi yuklab olish uzilgan: {(info.partialBytes / 1024 / 1024).toFixed(1)} MB yuklangan — shu joydan davom etadi.</p>
               )}
-              {pending > 0 &&<p className="text-amber-700">Navbatda {pending} ta amal bor — ular o'rnatishdan keyin ham saqlanadi va yuboriladi.</p>}
+              {pending > 0 &&<p className="text-pos-warning">Navbatda {pending} ta amal bor — ular o'rnatishdan keyin ham saqlanadi va yuboriladi.</p>}
               <div className="flex gap-2">
                 {!info.downloaded ? (
                   <Button disabled={busy !== null} onClick={() => void run("download")}>
@@ -786,7 +839,7 @@ function MarketingTab({ overview }: { overview: SettingsOverview }) {
       ) : (
         <div className="max-w-2xl">
           <Row label="Keshbek">
-            <span className={cashback.enabled ? "font-semibold text-emerald-700" : "text-muted-foreground"}>{cashback.enabled ? "Yoqilgan" : "O'chiq"}</span>
+            <span className={cashback.enabled ? "font-semibold text-pos-success" : "text-muted-foreground"}>{cashback.enabled ? "Yoqilgan" : "O'chiq"}</span>
           </Row>
           <Row label="Hisoblash asosi">
             <span className="text-sm">{cashback.accrualBase === "paid" ? "To'langan summadan" : "Chek summasidan"}</span>
@@ -898,7 +951,7 @@ function PermissionsTab({ overview, cashierName }: { overview: SettingsOverview;
             <span>
               {row.name ?? row.phone} <span className="text-muted-foreground">· {row.role}</span>
             </span>
-            <span className={row.active ? "text-emerald-700" : "text-destructive"}>
+            <span className={row.active ? "text-pos-success" : "text-destructive"}>
               {row.active ? "faol" : "kira olmaydi"}
               {row.hasPin ? " · PIN o'rnatilgan" : ""}
             </span>
@@ -917,7 +970,7 @@ function SubscriptionTab({ overview }: { overview: SettingsOverview }) {
       <Title hint="Holat oxirgi sinxrondagi ma'lumot bo'yicha. To'lov va tarif — web'da.">Obuna</Title>
       <div className="max-w-2xl">
         <Row label="Holati">
-          <span className={`text-sm font-semibold ${status === "active" ? "text-emerald-700" : status === "trial" ? "text-amber-700" : "text-destructive"}`}>
+          <span className={`text-sm font-semibold ${status === "active" ? "text-pos-success" : status === "trial" ? "text-pos-warning" : "text-destructive"}`}>
             {status ? (SUBSCRIPTION_LABELS[status] ?? status) : "Ma'lumot yo'q (sinxron qiling)"}
           </span>
         </Row>

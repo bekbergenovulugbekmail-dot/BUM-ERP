@@ -17,7 +17,7 @@ import type {
   RemoteWarehouseStock,
   SyncStatus,
 } from "./sync-types.js";
-import type { PosTheme } from "./themes.js";
+import type { PosCustomTheme, PosDensity, PosFontScale, PosThemeChoice, ThemeSource } from "./themes.js";
 import type { WeightBarcodeFormat } from "./scale-barcode.js";
 import type { ScaleConfigInput, ScaleQueueItem, ScaleQueueStatus, ScaleReconcileResult, ScaleTestResult, ScaleView, WeightReading } from "./scale-types.js";
 
@@ -72,6 +72,8 @@ export type PosProduct = {
   taxIncluded: boolean;
   /** Qurilmadagi qoldiq: server qoldig'i + sinxron bo'lmagan cheklar/qaytarishlar (asosiy birlikda). */
   stock: string;
+  /** Minimal qoldiq (kartada "kam" holati uchun; 0 — belgilanmagan). */
+  minStock: string;
   /** Rasm bor: `bum-image://product/<id>?v=<imageVersion>` (keshlanadi, offline — keshdagisi). */
   imageVersion: string | null;
   /** Tarozida tortiladi: savatga qo'shishda og'irlik tarozidan o'qiladi. */
@@ -604,11 +606,22 @@ export type HotkeyAction =
 export type DevicePrefs = {
   /** Dastur tili: o'zbek lotin, kirill (avtomatik o'giriladi) yoki rus (lug'at bo'yicha). */
   language: "uz-Latn" | "uz-Cyrl" | "ru";
-  /** Joriy kassirning mavzusi (tanlanmagan bo'lsa — qurilma standarti); kompaniya qulflagan bo'lsa — qulflangan mavzu. */
-  theme: PosTheme;
+  /** Amaldagi mavzu — ustuvorlik bo'yicha: kompaniya qulfi → kassir tanlovi → kompaniya standarti → Windows tizimi. */
+  theme: PosThemeChoice;
+  /** Faqat o'qish: mavzu qayerdan olingan. */
+  themeSource: ThemeSource;
   /** Faqat o'qish: kompaniya qulflagan mavzu (null — qulf yo'q, kassir o'zi tanlaydi). */
-  themeLock: PosTheme | null;
-  fontScale: "normal" | "large";
+  themeLock: PosThemeChoice | null;
+  /** Faqat o'qish: kompaniya standart mavzusi (config; eski server — null). */
+  companyTheme: PosThemeChoice | null;
+  /** Kassirning o'z tanlovi (null — tanlamagan). Saqlashda `null` yuborilsa — kompaniya standartiga qaytadi. */
+  cashierTheme: PosThemeChoice | null;
+  /** Faqat o'qish: kompaniya maxsus mavzusi (web'da yaratilgan, kontrastdan o'tgan). */
+  customTheme: PosCustomTheme | null;
+  /** Elementlar zichligi (tugma balandligi, karta o'lchami) — kassir bo'yicha. */
+  density: PosDensity;
+  /** Shrift o'lchami — kassir bo'yicha. */
+  fontScale: PosFontScale;
   /** Kassa ekranidagi mahsulotlar: rasmli kartalar yoki ixcham jadval. */
   productView: "cards" | "table";
   hotkeys: Record<HotkeyAction, string>;

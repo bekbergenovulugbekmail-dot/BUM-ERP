@@ -85,7 +85,7 @@ export default function CustomerPaymentDialog({
                   >
                     <span className="min-w-0 truncate font-medium">{row.name}</span>
                     <span className="text-right text-xs tabular-nums">
-                      {num(row.totalDebt) > 0 && <span className="block text-amber-600">qarz {fmtMoney(row.totalDebt, baseCurrency)}</span>}
+                      {num(row.totalDebt) > 0 && <span className="block text-pos-warning">qarz {fmtMoney(row.totalDebt, baseCurrency)}</span>}
                       <span className="block text-muted-foreground">balans {fmtMoney(row.balance, baseCurrency)}</span>
                     </span>
                   </button>
@@ -142,7 +142,7 @@ export default function CustomerPaymentDialog({
                 )}
               </div>
               {purpose === "debt" && num(amount) > debt && (
-                <p className="text-xs text-amber-600">Qarzdan ortig'i {fmtMoney(num(amount) - debt, baseCurrency)} balansga yoziladi</p>
+                <p className="text-xs text-pos-warning">Qarzdan ortig'i {fmtMoney(num(amount) - debt, baseCurrency)} balansga yoziladi</p>
               )}
             </div>
             <Button type="submit" className="h-11 w-full" disabled={busy || amount === "" || num(amount) <= 0}>

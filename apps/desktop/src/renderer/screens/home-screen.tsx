@@ -8,9 +8,9 @@ import type { View } from "../app.tsx";
 import { call, errorText } from "../kassa.ts";
 
 const SYNC_LABEL: Record<SyncState, { text: string; tone: string }> = {
-  idle: { text: "Sinxron", tone: "bg-emerald-500" },
-  syncing: { text: "Sinxron qilinmoqda…", tone: "bg-sky-500 animate-pulse" },
-  offline: { text: "Offline", tone: "bg-amber-500" },
+  idle: { text: "Sinxron", tone: "bg-pos-success" },
+  syncing: { text: "Sinxron qilinmoqda…", tone: "bg-pos-info animate-pulse" },
+  offline: { text: "Offline", tone: "bg-pos-warning" },
   unauthorized: { text: "Qurilma o'chirilgan", tone: "bg-destructive" },
   error: { text: "Sinxron xatosi", tone: "bg-destructive" },
 };

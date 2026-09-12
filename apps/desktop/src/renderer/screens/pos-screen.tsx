@@ -1,5 +1,27 @@
-import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
-import { Banknote, Calculator, Clock, History, House, Keyboard, LockKeyhole, LogOut, Menu, Printer, RefreshCw, Store, Truck, Undo2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import {
+  Banknote,
+  Clock,
+  Keyboard,
+  LayoutGrid,
+  LockKeyhole,
+  LogOut,
+  Menu,
+  Minus,
+  Palette,
+  Plus,
+  Printer,
+  RefreshCw,
+  Rows3,
+  Search,
+  ShoppingCart,
+  SlidersHorizontal,
+  Store,
+  Trash2,
+  Undo2,
+  UserRound,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
 import {
@@ -8,7 +30,12 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -28,11 +55,16 @@ import type {
 } from "../../shared/kassa-api.js";
 import { fromMinor, toMinor } from "../../shared/money.js";
 import { computeSale, type SaleCalc } from "../../shared/sale-calc.js";
-import type { PaymentMethod, SyncState } from "../../shared/sync-types.js";
+import type { PaymentMethod } from "../../shared/sync-types.js";
+import { CUSTOM_POS_THEME, POS_THEMES, THEME_ICONS, THEME_LABELS, type PosThemeChoice } from "../../shared/themes.js";
+import type { View } from "../app.tsx";
 import { decimalInput, fmtMoney, fmtQty, num, trimDecimal } from "../format.ts";
 import { call, errorText } from "../kassa.ts";
 import CustomerDialog from "../pos/customer-dialog.tsx";
 import HeldDialog from "../pos/held-dialog.tsx";
+import { PaymentProgress } from "../pos/payment-progress.tsx";
+import { PosSidebar } from "../pos/pos-sidebar.tsx";
+import { PosStatusBar } from "../pos/pos-status.tsx";
 import PrefsDialog from "../pos/prefs-dialog.tsx";
 import { CategoryChips, ProductCard, ProductDetailDialog, ProductImage, PromoBadges } from "../pos/product-grid.tsx";
 import { DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_LABELS, keyName } from "../../shared/hotkeys.js";
@@ -56,9 +88,12 @@ type CartLine = {
   taxIncluded: boolean;
   salesCurrency: string | null;
   stock: string;
+  /** Savat qatoridagi rasm (eski kechiktirilgan cheklarda yo'q — bosh harflar ko'rsatiladi). */
+  imageVersion?: string | null;
 };
 
 type DialogName = "customer" | "return" | "unsynced" | "held" | "shift" | "prefs" | "help";
+type Notice = { tone: "error" | "info" | "success"; text: string };
 
 const QTY = /^\d{1,14}(\.\d{1,4})?$/;
 /** Barcha mahsulotlar ro'yxati sahifasi va chegarasi (100 minglab mahsulotda ham ekranga shuncha). */
@@ -68,43 +103,45 @@ const MAX_LIST = 960;
 type PayKey = "cash" | "card" | "bank";
 const EMPTY_TENDER: Record<PayKey, string> = { cash: "", card: "", bank: "" };
 
-const PAY_METHODS: { key: PayKey; label: string; action: "payCash" | "payCard" | "payBank" }[] = [
-  { key: "cash", label: "Naqd", action: "payCash" },
-  { key: "card", label: "Karta", action: "payCard" },
-  { key: "bank", label: "Bank", action: "payBank" },
+const PAY_METHODS: { key: PayKey; label: string; action: "payCash" | "payCard" | "payBank"; dot: string }[] = [
+  { key: "cash", label: "Naqd", action: "payCash", dot: "bg-pos-success" },
+  { key: "card", label: "Karta", action: "payCard", dot: "bg-pos-info" },
+  { key: "bank", label: "Bank", action: "payBank", dot: "bg-primary" },
 ];
 
-const SYNC_LABEL: Record<SyncState, { text: string; tone: string }> = {
-  idle: { text: "Sinxron", tone: "bg-emerald-500" },
-  syncing: { text: "Sinxron…", tone: "bg-sky-500 animate-pulse" },
-  offline: { text: "Offline", tone: "bg-amber-500" },
-  unauthorized: { text: "Qurilma o'chirilgan", tone: "bg-destructive" },
-  error: { text: "Sinxron xatosi", tone: "bg-destructive" },
+const NOTICE_TONES: Record<Notice["tone"], string> = {
+  error: "border-pos-danger/30 bg-pos-danger/10 text-pos-danger",
+  info: "border-pos-info/30 bg-pos-info/10 text-pos-info",
+  success: "border-pos-success/30 bg-pos-success/10 text-pos-success",
 };
 
 /** O'zgarmas tugmalar (qolganlari — Sozlamalar → Qaynoq tugmalar). */
 const FIXED_HOTKEYS: [string, string][] = [
   ["↑ ↓", "Qator tanlash"],
+  ["← →", "Kategoriya tanlash (tablar ustida)"],
   ["+ / −", "Miqdorni oshirish / kamaytirish"],
   ["Delete", "Qatorni o'chirish"],
 ];
 
-type MenuTone = "primary" | "amber" | "sky" | "emerald" | "rose" | "slate";
+type MenuTone = "primary" | "warning" | "info" | "success" | "danger" | "neutral";
 
-/** Menyu qatori ikonkasi: fon va rang (mavzu tokenlari bilan; qorong'i mavzularda ham o'qiladi). */
+/** Menyu qatori ikonkasi: fon va rang — semantik tokenlar (har mavzuda o'qiladi). */
 const MENU_TONES: Record<MenuTone, { box: string; icon: string }> = {
   primary: { box: "bg-primary/10", icon: "text-primary" },
-  amber: { box: "bg-amber-500/15", icon: "text-amber-600 dark:text-amber-400" },
-  sky: { box: "bg-sky-500/15", icon: "text-sky-600 dark:text-sky-400" },
-  emerald: { box: "bg-emerald-500/15", icon: "text-emerald-600 dark:text-emerald-400" },
-  rose: { box: "bg-destructive/10", icon: "text-destructive" },
-  slate: { box: "bg-muted", icon: "text-foreground" },
+  warning: { box: "bg-pos-warning/15", icon: "text-pos-warning" },
+  info: { box: "bg-pos-info/15", icon: "text-pos-info" },
+  success: { box: "bg-pos-success/15", icon: "text-pos-success" },
+  danger: { box: "bg-pos-danger/10", icon: "text-pos-danger" },
+  neutral: { box: "bg-muted", icon: "text-foreground" },
 };
+
+/** Savat qatoridagi −/+ tugmalari: zichlikka qarab kattalashadi (sensorli ekranda ≥ 44 px). */
+const STEP_BUTTON = "flex size-[calc(var(--pos-tap-size)-0.5rem)] shrink-0 items-center justify-center text-foreground hover:bg-muted disabled:opacity-40";
 
 function MenuRow({
   icon: Icon,
   label,
-  tone = "slate",
+  tone = "neutral",
   shortcut,
   badge,
   disabled,
@@ -124,7 +161,7 @@ function MenuRow({
         <Icon className={`size-4 ${MENU_TONES[tone].icon}`} />
       </span>
       <span className="min-w-0 flex-1 truncate text-sm font-medium">{label}</span>
-      {badge ? <span className="rounded-full bg-amber-500 px-1.5 text-xs font-semibold tabular-nums text-white">{badge}</span> : null}
+      {badge ? <span className="rounded-full bg-pos-warning px-1.5 text-xs font-semibold tabular-nums text-pos-warning-foreground">{badge}</span> : null}
       {shortcut && <Kbd className="h-6 min-w-8 rounded-md border border-border bg-background px-1.5">{shortcut}</Kbd>}
     </DropdownMenuItem>
   );
@@ -134,27 +171,43 @@ function MenuGroupLabel({ children }: { children: string }) {
   return <DropdownMenuLabel className="px-2 pt-2.5 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{children}</DropdownMenuLabel>;
 }
 
+function SummaryCell({ label, value, tone = "" }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="@container min-w-0 rounded-(--radius) border border-border bg-background/60 px-2 py-1 text-center">
+      <dt className="text-[10.5px] font-semibold tracking-wide text-muted-foreground uppercase">{label}</dt>
+      <dd className={`truncate text-sm font-extrabold tabular-nums @[8rem]:text-base ${tone}`}>{value}</dd>
+    </div>
+  );
+}
+
 const cartInput = (cart: CartLine[]): CartLineInput[] =>
   cart.map((line) => ({ productId: line.productId, unitId: line.unitId, quantity: line.quantity, ...(line.priceOverride ? { unitPrice: line.priceOverride } : {}) }));
 
 /**
- * Kassa (POS): chap — mahsulot qidiruvi va ro'yxati (skaner ham), o'ng — savat, mijoz, to'lov. Yuqoridagi menyu:
- * ombor, sotuv valyutasi, sinxron bo'lmagan cheklar, qaytarish, kechiktirilgan cheklar, pul qutisi, smena, printer.
- * Hisob main jarayondagi bilan bir xil (`computeSale`) — ekranda ko'rilgan summa aynan chekka yoziladi.
+ * Kassa (POS): chapda — bo'limlar paneli, o'rtada — mahsulot qidiruvi, kategoriyalar va kartalar (skaner ham), o'ngda — savat,
+ * doim ko'rinadigan jami va to'lov. Yuqori panel: kompaniya/kassa, smena, sinxron, printer, tarozi, kassir, soat. Hisob main
+ * jarayondagi bilan bir xil (`computeSale`) — ekranda ko'rilgan summa aynan chekka yoziladi. Ekran boshqa bo'limga o'tganda
+ * yashiriladi (o'chirilmaydi): savat, joriy sotuv va to'lov holati saqlanadi; yashirin paytda tugma va skaner tinglanmaydi.
  */
 export default function PosScreen({
+  active,
   status,
+  appPrefs,
+  onPrefs,
   onStatus,
   onExit,
   onNavigate,
 }: {
+  active: boolean;
   status: AppStatus;
+  appPrefs: DevicePrefs | null;
+  onPrefs: (prefs: DevicePrefs) => void;
   onStatus: (status: AppStatus) => void;
   onExit: () => void;
-  onNavigate: (view: "history" | "kassa" | "purchase") => void;
+  onNavigate: (view: View) => void;
 }) {
   const [context, setContext] = useState<PosContext | null>(null);
-  const [prefs, setPrefs] = useState<DevicePrefs | null>(null);
+  const [prefs, setPrefs] = useState<DevicePrefs | null>(appPrefs);
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState<PosProduct[]>([]);
   const [productsVersion, setProductsVersion] = useState(0);
@@ -184,9 +237,11 @@ export default function PosScreen({
   const [foreignMethod, setForeignMethod] = useState<Record<string, "cash" | "card">>({});
   const [dialog, setDialog] = useState<DialogName | null>(null);
   const [receipt, setReceipt] = useState<LocalSale | null>(null);
-  const [notice, setNotice] = useState<{ tone: "error" | "info"; text: string } | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
   const [openingCash, setOpeningCash] = useState("");
+  /** Oxirgi qo'shilgan qator — qisqa yoritiladi (qo'shildi signali). */
+  const [flash, setFlash] = useState<{ key: string; at: number } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const methodReady = useRef(false);
   const lastSyncAt = status.sync.lastSyncAt;
@@ -212,6 +267,19 @@ export default function PosScreen({
       (err: unknown) => setNotice({ tone: "error", text: errorText(err) }),
     );
   }, [lastSyncAt]);
+
+  // Sozlamalar boshqa bo'limda o'zgartirilgan (mavzu, printer, to'lov usullari) — kassa ekrani ham yangisini ishlatadi
+  const [prefsSource, setPrefsSource] = useState(appPrefs);
+  if (appPrefs !== prefsSource) {
+    setPrefsSource(appPrefs);
+    if (appPrefs) setPrefs(appPrefs);
+  }
+
+  // Kassaga qaytganda qidiruvga fokus (skaner va klaviatura darhol ishlaydi)
+  useEffect(() => {
+    if (active && !dialog) searchRef.current?.focus({ preventScroll: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- faqat ko'rinish o'zgarganda
+  }, [active]);
 
   const showQuick = tab === "quick" && query.trim() === "";
   const quickCategory = tab === "quick" ? categoryId : null;
@@ -300,6 +368,18 @@ export default function PosScreen({
   }
   const currencyMode = !!calc && (calc.buckets.length > 1 || !calc.hasBaseBucket);
 
+  /** Sozlamani saqlash va butun ilovaga qo'llash (mavzu darhol almashadi — qayta yuklash va savat yo'qolishisiz). */
+  const savePrefs = (patch: Partial<DevicePrefs>) => {
+    if (!prefs) return;
+    call("device:save-prefs", { ...prefs, ...patch }).then(
+      (saved) => {
+        setPrefs(saved);
+        onPrefs(saved);
+      },
+      (err: unknown) => setNotice({ tone: "error", text: errorText(err) }),
+    );
+  };
+
   const resetCart = () => {
     setCart([]);
     setSelected(0);
@@ -342,10 +422,12 @@ export default function PosScreen({
           taxIncluded: product.taxIncluded,
           salesCurrency: product.salesCurrency,
           stock: product.stock,
+          imageVersion: product.imageVersion,
         },
       ]);
       setSelected(cart.length);
     }
+    setFlash({ key: `${product.id}:${product.baseUnitId}`, at: Date.now() });
     setNotice(null);
   };
 
@@ -456,6 +538,7 @@ export default function PosScreen({
       });
       resetCart();
       setReceipt(sale);
+      setNotice({ tone: "success", text: `Sotuv yakunlandi: chek ${sale.number} · ${fmtMoney(sale.total, base)}` });
       setProductsVersion((value) => value + 1);
       call("app:status").then(onStatus, () => undefined);
       if (prefs?.autoPrint) {
@@ -480,7 +563,7 @@ export default function PosScreen({
         cart: { customerId: customer?.id ?? null, lines: cartInput(cart), saleCurrencies: activeCurrencies, display: { customer, lines: cart } },
       });
       resetCart();
-      setNotice({ tone: "info", text: "Chek kechiktirildi — F6 bilan qaytarasiz" });
+      setNotice({ tone: "info", text: `Chek kechiktirildi — ${hotkeys.held} bilan qaytarasiz` });
     } catch (err) {
       setNotice({ tone: "error", text: errorText(err) });
     }
@@ -500,7 +583,7 @@ export default function PosScreen({
     );
     const lines = saved.flatMap((line, index) => {
       const product = fresh[index];
-      return product && product.price !== null ? [{ ...line, listPrice: product.price, stock: product.stock }] : [];
+      return product && product.price !== null ? [{ ...line, listPrice: product.price, stock: product.stock, imageVersion: product.imageVersion }] : [];
     });
     if (lines.length < saved.length) setNotice({ tone: "error", text: "Ba'zi mahsulotlar endi sotilmaydi — savatdan olib tashlandi" });
     setCart(lines);
@@ -542,11 +625,11 @@ export default function PosScreen({
 
   const setProductView = (productView: DevicePrefs["productView"]) => {
     if (!prefs || prefs.productView === productView) return;
-    call("device:save-prefs", { ...prefs, productView }).then(setPrefs, (err: unknown) => setNotice({ tone: "error", text: errorText(err) }));
+    savePrefs({ productView });
   };
 
   const handleKey = (event: KeyboardEvent) => {
-    if (dialog || receipt || detail) return;
+    if (!active || dialog || receipt || detail) return;
     const pickMethod = (method: PayKey) => {
       if (!enabledMethods.some((item) => item.key === method)) return;
       // Summa kiritilgan bo'lsa — qolgan summa shu usulga (aralash to'lov); aks holda usul tanlanadi (aniq summa)
@@ -586,19 +669,21 @@ export default function PosScreen({
   };
 
   // Global tinglovchilar bir marta ulanadi — eng so'nggi funksiyalar ref orqali
-  const actions = useRef({ handleKey, addProduct, addScanned, addByCode });
+  const actions = useRef({ active, handleKey, addProduct, addScanned, addByCode });
   useEffect(() => {
-    actions.current = { handleKey, addProduct, addScanned, addByCode };
+    actions.current = { active, handleKey, addProduct, addScanned, addByCode };
   });
   useEffect(() => {
     const listener = (event: KeyboardEvent) => actions.current.handleKey(event);
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
   }, []);
-  const onScan = useCallback((code: string) => void actions.current.addByCode(code), []);
+  // Kassa yashirin (boshqa bo'lim yoki blok) — skaner kodi savatga tushmaydi
+  const onScan = useCallback((code: string) => {
+    if (actions.current.active) void actions.current.addByCode(code);
+  }, []);
   useHIDScanner({ onScan, minLength: 3 });
 
-  const sync = SYNC_LABEL[status.sync.state];
   const unsyncedCount = status.sync.pending + status.sync.rejected;
   const shiftTotals = status.shift?.totals;
   const errors = calc?.errors.filter((error) => error !== "Savatcha bo'sh") ?? [];
@@ -607,104 +692,150 @@ export default function PosScreen({
   const discountPercent = num(customer?.discountPercent ?? "0");
   const cartQty = new Map<string, number>();
   for (const line of cart) cartQty.set(line.productId, (cartQty.get(line.productId) ?? 0) + num(line.quantity));
+  const cashierName = status.cashier?.name ?? status.cashier?.phone ?? "";
+  const themeChoices: PosThemeChoice[] = prefs?.customTheme ? [...POS_THEMES, CUSTOM_POS_THEME] : [...POS_THEMES];
+  const themeLocked = !prefs || prefs.themeLock !== null;
+  const itemsCount = cart.length;
+  const paymentEntered = typedMethods.length > 0 || (!!calc && calc.cashbackUsed + calc.balanceUsed > 0n);
 
-  const header = (
-    <header className="flex items-center gap-3 border-b border-border bg-card px-3 py-2">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="secondary" size="sm" className="gap-2">
-            <Menu className="size-4" />
-            Menyu
-            {unsyncedCount > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-xs font-semibold text-white">{unsyncedCount}</span>}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" sideOffset={6} className="w-[22rem] rounded-xl p-2 shadow-xl">
-          <div className="flex items-center gap-3 rounded-lg bg-muted/70 px-3 py-2.5">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <Store className="size-5" />
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{status.device?.warehouseName}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                Kassa {status.device?.code} · {status.device?.name}
-              </p>
-            </div>
+  const menu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="secondary" className="h-(--pos-tap-size) gap-2 px-3">
+          <Menu className="size-4" />
+          Menyu
+          {unsyncedCount > 0 && <span className="rounded-full bg-pos-warning px-1.5 text-xs font-semibold text-pos-warning-foreground">{unsyncedCount}</span>}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" sideOffset={6} className="max-h-[calc(100vh-5rem)] w-[22rem] overflow-y-auto rounded-xl p-2 shadow-xl">
+        <div className="flex items-center gap-3 rounded-lg bg-muted/70 px-3 py-2.5">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <Store className="size-5" />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">{status.device?.warehouseName}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              Kassa {status.device?.code} · {status.device?.name}
+            </p>
           </div>
+        </div>
 
-          <MenuGroupLabel>Sotuv valyutasi</MenuGroupLabel>
-          {[base, ...(context?.currencies ?? []).map((currency) => currency.code)].map((code) => (
-            <DropdownMenuCheckboxItem
-              key={code}
-              className="rounded-lg py-2 pr-2.5 pl-9"
-              checked={activeCurrencies.includes(code)}
-              onSelect={(event) => event.preventDefault()}
-              onCheckedChange={() => toggleCurrency(code)}
-            >
-              <span className="font-semibold">{code}</span>
-              {code !== base && (
-                <span className="ml-auto text-xs tabular-nums text-muted-foreground">{fmtMoney(context?.currencies.find((currency) => currency.code === code)?.rate, base)}</span>
-              )}
-            </DropdownMenuCheckboxItem>
-          ))}
+        <MenuGroupLabel>Sotuv valyutasi</MenuGroupLabel>
+        {[base, ...(context?.currencies ?? []).map((currency) => currency.code)].map((code) => (
+          <DropdownMenuCheckboxItem
+            key={code}
+            className="rounded-lg py-2 pr-2.5 pl-9"
+            checked={activeCurrencies.includes(code)}
+            onSelect={(event) => event.preventDefault()}
+            onCheckedChange={() => toggleCurrency(code)}
+          >
+            <span className="font-semibold">{code}</span>
+            {code !== base && (
+              <span className="ml-auto text-xs tabular-nums text-muted-foreground">{fmtMoney(context?.currencies.find((currency) => currency.code === code)?.rate, base)}</span>
+            )}
+          </DropdownMenuCheckboxItem>
+        ))}
 
-          <DropdownMenuSeparator className="my-1.5" />
-          <MenuGroupLabel>Cheklar</MenuGroupLabel>
-          <MenuRow
-            icon={RefreshCw}
-            tone={unsyncedCount > 0 ? "amber" : "sky"}
-            label="Sinxron bo'lmagan cheklar"
-            badge={unsyncedCount}
-            shortcut={hotkeys.unsynced}
-            onSelect={() => setDialog("unsynced")}
-          />
-          <MenuRow icon={Undo2} tone="rose" label="Mahsulotni qaytarish" shortcut={hotkeys.return} onSelect={() => setDialog("return")} />
-          <MenuRow icon={Clock} tone="primary" label="Kechiktirilgan cheklar" shortcut={hotkeys.held} onSelect={() => setDialog("held")} />
+        <DropdownMenuSeparator className="my-1.5" />
+        <MenuGroupLabel>Cheklar</MenuGroupLabel>
+        <MenuRow
+          icon={RefreshCw}
+          tone={unsyncedCount > 0 ? "warning" : "info"}
+          label="Sinxron bo'lmagan cheklar"
+          badge={unsyncedCount}
+          shortcut={hotkeys.unsynced}
+          onSelect={() => setDialog("unsynced")}
+        />
+        <MenuRow icon={Undo2} tone="danger" label="Mahsulotni qaytarish" shortcut={hotkeys.return} onSelect={() => setDialog("return")} />
+        <MenuRow icon={Clock} tone="primary" label="Kechiktirilgan cheklar" shortcut={hotkeys.held} onSelect={() => setDialog("held")} />
 
-          <DropdownMenuSeparator className="my-1.5" />
-          <MenuGroupLabel>Kassa</MenuGroupLabel>
-          <MenuRow icon={Banknote} tone="emerald" label="Pul qutisini ochish" onSelect={() => void openDrawer()} />
-          <MenuRow icon={LockKeyhole} tone="amber" label="Smenani yopish" disabled={!status.shift} onSelect={() => setDialog("shift")} />
-          <MenuRow icon={Printer} label="Printer va pul qutisi" onSelect={() => setDialog("prefs")} />
-          <MenuRow icon={Keyboard} label="Tugmalar" shortcut={hotkeys.help} onSelect={() => setDialog("help")} />
+        <DropdownMenuSeparator className="my-1.5" />
+        <MenuGroupLabel>Kassa</MenuGroupLabel>
+        <MenuRow icon={Banknote} tone="success" label="Pul qutisini ochish" onSelect={() => void openDrawer()} />
+        <MenuRow icon={LockKeyhole} tone="warning" label="Smenani yopish" disabled={!status.shift} onSelect={() => setDialog("shift")} />
+        <MenuRow icon={Printer} label="Printer va pul qutisi" onSelect={() => setDialog("prefs")} />
+        <MenuRow icon={Keyboard} label="Tugmalar" shortcut={hotkeys.help} onSelect={() => setDialog("help")} />
 
-          <DropdownMenuSeparator className="my-1.5" />
-          <MenuGroupLabel>Bo'limlar</MenuGroupLabel>
-          <MenuRow icon={History} tone="primary" label="Sotuv tarixi" onSelect={() => onNavigate("history")} />
-          <MenuRow icon={Calculator} tone="emerald" label="Kassa: kirim-chiqim, X/Z-hisobot" onSelect={() => onNavigate("kassa")} />
-          <MenuRow icon={Truck} tone="sky" label="Xarid: ta'minotchidan tovar" onSelect={() => onNavigate("purchase")} />
-          <MenuRow icon={House} label="Bosh sahifa" onSelect={onExit} />
-
-          <DropdownMenuSeparator className="my-1.5" />
-          <DropdownMenuItem className="gap-3 rounded-lg px-2 py-2" onSelect={() => void call("cashier:logout").then(onStatus)}>
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
-              {(status.cashier?.name ?? status.cashier?.phone ?? "?").trim().charAt(0).toUpperCase()}
+        <DropdownMenuSeparator className="my-1.5" />
+        <MenuGroupLabel>Ko'rinish</MenuGroupLabel>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger disabled={themeLocked} className="gap-3 rounded-lg px-2 py-1.5">
+            <span className={`flex size-8 shrink-0 items-center justify-center rounded-md ${MENU_TONES.primary.box}`}>
+              <Palette className={`size-4 ${MENU_TONES.primary.icon}`} />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium">{status.cashier?.name ?? status.cashier?.phone}</span>
-              <span className="block text-xs text-muted-foreground">Kassirni almashtirish</span>
+              <span className="block truncate text-sm font-medium">Mavzu</span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {prefs ? `${THEME_ICONS[prefs.theme]} ${THEME_LABELS[prefs.theme]}${prefs.themeLock !== null ? " · kompaniya qulflagan" : ""}` : "…"}
+              </span>
             </span>
-            <LogOut className="size-4 text-muted-foreground" />
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <div className="min-w-0 text-sm">
-        <span className="font-semibold">{status.company?.name}</span>
-        <span className="ml-2 text-muted-foreground">
-          {status.device?.code} · {status.device?.warehouseName}
-        </span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="max-h-[70vh] w-60 overflow-y-auto rounded-xl p-1.5">
+            <DropdownMenuRadioGroup value={prefs?.theme ?? ""} onValueChange={(value) => savePrefs({ theme: value as PosThemeChoice })}>
+              {themeChoices.map((theme) => (
+                <DropdownMenuRadioItem key={theme} value={theme} className="rounded-lg py-2" onSelect={(event) => event.preventDefault()}>
+                  <span aria-hidden className="w-5 text-center">
+                    {THEME_ICONS[theme]}
+                  </span>
+                  {THEME_LABELS[theme]}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <MenuRow icon={SlidersHorizontal} label="Ko'rinish sozlamalari" onSelect={() => onNavigate("settings")} />
+
+        <DropdownMenuSeparator className="my-1.5" />
+        <DropdownMenuItem className="gap-3 rounded-lg px-2 py-2" onSelect={() => void call("cashier:logout").then(onStatus)}>
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+            {cashierName.trim().charAt(0).toUpperCase() || "?"}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium">{cashierName}</span>
+            <span className="block text-xs text-muted-foreground">Kassirni almashtirish</span>
+          </span>
+          <LogOut className="size-4 text-muted-foreground" />
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
+  const header = (
+    <header className="pos-glass flex min-w-0 items-center gap-3 border-b border-border bg-pos-topbar px-3 py-2 text-pos-topbar-foreground">
+      {menu}
+      <div className="min-w-0 leading-tight">
+        <p className="truncate text-sm font-bold">{status.company?.name}</p>
+        <p className="truncate text-xs opacity-75">
+          Kassa {status.device?.code} · {status.device?.warehouseName}
+        </p>
       </div>
-      {shiftTotals && (
-        <div className="hidden text-xs text-muted-foreground lg:block">
-          Smena: {shiftTotals.receipts} chek · {fmtMoney(shiftTotals.sales, base)}
-        </div>
-      )}
-      <div className="ml-auto flex items-center gap-3 text-sm">
-        <button type="button" className="flex items-center gap-2" onClick={() => setDialog("unsynced")}>
-          <span className={`h-2.5 w-2.5 rounded-full ${sync.tone}`} />
-          {sync.text}
-          {unsyncedCount > 0 && <span className="text-muted-foreground">· {unsyncedCount} navbatda</span>}
-        </button>
-        <span className="font-medium">{status.cashier?.name ?? status.cashier?.phone}</span>
+      <div className="hidden min-w-0 items-center gap-1.5 border-l border-current/15 pl-3 text-xs lg:flex">
+        {status.shift ? (
+          <span className="truncate">
+            <span className="font-semibold">Smena ochiq</span>
+            {shiftTotals && (
+              <span className="opacity-75">
+                {" "}
+                · {shiftTotals.receipts} chek · {fmtMoney(shiftTotals.sales, base)}
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className="font-semibold text-pos-warning">Smena yopiq</span>
+        )}
+      </div>
+      <div className="ml-auto flex min-w-0 items-center gap-2">
+        <PosStatusBar
+          sync={status.sync}
+          unsynced={unsyncedCount}
+          printerName={prefs?.printerName ?? null}
+          canViewScales={permissions.includes("scale.view")}
+          onSyncClick={() => setDialog("unsynced")}
+        />
+        <span className="hidden items-center gap-2 border-l border-current/15 pl-2 text-sm font-medium 2xl:flex" title="Kassir">
+          <UserRound className="size-4 opacity-75" />
+          <span className="max-w-40 truncate">{cashierName}</span>
+        </span>
       </div>
     </header>
   );
@@ -745,7 +876,16 @@ export default function PosScreen({
           onStatus(next);
         }}
       />
-      <PrefsDialog open={dialog === "prefs"} context={context} cashierName={status.cashier?.name ?? null} onClose={() => setDialog(null)} onSaved={setPrefs} />
+      <PrefsDialog
+        open={dialog === "prefs"}
+        context={context}
+        cashierName={status.cashier?.name ?? null}
+        onClose={() => setDialog(null)}
+        onSaved={(saved) => {
+          setPrefs(saved);
+          onPrefs(saved);
+        }}
+      />
       <Dialog open={dialog === "help"} onOpenChange={(value) => !value && setDialog(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -778,40 +918,76 @@ export default function PosScreen({
     </>
   );
 
-  if (!status.shift) {
-    return (
-      <main className="flex h-full flex-col bg-muted/40">
+  const noticeBar = notice && (
+    <p role={notice.tone === "error" ? "alert" : "status"} className={`pos-rise flex items-start gap-2 rounded-(--radius) border px-3 py-2 text-sm font-medium ${NOTICE_TONES[notice.tone]}`}>
+      <span className="min-w-0 flex-1">{notice.text}</span>
+      <button type="button" aria-label="Yopish" className="-m-1 rounded p-1 opacity-70 hover:opacity-100" onClick={() => setNotice(null)}>
+        <X className="size-4" />
+      </button>
+    </p>
+  );
+
+  const shell = (content: ReactNode) => (
+    <main className="flex h-full min-h-0 text-foreground">
+      <PosSidebar
+        permissions={permissions}
+        activeTab={tab}
+        onTab={(next) => {
+          if (next !== tab) switchTab(next);
+          setQuery("");
+          searchRef.current?.focus();
+        }}
+        onNavigate={(view) => (view === "home" ? onExit() : onNavigate(view))}
+      />
+      <div className="grid min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)]">
         {header}
-        <div className="flex flex-1 items-center justify-center p-6">
-          <form
-            className="w-full max-w-sm space-y-3 rounded-2xl border border-border bg-card p-6"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void openShift();
-            }}
-          >
-            <h1 className="text-lg font-semibold">Smena yopiq</h1>
-            <p className="text-sm text-muted-foreground">Sotuvni boshlash uchun kassadagi boshlang'ich naqdni kiriting.</p>
-            <Input id="opening-cash" autoFocus inputMode="decimal" placeholder="0" value={openingCash} onChange={(e) => setOpeningCash(decimalInput(e.target.value))} />
-            <Button type="submit" className="h-11 w-full" disabled={busy}>
-              Smenani ochish
-            </Button>
-            {notice && <p className="text-sm text-destructive">{notice.text}</p>}
-          </form>
-        </div>
-        {dialogs}
-      </main>
+        {content}
+      </div>
+      {dialogs}
+    </main>
+  );
+
+  if (!status.shift) {
+    return shell(
+      <div className="flex items-center justify-center overflow-y-auto p-6">
+        <form
+          className="w-full max-w-sm space-y-3 rounded-2xl border border-border bg-card p-6 shadow-pos"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void openShift();
+          }}
+        >
+          <h1 className="text-xl font-bold">Smena yopiq</h1>
+          <p className="text-sm text-muted-foreground">Sotuvni boshlash uchun kassadagi boshlang'ich naqdni kiriting.</p>
+          <Input
+            id="opening-cash"
+            autoFocus
+            inputMode="decimal"
+            className="h-(--pos-tap-size) text-lg"
+            placeholder="0"
+            value={openingCash}
+            onChange={(e) => setOpeningCash(decimalInput(e.target.value))}
+          />
+          <Button type="submit" className="h-(--pos-tap-size) w-full bg-pos-action text-base font-bold text-pos-action-foreground hover:bg-pos-action-hover" disabled={busy}>
+            Smenani ochish
+          </Button>
+          {notice && <p className="text-sm text-pos-danger">{notice.text}</p>}
+        </form>
+      </div>,
     );
   }
 
-  return (
-    <main className="grid h-full grid-rows-[auto_1fr] bg-muted/40">
-      {header}
-      <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_440px]">
-        {/* Mahsulotlar */}
-        <section className="flex min-h-0 flex-col gap-2 p-3">
+  const productGridColumns = showQuick
+    ? "grid-cols-[repeat(auto-fill,minmax(min(100%,var(--pos-quick-card-size)),1fr))]"
+    : "grid-cols-[repeat(auto-fill,minmax(min(100%,var(--pos-card-size)),1fr))]";
+
+  return shell(
+    <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_clamp(21.5rem,33vw,30rem)]">
+      {/* Mahsulotlar */}
+      <section className="flex min-h-0 flex-col gap-(--pos-gap) p-3">
+        <div className="flex flex-wrap items-center gap-2">
           <form
-            className="flex gap-2"
+            className="relative min-w-60 flex-1"
             onSubmit={(event) => {
               event.preventDefault();
               const code = query.trim();
@@ -825,12 +1001,13 @@ export default function PosScreen({
               });
             }}
           >
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-5 -translate-y-1/2 text-muted-foreground" />
             <Input
               ref={searchRef}
               id="pos-search"
               autoFocus
-              className="h-11 text-base"
-              placeholder="Mahsulot nomi, SKU yoki shtrix-kod (F2)"
+              className="h-(--pos-tap-size) bg-card pl-10 text-base shadow-pos"
+              placeholder={`Nomi, SKU yoki shtrix-kod (${hotkeys.search})`}
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -838,396 +1015,492 @@ export default function PosScreen({
               }}
             />
           </form>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-lg border border-border bg-card p-0.5" role="tablist" aria-label="Mahsulotlar">
-              {(["quick", "all"] as const).map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === key}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${tab === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                  onClick={() => switchTab(key)}
-                >
-                  {key === "quick" ? `Tezkor sotuv${quick?.configured ? ` · ${quick.products.length}` : ""}` : "Barcha mahsulotlar"}
-                </button>
-              ))}
-            </div>
-            {query.trim() !== "" && tab === "quick" && <span className="text-xs text-muted-foreground">qidiruv — barcha mahsulotlar bo'yicha</span>}
-            <div className="ml-auto flex rounded-lg border border-border bg-card p-0.5" aria-label="Ko'rinish">
-              {(["cards", "table"] as const).map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  aria-pressed={productView === key}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium ${productView === key ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                  onClick={() => setProductView(key)}
-                >
-                  {key === "cards" ? "Kartalar" : "Jadval"}
-                </button>
-              ))}
-            </div>
+          <div className="flex h-(--pos-tap-size) rounded-(--radius) border border-border bg-card p-1 shadow-pos" role="tablist" aria-label="Mahsulotlar">
+            {(["quick", "all"] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={tab === key}
+                className={`pos-motion rounded-[calc(var(--radius)-0.25rem)] px-3 text-sm font-semibold whitespace-nowrap transition-colors ${
+                  tab === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
+                onClick={() => switchTab(key)}
+              >
+                {key === "quick" ? `Tezkor sotuv${quick?.configured ? ` · ${quick.products.length}` : ""}` : "Barcha mahsulotlar"}
+              </button>
+            ))}
           </div>
-          <CategoryChips categories={showQuick ? (quick?.categories ?? []) : categories} active={categoryId} onPick={pickCategory} />
-          <div className={`min-h-0 flex-1 overflow-y-auto ${productView === "table" ? "rounded-xl border border-border bg-card" : ""}`}>
-            {showQuick && quick && !quick.configured ? (
-              <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-                <p className="max-w-md text-sm text-muted-foreground">
-                  Tezkor sotuv assortimenti hali tanlanmagan. Rahbar web'da tanlaydi: Sozlamalar → Kassa qurilmalari → Tezkor sotuv (eng ko'p sotilganlar
-                  tavsiyasi bilan).
-                </p>
-                <Button variant="secondary" onClick={() => switchTab("all")}>
-                  Barcha mahsulotlar
-                </Button>
-              </div>
-            ) : productView === "cards" ? (
-              <div className={`grid gap-2 ${showQuick ? "grid-cols-[repeat(auto-fill,minmax(12.5rem,1fr))]" : "grid-cols-[repeat(auto-fill,minmax(10rem,1fr))]"}`}>
-                {shownProducts.map((product) => (
-                  <ProductCard
-                    key={product.id}
-                    product={product}
-                    base={base}
-                    discountPercent={discountPercent}
-                    inCart={cartQty.get(product.id) ?? 0}
-                    onAdd={(picked) => void addFromList(picked)}
-                    onDetails={setDetail}
-                  />
-                ))}
-              </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-muted/80 text-left text-xs text-muted-foreground backdrop-blur">
-                  <tr>
-                    <th className="px-3 py-2">Mahsulot</th>
-                    <th className="px-3 py-2">SKU</th>
-                    <th className="px-3 py-2 text-right">Narx</th>
-                    <th className="px-3 py-2 text-right">Qoldiq</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shownProducts.map((product) => {
-                    const stock = num(product.stock);
-                    return (
-                      <tr key={product.id} className="cursor-pointer border-t border-border hover:bg-primary/5" onClick={() => void addFromList(product)}>
-                        <td className="px-3 py-1.5 font-medium">
-                          <span className="flex items-center gap-2">
-                            <ProductImage product={product} className="h-9 w-9 shrink-0 rounded-md text-xs" />
-                            <span className="min-w-0">
-                              {product.name}
-                              <span className="ml-2 inline-flex gap-1 align-middle">
-                                <PromoBadges product={product} discountPercent={0} />
-                              </span>
+          <div className="flex h-(--pos-tap-size) rounded-(--radius) border border-border bg-card p-1 shadow-pos" aria-label="Ko'rinish">
+            {(
+              [
+                ["cards", LayoutGrid, "Kartalar"],
+                ["table", Rows3, "Jadval"],
+              ] as const
+            ).map(([key, Icon, label]) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={productView === key}
+                title={label}
+                aria-label={label}
+                className={`flex aspect-square items-center justify-center rounded-[calc(var(--radius)-0.25rem)] ${productView === key ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                onClick={() => setProductView(key)}
+              >
+                <Icon className="size-4" />
+              </button>
+            ))}
+          </div>
+        </div>
+        {query.trim() !== "" && tab === "quick" && <p className="-mt-1 text-xs text-muted-foreground">Qidiruv — barcha mahsulotlar bo'yicha</p>}
+        <CategoryChips categories={showQuick ? (quick?.categories ?? []) : categories} active={categoryId} onPick={pickCategory} />
+        <div className={`min-h-0 flex-1 overflow-y-auto ${productView === "table" ? "rounded-(--radius) border border-border bg-card" : "-mx-1 px-1 pt-1"}`}>
+          {showQuick && quick && !quick.configured ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+              <p className="max-w-md text-sm text-muted-foreground">
+                Tezkor sotuv assortimenti hali tanlanmagan. Rahbar web'da tanlaydi: Sozlamalar → Kassa qurilmalari → Tezkor sotuv (eng ko'p sotilganlar tavsiyasi
+                bilan).
+              </p>
+              <Button variant="secondary" onClick={() => switchTab("all")}>
+                Barcha mahsulotlar
+              </Button>
+            </div>
+          ) : productView === "cards" ? (
+            <div className={`grid gap-(--pos-gap) pb-2 ${productGridColumns}`}>
+              {shownProducts.map((product) => (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  base={base}
+                  discountPercent={discountPercent}
+                  inCart={cartQty.get(product.id) ?? 0}
+                  onAdd={(picked) => void addFromList(picked)}
+                  onDetails={setDetail}
+                />
+              ))}
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 z-10 bg-muted text-left text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2">Mahsulot</th>
+                  <th className="px-3 py-2">SKU</th>
+                  <th className="px-3 py-2 text-right">Narx</th>
+                  <th className="px-3 py-2 text-right">Qoldiq</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shownProducts.map((product) => {
+                  const stock = num(product.stock);
+                  const min = num(product.minStock);
+                  return (
+                    <tr
+                      key={product.id}
+                      tabIndex={0}
+                      className="cursor-pointer border-t border-border hover:bg-pos-selected focus-visible:bg-pos-selected"
+                      onClick={() => void addFromList(product)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          void addFromList(product);
+                        }
+                      }}
+                    >
+                      <td className="px-3 py-1.5 font-medium">
+                        <span className="flex items-center gap-2">
+                          <ProductImage product={product} className="h-10 w-10 shrink-0 rounded-md text-xs" />
+                          <span className="min-w-0">
+                            {product.name}
+                            <span className="ml-2 inline-flex gap-1 align-middle">
+                              <PromoBadges product={product} discountPercent={0} />
                             </span>
                           </span>
-                        </td>
-                        <td className="px-3 py-1.5 text-muted-foreground">{product.sku}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">
-                          {product.price === null ? (
-                            <span className="text-destructive">kurs yo'q</span>
-                          ) : (
-                            <span className={product.promo ? "font-semibold text-destructive" : ""}>{fmtMoney(product.price, base)}</span>
-                          )}
-                          {product.promo && product.regularPrice && product.regularPrice !== product.price && (
-                            <s className="block text-xs text-muted-foreground">{fmtMoney(product.regularPrice, base)}</s>
-                          )}
-                          {product.salesCurrency && product.salesCurrency !== base && (
-                            <span className="block text-xs text-muted-foreground">{fmtMoney(product.salesPrice, product.salesCurrency)}</span>
-                          )}
-                        </td>
-                        <td className={`px-3 py-1.5 text-right tabular-nums ${stock < 0 ? "text-destructive" : stock === 0 ? "text-amber-600" : ""}`}>
-                          {fmtQty(product.stock)} {product.unitName}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-            {shownProducts.length === 0 && !(showQuick && quick && !quick.configured) && (
-              <p className="px-3 py-10 text-center text-sm text-muted-foreground">Mahsulot topilmadi</p>
-            )}
-            {!showQuick && products.length >= limit && limit < MAX_LIST && (
-              <div className="p-2 text-center">
-                <Button variant="secondary" size="sm" onClick={() => setLimit(limit + PAGE)}>
-                  Yana ko'rsatish
-                </Button>
-              </div>
-            )}
-          </div>
-          {notice && (
-            <p className={`rounded-lg px-3 py-2 text-sm ${notice.tone === "error" ? "bg-destructive/10 text-destructive" : "bg-sky-500/10 text-sky-700"}`}>{notice.text}</p>
+                        </span>
+                      </td>
+                      <td className="px-3 py-1.5 text-muted-foreground">{product.sku}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">
+                        {product.price === null ? (
+                          <span className="text-pos-danger">kurs yo'q</span>
+                        ) : (
+                          <span className={`font-bold ${product.promo ? "text-pos-promotion" : "text-pos-price"}`}>{fmtMoney(product.price, base)}</span>
+                        )}
+                        {product.promo && product.regularPrice && product.regularPrice !== product.price && (
+                          <s className="block text-xs text-muted-foreground">{fmtMoney(product.regularPrice, base)}</s>
+                        )}
+                        {product.salesCurrency && product.salesCurrency !== base && (
+                          <span className="block text-xs text-muted-foreground">{fmtMoney(product.salesPrice, product.salesCurrency)}</span>
+                        )}
+                      </td>
+                      <td
+                        className={`px-3 py-1.5 text-right font-medium tabular-nums ${stock <= 0 ? "text-pos-stock-out" : min > 0 && stock <= min ? "text-pos-stock-low" : "text-pos-stock-ok"}`}
+                      >
+                        {fmtQty(product.stock)} {product.unitName}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
-        </section>
+          {shownProducts.length === 0 && !(showQuick && quick && !quick.configured) && (
+            <p className="px-3 py-10 text-center text-sm text-muted-foreground">Mahsulot topilmadi</p>
+          )}
+          {!showQuick && products.length >= limit && limit < MAX_LIST && (
+            <div className="p-2 text-center">
+              <Button variant="secondary" size="sm" onClick={() => setLimit(limit + PAGE)}>
+                Yana ko'rsatish
+              </Button>
+            </div>
+          )}
+        </div>
+        {noticeBar}
+      </section>
 
-        {/* Savat va to'lov */}
-        <aside className="flex min-h-0 flex-col border-l border-border bg-card">
-          <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-            {customer ? (
+      {/* Savat va to'lov */}
+      <aside className="pos-glass flex min-h-0 flex-col border-l border-border bg-pos-cart" aria-label="Savat">
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          {customer ? (
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/12 text-primary">
+                <UserRound className="size-4" />
+              </span>
               <div className="min-w-0 flex-1">
-                <button type="button" className="block max-w-full truncate text-left font-medium" onClick={() => setDialog("customer")}>
+                <button type="button" className="block max-w-full truncate text-left text-sm font-semibold" onClick={() => setDialog("customer")}>
                   {customer.name}
                 </button>
-                <p className="text-xs text-muted-foreground">
-                  {num(customer.totalDebt) > 0 && <span className="text-amber-600">qarz {fmtMoney(customer.totalDebt, base)} · </span>}
+                <p className="truncate text-xs text-muted-foreground">
+                  {num(customer.totalDebt) > 0 && <span className="font-medium text-pos-warning">qarz {fmtMoney(customer.totalDebt, base)} · </span>}
                   balans {fmtMoney(customer.balance, base)}
                   {context?.cashback?.enabled && <> · keshbek {fmtMoney(customer.cashbackBalance, base)}</>}
+                  {discountPercent > 0 && <span className="font-medium text-pos-success"> · chegirma {discountPercent}%</span>}
                 </p>
               </div>
-            ) : (
-              <Button variant="secondary" size="sm" className="flex-1 justify-start" onClick={() => setDialog("customer")}>
-                Mijoz tanlash (F4)
+              <Button size="icon" variant="ghost" aria-label="Mijozni olib tashlash" onClick={() => setCustomer(null)}>
+                <X className="size-4" />
               </Button>
-            )}
-            {customer && (
-              <Button size="sm" variant="ghost" onClick={() => setCustomer(null)}>
-                ✕
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" disabled={cart.length === 0} onClick={() => void hold()}>
-              Kechiktirish F5
+            </div>
+          ) : (
+            <Button variant="secondary" className="h-(--pos-tap-size) min-w-0 flex-1 justify-start gap-2" onClick={() => setDialog("customer")}>
+              <UserRound className="size-4" />
+              Mijoz tanlash
+              <Kbd className="ml-auto">{hotkeys.customer}</Kbd>
             </Button>
-          </div>
+          )}
+          <Button variant="ghost" className="h-(--pos-tap-size) gap-1.5 px-2.5" disabled={cart.length === 0} onClick={() => void hold()} title="Chekni kechiktirish">
+            <Clock className="size-4" />
+            <span className="hidden xl:inline">Kechiktirish</span>
+            <Kbd>{hotkeys.hold}</Kbd>
+          </Button>
+        </div>
 
-          <ul className="min-h-0 flex-1 divide-y divide-border overflow-y-auto">
-            {cart.map((line, index) => {
-              const lineCalc = calc?.lines[index];
-              const short = QTY.test(line.quantity) && toMinor(line.stock, 4) < toMinor(line.quantity, 4);
-              return (
-                <li
-                  key={`${line.productId}:${line.unitId}`}
-                  className={`px-3 py-2 ${index === selected ? "bg-primary/5" : ""}`}
-                  onClick={() => setSelected(index)}
-                >
-                  <div className="flex items-start gap-2">
-                    <p className="min-w-0 flex-1 text-sm font-medium leading-tight">{line.name}</p>
-                    <button type="button" className="text-xs text-muted-foreground hover:text-destructive" onClick={() => removeLine(index)}>
-                      ✕
+        <div className="flex items-center justify-between px-3 pt-2 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+          <span>Savat</span>
+          <span className="tabular-nums">{itemsCount > 0 ? `${itemsCount} ta mahsulot` : ""}</span>
+        </div>
+        <ul className="min-h-[5.5rem] flex-1 divide-y divide-border overflow-y-auto">
+          {cart.map((line, index) => {
+            const lineCalc = calc?.lines[index];
+            const short = QTY.test(line.quantity) && toMinor(line.stock, 4) < toMinor(line.quantity, 4);
+            const key = `${line.productId}:${line.unitId}`;
+            return (
+              <li
+                key={flash?.key === key ? `${key}:${flash.at}` : key}
+                aria-selected={index === selected}
+                className={`px-3 py-2 ${index === selected ? "bg-pos-selected" : ""} ${flash?.key === key && index !== selected ? "pos-flash" : ""}`}
+                onClick={() => setSelected(index)}
+              >
+                {/* 1-qator: rasm, nom, qator summasi; 2-qator (to'liq kenglik — katta shrift va sensorli rejimda ham sig'adi): miqdor, narx, o'chirish */}
+                <div className="flex items-start gap-2.5">
+                  <ProductImage product={{ id: line.productId, name: line.name, imageVersion: line.imageVersion }} className="size-10 shrink-0 rounded-md text-xs" />
+                  <p className="line-clamp-2 min-w-0 flex-1 text-sm font-semibold leading-snug">{line.name}</p>
+                  <span className="shrink-0 text-base font-extrabold tabular-nums">
+                    {lineCalc ? fmtMoney(fromMinor(lineCalc.currencyTotal), lineCalc.currency) : "—"}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <div className="flex items-center overflow-hidden rounded-(--radius) border border-border bg-background">
+                    <button type="button" aria-label="Kamaytirish" className={STEP_BUTTON} onClick={() => changeQty(index, -1n)}>
+                      <Minus className="size-4" />
                     </button>
-                  </div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <Button size="sm" variant="secondary" className="h-7 w-7 p-0" onClick={() => changeQty(index, -1n)}>
-                      −
-                    </Button>
                     <Input
                       id={`cart-qty-${index}`}
-                      className="h-7 w-20 text-right"
+                      aria-label="Miqdor"
+                      className="h-[calc(var(--pos-tap-size)-0.5rem)] w-14 rounded-none border-0 border-x border-border bg-transparent px-1 text-center text-base font-bold shadow-none"
                       inputMode="decimal"
                       value={line.quantity}
                       onChange={(e) => setLine(index, { quantity: decimalInput(e.target.value, 4) })}
                     />
-                    <Button size="sm" variant="secondary" className="h-7 w-7 p-0" onClick={() => changeQty(index, 1n)}>
-                      +
-                    </Button>
-                    <span className="text-xs text-muted-foreground">{line.unitName} ×</span>
-                    {canEditPrice ? (
-                      <Input
-                        id={`cart-price-${index}`}
-                        className="h-7 w-28 text-right"
-                        inputMode="decimal"
-                        value={line.priceOverride ?? trimDecimal(line.listPrice)}
-                        onChange={(e) => {
-                          const value = decimalInput(e.target.value, 4);
-                          setLine(index, { priceOverride: value === trimDecimal(line.listPrice) ? null : value });
-                        }}
-                      />
-                    ) : (
-                      <span className="text-xs tabular-nums">{fmtMoney(line.listPrice, base)}</span>
-                    )}
-                    <span className="ml-auto text-sm font-semibold tabular-nums">
-                      {lineCalc ? fmtMoney(fromMinor(lineCalc.currencyTotal), lineCalc.currency) : "—"}
-                    </span>
+                    <button type="button" aria-label="Ko'paytirish" className={STEP_BUTTON} onClick={() => changeQty(index, 1n)}>
+                      <Plus className="size-4" />
+                    </button>
                   </div>
-                  {short && <p className="mt-1 text-xs text-amber-600">Qoldiq {fmtQty(line.stock)} — sotuv yoziladi, rahbar ko'radi</p>}
-                </li>
-              );
-            })}
-            {cart.length === 0 && <li className="px-3 py-12 text-center text-sm text-muted-foreground">Savat bo'sh — mahsulotni skanerlang yoki tanlang</li>}
-          </ul>
-
-          <div className="space-y-2 border-t border-border p-3">
-            {calc && (
-              <dl className="space-y-0.5 text-sm">
-                {calc.tax > 0n && (
-                  <div className="flex justify-between text-muted-foreground">
-                    <dt>shu jumladan QQS</dt>
-                    <dd className="tabular-nums">{fmtMoney(fromMinor(calc.tax), base)}</dd>
-                  </div>
-                )}
-                {currencyMode ? (
-                  calc.buckets.map((bucket) => (
-                    <div key={bucket.currency} className="flex justify-between text-lg font-bold">
-                      <dt>Jami ({bucket.currency})</dt>
-                      <dd className="tabular-nums">{fmtMoney(fromMinor(bucket.total), bucket.currency)}</dd>
-                    </div>
-                  ))
-                ) : (
-                  <div className="flex justify-between text-2xl font-bold">
-                    <dt>Jami</dt>
-                    <dd className="tabular-nums">{fmtMoney(fromMinor(calc.total), base)}</dd>
-                  </div>
-                )}
-                {calc.cashbackUsed > 0n && (
-                  <div className="flex justify-between text-violet-600">
-                    <dt>Keshbekdan</dt>
-                    <dd className="tabular-nums">−{fmtMoney(fromMinor(calc.cashbackUsed), base)}</dd>
-                  </div>
-                )}
-                {calc.balanceUsed > 0n && (
-                  <div className="flex justify-between text-emerald-600">
-                    <dt>Balansdan</dt>
-                    <dd className="tabular-nums">−{fmtMoney(fromMinor(calc.balanceUsed), base)}</dd>
-                  </div>
-                )}
-                {calc.hasBaseBucket && calc.cashbackUsed + calc.balanceUsed > 0n && (
-                  <div className="flex justify-between font-semibold">
-                    <dt>To'lanadi</dt>
-                    <dd className="tabular-nums">{fmtMoney(fromMinor(calc.due), base)}</dd>
-                  </div>
-                )}
-              </dl>
-            )}
-
-            {customer && calc && (
-              <div className="flex flex-wrap gap-1">
-                {num(customer.balance) > 0 && (
-                  <Button size="sm" variant={useBalance ? "default" : "secondary"} onClick={() => setUseBalance((value) => !value)}>
-                    Balansdan
-                  </Button>
-                )}
-                {useBalance && (
-                  <Input
-                    id="pay-balance"
-                    className="h-8 w-28 text-right"
-                    inputMode="decimal"
-                    placeholder="hammasi"
-                    value={balanceInput}
-                    onChange={(e) => setBalanceInput(decimalInput(e.target.value))}
-                  />
-                )}
-                {context?.cashback?.enabled && num(customer.cashbackBalance) > 0 && (
-                  <Button size="sm" variant={useCashback ? "default" : "secondary"} onClick={() => setUseCashback((value) => !value)}>
-                    Keshbekdan
-                  </Button>
-                )}
-                {useCashback && (
-                  <Input
-                    id="pay-cashback"
-                    className="h-8 w-28 text-right"
-                    inputMode="decimal"
-                    placeholder={fmtQty(fromMinor(calc.cashbackLimit))}
-                    value={cashbackInput}
-                    onChange={(e) => setCashbackInput(decimalInput(e.target.value))}
-                  />
-                )}
-              </div>
-            )}
-
-            {(!calc || calc.hasBaseBucket) && (
-              <div className="space-y-1.5 rounded-lg border border-border p-2">
-                {enabledMethods.map((method) => (
-                  <div key={method.key} className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      className="w-28 justify-between"
-                      variant={payMethod === method.key ? "default" : "secondary"}
-                      onClick={() => (typedMethods.length > 0 ? fillRest(method.key) : setPayMethod(method.key))}
-                    >
-                      {method.label} <span className="text-[10px] opacity-70">{hotkeys[method.action]}</span>
-                    </Button>
+                  <span className="text-xs text-muted-foreground">{line.unitName} ×</span>
+                  {canEditPrice ? (
                     <Input
-                      id={`pay-${method.key}`}
-                      className="h-9 text-right font-semibold"
+                      id={`cart-price-${index}`}
+                      aria-label="Narx"
+                      className="h-[calc(var(--pos-tap-size)-0.5rem)] w-24 text-right tabular-nums"
                       inputMode="decimal"
-                      placeholder={typedMethods.length === 0 && payMethod === method.key && calc ? trimDecimal(fromMinor(calc.due)) : "0"}
-                      value={tender[method.key]}
-                      onChange={(e) => setTender((current) => ({ ...current, [method.key]: decimalInput(e.target.value) }))}
+                      value={line.priceOverride ?? trimDecimal(line.listPrice)}
+                      onChange={(e) => {
+                        const value = decimalInput(e.target.value, 4);
+                        setLine(index, { priceOverride: value === trimDecimal(line.listPrice) ? null : value });
+                      }}
                     />
-                    {calc && calc.due > 0n && (
-                      <Button size="sm" variant="ghost" className="h-9 px-2 text-xs" title="Qolgan summani shu usulga" onClick={() => fillRest(method.key)}>
-                        qoldiq
-                      </Button>
-                    )}
-                  </div>
-                ))}
-                {calc && (
-                  <dl className="grid grid-cols-3 gap-1 pt-1 text-center text-xs">
-                    <div>
-                      <dt className="text-muted-foreground">To'lanadi</dt>
-                      <dd className="font-semibold tabular-nums">{fmtMoney(fromMinor(calc.due), base)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-muted-foreground">To'langan</dt>
-                      <dd className="font-semibold tabular-nums">{fmtMoney(fromMinor(calc.paid), base)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-muted-foreground">Qoldiq</dt>
-                      <dd className={`font-semibold tabular-nums ${calc.due > calc.paid ? "text-destructive" : "text-emerald-600"}`}>
-                        {fmtMoney(fromMinor(calc.due > calc.paid ? calc.due - calc.paid : 0n), base)}
-                      </dd>
-                    </div>
-                  </dl>
-                )}
-                {customer && calc && calc.due > 0n && (
-                  <Button size="sm" variant="ghost" className="w-full text-amber-600" onClick={() => setTender({ ...EMPTY_TENDER, cash: "0" })}>
-                    Qarzga (mijoz hisobiga)
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {calc?.foreign.map((part) => (
-              <div key={part.currency} className="flex items-center gap-2">
-                <span className="w-12 text-sm font-medium">{part.currency}</span>
-                {(["cash", "card"] as const).map((method) => (
-                  <Button
-                    key={method}
-                    size="sm"
-                    variant={part.method === method ? "default" : "secondary"}
-                    onClick={() => setForeignMethod((current) => ({ ...current, [part.currency]: method }))}
+                  ) : (
+                    <span className="text-sm tabular-nums">{fmtMoney(line.listPrice, base)}</span>
+                  )}
+                  <button
+                    type="button"
+                    aria-label={`${line.name} — savatdan o'chirish`}
+                    className="ml-auto flex size-[calc(var(--pos-tap-size)-0.5rem)] items-center justify-center rounded-(--radius) text-muted-foreground hover:bg-pos-danger/10 hover:text-pos-danger"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      removeLine(index);
+                    }}
                   >
-                    {method === "cash" ? "Naqd" : "Karta"}
-                  </Button>
-                ))}
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
+                {lineCalc && lineCalc.discount > 0n && <p className="mt-0.5 text-xs font-medium text-pos-success">Chegirma −{fmtMoney(fromMinor(lineCalc.discount), base)}</p>}
+                {short && <p className="mt-0.5 text-xs font-medium text-pos-warning">Qoldiq {fmtQty(line.stock)} — sotuv yoziladi, rahbar ko'radi</p>}
+              </li>
+            );
+          })}
+          {cart.length === 0 && (
+            <li className="flex flex-col items-center gap-2 px-3 py-10 text-center text-sm text-muted-foreground">
+              <ShoppingCart className="size-8 opacity-50" />
+              Savat bo'sh — mahsulotni skanerlang yoki tanlang
+            </li>
+          )}
+        </ul>
+
+        {/* Jami — doim ko'rinadi (savat qatorlari o'z joyida aylantiriladi) */}
+        <div className="border-t border-border bg-pos-total px-3 py-2 text-pos-total-foreground">
+          {calc && !currencyMode && (
+            <dl className="space-y-0.5 text-sm">
+              {calc.discount > 0n && (
+                <>
+                  <div className="flex justify-between opacity-80">
+                    <dt>Mahsulotlar</dt>
+                    <dd className="tabular-nums">{fmtMoney(fromMinor(calc.total + calc.discount), base)}</dd>
+                  </div>
+                  <div className="flex justify-between font-medium">
+                    <dt>Chegirma</dt>
+                    <dd className="tabular-nums">−{fmtMoney(fromMinor(calc.discount), base)}</dd>
+                  </div>
+                </>
+              )}
+              {calc.tax > 0n && (
+                <div className="flex justify-between opacity-80">
+                  <dt>shu jumladan QQS</dt>
+                  <dd className="tabular-nums">{fmtMoney(fromMinor(calc.tax), base)}</dd>
+                </div>
+              )}
+            </dl>
+          )}
+          {calc && currencyMode ? (
+            calc.buckets.map((bucket) => (
+              <div key={bucket.currency} className="flex items-baseline justify-between gap-2 text-xl font-extrabold">
+                <span className="text-sm font-bold tracking-wide uppercase">Jami ({bucket.currency})</span>
+                <span className="tabular-nums">{fmtMoney(fromMinor(bucket.total), bucket.currency)}</span>
+              </div>
+            ))
+          ) : (
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-base font-bold tracking-wide uppercase">Jami</span>
+              <span className="text-[1.75rem] leading-tight font-extrabold tabular-nums [@media(max-height:820px)]:text-2xl" data-testid="pos-total">
+                {fmtMoney(calc ? fromMinor(calc.total) : "0", base)}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* To'lov — kichik ekranda (768 px) o'z joyida aylantiriladi, yakunlash tugmasi doim ko'rinadi */}
+        <div className="max-h-[38vh] min-h-0 shrink space-y-2 overflow-y-auto px-3 pt-2">
+          {customer && calc && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {num(customer.balance) > 0 && (
+                <Button size="sm" variant={useBalance ? "default" : "secondary"} onClick={() => setUseBalance((value) => !value)}>
+                  Balansdan
+                </Button>
+              )}
+              {useBalance && (
                 <Input
-                  id={`pay-${part.currency}`}
-                  className="h-9 text-right"
+                  id="pay-balance"
+                  className="h-8 w-28 text-right"
                   inputMode="decimal"
-                  placeholder={trimDecimal(fromMinor(part.due))}
-                  value={foreignTender[part.currency] ?? ""}
-                  onChange={(e) => setForeignTender((current) => ({ ...current, [part.currency]: decimalInput(e.target.value) }))}
+                  placeholder="hammasi"
+                  value={balanceInput}
+                  onChange={(e) => setBalanceInput(decimalInput(e.target.value))}
                 />
-                {part.change > 0n && <span className="whitespace-nowrap text-xs text-emerald-600">qaytim {fmtMoney(fromMinor(part.change), part.currency)}</span>}
-              </div>
-            ))}
+              )}
+              {context?.cashback?.enabled && num(customer.cashbackBalance) > 0 && (
+                <Button size="sm" variant={useCashback ? "default" : "secondary"} onClick={() => setUseCashback((value) => !value)}>
+                  Keshbekdan
+                </Button>
+              )}
+              {useCashback && (
+                <Input
+                  id="pay-cashback"
+                  className="h-8 w-28 text-right"
+                  inputMode="decimal"
+                  placeholder={fmtQty(fromMinor(calc.cashbackLimit))}
+                  value={cashbackInput}
+                  onChange={(e) => setCashbackInput(decimalInput(e.target.value))}
+                />
+              )}
+            </div>
+          )}
+          {calc && (calc.cashbackUsed > 0n || calc.balanceUsed > 0n) && (
+            <dl className="space-y-0.5 text-sm">
+              {calc.cashbackUsed > 0n && (
+                <div className="flex justify-between font-medium text-pos-promotion">
+                  <dt>Keshbekdan</dt>
+                  <dd className="tabular-nums">−{fmtMoney(fromMinor(calc.cashbackUsed), base)}</dd>
+                </div>
+              )}
+              {calc.balanceUsed > 0n && (
+                <div className="flex justify-between font-medium text-pos-success">
+                  <dt>Balansdan</dt>
+                  <dd className="tabular-nums">−{fmtMoney(fromMinor(calc.balanceUsed), base)}</dd>
+                </div>
+              )}
+            </dl>
+          )}
 
-            {calc && calc.change > 0n && (
-              <div className="flex items-center justify-between rounded-lg bg-emerald-500/10 px-3 py-2 font-semibold text-emerald-700">
-                <span>{calc.changeKept > 0n ? "Qaytim balansga" : "Qaytim"}</span>
-                <span className="tabular-nums">{fmtMoney(fromMinor(calc.change), base)}</span>
-                {customer && (
-                  <Button size="sm" variant="ghost" className="h-7" onClick={() => setChangeToBalance((value) => !value)}>
-                    {changeToBalance ? "Qaytimni berish" : "Balansga"}
-                  </Button>
-                )}
+          {(!calc || calc.hasBaseBucket) && (
+            <div className="space-y-1.5">
+              {/* Usullar yonma-yon (NAQD / KARTA / BANK): kichik ekranda savatga joy qoladi */}
+              <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.max(enabledMethods.length, 1)}, minmax(0, 1fr))` }}>
+                {enabledMethods.map((method) => {
+                  const chosen = payMethod === method.key;
+                  return (
+                    <div
+                      key={method.key}
+                      className={`@container rounded-(--radius) border p-1 ${chosen ? "border-primary bg-pos-selected ring-1 ring-primary" : "border-border bg-background/60"}`}
+                    >
+                      <div className="flex items-center gap-1 px-0.5">
+                        <button
+                          type="button"
+                          aria-pressed={chosen}
+                          title={typedMethods.length > 0 ? "Qolgan summani shu usulga" : undefined}
+                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded py-0.5 text-left text-sm font-semibold"
+                          onClick={() => (typedMethods.length > 0 ? fillRest(method.key) : setPayMethod(method.key))}
+                        >
+                          <span className={`size-2 shrink-0 rounded-full ${method.dot}`} aria-hidden />
+                          <span className="truncate">{method.label}</span>
+                          <span className="hidden text-[10px] font-medium text-muted-foreground @[8.5rem]:inline">{hotkeys[method.action]}</span>
+                        </button>
+                        {calc && calc.due > 0n && (
+                          <button
+                            type="button"
+                            className="shrink-0 rounded px-1 text-[11px] font-semibold text-primary hover:underline"
+                            title="Qolgan summani shu usulga"
+                            onClick={() => fillRest(method.key)}
+                          >
+                            qoldiq
+                          </button>
+                        )}
+                      </div>
+                      <Input
+                        id={`pay-${method.key}`}
+                        aria-label={method.label}
+                        className="mt-1 h-(--pos-tap-size) min-w-0 px-2 text-right text-base font-bold tabular-nums"
+                        inputMode="decimal"
+                        placeholder={typedMethods.length === 0 && chosen && calc ? trimDecimal(fromMinor(calc.due)) : "0"}
+                        value={tender[method.key]}
+                        onChange={(e) => setTender((current) => ({ ...current, [method.key]: decimalInput(e.target.value) }))}
+                      />
+                    </div>
+                  );
+                })}
               </div>
-            )}
-            {calc && calc.debt > 0n && customer && (
-              <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-700">Qarzga yoziladi: {fmtMoney(fromMinor(calc.debt), base)}</p>
-            )}
-            {errors.map((error) => (
-              <p key={error} className="text-sm text-destructive">
-                {error}
-              </p>
-            ))}
-            {!linesValid && cart.length > 0 && <p className="text-sm text-destructive">Miqdor yoki narxni tekshiring</p>}
+              {/* Taqsimot va TO'LANADI / TO'LANGAN / QOLDIQ — summa kiritilganda (aniq summada qoldiq doim 0, joy savatga qoladi) */}
+              {calc && paymentEntered && <PaymentProgress calc={calc} base={base} />}
+              {calc && paymentEntered && (
+                <dl className="grid grid-cols-3 gap-1.5">
+                  <SummaryCell label="To'lanadi" value={fmtMoney(fromMinor(calc.due), base)} />
+                  <SummaryCell label="To'langan" value={fmtMoney(fromMinor(calc.paid), base)} />
+                  <SummaryCell
+                    label="Qoldiq"
+                    value={fmtMoney(fromMinor(calc.due > calc.paid ? calc.due - calc.paid : 0n), base)}
+                    tone={calc.due > calc.paid ? "text-pos-danger" : "text-pos-success"}
+                  />
+                </dl>
+              )}
+              {customer && calc && calc.due > 0n && (
+                <Button size="sm" variant="ghost" className="w-full text-pos-warning" onClick={() => setTender({ ...EMPTY_TENDER, cash: "0" })}>
+                  Qarzga (mijoz hisobiga)
+                </Button>
+              )}
+            </div>
+          )}
 
-            <Button className="h-14 w-full text-lg font-bold" disabled={busy || cart.length === 0 || !calc || errors.length > 0} onClick={() => void complete()}>
-              {calc && calc.debt > 0n ? "Qarzga yakunlash" : "Yakunlash"} <span className="ml-2 text-sm opacity-70">F12</span>
-            </Button>
-          </div>
-        </aside>
-      </div>
-      {dialogs}
-    </main>
+          {calc?.foreign.map((part) => (
+            <div key={part.currency} className="flex items-center gap-1.5">
+              <span className="w-12 text-sm font-semibold">{part.currency}</span>
+              {(["cash", "card"] as const).map((method) => (
+                <Button
+                  key={method}
+                  size="sm"
+                  variant={part.method === method ? "default" : "secondary"}
+                  onClick={() => setForeignMethod((current) => ({ ...current, [part.currency]: method }))}
+                >
+                  {method === "cash" ? "Naqd" : "Karta"}
+                </Button>
+              ))}
+              <Input
+                id={`pay-${part.currency}`}
+                className="h-9 min-w-0 text-right"
+                inputMode="decimal"
+                placeholder={trimDecimal(fromMinor(part.due))}
+                value={foreignTender[part.currency] ?? ""}
+                onChange={(e) => setForeignTender((current) => ({ ...current, [part.currency]: decimalInput(e.target.value) }))}
+              />
+              {part.change > 0n && <span className="whitespace-nowrap text-xs font-medium text-pos-success">qaytim {fmtMoney(fromMinor(part.change), part.currency)}</span>}
+            </div>
+          ))}
+
+          {calc && calc.change > 0n && (
+            <div className="flex items-center justify-between gap-2 rounded-(--radius) border border-pos-success/30 bg-pos-success/10 px-3 py-2 font-bold text-pos-success">
+              <span>{calc.changeKept > 0n ? "Qaytim balansga" : "Qaytim"}</span>
+              <span className="text-lg tabular-nums">{fmtMoney(fromMinor(calc.change), base)}</span>
+              {customer && (
+                <Button size="sm" variant="ghost" className="h-7" onClick={() => setChangeToBalance((value) => !value)}>
+                  {changeToBalance ? "Qaytimni berish" : "Balansga"}
+                </Button>
+              )}
+            </div>
+          )}
+          {calc && calc.debt > 0n && customer && (
+            <p className="rounded-(--radius) border border-pos-warning/30 bg-pos-warning/10 px-3 py-2 text-sm font-semibold text-pos-warning">
+              Qarzga yoziladi: {fmtMoney(fromMinor(calc.debt), base)}
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-1.5 border-t border-border p-3">
+          {errors.map((error) => (
+            <p key={error} role="alert" className="text-sm font-medium text-pos-danger">
+              {error}
+            </p>
+          ))}
+          {!linesValid && cart.length > 0 && (
+            <p role="alert" className="text-sm font-medium text-pos-danger">
+              Miqdor yoki narxni tekshiring
+            </p>
+          )}
+          <Button
+            className="pos-motion h-[calc(var(--pos-tap-size)+1.25rem)] w-full [@media(max-height:820px)]:h-[calc(var(--pos-tap-size)+0.5rem)] gap-3 bg-pos-action text-lg font-extrabold tracking-wide text-pos-action-foreground uppercase shadow-pos hover:bg-pos-action-hover"
+            disabled={busy || cart.length === 0 || !calc || errors.length > 0}
+            onClick={() => void complete()}
+          >
+            {calc && calc.debt > 0n ? "Qarzga yakunlash" : "Savdoni yakunlash"}
+            <Kbd className="bg-pos-action-foreground/15 text-pos-action-foreground">{hotkeys.complete}</Kbd>
+          </Button>
+        </div>
+      </aside>
+    </div>,
   );
 }

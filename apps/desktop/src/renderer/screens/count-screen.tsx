@@ -91,7 +91,7 @@ export default function CountScreen({ status, onStatus, onExit }: { status: AppS
       </header>
 
       {!canCount ? (
-        <p className="m-6 rounded-lg bg-amber-500/10 px-4 py-3 text-amber-700">Inventarizatsiya uchun ruxsat kerak: warehouse.view va warehouse.count.</p>
+        <p className="m-6 rounded-lg bg-pos-warning/10 px-4 py-3 text-pos-warning">Inventarizatsiya uchun ruxsat kerak: warehouse.view va warehouse.count.</p>
       ) : (
         <div className="grid min-h-0 grid-cols-[minmax(0,360px)_minmax(0,1fr)] gap-3 p-3">
           <ProductPicker onPick={pick} placeholder="Skanerlang yoki qidiring — har biri +1" refreshKey={lastSyncAt} />
@@ -133,7 +133,7 @@ export default function CountScreen({ status, onStatus, onExit }: { status: AppS
                       </td>
                       <td
                         className={`px-3 py-1.5 text-right font-semibold tabular-nums ${
-                          line.difference.startsWith("-") ? "text-destructive" : line.difference === "0.0000" ? "text-muted-foreground" : "text-emerald-600"
+                          line.difference.startsWith("-") ? "text-destructive" : line.difference === "0.0000" ? "text-muted-foreground" : "text-pos-success"
                         }`}
                       >
                         {line.difference.startsWith("-") || line.difference === "0.0000" ? "" : "+"}
@@ -167,7 +167,7 @@ export default function CountScreen({ status, onStatus, onExit }: { status: AppS
                 <span>
                   Sanalgan: <span className="font-semibold tabular-nums">{lines.length}</span>
                 </span>
-                <span className="text-emerald-700">
+                <span className="text-pos-success">
                   Ortiqcha: <span className="font-semibold tabular-nums">{surplus}</span>
                 </span>
                 <span className="text-destructive">
@@ -182,7 +182,7 @@ export default function CountScreen({ status, onStatus, onExit }: { status: AppS
               </label>
               <Input id="count-notes" maxLength={500} placeholder="Izoh (masalan: oylik inventarizatsiya, javobgar)" value={notes} onChange={(e) => setNotes(e.target.value)} />
               {completed && (
-                <p className="rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
+                <p className="rounded-lg bg-pos-success/10 px-3 py-2 text-sm text-pos-success">
                   {completed.number}: {completed.lines.length} mahsulot yozildi
                   {completed.value ? ` · farq qiymati ${fmtMoney(completed.value, base)}` : ""}
                 </p>

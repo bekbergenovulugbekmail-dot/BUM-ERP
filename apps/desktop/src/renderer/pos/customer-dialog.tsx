@@ -99,13 +99,13 @@ export default function CustomerDialog({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium">
                         {customer.name}
-                        {customer.pending && <span className="ml-2 text-xs text-amber-600">sinxron kutilmoqda</span>}
+                        {customer.pending && <span className="ml-2 text-xs text-pos-warning">sinxron kutilmoqda</span>}
                       </span>
                       <span className="text-xs text-muted-foreground">{[customer.phone, customer.code].filter(Boolean).join(" · ")}</span>
                     </span>
                     <span className="text-right text-xs tabular-nums">
-                      {num(customer.totalDebt) > 0 && <span className="block text-amber-600">qarz {fmtMoney(customer.totalDebt, baseCurrency)}</span>}
-                      {num(customer.balance) > 0 && <span className="block text-emerald-600">balans {fmtMoney(customer.balance, baseCurrency)}</span>}
+                      {num(customer.totalDebt) > 0 && <span className="block text-pos-warning">qarz {fmtMoney(customer.totalDebt, baseCurrency)}</span>}
+                      {num(customer.balance) > 0 && <span className="block text-pos-success">balans {fmtMoney(customer.balance, baseCurrency)}</span>}
                     </span>
                   </button>
                 </li>

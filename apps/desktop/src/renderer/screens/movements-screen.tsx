@@ -86,7 +86,7 @@ export default function MovementsScreen({
       </header>
 
       {!allowed ? (
-        <p className="m-6 rounded-lg bg-amber-500/10 px-4 py-3 text-amber-700">Mahsulot harakati uchun ruxsat kerak: warehouse.view.</p>
+        <p className="m-6 rounded-lg bg-pos-warning/10 px-4 py-3 text-pos-warning">Mahsulot harakati uchun ruxsat kerak: warehouse.view.</p>
       ) : (
         <div className="grid min-h-0 grid-cols-[minmax(0,340px)_minmax(0,1fr)] gap-3 p-3">
           <div className="flex min-h-0 flex-col gap-2">
@@ -116,7 +116,7 @@ export default function MovementsScreen({
           </div>
 
           <section className="flex min-h-0 flex-col rounded-xl border border-border bg-card">
-            {page?.offline && <p className="border-b border-border bg-amber-500/10 px-3 py-2 text-sm text-amber-700">Internet yo'q — faqat shu kassadagi yuborilmagan hujjatlar ko'rinmoqda</p>}
+            {page?.offline && <p className="border-b border-border bg-pos-warning/10 px-3 py-2 text-sm text-pos-warning">Internet yo'q — faqat shu kassadagi yuborilmagan hujjatlar ko'rinmoqda</p>}
             <div className="min-h-0 flex-1 overflow-auto">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-muted/80 text-left text-xs text-muted-foreground">
@@ -131,19 +131,19 @@ export default function MovementsScreen({
                 </thead>
                 <tbody>
                   {rows.map((row) => (
-                    <tr key={row.id} className={`border-t border-border ${row.source === "pending" ? "bg-amber-500/5" : ""}`}>
+                    <tr key={row.id} className={`border-t border-border ${row.source === "pending" ? "bg-pos-warning/5" : ""}`}>
                       <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{fmtTime(row.occurredAt)}</td>
                       <td className="px-3 py-1.5">
                         {row.source === "pending" ? (
                           <>
-                            {OP_LABELS[row.type] ?? row.type} <span className="text-xs text-amber-600">navbatda</span>
+                            {OP_LABELS[row.type] ?? row.type} <span className="text-xs text-pos-warning">navbatda</span>
                           </>
                         ) : (
                           (MOVEMENT_LABELS[row.type] ?? row.type)
                         )}
                       </td>
                       {!product && <td className="px-3 py-1.5">{row.productName}</td>}
-                      <td className={`px-3 py-1.5 text-right font-semibold tabular-nums ${row.quantity.startsWith("-") ? "text-destructive" : "text-emerald-600"}`}>
+                      <td className={`px-3 py-1.5 text-right font-semibold tabular-nums ${row.quantity.startsWith("-") ? "text-destructive" : "text-pos-success"}`}>
                         {row.quantity.startsWith("-") ? "" : "+"}
                         {fmtQty(row.quantity)} {row.unitName}
                       </td>

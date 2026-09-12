@@ -182,30 +182,62 @@ describe("Kassa xizmati (main jarayon)", () => {
     await expect(kassa.register({ apiUrl: "https://bum-erp.uz", phone: "x", password: "right", warehouseId: "w1", name: "K" })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
-  it("mavzu: kassir tanlovi saqlanadi va qayta kirganda tiklanadi; kassir yo'q — qurilma standarti; kompaniya qulfi ustun", async () => {
+  it("mavzu: ustuvorlik (qulf → kassir → kompaniya standarti → Windows), qayta kirish va ilova qayta ishga tushishida tiklanadi, standartga qaytish, zichlik va shrift, eski nomlar, maxsus mavzu", async () => {
     const api = fakeApi();
     const kassa = service(api);
     await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
     const userId = kassa.status().cashier!.userId;
-    expect(kassa.prefs()).toMatchObject({ theme: "light", themeLock: null });
-    expect(kassa.savePrefs({ ...kassa.prefs(), theme: "green" })).toMatchObject({ theme: "green", themeLock: null });
-    expect(kassa.savePrefs({ ...kassa.prefs(), theme: "neon" as never }).theme).toBe("green");
+    const setAppearance = (appearance: Record<string, unknown>) =>
+      store.setMeta("config", { ...(store.getMeta<Record<string, unknown>>("config") ?? {}), appearance });
 
+    // Config yo'q (eski server) — Windows tizimi
+    expect(kassa.prefs()).toMatchObject({ theme: "system", themeSource: "system", themeLock: null, cashierTheme: null, density: "comfortable", fontScale: "normal" });
+
+    // Kompaniya standarti — kassir tanlamagan
+    setAppearance({ locked: false, theme: "ocean" });
+    expect(kassa.prefs()).toMatchObject({ theme: "ocean", themeSource: "company-default", companyTheme: "ocean", cashierTheme: null });
+
+    // Kassir tanlovi ustun; noto'g'ri nom e'tiborsiz; zichlik va shrift
+    expect(kassa.savePrefs({ ...kassa.prefs(), theme: "emerald" })).toMatchObject({ theme: "emerald", themeSource: "cashier", cashierTheme: "emerald" });
+    expect(kassa.savePrefs({ ...kassa.prefs(), theme: "rainbow" as never }).theme).toBe("emerald");
+    expect(kassa.savePrefs({ ...kassa.prefs(), density: "touch", fontScale: "xlarge" })).toMatchObject({ theme: "emerald", density: "touch", fontScale: "xlarge" });
+    expect(kassa.savePrefs({ ...kassa.prefs(), density: "huge" as never, fontScale: "tiny" as never })).toMatchObject({ density: "touch", fontScale: "xlarge" });
+
+    // Kassir chiqdi — kompaniya standarti; qayta kirdi — o'z tanlovi
     kassa.logout();
-    expect(kassa.prefs().theme).toBe("light");
+    expect(kassa.prefs()).toMatchObject({ theme: "ocean", density: "comfortable", fontScale: "normal" });
     await kassa.unlock({ userId, pin: "1234" });
-    expect(kassa.prefs().theme).toBe("green");
+    expect(kassa.prefs()).toMatchObject({ theme: "emerald", density: "touch", fontScale: "xlarge" });
 
-    // Kompaniya qulfi (pull config): hamma kassirda shu mavzu, o'zgartirib bo'lmaydi; boshqa sozlamalar saqlanadi
-    store.setMeta("config", { ...(store.getMeta<Record<string, unknown>>("config") ?? {}), appearance: { locked: true, theme: "high-contrast" } });
-    expect(kassa.prefs()).toMatchObject({ theme: "high-contrast", themeLock: "high-contrast" });
-    expect(() => kassa.savePrefs({ ...kassa.prefs(), theme: "dark" })).toThrow("qulflangan");
+    // Ilova qayta ishga tushdi (yangi xizmat, o'sha lokal baza)
+    const restarted = service(api);
+    await restarted.unlock({ userId, pin: "1234" });
+    expect(restarted.prefs()).toMatchObject({ theme: "emerald", themeSource: "cashier", density: "touch", fontScale: "xlarge" });
+
+    // Kompaniya qulfi hammasidan ustun: mavzu va standartga qaytish rad, shrift o'zgaradi
+    setAppearance({ locked: true, theme: "high-contrast" });
+    expect(kassa.prefs()).toMatchObject({ theme: "high-contrast", themeSource: "company-lock", themeLock: "high-contrast" });
+    expect(() => kassa.savePrefs({ ...kassa.prefs(), theme: "midnight" })).toThrow("qulflangan");
+    expect(() => kassa.savePrefs({ ...kassa.prefs(), cashierTheme: null })).toThrow("qulflangan");
     expect(kassa.savePrefs({ ...kassa.prefs(), fontScale: "large" })).toMatchObject({ theme: "high-contrast", fontScale: "large" });
 
-    // Qulf olindi — kassirning o'z tanlovi qaytadi
-    store.setMeta("config", { ...(store.getMeta<Record<string, unknown>>("config") ?? {}), appearance: { locked: false, theme: "high-contrast" } });
-    expect(kassa.prefs()).toMatchObject({ theme: "green", themeLock: null });
+    // Qulf olindi — kassir tanlovi qaytadi; "kompaniya standartiga qaytish"
+    setAppearance({ locked: false, theme: "ocean" });
+    expect(kassa.prefs()).toMatchObject({ theme: "emerald", themeLock: null });
+    expect(kassa.savePrefs({ ...kassa.prefs(), cashierTheme: null })).toMatchObject({ theme: "ocean", themeSource: "company-default", cashierTheme: null, fontScale: "large" });
+
+    // K4 da saqlangan eski nom
+    store.setMeta(`cashierPrefs:${userId}`, { theme: "green" });
+    expect(kassa.prefs()).toMatchObject({ theme: "emerald", cashierTheme: "emerald" });
+
+    // Kompaniya maxsus mavzusi: qulf bilan; buzilgan maxsus mavzu — e'tiborsiz (kassir tanlovi)
+    const custom = { name: "Bonnu", base: "dark", primary: "#1d4ed8", secondary: "#334155", background: "#0f172a", surface: "#1e293b", card: "#1e293b", button: "#15803d", sidebar: "#020617", accent: "#1e3a8a", radius: 12, shadow: "soft", density: "touch", fontScale: "large" };
+    store.setMeta(`cashierPrefs:${userId}`, {});
+    setAppearance({ locked: true, theme: "custom", custom });
+    expect(kassa.prefs()).toMatchObject({ theme: "custom", themeLock: "custom", customTheme: { name: "Bonnu", base: "dark" }, density: "touch", fontScale: "large" });
+    setAppearance({ locked: true, theme: "custom", custom: { ...custom, primary: "blue" } });
+    expect(kassa.prefs()).toMatchObject({ theme: "system", themeLock: null, customTheme: null });
   });
 
   it("tezkor sotuv: assortiment tartibi, kategoriya tablari, qidiruv, aksiya narxi (chekda ham), rasm keshi, ko'rinish sozlamasi", async () => {
@@ -907,7 +939,7 @@ describe("Kassa xizmati (main jarayon)", () => {
     );
 
     // Standart sozlamalar va tekshiruv
-    expect(kassa.prefs()).toMatchObject({ theme: "light", language: "uz-Latn", syncIntervalSec: 30, autoLockMinutes: 0, hotkeys: { complete: "F12" }, enabledPaymentMethods: ["cash", "card", "bank", "transfer"] });
+    expect(kassa.prefs()).toMatchObject({ theme: "system", language: "uz-Latn", syncIntervalSec: 30, autoLockMinutes: 0, hotkeys: { complete: "F12" }, enabledPaymentMethods: ["cash", "card", "bank", "transfer"] });
     expect(() => kassa.savePrefs({ ...kassa.prefs(), enabledPaymentMethods: [] })).toThrow("Kamida bitta");
     expect(() => kassa.savePrefs({ ...kassa.prefs(), hotkeys: { ...kassa.prefs().hotkeys, help: "F12" } })).toThrow("Tugma takrorlangan: F12");
     expect(() => kassa.savePrefs({ ...kassa.prefs(), hotkeys: { ...kassa.prefs().hotkeys, help: "Q" } })).toThrow("Tugma noto'g'ri");
@@ -922,7 +954,7 @@ describe("Kassa xizmati (main jarayon)", () => {
       blockNegativeStock: true,
       hotkeys: { ...kassa.prefs().hotkeys, help: "Ctrl+H" },
     });
-    expect(saved).toMatchObject({ enabledPaymentMethods: ["cash"], defaultPaymentMethod: "cash", syncIntervalSec: 10, autoLockMinutes: 240, theme: "dark", language: "uz-Cyrl", blockNegativeStock: true, hotkeys: { help: "Ctrl+H", complete: "F12" } });
+    expect(saved).toMatchObject({ enabledPaymentMethods: ["cash"], defaultPaymentMethod: "cash", syncIntervalSec: 10, autoLockMinutes: 240, theme: "midnight", language: "uz-Cyrl", blockNegativeStock: true, hotkeys: { help: "Ctrl+H", complete: "F12" } });
     expect(kassa.prefs()).toEqual(saved);
 
     // O'chirilgan usul va qoldiqsiz sotuv taqiqi

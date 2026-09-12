@@ -132,7 +132,7 @@ export default function StockDocumentForm({
                       <div className="flex items-center justify-end gap-1">
                         <Input
                           id={`stock-doc-qty-${index}`}
-                          className={`h-8 w-24 text-right ${exceeds ? "border-amber-500" : ""}`}
+                          className={`h-8 w-24 text-right ${exceeds ? "border-pos-warning" : ""}`}
                           inputMode="decimal"
                           value={line.quantity}
                           onChange={(e) => setQuantity(index, decimalInput(e.target.value, 4))}
@@ -176,12 +176,12 @@ export default function StockDocumentForm({
             />
           </div>
           {over.length > 0 && (
-            <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-700">
+            <p className="rounded-lg bg-pos-warning/10 px-3 py-2 text-sm text-pos-warning">
               {over.length} ta mahsulot qoldiqdan ko'p — hujjat yoziladi, serverda nomuvofiqlik sifatida belgilanadi
             </p>
           )}
           {notice && (
-            <p className={`rounded-lg px-3 py-2 text-sm ${notice.tone === "error" ? "bg-destructive/10 text-destructive" : "bg-emerald-500/10 text-emerald-700"}`}>{notice.text}</p>
+            <p className={`rounded-lg px-3 py-2 text-sm ${notice.tone === "error" ? "bg-destructive/10 text-destructive" : "bg-pos-success/10 text-pos-success"}`}>{notice.text}</p>
           )}
           <Button className="h-12 w-full text-base font-bold" disabled={!ready || busy} onClick={() => void submit()}>
             {kind === "writeoff" ? "Hisobdan chiqarish" : "Ko'chirishni yozish (tovar jo'natildi)"}

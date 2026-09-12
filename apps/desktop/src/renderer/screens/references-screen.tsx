@@ -138,7 +138,7 @@ function PartiesTab({
                   <td className="px-3 py-1.5">
                     <p className="font-medium leading-tight">
                       {row.name}
-                      {row.pending && <span className="ml-2 text-xs text-amber-600">sinxron kutilmoqda</span>}
+                      {row.pending && <span className="ml-2 text-xs text-pos-warning">sinxron kutilmoqda</span>}
                     </p>
                     <p className="text-xs text-muted-foreground">{[row.code, "contactName" in row ? row.contactName : row.contactPerson, row.address].filter(Boolean).join(" · ")}</p>
                   </td>
@@ -156,13 +156,13 @@ function PartiesTab({
                   <td className="px-3 py-1.5 text-right tabular-nums">
                     {customer ? (
                       <>
-                        {num(customer.totalDebt) > 0 && <span className="block text-amber-600">qarz {fmtMoney(customer.totalDebt, baseCurrency)}</span>}
-                        {num(customer.balance) > 0 && <span className="block text-emerald-600">balans {fmtMoney(customer.balance, baseCurrency)}</span>}
-                        {num(customer.cashbackBalance) > 0 && <span className="block text-violet-600">keshbek {fmtMoney(customer.cashbackBalance, baseCurrency)}</span>}
+                        {num(customer.totalDebt) > 0 && <span className="block text-pos-warning">qarz {fmtMoney(customer.totalDebt, baseCurrency)}</span>}
+                        {num(customer.balance) > 0 && <span className="block text-pos-success">balans {fmtMoney(customer.balance, baseCurrency)}</span>}
+                        {num(customer.cashbackBalance) > 0 && <span className="block text-pos-promotion">keshbek {fmtMoney(customer.cashbackBalance, baseCurrency)}</span>}
                         {num(customer.totalDebt) <= 0 && num(customer.balance) <= 0 && num(customer.cashbackBalance) <= 0 && <span className="text-muted-foreground">—</span>}
                       </>
                     ) : num(row.totalDebt) !== 0 ? (
-                      <span className={num(row.totalDebt) > 0 ? "text-amber-600" : "text-emerald-600"}>
+                      <span className={num(row.totalDebt) > 0 ? "text-pos-warning" : "text-pos-success"}>
                         {num(row.totalDebt) > 0 ? "" : "avans "}
                         {fmtMoney(Math.abs(num(row.totalDebt)), baseCurrency)}
                       </span>
@@ -260,7 +260,7 @@ function PricesTab({ baseCurrency, canEdit, refreshKey }: { baseCurrency: string
                 <td className="px-3 py-1.5">
                   <p className="font-medium leading-tight">
                     {row.name}
-                    {row.pending && <span className="ml-2 text-xs text-amber-600">narx navbatda</span>}
+                    {row.pending && <span className="ml-2 text-xs text-pos-warning">narx navbatda</span>}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {row.sku}

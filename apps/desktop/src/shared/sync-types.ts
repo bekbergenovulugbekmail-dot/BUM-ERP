@@ -459,7 +459,7 @@ export type PosConfig = {
   /** Etiketka shablonlari (`LabelSettings`, web: Sozlamalar → Etiketka); eski server — yo'q. */
   labels?: unknown;
   /** Kassa mavzusi qulfi (web: Sozlamalar → Kassa qurilmalari); eski server — yo'q. */
-  appearance?: { locked: boolean; theme: string };
+  appearance?: { locked: boolean; theme: string; custom?: unknown };
   /** Tezkor sotuv assortimenti (tartibi bilan); eski server — yo'q. */
   quickSale?: { productIds: string[] };
 };

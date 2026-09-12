@@ -15,7 +15,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_PATTERN } from "../shared/hotkeys.js";
-import { isPosTheme } from "../shared/themes.js";
+import { isPosDensity, isPosFontScale, normalizePosTheme, parseCustomTheme, resolvePosTheme } from "../shared/themes.js";
 import type {
   AppStatus,
   CartLineInput,
@@ -164,8 +164,13 @@ export type AppUpdater = { install(file: string): Promise<void> };
 
 export const DEFAULT_PREFS: DevicePrefs = {
   language: "uz-Latn",
-  theme: "light",
+  theme: "system",
+  themeSource: "system",
   themeLock: null,
+  companyTheme: null,
+  cashierTheme: null,
+  customTheme: null,
+  density: "comfortable",
   fontScale: "normal",
   productView: "cards",
   hotkeys: { ...DEFAULT_HOTKEYS },
@@ -198,8 +203,11 @@ type ProductRow = CalcProduct & {
   imageKey?: string | null;
   isWeighted?: boolean;
   pluCode?: number | null;
+  minStock?: string;
 };
 type CategoryRow = { id: string; name: string; parentId: string | null; sortOrder?: number; isActive: boolean };
+/** Kassirning ko'rinish tanlovi (qurilmada, kassir bo'yicha): mavzu, zichlik, shrift. */
+type CashierPrefs = { theme?: string; density?: string; fontScale?: string };
 
 const IMAGE_EXTENSIONS = [
   ["jpg", "image/jpeg"],
@@ -785,6 +793,7 @@ export class KassaService {
       taxRate: row.taxRate,
       taxIncluded: row.taxIncluded,
       stock: fromMinor(stock.get(row.id) ?? 0n, 4),
+      minStock: typeof row.minStock === "string" ? row.minStock : "0",
       imageVersion: imageVersionOf(row.imageKey),
       isWeighted: row.isWeighted === true,
       pluCode: typeof row.pluCode === "number" ? row.pluCode : null,
@@ -3367,29 +3376,49 @@ export class KassaService {
   // ─── Qurilma sozlamalari, printer, pul qutisi ───────────────────────────
 
   /**
-   * Qurilma sozlamalari; mavzu: kompaniya qulfi (pull `config.appearance`) → joriy kassirning tanlovi → qurilma standarti.
-   * Kassir mavzusi qurilmada kassir bo'yicha saqlanadi — qayta kirganda tiklanadi.
+   * Qurilma sozlamalari + ko'rinish: mavzu ustuvorligi (kompaniya qulfi → kassir tanlovi → kompaniya standarti → Windows),
+   * zichlik va shrift (kassir → qurilma → maxsus mavzu standarti). Kassir tanlovi qurilmada kassir bo'yicha saqlanadi.
    */
   prefs(): DevicePrefs {
     const stored = this.store.getMeta<Partial<DevicePrefs>>("devicePrefs") ?? {};
     const base = { ...DEFAULT_PREFS, ...stored, hotkeys: { ...DEFAULT_HOTKEYS, ...(stored.hotkeys ?? {}) } };
     const appearance = this.config()?.appearance;
-    const lock = appearance?.locked && isPosTheme(appearance.theme) ? appearance.theme : null;
-    const own = this.cashier ? this.store.getMeta<{ theme?: string }>(`cashierPrefs:${this.cashier.userId}`)?.theme : undefined;
-    const theme = lock ?? (isPosTheme(own) ? own : isPosTheme(base.theme) ? base.theme : "light");
-    return { ...base, theme, themeLock: lock };
+    const customTheme = parseCustomTheme(appearance?.custom);
+    const company = appearance ? { locked: appearance.locked === true, theme: appearance.theme, custom: customTheme } : null;
+    const own = this.cashier ? this.store.getMeta<CashierPrefs>(`cashierPrefs:${this.cashier.userId}`) : null;
+    const resolved = resolvePosTheme({ company, cashierTheme: own?.theme ?? null });
+    const themeDefaults = resolved.theme === "custom" ? customTheme : null;
+    return {
+      ...base,
+      theme: resolved.theme,
+      themeSource: resolved.source,
+      themeLock: resolved.lock,
+      companyTheme: company ? normalizePosTheme(company.theme, customTheme !== null) : null,
+      cashierTheme: normalizePosTheme(own?.theme, customTheme !== null),
+      customTheme,
+      density: [own?.density, stored.density, themeDefaults?.density].find(isPosDensity) ?? "comfortable",
+      fontScale: [own?.fontScale, stored.fontScale, themeDefaults?.fontScale].find(isPosFontScale) ?? "normal",
+    };
   }
 
   savePrefs(input: DevicePrefs): DevicePrefs {
     const cashier = this.requireCashier();
     const current = this.prefs();
-    // Mavzu — joriy kassirniki (qurilma standarti o'zgarmaydi); kompaniya qulflagan bo'lsa o'zgartirib bo'lmaydi
-    const theme = isPosTheme(input.theme) ? input.theme : current.theme;
-    if (theme !== current.theme) {
+    const ownKey = `cashierPrefs:${cashier.userId}`;
+    const own: CashierPrefs = { ...(this.store.getMeta<CashierPrefs>(ownKey) ?? {}) };
+    // Mavzu — kassirniki; `cashierTheme: null` — kompaniya standartiga qaytish; kompaniya qulflagan bo'lsa o'zgarmaydi
+    const requested = normalizePosTheme(input.theme, current.customTheme !== null);
+    const resetTheme = input.cashierTheme === null && current.cashierTheme !== null;
+    if (resetTheme || (requested !== null && requested !== current.theme)) {
       if (current.themeLock) throw new KassaError("FORBIDDEN", "Mavzu kompaniya tomonidan qulflangan");
-      this.store.setMeta(`cashierPrefs:${cashier.userId}`, { theme });
+      if (resetTheme) delete own.theme;
+      else own.theme = requested!;
     }
-    const deviceTheme = this.store.getMeta<Partial<DevicePrefs>>("devicePrefs")?.theme;
+    // Zichlik va shrift — kassirniki (faqat o'zgarganda — tanlanmagani maxsus mavzu standartiga ergashadi)
+    if (isPosDensity(input.density) && input.density !== current.density) own.density = input.density;
+    if (isPosFontScale(input.fontScale) && input.fontScale !== current.fontScale) own.fontScale = input.fontScale;
+    this.store.setMeta(ownKey, own);
+    const storedDevice = this.store.getMeta<Partial<DevicePrefs>>("devicePrefs") ?? {};
     const methods = Array.isArray(input.enabledPaymentMethods)
       ? [...new Set(input.enabledPaymentMethods.filter((method) => PAYMENT_METHODS.includes(method)))]
       : current.enabledPaymentMethods;
@@ -3403,11 +3432,8 @@ export class KassaService {
       used.set(key, action);
       hotkeys[action] = key;
     }
-    const prefs: DevicePrefs = {
+    const prefs = {
       language: input.language === "uz-Cyrl" || input.language === "ru" ? input.language : "uz-Latn",
-      theme: isPosTheme(deviceTheme) ? deviceTheme : "light",
-      themeLock: null,
-      fontScale: input.fontScale === "large" ? "large" : "normal",
       productView: input.productView === "table" ? "table" : "cards",
       hotkeys,
       blockNegativeStock: !!input.blockNegativeStock,
@@ -3426,7 +3452,10 @@ export class KassaService {
         ...(input.drawer?.port ? { port: Number(input.drawer.port) } : {}),
         ...(input.drawer?.share ? { share: String(input.drawer.share).trim() } : {}),
       },
-    };
+      // Qurilma darajasidagi (eski) shrift/zichlik — kassir tanlamaganda
+      ...(isPosDensity(storedDevice.density) ? { density: storedDevice.density } : {}),
+      ...(isPosFontScale(storedDevice.fontScale) ? { fontScale: storedDevice.fontScale } : {}),
+    } satisfies Partial<DevicePrefs>;
     const invalid = validateDrawerPrefs(prefs.drawer);
     if (invalid) throw new KassaError("BAD_REQUEST", invalid);
     this.store.setMeta("devicePrefs", prefs);

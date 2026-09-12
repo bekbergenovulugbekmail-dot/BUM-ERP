@@ -100,7 +100,7 @@ export default function PurchaseReturnDialog({
           <DialogDescription>Xarid raqamini kiriting (masalan, K01-P000012 yoki PO-2026-0031).</DialogDescription>
         </DialogHeader>
         {!canReturn ? (
-          <p className="rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-700">Qaytarish uchun ruxsat kerak: purchase.return</p>
+          <p className="rounded-md bg-pos-warning/10 px-3 py-2 text-sm text-pos-warning">Qaytarish uchun ruxsat kerak: purchase.return</p>
         ) : result ? (
           <div className="space-y-3">
             <p className="text-lg font-semibold">Qaytarish {result.number} yozildi</p>
@@ -108,7 +108,7 @@ export default function PurchaseReturnDialog({
               Xarid {result.orderNumber} · {result.supplier.name} · taxminan {fmtMoney(result.total, baseCurrency)}
             </p>
             {result.refund && (
-              <p className="rounded-lg bg-emerald-500/10 px-3 py-2 font-medium text-emerald-700">
+              <p className="rounded-lg bg-pos-success/10 px-3 py-2 font-medium text-pos-success">
                 Kassaga qaytgan pul: {fmtMoney(result.refund.amount, baseCurrency)} ({result.refund.method === "cash" ? "naqd" : "karta"})
               </p>
             )}
