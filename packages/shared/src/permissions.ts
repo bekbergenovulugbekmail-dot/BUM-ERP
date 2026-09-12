@@ -26,6 +26,8 @@ export const PERMISSIONS = {
   "sales.cancel":         { label: "Savdoni bekor qilish",         group: "Savdo" },
   "sales.refund":         { label: "Qaytarish",                    group: "Savdo" },
   "pos.use":              { label: "Kassa (POS) ishlatish",        group: "Savdo" },
+  /** Desktop kassa qurilmasini ro'yxatdan o'tkazish va o'chirish. */
+  "pos.devices.manage":   { label: "Kassa qurilmalarini boshqarish", group: "Savdo" },
 
   // ─── Ombor ─────────────────────────────────────────────────────────────────
   "warehouse.view":       { label: "Omborni ko'rish",              group: "Ombor" },

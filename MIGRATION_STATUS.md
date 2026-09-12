@@ -855,6 +855,39 @@ Foydalanuvchi `BUMERP_SOTUVAGE.docx` (68 bo'lim) yubordi: pullik xarita API'si y
 - **V6–V8** commit `6652467`, production'ga deploy qilindi (API va web SUCCESS; `/catalog/filters`, `/policy/recipients`, `/reports` 401; bundle'da katalog filtrlari, bildirishnoma oluvchilari, "BUYURTMANI YAKUNLASH"; `sw.js` yangilangan)
 - qolgan: production'da S3; telefonda qo'lda sinov (kamera, GPS, menyu); native ilova (fondagi kuzatuv, faqat kamera); agent bo'yicha yetkazish siyosati; bazadagi rasmlar saqlash muddati (foydalanuvchi tasdig'i bilan); bum-erp.uz TLS/DNS
 
+## BUM POS KASSA — offline desktop kassa (2026-09-12)
+
+Foydalanuvchi alohida Windows desktop kassa so'radi: POS (yuqori menyu — ombor, valyuta, sinxron bo'lmagan cheklar, qaytarish), sotuv tarixi, kassa, xarid, ombor, mahsulot harakati, inventarizatsiya, etiketka, ma'lumotlar (mijozlar, yetkazib beruvchilar, yuridik/jismoniy shaxslar, narxlar), analitika, sozlamalar. Asosiy afzallik — to'liq offline ishlash (sotuv va xarid), internet qaytganda sinxron.
+
+Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lokal qoldiq yetmasa — **ruxsat, sinxronda ziddiyat sifatida belgilanadi**; birinchi reliz — **D0–D2**, keyin qolgani.
+
+| # | Bosqich | Holat |
+|---|---|---|
+| D0 | Poydevor: qurilma va token, kassir PIN, lokal SQLite, pull/push sinxron, offline smena | ⏳ server ✅, desktop skeleti yozildi |
+| D1 | POS: yuqori menyu, shtrix-kod, tezkor tugmalar, valyutalar, kechiktirilgan/qisman qaytarish, chek printeri, offline sotuv sinxroni (qoldiq ziddiyati) | ⏳ |
+| D2 | Sotuv tarixi, kassa (inkassatsiya, smena/kassir/to'lov turi hisobotlari) | ⏳ |
+| D3–D9 | Xarid, ombor, inventarizatsiya, etiketka, ma'lumotlar, analitika, sozlamalar va avtomatik yangilanish, offline testlar | ⏳ |
+
+**D0 — server** (migratsiya 0031):
+- jadvallar `pos_devices` (kompaniya, ombor, nomi, `code` K01/K02…, token SHA-256 xeshi, faollik, versiya, oxirgi pull/push) va `pos_sync_operations` (qurilma + `op_id` unikal, tur, kassir, `applied`/`rejected`, natija yoki xato, qurilmadagi vaqt); `pos_shifts.device_id`
+- bir omborda bir nechta kassa: ochiq smena web kassada — ombor bo'yicha bitta, desktopda — qurilma bo'yicha bitta (ikki qisman unikal indeks); web kassaga desktop smenasi ko'rinmaydi
+- ruxsat `pos.devices.manage` (Direktor; egasi/admin — hammasi); migratsiya mavjud Direktor rollariga qo'shadi
+- `POST /api/pos-device/setup/options` va `/setup/register` — rahbar telefon + parol (mavjud login cheklovlari bilan), kompaniya va ombor tanlash; token bir marta qaytadi. Audit `POS_DEVICE_REGISTERED`
+- qurilma so'rovlari `Authorization: Bearer bumpos_…`: `GET /session`, `POST /cashiers/login` (kassirning birinchi kirishi — telefon + parol, `pos.use` va ombor ruxsati; audit `POS_CASHIER_LOGIN`), `POST /pull`, `POST /push`
+- `pull`: 10 tur (birliklar, konversiyalar, kategoriya, brend, mahsulot, mijoz, ombor, qurilma ombori qoldig'i, valyutalar, kassirlar) — har biri `(updated_at, id)` kursori (mikrosekund) bo'yicha sahifalab; kassirlar ruxsatlari va `active` (a'zolik, foydalanuvchi, `pos.use`, ombor) bilan; parol/PIN xeshlari yuborilmaydi
+- `push`: 100 tagacha amal; har amal `opId` bilan bir marta (takrorda saqlangan javob `duplicate: true`), tartib bilan, har biri o'z tranzaksiyasida; biznes xatosi — rad etiladi va saqlanadi, keyingilari davom etadi; amal vaqti kelajakda 5 daqiqadan / o'tmishda 30 kundan oshmasin; kassir har amalda qayta tekshiriladi. Hozirgi amallar: `shift.open` (qurilmadagi smena ID'si va vaqti bilan), `shift.close`
+- web `GET /api/pos/devices`, `PATCH /api/pos/devices/:id` (nomi, o'chirish — token darhol 401). Audit `POS_DEVICE_DEACTIVATED`
+- testlar: `pos-device` (3) — ro'yxatdan o'tkazish va ruxsatlar, sahifalab pull va kompaniya izolyatsiyasi, push idempotentligi va rad etishlar
+
+**D0 — desktop** (`apps/desktop`, `@bum/desktop`):
+- Electron main (contextIsolation, sandbox, tashqi navigatsiya bloklangan), CommonJS preload faqat `window.bumKassa` (oq ro'yxatdagi `kassa:*` kanallar), React renderer web UI komponentlari va Tailwind mavzusi bilan
+- lokal baza — Node'ning `node:sqlite` (native modul yig'ishsiz), `PRAGMA user_version` migratsiyalari; mahsulot/mijoz/qoldiq jadvallari, ma'lumotnomalar, offline navbat (`outbox`), kassir PIN'lari
+- token Windows `safeStorage` bilan shifrlangan; server manzili faqat https (localhost bundan mustasno)
+- sinxron: avval navbat (50 tadan), keyin pull sahifalab; har siklda kursor 2 daqiqa orqaga suriladi, saqlangan kursor orqaga ketmaydi; offline — navbat saqlanadi; 401 — "qurilma o'chirilgan"; har 30 soniyada va qo'lda
+- kassir: birinchi marta onlayn (telefon + parol) → shu qurilma uchun PIN (argon2id, hash-wasm); keyin offline PIN bilan almashish, 5 xatodan keyin 5 daqiqa qulf; server o'chirgan kassir kira olmaydi
+- ekranlar: ro'yxatdan o'tkazish (server, rahbar, kompaniya, ombor, kassa nomi), kassir (PIN / birinchi kirish), bosh ekran (sinxron holati, navbat, rad etilgan amallar, offline smena ochish/yopish, keyingi bo'limlar)
+- Windows o'rnatuvchi: `electron-builder` NSIS (`pnpm --filter @bum/desktop dist:win`)
+
 ### Distributsiya (`/api/distribution`)
 
 O'qish — `distribution.view`, yozish — `distribution.manage`.

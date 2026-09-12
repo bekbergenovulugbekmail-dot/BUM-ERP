@@ -28,6 +28,7 @@ import {
 import { companies, users } from "./platform.js";
 import { products, units } from "./catalog.js";
 import { warehouses } from "./inventory.js";
+import { posDevices } from "./pos.js";
 import { cashAccounts, journalEntries } from "./finance.js";
 import { paymentMethod } from "./purchase.js";
 import { legacyId, money, percent, pk, price, qty, timestamps } from "./_shared.js";
@@ -122,6 +123,8 @@ export const posShifts = pgTable(
 
     cashierId: uuid("cashier_id").references(() => users.id, { onDelete: "set null" }),
     cashierName: varchar("cashier_name", { length: 200 }),
+    /** Desktop kassa qurilmasi; null — web kassa. */
+    deviceId: uuid("device_id").references(() => posDevices.id, { onDelete: "set null" }),
 
     status: posShiftStatus("status").notNull().default("open"),
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull(),
@@ -145,10 +148,13 @@ export const posShifts = pgTable(
   (t) => [
     index("ps_company_warehouse_idx").on(t.companyId, t.warehouseId),
     index("ps_company_status_idx").on(t.companyId, t.status),
-    /** Bitta omborda bir vaqtda faqat bitta ochiq smena. */
+    /** Web kassa: bitta omborda bir vaqtda bitta ochiq smena; desktop kassa: har qurilmada bitta. */
     uniqueIndex("ps_one_open_per_warehouse")
       .on(t.companyId, t.warehouseId)
-      .where(sql`${t.status} = 'open'`),
+      .where(sql`${t.status} = 'open' and ${t.deviceId} is null`),
+    uniqueIndex("ps_one_open_per_device")
+      .on(t.deviceId)
+      .where(sql`${t.status} = 'open' and ${t.deviceId} is not null`),
   ],
 );
 

@@ -8,6 +8,7 @@ export * from "./catalog.js";
 export * from "./inventory.js";
 export * from "./finance.js";
 export * from "./purchase.js";
+export * from "./pos.js";
 export * from "./sales.js";
 export * from "./crm.js";
 export * from "./sales-agent.js";

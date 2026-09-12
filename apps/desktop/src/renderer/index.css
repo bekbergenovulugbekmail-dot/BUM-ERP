@@ -1,0 +1,19 @@
+/* Web ilova mavzusi (ranglar, radiuslar) va UI komponentlari */
+@import "../../../../src/index.css";
+@source "../../../../src/components/ui";
+@source "./";
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  user-select: none;
+}
+
+input,
+textarea {
+  user-select: text;
+}

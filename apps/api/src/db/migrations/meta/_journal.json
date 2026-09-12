@@ -218,6 +218,13 @@
       "when": 1789181718036,
       "tag": "0030_customer_photos",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1789190617646,
+      "tag": "0031_pos_devices",
+      "breakpoints": true
     }
   ]
 }

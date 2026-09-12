@@ -14,6 +14,9 @@ dist-ssr
 *.local
 .eslintcache
 tsconfig.tsbuildinfo
+# Desktop kassa build va o'rnatuvchi fayllari
+apps/desktop/out
+apps/desktop/release
 
 # Editor directories and files
 .vscode/*

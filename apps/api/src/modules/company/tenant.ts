@@ -123,8 +123,16 @@ export async function requireTenantForWrite(conn: DbOrTx, user: SessionUser): Pr
 }
 
 /** A'zoning amaldagi ruxsatlari (frontend UX uchun ham qaytariladi). */
-export async function effectivePermissions(conn: DbOrTx, tenant: TenantContext): Promise<Permission[]> {
-  const { membership, company } = tenant;
+export function effectivePermissions(conn: DbOrTx, tenant: TenantContext): Promise<Permission[]> {
+  return membershipPermissions(conn, tenant.company.id, tenant.membership);
+}
+
+/** A'zolik (rol) bo'yicha ruxsatlar — kontekstsiz ro'yxatlar uchun ham (masalan, kassa qurilmasi kassirlari). */
+export async function membershipPermissions(
+  conn: DbOrTx,
+  companyId: string,
+  membership: { companyRole: string; roleId: string | null },
+): Promise<Permission[]> {
   if (isFullAccessRole(membership.companyRole)) return [...ALL_PERMISSIONS];
 
   const match = membership.roleId
@@ -135,7 +143,7 @@ export async function effectivePermissions(conn: DbOrTx, tenant: TenantContext):
   const [role] = await conn
     .select({ permissions: roles.permissions, isActive: roles.isActive })
     .from(roles)
-    .where(and(match, or(eq(roles.companyId, company.id), isNull(roles.companyId))))
+    .where(and(match, or(eq(roles.companyId, companyId), isNull(roles.companyId))))
     .orderBy(sql`${roles.companyId} is null`)
     .limit(1);
 

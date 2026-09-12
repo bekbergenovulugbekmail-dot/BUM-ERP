@@ -15,7 +15,7 @@
  *    ombor ruxsati tekshirilmasdi; `cashierName` mijozdan kelardi, `cashierId` yozilmasdi
  *  - `getShifts` / `getOpenShift` ruxsat tekshirmasdi — `pos.use`
  */
-import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, isNull, sql } from "drizzle-orm";
 import { badRequest, conflict, forbidden, notFound } from "@bum/shared";
 import { warehouses } from "../../db/schema/inventory.js";
 import { customers, posShifts, salesOrders } from "../../db/schema/sales.js";
@@ -67,7 +67,13 @@ export async function getOpenShift(conn: DbOrTx, tenant: TenantContext, warehous
     .from(posShifts)
     .innerJoin(warehouses, eq(warehouses.id, posShifts.warehouseId))
     .where(
-      and(eq(posShifts.companyId, tenant.company.id), eq(posShifts.warehouseId, warehouseId), eq(posShifts.status, "open")),
+      and(
+        eq(posShifts.companyId, tenant.company.id),
+        eq(posShifts.warehouseId, warehouseId),
+        eq(posShifts.status, "open"),
+        // Desktop kassa smenalari web kassaga ko'rinmaydi (har qurilmaning o'z smenasi)
+        isNull(posShifts.deviceId),
+      ),
     )
     .limit(1);
   return shift ?? null;
@@ -103,6 +109,10 @@ export async function openShift(
     /** Chet valyutadagi boshlang'ich naqd (yoqilgan qo'shimcha valyutalar). */
     openingForeignCash?: { currency: string; amount: string }[];
     notes?: string | null;
+    /** Desktop kassa (sinxron): qurilmada yaratilgan smena ID'si, ochilgan vaqti va qurilma. */
+    id?: string;
+    openedAt?: Date;
+    deviceId?: string;
   },
   meta: RequestMeta,
 ) {
@@ -119,9 +129,15 @@ export async function openShift(
   const [existing] = await tx
     .select({ id: posShifts.id })
     .from(posShifts)
-    .where(and(eq(posShifts.companyId, companyId), eq(posShifts.warehouseId, input.warehouseId), eq(posShifts.status, "open")))
+    .where(
+      and(
+        eq(posShifts.companyId, companyId),
+        eq(posShifts.status, "open"),
+        input.deviceId ? eq(posShifts.deviceId, input.deviceId) : and(eq(posShifts.warehouseId, input.warehouseId), isNull(posShifts.deviceId)),
+      ),
+    )
     .limit(1);
-  if (existing) throw conflict("Bu omborda smena allaqachon ochiq");
+  if (existing) throw conflict(input.deviceId ? "Bu kassada smena allaqachon ochiq" : "Bu omborda smena allaqachon ochiq");
 
   // Chet valyutadagi boshlang'ich naqd — faqat yoqilgan qo'shimcha valyutalar, har biri bir marta
   const baseCurrency = await companyCurrency(tx, companyId);
@@ -138,11 +154,13 @@ export async function openShift(
   const [shift] = await tx
     .insert(posShifts)
     .values({
+      ...(input.id ? { id: input.id } : {}),
       companyId,
       warehouseId: input.warehouseId,
+      deviceId: input.deviceId ?? null,
       cashierId: tenant.user.id,
       cashierName: tenant.user.name,
-      openedAt: new Date(),
+      openedAt: input.openedAt ?? new Date(),
       openingCash: input.openingCash,
       openingForeignCash,
       notes: input.notes ?? null,
@@ -186,6 +204,8 @@ export async function closeShift(
     /** Kassada sanalgan chet valyuta naqdi; smenada shu valyutada naqd bo'lsa — majburiy. */
     closingForeignCash?: { currency: string; amount: string }[];
     notes?: string | null;
+    /** Desktop kassa (sinxron): smena qurilmada yopilgan vaqt. */
+    closedAt?: Date;
   },
   meta: RequestMeta,
 ) {
@@ -222,7 +242,7 @@ export async function closeShift(
     .update(posShifts)
     .set({
       status: "closed",
-      closedAt: new Date(),
+      closedAt: input.closedAt ?? new Date(),
       closingCash: input.closingCash,
       closingForeignCash: foreignCash.length > 0 ? Object.fromEntries(foreignCash.map((row) => [row.currency, row.counted])) : null,
       notes: input.notes ?? shift.notes,

@@ -21,6 +21,7 @@ import { companyRoutes } from "./modules/company/routes.js";
 import { crmRoutes } from "./modules/crm/routes.js";
 import { distributionRoutes } from "./modules/distribution/routes.js";
 import { salesAgentRoutes } from "./modules/sales-agent/routes.js";
+import { posDeviceRoutes, posDevicesAdminRoutes } from "./modules/pos-device/routes.js";
 import { fileRoutes } from "./modules/files/routes.js";
 import { financeRoutes } from "./modules/finance/routes.js";
 import { hrRoutes } from "./modules/hr/routes.js";
@@ -92,6 +93,8 @@ export async function buildServer() {
   await app.register(crmRoutes, { prefix: "/api/crm" });
   await app.register(distributionRoutes, { prefix: "/api/distribution" });
   await app.register(salesAgentRoutes, { prefix: "/api/sales-agent" });
+  await app.register(posDeviceRoutes, { prefix: "/api/pos-device" });
+  await app.register(posDevicesAdminRoutes, { prefix: "/api/pos/devices" });
   await app.register(manufacturingRoutes, { prefix: "/api/manufacturing" });
   await app.register(hrRoutes, { prefix: "/api/hr" });
   await app.register(analyticsRoutes, { prefix: "/api/analytics" });

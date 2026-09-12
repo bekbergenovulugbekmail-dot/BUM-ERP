@@ -1,0 +1,102 @@
+/**
+ * Server bilan aloqa (faqat main jarayonda — token renderer'ga chiqmaydi).
+ * Tarmoq xatosi yoki vaqt tugashi — `OfflineError` (navbat saqlanadi, keyinroq qayta urinish).
+ */
+import type { CashierRecord, CompanyInfo, DeviceInfo, PullCursors, PullResponse, PushResult, WireOperation } from "../shared/sync-types.js";
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly details: unknown;
+
+  constructor(status: number, code: string, message: string, details?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+export class OfflineError extends Error {
+  constructor(message = "Server bilan aloqa yo'q") {
+    super(message);
+    this.name = "OfflineError";
+  }
+}
+
+export type SetupOptions = {
+  companies: { id: string; name: string }[];
+  company: { id: string; name: string } | null;
+  warehouses: { id: string; name: string; code: string; isDefault: boolean }[];
+};
+
+export type Registration = { token: string; device: DeviceInfo & { isActive: boolean }; company: CompanyInfo };
+
+export type ApiClient = ReturnType<typeof createApiClient>;
+
+type ErrorBody = { code?: string; message?: string; details?: unknown };
+
+function parseBody(raw: string): ErrorBody | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ErrorBody;
+  } catch {
+    return null;
+  }
+}
+
+export function createApiClient(options: {
+  baseUrl: string;
+  token?: string | null;
+  appVersion: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}) {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 20_000;
+
+  async function request<T>(method: "GET" | "POST", path: string, body?: unknown, withToken = true): Promise<T> {
+    const headers: Record<string, string> = { "x-app-version": options.appVersion };
+    if (body !== undefined) headers["content-type"] = "application/json";
+    if (withToken && options.token) headers.authorization = `Bearer ${options.token}`;
+    let response: Response;
+    try {
+      response = await fetchImpl(new URL(path, options.baseUrl), {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch {
+      throw new OfflineError();
+    }
+    const raw = await response.text();
+    const json = parseBody(raw);
+    if (!response.ok) {
+      // Proksi/serverga yetib bo'lmadi (502–504) — tarmoq muammosi sifatida
+      if (response.status >= 502 && response.status <= 504) throw new OfflineError();
+      throw new ApiError(response.status, json?.code ?? "HTTP_ERROR", json?.message ?? `HTTP ${response.status}`, json?.details);
+    }
+    return json as T;
+  }
+
+  const credentials = (phone: string, password: string) => ({ phone, password });
+
+  return {
+    setupOptions: (input: { phone: string; password: string; companyId?: string }) =>
+      request<SetupOptions>("POST", "/api/pos-device/setup/options", { ...credentials(input.phone, input.password), ...(input.companyId ? { companyId: input.companyId } : {}) }, false),
+    setupRegister: (input: { phone: string; password: string; companyId?: string; warehouseId: string; name: string; platform: string }) =>
+      request<Registration>(
+        "POST",
+        "/api/pos-device/setup/register",
+        { ...input, ...(input.companyId ? {} : { companyId: undefined }), appVersion: options.appVersion },
+        false,
+      ),
+    session: () => request<{ device: DeviceInfo; company: CompanyInfo; serverTime: string }>("GET", "/api/pos-device/session"),
+    cashierLogin: (phone: string, password: string) =>
+      request<{ cashier: Omit<CashierRecord, "userId" | "active"> & { id: string } }>("POST", "/api/pos-device/cashiers/login", credentials(phone, password)),
+    pull: (cursors: PullCursors, limit?: number) => request<PullResponse>("POST", "/api/pos-device/pull", { cursors, ...(limit ? { limit } : {}) }),
+    push: (ops: WireOperation[]) => request<{ results: PushResult[] }>("POST", "/api/pos-device/push", { ops }),
+  };
+}

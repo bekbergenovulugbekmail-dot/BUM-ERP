@@ -7,6 +7,7 @@ onlyBuiltDependencies:
   - "@swc/core"
   - "@tailwindcss/oxide"
   - esbuild
+  - electron
 
 blockExoticSubdeps: true
 
@@ -15,3 +16,7 @@ allowBuilds:
   "@swc/core": true
   core-js: false
   esbuild: true
+  # Desktop kassa: o'rnatishda Electron binarini yuklab oladi
+  electron: true
+  # electron-builder'ning Squirrel o'rnatuvchisi — ishlatilmaydi (NSIS)
+  electron-winstaller: false
