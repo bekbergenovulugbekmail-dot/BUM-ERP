@@ -1197,7 +1197,7 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
      - Convex RBAC tuzatishi (`main` `3f958f1`) — Convex ishlatilmasa kerak emas
 3. **PR:** `feat/postgres-migration` → `main` — production'ga o'tish kuni kelishilgach
 4. **Desktop POS (K1–K6) — qolgan:**
-   - o'rnatuvchi 0.3.0 (`apps/desktop/release/BUM-POS-KASSA-Setup-0.3.0.exe`) — platforma admini Admin → "Desktop kassa" orqali yuklab e'lon qiladi (bo'laklab, davom ettiriladigan); o'rnatilgan kassalar Sozlamalar → Ilova versiyasi'dan yangilanadi
+   - o'rnatuvchi 0.3.1 (`apps/desktop/release/BUM-POS-KASSA-Setup-0.3.1.exe`, SHA-256 `53DA4A7A2503200D8B5D3267D2E70A4137BF087C425634FC2569E898E6EB086D`, imzosiz) — platforma admini Admin → "Desktop kassa" orqali yuklab e'lon qiladi (bo'laklab, davom ettiriladigan); o'rnatilgan kassalar Sozlamalar → Ilova versiyasi'dan yangilanadi
    - tarozilar: real uskunada sinov — Umumiy ASCII (LAN va COM), COM transporti (PowerShell SerialPort); Shtrix-M, YES POS, Rongta uchun ishlab chiqaruvchidan almashinuv protokoli hujjati kerak (K6 bo'limida ro'yxat) — hujjat kelgach adapter shu interfeysga yoziladi va real tarozida tekshiriladi
    - kod imzolash sertifikati (`CSC_LINK`, `CSC_KEY_PASSWORD`); `bum-erp.uz` apex DNS (2-band)
    - brauzer va kassada qo'lda sinov: aralash to'lov, qaytarish tarkibi, tezkor sotuv (rasm yuklash → kassada ko'rinish), mavzular, kurs tahriri, tarozi simulyatori
