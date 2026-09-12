@@ -11,6 +11,7 @@ export type ModuleId =
   | "manufacturing"
   | "crm"
   | "distribution"
+  | "delivery"
   | "finance"
   | "hr"
   | "reports"
@@ -39,6 +40,7 @@ export const ERP_MODULES: ModuleConfig[] = [
   { id: "manufacturing", labelKey: "nav.manufacturing", path: "manufacturing", icon: "Factory", defaultEnabled: false, group: "operations", permission: "manufacturing.view" },
   { id: "crm", labelKey: "nav.crm", path: "crm", icon: "Users", defaultEnabled: true, group: "business", permission: "crm.view" },
   { id: "distribution", labelKey: "nav.distribution", path: "distribution", icon: "Truck", defaultEnabled: true, group: "business", permission: "distribution.view" },
+  { id: "delivery", labelKey: "nav.delivery", path: "delivery", icon: "PackageCheck", defaultEnabled: true, group: "business", permission: "delivery.view" },
   { id: "finance", labelKey: "nav.finance", path: "finance", icon: "DollarSign", defaultEnabled: true, group: "business", permission: "finance.view" },
   { id: "hr", labelKey: "nav.hr", path: "hr", icon: "UserCheck", defaultEnabled: true, group: "business", permission: "hr.view" },
   { id: "reports", labelKey: "nav.reports", path: "reports", icon: "FileBarChart", defaultEnabled: true, group: "insights", permission: "analytics.view" },

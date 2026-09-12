@@ -87,6 +87,8 @@ export type SalesOrderInput = {
   warehouseId: string;
   orderDate: string;
   deliveryDate?: string | null;
+  /** Yetkazib berish kerakmi (null — dostavka siyosati bo'yicha); tasdiqlanganda yetkazma yaratiladi. */
+  deliveryRequired?: boolean | null;
   notes?: string | null;
   items: SalesItemInput[];
   /** Sotuv valyutalari (POS bilan bir xil qoida); standart — asosiy valyuta. */
@@ -595,6 +597,7 @@ export async function createOrder(
       warehouseId: input.warehouseId,
       orderDate: input.orderDate,
       deliveryDate: input.deliveryDate ?? null,
+      deliveryRequired: input.deliveryRequired ?? null,
       notes: input.notes ?? null,
       currency: baseCurrency,
       ...totals,
@@ -649,6 +652,7 @@ export async function updateOrder(
       warehouseId,
       ...(patch.orderDate ? { orderDate: patch.orderDate } : {}),
       ...(patch.deliveryDate !== undefined ? { deliveryDate: patch.deliveryDate } : {}),
+      ...(patch.deliveryRequired !== undefined ? { deliveryRequired: patch.deliveryRequired } : {}),
       ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
       ...totals,
       updatedAt: new Date(),

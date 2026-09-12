@@ -190,6 +190,8 @@ export const salesOrders = pgTable(
     status: salesOrderStatus("status").notNull().default("draft"),
     orderDate: date("order_date").notNull(),
     deliveryDate: date("delivery_date"),
+    /** Yetkazib berish kerakmi: null — kompaniya dostavka siyosati bo'yicha (`deliveryRequiredByDefault`). */
+    deliveryRequired: boolean("delivery_required"),
 
     currency: varchar("currency", { length: 3 }).notNull().default("UZS"),
     exchangeRate: price("exchange_rate").notNull().default("1"),

@@ -12,6 +12,7 @@ export * from "./pos.js";
 export * from "./sales.js";
 export * from "./crm.js";
 export * from "./sales-agent.js";
+export * from "./delivery.js";
 export * from "./manufacturing.js";
 export * from "./hr.js";
 export * from "./notifications.js";

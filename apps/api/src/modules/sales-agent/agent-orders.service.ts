@@ -29,6 +29,7 @@ import type { TenantContext } from "../company/tenant.js";
 import { todayIso } from "../finance/cash.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
 import { VIEW_TTL } from "../files/files.service.js";
+import { autoCreateDeliveryTask } from "../delivery/tasks.service.js";
 import { cancelOrder, confirmOrder, createOrder, updateOrder, type SalesItemInput } from "../sales/orders.service.js";
 import type { AgentContext } from "./agent-context.js";
 import { checkLocationQuality, insertLocationEvent, type LocationInput } from "./location.service.js";
@@ -747,6 +748,7 @@ export async function submitAgentOrder(
     });
   } else {
     await confirmOrder(tx, context, orderId, meta);
+    await autoCreateDeliveryTask(tx, context, orderId, meta);
   }
   await audit(tx, context, meta, {
     action: "ORDER_SUBMIT",
@@ -840,6 +842,7 @@ export async function approveAgentOrder(tx: Tx, tenant: TenantContext, orderId: 
     .where(eq(salesOrderItems.orderId, orderId));
   await assertStock(tx, tenant.company.id, row.warehouseId, items);
   await confirmOrder(tx, tenant, orderId, meta);
+  await autoCreateDeliveryTask(tx, tenant, orderId, meta);
   const now = new Date();
   await tx
     .update(agentOrders)

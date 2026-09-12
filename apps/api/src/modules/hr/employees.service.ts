@@ -15,6 +15,7 @@ import { badRequest, conflict, notFound } from "@bum/shared";
 import { salesReps } from "../../db/schema/crm.js";
 import { attendances, departments, employees, leaves, positions, salaryPayments } from "../../db/schema/hr.js";
 import { companyMembers } from "../../db/schema/platform.js";
+import { setDeliveryAgentsActiveForUser } from "../delivery/work-session.repo.js";
 import { endSessionsForUser } from "../sales-agent/work-session.repo.js";
 import { setMemberAccess } from "../users/member-access.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -265,6 +266,7 @@ export async function updateEmployee(
       .update(salesReps)
       .set({ isActive: active, updatedAt: new Date() })
       .where(and(eq(salesReps.companyId, companyId), eq(salesReps.userId, userId)));
+    await setDeliveryAgentsActiveForUser(tx, companyId, userId, active);
   }
 
   // Maosh va bank ma'lumotlari o'zgarishi auditda maydon nomi bilan qoladi, qiymati bilan emas
@@ -303,6 +305,7 @@ export async function deleteEmployee(tx: Tx, tenant: TenantContext, employeeId: 
       .update(salesReps)
       .set({ isActive: false, updatedAt: new Date() })
       .where(and(eq(salesReps.companyId, tenant.company.id), eq(salesReps.userId, employee.userId)));
+    await setDeliveryAgentsActiveForUser(tx, tenant.company.id, employee.userId, false);
   }
   await tx.delete(employees).where(eq(employees.id, employeeId));
   await hrAudit(tx, tenant, meta, {

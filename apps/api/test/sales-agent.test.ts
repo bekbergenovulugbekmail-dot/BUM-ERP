@@ -105,14 +105,14 @@ describe("Sotuv agenti roli va ish joyi", () => {
       .set({ permissions: ["crm.view"] })
       .where(and(eq(roles.companyId, company.companyId), eq(roles.name, "Direktor")));
 
-    // 0020 (rollar) va 0027 (agent qo'shish ruxsati) — ketma-ket, ikki marta
+    // 0020 (rollar), 0027 (agent qo'shish ruxsati), 0030 (mijoz ruxsatlari), 0042 (Supervayzerga dostavka ruxsatlari) — ketma-ket, ikki marta
     const migrations = await Promise.all(
-      ["0020_sales_agent_roles.sql", "0027_sales_agent_team.sql", "0030_customer_photos.sql"].map((file) =>
+      ["0020_sales_agent_roles.sql", "0027_sales_agent_team.sql", "0030_customer_photos.sql", "0042_delivery.sql"].map((file) =>
         readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), "utf8"),
       ),
     );
     const permissionStatements = (sqlText: string) =>
-      sqlText.split("--> statement-breakpoint").filter((statement) => !/ALTER TABLE|CREATE (TABLE|INDEX|TYPE)/i.test(statement));
+      sqlText.split("--> statement-breakpoint").filter((statement) => !/ALTER TABLE|CREATE (UNIQUE )?(TABLE|INDEX|TYPE)/i.test(statement));
     const run = async () => {
       for (const migration of migrations) {
         for (const statement of permissionStatements(migration)) await db.execute(sql.raw(statement));

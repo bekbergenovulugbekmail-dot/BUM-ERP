@@ -25,6 +25,14 @@ import AgentStorePage from "./pages/sales-agent/stores/store-page.tsx";
 import AgentOrderPage from "./pages/sales-agent/stores/order-page.tsx";
 import AgentPromotionsPage from "./pages/sales-agent/promotions/page.tsx";
 import AgentProspectsPage from "./pages/sales-agent/prospects/page.tsx";
+import DeliveryPage from "./pages/delivery/page.tsx";
+import DeliveryAgentLayout from "./pages/delivery-agent/layout.tsx";
+import DeliveryAgentDashboardPage from "./pages/delivery-agent/dashboard/page.tsx";
+import DeliveryAgentTasksPage from "./pages/delivery-agent/tasks/page.tsx";
+import DeliveryAgentTaskPage from "./pages/delivery-agent/tasks/task-page.tsx";
+import DeliveryAgentCustomersPage from "./pages/delivery-agent/customers/page.tsx";
+import DeliveryAgentDebtsPage from "./pages/delivery-agent/debts/page.tsx";
+import DeliveryAgentReportsPage from "./pages/delivery-agent/reports/page.tsx";
 import ManufacturingPage from "./pages/manufacturing/page.tsx";
 import HRPage from "./pages/hr/page.tsx";
 import AnalyticsPage from "./pages/analytics/page.tsx";
@@ -141,6 +149,17 @@ function MainApp() {
             <Route path="prospects" element={<AgentProspectsPage />} />
           </Route>
 
+          {/* Yetkazuvchi (dostavka agenti) ish joyi: mobil, ERP menyusiz */}
+          <Route path="delivery-agent" element={<DeliveryAgentLayout />}>
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="dashboard" element={<DeliveryAgentDashboardPage />} />
+            <Route path="tasks" element={<DeliveryAgentTasksPage />} />
+            <Route path="tasks/:taskId" element={<DeliveryAgentTaskPage />} />
+            <Route path="customers" element={<DeliveryAgentCustomersPage />} />
+            <Route path="debts" element={<DeliveryAgentDebtsPage />} />
+            <Route path="reports" element={<DeliveryAgentReportsPage />} />
+          </Route>
+
           {/* ERP App with layout */}
           <Route element={<ERPApp />}>
             <Route index element={<Navigate to="dashboard" replace />} />
@@ -153,6 +172,7 @@ function MainApp() {
             <Route path="manufacturing" element={<ModuleGuard module="manufacturing"><ManufacturingPage /></ModuleGuard>} />
             <Route path="crm" element={<ModuleGuard module="crm"><CRMPage /></ModuleGuard>} />
             <Route path="distribution" element={<ModuleGuard module="distribution"><DistributionPage /></ModuleGuard>} />
+            <Route path="delivery" element={<ModuleGuard module="delivery"><DeliveryPage /></ModuleGuard>} />
             <Route path="finance" element={<ModuleGuard module="finance"><FinancePage /></ModuleGuard>} />
             <Route path="hr" element={<ModuleGuard module="hr"><HRPage /></ModuleGuard>} />
             <Route path="reports" element={<ModuleGuard module="reports"><AnalyticsPage /></ModuleGuard>} />

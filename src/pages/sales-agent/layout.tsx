@@ -42,7 +42,7 @@ function Spinner() {
   );
 }
 
-function LanguageMenu() {
+export function LanguageMenu() {
   const { i18n } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();

@@ -17,7 +17,10 @@ const urlsToCache = [
 // geofence va kredit serverda, internet bilan tekshiriladi. Supervayzer ma'lumotlari va rasm havolalari keshlanmaydi.
 // Ish sessiyasi holati keshdan ko'rsatilmaydi (ish boshlangan/tugaganini faqat server biladi); rasmlar keshlanmaydi
 const AGENT_READ = /^\/api\/sales-agent\/(me|policy|today|stores|catalog|debtors|promotions|dashboard|orders|visits\/current|prospects|customers|reports)(\/|$)/;
-const NOT_CACHED = /\/(image|url|photo|content)$/;
+// Yetkazuvchi agent: profil, siyosat, bosh sahifa, yetkazmalar (tafsiloti bilan), mijozlar, qarz/to'lovlar, hisobotlar.
+// Amallar (qabul, yetib kelish, to'lov, tasdiqlash) keshlanmaydi — ilova ularni qurilmadagi navbatga qo'yadi va server qayta tekshiradi.
+const DELIVERY_READ = /^\/api\/delivery\/(policy$|agent\/(me|dashboard|tasks|customers|debts|reports)(\/|$))/;
+const NOT_CACHED = /\/(image|url|photo|content)$|\/proofs\//;
 
 // Install — cache offline page and icons
 self.addEventListener("install", (event) => {
@@ -94,7 +97,9 @@ self.addEventListener("fetch", (event) => {
 
   // API: faqat agent o'qish ma'lumotlari oflayn uchun keshlanadi, qolgani — to'g'ridan-to'g'ri tarmoq
   if (url.pathname.startsWith("/api/")) {
-    if (AGENT_READ.test(url.pathname) && !NOT_CACHED.test(url.pathname)) event.respondWith(agentRead(event.request));
+    if ((AGENT_READ.test(url.pathname) || DELIVERY_READ.test(url.pathname)) && !NOT_CACHED.test(url.pathname)) {
+      event.respondWith(agentRead(event.request));
+    }
     return;
   }
 

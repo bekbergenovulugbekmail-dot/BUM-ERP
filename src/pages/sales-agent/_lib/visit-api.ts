@@ -31,7 +31,7 @@ export function freshPosition(): Promise<LocationPayload> {
 }
 
 /** Telefon rasmi odatda 3–10 MB: JPEG ga siqiladi (mobil internet uchun). Xato bo'lsa — asl fayl. */
-async function compressImage(file: File, maxSide: number, quality: number): Promise<Blob> {
+export async function compressImage(file: File, maxSide: number, quality: number): Promise<Blob> {
   try {
     const bitmap = await createImageBitmap(file);
     const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
@@ -47,7 +47,7 @@ async function compressImage(file: File, maxSide: number, quality: number): Prom
   }
 }
 
-async function base64Of(blob: Blob): Promise<string> {
+export async function base64Of(blob: Blob): Promise<string> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));

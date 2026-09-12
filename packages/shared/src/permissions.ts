@@ -89,6 +89,28 @@ export const PERMISSIONS = {
   "sales_agent.customer.location.edit":  { label: "Agent mijoz lokatsiyasini saqlaydi", group: "Sotuv agenti" },
   "sales_agent.customer.photo.create":   { label: "Agent do'kon rasmini qo'shadi",   group: "Sotuv agenti" },
 
+  // ─── Dostavka ──────────────────────────────────────────────────────────────
+  /** Barcha yetkazmalar, agentlar va holatlar (lokatsiyasiz). */
+  "delivery.view":            { label: "Yetkazmalarni ko'rish",               group: "Dostavka" },
+  /** Yetkazma yaratish, bekor qilish, qayta rejalash, yetkazuvchi agentlar va siyosat. */
+  "delivery.manage":          { label: "Yetkazmalarni boshqarish",            group: "Dostavka" },
+  "delivery.assign":          { label: "Yetkazmani agentga biriktirish",      group: "Dostavka" },
+  "delivery.reassign":        { label: "Yetkazmani boshqa agentga o'tkazish", group: "Dostavka" },
+  /** Yetkazuvchi agent ish joyi: o'ziga biriktirilgan yetkazmalarni ko'rish va qabul qilish. */
+  "delivery.accept":          { label: "Yetkazmani qabul qilish (agent)",      group: "Dostavka" },
+  "delivery.start":           { label: "Yo'lga chiqish",                       group: "Dostavka" },
+  "delivery.arrive":          { label: "Mijozga yetib kelish (geofence)",      group: "Dostavka" },
+  "delivery.confirm":         { label: "Yetkazishni tasdiqlash",               group: "Dostavka" },
+  "delivery.fail":            { label: "Yetkazib bo'lmadi deb belgilash",      group: "Dostavka" },
+  /** Qaytgan mahsulotni omborga qabul qilish (zaxira va qarz qaytadi). */
+  "delivery.return":          { label: "Qaytgan mahsulotni qabul qilish",      group: "Dostavka" },
+  "delivery.collect_payment": { label: "Yetkazishda to'lov qabul qilish",      group: "Dostavka" },
+  "delivery.view_debt":       { label: "Agent mijoz qarzini ko'radi",          group: "Dostavka" },
+  /** Lokatsiya — maxfiy operatsion ma'lumot: faqat o'qish rollariga avtomatik berilmaydi. */
+  "delivery.view_location":   { label: "Yetkazuvchi lokatsiyasini ko'rish",    group: "Dostavka" },
+  "delivery.manage_routes":   { label: "Yetkazish tartibini o'zgartirish",     group: "Dostavka" },
+  "delivery.view_reports":    { label: "Dostavka hisobotlari",                 group: "Dostavka" },
+
   // ─── Ishlab chiqarish ──────────────────────────────────────────────────────
   "manufacturing.view":   { label: "Ishlab chiqarishni ko'rish",    group: "Ishlab chiqarish" },
   "manufacturing.manage": { label: "Ishlab chiqarishni boshqarish", group: "Ishlab chiqarish" },
@@ -218,6 +240,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "crm.view", "crm.manage",
       "distribution.view", "distribution.manage",
       "sales_agent.supervise", "promotions.manage", "sales_agent.agents.manage",
+      "delivery.view", "delivery.manage", "delivery.assign", "delivery.reassign", "delivery.manage_routes", "delivery.view_reports",
       "analytics.view",
       "settings.view",
     ],
@@ -246,6 +269,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "warehouse.view", "warehouse.manage", "warehouse.transfer", "warehouse.count", "warehouse.receive",
       "scale.view", "scale.manage", "scale.sync",
       "purchase.view",
+      "delivery.view", "delivery.return",
       "analytics.view",
       "settings.view",
     ],
@@ -326,7 +350,20 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "sales_agent.supervise",
       "sales_agent.location.view", "sales_agent.location.live", "sales_agent.location.history",
       "promotions.manage", "sales_agent.agents.manage",
+      "delivery.view", "delivery.manage", "delivery.assign", "delivery.reassign", "delivery.return",
+      "delivery.view_location", "delivery.manage_routes", "delivery.view_reports",
       "analytics.view",
+    ],
+  },
+  {
+    name: "Dostavka agenti",
+    description: "DELIVERY_AGENT — yetkazuvchi ish joyi: o'z yetkazmalari, mijozlari va to'lovlari",
+    color: "#f43f5e",
+    isSystem: true,
+    // Faqat o'ziga biriktirilgan yetkazmalar — ERP bo'limlari, boshqa agentlar va sozlamalar ko'rinmaydi
+    permissions: [
+      "delivery.accept", "delivery.start", "delivery.arrive", "delivery.confirm", "delivery.fail",
+      "delivery.collect_payment", "delivery.view_debt",
     ],
   },
   {

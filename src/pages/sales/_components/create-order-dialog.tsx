@@ -73,6 +73,8 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const [warehouseId, setWarehouseId] = useState("");
   const [orderDate, setOrderDate] = useState(todayLocal);
   const [deliveryDate, setDeliveryDate] = useState("");
+  /** Belgilanmasa — kompaniya dostavka siyosati bo'yicha (tasdiqlanganda yetkazma yaratiladimi). */
+  const [deliveryRequired, setDeliveryRequired] = useState(false);
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineItem[]>([emptyLine()]);
   const [loading, setLoading] = useState(false);
@@ -158,6 +160,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
         warehouseId,
         orderDate,
         deliveryDate: deliveryDate || null,
+        ...(deliveryRequired ? { deliveryRequired: true } : {}),
         notes: notes || null,
         ...(currencyMode ? { saleCurrencies: selectedCurrencies } : {}),
         // Soliq stavkasi yuborilmaydi — serverda mahsulotdan
@@ -222,6 +225,15 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
               <Label>Yetkazish sanasi</Label>
               <Input type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
             </div>
+            <label className="flex items-center gap-2 self-end pb-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-primary"
+                checked={deliveryRequired}
+                onChange={(e) => setDeliveryRequired(e.target.checked)}
+              />
+              Yetkazib berish kerak (dostavka)
+            </label>
           </div>
 
           {currencies.codes.length > 1 && (

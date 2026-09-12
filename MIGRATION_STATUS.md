@@ -1141,6 +1141,75 @@ Talablar hujjati: `BUMERP_DESKTOP.docx` — aralash to'lov, tezkor sotuv, 9 mavz
 - to'liq API: 302/302 (80 fayl; xotira yetmagani uchun 4 qismda, `--maxWorkers=1`); desktop 50/50 (8 fayl); tsc (API, desktop main/renderer, web) va lint — toza
 - TEKSHIRILMAGAN: haqiqiy sensorli monitorda uzoq bosish va barmoq bilan aylantirish; to'liq Electron E2E (haqiqiy main jarayon + server); web'da yaratilgan maxsus mavzuning production kassaga yetib borishi (API va desktop alohida testlangan); ekran o'quvchi
 
+## Dostavka / Delivery moduli (2026-09-13)
+
+Talab: "BUM ERP — DOSTAVKA / DELIVERY MASTER PROMPT" (1–62 bo'lim). Asosiy prinsip — ORDER ≠ DELIVERY: yetkazma buyurtmadan alohida obyekt, buyurtmaning miqdori va narxi yetkazmada o'zgarmaydi.
+
+| # | Bosqich | Holat |
+|---|---------|-------|
+| D1 | 15 ta `delivery.*` ruxsat, "Dostavka agenti" (DELIVERY_AGENT) roli, yetkazuvchi profili — login + a'zolik + HR xodimi + profil bitta tranzaksiyada | ✅ |
+| D2 | DeliveryTask sxemasi, 11 holatli o'tishlar (serverda tekshiriladi), tasdiqlangan buyurtmadan avtomatik yoki qo'lda yaratish | ✅ |
+| D3 | Supervayzer: biriktirish, boshqa agentga o'tkazish, olib tashlash, qayta rejalash, bekor qilish, tahrir, kunlik tartib | ✅ |
+| D4 | Agent jarayoni: qabul → yo'lga chiqish → mijozga yetdim (GPS sifati, geofence) → topshirish (rasm / imzo / OTP, to'lov) → to'liq yoki qisman tasdiqlash, yoki "yetkazilmadi" | ✅ |
+| D5 | Qaytgan mahsulotni omborga qabul qilish, to'lov farqi siyosati va ko'rib chiqish | ✅ |
+| D6 | Ish sessiyasi va lokatsiya (faqat sessiyada), jonli holat va kunlik iz (audit bilan) | ✅ |
+| D7 | Oflayn: o'qish keshi (service worker) va amallar navbati, server har amalni qayta tekshiradi | ✅ (haqiqiy telefonda tekshirilmagan) |
+| D8 | Web: yetkazuvchi mobil ish joyi `/delivery-agent` va supervayzer sahifasi `/delivery` | ✅ (brauzerda qo'lda tekshirilmagan) |
+
+**Migratsiya 0042** — faqat qo'shimcha: yangi enumlar va jadvallar, `sales_orders.delivery_required` (null — siyosatdagi standart), "Dostavka agenti" roli va mavjud rollarga `delivery.*` ruxsatlari (Direktor — hammasi; Supervayzer 8; Savdo menejeri 6; Ombor menejeri 2; Auditor va Ko'ruvchi — `delivery.view`). Ma'lumot o'chirilmaydi va o'zgartirilmaydi. Jadvallar: `delivery_agents`, `delivery_tasks` (buyurtmada bitta ochiq yetkazma — partial unique), `delivery_task_items`, `delivery_events` (tarix), `delivery_proofs` (bytea, 3 MB), `delivery_payments`, `delivery_work_sessions`, `delivery_locations`, `delivery_location_latest`.
+
+**Server qoidalari:**
+- geofence: masofa serverda (haversine, metrga yaxlitlab); `masofa > radius` — rad (200 m: 199 va 200 — ruxsat, 201 — rad). So'rov tanasi strict — mijoz yuborgan masofa, "ichida" belgisi, agent/kompaniya/mijoz ID'si qabul qilinmaydi. Rad etish hodisa, audit (`DELIVERY_GEOFENCE_BLOCK`) va siyosat bo'yicha bildirishnoma bilan saqlanadi
+- GPS: aniqlik ("GPS aniqligi yetarli emas. Iltimos, qayta urinib ko'ring."), eskirgan o'lchov (amal vaqtiga nisbatan), noto'g'ri koordinata; chegaralar kompaniya siyosatida (`delivery.policy`, umumiy sozlamalar PUT orqali yozilmaydi)
+- zaxira, qarz va jurnal — mavjud `shipOrder` yo'lga chiqishda (buyurtma "tasdiqlangan" bo'lsa, qulf ostida, bir marta); to'lov — mavjud `recordCustomerPayment` (`delivery:<clientRequestId>` referensi, kassa/bank va jurnal); qaytarish — mavjud `returnSaleItems` (bir marta). Har agent amali `clientRequestId` bilan idempotent — takror to'lov, chiqim, jurnal yoki tasdiqlash yo'q
+- qisman yetkazish: yetkazilgan miqdor yetkazma qatorida, kutilgan to'lov yetkazilgan qiymat ulushida, qolgani "Omborga qabul qilish" bilan; buyurtma o'zgarmaydi
+- to'lov farqi (masalan 500 000 o'rniga 480 000): siyosat `approval` — supervayzer ko'rib chiqadi, `debt` — farq mijoz qarzida, `block` — tasdiqlash rad etiladi; avtomatik "to'langan" bo'lmaydi, agent nasiya bermaydi
+- OTP: faqat HMAC-SHA256 hash, muddat va urinishlar chegarasi; SMS faqat SMS provayder sozlangan bo'lsa (production'da yo'q — supervayzer kodni beradi, javobda bir marta, auditga yozilmaydi)
+- oflayn amal: `occurredAt` 120 s gacha — onlayn; eskirog'i — siyosat ruxsati va `offlineMaxAgeHours` ichida, qurilma soati 60 s dan oldinda — rad; amal vaqtida ish sessiyasi ochiq bo'lishi, GPS yangiligi amal vaqtiga nisbatan tekshiriladi
+- maxfiylik: agent faqat o'ziga biriktirilgan yetkazmani ko'radi (boshqasi — 404), supervayzer izohi, koordinatalar va hodisa tafsilotlari agentga berilmaydi, qarz — `delivery.view_debt` bilan; lokatsiya faqat faol ish sessiyasida qabul qilinadi, nuqtalar auditga yozilmaydi, iz ko'rish auditga yoziladi (`LOCATION_HISTORY_VIEWED`), saqlash muddati tugagan nuqtalar tozalanadi
+- bildirishnoma faqat: yetkazilmadi, to'lov farqi (approval), geofence buzilishi — siyosatdagi oluvchilar yoki dostavka boshqaruvchilari
+- xarita: tashqi yoki pullik xarita API'si yo'q — sxematik `MapView` va qurilmaning xarita ilovasi (`geo:` / Apple Maps / OpenStreetMap havolasi)
+
+**Web:**
+- yetkazuvchi `/uz/delivery-agent` (faqat yetkazuvchi ruxsatlari bor xodim ERP'dan shu yerga yo'naltiriladi): Bosh sahifa (progress, qolgan, yo'lda, kechikkan, yig'ilgan pul naqd/karta/bank, yig'ilishi kutilayotgan, to'lov farqi, mijozlar qarzi, keyingi yetkazma), Yetkazmalar (bugun / keyingi / tarix — mijoz, buyurtma №, summa, sana va vaqt oynasi, to'lov turi, taxminiy masofa, ustuvorlik, holat, KECHIKDI), yetkazma sahifasi (qadamlar, XARITADA OCHISH, MIJOZGA YETDIM, topshirish: rasm — kamera, imzo — canvas PNG, to'lov, OTP; tasdiqlash oynasi — qabul qilingan miqdor, talablar, farq ogohlantirishi; "yetkazib bo'lmadi" — sabablar, "Boshqa" uchun izoh; natija ekrani va KEYINGI YETKAZMA), Mijozlar, Qarz/To'lov (ruxsat bilan), Hisobotlar (davr)
+- oflayn navbat (`localStorage`): tarmoq xatosida amal so'rov kaliti va vaqti bilan saqlanadi, internet qaytganda tartib bilan yuboriladi; server rad etsa — shu yetkazmaning keyingi amallari kutadi, "Qayta yuborish" / "O'chirish"; yetkazma holati navbat bo'yicha oldindan ko'rsatiladi ("Navbatda" belgisi); lokatsiya buferi 200 nuqtagacha
+- supervayzer `/uz/delivery` (menyu "Dostavka"): Bugun (bosiladigan ko'rsatkichlar, agentlar progressi va yig'ilgan pul), Yetkazmalar (sana, holat, agent, biriktirilmagan, kechikkan, to'lov farqi, qidiruv — serverda, kursor sahifalash; tafsilot oynasi: bosqichlar, isbot rasmlari, to'lovlar, tarix va amallar), Buyurtmalar (yetkazma yaratish), Yetkazuvchilar (qo'shish, tahrir, faollik, kunlik tartib), Xarita (jonli joy, geofence doirasi, kunlik iz), Nazorat (farq, qaytarish, kechikkan), Hisobotlar, Sozlamalar (siyosat va bildirishnoma oluvchilari)
+- HR → Xodimlar: "Dostavka agenti qo'shish"; savdo buyurtmasi formasida "Yetkazib berish kerak (dostavka)"
+- tillar: uz, ru, kk (`delivery.json`, 592 kalit; kodda ishlatilgan kalitlar va tillar mosligi skript bilan tekshirildi)
+
+**Testlar:**
+- API: `delivery-team` (4), `delivery-flow` (8 — TEST1–TEST6, OTP + imzo, boshqaruv o'tishlari), `delivery-security` (2), `delivery-tracking` (3) — 17/17
+- regressiya tuzatildi: `maintenance.test.ts` (yangi tozalash maydonlari), `sales-agent.test.ts` (rol mosligi — 0042 ham qo'llanadi)
+- to'liq API: 84 fayl, 319 test — 4 qismda `--maxWorkers=1` (111 + 91 + 63 + 54), hammasi o'tdi
+- web: `offline-queue` (5), `actions` (6), `errors` (6), `filters` (3), `use-delivery-tracking` (3); to'liq web — 10 fayl, 39 test
+- tsc (API testlar bilan, web), lint (o'zgargan va yangi fayllar), `vite build` — toza
+
+**TEKSHIRILMAGAN / QILINMAGAN:**
+- brauzerda va haqiqiy Android telefonda qo'lda E2E (kamera, GPS, imzo, oflayn navbat) — faqat avtomatik testlar
+- WebSocket yo'q — ro'yxatlar 30–60 soniyada qayta so'raladi
+- avtomatik biriktirish va marshrut optimallashtirish yo'q (arxitektura tayyor, faqat qo'lda tartib)
+- ekran qulflanganda fondagi lokatsiya — brauzer cheklovi, native Android ilova kerak
+- "faqat kamera" — `capture` atributi; ba'zi brauzerlar galereyani ham taklif qiladi
+- SMS orqali OTP — production'da SMS provayder yo'q
+- filial va hudud jadvallari yo'q — hudud matn, filial `branchId`
+- qisman yetkazilgan qoldiqni qayta yetkazish yo'q (faqat omborga qaytarish)
+
+### Dostavka (`/api/delivery`)
+
+Agent yo'llari — `delivery.accept` va bog'langan faol yetkazuvchi (agent, kompaniya va mijoz ID'si so'rovdan olinmaydi).
+
+| Metod | Yo'l | Ruxsat |
+|---|---|---|
+| GET / PUT | `/policy`, `/policy/recipients` | o'qish — `delivery.view` yoki agent; yozish — `delivery.manage` |
+| GET / POST / PATCH | `/agents` (`?activeOnly=&branchId=&territory=`), `/agents/supervisors`, `/agents/:agentId` | `delivery.view` / `delivery.manage` |
+| GET | `/agents/live`, `/agents/:agentId/track` (`?date=`, audit) | `delivery.view_location` |
+| GET | `/dashboard` (`?date=`), `/reports` (`?from=&to=&agentId=`) | `delivery.view` / `delivery.view_reports` |
+| GET / POST / PATCH | `/ready-orders`, `/tasks` (`?dateFrom=&dateTo=&status=&agentId=&unassigned=&branchId=&territory=&customerId=&search=&overdue=&reviewPending=&limit=&cursor=`), `/tasks/:taskId`, `/tasks/:taskId/proofs/:proofId` | `delivery.view` / `delivery.manage` |
+| POST / PUT | `/tasks/:taskId/assign` (boshqa agentga — `delivery.reassign`), `/unassign`, `/reschedule`, `/cancel`, `/route-order`, `/tasks/:taskId/return`, `/payment-review`, `/otp` | `delivery.assign` / `.reassign` / `.manage` / `.manage_routes` / `.return` |
+| GET | `/agent/me`, `/agent/dashboard`, `/agent/tasks` (`?scope=today\|upcoming\|history`), `/agent/tasks/:taskId`, `/agent/customers`, `/agent/customers/:customerId`, `/agent/reports`, `/agent/debts` (`delivery.view_debt`) | agent |
+| GET / POST | `/agent/work-session`, `/agent/work-session/start`, `/agent/work-session/end`, `/agent/locations` (1–20 nuqta, faqat sessiyada) | agent |
+| POST | `/agent/tasks/:taskId/accept`, `/start`, `/arrive`, `/delivering`, `/proofs`, `/otp/resend`, `/payments`, `/confirm`, `/fail` | `delivery.accept` / `.start` / `.arrive` / `.confirm` / `.collect_payment` / `.fail` |
+
 ### Distributsiya (`/api/distribution`)
 
 O'qish — `distribution.view`, yozish — `distribution.manage`.
@@ -1219,3 +1288,7 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
    - tarozilar: real uskunada sinov — Umumiy ASCII (LAN va COM), COM transporti (PowerShell SerialPort); Shtrix-M, YES POS, Rongta uchun ishlab chiqaruvchidan almashinuv protokoli hujjati kerak (K6 bo'limida ro'yxat) — hujjat kelgach adapter shu interfeysga yoziladi va real tarozida tekshiriladi
    - kod imzolash sertifikati (`CSC_LINK`, `CSC_KEY_PASSWORD`); `bum-erp.uz` apex DNS (2-band)
    - brauzer va kassada qo'lda sinov: aralash to'lov, qaytarish tarkibi, tezkor sotuv (rasm yuklash → kassada ko'rinish), mavzular, kurs tahriri, tarozi simulyatori
+5. **Dostavka moduli — qolgan:**
+   - brauzerda va Android telefonda qo'lda sinov: HR'da dostavka agenti qo'shish → telefon bilan kirish → ish sessiyasi → buyurtma ("Yetkazib berish kerak") → supervayzer biriktiradi → qabul → yo'lga chiqish → 200 m geofence → rasm, imzo, OTP (supervayzer kodi) → to'lov farqi → qisman yetkazish → omborga qaytarish; oflayn navbat (samolyot rejimi)
+   - avtomatik biriktirish va marshrut optimallashtirish; WebSocket (hozir so'rovlar bilan yangilanadi)
+   - native Android ilova (ekran qulflanganda fondagi lokatsiya); SMS provayder (OTP SMS); qisman qoldiqni qayta yetkazish; filial/hudud ma'lumotnomasi

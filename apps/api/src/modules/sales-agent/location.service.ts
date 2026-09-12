@@ -49,8 +49,12 @@ const MIN_JUMP_METERS = 1000;
 
 const ageSecondsOf = (input: LocationInput, now: number) => (now - input.recordedAt.getTime()) / 1000;
 
-/** Siyosat bo'yicha sifat tekshiruvi — lokatsiya kuzatuvi, tashrif va buyurtmada bir xil. */
-export function checkLocationQuality(policy: SalesAgentPolicy, input: LocationInput, now = Date.now()): LocationRejection | null {
+/** Siyosat bo'yicha sifat tekshiruvi — lokatsiya kuzatuvi, tashrif va buyurtmada (va dostavkada) bir xil. */
+export function checkLocationQuality(
+  policy: Pick<SalesAgentPolicy, "maxLocationAgeSeconds" | "maxAccuracyMeters">,
+  input: LocationInput,
+  now = Date.now(),
+): LocationRejection | null {
   const ageSeconds = ageSecondsOf(input, now);
   if (!isValidCoordinate(input)) return { reason: "invalid", message: "Koordinata noto'g'ri" };
   if (ageSeconds < -FUTURE_TOLERANCE_SECONDS) {

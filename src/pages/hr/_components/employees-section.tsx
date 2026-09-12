@@ -13,6 +13,7 @@ import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import CreateAgentDialog from "@/components/sales-agent/create-agent-dialog.tsx";
+import DeliveryAgentDialog from "@/components/delivery/delivery-agent-dialog.tsx";
 import {
   fmt, localIsoDate,
   type Department, type Employee, type EmployeeStatus, type Position, type SalaryType,
@@ -68,6 +69,10 @@ export default function EmployeesSection() {
   const canManage = can("hr.manage");
   const canAddAgent = can("sales_agent.agents.manage");
   const [agentOpen, setAgentOpen] = useState(false);
+  // Dostavka agenti: xodim + login + "Dostavka agenti" roli + yetkazuvchi profili bitta amalda
+  const { t: td } = useTranslation("delivery");
+  const canAddDeliveryAgent = can("delivery.manage");
+  const [deliveryAgentOpen, setDeliveryAgentOpen] = useState(false);
 
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState<string>("all");
@@ -175,8 +180,14 @@ export default function EmployeesSection() {
             <Plus className="h-3.5 w-3.5 mr-1" /> {t("team.add")}
           </Button>
         )}
+        {canAddDeliveryAgent && (
+          <Button size="sm" variant="secondary" onClick={() => setDeliveryAgentOpen(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> {td("agents.add")}
+          </Button>
+        )}
       </div>
       {agentOpen && <CreateAgentDialog onClose={() => setAgentOpen(false)} />}
+      {deliveryAgentOpen && <DeliveryAgentDialog onClose={() => setDeliveryAgentOpen(false)} />}
 
       {/* List */}
       {!employees ? (

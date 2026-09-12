@@ -48,6 +48,8 @@ describe("davriy tozalash", () => {
       agentLocations: 0,
       agentLocationEvents: 0,
       workSessionsEnded: 0,
+      deliveryLocations: 0,
+      deliverySessionsEnded: 0,
     });
     expect(await db.$count(sessions)).toBe(3);
     expect(await db.$count(passwordResetCodes)).toBe(2);
@@ -61,6 +63,8 @@ describe("davriy tozalash", () => {
       agentLocations: 0,
       agentLocationEvents: 0,
       workSessionsEnded: 0,
+      deliveryLocations: 0,
+      deliverySessionsEnded: 0,
     });
   });
 

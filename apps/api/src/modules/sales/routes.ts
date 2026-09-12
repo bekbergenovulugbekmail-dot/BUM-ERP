@@ -32,6 +32,7 @@ import { requestMeta } from "../../shared/audit.js";
 import { decimalSchema, moneySchema, percentSchema, priceSchema } from "../../shared/decimal.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 import { requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
+import { autoCreateDeliveryTask } from "../delivery/tasks.service.js";
 import { createCustomer, getCustomer, listCustomers, updateCustomer } from "./customers.service.js";
 import {
   cancelOrder,
@@ -120,6 +121,8 @@ const orderBody = z.strictObject({
   warehouseId: z.uuid(),
   orderDate: isoDate,
   deliveryDate: isoDate.nullable().optional(),
+  /** Yetkazib berish kerakmi (null — dostavka siyosati bo'yicha); tasdiqlanganda yetkazma yaratiladi. */
+  deliveryRequired: z.boolean().nullable().optional(),
   notes: nullableText(2000),
   items: z.array(salesItem).min(1).max(500),
   /** Sotuv valyutalari: mahsulot o'z narx valyutasida, tanlanmagan bo'lsa birinchi valyutada. */
@@ -356,9 +359,12 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/orders/:orderId/confirm", async (req) => {
     const { orderId } = orderParams.parse(req.params);
-    const order = await writeInTenant(req, "sales.approve", (tx, tenant) =>
-      confirmOrder(tx, tenant, orderId, requestMeta(req)),
-    );
+    const order = await writeInTenant(req, "sales.approve", async (tx, tenant) => {
+      const confirmed = await confirmOrder(tx, tenant, orderId, requestMeta(req));
+      // Yetkazish kerak bo'lsa — yetkazma (DeliveryTask) shu tranzaksiyada yaratiladi
+      await autoCreateDeliveryTask(tx, tenant, orderId, requestMeta(req));
+      return confirmed;
+    });
     return { order };
   });
 

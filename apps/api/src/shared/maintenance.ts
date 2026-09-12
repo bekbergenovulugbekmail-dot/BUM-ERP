@@ -9,6 +9,7 @@ import { and, isNotNull, lt, or, sql } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
 import { passwordResetCodes, rateLimits, sessions } from "../db/schema/platform.js";
 import { withTransaction } from "../db/transaction.js";
+import { autoEndStaleDeliverySessions, purgeDeliveryLocations } from "../modules/delivery/work-session.repo.js";
 import { purgeAgentLocations } from "../modules/sales-agent/location.service.js";
 import { autoEndStaleSessions } from "../modules/sales-agent/work-session.repo.js";
 
@@ -24,6 +25,9 @@ export type PurgeResult = {
   agentLocationEvents: number;
   /** Uzoq ochiq qolgan (yakunlash unutilgan) agent ish sessiyalari. */
   workSessionsEnded: number;
+  /** Dostavka: saqlash muddatidan eski yetkazuvchi lokatsiyalari va uzoq ochiq qolgan ish sessiyalari. */
+  deliveryLocations: number;
+  deliverySessionsEnded: number;
 };
 
 /** Lock boshqa nusxada band bo'lsa `null`. */
@@ -48,6 +52,8 @@ export async function purgeExpired(now = new Date()): Promise<PurgeResult | null
     const oldWindows = await tx.delete(rateLimits).where(lt(rateLimits.windowStart, cutoff));
     const agentLocations = await purgeAgentLocations(tx, now);
     const workSessionsEnded = await autoEndStaleSessions(tx, now);
+    const deliveryLocations = await purgeDeliveryLocations(tx, now);
+    const deliverySessionsEnded = await autoEndStaleDeliverySessions(tx, now);
 
     return {
       sessions: expiredSessions.rowCount ?? 0,
@@ -55,6 +61,8 @@ export async function purgeExpired(now = new Date()): Promise<PurgeResult | null
       rateLimits: oldWindows.rowCount ?? 0,
       ...agentLocations,
       workSessionsEnded,
+      deliveryLocations,
+      deliverySessionsEnded,
     };
   });
 }

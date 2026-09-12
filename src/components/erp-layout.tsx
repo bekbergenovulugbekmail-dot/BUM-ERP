@@ -8,6 +8,7 @@ import {
   Factory,
   Users,
   Truck,
+  PackageCheck,
   DollarSign,
   UserCheck,
   FileBarChart,
@@ -55,7 +56,7 @@ import PWAInstallBanner from "@/components/pwa-install-banner.tsx";
 import { GlobalSearch } from "@/components/global-search.tsx";
 import { useAuth, useCurrentUser } from "@/hooks/use-auth.ts";
 import { useActiveCompany, useMyCompanies, useSwitchCompany } from "@/hooks/use-company.ts";
-import { isAgentOnly } from "@/lib/agent-access.ts";
+import { isAgentOnly, isDeliveryAgentOnly } from "@/lib/agent-access.ts";
 import { Authenticated, Unauthenticated } from "@/components/auth-gates.tsx";
 import { useTheme } from "next-themes";
 import { isAdminSubdomain } from "@/lib/subdomain.ts";
@@ -76,6 +77,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   BarChart3,
   BrainCircuit,
   Settings,
+  PackageCheck,
 };
 
 function getIcon(name: string): LucideIcon {
@@ -625,6 +627,10 @@ export default function ERPLayout({ children }: { children: React.ReactNode }) {
   // Faqat sotuv agenti ruxsati bor xodim — mobil ish joyiga (ERP menyusi unga kerak emas)
   if (permissions && isAgentOnly(permissions)) {
     return <Navigate to={`/${lng ?? "uz"}/sales-agent`} replace />;
+  }
+  // Faqat yetkazuvchi (DELIVERY_AGENT) ruxsati bor xodim — yetkazuvchi mobil ish joyiga
+  if (permissions && isDeliveryAgentOnly(permissions)) {
+    return <Navigate to={`/${lng ?? "uz"}/delivery-agent`} replace />;
   }
 
   return (
