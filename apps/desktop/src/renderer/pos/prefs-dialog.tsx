@@ -85,6 +85,22 @@ export default function PrefsDialog({
                 ))}
               </select>
             </div>
+            <div className="space-y-1">
+              <Label htmlFor="prefs-label-printer">Etiketka printeri</Label>
+              <select
+                id="prefs-label-printer"
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                value={prefs.labelPrinterName ?? ""}
+                onChange={(e) => patch({ labelPrinterName: e.target.value || null })}
+              >
+                <option value="">Windows standart printeri</option>
+                {printers.map((printer) => (
+                  <option key={printer.name} value={printer.name}>
+                    {printer.displayName}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="flex items-center justify-between gap-3">
               <Label>Qog'oz kengligi</Label>
               <div className="flex gap-1">

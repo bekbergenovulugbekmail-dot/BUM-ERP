@@ -867,7 +867,9 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 | D1 | POS: yuqori menyu, shtrix-kod, tezkor tugmalar, valyutalar, kechiktirilgan/qisman qaytarish, chek printeri, offline sotuv sinxroni (qoldiq ziddiyati) | ✅ commit `f4fbd55`, API deploy (yangi endpointlar production'da 401) |
 | D2 | Sotuv tarixi, kassa (inkassatsiya, smena/kassir/to'lov turi hisobotlari) | ✅ server commit `d38a250`, API deploy (yangi endpointlar production'da 401); desktop kodi — D4 commitida |
 | D3 | Xarid (offline, ta'minotchiga qaytarish va to'lov) | ✅ server commit (migratsiya 0034), API deploy; desktop kodi — D4 commitida (bir xil fayllar) |
-| D4–D9 | Ombor, inventarizatsiya, etiketka, ma'lumotlar, analitika, sozlamalar va avtomatik yangilanish, offline testlar | ⏳ |
+| D4 | Ombor, mahsulot harakati, inventarizatsiya (offline) | ✅ (pastda) |
+| D5 | Etiketka (web shablonlari, etiketka printeri) | ✅ (pastda) |
+| D6–D9 | Ma'lumotlar, analitika, sozlamalar va avtomatik yangilanish, offline testlar | ⏳ |
 
 **D0 — server** (migratsiya 0031):
 - jadvallar `pos_devices` (kompaniya, ombor, nomi, `code` K01/K02…, token SHA-256 xeshi, faollik, versiya, oxirgi pull/push) va `pos_sync_operations` (qurilma + `op_id` unikal, tur, kassir, `applied`/`rejected`, natija yoki xato, qurilmadagi vaqt); `pos_shifts.device_id`
@@ -943,6 +945,28 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 - X/Z-hisobotda ta'minotchilarga to'lov (naqd/karta) va qaytgan pul; kutilgan naqdga ta'sir qiladi
 - sinxron: sikl ketayotganda navbatga tushgan hujjat — sikl tugagach darhol yana bir sikl (30 soniyalik davriy sinxronni kutmaydi); qo'lda sinxron ketayotgan sikl tugashini kutib yangisini boshlaydi
 - testlar: 18
+
+**D4 — server** (migratsiyasiz):
+- `push`: `stock.writeoff` (`K01-W000001`, `warehouse.manage`) — ko'p qatorli hisobdan chiqarish, bitta jurnal (boshqa xarajatlar / tovar zaxirasi); `stock.transfer` (`K01-T000001`, `warehouse.transfer`) — qurilma omboridan boshqa faol omborga, qabul qiluvchida manba o'rtacha tannarxida kirim, qulflar mahsulot/ombor tartibida; `stock.count` (`K01-I000001`, `warehouse.count` + `warehouse.manage`) — darhol yakunlangan inventarizatsiya
+- inventarizatsiya farqi SANASH LAHZASIDAGI qoldiqqa nisbatan: kutilgan = joriy qoldiq − sanashdan keyingi harakatlar (qoldiq qatorlari qulf ostida); tuzatma sanash vaqti bilan, ortiqcha/kamomad jurnali; boshqa kassalarning keyingi sotuvlari yo'qolmaydi
+- kech yetib kelgan, lekin inventarizatsiyadan OLDIN bo'lgan hujjat (boshqa kassaning offline cheki, xarid, qaytarish, o'tgan sanali web kirim/chiqim yoki ko'chirish): sanoq bu tovarni allaqachon hisobga olgan — hujjat yoziladi, qoldiq esa inventarizatsiya nomidan teskari tuzatma bilan o'zgarmay qoladi (jurnal ham), nomuvofiqlik `count_late_document`. Tranzaksiyadagi harakatlar `moveStock` ichida yig'iladi (qo'shimcha so'rov faqat sinxron va o'tgan sanali harakatda)
+- offline chiqimda qoldiq yetmasa — manfiy qoldiq va `stock_shortage` (so'ralgan / bor edi)
+- qurilma: `GET /api/pos-device/movements` (qurilma ombori, mahsulot va tur bo'yicha, kursor; hujjat raqami — chek, xarid, qaytarish, inventarizatsiya), `GET /api/pos-device/stock/:productId` (faol omborlar bo'yicha qoldiq); pull qoldig'ida `avgCostPrice`
+- testlar: `pos-stock-sync` (2) — hisobdan chiqarish va ko'chirish (nomuvofiqlik, jurnal, tannarx, ruxsatlar, noto'g'ri raqam/ombor, harakatlar sahifalash, omborlar qoldig'i, pull); inventarizatsiya (sanash lahzasidagi farq, keyingi sotuv saqlanishi, kech kelgan oldingi chek va o'tgan sanali web kirim tuzatmasi, band ID, ruxsat, noma'lum mahsulot)
+
+**D4 — desktop** (lokal baza v5: ombor hujjatlari):
+- Ombor: qoldiqlar (ko'rinadigan = server + yuborilmagan hujjatlar, "navbatda" farqi), filtrlar (bor, kam qolgan — minimal qoldiq bo'yicha, tugagan, manfiy) va sonlari, o'rtacha tannarx va ombor qiymati (faqat `warehouse.manage`), boshqa omborlardagi qoldiq (internet bilan)
+- hisobdan chiqarish (sabab majburiy) va boshqa omborga ko'chirish — skaner/qidiruv, qoldiqdan ko'p bo'lsa ogohlantirish; hujjatlar ro'yxati (tur, qatorlar, sinxron holati, nomuvofiqliklar)
+- Mahsulot harakati: serverdagi tarix (barcha kassalar va web, tur filtri, sahifalab) va yuqorida qurilmadagi yuborilmagan hujjatlar; internet bo'lmasa — faqat qurilmadagilar
+- Inventarizatsiya: skaner har o'qishda +1, miqdorni qo'lda kiritish, kutilgan qoldiq va farq darhol; qoralama ilova yopilsa ham saqlanadi; to'liq inventarizatsiya — sanalmagan, qoldig'i bor mahsulotlar 0; yakunlashda tasdiq; qoldiq darhol sanalganiga teng ko'rinadi
+- sinxron bo'lmagan amallar ro'yxatida hujjat raqami va izoh (sabab, qabul qiluvchi ombor, mahsulotlar soni)
+- testlar: 19
+
+**D5 — etiketka:**
+- server: pull `config` da etiketka shablonlari (`print.labels`, web: Sozlamalar → Etiketka; sozlanmagan — standart) — xesh o'zgarsa qurilmaga keladi
+- desktop: Etiketka bo'limi — shablon tanlash (rulon yoki A4 ustunlar), mahsulot skaner/qidiruv (har o'qish +1 nusxa), bugungi xaridlardan (qabul qilingan miqdor bo'yicha nusxa), nusxa soni, jonli ko'rinish; shtrix-kod/QR va narx (asosiy valyutada) web bilan bir xil shablondan (`label-html`); internet shart emas
+- chop etish: alohida etiketka printeri (qurilma sozlamasi, kassa printer oynasida ham), dialogsiz; rulon — sahifa etiketka o'lchamida (mm), A4 — varaq; ko'p etiketka vaqtinchalik fayl orqali (data URL chegarasi yo'q), bir martada 2000 tagacha
+- testlar: 20
 
 ### Distributsiya (`/api/distribution`)
 

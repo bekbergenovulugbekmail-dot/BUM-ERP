@@ -11,40 +11,74 @@ import { randomUUID } from "node:crypto";
 import type {
   AppStatus,
   CartLineInput,
+  CountDraft,
   DevicePrefs,
   DocumentSync,
   HeldCart,
+  LabelPrintInput,
   HeldReceipt,
+  LocalCashMovement,
+  LocalCustomerPayment,
+  LocalPurchase,
+  LocalPurchaseReturn,
   LocalReturn,
   LocalSale,
   LocalShift,
+  LocalStockDocument,
+  LocalSupplierPayment,
+  MovementPage,
+  MovementRow,
   PosContext,
   PosCustomer,
   PosProduct,
+  PosSupplier,
+  PurchaseInput,
+  PurchaseProduct,
+  PurchaseReturnInput,
   RejectedOperation,
   ReturnableReceipt,
+  ReturnablePurchase,
   ReturnInput,
   SaleInput,
+  ShiftReport,
   ShiftTotals,
+  StockDocumentKind,
+  StockFilter,
+  StockLineInput,
+  StockList,
+  StockRow,
+  StockWarehouse,
   UnsyncedOperation,
 } from "../shared/kassa-api.js";
-import { fromMinor, mulDivRound, rescale, toMinor } from "../shared/money.js";
+import { computeLine, fromMinor, mulDivRound, rescale, toMinor } from "../shared/money.js";
 import { computeSale, estimateCashback, listPrice, unitFactor, type CalcConversion, type CalcProduct } from "../shared/sale-calc.js";
 import type {
   CashierRecord,
+  CashMovementKind,
+  CashMovementPayload,
   CompanyInfo,
+  CustomerPaymentPayload,
   DeviceInfo,
   PaymentMethod,
   PosConfig,
+  PurchasePayload,
+  PurchaseReturnPayload,
   RefundMethod,
+  RemotePurchase,
   RemoteReceipt,
+  RemoteWarehouseStock,
   ReturnPayload,
   SalePayload,
+  StockCountPayload,
+  StockTransferPayload,
+  StockWriteoffPayload,
+  SupplierPaymentPayload,
+  SyncOperationType,
   SyncStatus,
 } from "../shared/sync-types.js";
 import { ApiError, OfflineError, createApiClient, type ApiClient } from "./api-client.js";
 import { kickDrawer, validateDrawerPrefs } from "./drawer.js";
-import type { LocalStore, StockDelta, StoredDocument } from "./local-store.js";
+import type { LocalStore, OutboxOp, StockDelta, StoredDocument } from "./local-store.js";
 import { PIN_PATTERN, checkPin, hashPin } from "./pin.js";
 import { SyncEngine } from "./sync-engine.js";
 
@@ -72,6 +106,8 @@ export type TokenVault = { save(token: string): void; load(): string | null; cle
 export type ReceiptPrinter = {
   list(): Promise<{ name: string; displayName: string }[]>;
   print(html: string, prefs: DevicePrefs): Promise<void>;
+  /** Etiketkalar: rulon — har sahifa etiketka o'lchamida, A4 — varaq. */
+  printLabels(html: string, options: { printerName: string | null; layout: "roll" | "a4"; widthMm: number; heightMm: number }): Promise<void>;
 };
 
 export const DEFAULT_PREFS: DevicePrefs = {
@@ -80,7 +116,11 @@ export const DEFAULT_PREFS: DevicePrefs = {
   autoPrint: true,
   drawer: { mode: "none" },
   openDrawerOnCash: false,
+  labelPrinterName: null,
 };
+
+const LABEL_MM = { min: 10, max: 300 };
+const MAX_LABELS_HTML = 30_000_000;
 
 type ProductRow = CalcProduct & { sku: string; barcode: string | null; isActive: boolean; isSaleable: boolean };
 type CustomerRow = {
@@ -98,8 +138,63 @@ type CustomerRow = {
   taxId?: string | null;
 };
 
-const EMPTY_TOTALS: ShiftTotals = { sales: "0.00", cash: "0.00", card: "0.00", returns: "0.00", receipts: 0 };
+const EMPTY_TOTALS: ShiftTotals = { sales: "0.00", cash: "0.00", card: "0.00", returns: "0.00", receipts: 0, cashIn: "0.00", cashOut: "0.00" };
+
+export const CASH_KINDS: Record<CashMovementKind, { type: "in" | "out"; label: string }> = {
+  collection: { type: "out", label: "Inkassatsiya" },
+  change_fund: { type: "in", label: "Almashtirish puli" },
+  expense: { type: "out", label: "Kassadan xarajat" },
+  other_in: { type: "in", label: "Boshqa kirim" },
+  other_out: { type: "out", label: "Boshqa chiqim" },
+};
+
+const METHOD_LABELS: Record<string, string> = {
+  cash: "Naqd",
+  card: "Karta",
+  bank: "Bank",
+  transfer: "O'tkazma",
+  balance: "Mijoz balansidan",
+  cashback: "Keshbekdan",
+  debt: "Qarzga",
+  change_to_balance: "Qaytim balansga (naqd)",
+};
+
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+type SupplierRow = { id: string; name: string; code: string | null; phone: string | null; totalDebt: string; isActive: boolean; currency?: string };
+type PurchaseProductRow = ProductRow & {
+  isPurchaseable: boolean;
+  purchasePrice: string;
+  purchaseCurrency: string | null;
+  trackBatch?: boolean;
+  trackExpiry?: boolean;
+};
+
+type StockProductRow = ProductRow & { minStock?: string };
+type RawCountDraft = { id: string; startedAt: string; lines: { productId: string; counted: string }[] };
+
+const STOCK_DOCS: Record<StockDocumentKind, { op: SyncOperationType; prefix: string }> = {
+  writeoff: { op: "stock.writeoff", prefix: "W" },
+  transfer: { op: "stock.transfer", prefix: "T" },
+  count: { op: "stock.count", prefix: "I" },
+};
+const STOCK_KINDS = Object.keys(STOCK_DOCS) as StockDocumentKind[];
+const STOCK_FILTERS: StockFilter[] = ["all", "positive", "low", "zero", "negative"];
+const MOVEMENT_TYPES = ["receive", "issue", "transfer_out", "transfer_in", "adjust", "writeoff", "return_in", "return_out", "count"];
+const MAX_COUNT_LINES = 5000;
+
+const pad6 = (value: number) => String(value).padStart(6, "0");
 const addMoney = (a: string, b: bigint) => fromMinor(toMinor(a) + b);
+const note = (value: unknown) => (value ? String(value).trim().slice(0, 500) || null : null);
+
+/** O'rtacha tannarxdagi qiymat (tiyin, miqdor ishorasi bilan): miqdor (4 kasr) × tannarx (4 kasr). */
+function costValue(costs: Map<string, string>, productId: string, quantity: bigint): bigint {
+  const cost = costs.get(productId);
+  if (!cost) return 0n;
+  const value = rescale((quantity < 0n ? -quantity : quantity) * toMinor(cost, 4), 8, 2);
+  return quantity < 0n ? -value : value;
+}
 
 function documentSync<T>(stored: StoredDocument<T>): DocumentSync {
   const conflicts = stored.result?.conflicts;
@@ -158,7 +253,7 @@ export class KassaService {
   /** Davriy sinxron (standart 30 soniya); ilova yopilganda `stop`. */
   start(intervalMs = 30_000) {
     this.stop();
-    void this.engine?.sync();
+    this.engine?.schedule();
     this.timer = setInterval(() => void this.engine?.sync(), intervalMs);
   }
 
@@ -253,7 +348,7 @@ export class KassaService {
 
   async syncNow(): Promise<AppStatus> {
     if (!this.engine) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
-    await this.engine.sync();
+    await this.engine.syncFresh();
     return this.status();
   }
 
@@ -263,6 +358,7 @@ export class KassaService {
 
   unsynced(): UnsyncedOperation[] {
     this.requireCashier();
+    const warehouses = new Map(this.store.records<{ id: string; name: string }>("warehouses").map((row) => [row.id, row.name]));
     return this.store.unsyncedOps().map((op) => ({
       opId: op.opId,
       type: op.type,
@@ -272,14 +368,36 @@ export class KassaService {
       error: op.error,
       number: op.number,
       total: op.total,
-      label: op.type === "customer.create" ? String(op.payload.name ?? "") : op.type.startsWith("shift.") ? String(op.payload.shiftId ?? "") : null,
+      label: this.operationLabel(op, warehouses),
     }));
+  }
+
+  private operationLabel(op: OutboxOp, warehouses: Map<string, string>): string | null {
+    switch (op.type) {
+      case "customer.create":
+      case "supplier.create":
+        return String(op.payload.name ?? "");
+      case "cash.movement":
+        return CASH_KINDS[op.payload.kind as CashMovementKind]?.label ?? null;
+      case "customer.payment":
+        return op.payload.purpose === "debt" ? "qarz to'lovi" : "balansga kirim";
+      case "supplier.payment":
+        return "ta'minotchiga to'lov";
+      case "stock.writeoff":
+        return op.payload.reason ? String(op.payload.reason) : null;
+      case "stock.transfer":
+        return `→ ${warehouses.get(String(op.payload.toWarehouseId)) ?? "boshqa ombor"}`;
+      case "stock.count":
+        return `${Array.isArray(op.payload.items) ? op.payload.items.length : 0} mahsulot`;
+      default:
+        return null;
+    }
   }
 
   retry(input: { opId: string }): AppStatus {
     this.requireCashier();
     if (!this.store.retryOp(input.opId)) throw new KassaError("NOT_FOUND", "Rad etilgan amal topilmadi");
-    void this.engine?.sync();
+    this.engine?.schedule();
     return this.status();
   }
 
@@ -308,7 +426,7 @@ export class KassaService {
       this.store.enqueue({ type: "shift.open", cashierId: cashier.userId, payload: { shiftId: shift.id, openingCash: input.openingCash } }, new Date(shift.openedAt));
       this.store.setMeta("shift", shift);
     });
-    void this.engine?.sync();
+    this.engine?.schedule();
     return this.status();
   }
 
@@ -319,11 +437,15 @@ export class KassaService {
     if (!shift) throw new KassaError("CONFLICT", "Ochiq smena yo'q");
     this.assertShiftOperator(shift, cashier);
     if (this.store.heldReceipts().length > 0) throw new KassaError("CONFLICT", "Kechiktirilgan cheklar bor — avval yakunlang yoki o'chiring");
+    const closedAt = new Date();
+    // Z-hisobot: yopilish lahzasidagi qurilma hujjatlaridan (smena tarixida qoladi, qayta chop etiladi)
+    const report = this.buildReport(shift, closedAt.toISOString(), fromMinor(toMinor(input.closingCash)));
     this.store.inTransaction(() => {
-      this.store.enqueue({ type: "shift.close", cashierId: cashier.userId, payload: { shiftId: shift.id, closingCash: input.closingCash } });
+      this.store.enqueue({ type: "shift.close", cashierId: cashier.userId, payload: { shiftId: shift.id, closingCash: input.closingCash } }, closedAt);
+      this.store.saveShiftHistory({ id: shift.id, openedAt: shift.openedAt, closedAt: report.shift.closedAt!, data: report });
       this.store.deleteMeta("shift");
     });
-    void this.engine?.sync();
+    this.engine?.schedule();
     return this.status();
   }
 
@@ -372,6 +494,7 @@ export class KassaService {
       currencies: Object.entries(this.rates()).map(([code, rate]) => ({ code, rate })),
       cashback: config?.cashback ?? null,
       receipt: config?.receipt ?? null,
+      labels: config?.labels ?? null,
       company: config?.company ?? null,
       permissions: cashier.permissions,
     };
@@ -403,6 +526,18 @@ export class KassaService {
     this.requireCashier();
     const limit = Math.min(Math.max(input.limit ?? 60, 1), 200);
     return this.toPosProducts(this.store.searchProducts(String(input.query ?? ""), limit) as ProductRow[]);
+  }
+
+  /** Etiketka va hujjatlardan qo'shish uchun: berilgan ID'lardagi faol mahsulotlar (tartib saqlanadi). */
+  productsByIds(input: { ids: string[] }): PosProduct[] {
+    this.requireCashier();
+    if (!Array.isArray(input.ids) || input.ids.length > 2000) throw new KassaError("BAD_REQUEST", "Mahsulotlar ro'yxati noto'g'ri");
+    const rows: ProductRow[] = [];
+    for (const id of new Set(input.ids.map(String))) {
+      const row = this.store.product<ProductRow>(id);
+      if (row?.isActive) rows.push(row);
+    }
+    return this.toPosProducts(rows);
   }
 
   productByCode(input: { code: string }): PosProduct | null {
@@ -462,7 +597,7 @@ export class KassaService {
       this.store.enqueue({ type: "customer.create", cashierId: cashier.userId, payload: { customerId: row.id, name, phone } });
       this.store.saveCustomer(row);
     });
-    void this.engine?.sync();
+    this.engine?.schedule();
     return this.toPosCustomer(row, new Set([row.id]));
   }
 
@@ -681,7 +816,7 @@ export class KassaService {
       return sale;
     });
 
-    void this.engine?.sync();
+    this.engine?.schedule();
     return doc;
   }
 
@@ -949,8 +1084,1184 @@ export class KassaService {
       } satisfies LocalShift);
       return localReturn;
     });
-    void this.engine?.sync();
+    this.engine?.schedule();
     return doc;
+  }
+
+  // ─── Kassa bo'limi: naqd harakatlari, mijoz to'lovlari, hisobotlar ──────
+
+  /** Inkassatsiya, almashtirish puli, kassadan xarajat (`pos.cash.expense`), boshqa kirim/chiqim — offline. */
+  cashMovement(input: { kind: CashMovementKind; amount: string; category?: string | null; notes?: string | null }): LocalCashMovement {
+    const cashier = this.requireCashier();
+    const shift = this.requireShift(cashier);
+    const kind = CASH_KINDS[input.kind];
+    if (!kind) throw new KassaError("BAD_REQUEST", "Harakat turi noto'g'ri");
+    const amount = String(input.amount ?? "");
+    if (!MONEY.test(amount) || toMinor(amount) <= 0n) throw new KassaError("BAD_REQUEST", "Summa noto'g'ri");
+    if (input.kind === "expense" && !cashier.permissions.includes("pos.cash.expense") && !cashier.permissions.includes("finance.manage")) {
+      throw new KassaError("FORBIDDEN", "Ruxsat yo'q: pos.cash.expense");
+    }
+    const category = input.kind === "expense" ? String(input.category ?? "").trim().slice(0, 64) || "kassa" : null;
+    const notes = input.notes ? String(input.notes).trim().slice(0, 500) || null : null;
+    const now = new Date();
+    const movement: LocalCashMovement = {
+      id: randomUUID(),
+      shiftId: shift.id,
+      kind: input.kind,
+      type: kind.type,
+      amount: fromMinor(toMinor(amount)),
+      category,
+      notes,
+      cashierName: cashier.name,
+      createdAt: now.toISOString(),
+      sync: { state: "pending", error: null, conflicts: [] },
+    };
+    this.store.inTransaction(() => {
+      const payload: CashMovementPayload = {
+        movementId: movement.id,
+        shiftId: shift.id,
+        kind: input.kind,
+        amount: movement.amount,
+        ...(category ? { category } : {}),
+        ...(notes ? { notes } : {}),
+      };
+      const op = this.store.enqueue({ type: "cash.movement", cashierId: cashier.userId, payload }, now);
+      this.store.insertCashMovement({
+        id: movement.id,
+        opId: op.opId,
+        shiftId: shift.id,
+        cashierId: cashier.userId,
+        kind: input.kind,
+        amount: movement.amount,
+        createdAt: movement.createdAt,
+        doc: movement,
+      });
+      const totals = { ...EMPTY_TOTALS, ...shift.totals };
+      const delta = toMinor(movement.amount);
+      this.store.setMeta("shift", {
+        ...shift,
+        totals: kind.type === "in" ? { ...totals, cashIn: addMoney(totals.cashIn!, delta) } : { ...totals, cashOut: addMoney(totals.cashOut!, delta) },
+      } satisfies LocalShift);
+    });
+    this.engine?.schedule();
+    return movement;
+  }
+
+  cashMovements(): LocalCashMovement[] {
+    this.requireCashier();
+    const shift = this.store.getMeta<LocalShift>("shift");
+    if (!shift) return [];
+    return this.store.cashMovements<LocalCashMovement>({ limit: 1000, shiftId: shift.id }).map((stored) => ({ ...stored.doc, sync: documentSync(stored) }));
+  }
+
+  /** Mijoz qarzini to'lash yoki balansini to'ldirish (naqd/karta). Qarzdan ortig'i balansga — server ham shunday. */
+  customerPayment(input: { customerId: string; purpose: "deposit" | "debt"; amount: string; method: "cash" | "card"; notes?: string | null }): LocalCustomerPayment {
+    const cashier = this.requireCashier();
+    const shift = this.requireShift(cashier);
+    if (input.purpose !== "deposit" && input.purpose !== "debt") throw new KassaError("BAD_REQUEST", "To'lov maqsadi noto'g'ri");
+    if (input.method !== "cash" && input.method !== "card") throw new KassaError("BAD_REQUEST", "To'lov usuli noto'g'ri");
+    const amount = String(input.amount ?? "");
+    if (!MONEY.test(amount) || toMinor(amount) <= 0n) throw new KassaError("BAD_REQUEST", "Summa noto'g'ri");
+    const customer = this.store.customer<CustomerRow>(String(input.customerId));
+    if (!customer) throw new KassaError("BAD_REQUEST", "Mijoz topilmadi");
+
+    const minor = toMinor(amount);
+    const debt = toMinor(customer.totalDebt) > 0n ? toMinor(customer.totalDebt) : 0n;
+    const toDebt = input.purpose === "debt" ? (minor < debt ? minor : debt) : 0n;
+    const customerAfter = {
+      totalDebt: fromMinor(toMinor(customer.totalDebt) - toDebt),
+      balance: fromMinor(toMinor(customer.balance) + minor - toDebt),
+    };
+    const notes = input.notes ? String(input.notes).trim().slice(0, 500) || null : null;
+    const now = new Date();
+    const payment: LocalCustomerPayment = {
+      id: randomUUID(),
+      shiftId: shift.id,
+      customer: { id: customer.id, name: customer.name, phone: customer.phone },
+      purpose: input.purpose,
+      method: input.method,
+      amount: fromMinor(minor),
+      cashierName: cashier.name,
+      createdAt: now.toISOString(),
+      customerAfter,
+      sync: { state: "pending", error: null, conflicts: [] },
+    };
+    this.store.inTransaction(() => {
+      const payload: CustomerPaymentPayload = {
+        paymentId: payment.id,
+        shiftId: shift.id,
+        customerId: customer.id,
+        purpose: input.purpose,
+        amount: payment.amount,
+        method: input.method,
+        ...(notes ? { notes } : {}),
+      };
+      const op = this.store.enqueue({ type: "customer.payment", cashierId: cashier.userId, payload }, now);
+      this.store.insertCustomerPayment({
+        id: payment.id,
+        opId: op.opId,
+        shiftId: shift.id,
+        cashierId: cashier.userId,
+        customerId: customer.id,
+        amount: payment.amount,
+        createdAt: payment.createdAt,
+        doc: payment,
+      });
+      this.store.saveCustomer({ ...customer, ...customerAfter });
+      const totals = { ...EMPTY_TOTALS, ...shift.totals };
+      this.store.setMeta("shift", {
+        ...shift,
+        totals: input.method === "cash" ? { ...totals, cash: addMoney(totals.cash, minor) } : { ...totals, card: addMoney(totals.card, minor) },
+      } satisfies LocalShift);
+    });
+    this.engine?.schedule();
+    return payment;
+  }
+
+  customerPayments(): LocalCustomerPayment[] {
+    this.requireCashier();
+    const shift = this.store.getMeta<LocalShift>("shift");
+    if (!shift) return [];
+    return this.store.customerPayments<LocalCustomerPayment>({ limit: 1000, shiftId: shift.id }).map((stored) => ({ ...stored.doc, sync: documentSync(stored) }));
+  }
+
+  /** Smena hisoboti qurilmadagi hujjatlardan: tushum turi, qaytarishlar, mijoz to'lovlari, naqd harakatlari, kassirlar. */
+  private buildReport(shift: LocalShift, closedAt: string | null, closingCash: string | null): ShiftReport {
+    const alive = <T>(rows: StoredDocument<T>[]) => rows.filter((row) => row.state !== "discarded");
+    const sales = alive(this.store.sales<LocalSale>({ limit: 1_000_000, shiftId: shift.id }));
+    const returns = alive(this.store.returns<LocalReturn>({ limit: 1_000_000, shiftId: shift.id }));
+    const movements = alive(this.store.cashMovements<LocalCashMovement>({ limit: 1_000_000, shiftId: shift.id }));
+    const payments = alive(this.store.customerPayments<LocalCustomerPayment>({ limit: 1_000_000, shiftId: shift.id }));
+    const purchases = alive(this.store.purchases<LocalPurchase>({ limit: 1_000_000, shiftId: shift.id }));
+    const purchaseReturns = alive(this.store.purchaseReturns<LocalPurchaseReturn>({ limit: 1_000_000, shiftId: shift.id }));
+    const supplierPayments = alive(this.store.supplierPayments<LocalSupplierPayment>({ limit: 1_000_000, shiftId: shift.id }));
+    const supplierCash = { payments: 0, paidCash: 0n, paidCard: 0n, refunds: 0, refundCash: 0n, refundCard: 0n };
+    const paidOut = (payment: { amount: string; method: "cash" | "card" }) => {
+      supplierCash.payments += 1;
+      if (payment.method === "cash") supplierCash.paidCash += toMinor(payment.amount);
+      else supplierCash.paidCard += toMinor(payment.amount);
+    };
+    for (const { doc } of purchases) if (doc.payment) paidOut(doc.payment);
+    for (const { doc } of supplierPayments) paidOut(doc);
+    for (const { doc } of purchaseReturns) {
+      if (!doc.refund) continue;
+      supplierCash.refunds += 1;
+      if (doc.refund.method === "cash") supplierCash.refundCash += toMinor(doc.refund.amount);
+      else supplierCash.refundCard += toMinor(doc.refund.amount);
+    }
+    const base = this.baseCurrency();
+    const device = this.store.getMeta<DeviceInfo>("device");
+
+    const methods = new Map<string, bigint>();
+    const add = (key: string, value: bigint) => {
+      if (value !== 0n) methods.set(key, (methods.get(key) ?? 0n) + value);
+    };
+    const cashiers = new Map<string, { receipts: number; total: bigint }>();
+    let salesTotal = 0n;
+    let tax = 0n;
+    let discount = 0n;
+    let cashFromSales = 0n;
+    for (const { doc } of sales) {
+      salesTotal += toMinor(doc.total);
+      tax += toMinor(doc.tax);
+      discount += toMinor(doc.discount);
+      add(doc.paymentMethod, toMinor(doc.paid));
+      add("balance", toMinor(doc.balanceUsed));
+      add("cashback", toMinor(doc.cashbackUsed));
+      add("debt", toMinor(doc.debt));
+      add("change_to_balance", toMinor(doc.changeToBalance));
+      if (doc.paymentMethod === "cash") cashFromSales += toMinor(doc.paid) + toMinor(doc.changeToBalance);
+      for (const part of doc.currencyTotals) {
+        if (part.currency !== base) add(`fx:${part.currency}`, toMinor(part.paid));
+      }
+      const name = doc.cashierName ?? "—";
+      const current = cashiers.get(name) ?? { receipts: 0, total: 0n };
+      cashiers.set(name, { receipts: current.receipts + 1, total: current.total + toMinor(doc.total) });
+    }
+
+    const refunds = { total: 0n, cash: 0n, card: 0n, balance: 0n };
+    for (const { doc } of returns) {
+      refunds.total += toMinor(doc.total);
+      refunds[doc.refundMethod] += toMinor(doc.refundEstimate);
+    }
+    const paid = { debtCash: 0n, debtCard: 0n, depositCash: 0n, depositCard: 0n };
+    for (const { doc } of payments) {
+      const key = `${doc.purpose}${doc.method === "cash" ? "Cash" : "Card"}` as keyof typeof paid;
+      paid[key] += toMinor(doc.amount);
+    }
+    const byKind = new Map<CashMovementKind, { count: number; amount: bigint }>();
+    let cashIn = 0n;
+    let cashOut = 0n;
+    for (const { doc } of movements) {
+      const current = byKind.get(doc.kind) ?? { count: 0, amount: 0n };
+      byKind.set(doc.kind, { count: current.count + 1, amount: current.amount + toMinor(doc.amount) });
+      if (doc.type === "in") cashIn += toMinor(doc.amount);
+      else cashOut += toMinor(doc.amount);
+    }
+
+    const expected =
+      toMinor(shift.openingCash) +
+      cashFromSales +
+      paid.debtCash +
+      paid.depositCash -
+      refunds.cash +
+      cashIn -
+      cashOut -
+      supplierCash.paidCash +
+      supplierCash.refundCash;
+    const unsynced = [...sales, ...returns, ...movements, ...payments, ...purchases, ...purchaseReturns, ...supplierPayments].filter(
+      (row) => row.state === "pending" || row.state === "rejected",
+    ).length;
+    return {
+      shift: {
+        id: shift.id,
+        cashierName: shift.cashierName,
+        openedAt: shift.openedAt,
+        closedAt,
+        openingCash: fromMinor(toMinor(shift.openingCash)),
+        closingCash,
+      },
+      device: device ? { code: device.code, name: device.name, warehouseName: device.warehouseName } : null,
+      receipts: sales.length,
+      salesTotal: fromMinor(salesTotal),
+      tax: fromMinor(tax),
+      discount: fromMinor(discount),
+      byMethod: [...methods].map(([key, amount]) => ({
+        key,
+        label: key.startsWith("fx:") ? `${key.slice(3)} (valyutada)` : (METHOD_LABELS[key] ?? key),
+        amount: fromMinor(amount),
+      })),
+      returns: { count: returns.length, total: fromMinor(refunds.total), cash: fromMinor(refunds.cash), card: fromMinor(refunds.card), balance: fromMinor(refunds.balance) },
+      customerPayments: {
+        count: payments.length,
+        debtCash: fromMinor(paid.debtCash),
+        debtCard: fromMinor(paid.debtCard),
+        depositCash: fromMinor(paid.depositCash),
+        depositCard: fromMinor(paid.depositCard),
+      },
+      cashMovements: [...byKind].map(([kind, row]) => ({ kind, label: CASH_KINDS[kind].label, count: row.count, amount: fromMinor(row.amount) })),
+      cashIn: fromMinor(cashIn),
+      cashOut: fromMinor(cashOut),
+      expectedCash: fromMinor(expected),
+      difference: closingCash === null ? null : fromMinor(toMinor(closingCash) - expected),
+      cashiers: [...cashiers].map(([name, row]) => ({ name, receipts: row.receipts, total: fromMinor(row.total) })),
+      suppliers: {
+        payments: supplierCash.payments,
+        paidCash: fromMinor(supplierCash.paidCash),
+        paidCard: fromMinor(supplierCash.paidCard),
+        refunds: supplierCash.refunds,
+        refundCash: fromMinor(supplierCash.refundCash),
+        refundCard: fromMinor(supplierCash.refundCard),
+      },
+      unsynced,
+    };
+  }
+
+  /** X-hisobot (joriy smena) yoki yopilgan smena Z-hisoboti. */
+  shiftReport(input: { shiftId?: string }): ShiftReport {
+    this.requireCashier();
+    const current = this.store.getMeta<LocalShift>("shift");
+    if (input.shiftId && input.shiftId !== current?.id) {
+      const closed = this.store.shiftHistory<ShiftReport>(1000).find((row) => row.shift.id === input.shiftId);
+      if (!closed) throw new KassaError("NOT_FOUND", "Smena topilmadi");
+      return closed;
+    }
+    if (!current) throw new KassaError("CONFLICT", "Ochiq smena yo'q");
+    return this.buildReport(current, null, null);
+  }
+
+  shiftHistory(input: { limit?: number }): ShiftReport[] {
+    this.requireCashier();
+    return this.store.shiftHistory<ShiftReport>(Math.min(Math.max(input.limit ?? 30, 1), 500));
+  }
+
+  private historyRange(input: { from?: string; to?: string; limit?: number }) {
+    if (input.from && !ISO_TIME.test(input.from)) throw new KassaError("BAD_REQUEST", "Sana noto'g'ri");
+    if (input.to && !ISO_TIME.test(input.to)) throw new KassaError("BAD_REQUEST", "Sana noto'g'ri");
+    return { limit: Math.min(Math.max(input.limit ?? 500, 1), 5000), ...(input.from ? { from: input.from } : {}), ...(input.to ? { to: input.to } : {}) };
+  }
+
+  historySales(input: { from?: string; to?: string; limit?: number }): LocalSale[] {
+    this.requireCashier();
+    return this.store.sales<LocalSale>(this.historyRange(input)).map((stored) => ({ ...stored.doc, sync: documentSync(stored) }));
+  }
+
+  historyReturns(input: { from?: string; to?: string; limit?: number }): LocalReturn[] {
+    this.requireCashier();
+    return this.store.returns<LocalReturn>(this.historyRange(input)).map((stored) => ({ ...stored.doc, sync: documentSync(stored) }));
+  }
+
+  /** Serverdagi tarix: qurilma omboridagi barcha kassalar va web (internet kerak). */
+  async historyServer(input: { from?: string; to?: string; cursor?: string }) {
+    this.requireCashier();
+    if (!this.api) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
+    if ((input.from && !ISO_DATE.test(input.from)) || (input.to && !ISO_DATE.test(input.to))) throw new KassaError("BAD_REQUEST", "Sana noto'g'ri");
+    try {
+      return await this.api.sales({ from: input.from, to: input.to, cursor: input.cursor ? String(input.cursor).slice(0, 500) : undefined, limit: 100 });
+    } catch (error) {
+      if (error instanceof OfflineError) throw new KassaError("OFFLINE", "Serverdagi tarix uchun internet kerak");
+      throw error;
+    }
+  }
+
+  // ─── Xarid: ta'minotchilar, kassada xarid, qaytarish, to'lov ─────────────
+
+  private requireCashierWith(...permissions: string[]): CashierRecord {
+    const cashier = this.requireCashier();
+    const missing = permissions.find((permission) => !cashier.permissions.includes(permission));
+    if (missing) throw new KassaError("FORBIDDEN", `Ruxsat yo'q: ${missing}`);
+    return cashier;
+  }
+
+  private toPosSupplier(row: SupplierRow, pending: Set<string>): PosSupplier {
+    return {
+      id: row.id,
+      name: row.name,
+      code: row.code ?? null,
+      phone: row.phone ?? null,
+      totalDebt: row.totalDebt ?? "0.00",
+      isActive: row.isActive,
+      pending: pending.has(row.id),
+    };
+  }
+
+  suppliers(input: { query: string }): PosSupplier[] {
+    this.requireCashierWith("purchase.create");
+    const pending = this.store.pendingSupplierIds();
+    return this.store.searchSuppliers<SupplierRow>(String(input.query ?? "")).map((row) => this.toPosSupplier(row, pending));
+  }
+
+  createSupplier(input: { name: string; phone?: string | null }): PosSupplier {
+    const cashier = this.requireCashierWith("purchase.create");
+    const name = String(input.name ?? "").trim();
+    const phone = input.phone ? String(input.phone).trim() : null;
+    if (name.length === 0 || name.length > 200) throw new KassaError("BAD_REQUEST", "Ta'minotchi nomi 1–200 belgi");
+    if (phone && (phone.length > 20 || phone.replace(/\D/g, "").length < 9)) throw new KassaError("BAD_REQUEST", "Telefon raqami noto'g'ri");
+    const row: SupplierRow = { id: randomUUID(), name, code: null, phone, totalDebt: "0.00", isActive: true, currency: this.baseCurrency() };
+    this.store.inTransaction(() => {
+      this.store.enqueue({ type: "supplier.create", cashierId: cashier.userId, payload: { supplierId: row.id, name, phone } });
+      this.store.saveSupplier(row);
+    });
+    this.engine?.schedule();
+    return this.toPosSupplier(row, new Set([row.id]));
+  }
+
+  private toPurchaseProducts(rows: PurchaseProductRow[]): PurchaseProduct[] {
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return this.toPosProducts(rows).map((product) => {
+      const row = byId.get(product.id)!;
+      return {
+        ...product,
+        purchasePrice: row.purchasePrice ?? "0",
+        purchaseCurrency: row.purchaseCurrency ?? null,
+        trackBatch: !!row.trackBatch,
+        trackExpiry: !!row.trackExpiry,
+      };
+    });
+  }
+
+  purchaseProducts(input: { query: string }): PurchaseProduct[] {
+    this.requireCashierWith("purchase.create");
+    const rows = (this.store.searchProducts(String(input.query ?? ""), 80, { saleableOnly: false }) as PurchaseProductRow[]).filter((row) => row.isPurchaseable !== false);
+    return this.toPurchaseProducts(rows);
+  }
+
+  purchaseProductByCode(input: { code: string }): PurchaseProduct | null {
+    this.requireCashierWith("purchase.create");
+    const row = this.store.productByCode<PurchaseProductRow>(String(input.code ?? ""), false);
+    return row && row.isPurchaseable !== false ? this.toPurchaseProducts([row])[0]! : null;
+  }
+
+  /**
+   * Kassada xarid: ta'minotchidan tovar keldi (offline). Serverda tasdiqlangan va to'liq qabul qilingan xarid bo'lib
+   * yoziladi (zaxira, tannarx, ta'minotchi qarzi, jurnal). Darhol to'lov — smenadan (`purchase.approve`).
+   */
+  completePurchase(input: PurchaseInput): LocalPurchase {
+    const cashier = this.requireCashierWith("purchase.create", "warehouse.receive");
+    const device = this.store.getMeta<DeviceInfo>("device");
+    if (!device) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
+    const supplier = this.store.supplier<SupplierRow>(String(input.supplierId ?? ""));
+    if (!supplier) throw new KassaError("BAD_REQUEST", "Ta'minotchi topilmadi");
+    if (!supplier.isActive) throw new KassaError("BAD_REQUEST", "Ta'minotchi faol emas");
+    if (!Array.isArray(input.lines) || input.lines.length === 0) throw new KassaError("BAD_REQUEST", "Xaridda kamida bitta mahsulot bo'lishi kerak");
+    if (input.lines.length > 500) throw new KassaError("BAD_REQUEST", "Xaridda ko'pi bilan 500 qator");
+
+    const base = this.baseCurrency();
+    const rates = this.rates();
+    const conversions = this.store.records<CalcConversion>("unitConversions");
+    const units = this.unitNames();
+    const stockDeltas = new Map<string, bigint>();
+    const currencyTotals = new Map<string, bigint>();
+    let total = 0n;
+    const lines = input.lines.map((line) => {
+      const quantity = String(line.quantity ?? "");
+      const unitPrice = String(line.unitPrice ?? "");
+      const product = this.store.product<PurchaseProductRow>(String(line.productId));
+      if (!product || !product.isActive || product.isPurchaseable === false) throw new KassaError("BAD_REQUEST", `${product?.name ?? "Mahsulot"}: xarid qilinmaydi`);
+      if (!QTY.test(quantity) || toMinor(quantity, 4) <= 0n) throw new KassaError("BAD_REQUEST", `${product.name}: miqdor noto'g'ri`);
+      if (!QTY.test(unitPrice)) throw new KassaError("BAD_REQUEST", `${product.name}: narx noto'g'ri`);
+      const factor = unitFactor(product, String(line.unitId), conversions);
+      if (!factor) throw new KassaError("BAD_REQUEST", `${product.name}: bu o'lchov birligidan asosiy birlikka konversiya yo'q`);
+      const currency = line.currency && line.currency !== base ? String(line.currency) : null;
+      if (currency && !rates[currency]) throw new KassaError("BAD_REQUEST", `${currency} valyutasi yoqilmagan`);
+      const salesPrice = line.salesPrice ? String(line.salesPrice) : null;
+      if (salesPrice !== null && !QTY.test(salesPrice)) throw new KassaError("BAD_REQUEST", `${product.name}: sotuv narxi noto'g'ri`);
+      const batchNumber = line.batchNumber ? String(line.batchNumber).trim().slice(0, 64) : null;
+      const expiryDate = line.expiryDate ? String(line.expiryDate) : null;
+      if (expiryDate && !ISO_DATE.test(expiryDate)) throw new KassaError("BAD_REQUEST", `${product.name}: yaroqlilik muddati noto'g'ri`);
+      if (product.trackBatch && !batchNumber) throw new KassaError("BAD_REQUEST", `${product.name}: partiya raqami kiritilishi shart`);
+      if (product.trackExpiry && !expiryDate) throw new KassaError("BAD_REQUEST", `${product.name}: yaroqlilik muddati kiritilishi shart`);
+
+      // Ta'minotchi narxi soliqsiz, qator valyutasida; asosiy valyutadagi qiymat qurilmadagi kurs bilan (server ham shu kursda)
+      const lineTotal = computeLine({ quantity, unitPrice }).lineTotal;
+      const baseTotal = currency ? rescale(lineTotal * toMinor(rates[currency]!, 4), 6, 2) : lineTotal;
+      currencyTotals.set(currency ?? base, (currencyTotals.get(currency ?? base) ?? 0n) + lineTotal);
+      total += baseTotal;
+      const baseQty = rescale(toMinor(quantity, 4) * toMinor(factor, 4), 8, 4);
+      stockDeltas.set(product.id, (stockDeltas.get(product.id) ?? 0n) + baseQty);
+      return {
+        id: randomUUID(),
+        product,
+        unitId: String(line.unitId),
+        unitName: units.get(String(line.unitId)) ?? "",
+        quantity,
+        unitPrice,
+        currency,
+        lineTotal,
+        baseTotal,
+        salesPrice,
+        batchNumber,
+        expiryDate,
+      };
+    });
+
+    let payment: { amount: string; method: "cash" | "card" } | null = null;
+    let shift = this.store.getMeta<LocalShift>("shift");
+    if (input.payment) {
+      this.requireCashierWith("purchase.approve");
+      shift = this.requireShift(cashier);
+      const amount = String(input.payment.amount ?? "");
+      if (!MONEY.test(amount) || toMinor(amount) <= 0n) throw new KassaError("BAD_REQUEST", "To'lov summasi noto'g'ri");
+      if (input.payment.method !== "cash" && input.payment.method !== "card") throw new KassaError("BAD_REQUEST", "To'lov usuli noto'g'ri");
+      const baseBucket = currencyTotals.get(base) ?? 0n;
+      if (toMinor(amount) > baseBucket) {
+        throw new KassaError("BAD_REQUEST", `Darhol to'lov ${base} dagi qatorlar summasidan oshmasin (${fromMinor(baseBucket)}) — valyutadagi qismini keyin to'lang`);
+      }
+      payment = { amount: fromMinor(toMinor(amount)), method: input.payment.method };
+    }
+    const notes = input.notes ? String(input.notes).trim().slice(0, 500) || null : null;
+    const usedRates: Record<string, string> = {};
+    for (const line of lines) if (line.currency) usedRates[line.currency] = rates[line.currency]!;
+
+    const now = new Date();
+    const purchaseId = randomUUID();
+    const doc = this.store.inTransaction(() => {
+      const number = `${device.code}-P${pad6(this.store.nextSequence("purchase"))}`;
+      const payload: PurchasePayload = {
+        purchaseId,
+        number,
+        supplierId: supplier.id,
+        items: lines.map((line) => ({
+          id: line.id,
+          productId: line.product.id,
+          unitId: line.unitId,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          ...(line.currency ? { currency: line.currency } : {}),
+          ...(line.salesPrice ? { salesPrice: line.salesPrice } : {}),
+          ...(line.batchNumber ? { batchNumber: line.batchNumber } : {}),
+          ...(line.expiryDate ? { expiryDate: line.expiryDate } : {}),
+        })),
+        ...(Object.keys(usedRates).length > 0 ? { rates: usedRates } : {}),
+        ...(notes ? { notes } : {}),
+        ...(payment && shift ? { payment: { shiftId: shift.id, ...payment } } : {}),
+      };
+      const op = this.store.enqueue({ type: "purchase.complete", cashierId: cashier.userId, payload }, now);
+      const purchase: LocalPurchase = {
+        id: purchaseId,
+        number,
+        supplier: { id: supplier.id, name: supplier.name },
+        shiftId: shift?.id ?? null,
+        cashierName: cashier.name,
+        createdAt: now.toISOString(),
+        lines: lines.map((line) => ({
+          id: line.id,
+          productId: line.product.id,
+          name: line.product.name,
+          sku: line.product.sku,
+          unitId: line.unitId,
+          unitName: line.unitName,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          currency: line.currency,
+          lineTotal: fromMinor(line.lineTotal),
+          baseTotal: fromMinor(line.baseTotal),
+          salesPrice: line.salesPrice,
+        })),
+        total: fromMinor(total),
+        currencyTotals: [...currencyTotals].map(([currency, amount]) => ({ currency, total: fromMinor(amount) })),
+        payment,
+        notes,
+        sync: { state: "pending", error: null, conflicts: [] },
+      };
+      this.store.insertPurchase({
+        id: purchaseId,
+        number,
+        opId: op.opId,
+        shiftId: shift?.id ?? null,
+        cashierId: cashier.userId,
+        supplierId: supplier.id,
+        total: purchase.total,
+        createdAt: purchase.createdAt,
+        doc: purchase,
+        stockDeltas: [...stockDeltas].map(([productId, quantity]) => ({ productId, quantity: fromMinor(quantity, 4) })),
+      });
+      this.store.saveSupplier({ ...supplier, totalDebt: fromMinor(toMinor(supplier.totalDebt ?? "0") + total - (payment ? toMinor(payment.amount) : 0n)) });
+      if (payment?.method === "cash" && shift) {
+        const totals = { ...EMPTY_TOTALS, ...shift.totals };
+        this.store.setMeta("shift", { ...shift, totals: { ...totals, cashOut: addMoney(totals.cashOut!, toMinor(payment.amount)) } } satisfies LocalShift);
+      }
+      return purchase;
+    });
+    this.engine?.schedule();
+    return doc;
+  }
+
+  purchases(input: { from?: string; to?: string; limit?: number }): LocalPurchase[] {
+    this.requireCashierWith("purchase.create");
+    return this.store.purchases<LocalPurchase>(this.historyRange(input)).map((stored) => ({ ...stored.doc, sync: documentSync(stored) }));
+  }
+
+  purchaseReturns(input: { from?: string; to?: string; limit?: number }): LocalPurchaseReturn[] {
+    this.requireCashierWith("purchase.create");
+    return this.store.purchaseReturns<LocalPurchaseReturn>(this.historyRange(input)).map((stored) => ({ ...stored.doc, sync: documentSync(stored) }));
+  }
+
+  private localPurchaseReturned(orderId: string, onlyPending: boolean) {
+    const returned = new Map<string, bigint>();
+    for (const stored of this.store.purchaseReturnsForOrder<LocalPurchaseReturn>(orderId)) {
+      if (stored.state === "rejected" || (onlyPending && stored.state !== "pending")) continue;
+      for (const line of stored.doc.lines) returned.set(line.orderItemId, (returned.get(line.orderItemId) ?? 0n) + toMinor(line.quantity, 4));
+    }
+    return returned;
+  }
+
+  async findPurchase(input: { number: string }): Promise<ReturnablePurchase> {
+    this.requireCashierWith("purchase.create");
+    const number = String(input.number ?? "").trim().toUpperCase();
+    if (!number) throw new KassaError("BAD_REQUEST", "Xarid raqamini kiriting");
+    const local = this.store.purchaseByNumber<LocalPurchase>(number);
+    if (local) {
+      const returned = this.localPurchaseReturned(local.doc.id, false);
+      return {
+        source: "local",
+        orderId: local.doc.id,
+        number: local.doc.number,
+        createdAt: local.doc.createdAt,
+        status: local.state === "rejected" || local.state === "discarded" ? local.state : "received",
+        supplier: local.doc.supplier,
+        lines: local.doc.lines.map((line) => ({
+          id: line.id,
+          productId: line.productId,
+          name: line.name,
+          unitId: line.unitId,
+          unitName: line.unitName,
+          quantity: line.quantity,
+          returned: fromMinor(returned.get(line.id) ?? 0n, 4),
+          unitPrice: line.unitPrice,
+          lineTotal: line.baseTotal,
+          currency: null,
+        })),
+      };
+    }
+    if (!this.api) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
+    let purchase: RemotePurchase;
+    try {
+      purchase = (await this.api.purchase(number)).purchase;
+    } catch (error) {
+      if (error instanceof OfflineError) throw new KassaError("OFFLINE", "Xarid bu kassada yo'q — boshqa xaridni qaytarish uchun internet kerak");
+      throw error;
+    }
+    const pending = this.localPurchaseReturned(purchase.id, true);
+    return {
+      source: "server",
+      orderId: purchase.id,
+      number: purchase.number,
+      createdAt: purchase.createdAt,
+      status: purchase.status,
+      supplier: { id: purchase.supplierId, name: purchase.supplierName },
+      lines: purchase.items.map((item) => ({
+        id: item.id,
+        productId: item.productId,
+        name: item.productName,
+        unitId: item.unitId,
+        unitName: item.unitName,
+        quantity: item.receivedQty,
+        returned: fromMinor(toMinor(item.returnedQty, 4) + (pending.get(item.id) ?? 0n), 4),
+        unitPrice: item.unitPrice,
+        lineTotal: item.lineTotal,
+        currency: item.currency,
+      })),
+    };
+  }
+
+  /** Ta'minotchiga qaytarish (`purchase.return`): zaxira kamayadi, ta'minotchi qarzi kamayadi; pul qaytsa — kassaga. */
+  async returnPurchase(input: PurchaseReturnInput): Promise<LocalPurchaseReturn> {
+    const cashier = this.requireCashierWith("purchase.return");
+    const device = this.store.getMeta<DeviceInfo>("device");
+    if (!device) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
+    const purchase = await this.findPurchase({ number: input.number });
+    if (purchase.status === "rejected" || purchase.status === "discarded") throw new KassaError("CONFLICT", "Xarid serverga yozilmagan — qaytarib bo'lmaydi");
+    if (!Array.isArray(input.items) || input.items.length === 0) throw new KassaError("BAD_REQUEST", "Qaytariladigan mahsulotni tanlang");
+
+    const lineById = new Map(purchase.lines.map((line) => [line.id, line]));
+    const conversions = this.store.records<CalcConversion>("unitConversions");
+    const seen = new Set<string>();
+    const stockDeltas: { productId: string; quantity: string }[] = [];
+    const lines = input.items.map((item) => {
+      const line = lineById.get(String(item.orderItemId));
+      if (!line || seen.has(line.id)) throw new KassaError("BAD_REQUEST", "Xaridda bunday mahsulot qatori yo'q");
+      seen.add(line.id);
+      const qty = String(item.quantity ?? "");
+      if (!QTY.test(qty) || toMinor(qty, 4) <= 0n) throw new KassaError("BAD_REQUEST", `${line.name}: miqdor noto'g'ri`);
+      const quantity = toMinor(line.quantity, 4);
+      const remaining = quantity - toMinor(line.returned, 4);
+      const requested = toMinor(qty, 4);
+      if (requested > remaining) throw new KassaError("BAD_REQUEST", `${line.name}: qaytarish miqdori qolganidan ko'p (qolgan ${fromMinor(remaining, 4)})`);
+      const product = this.store.product<PurchaseProductRow>(line.productId);
+      const factor = product ? unitFactor(product, line.unitId, conversions) : null;
+      if (factor) stockDeltas.push({ productId: line.productId, quantity: fromMinor(-rescale(requested * toMinor(factor, 4), 8, 4), 4) });
+      return { orderItemId: line.id, name: line.name, quantity: qty, lineTotal: fromMinor(quantity > 0n ? mulDivRound(toMinor(line.lineTotal), requested, quantity) : 0n) };
+    });
+    const total = lines.reduce((sum, line) => sum + toMinor(line.lineTotal), 0n);
+
+    let refund: { amount: string; method: "cash" | "card" } | null = null;
+    let shift = this.store.getMeta<LocalShift>("shift");
+    if (input.refund) {
+      shift = this.requireShift(cashier);
+      const amount = String(input.refund.amount ?? "");
+      if (!MONEY.test(amount) || toMinor(amount) <= 0n) throw new KassaError("BAD_REQUEST", "Qaytgan pul summasi noto'g'ri");
+      if (input.refund.method !== "cash" && input.refund.method !== "card") throw new KassaError("BAD_REQUEST", "Pul usuli noto'g'ri");
+      refund = { amount: fromMinor(toMinor(amount)), method: input.refund.method };
+    }
+    const reason = input.reason ? String(input.reason).trim().slice(0, 500) || null : null;
+
+    const now = new Date();
+    const returnId = randomUUID();
+    const doc = this.store.inTransaction(() => {
+      const number = `${device.code}-R${pad6(this.store.nextSequence("purchase_return"))}`;
+      const payload: PurchaseReturnPayload = {
+        returnId,
+        number,
+        orderId: purchase.orderId,
+        items: lines.map((line) => ({ orderItemId: line.orderItemId, quantity: line.quantity })),
+        ...(reason ? { reason } : {}),
+        ...(refund && shift ? { refund: { shiftId: shift.id, ...refund } } : {}),
+      };
+      const op = this.store.enqueue({ type: "purchase.return", cashierId: cashier.userId, payload }, now);
+      const purchaseReturn: LocalPurchaseReturn = {
+        id: returnId,
+        number,
+        orderId: purchase.orderId,
+        orderNumber: purchase.number,
+        supplier: purchase.supplier,
+        shiftId: shift?.id ?? null,
+        cashierName: cashier.name,
+        createdAt: now.toISOString(),
+        lines,
+        total: fromMinor(total),
+        refund,
+        reason,
+        sync: { state: "pending", error: null, conflicts: [] },
+      };
+      this.store.insertPurchaseReturn({
+        id: returnId,
+        number,
+        opId: op.opId,
+        orderId: purchase.orderId,
+        shiftId: shift?.id ?? null,
+        cashierId: cashier.userId,
+        total: purchaseReturn.total,
+        createdAt: purchaseReturn.createdAt,
+        doc: purchaseReturn,
+        stockDeltas,
+      });
+      const supplier = this.store.supplier<SupplierRow>(purchase.supplier.id);
+      if (supplier) {
+        this.store.saveSupplier({ ...supplier, totalDebt: fromMinor(toMinor(supplier.totalDebt ?? "0") - total + (refund ? toMinor(refund.amount) : 0n)) });
+      }
+      if (refund?.method === "cash" && shift) {
+        const totals = { ...EMPTY_TOTALS, ...shift.totals };
+        this.store.setMeta("shift", { ...shift, totals: { ...totals, cashIn: addMoney(totals.cashIn!, toMinor(refund.amount)) } } satisfies LocalShift);
+      }
+      return purchaseReturn;
+    });
+    this.engine?.schedule();
+    return doc;
+  }
+
+  /** Kassa smenasidan ta'minotchi qarzini to'lash (`purchase.approve`); qarzdan ortig'i serverda avans bo'ladi. */
+  supplierPayment(input: { supplierId: string; amount: string; method: "cash" | "card"; notes?: string | null }): LocalSupplierPayment {
+    const cashier = this.requireCashierWith("purchase.approve");
+    const shift = this.requireShift(cashier);
+    const supplier = this.store.supplier<SupplierRow>(String(input.supplierId ?? ""));
+    if (!supplier) throw new KassaError("BAD_REQUEST", "Ta'minotchi topilmadi");
+    const amount = String(input.amount ?? "");
+    if (!MONEY.test(amount) || toMinor(amount) <= 0n) throw new KassaError("BAD_REQUEST", "Summa noto'g'ri");
+    if (input.method !== "cash" && input.method !== "card") throw new KassaError("BAD_REQUEST", "To'lov usuli noto'g'ri");
+    const notes = input.notes ? String(input.notes).trim().slice(0, 500) || null : null;
+    const minor = toMinor(amount);
+    const now = new Date();
+    const payment: LocalSupplierPayment = {
+      id: randomUUID(),
+      shiftId: shift.id,
+      supplier: { id: supplier.id, name: supplier.name },
+      amount: fromMinor(minor),
+      method: input.method,
+      notes,
+      cashierName: cashier.name,
+      createdAt: now.toISOString(),
+      supplierDebtAfter: fromMinor(toMinor(supplier.totalDebt ?? "0") - minor),
+      sync: { state: "pending", error: null, conflicts: [] },
+    };
+    this.store.inTransaction(() => {
+      const payload: SupplierPaymentPayload = {
+        paymentId: payment.id,
+        shiftId: shift.id,
+        supplierId: supplier.id,
+        amount: payment.amount,
+        method: input.method,
+        ...(notes ? { notes } : {}),
+      };
+      const op = this.store.enqueue({ type: "supplier.payment", cashierId: cashier.userId, payload }, now);
+      this.store.insertSupplierPayment({
+        id: payment.id,
+        opId: op.opId,
+        shiftId: shift.id,
+        cashierId: cashier.userId,
+        supplierId: supplier.id,
+        amount: payment.amount,
+        createdAt: payment.createdAt,
+        doc: payment,
+      });
+      this.store.saveSupplier({ ...supplier, totalDebt: payment.supplierDebtAfter });
+      if (input.method === "cash") {
+        const totals = { ...EMPTY_TOTALS, ...shift.totals };
+        this.store.setMeta("shift", { ...shift, totals: { ...totals, cashOut: addMoney(totals.cashOut!, minor) } } satisfies LocalShift);
+      }
+    });
+    this.engine?.schedule();
+    return payment;
+  }
+
+  // ─── Ombor: qoldiqlar, hisobdan chiqarish, ko'chirish, inventarizatsiya, harakatlar ─
+
+  private requireDevice(): DeviceInfo {
+    const device = this.store.getMeta<DeviceInfo>("device");
+    if (!device) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
+    return device;
+  }
+
+  /**
+   * Qurilma omboridagi qoldiqlar (ko'rinadigan: server + yuborilmagan hujjatlar). Tannarx va qiymat — faqat
+   * `warehouse.manage` bilan. Yig'indilar filtrdan oldin, ro'yxat — filtr va chegara bilan.
+   */
+  stockList(input: { query: string; filter?: StockFilter; limit?: number }): StockList {
+    const cashier = this.requireCashierWith("warehouse.view");
+    const showCost = cashier.permissions.includes("warehouse.manage");
+    const filter = STOCK_FILTERS.includes(input.filter as StockFilter) ? (input.filter as StockFilter) : "all";
+    const limit = Math.min(Math.max(Number(input.limit) || 300, 1), 2000);
+    const products = this.store.searchProducts(String(input.query ?? ""), 100_000, { saleableOnly: false }) as StockProductRow[];
+    const stock = this.store.stockAll();
+    const pending = this.store.pendingStockAll();
+    const costs = showCost ? this.store.stockLevelCosts() : new Map<string, string>();
+    const units = this.unitNames();
+    const summary = { products: products.length, positive: 0, low: 0, zero: 0, negative: 0 };
+    let totalValue = 0n;
+    let matched = 0;
+    const rows: StockRow[] = [];
+    for (const product of products) {
+      const quantity = stock.get(product.id) ?? 0n;
+      const minStock = toMinor(product.minStock ?? "0", 4);
+      const isLow = minStock > 0n && quantity >= 0n && quantity <= minStock;
+      if (quantity > 0n) summary.positive += 1;
+      else if (quantity === 0n) summary.zero += 1;
+      else summary.negative += 1;
+      if (isLow) summary.low += 1;
+      const value = quantity > 0n ? costValue(costs, product.id, quantity) : 0n;
+      totalValue += value;
+      const keep =
+        filter === "all" ||
+        (filter === "positive" && quantity > 0n) ||
+        (filter === "zero" && quantity === 0n) ||
+        (filter === "negative" && quantity < 0n) ||
+        (filter === "low" && isLow);
+      if (!keep) continue;
+      matched += 1;
+      if (rows.length >= limit) continue;
+      rows.push({
+        productId: product.id,
+        name: product.name,
+        sku: product.sku,
+        barcode: product.barcode ?? null,
+        unitName: units.get(product.baseUnitId) ?? "",
+        quantity: fromMinor(quantity, 4),
+        pending: fromMinor(pending.get(product.id) ?? 0n, 4),
+        minStock: fromMinor(minStock, 4),
+        avgCost: showCost ? (costs.get(product.id) ?? "0.0000") : null,
+        value: showCost ? fromMinor(value) : null,
+        isLow,
+      });
+    }
+    return { rows, summary: { ...summary, totalValue: showCost ? fromMinor(totalValue) : null }, truncated: matched > rows.length };
+  }
+
+  /** Ko'chirish uchun: kompaniyaning boshqa faol omborlari. */
+  stockWarehouses(): StockWarehouse[] {
+    this.requireCashierWith("warehouse.view");
+    const device = this.requireDevice();
+    return this.store
+      .records<StockWarehouse & { isActive: boolean }>("warehouses")
+      .filter((row) => row.isActive && row.id !== device.warehouseId)
+      .map((row) => ({ id: row.id, name: row.name, code: row.code }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Ombor hujjatlari uchun mahsulot qidiruvi (sotilmaydigan xomashyo ham). */
+  stockProducts(input: { query: string }): PosProduct[] {
+    this.requireCashierWith("warehouse.view");
+    return this.toPosProducts(this.store.searchProducts(String(input.query ?? ""), 80, { saleableOnly: false }) as ProductRow[]);
+  }
+
+  stockProductByCode(input: { code: string }): PosProduct | null {
+    this.requireCashierWith("warehouse.view");
+    const row = this.store.productByCode<ProductRow>(String(input.code ?? ""), false);
+    return row ? this.toPosProducts([row])[0]! : null;
+  }
+
+  private stockLines(input: StockLineInput[] | undefined) {
+    if (!Array.isArray(input) || input.length === 0) throw new KassaError("BAD_REQUEST", "Kamida bitta mahsulot tanlang");
+    if (input.length > 500) throw new KassaError("BAD_REQUEST", "Hujjatda ko'pi bilan 500 qator");
+    const units = this.unitNames();
+    const seen = new Set<string>();
+    return input.map((line) => {
+      const product = this.store.product<StockProductRow>(String(line.productId ?? ""));
+      if (!product || !product.isActive) throw new KassaError("BAD_REQUEST", "Mahsulot topilmadi yoki faol emas");
+      if (seen.has(product.id)) throw new KassaError("BAD_REQUEST", `${product.name}: qator takrorlangan`);
+      seen.add(product.id);
+      const quantity = String(line.quantity ?? "");
+      if (!QTY.test(quantity) || toMinor(quantity, 4) <= 0n) throw new KassaError("BAD_REQUEST", `${product.name}: miqdor noto'g'ri`);
+      return { product, minor: toMinor(quantity, 4), unitName: units.get(product.baseUnitId) ?? "" };
+    });
+  }
+
+  /** Ombor hujjati: raqam, navbat, lokal yozuv va ko'rinadigan qoldiq farqi — bitta tranzaksiyada. */
+  private saveStockDocument(input: {
+    kind: StockDocumentKind;
+    cashier: CashierRecord;
+    device: DeviceInfo;
+    lines: LocalStockDocument["lines"];
+    deltas: StockDelta[];
+    value: string | null;
+    toWarehouse: { id: string; name: string } | null;
+    notes: string | null;
+    payload: (id: string, number: string) => StockWriteoffPayload | StockTransferPayload | StockCountPayload;
+    afterInsert?: () => void;
+  }): LocalStockDocument {
+    const now = new Date();
+    const id = randomUUID();
+    const doc = this.store.inTransaction(() => {
+      const spec = STOCK_DOCS[input.kind];
+      const number = `${input.device.code}-${spec.prefix}${pad6(this.store.nextSequence(`stock_${input.kind}`))}`;
+      const op = this.store.enqueue({ type: spec.op, cashierId: input.cashier.userId, payload: input.payload(id, number) }, now);
+      const document: LocalStockDocument = {
+        id,
+        number,
+        kind: input.kind,
+        cashierName: input.cashier.name,
+        createdAt: now.toISOString(),
+        toWarehouse: input.toWarehouse,
+        lines: input.lines,
+        notes: input.notes,
+        value: input.value,
+        sync: { state: "pending", error: null, conflicts: [] },
+      };
+      this.store.insertStockDocument({
+        id,
+        number,
+        opId: op.opId,
+        kind: input.kind,
+        cashierId: input.cashier.userId,
+        total: input.value,
+        createdAt: document.createdAt,
+        doc: document,
+        stockDeltas: input.deltas,
+      });
+      input.afterInsert?.();
+      return document;
+    });
+    this.engine?.schedule();
+    return doc;
+  }
+
+  /** Hisobdan chiqarish (`warehouse.manage`): qoldiq yetmasa ham yoziladi — server nomuvofiqlik sifatida belgilaydi. */
+  writeOff(input: { lines: StockLineInput[]; reason?: string | null }): LocalStockDocument {
+    const cashier = this.requireCashierWith("warehouse.view", "warehouse.manage");
+    const device = this.requireDevice();
+    const lines = this.stockLines(input.lines);
+    const reason = note(input.reason);
+    const costs = this.store.stockLevelCosts();
+    const value = lines.reduce((sum, line) => sum + costValue(costs, line.product.id, line.minor), 0n);
+    return this.saveStockDocument({
+      kind: "writeoff",
+      cashier,
+      device,
+      lines: lines.map((line) => ({ productId: line.product.id, name: line.product.name, sku: line.product.sku, unitName: line.unitName, quantity: fromMinor(line.minor, 4) })),
+      deltas: lines.map((line) => ({ productId: line.product.id, quantity: fromMinor(-line.minor, 4) })),
+      value: fromMinor(value),
+      toWarehouse: null,
+      notes: reason,
+      payload: (writeoffId, number) => ({
+        writeoffId,
+        number,
+        items: lines.map((line) => ({ productId: line.product.id, unitId: line.product.baseUnitId, quantity: fromMinor(line.minor, 4) })),
+        ...(reason ? { reason } : {}),
+      }),
+    });
+  }
+
+  /** Boshqa omborga ko'chirish (`warehouse.transfer`): qurilma omboridan chiqadi, qabul qiluvchida serverda kirim bo'ladi. */
+  transfer(input: { toWarehouseId: string; lines: StockLineInput[]; notes?: string | null }): LocalStockDocument {
+    const cashier = this.requireCashierWith("warehouse.view", "warehouse.transfer");
+    const device = this.requireDevice();
+    const target = this.stockWarehouses().find((row) => row.id === String(input.toWarehouseId ?? ""));
+    if (!target) throw new KassaError("BAD_REQUEST", "Qabul qiluvchi ombor topilmadi");
+    const lines = this.stockLines(input.lines);
+    const notes = note(input.notes);
+    const showCost = cashier.permissions.includes("warehouse.manage");
+    const costs = this.store.stockLevelCosts();
+    const value = lines.reduce((sum, line) => sum + costValue(costs, line.product.id, line.minor), 0n);
+    return this.saveStockDocument({
+      kind: "transfer",
+      cashier,
+      device,
+      lines: lines.map((line) => ({ productId: line.product.id, name: line.product.name, sku: line.product.sku, unitName: line.unitName, quantity: fromMinor(line.minor, 4) })),
+      deltas: lines.map((line) => ({ productId: line.product.id, quantity: fromMinor(-line.minor, 4) })),
+      value: showCost ? fromMinor(value) : null,
+      toWarehouse: { id: target.id, name: target.name },
+      notes,
+      payload: (transferId, number) => ({
+        transferId,
+        number,
+        toWarehouseId: target.id,
+        items: lines.map((line) => ({ productId: line.product.id, unitId: line.product.baseUnitId, quantity: fromMinor(line.minor, 4) })),
+        ...(notes ? { notes } : {}),
+      }),
+    });
+  }
+
+  stockDocuments(input: { kind?: StockDocumentKind; from?: string; to?: string; limit?: number }): LocalStockDocument[] {
+    this.requireCashierWith("warehouse.view");
+    const kind = input.kind && STOCK_KINDS.includes(input.kind) ? input.kind : undefined;
+    return this.store
+      .stockDocuments<LocalStockDocument>({ ...this.historyRange(input), ...(kind ? { kind } : {}) })
+      .map((stored) => ({ ...stored.doc, sync: documentSync(stored) }));
+  }
+
+  // Inventarizatsiya: sanash qoralamasi qurilmada saqlanadi (ilova yopilsa ham), kutilgan qoldiq har safar yangidan
+
+  private toCountDraft(raw: RawCountDraft): CountDraft {
+    const stock = this.store.stockMap(raw.lines.map((line) => line.productId));
+    const units = this.unitNames();
+    const lines: CountDraft["lines"] = [];
+    for (const line of raw.lines) {
+      const product = this.store.product<StockProductRow>(line.productId);
+      if (!product) continue;
+      const expected = stock.get(product.id) ?? 0n;
+      const counted = toMinor(line.counted, 4);
+      lines.push({
+        productId: product.id,
+        name: product.name,
+        sku: product.sku,
+        unitName: units.get(product.baseUnitId) ?? "",
+        counted: fromMinor(counted, 4),
+        expected: fromMinor(expected, 4),
+        difference: fromMinor(counted - expected, 4),
+      });
+    }
+    return { id: raw.id, startedAt: raw.startedAt, lines };
+  }
+
+  countDraft(): CountDraft | null {
+    this.requireCashierWith("warehouse.view", "warehouse.count");
+    const raw = this.store.getMeta<RawCountDraft>("countDraft");
+    return raw ? this.toCountDraft(raw) : null;
+  }
+
+  /** Sanalgan miqdor: `set` — qiymatni qo'yadi, `add` — qo'shadi (skaner har o'qishda +1). Asosiy birlikda. */
+  countSet(input: { productId: string; counted: string; mode?: "set" | "add" }): CountDraft {
+    this.requireCashierWith("warehouse.view", "warehouse.count");
+    const product = this.store.product<StockProductRow>(String(input.productId ?? ""));
+    if (!product || !product.isActive) throw new KassaError("BAD_REQUEST", "Mahsulot topilmadi yoki faol emas");
+    const value = String(input.counted ?? "");
+    const add = input.mode === "add";
+    if (!QTY.test(value) || (add && toMinor(value, 4) <= 0n)) throw new KassaError("BAD_REQUEST", `${product.name}: miqdor noto'g'ri`);
+    const raw = this.store.getMeta<RawCountDraft>("countDraft") ?? { id: randomUUID(), startedAt: new Date().toISOString(), lines: [] };
+    const index = raw.lines.findIndex((line) => line.productId === product.id);
+    if (index >= 0) {
+      const current = toMinor(raw.lines[index]!.counted, 4);
+      raw.lines[index] = { productId: product.id, counted: fromMinor(add ? current + toMinor(value, 4) : toMinor(value, 4), 4) };
+    } else {
+      if (raw.lines.length >= MAX_COUNT_LINES) throw new KassaError("BAD_REQUEST", `Inventarizatsiyada ko'pi bilan ${MAX_COUNT_LINES} mahsulot`);
+      raw.lines.unshift({ productId: product.id, counted: fromMinor(toMinor(value, 4), 4) });
+    }
+    this.store.setMeta("countDraft", raw);
+    return this.toCountDraft(raw);
+  }
+
+  countRemove(input: { productId: string }): CountDraft | null {
+    this.requireCashierWith("warehouse.view", "warehouse.count");
+    const raw = this.store.getMeta<RawCountDraft>("countDraft");
+    if (!raw) return null;
+    const next = { ...raw, lines: raw.lines.filter((line) => line.productId !== String(input.productId ?? "")) };
+    this.store.setMeta("countDraft", next);
+    return this.toCountDraft(next);
+  }
+
+  countCancel(): void {
+    this.requireCashierWith("warehouse.view", "warehouse.count");
+    this.store.deleteMeta("countDraft");
+  }
+
+  /**
+   * Inventarizatsiyani yakunlash (`warehouse.count` + `warehouse.manage`, web'dagi qo'llash kabi). Farq — qurilmadagi
+   * ko'rinadigan qoldiqqa nisbatan (darhol ko'rinadi); serverda — amal lahzasidagi server qoldig'iga nisbatan.
+   * `zeroMissing` — sanalmagan, lekin qoldig'i bor mahsulotlar 0 deb yoziladi (to'liq inventarizatsiya).
+   */
+  countComplete(input: { notes?: string | null; zeroMissing?: boolean }): LocalStockDocument {
+    const cashier = this.requireCashierWith("warehouse.view", "warehouse.count", "warehouse.manage");
+    const device = this.requireDevice();
+    const raw = this.store.getMeta<RawCountDraft>("countDraft");
+    const counted = new Map<string, bigint>();
+    for (const line of raw?.lines ?? []) {
+      if (this.store.product(line.productId)) counted.set(line.productId, toMinor(line.counted, 4));
+    }
+    const stock = this.store.stockAll();
+    if (input.zeroMissing) {
+      for (const [productId, quantity] of stock) {
+        if (quantity === 0n || counted.has(productId)) continue;
+        if (this.store.product<StockProductRow>(productId)?.isActive) counted.set(productId, 0n);
+      }
+    }
+    if (counted.size === 0) throw new KassaError("BAD_REQUEST", "Sanalgan mahsulot yo'q");
+    if (counted.size > MAX_COUNT_LINES) throw new KassaError("BAD_REQUEST", `Inventarizatsiyada ko'pi bilan ${MAX_COUNT_LINES} mahsulot`);
+
+    const notes = note(input.notes);
+    const costs = this.store.stockLevelCosts();
+    const units = this.unitNames();
+    let value = 0n;
+    const lines: LocalStockDocument["lines"] = [];
+    const deltas: StockDelta[] = [];
+    for (const [productId, quantity] of counted) {
+      const product = this.store.product<StockProductRow>(productId)!;
+      const expected = stock.get(productId) ?? 0n;
+      const difference = quantity - expected;
+      value += costValue(costs, productId, difference);
+      if (difference !== 0n) deltas.push({ productId, quantity: fromMinor(difference, 4) });
+      lines.push({
+        productId,
+        name: product.name,
+        sku: product.sku,
+        unitName: units.get(product.baseUnitId) ?? "",
+        quantity: fromMinor(quantity, 4),
+        expected: fromMinor(expected, 4),
+        difference: fromMinor(difference, 4),
+      });
+    }
+    lines.sort((a, b) => a.name.localeCompare(b.name));
+    return this.saveStockDocument({
+      kind: "count",
+      cashier,
+      device,
+      lines,
+      deltas,
+      value: fromMinor(value),
+      toWarehouse: null,
+      notes,
+      payload: (countId, number) => ({ countId, number, items: lines.map((line) => ({ productId: line.productId, countedQty: line.quantity })), ...(notes ? { notes } : {}) }),
+      afterInsert: () => this.store.deleteMeta("countDraft"),
+    });
+  }
+
+  /**
+   * Mahsulot harakati: serverdagi tarix (qurilma ombori, sahifalab) va birinchi sahifada — qurilmadagi yuborilmagan
+   * hujjatlar. Internet bo'lmasa — faqat qurilmadagilari (`offline: true`).
+   */
+  async stockMovements(input: { productId?: string; type?: string; cursor?: string }): Promise<MovementPage> {
+    this.requireCashierWith("warehouse.view");
+    if (!this.api) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
+    const productId = input.productId ? String(input.productId) : null;
+    const type = input.type && MOVEMENT_TYPES.includes(input.type) ? input.type : undefined;
+    const cursor = input.cursor ? String(input.cursor).slice(0, 500) : undefined;
+    const units = this.unitNames();
+    const names = new Map<string, { name: string; unitName: string }>();
+    const describe = (id: string) => {
+      let known = names.get(id);
+      if (!known) {
+        const product = this.store.product<ProductRow>(id);
+        known = { name: product?.name ?? "—", unitName: product ? (units.get(product.baseUnitId) ?? "") : "" };
+        names.set(id, known);
+      }
+      return known;
+    };
+    const pending: MovementRow[] =
+      cursor || type
+        ? []
+        : this.store.pendingMovements(productId, 200).map((row) => ({
+            id: `${row.opId}:${row.productId}`,
+            source: "pending",
+            type: row.type,
+            productId: row.productId,
+            productName: describe(row.productId).name,
+            unitName: describe(row.productId).unitName,
+            quantity: row.quantity,
+            documentNumber: row.number,
+            notes: null,
+            by: null,
+            occurredAt: row.createdAt,
+          }));
+    try {
+      const page = await this.api.movements({ productId: productId ?? undefined, type, cursor, limit: 100 });
+      const server: MovementRow[] = page.movements.map((row) => ({
+        id: row.id,
+        source: "server",
+        type: row.type,
+        productId: row.productId,
+        productName: row.productName,
+        unitName: row.unitName,
+        quantity: row.quantity,
+        documentNumber: row.documentNumber,
+        notes: row.notes,
+        by: row.performedByName,
+        occurredAt: row.occurredAt,
+      }));
+      return { rows: [...pending, ...server], nextCursor: page.nextCursor, offline: false };
+    } catch (error) {
+      if (error instanceof OfflineError) return { rows: pending, nextCursor: null, offline: true };
+      throw error;
+    }
+  }
+
+  /** Mahsulotning boshqa omborlardagi qoldig'i (internet kerak). */
+  async stockElsewhere(input: { productId: string }): Promise<RemoteWarehouseStock[]> {
+    this.requireCashierWith("warehouse.view");
+    if (!this.api) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
+    try {
+      return (await this.api.productStock(String(input.productId ?? ""))).stock;
+    } catch (error) {
+      if (error instanceof OfflineError) throw new KassaError("OFFLINE", "Boshqa omborlar qoldig'i uchun internet kerak");
+      throw error;
+    }
   }
 
   // ─── Qurilma sozlamalari, printer, pul qutisi ───────────────────────────
@@ -966,6 +2277,7 @@ export class KassaService {
       paperWidth: input.paperWidth === 58 ? 58 : 80,
       autoPrint: !!input.autoPrint,
       openDrawerOnCash: !!input.openDrawerOnCash,
+      labelPrinterName: input.labelPrinterName ? String(input.labelPrinterName).slice(0, 200) : null,
       drawer: {
         mode: ["none", "driver", "tcp", "share"].includes(input.drawer?.mode) ? input.drawer.mode : "none",
         ...(input.drawer?.host ? { host: String(input.drawer.host).trim() } : {}),
@@ -989,6 +2301,19 @@ export class KassaService {
     if (html.length === 0 || html.length > 2_000_000) throw new KassaError("BAD_REQUEST", "Chek hujjati noto'g'ri");
     if (!this.options.printer) throw new KassaError("UNAVAILABLE", "Printer mavjud emas");
     await this.options.printer.print(html, this.prefs());
+  }
+
+  /** Etiketkalar — etiketka printeriga (qurilma sozlamasi), o'lcham shablondan. */
+  async printLabels(input: LabelPrintInput): Promise<void> {
+    this.requireCashier();
+    const html = String(input.html ?? "");
+    if (html.length === 0 || html.length > MAX_LABELS_HTML) throw new KassaError("BAD_REQUEST", "Etiketka hujjati noto'g'ri");
+    const widthMm = Number(input.widthMm);
+    const heightMm = Number(input.heightMm);
+    const inRange = (value: number) => Number.isFinite(value) && value >= LABEL_MM.min && value <= LABEL_MM.max;
+    if (!inRange(widthMm) || !inRange(heightMm)) throw new KassaError("BAD_REQUEST", "Etiketka o'lchami noto'g'ri");
+    if (!this.options.printer) throw new KassaError("UNAVAILABLE", "Printer mavjud emas");
+    await this.options.printer.printLabels(html, { printerName: this.prefs().labelPrinterName, layout: input.layout === "a4" ? "a4" : "roll", widthMm, heightMm });
   }
 
   async openDrawer(): Promise<void> {

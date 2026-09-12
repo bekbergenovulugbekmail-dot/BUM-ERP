@@ -6,10 +6,10 @@
  *    qatorlar qurilmada `id` bo'yicha upsert qilinadi, takror kelishi zararsiz.
  *  - Faqat qurilma kompaniyasi; qoldiq — faqat qurilma ombori. Kassirlar: a'zolik yoki foydalanuvchi o'zgarsa qayta
  *    keladi (faolsizlantirilgani `active: false` bilan), ruxsatlari bilan; parol/PIN xeshlari hech qachon yuborilmaydi.
- *  - Kompaniya sozlamalari (rekvizitlar, keshbek, chek shabloni) — xeshi qurilmadagidan farq qilsagina (`config`).
+ *  - Kompaniya sozlamalari (rekvizitlar, keshbek, chek va etiketka shablonlari) — xeshi qurilmadagidan farq qilsagina (`config`).
  */
 import { createHash } from "node:crypto";
-import { and, asc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { brands, categories, products, unitConversions, units } from "../../db/schema/catalog.js";
 import { companyCurrencies } from "../../db/schema/finance.js";
@@ -18,7 +18,7 @@ import { companies, companyMembers, settings, users } from "../../db/schema/plat
 import { suppliers } from "../../db/schema/purchase.js";
 import { customers } from "../../db/schema/sales.js";
 import type { DbOrTx } from "../../db/transaction.js";
-import { RECEIPT_SETTING_KEY, parseReceiptTemplate } from "../company/print-settings.service.js";
+import { LABELS_SETTING_KEY, RECEIPT_SETTING_KEY, parseLabelSettings, parseReceiptTemplate } from "../company/print-settings.service.js";
 import { membershipPermissions } from "../company/tenant.js";
 import { getCashbackSettings } from "../sales/cashback.service.js";
 import type { DeviceContext } from "./device-auth.js";
@@ -63,15 +63,16 @@ export async function posConfig(conn: DbOrTx, companyId: string) {
     .from(companies)
     .where(eq(companies.id, companyId))
     .limit(1);
-  const [receipt] = await conn
-    .select({ value: settings.value })
+  const printRows = await conn
+    .select({ key: settings.key, value: settings.value })
     .from(settings)
-    .where(and(eq(settings.companyId, companyId), eq(settings.key, RECEIPT_SETTING_KEY)))
-    .limit(1);
+    .where(and(eq(settings.companyId, companyId), inArray(settings.key, [RECEIPT_SETTING_KEY, LABELS_SETTING_KEY])));
+  const printValue = (key: string) => printRows.find((row) => row.key === key)?.value;
   const body = {
     company: company!,
     cashback: await getCashbackSettings(conn, companyId),
-    receipt: parseReceiptTemplate(receipt?.value),
+    receipt: parseReceiptTemplate(printValue(RECEIPT_SETTING_KEY)),
+    labels: parseLabelSettings(printValue(LABELS_SETTING_KEY)),
   };
   return { hash: createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 32), ...body };
 }
@@ -205,6 +206,7 @@ export async function pullChanges(
       warehouseId: stockLevels.warehouseId,
       quantity: stockLevels.quantity,
       reservedQty: stockLevels.reservedQty,
+      avgCostPrice: stockLevels.avgCostPrice,
       cursorAt: cursorText(stockLevels.updatedAt),
     })
     .from(stockLevels)

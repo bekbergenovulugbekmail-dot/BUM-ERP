@@ -3,48 +3,45 @@ import { Button } from "@/components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
-import type { LocalReturn, ReturnableReceipt } from "../../shared/kassa-api.js";
+import type { LocalPurchaseReturn, ReturnablePurchase } from "../../shared/kassa-api.js";
 import { fromMinor, toMinor } from "../../shared/money.js";
-import type { RefundMethod } from "../../shared/sync-types.js";
-import { PAYMENT_LABELS, decimalInput, fmtMoney, fmtQty, fmtTime, trimDecimal } from "../format.ts";
+import { decimalInput, fmtMoney, fmtQty, fmtTime, num, trimDecimal } from "../format.ts";
 import { call, errorText } from "../kassa.ts";
 
 const QTY = /^\d{1,14}(\.\d{1,4})?$/;
 
-/**
- * Mahsulotni qaytarish: chek raqami (shu kassa — offline; boshqa kassa yoki web — internet bilan), qator bo'yicha
- * miqdor, pul qaytarish usuli. Pul summasi taxminiy — mijoz qarzi bo'lsa server avval qarzni yopadi.
- */
-export default function ReturnDialog({
+/** Ta'minotchiga qaytarish: xarid raqami (shu kassa — offline, boshqasi — internet bilan), miqdor, qaytgan pul. */
+export default function PurchaseReturnDialog({
   open,
-  initialNumber = "",
   baseCurrency,
-  canRefund,
+  canReturn,
+  hasShift,
   onClose,
   onDone,
 }: {
   open: boolean;
-  /** Sotuv tarixidan ochilganda — chek raqami tayyor (Topish tugmasi bilan). */
-  initialNumber?: string;
   baseCurrency: string;
-  canRefund: boolean;
+  canReturn: boolean;
+  hasShift: boolean;
   onClose: () => void;
-  onDone: (result: LocalReturn) => void;
+  onDone: (result: LocalPurchaseReturn) => void;
 }) {
-  const [number, setNumber] = useState(initialNumber);
-  const [receipt, setReceipt] = useState<ReturnableReceipt | null>(null);
+  const [number, setNumber] = useState("");
+  const [purchase, setPurchase] = useState<ReturnablePurchase | null>(null);
   const [quantities, setQuantities] = useState<Record<string, string>>({});
-  const [method, setMethod] = useState<RefundMethod>("cash");
+  const [refundAmount, setRefundAmount] = useState("");
+  const [refundMethod, setRefundMethod] = useState<"cash" | "card">("cash");
   const [reason, setReason] = useState("");
-  const [result, setResult] = useState<LocalReturn | null>(null);
+  const [result, setResult] = useState<LocalPurchaseReturn | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const reset = () => {
     setNumber("");
-    setReceipt(null);
+    setPurchase(null);
     setQuantities({});
-    setMethod("cash");
+    setRefundAmount("");
+    setRefundMethod("cash");
     setReason("");
     setResult(null);
     setError(null);
@@ -58,35 +55,33 @@ export default function ReturnDialog({
     setBusy(true);
     setError(null);
     try {
-      setReceipt(await call("pos:find-receipt", { number }));
+      setPurchase(await call("purchase:find", { number }));
       setQuantities({});
     } catch (err) {
-      setReceipt(null);
+      setPurchase(null);
       setError(errorText(err));
     } finally {
       setBusy(false);
     }
   };
 
-  const remaining = (line: ReturnableReceipt["lines"][number]) => toMinor(line.quantity, 4) - toMinor(line.returned, 4);
-  const selected = receipt
-    ? receipt.lines.filter((line) => QTY.test(quantities[line.id] ?? "") && toMinor(quantities[line.id]!, 4) > 0n)
-    : [];
-  const invalid = receipt?.lines.find((line) => {
+  const remaining = (line: ReturnablePurchase["lines"][number]) => toMinor(line.quantity, 4) - toMinor(line.returned, 4);
+  const selected = purchase ? purchase.lines.filter((line) => QTY.test(quantities[line.id] ?? "") && toMinor(quantities[line.id]!, 4) > 0n) : [];
+  const invalid = purchase?.lines.find((line) => {
     const value = quantities[line.id];
     return value && QTY.test(value) && toMinor(value, 4) > remaining(line);
   });
 
   const submit = async () => {
-    if (!receipt) return;
+    if (!purchase) return;
     setBusy(true);
     setError(null);
     try {
-      const done = await call("pos:return", {
-        number: receipt.number,
+      const done = await call("purchase:return", {
+        number: purchase.number,
         items: selected.map((line) => ({ orderItemId: line.id, quantity: quantities[line.id]! })),
-        refundMethod: method,
         reason: reason.trim() || null,
+        refund: refundAmount !== "" && num(refundAmount) > 0 ? { amount: refundAmount, method: refundMethod } : null,
       });
       setResult(done);
       onDone(done);
@@ -101,21 +96,22 @@ export default function ReturnDialog({
     <Dialog open={open} onOpenChange={(value) => !value && close()}>
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Mahsulotni qaytarish</DialogTitle>
-          <DialogDescription>Chek raqamini kiriting yoki skanerlang (masalan, K01-000123).</DialogDescription>
+          <DialogTitle>Ta'minotchiga qaytarish</DialogTitle>
+          <DialogDescription>Xarid raqamini kiriting (masalan, K01-P000012 yoki PO-2026-0031).</DialogDescription>
         </DialogHeader>
-
-        {!canRefund ? (
-          <p className="rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-700">Qaytarish uchun ruxsat kerak: sales.refund — rahbar kassir sifatida kirsin.</p>
+        {!canReturn ? (
+          <p className="rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-700">Qaytarish uchun ruxsat kerak: purchase.return</p>
         ) : result ? (
           <div className="space-y-3">
             <p className="text-lg font-semibold">Qaytarish {result.number} yozildi</p>
             <p className="text-sm text-muted-foreground">
-              Chek {result.orderNumber} · {result.lines.length} qator · {fmtMoney(result.total, baseCurrency)}
+              Xarid {result.orderNumber} · {result.supplier.name} · taxminan {fmtMoney(result.total, baseCurrency)}
             </p>
-            <p className="rounded-lg bg-emerald-500/10 px-3 py-2 font-medium text-emerald-700">
-              {PAYMENT_LABELS[result.refundMethod]}: {fmtMoney(result.refundEstimate, baseCurrency)} (taxminiy)
-            </p>
+            {result.refund && (
+              <p className="rounded-lg bg-emerald-500/10 px-3 py-2 font-medium text-emerald-700">
+                Kassaga qaytgan pul: {fmtMoney(result.refund.amount, baseCurrency)} ({result.refund.method === "cash" ? "naqd" : "karta"})
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <Button variant="secondary" onClick={reset}>
                 Yana qaytarish
@@ -134,34 +130,32 @@ export default function ReturnDialog({
                 void find();
               }}
             >
-              <Input id="return-number" autoFocus placeholder="Chek raqami" value={number} onChange={(e) => setNumber(e.target.value.toUpperCase())} />
+              <Input id="purchase-return-number" autoFocus placeholder="Xarid raqami" value={number} onChange={(e) => setNumber(e.target.value.toUpperCase())} />
               <Button type="submit" disabled={busy || number.trim() === ""}>
                 Topish
               </Button>
             </form>
-
-            {receipt && (
+            {purchase && (
               <>
                 <div className="flex flex-wrap gap-x-4 text-sm text-muted-foreground">
-                  <span className="font-medium text-foreground">{receipt.number}</span>
-                  <span>{fmtTime(receipt.createdAt)}</span>
-                  <span>{receipt.source === "local" ? "shu kassa" : "server"}</span>
-                  {receipt.customer && <span>Mijoz: {receipt.customer.name}</span>}
-                  <span>Jami {fmtMoney(receipt.total, baseCurrency)}</span>
+                  <span className="font-medium text-foreground">{purchase.number}</span>
+                  <span>{fmtTime(purchase.createdAt)}</span>
+                  <span>{purchase.supplier.name}</span>
+                  <span>{purchase.source === "local" ? "shu kassa" : "server"}</span>
                 </div>
                 <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
                   <table className="w-full text-sm">
                     <thead className="bg-muted/60 text-left text-xs text-muted-foreground">
                       <tr>
                         <th className="px-3 py-2">Mahsulot</th>
-                        <th className="px-3 py-2 text-right">Sotilgan</th>
+                        <th className="px-3 py-2 text-right">Qabul qilingan</th>
                         <th className="px-3 py-2 text-right">Qaytgan</th>
                         <th className="px-3 py-2 text-right">Summa</th>
                         <th className="w-40 px-3 py-2 text-right">Qaytariladi</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {receipt.lines.map((line) => {
+                      {purchase.lines.map((line) => {
                         const left = remaining(line);
                         return (
                           <tr key={line.id} className="border-t border-border">
@@ -170,12 +164,12 @@ export default function ReturnDialog({
                               {fmtQty(line.quantity)} {line.unitName}
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums">{fmtQty(line.returned)}</td>
-                            <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(line.lineTotal, baseCurrency)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(line.lineTotal, line.currency ?? baseCurrency)}</td>
                             <td className="px-3 py-2">
                               {left > 0n ? (
                                 <div className="flex items-center justify-end gap-1">
                                   <Input
-                                    id={`return-qty-${line.id}`}
+                                    id={`purchase-return-qty-${line.id}`}
                                     className="h-8 w-20 text-right"
                                     inputMode="decimal"
                                     value={quantities[line.id] ?? ""}
@@ -200,27 +194,28 @@ export default function ReturnDialog({
                     </tbody>
                   </table>
                 </div>
-
-                <div className="grid gap-3 sm:grid-cols-[auto_1fr]">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
-                    <Label>Pul qaytarish</Label>
+                    <Label htmlFor="purchase-refund">Ta'minotchi qaytargan pul (ixtiyoriy)</Label>
                     <div className="flex gap-1">
-                      {(["cash", "card", "balance"] as const).map((key) => (
-                        <Button
-                          key={key}
-                          size="sm"
-                          variant={method === key ? "default" : "secondary"}
-                          disabled={key === "balance" && !receipt.customer}
-                          onClick={() => setMethod(key)}
-                        >
-                          {PAYMENT_LABELS[key]}
+                      <Input
+                        id="purchase-refund"
+                        inputMode="decimal"
+                        disabled={!hasShift}
+                        placeholder={hasShift ? "0" : "Smena yopiq"}
+                        value={refundAmount}
+                        onChange={(e) => setRefundAmount(decimalInput(e.target.value))}
+                      />
+                      {(["cash", "card"] as const).map((method) => (
+                        <Button key={method} size="sm" variant={refundMethod === method ? "default" : "secondary"} onClick={() => setRefundMethod(method)}>
+                          {method === "cash" ? "Naqd" : "Karta"}
                         </Button>
                       ))}
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <Label htmlFor="return-reason">Sabab</Label>
-                    <Input id="return-reason" value={reason} maxLength={500} placeholder="Sifatsiz, xato mahsulot…" onChange={(e) => setReason(e.target.value)} />
+                    <Label htmlFor="purchase-return-reason">Sabab</Label>
+                    <Input id="purchase-return-reason" maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
                   </div>
                 </div>
                 {invalid && <p className="text-sm text-destructive">{invalid.name}: qaytarish miqdori qolganidan ko'p</p>}

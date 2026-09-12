@@ -11,6 +11,8 @@
  *   GET  /receipts/:number         (token) qaytarish uchun chek (qurilma omboridagi, qaytarilgan miqdorlar bilan)
  *   GET  /sales                    (token) sotuv tarixi: qurilma omboridagi barcha kassa cheklari (sana, kursor)
  *   GET  /purchases/:number        (token) ta'minotchiga qaytarish uchun xarid (qabul va qaytarilgan miqdorlar)
+ *   GET  /movements                (token) mahsulot harakati — qurilma ombori (?productId, type, kursor)
+ *   GET  /stock/:productId         (token) mahsulot qoldig'i kompaniyaning faol omborlarida
  *
  * /api/pos/devices — web (sessiya, `pos.devices.manage`):
  *   GET  /                         qurilmalar ro'yxati
@@ -23,6 +25,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { badRequest } from "@bum/shared";
 import { db } from "../../db/client.js";
+import { stockMovementType } from "../../db/schema/inventory.js";
 import { posDevices } from "../../db/schema/pos.js";
 import { withTransaction } from "../../db/transaction.js";
 import { requestMeta, writeAuditLog } from "../../shared/audit.js";
@@ -33,7 +36,7 @@ import { companyCurrency } from "../finance/accounts.service.js";
 import { listConflicts, resolveConflict } from "./conflicts.service.js";
 import { cashierTenant, deviceOf, requireDevice } from "./device-auth.js";
 import { deviceWarehouses, listDevices, registerDevice, setupTenant, updateDevice } from "./devices.service.js";
-import { findDevicePurchase, findDeviceReceipt, listDeviceSales } from "./receipts.service.js";
+import { deviceProductStock, findDevicePurchase, findDeviceReceipt, listDeviceMovements, listDeviceSales } from "./receipts.service.js";
 import { DEFAULT_PULL_LIMIT, PULL_ENTITIES, pullChanges } from "./sync-pull.service.js";
 import { MAX_OPS_PER_PUSH, pushOperations } from "./sync-push.service.js";
 
@@ -69,6 +72,13 @@ const salesQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   cursor: z.string().max(500).optional(),
 });
+const movementsQuery = z.object({
+  productId: z.uuid().optional(),
+  type: z.enum(stockMovementType.enumValues).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+  cursor: z.string().max(500).optional(),
+});
+const productParams = z.object({ productId: z.uuid() });
 const deviceParams = z.object({ deviceId: z.uuid() });
 const conflictParams = z.object({ conflictId: z.uuid() });
 const conflictsQuery = z.object({
@@ -193,6 +203,16 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
     scoped.get("/purchases/:number", async (req) => {
       const { number } = receiptParams.parse(req.params);
       return { purchase: await findDevicePurchase(db, deviceOf(req), number) };
+    });
+
+    scoped.get("/movements", async (req) => {
+      const query = movementsQuery.parse(req.query);
+      return listDeviceMovements(db, deviceOf(req), query);
+    });
+
+    scoped.get("/stock/:productId", async (req) => {
+      const { productId } = productParams.parse(req.params);
+      return { stock: await deviceProductStock(db, deviceOf(req), productId) };
     });
   });
 }

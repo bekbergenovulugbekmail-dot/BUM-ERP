@@ -42,6 +42,37 @@ function fakeApi() {
         );
         return json(200, { results });
       }
+      case "/api/pos-device/movements":
+        if (!authed) return json(401, { code: "UNAUTHENTICATED", message: "token" });
+        return json(200, {
+          movements: [
+            {
+              id: "m1",
+              type: "transfer_out",
+              productId: url.searchParams.get("productId") ?? "p1",
+              productName: "Pepsi",
+              productSku: "PEPSI",
+              unitName: "dona",
+              quantity: "-4.0000",
+              costPrice: "3000.0000",
+              referenceType: "stock_transfer",
+              referenceId: null,
+              documentNumber: "K01-T000001",
+              notes: null,
+              performedByName: "Ali",
+              occurredAt: "2026-09-12T10:00:00.000Z",
+            },
+          ],
+          nextCursor: "c1",
+        });
+      case "/api/pos-device/stock/p2":
+        if (!authed) return json(401, { code: "UNAUTHENTICATED", message: "token" });
+        return json(200, {
+          stock: [
+            { warehouseId: "w1", warehouseName: "Asosiy", warehouseCode: "MAIN", quantity: "5.0000", reservedQty: "0.0000" },
+            { warehouseId: "w2", warehouseName: "Filial", warehouseCode: "F1", quantity: "4.0000", reservedQty: "0.0000" },
+          ],
+        });
       default:
         return json(404, { code: "NOT_FOUND", message: url.pathname });
     }
@@ -210,5 +241,348 @@ describe("Kassa xizmati (main jarayon)", () => {
     expect(kassa.unsynced()).toEqual([]);
     expect(kassa.sales({}).find((row) => row.id === second.id)!.sync.state).toBe("discarded");
     expect(kassa.products({ query: "cola" })[0]!.stock).toBe("5.0000");
+  });
+
+  it("kassa bo'limi: kirim-chiqim, xarajat ruxsati, mijoz to'lovi (qarzdan ortig'i balansga), X/Z-hisobot, tarix, navbat tartibi", async () => {
+    const api = fakeApi();
+    const kassa = service(api);
+    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
+    store.saveCashier({ ...cashier, permissions: ["pos.use"] });
+    store.applyPull(
+      pullResponse({
+        units: { rows: [{ id: "unit-d", name: "Dona", shortName: "dona", isBase: true, isActive: true }] },
+        products: { rows: [product("p1", "Cola")] },
+        stockLevels: { rows: [{ id: "s1", productId: "p1", warehouseId: "w1", quantity: "50.0000", reservedQty: "0.0000" }] },
+        customers: {
+          rows: [
+            {
+              id: "c1",
+              name: "Vali",
+              code: "C-0001",
+              phone: "+998901234567",
+              discountPercent: "0.00",
+              creditLimit: "0.00",
+              totalDebt: "15000.00",
+              balance: "0.00",
+              cashbackBalance: "0.00",
+              isActive: true,
+            },
+          ],
+        },
+      }),
+    );
+
+    api.state.online = false;
+    kassa.openShift({ openingCash: "10000" });
+    const sale = (quantity: string, paymentMethod: "cash" | "card") =>
+      kassa.completeSale({
+        customerId: null,
+        lines: [{ productId: "p1", unitId: "unit-d", quantity }],
+        saleCurrencies: [],
+        paymentMethod,
+        amountPaid: null,
+        cashbackAmount: null,
+        balanceAmount: null,
+        changeToBalance: false,
+        currencyPayments: [],
+      });
+    sale("3", "cash");
+    sale("1", "card");
+
+    expect(() => kassa.cashMovement({ kind: "expense", amount: "1000" })).toThrow("pos.cash.expense");
+    expect(() => kassa.cashMovement({ kind: "collection", amount: "0" })).toThrow("Summa noto'g'ri");
+    kassa.cashMovement({ kind: "collection", amount: "25000", notes: "Seyfga" });
+    kassa.cashMovement({ kind: "change_fund", amount: "5000" });
+    store.saveCashier({ ...cashier, permissions: ["pos.use", "pos.cash.expense"] });
+    expect(kassa.cashMovement({ kind: "expense", amount: "2000", category: "suv" })).toMatchObject({ type: "out", category: "suv", sync: { state: "pending" } });
+    expect(kassa.cashMovements()).toHaveLength(3);
+
+    // Qarz 15000, to'lov 20000 → qarz 0, balans 5000 (server ham ortig'ini balansga yozadi)
+    expect(kassa.customerPayment({ customerId: "c1", purpose: "debt", amount: "20000", method: "cash" }).customerAfter).toEqual({ totalDebt: "0.00", balance: "5000.00" });
+    expect(kassa.customers({ query: "vali" })[0]).toMatchObject({ totalDebt: "0.00", balance: "5000.00" });
+    expect(kassa.customerPayments()).toHaveLength(1);
+
+    // Naqd: 10000 + 30000 + 20000 − 25000 + 5000 − 2000 = 38000
+    const report = kassa.shiftReport({});
+    expect(report).toMatchObject({ receipts: 2, salesTotal: "40000.00", cashIn: "5000.00", cashOut: "27000.00", expectedCash: "38000.00", difference: null, unsynced: 6 });
+    expect(report.byMethod).toEqual(
+      expect.arrayContaining([
+        { key: "cash", label: "Naqd", amount: "30000.00" },
+        { key: "card", label: "Karta", amount: "10000.00" },
+      ]),
+    );
+    expect(report.customerPayments).toMatchObject({ count: 1, debtCash: "20000.00" });
+    expect(report.cashMovements).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "collection", count: 1, amount: "25000.00" })]));
+    expect(kassa.status().shift!.totals).toMatchObject({ cash: "50000.00", card: "10000.00", cashIn: "5000.00", cashOut: "27000.00" });
+
+    // Smena yopildi: Z-hisobot tarixda, farq sanalgan naqd bilan
+    kassa.closeShift({ closingCash: "37500" });
+    const [closed] = kassa.shiftHistory({});
+    expect(closed).toMatchObject({ receipts: 2, expectedCash: "38000.00", difference: "-500.00", shift: { closingCash: "37500.00" } });
+    expect(kassa.shiftReport({ shiftId: closed!.shift.id }).shift.closedAt).not.toBeNull();
+    expect(() => kassa.shiftReport({})).toThrow("Ochiq smena yo'q");
+
+    // Tarix: sana oralig'i; server tarixi internet talab qiladi
+    expect(kassa.historySales({ from: new Date(Date.now() - 3_600_000).toISOString() })).toHaveLength(2);
+    expect(kassa.historySales({ from: new Date(Date.now() + 3_600_000).toISOString() })).toEqual([]);
+    expect(() => kassa.historySales({ from: "kecha" })).toThrow("Sana noto'g'ri");
+    await expect(kassa.historyServer({})).rejects.toMatchObject({ code: "OFFLINE" });
+
+    api.state.online = true;
+    expect((await kassa.syncNow()).sync).toMatchObject({ state: "idle", pending: 0 });
+    expect(api.state.pushed.map((op) => op.type)).toEqual([
+      "shift.open",
+      "sale.complete",
+      "sale.complete",
+      "cash.movement",
+      "cash.movement",
+      "cash.movement",
+      "customer.payment",
+      "shift.close",
+    ]);
+  });
+
+  it("xarid bo'limi: ta'minotchi (offline), xarid va qoldiq, darhol to'lov smenadan, qaytarish va qaytgan pul, ta'minotchiga to'lov, X-hisobot", async () => {
+    const api = fakeApi();
+    const kassa = service(api);
+    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
+    store.saveCashier({ ...cashier, permissions: ["pos.use"] });
+    store.applyPull(
+      pullResponse({
+        units: { rows: [{ id: "unit-d", name: "Dona", shortName: "dona", isBase: true, isActive: true }] },
+        products: { rows: [product("p1", "Cola", { isPurchaseable: true, purchasePrice: "7000.0000", purchaseCurrency: null })] },
+        stockLevels: { rows: [{ id: "s1", productId: "p1", warehouseId: "w1", quantity: "2.0000", reservedQty: "0.0000" }] },
+        currencies: { rows: [{ id: "cur1", code: "USD", rate: "12500.0000", rateDate: "2026-09-12", isActive: true }] },
+      }),
+    );
+
+    api.state.online = false;
+    kassa.openShift({ openingCash: "100000" });
+    expect(() => kassa.createSupplier({ name: "Olma" })).toThrow("purchase.create");
+    store.saveCashier({ ...cashier, permissions: ["pos.use", "purchase.create", "warehouse.receive"] });
+    const supplier = kassa.createSupplier({ name: "Olma savdo", phone: "+998901112233" });
+    expect(kassa.suppliers({ query: "olma" })[0]).toMatchObject({ id: supplier.id, pending: true, totalDebt: "0.00" });
+
+    const input = (payment: { amount: string; method: "cash" | "card" } | null) => ({
+      supplierId: supplier.id,
+      lines: [
+        { productId: "p1", unitId: "unit-d", quantity: "10", unitPrice: "7000", salesPrice: "9000" },
+        { productId: "p1", unitId: "unit-d", quantity: "1", unitPrice: "2", currency: "USD" },
+      ],
+      notes: "Faktura 15",
+      payment,
+    });
+    expect(() => kassa.completePurchase(input({ amount: "50000", method: "cash" }))).toThrow("purchase.approve");
+    store.saveCashier({ ...cashier, permissions: ["pos.use", "purchase.create", "warehouse.receive", "purchase.approve", "purchase.return"] });
+    expect(() => kassa.completePurchase(input({ amount: "80000", method: "cash" }))).toThrow("UZS dagi qatorlar summasidan oshmasin");
+
+    // 10 × 7000 + 2 USD × 12500 = 95000
+    const purchase = kassa.completePurchase(input({ amount: "50000", method: "cash" }));
+    expect(purchase).toMatchObject({ number: "K01-P000001", total: "95000.00", payment: { amount: "50000.00", method: "cash" }, sync: { state: "pending" } });
+    expect(purchase.currencyTotals).toEqual([
+      { currency: "UZS", total: "70000.00" },
+      { currency: "USD", total: "2.00" },
+    ]);
+    expect(kassa.purchaseProducts({ query: "cola" })[0]).toMatchObject({ stock: "13.0000", purchasePrice: "7000.0000" });
+    expect(kassa.suppliers({ query: "olma" })[0]!.totalDebt).toBe("45000.00");
+
+    // Qaytarish: 2 dona, ta'minotchi 5000 naqd qaytardi
+    const returned = await kassa.returnPurchase({
+      number: "k01-p000001",
+      items: [{ orderItemId: purchase.lines[0]!.id, quantity: "2" }],
+      refund: { amount: "5000", method: "cash" },
+      reason: "Siniq",
+    });
+    expect(returned).toMatchObject({ number: "K01-R000001", total: "14000.00", refund: { amount: "5000.00", method: "cash" } });
+    expect((await kassa.findPurchase({ number: "K01-P000001" })).lines[0]).toMatchObject({ quantity: "10", returned: "2.0000" });
+    await expect(
+      kassa.returnPurchase({ number: "K01-P000001", items: [{ orderItemId: purchase.lines[0]!.id, quantity: "9" }], refund: null }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(kassa.purchaseProducts({ query: "cola" })[0]!.stock).toBe("11.0000");
+    expect(kassa.suppliers({ query: "olma" })[0]!.totalDebt).toBe("36000.00");
+
+    expect(kassa.supplierPayment({ supplierId: supplier.id, amount: "6000", method: "cash" }).supplierDebtAfter).toBe("30000.00");
+
+    // Kutilgan naqd: 100000 − 50000 + 5000 − 6000 = 49000
+    expect(kassa.shiftReport({})).toMatchObject({
+      expectedCash: "49000.00",
+      suppliers: { payments: 2, paidCash: "56000.00", paidCard: "0.00", refunds: 1, refundCash: "5000.00" },
+    });
+    expect(kassa.purchases({})).toHaveLength(1);
+    expect(kassa.purchaseReturns({})).toHaveLength(1);
+
+    api.state.online = true;
+    await kassa.syncNow();
+    expect(api.state.pushed.map((op) => op.type)).toEqual(["shift.open", "supplier.create", "purchase.complete", "purchase.return", "supplier.payment"]);
+    expect(api.state.pushed[2]!.payload).toMatchObject({
+      number: "K01-P000001",
+      supplierId: supplier.id,
+      rates: { USD: "12500.0000" },
+      payment: { amount: "50000.00", method: "cash" },
+    });
+  });
+
+  it("etiketka: kontekstda shablonlar, mahsulotlar ID bo'yicha, etiketka printeri sozlamasi, o'lcham tekshiruvi va chop etish", async () => {
+    const api = fakeApi();
+    const kassa = service(api);
+    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    api.state.online = false;
+    store.applyPull(pullResponse({ products: { rows: [product("p1", "Cola"), product("p2", "Pepsi", { isActive: false })] } }));
+
+    // Sozlama kelmagan — null (renderer standart shablonni oladi); pull'dagi config bilan — shablonlar
+    expect(kassa.posContext().labels).toBeNull();
+    store.setMeta("config", {
+      hash: "h1",
+      company: { name: "Bonnu", address: null, phone: null, taxId: null, currency: "UZS" },
+      cashback: { enabled: false, accrualBase: "paid", maxUsagePercent: 0, tiers: [], categoryRates: [] },
+      receipt: {},
+      labels: { defaultTemplateId: "t1", templates: [{ id: "t1", name: "58×40", layout: "roll", widthMm: 58, heightMm: 40 }] },
+    });
+    expect(kassa.posContext().labels).toMatchObject({ defaultTemplateId: "t1" });
+
+    // Faol emas va noma'lum — tashlab ketiladi, takror — bir marta
+    expect(kassa.productsByIds({ ids: ["p2", "p1", "p1", "missing"] }).map((row) => row.id)).toEqual(["p1"]);
+    expect(kassa.savePrefs({ ...kassa.prefs(), labelPrinterName: "Xprinter 365B" }).labelPrinterName).toBe("Xprinter 365B");
+    await expect(kassa.printLabels({ html: "<p>x</p>", layout: "roll", widthMm: 5, heightMm: 40 })).rejects.toThrow("o'lchami");
+    await expect(kassa.printLabels({ html: "<p>x</p>", layout: "roll", widthMm: 58, heightMm: 40 })).rejects.toMatchObject({ code: "UNAVAILABLE" });
+
+    const printed: unknown[] = [];
+    const withPrinter = new KassaService(store, vault, {
+      appVersion: "0.1.0",
+      platform: "win32",
+      fetchImpl: api.fetchImpl,
+      printer: {
+        list: async () => [],
+        print: async () => undefined,
+        printLabels: async (_html, options) => {
+          printed.push(options);
+        },
+      },
+    });
+    await withPrinter.unlock({ userId: "u1", pin: "1234" });
+    await withPrinter.printLabels({ html: "<p>x</p>", layout: "a4", widthMm: 58, heightMm: 40 });
+    expect(printed).toEqual([{ printerName: "Xprinter 365B", layout: "a4", widthMm: 58, heightMm: 40 }]);
+  });
+
+  it("ombor bo'limi: qoldiqlar va qiymat, hisobdan chiqarish, ko'chirish, inventarizatsiya qoralamasi va farq, harakatlar, navbat", async () => {
+    const api = fakeApi();
+    const kassa = service(api);
+    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
+    store.saveCashier({ ...cashier, permissions: ["pos.use"] });
+    api.state.online = false;
+    store.applyPull(
+      pullResponse({
+        units: { rows: [{ id: "unit-d", name: "Dona", shortName: "dona", isBase: true, isActive: true }] },
+        products: { rows: [product("p1", "Cola", { minStock: "5.0000" }), product("p2", "Pepsi", { isSaleable: false }), product("p3", "Fanta")] },
+        stockLevels: {
+          rows: [
+            { id: "s1", productId: "p1", warehouseId: "w1", quantity: "4.0000", reservedQty: "0.0000", avgCostPrice: "7000.0000" },
+            { id: "s2", productId: "p2", warehouseId: "w1", quantity: "10.0000", reservedQty: "0.0000", avgCostPrice: "3000.0000" },
+          ],
+        },
+        warehouses: {
+          rows: [
+            { id: "w1", name: "Asosiy", code: "MAIN", isDefault: true, isActive: true },
+            { id: "w2", name: "Filial", code: "F1", isDefault: false, isActive: true },
+            { id: "w3", name: "Yopilgan", code: "X", isDefault: false, isActive: false },
+          ],
+        },
+      }),
+    );
+
+    // Ruxsatsiz — yo'q; ko'rish ruxsati bilan tannarx ko'rinmaydi
+    expect(() => kassa.stockList({ query: "" })).toThrow("warehouse.view");
+    store.saveCashier({ ...cashier, permissions: ["pos.use", "warehouse.view"] });
+    const list = kassa.stockList({ query: "" });
+    expect(list.summary).toEqual({ products: 3, positive: 2, low: 1, zero: 1, negative: 0, totalValue: null });
+    expect(list.rows.find((row) => row.productId === "p1")).toMatchObject({ quantity: "4.0000", isLow: true, avgCost: null, value: null });
+    expect(kassa.stockList({ query: "", filter: "zero" }).rows.map((row) => row.productId)).toEqual(["p3"]);
+    expect(kassa.stockWarehouses()).toEqual([{ id: "w2", name: "Filial", code: "F1" }]);
+    expect(kassa.stockProductByCode({ code: "PEPSI" })?.id).toBe("p2");
+    expect(() => kassa.writeOff({ lines: [{ productId: "p1", quantity: "1" }], reason: "Singan" })).toThrow("warehouse.manage");
+
+    store.saveCashier({ ...cashier, permissions: ["pos.use", "warehouse.view", "warehouse.manage", "warehouse.transfer", "warehouse.count"] });
+    // 4 × 7000 + 10 × 3000
+    expect(kassa.stockList({ query: "" }).summary.totalValue).toBe("58000.00");
+
+    // Hisobdan chiqarish qoldiqdan ko'p — yoziladi (qoldiq manfiy ko'rinadi)
+    const writeoff = kassa.writeOff({ lines: [{ productId: "p1", quantity: "6" }], reason: "Singan" });
+    expect(writeoff).toMatchObject({ number: "K01-W000001", kind: "writeoff", value: "42000.00", notes: "Singan", sync: { state: "pending" } });
+    expect(kassa.stockList({ query: "cola" }).rows[0]).toMatchObject({ quantity: "-2.0000", pending: "-6.0000" });
+
+    expect(() => kassa.transfer({ toWarehouseId: "w3", lines: [{ productId: "p2", quantity: "1" }] })).toThrow("Qabul qiluvchi ombor topilmadi");
+    expect(() =>
+      kassa.transfer({
+        toWarehouseId: "w2",
+        lines: [
+          { productId: "p2", quantity: "1" },
+          { productId: "p2", quantity: "2" },
+        ],
+      }),
+    ).toThrow("takrorlangan");
+    const transfer = kassa.transfer({ toWarehouseId: "w2", lines: [{ productId: "p2", quantity: "4" }], notes: "Filialga" });
+    expect(transfer).toMatchObject({ number: "K01-T000001", toWarehouse: { id: "w2", name: "Filial" }, value: "12000.00" });
+
+    // Inventarizatsiya: skaner +1, qo'lda qiymat, olib tashlash; kutilgan qoldiq — ko'rinadigan
+    kassa.countSet({ productId: "p2", counted: "1", mode: "add" });
+    kassa.countSet({ productId: "p2", counted: "1", mode: "add" });
+    expect(kassa.countDraft()!.lines).toEqual([expect.objectContaining({ productId: "p2", counted: "2.0000", expected: "6.0000", difference: "-4.0000" })]);
+    kassa.countSet({ productId: "p3", counted: "3", mode: "set" });
+    expect(kassa.countRemove({ productId: "p3" })!.lines).toHaveLength(1);
+    kassa.countSet({ productId: "p2", counted: "5", mode: "set" });
+    expect(() => kassa.countSet({ productId: "p2", counted: "0", mode: "add" })).toThrow("miqdor noto'g'ri");
+
+    // To'liq inventarizatsiya: sanalmagan Cola (−2) → 0; qiymat: +2 × 7000 − 1 × 3000
+    const count = kassa.countComplete({ notes: "Oylik", zeroMissing: true });
+    expect(count).toMatchObject({ number: "K01-I000001", kind: "count", value: "11000.00", notes: "Oylik" });
+    expect(count.lines).toEqual([
+      expect.objectContaining({ productId: "p1", quantity: "0.0000", expected: "-2.0000", difference: "2.0000" }),
+      expect.objectContaining({ productId: "p2", quantity: "5.0000", expected: "6.0000", difference: "-1.0000" }),
+    ]);
+    expect(kassa.countDraft()).toBeNull();
+    expect(() => kassa.countComplete({})).toThrow("Sanalgan mahsulot yo'q");
+    expect(kassa.stockList({ query: "", filter: "positive" }).rows.map((row) => [row.productId, row.quantity])).toEqual([["p2", "5.0000"]]);
+    expect(kassa.stockDocuments({ kind: "count" }).map((doc) => doc.number)).toEqual(["K01-I000001"]);
+    expect(kassa.stockDocuments({}).map((doc) => doc.number).sort()).toEqual(["K01-I000001", "K01-T000001", "K01-W000001"]);
+    expect(kassa.unsynced().map((op) => [op.type, op.number, op.label])).toEqual([
+      ["stock.writeoff", "K01-W000001", "Singan"],
+      ["stock.transfer", "K01-T000001", "→ Filial"],
+      ["stock.count", "K01-I000001", "2 mahsulot"],
+    ]);
+
+    // Harakatlar offline — faqat qurilmadagi yuborilmagan hujjatlar; boshqa omborlar — internet bilan
+    const offline = await kassa.stockMovements({ productId: "p2" });
+    expect(offline.offline).toBe(true);
+    expect(offline.rows.map((row) => [row.source, row.type, row.quantity, row.documentNumber])).toEqual([
+      ["pending", "stock.count", "-1.0000", "K01-I000001"],
+      ["pending", "stock.transfer", "-4.0000", "K01-T000001"],
+    ]);
+    await expect(kassa.stockElsewhere({ productId: "p2" })).rejects.toMatchObject({ code: "OFFLINE" });
+
+    api.state.online = true;
+    await kassa.syncNow();
+    expect(api.state.pushed.map((op) => op.type)).toEqual(["stock.writeoff", "stock.transfer", "stock.count"]);
+    expect(api.state.pushed[0]!.payload).toMatchObject({ number: "K01-W000001", reason: "Singan", items: [{ productId: "p1", unitId: "unit-d", quantity: "6.0000" }] });
+    expect(api.state.pushed[1]!.payload).toMatchObject({ toWarehouseId: "w2", notes: "Filialga", items: [{ productId: "p2", quantity: "4.0000" }] });
+    expect(api.state.pushed[2]!.payload).toMatchObject({
+      number: "K01-I000001",
+      notes: "Oylik",
+      items: [
+        { productId: "p1", countedQty: "0.0000" },
+        { productId: "p2", countedQty: "5.0000" },
+      ],
+    });
+    expect(kassa.stockDocuments({ kind: "writeoff" })[0]!.sync.state).toBe("applied");
+
+    const online = await kassa.stockMovements({ productId: "p2" });
+    expect(online).toMatchObject({ offline: false, nextCursor: "c1", rows: [expect.objectContaining({ source: "server", type: "transfer_out", by: "Ali" })] });
+    expect((await kassa.stockElsewhere({ productId: "p2" })).map((row) => row.warehouseCode)).toEqual(["MAIN", "F1"]);
   });
 });

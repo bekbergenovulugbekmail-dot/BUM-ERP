@@ -6,6 +6,8 @@
  *  - Tashqi havolalar va yangi oynalar bloklanadi.
  */
 import { app, BrowserWindow, ipcMain, Menu, safeStorage, shell } from "electron";
+import { randomUUID } from "node:crypto";
+import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { KassaChannel, KassaChannels } from "../shared/kassa-api.js";
@@ -64,6 +66,31 @@ const receiptPrinter: ReceiptPrinter = {
       win.destroy();
     }
   },
+  async printLabels(html, options) {
+    // Ko'p etiketka (shtrix-kod SVG) data: URL chegarasidan katta bo'lishi mumkin — vaqtinchalik fayl orqali
+    const file = path.join(app.getPath("temp"), `bum-labels-${randomUUID()}.html`);
+    const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false } });
+    try {
+      await writeFile(file, html, "utf8");
+      await win.loadFile(file);
+      await new Promise<void>((resolve, reject) => {
+        win.webContents.print(
+          {
+            silent: true,
+            printBackground: true,
+            ...(options.printerName ? { deviceName: options.printerName } : {}),
+            ...(options.layout === "roll"
+              ? { margins: { marginType: "none" as const }, pageSize: { width: Math.round(options.widthMm * 1000), height: Math.round(options.heightMm * 1000) } }
+              : { pageSize: "A4" as const }),
+          },
+          (success, reason) => (success ? resolve() : reject(new Error(reason || "Chop etilmadi"))),
+        );
+      });
+    } finally {
+      win.destroy();
+      await rm(file, { force: true });
+    }
+  },
 };
 
 function createWindow() {
@@ -115,6 +142,7 @@ function registerIpc(service: KassaService) {
     "pos:context": () => service.posContext(),
     "pos:products": (input) => service.products(input),
     "pos:product-by-code": (input) => service.productByCode(input),
+    "pos:products-by-ids": (input) => service.productsByIds(input),
     "pos:customers": (input) => service.customers(input),
     "pos:customer-create": (input) => service.createCustomer(input),
     "pos:complete-sale": (input) => service.completeSale(input),
@@ -125,10 +153,44 @@ function registerIpc(service: KassaService) {
     "pos:held-delete": (input) => service.deleteHeld(input),
     "pos:find-receipt": (input) => service.findReceipt(input),
     "pos:return": (input) => service.returnItems(input),
+    "cash:report": (input) => service.shiftReport(input),
+    "cash:movement": (input) => service.cashMovement(input),
+    "cash:movements": () => service.cashMovements(),
+    "cash:customer-payment": (input) => service.customerPayment(input),
+    "cash:customer-payments": () => service.customerPayments(),
+    "cash:shifts": (input) => service.shiftHistory(input),
+    "history:sales": (input) => service.historySales(input),
+    "history:returns": (input) => service.historyReturns(input),
+    "history:server": (input) => service.historyServer(input),
+    "purchase:suppliers": (input) => service.suppliers(input),
+    "purchase:supplier-create": (input) => service.createSupplier(input),
+    "purchase:products": (input) => service.purchaseProducts(input),
+    "purchase:product-by-code": (input) => service.purchaseProductByCode(input),
+    "purchase:complete": (input) => service.completePurchase(input),
+    "purchase:list": (input) => service.purchases(input),
+    "purchase:find": (input) => service.findPurchase(input),
+    "purchase:return": (input) => service.returnPurchase(input),
+    "purchase:returns": (input) => service.purchaseReturns(input),
+    "purchase:supplier-payment": (input) => service.supplierPayment(input),
+    "stock:list": (input) => service.stockList(input),
+    "stock:warehouses": () => service.stockWarehouses(),
+    "stock:products": (input) => service.stockProducts(input),
+    "stock:product-by-code": (input) => service.stockProductByCode(input),
+    "stock:writeoff": (input) => service.writeOff(input),
+    "stock:transfer": (input) => service.transfer(input),
+    "stock:documents": (input) => service.stockDocuments(input),
+    "stock:movements": (input) => service.stockMovements(input),
+    "stock:elsewhere": (input) => service.stockElsewhere(input),
+    "count:draft": () => service.countDraft(),
+    "count:set": (input) => service.countSet(input),
+    "count:remove": (input) => service.countRemove(input),
+    "count:cancel": () => service.countCancel(),
+    "count:complete": (input) => service.countComplete(input),
     "device:prefs": () => service.prefs(),
     "device:save-prefs": (input) => service.savePrefs(input),
     "device:printers": () => service.printers(),
     "device:print": (input) => service.print(input),
+    "device:print-labels": (input) => service.printLabels(input),
     "device:open-drawer": () => service.openDrawer(),
   };
   for (const [channel, handler] of Object.entries(handlers) as [KassaChannel, (input: unknown) => unknown][]) {

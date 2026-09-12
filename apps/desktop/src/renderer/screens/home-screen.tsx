@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import type { AppStatus, RejectedOperation } from "../../shared/kassa-api.js";
 import type { SyncState } from "../../shared/sync-types.js";
+import type { View } from "../app.tsx";
 import { call, errorText } from "../kassa.ts";
 
 const SYNC_LABEL: Record<SyncState, { text: string; tone: string }> = {
@@ -17,7 +18,15 @@ const SYNC_LABEL: Record<SyncState, { text: string; tone: string }> = {
 const SECTIONS = ["Kassa (POS)", "Sotuv tarixi", "Kassa hisobi", "Xarid", "Ombor", "Mahsulot harakati", "Inventarizatsiya", "Etiketka", "Ma'lumotlar", "Analitika", "Sozlamalar"];
 
 /** Bosh ekran: qurilma, kassir, sinxron holati va navbat, smena; bo'limlar (Kassa — ishlaydi, qolganlari keyingi bosqichlarda). */
-export default function HomeScreen({ status, onChange, onOpenPos }: { status: AppStatus; onChange: (status: AppStatus) => void; onOpenPos: () => void }) {
+export default function HomeScreen({
+  status,
+  onChange,
+  onOpen,
+}: {
+  status: AppStatus;
+  onChange: (status: AppStatus) => void;
+  onOpen: (view: Exclude<View, "home">) => void;
+}) {
   const [cash, setCash] = useState("");
   const [rejected, setRejected] = useState<RejectedOperation[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -111,11 +120,29 @@ export default function HomeScreen({ status, onChange, onOpenPos }: { status: Ap
         </section>
 
         <section className="grid content-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <button type="button" onClick={onOpenPos} className="rounded-2xl border border-primary/40 bg-primary/5 p-5 text-left transition-colors hover:bg-primary/10">
-            <p className="font-medium">{SECTIONS[0]}</p>
-            <p className="text-xs text-muted-foreground">Sotuv, qaytarish, kechiktirilgan cheklar — internet bo'lmasa ham</p>
-          </button>
-          {SECTIONS.slice(1).map((title) => (
+          {(
+            [
+              ["pos", SECTIONS[0], "Sotuv, qaytarish, kechiktirilgan cheklar — internet bo'lmasa ham"],
+              ["history", SECTIONS[1], "Shu kassa cheklari va qaytarishlari, barcha kassalar (server)"],
+              ["kassa", SECTIONS[2], "X/Z-hisobot, inkassatsiya, xarajat, mijoz to'lovlari"],
+              ["purchase", SECTIONS[3], "Ta'minotchidan tovar qabuli, qaytarish, to'lov — offline ham"],
+              ["warehouse", SECTIONS[4], "Qoldiqlar, hisobdan chiqarish, boshqa omborga ko'chirish — offline ham"],
+              ["movements", SECTIONS[5], "Kirim-chiqim tarixi: barcha kassalar va yuborilmagan hujjatlar"],
+              ["count", SECTIONS[6], "Skaner bilan sanash, farq va qoldiqni tenglashtirish — offline ham"],
+              ["labels", SECTIONS[7], "Shtrix-kod/QR etiketkalar, bugungi xaridlardan — etiketka printeriga"],
+            ] as const
+          ).map(([view, title, hint]) => (
+            <button
+              key={view}
+              type="button"
+              onClick={() => onOpen(view)}
+              className="rounded-2xl border border-primary/40 bg-primary/5 p-5 text-left transition-colors hover:bg-primary/10"
+            >
+              <p className="font-medium">{title}</p>
+              <p className="text-xs text-muted-foreground">{hint}</p>
+            </button>
+          ))}
+          {SECTIONS.slice(8).map((title) => (
             <div key={title} className="rounded-2xl border border-dashed border-border bg-card/60 p-5">
               <p className="font-medium">{title}</p>
               <p className="text-xs text-muted-foreground">Keyingi bosqichda</p>

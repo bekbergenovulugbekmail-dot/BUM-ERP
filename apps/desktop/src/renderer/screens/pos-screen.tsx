@@ -87,7 +87,17 @@ const cartInput = (cart: CartLine[]): CartLineInput[] =>
  * ombor, sotuv valyutasi, sinxron bo'lmagan cheklar, qaytarish, kechiktirilgan cheklar, pul qutisi, smena, printer.
  * Hisob main jarayondagi bilan bir xil (`computeSale`) — ekranda ko'rilgan summa aynan chekka yoziladi.
  */
-export default function PosScreen({ status, onStatus, onExit }: { status: AppStatus; onStatus: (status: AppStatus) => void; onExit: () => void }) {
+export default function PosScreen({
+  status,
+  onStatus,
+  onExit,
+  onNavigate,
+}: {
+  status: AppStatus;
+  onStatus: (status: AppStatus) => void;
+  onExit: () => void;
+  onNavigate: (view: "history" | "kassa" | "purchase") => void;
+}) {
   const [context, setContext] = useState<PosContext | null>(null);
   const [prefs, setPrefs] = useState<DevicePrefs | null>(null);
   const [query, setQuery] = useState("");
@@ -468,6 +478,9 @@ export default function PosScreen({ status, onStatus, onExit }: { status: AppSta
             <DropdownMenuShortcut>F1</DropdownMenuShortcut>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => onNavigate("history")}>Sotuv tarixi</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onNavigate("kassa")}>Kassa: kirim-chiqim, X/Z-hisobot</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onNavigate("purchase")}>Xarid: ta'minotchidan tovar</DropdownMenuItem>
           <DropdownMenuItem onSelect={onExit}>Bosh sahifa</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => void call("cashier:logout").then(onStatus)}>Kassirni almashtirish</DropdownMenuItem>
         </DropdownMenuContent>

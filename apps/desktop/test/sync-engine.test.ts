@@ -102,6 +102,19 @@ describe("Sinxron mexanizmi", () => {
     expect(online.pushed.flat().map((o) => o.opId)).toEqual([op.opId]);
   });
 
+  it("sinxron ketayotganda navbatga tushgan amal — sikl tugagach yana bir sikl (davriy sinxronni kutmaydi)", async () => {
+    const server = fakeServer();
+    const engine = new SyncEngine(store, server.api);
+    const first = engine.sync();
+    // Joriy sikl navbatni allaqachon o'qib bo'lgan — amal keyin tushdi
+    const op = store.enqueue({ type: "shift.open", cashierId: "u1", payload: { shiftId: "s2", openingCash: "0" } });
+    engine.schedule();
+    expect((await first).pushed.applied).toBe(0);
+    await engine.syncFresh();
+    expect(server.pushed.flat().map((o) => o.opId)).toEqual([op.opId]);
+    expect(store.operation(op.opId)!.status).toBe("applied");
+  });
+
   it("qurilma o'chirilgan (401) — holat unauthorized; parallel sinxron bitta", async () => {
     const server = fakeServer({ status: 401 });
     const engine = new SyncEngine(store, server.api);

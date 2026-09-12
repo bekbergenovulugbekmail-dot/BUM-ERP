@@ -38,6 +38,8 @@ const toWire = (op: OutboxOp): WireOperation => ({ opId: op.opId, type: op.type,
 
 export class SyncEngine {
   private running: Promise<SyncReport> | null = null;
+  /** Sinxron ketayotganda navbatga yangi amal tushdi — tugagach yana bir sikl. */
+  private dirty = false;
   private state: SyncStatus["state"] = "idle";
   private lastError: string | null = null;
 
@@ -58,11 +60,31 @@ export class SyncEngine {
     };
   }
 
+  /** Bir vaqtda bitta sikl: ketayotgan bo'lsa — o'sha natija. */
   sync(): Promise<SyncReport> {
     this.running ??= this.run().finally(() => {
       this.running = null;
+      if (this.dirty) {
+        this.dirty = false;
+        void this.sync();
+      }
     });
     return this.running;
+  }
+
+  /**
+   * Yangi amal navbatga tushganda: sinxron ketmayotgan bo'lsa — darhol, ketayotgan bo'lsa — tugagach yana bir sikl
+   * (aks holda amal keyingi davriy sinxrongacha kutib qolardi: joriy sikl navbatni allaqachon o'qib bo'lgan).
+   */
+  schedule(): void {
+    if (this.running) this.dirty = true;
+    else void this.sync();
+  }
+
+  /** Qo'lda sinxron: ketayotgan sikl tugashini kutib, yangisini boshlaydi (internet endi qaytgan bo'lishi mumkin). */
+  async syncFresh(): Promise<SyncReport> {
+    if (this.running) await this.running;
+    return this.sync();
   }
 
   private emit(state: SyncStatus["state"], error: string | null = null) {

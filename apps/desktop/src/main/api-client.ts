@@ -9,7 +9,11 @@ import type {
   PullCursors,
   PullResponse,
   PushResult,
+  RemoteMovement,
+  RemotePurchase,
   RemoteReceipt,
+  RemoteSale,
+  RemoteWarehouseStock,
   WireOperation,
 } from "../shared/sync-types.js";
 
@@ -109,5 +113,17 @@ export function createApiClient(options: {
       request<PullResponse>("POST", "/api/pos-device/pull", { cursors, ...(limit ? { limit } : {}), ...(configHash ? { configHash } : {}) }),
     push: (ops: WireOperation[]) => request<{ results: PushResult[] }>("POST", "/api/pos-device/push", { ops }),
     receipt: (number: string) => request<{ receipt: RemoteReceipt }>("GET", `/api/pos-device/receipts/${encodeURIComponent(number)}`),
+    purchase: (number: string) => request<{ purchase: RemotePurchase }>("GET", `/api/pos-device/purchases/${encodeURIComponent(number)}`),
+    sales: (query: { from?: string; to?: string; limit?: number; cursor?: string }) =>
+      request<{ sales: RemoteSale[]; nextCursor: string | null }>("GET", `/api/pos-device/sales?${searchParams(query)}`),
+    movements: (query: { productId?: string; type?: string; limit?: number; cursor?: string }) =>
+      request<{ movements: RemoteMovement[]; nextCursor: string | null }>("GET", `/api/pos-device/movements?${searchParams(query)}`),
+    productStock: (productId: string) => request<{ stock: RemoteWarehouseStock[] }>("GET", `/api/pos-device/stock/${encodeURIComponent(productId)}`),
   };
+}
+
+function searchParams(query: Record<string, string | number | undefined>): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+  return params.toString();
 }

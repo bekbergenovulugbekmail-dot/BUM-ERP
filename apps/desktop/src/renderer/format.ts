@@ -31,6 +31,46 @@ export const OP_LABELS: Record<string, string> = {
   "customer.create": "Yangi mijoz",
   "shift.open": "Smena ochildi",
   "shift.close": "Smena yopildi",
+  "cash.movement": "Kassa harakati",
+  "customer.payment": "Mijoz to'lovi",
+  "supplier.create": "Yangi ta'minotchi",
+  "purchase.complete": "Xarid",
+  "purchase.return": "Ta'minotchiga qaytarish",
+  "supplier.payment": "Ta'minotchiga to'lov",
+  "stock.writeoff": "Hisobdan chiqarish",
+  "stock.transfer": "Ko'chirish",
+  "stock.count": "Inventarizatsiya",
+};
+
+/** Lokal hujjatning serverga yetib borish holati. */
+export const SYNC_STATE_TEXT: Record<string, { text: string; tone: string }> = {
+  pending: { text: "navbatda", tone: "text-amber-600" },
+  rejected: { text: "rad etildi", tone: "text-destructive" },
+  applied: { text: "serverda", tone: "text-emerald-600" },
+  discarded: { text: "bekor qilingan", tone: "text-muted-foreground" },
+};
+
+export const STOCK_DOCUMENT_LABELS: Record<string, string> = { writeoff: "Hisobdan chiqarish", transfer: "Ko'chirish", count: "Inventarizatsiya" };
+
+/** Serverdagi zaxira harakati turlari. */
+export const MOVEMENT_LABELS: Record<string, string> = {
+  receive: "Kirim",
+  issue: "Chiqim (sotuv)",
+  transfer_out: "Ko'chirildi",
+  transfer_in: "Ko'chirib keltirildi",
+  adjust: "Tuzatish",
+  writeoff: "Hisobdan chiqarildi",
+  return_in: "Qaytib keldi",
+  return_out: "Qaytarildi",
+  count: "Inventarizatsiya",
+};
+
+export const CASH_KIND_LABELS: Record<string, string> = {
+  collection: "Inkassatsiya",
+  change_fund: "Almashtirish puli",
+  expense: "Kassadan xarajat",
+  other_in: "Boshqa kirim",
+  other_out: "Boshqa chiqim",
 };
 
 export const PAYMENT_LABELS: Record<string, string> = { cash: "Naqd", card: "Karta", bank: "Bank", transfer: "O'tkazma", balance: "Mijoz balansiga" };

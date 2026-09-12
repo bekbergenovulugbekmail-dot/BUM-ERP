@@ -22,6 +22,7 @@ export const CONFLICT_KINDS = {
   customer_duplicate_phone: "Shu telefonli mijoz bor edi",
   debt_overpaid: "Mijoz qarzidan ortiq to'landi (farqi balansga)",
   supplier_overpaid: "Ta'minotchi qarzidan ortiq to'landi (avans)",
+  count_late_document: "Inventarizatsiyadan oldingi hujjat kech keldi (qoldiq sanoq bo'yicha tuzatildi)",
 } as const;
 
 export async function listConflicts(conn: DbOrTx, tenant: TenantContext, options: { resolved?: boolean; limit: number }) {

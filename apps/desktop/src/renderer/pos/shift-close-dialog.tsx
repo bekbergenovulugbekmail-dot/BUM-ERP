@@ -12,12 +12,15 @@ export default function ShiftCloseDialog({
   open,
   shift,
   baseCurrency,
+  expectedCash,
   onClose,
   onClosed,
 }: {
   open: boolean;
   shift: LocalShift | null;
   baseCurrency: string;
+  /** Kassa bo'limidan — hujjatlardan hisoblangan X-hisobot qiymati. */
+  expectedCash?: string;
   onClose: () => void;
   onClosed: (status: AppStatus) => void;
 }) {
@@ -25,7 +28,8 @@ export default function ShiftCloseDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const totals = shift?.totals;
-  const expected = num(shift?.openingCash) + num(totals?.cash);
+  const expected =
+    expectedCash !== undefined ? num(expectedCash) : num(shift?.openingCash) + num(totals?.cash) + num(totals?.cashIn) - num(totals?.cashOut);
 
   const submit = async () => {
     setBusy(true);
@@ -47,6 +51,8 @@ export default function ShiftCloseDialog({
     ["Naqd tushum", fmtMoney(totals?.cash, baseCurrency)],
     ["Karta", fmtMoney(totals?.card, baseCurrency)],
     ["Qaytarishlar", fmtMoney(totals?.returns, baseCurrency)],
+    ["Kassaga kirim", fmtMoney(totals?.cashIn, baseCurrency)],
+    ["Kassadan chiqim", fmtMoney(totals?.cashOut, baseCurrency)],
     ["Cheklar soni", String(totals?.receipts ?? 0)],
   ];
 

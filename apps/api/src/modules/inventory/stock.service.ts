@@ -22,7 +22,14 @@ import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, lt, or, sql
 import { badRequest, notFound } from "@bum/shared";
 import { batches, products, units } from "../../db/schema/catalog.js";
 import { accounts } from "../../db/schema/finance.js";
-import { stockLevels, stockMovementType, stockMovements, warehouses } from "../../db/schema/inventory.js";
+import {
+  inventoryCountItems,
+  inventoryCounts,
+  stockLevels,
+  stockMovementType,
+  stockMovements,
+  warehouses,
+} from "../../db/schema/inventory.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
@@ -61,6 +68,15 @@ export type StockMove = {
    */
   allowNegative?: boolean;
 };
+
+/** Ishorali miqdor (4 kasr) ↔ butun son. */
+export const signedQtyMinor = (value: string) => (value.startsWith("-") ? -toMinor(value.slice(1), 4) : toMinor(value, 4));
+export const signedQtyText = (value: bigint) => (value < 0n ? `-${fromMinor(-value, 4)}` : fromMinor(value, 4));
+
+type TxMovement = { productId: string; warehouseId: string; quantity: string; occurredAt: Date };
+
+/** Tranzaksiyada yozilgan harakatlar (inventarizatsiya harakatlaridan tashqari) — `compensateCountedMovements` uchun. */
+const txMovements = new WeakMap<object, TxMovement[]>();
 
 async function lockLevel(tx: Tx, companyId: string, productId: string, warehouseId: string) {
   const [level] = await tx
@@ -173,6 +189,12 @@ export async function moveStock(tx: Tx, companyId: string, performedBy: string |
       occurredAt: move.occurredAt ?? new Date(),
     })
     .returning(movementFields);
+
+  if (move.type !== "count") {
+    const moved = txMovements.get(tx) ?? [];
+    moved.push({ productId: product.id, warehouseId: warehouse.id, quantity: movement!.quantity, occurredAt: movement!.occurredAt });
+    txMovements.set(tx, moved);
+  }
 
   return { movement: movement!, level: updated };
 }
@@ -420,7 +442,7 @@ export async function postStockJournal(
  * Boshqa o'lchov birligidagi miqdor va birlik narxini asosiy birlikka o'tkazadi:
  * 2 quti × 12 = 24 dona, quti narxi 24000 → dona narxi 2000. Aniq o'nlik arifmetika.
  */
-async function toBaseUnit(
+export async function toBaseUnit(
   tx: Tx,
   companyId: string,
   input: { productId: string; unitId?: string | null; quantity: string; costPrice?: string | null },
@@ -503,6 +525,8 @@ export async function recordManualMovement(
     },
     tx,
   );
+  // O'tgan sana bilan — undan keyingi inventarizatsiya bu tovarni allaqachon sanagan bo'lishi mumkin
+  if (input.occurredAt) await compensateCountedMovements(tx, tenant.company.id, tenant.user.id);
   return { ...result, journalEntryId: journal?.id ?? null };
 }
 
@@ -577,5 +601,91 @@ export async function transferStock(
     },
     tx,
   );
+  if (input.occurredAt) await compensateCountedMovements(tx, tenant.company.id, tenant.user.id);
   return { referenceId, from: out.level, to: into.level, costPrice: out.movement.costPrice };
+}
+
+// ─── Kech yozilgan hujjat va inventarizatsiya ───────────────────────────────
+
+export type CountCompensation = { productId: string; warehouseId: string; countId: string; countName: string; quantity: string };
+
+/**
+ * Inventarizatsiyadan OLDIN bo'lgan, lekin undan KEYIN yozilayotgan harakat — boshqa kassaning kech sinxron bo'lgan
+ * offline hujjati yoki o'tgan sana bilan kiritilgan kirim/chiqim. Sanoq bu tovarni allaqachon hisobga olgan (sanalgan
+ * miqdorga kirgan), shuning uchun qoldiq ikkinchi marta o'zgarmasligi kerak: joriy tranzaksiyadagi shunday harakatlar
+ * uchun eng oxirgi mos inventarizatsiya nomidan teskari tuzatma (`count`) va jurnal (boshqa daromad/xarajat) yoziladi.
+ * Hujjatning o'zi (tannarx, sotuv, qarz) o'zgarmaydi. Chaqiruvchilar — offline sinxron va o'tgan sanali qo'lda harakat.
+ */
+export async function compensateCountedMovements(tx: Tx, companyId: string, userId: string): Promise<CountCompensation[]> {
+  const moved = txMovements.get(tx) ?? [];
+  txMovements.delete(tx);
+  if (moved.length === 0) return [];
+
+  const values = sql.join(
+    moved.map((item, index) => sql`(${index}::int, ${item.productId}::uuid, ${item.warehouseId}::uuid, ${item.occurredAt.toISOString()}::timestamptz)`),
+    sql`, `,
+  );
+  const { rows } = await tx.execute<{ idx: number; count_id: string; completed_at: Date | string; name: string }>(sql`
+    select v.idx, c.id as count_id, c.completed_at, c.name
+    from (values ${values}) as v(idx, product_id, warehouse_id, occurred_at)
+    join lateral (
+      select ic.id, ic.completed_at, ic.name
+      from ${inventoryCounts} ic
+      join ${inventoryCountItems} ici on ici.count_id = ic.id
+      where ic.company_id = ${companyId}
+        and ic.warehouse_id = v.warehouse_id
+        and ic.status = 'completed'
+        and ic.adjustments_made
+        and ici.product_id = v.product_id
+        and ici.counted_qty is not null
+        and ic.completed_at > v.occurred_at
+      order by ic.completed_at desc
+      limit 1
+    ) c on true`);
+
+  const groups = new Map<string, { productId: string; warehouseId: string; countId: string; countName: string; countedAt: Date; quantity: bigint }>();
+  for (const row of rows) {
+    const item = moved[Number(row.idx)]!;
+    const key = `${item.productId}:${item.warehouseId}:${row.count_id}`;
+    const group = groups.get(key) ?? {
+      productId: item.productId,
+      warehouseId: item.warehouseId,
+      countId: row.count_id,
+      countName: row.name,
+      countedAt: new Date(row.completed_at),
+      quantity: 0n,
+    };
+    group.quantity += signedQtyMinor(item.quantity);
+    groups.set(key, group);
+  }
+
+  const adjustments: CountCompensation[] = [];
+  for (const group of groups.values()) {
+    if (group.quantity === 0n) continue;
+    const quantity = signedQtyText(-group.quantity);
+    const { movement } = await moveStock(tx, companyId, userId, {
+      type: "count",
+      productId: group.productId,
+      warehouseId: group.warehouseId,
+      quantity,
+      referenceType: "inventory_count",
+      referenceId: group.countId,
+      notes: `Inventarizatsiya tuzatmasi (${group.countName}): sanashdan oldingi hujjat kech yozildi`,
+      occurredAt: group.countedAt,
+      allowNegative: true,
+    });
+    const value = movementValue(movement.quantity, movement.costPrice);
+    const incoming = !movement.quantity.startsWith("-");
+    await postStockJournal(tx, companyId, userId, {
+      referenceType: "inventory_count",
+      referenceId: group.countId,
+      date: todayIso(),
+      description: `Inventarizatsiya tuzatmasi: ${group.countName}`,
+      incoming: incoming ? value : 0n,
+      outgoing: incoming ? 0n : value,
+      incomingCounter: "other_income",
+    });
+    adjustments.push({ productId: group.productId, warehouseId: group.warehouseId, countId: group.countId, countName: group.countName, quantity });
+  }
+  return adjustments;
 }

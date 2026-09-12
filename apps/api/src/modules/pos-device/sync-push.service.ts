@@ -16,7 +16,10 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AppError, badRequest, conflict, notFound } from "@bum/shared";
 import { db } from "../../db/client.js";
+import { inventoryCounts } from "../../db/schema/inventory.js";
 import { posSyncConflicts, posSyncOperations, type PosSyncError } from "../../db/schema/pos.js";
+import { applyDeviceCount, transferStockItems, writeOffStock } from "../inventory/stock-documents.service.js";
+import { compensateCountedMovements } from "../inventory/stock.service.js";
 import { purchaseOrderItems, purchaseOrders, purchaseReturns, suppliers } from "../../db/schema/purchase.js";
 import { completeDirectPurchase } from "../purchase/direct-purchase.service.js";
 import { recordSupplierPayment } from "../purchase/payments.service.js";
@@ -25,8 +28,8 @@ import { createSupplier } from "../purchase/suppliers.service.js";
 import { customers, posCashMovements, posShifts, salesOrderItems, salesOrders, salesReturns } from "../../db/schema/sales.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
-import { decimalSchema, moneySchema, percentSchema, priceSchema } from "../../shared/decimal.js";
-import { requirePermission } from "../company/tenant.js";
+import { decimalSchema, moneySchema, percentSchema, priceSchema, qtySchema } from "../../shared/decimal.js";
+import { requirePermission, type TenantContext } from "../company/tenant.js";
 import { closeShift, completeSale, openShift, posCustomerPayment, type SaleConflict } from "../sales/pos.service.js";
 import { CASH_MOVEMENT_KINDS, posCashMovement } from "../sales/pos-cash.service.js";
 import { createCustomer } from "../sales/customers.service.js";
@@ -48,6 +51,12 @@ const positiveQty = decimalSchema({ scale: 4, positive: true });
 /** Qurilma hujjat raqami: `K01-000123` (chek), `K01-Q000004` (qaytarish). */
 const deviceNumber = z.string().regex(/^[A-Z0-9]{1,8}-[A-Z]?\d{1,12}$/, "Hujjat raqami noto'g'ri");
 const common = { opId: z.uuid(), cashierId: z.uuid(), createdAt: clientTime };
+/** Ombor hujjati qatorlari: mahsulot bir marta. */
+const stockItems = z
+  .array(z.strictObject({ productId: z.uuid(), unitId: z.uuid(), quantity: positiveQty }))
+  .min(1)
+  .max(500)
+  .refine((items) => new Set(items.map((item) => item.productId)).size === items.length, "Mahsulot takrorlangan");
 
 export const syncOperationSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -222,6 +231,30 @@ export const syncOperationSchema = z.discriminatedUnion("type", [
       notes,
     }),
   }),
+  z.strictObject({
+    ...common,
+    type: z.literal("stock.writeoff"),
+    payload: z.strictObject({ writeoffId: z.uuid(), number: deviceNumber, items: stockItems, reason: notes }),
+  }),
+  z.strictObject({
+    ...common,
+    type: z.literal("stock.transfer"),
+    payload: z.strictObject({ transferId: z.uuid(), number: deviceNumber, toWarehouseId: z.uuid(), items: stockItems, notes }),
+  }),
+  z.strictObject({
+    ...common,
+    type: z.literal("stock.count"),
+    payload: z.strictObject({
+      countId: z.uuid(),
+      number: deviceNumber,
+      items: z
+        .array(z.strictObject({ productId: z.uuid(), countedQty: qtySchema }))
+        .min(1)
+        .max(5000)
+        .refine((items) => new Set(items.map((item) => item.productId)).size === items.length, "Mahsulot takrorlangan"),
+      notes,
+    }),
+  }),
 ]);
 export type SyncOperation = z.infer<typeof syncOperationSchema>;
 
@@ -276,7 +309,18 @@ async function recordConflicts(
 async function applyOperation(tx: Tx, context: DeviceContext, op: SyncOperation, meta: RequestMeta): Promise<Record<string, unknown>> {
   assertClientTime(op.createdAt);
   const tenant = await cashierTenant(tx, context, op.cashierId);
+  const result = await executeOperation(tx, context, tenant, op, meta);
+  if (op.type === "stock.count") return result;
 
+  // Kech yetib kelgan hujjat keyinroq o'tkazilgan inventarizatsiyadan oldin bo'lgan — sanoq uni allaqachon hisobga olgan
+  const adjusted = await compensateCountedMovements(tx, context.company.id, tenant.user.id);
+  if (adjusted.length === 0) return result;
+  await recordConflicts(tx, context, op, { type: "inventory_count", id: adjusted[0]!.countId }, [{ kind: "count_late_document", details: { items: adjusted } }]);
+  const conflicts = Array.isArray(result.conflicts) ? result.conflicts : [];
+  return { ...result, conflicts: [...conflicts, "count_late_document"] };
+}
+
+async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantContext, op: SyncOperation, meta: RequestMeta): Promise<Record<string, unknown>> {
   switch (op.type) {
     case "shift.open": {
       const [existing] = await tx.select({ id: posShifts.id }).from(posShifts).where(eq(posShifts.id, op.payload.shiftId)).limit(1);
@@ -599,6 +643,72 @@ async function applyOperation(tx: Tx, context: DeviceContext, op: SyncOperation,
       const found: SaleConflict[] = paid.overpaid ? [{ kind: "supplier_overpaid", details: { supplierId: payload.supplierId, advance: paid.overpaid } }] : [];
       await recordConflicts(tx, context, op, { type: "supplier_payment", id: paid.payment.id }, found);
       return { paymentId: paid.payment.id, advance: paid.overpaid, conflicts: found.map((item) => item.kind) };
+    }
+    case "stock.writeoff": {
+      const payload = op.payload;
+      await requirePermission(tx, tenant, "warehouse.manage");
+      assertDeviceNumber(context, payload.number);
+      const result = await writeOffStock(
+        tx,
+        tenant,
+        {
+          id: payload.writeoffId,
+          number: payload.number,
+          warehouseId: context.device.warehouseId,
+          items: payload.items,
+          reason: payload.reason ?? null,
+          occurredAt: op.createdAt,
+          allowNegative: true,
+        },
+        meta,
+      );
+      await recordConflicts(tx, context, op, { type: "stock_writeoff", id: payload.writeoffId }, result.conflicts);
+      return { writeoffId: result.id, number: result.number, value: result.value, journalEntryId: result.journalEntryId, conflicts: result.conflicts.map((item) => item.kind) };
+    }
+    case "stock.transfer": {
+      const payload = op.payload;
+      await requirePermission(tx, tenant, "warehouse.transfer");
+      assertDeviceNumber(context, payload.number);
+      const result = await transferStockItems(
+        tx,
+        tenant,
+        {
+          id: payload.transferId,
+          number: payload.number,
+          fromWarehouseId: context.device.warehouseId,
+          toWarehouseId: payload.toWarehouseId,
+          items: payload.items,
+          notes: payload.notes ?? null,
+          occurredAt: op.createdAt,
+          allowNegative: true,
+        },
+        meta,
+      );
+      await recordConflicts(tx, context, op, { type: "stock_transfer", id: payload.transferId }, result.conflicts);
+      return { transferId: result.id, number: result.number, toWarehouseId: result.toWarehouseId, value: result.value, conflicts: result.conflicts.map((item) => item.kind) };
+    }
+    case "stock.count": {
+      const payload = op.payload;
+      await requirePermission(tx, tenant, "warehouse.count");
+      await requirePermission(tx, tenant, "warehouse.manage");
+      assertDeviceNumber(context, payload.number);
+      const [taken] = await tx.select({ id: inventoryCounts.id }).from(inventoryCounts).where(eq(inventoryCounts.id, payload.countId)).limit(1);
+      if (taken) throw conflict("Inventarizatsiya identifikatori band");
+      const { conflicts, ...result } = await applyDeviceCount(
+        tx,
+        tenant,
+        {
+          id: payload.countId,
+          number: payload.number,
+          warehouseId: context.device.warehouseId,
+          countedAt: op.createdAt,
+          items: payload.items,
+          notes: payload.notes ?? null,
+        },
+        meta,
+      );
+      await recordConflicts(tx, context, op, { type: "inventory_count", id: payload.countId }, conflicts);
+      return { ...result, conflicts: conflicts.map((item) => item.kind) };
     }
   }
 }

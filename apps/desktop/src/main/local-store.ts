@@ -33,6 +33,22 @@ export type StoredDocument<T> = {
 
 type DocumentRow = { data: string; op_id: string; discarded_at: string | null; status: string | null; error: string | null; result: string | null };
 
+type DocumentTable =
+  | "sales"
+  | "sale_returns"
+  | "cash_movements"
+  | "customer_payments"
+  | "purchases"
+  | "purchase_returns"
+  | "supplier_payments"
+  | "stock_documents";
+
+/** `kind` — faqat ombor hujjatlarida. */
+export type DocumentFilter = { limit: number; shiftId?: string; from?: string; to?: string; kind?: string };
+
+/** Serverga hali yetib bormagan hujjatning bitta mahsulotga ta'siri. */
+export type PendingMovement = { opId: string; productId: string; quantity: string; type: SyncOperationType; createdAt: string; number: string | null };
+
 type Param = string | number | null;
 
 export type OutboxOp = WireOperation & {
@@ -158,6 +174,15 @@ export class LocalStore {
           )
           .run(text(row.id), text(row.name), text(row.phone).replace(/\D/g, "") || null, searchText(row.name, row.code, row.phone), row.isActive ? 1 : 0, data);
         return;
+      case "suppliers":
+        this.db
+          .prepare(
+            `INSERT INTO suppliers (id, name, phone_digits, search, is_active, data) VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT (id) DO UPDATE SET name = excluded.name, phone_digits = excluded.phone_digits, search = excluded.search,
+               is_active = excluded.is_active, data = excluded.data`,
+          )
+          .run(text(row.id), text(row.name), text(row.phone).replace(/\D/g, "") || null, searchText(row.name, row.code, row.phone), row.isActive ? 1 : 0, data);
+        return;
       case "stockLevels":
         this.db
           .prepare(
@@ -199,17 +224,19 @@ export class LocalStore {
     this.putRecord("cashiers", cashier.userId, JSON.stringify(cashier));
   }
 
-  searchProducts(query: string, limit = 50): Record<string, unknown>[] {
+  /** Faol mahsulotlar; `saleableOnly: false` — xarid uchun (sotilmaydigan xomashyo ham). */
+  searchProducts(query: string, limit = 50, options: { saleableOnly?: boolean } = {}): Record<string, unknown>[] {
     const needle = query.trim().toLowerCase();
+    const saleable = options.saleableOnly === false ? "" : "AND is_saleable = 1";
     const rows = (
       needle
         ? this.db
             .prepare(
-              `SELECT data FROM products WHERE is_active = 1 AND is_saleable = 1 AND (barcode = ? OR sku = ? OR search LIKE ?)
+              `SELECT data FROM products WHERE is_active = 1 ${saleable} AND (barcode = ? OR sku = ? OR search LIKE ?)
                ORDER BY CASE WHEN barcode = ? OR sku = ? THEN 0 ELSE 1 END, name LIMIT ?`,
             )
             .all(query.trim(), query.trim(), `%${needle.replace(/[%_]/g, "")}%`, query.trim(), query.trim(), limit)
-        : this.db.prepare("SELECT data FROM products WHERE is_active = 1 AND is_saleable = 1 ORDER BY name LIMIT ?").all(limit)
+        : this.db.prepare(`SELECT data FROM products WHERE is_active = 1 ${saleable} ORDER BY name LIMIT ?`).all(limit)
     ) as { data: string }[];
     return rows.map((row) => JSON.parse(row.data) as Record<string, unknown>);
   }
@@ -289,11 +316,12 @@ export class LocalStore {
   }
 
   /** Skaner: shtrix-kod yoki SKU aniq mos, sotiladigan faol mahsulot. */
-  productByCode<T = Record<string, unknown>>(code: string): T | null {
+  productByCode<T = Record<string, unknown>>(code: string, saleableOnly = true): T | null {
     const needle = code.trim();
     if (!needle) return null;
     return this.dataRow<T>(
-      "SELECT data FROM products WHERE is_active = 1 AND is_saleable = 1 AND (barcode = ? OR sku = ?) ORDER BY CASE WHEN barcode = ? THEN 0 ELSE 1 END LIMIT 1",
+      `SELECT data FROM products WHERE is_active = 1 ${saleableOnly ? "AND is_saleable = 1" : ""} AND (barcode = ? OR sku = ?)
+       ORDER BY CASE WHEN barcode = ? THEN 0 ELSE 1 END LIMIT 1`,
       needle,
       needle,
       needle,
@@ -318,22 +346,45 @@ export class LocalStore {
     return this.dataRow<T>("SELECT data FROM customers WHERE id = ?", id);
   }
 
-  searchCustomers<T = Record<string, unknown>>(query: string, limit = 30): T[] {
+  /** Mijoz yoki ta'minotchi: ism/kod bo'yicha, 3+ raqam bo'lsa telefon bo'yicha ham; faqat faollari. */
+  private searchParties<T>(table: "customers" | "suppliers", query: string, limit: number): T[] {
     const needle = query.trim().toLowerCase();
     const digits = query.replace(/\D/g, "");
     let rows: { data: string }[];
     if (!needle) {
-      rows = this.db.prepare("SELECT data FROM customers WHERE is_active = 1 ORDER BY name LIMIT ?").all(limit) as { data: string }[];
+      rows = this.db.prepare(`SELECT data FROM ${table} WHERE is_active = 1 ORDER BY name LIMIT ?`).all(limit) as { data: string }[];
     } else if (digits.length >= 3) {
       rows = this.db
-        .prepare("SELECT data FROM customers WHERE is_active = 1 AND (search LIKE ? OR phone_digits LIKE ?) ORDER BY name LIMIT ?")
+        .prepare(`SELECT data FROM ${table} WHERE is_active = 1 AND (search LIKE ? OR phone_digits LIKE ?) ORDER BY name LIMIT ?`)
         .all(`%${needle.replace(/[%_]/g, "")}%`, `%${digits}%`, limit) as { data: string }[];
     } else {
       rows = this.db
-        .prepare("SELECT data FROM customers WHERE is_active = 1 AND search LIKE ? ORDER BY name LIMIT ?")
+        .prepare(`SELECT data FROM ${table} WHERE is_active = 1 AND search LIKE ? ORDER BY name LIMIT ?`)
         .all(`%${needle.replace(/[%_]/g, "")}%`, limit) as { data: string }[];
     }
     return rows.map((row) => JSON.parse(row.data) as T);
+  }
+
+  searchCustomers<T = Record<string, unknown>>(query: string, limit = 30): T[] {
+    return this.searchParties<T>("customers", query, limit);
+  }
+
+  supplier<T = Record<string, unknown>>(id: string): T | null {
+    return this.dataRow<T>("SELECT data FROM suppliers WHERE id = ?", id);
+  }
+
+  searchSuppliers<T = Record<string, unknown>>(query: string, limit = 30): T[] {
+    return this.searchParties<T>("suppliers", query, limit);
+  }
+
+  /** Kassada yaratilgan yoki qurilmada o'zgargan (qarz) ta'minotchi — keyingi pull server qiymati bilan almashtiradi. */
+  saveSupplier(row: Record<string, unknown>): void {
+    this.upsert("suppliers", row);
+  }
+
+  pendingSupplierIds(): Set<string> {
+    const rows = this.db.prepare("SELECT payload FROM outbox WHERE type = 'supplier.create' AND status = 'pending'").all() as { payload: string }[];
+    return new Set(rows.map((row) => String((JSON.parse(row.payload) as { supplierId?: string }).supplierId ?? "")));
   }
 
   /** Kassada yaratilgan yoki qurilmada o'zgargan (balans, qarz) mijoz — keyingi pull server qiymati bilan almashtiradi. */
@@ -420,7 +471,7 @@ export class LocalStore {
     this.addPendingStock(input.opId, input.stockDeltas);
   }
 
-  private documents<T>(table: "sales" | "sale_returns", where: string, params: Param[], limit: number): StoredDocument<T>[] {
+  private documents<T>(table: DocumentTable, where: string, params: Param[], limit: number): StoredDocument<T>[] {
     const rows = this.db
       .prepare(
         `SELECT d.data, d.op_id, d.discarded_at, o.status, o.error, o.result FROM ${table} d LEFT JOIN outbox o ON o.op_id = d.op_id
@@ -436,10 +487,229 @@ export class LocalStore {
     }));
   }
 
-  sales<T>(options: { limit: number; shiftId?: string }): StoredDocument<T>[] {
-    return options.shiftId
-      ? this.documents<T>("sales", "WHERE d.shift_id = ?", [options.shiftId], options.limit)
-      : this.documents<T>("sales", "", [], options.limit);
+  /** Smena va sana oralig'i (ISO vaqt, `to` — shu vaqtgacha) bo'yicha hujjatlar. */
+  private filtered<T>(table: DocumentTable, options: DocumentFilter): StoredDocument<T>[] {
+    const clauses: string[] = [];
+    const params: Param[] = [];
+    if (options.shiftId) {
+      clauses.push("d.shift_id = ?");
+      params.push(options.shiftId);
+    }
+    if (options.from) {
+      clauses.push("d.created_at >= ?");
+      params.push(options.from);
+    }
+    if (options.to) {
+      clauses.push("d.created_at < ?");
+      params.push(options.to);
+    }
+    if (options.kind) {
+      clauses.push("d.kind = ?");
+      params.push(options.kind);
+    }
+    return this.documents<T>(table, clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "", params, options.limit);
+  }
+
+  sales<T>(options: DocumentFilter): StoredDocument<T>[] {
+    return this.filtered<T>("sales", options);
+  }
+
+  cashMovements<T>(options: DocumentFilter): StoredDocument<T>[] {
+    return this.filtered<T>("cash_movements", options);
+  }
+
+  customerPayments<T>(options: DocumentFilter): StoredDocument<T>[] {
+    return this.filtered<T>("customer_payments", options);
+  }
+
+  insertCashMovement(input: { id: string; opId: string; shiftId: string; cashierId: string; kind: string; amount: string; createdAt: string; doc: unknown }): void {
+    this.db
+      .prepare("INSERT INTO cash_movements (id, op_id, shift_id, cashier_id, kind, amount, created_at, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(input.id, input.opId, input.shiftId, input.cashierId, input.kind, input.amount, input.createdAt, JSON.stringify({ doc: input.doc }));
+  }
+
+  insertCustomerPayment(input: { id: string; opId: string; shiftId: string; cashierId: string; customerId: string; amount: string; createdAt: string; doc: unknown }): void {
+    this.db
+      .prepare("INSERT INTO customer_payments (id, op_id, shift_id, cashier_id, customer_id, amount, created_at, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(input.id, input.opId, input.shiftId, input.cashierId, input.customerId, input.amount, input.createdAt, JSON.stringify({ doc: input.doc }));
+  }
+
+  // ─── Xarid ──────────────────────────────────────────────────────────────
+
+  insertPurchase(input: {
+    id: string;
+    number: string;
+    opId: string;
+    shiftId: string | null;
+    cashierId: string;
+    supplierId: string;
+    total: string;
+    createdAt: string;
+    doc: unknown;
+    stockDeltas: StockDelta[];
+  }): void {
+    this.db
+      .prepare("INSERT INTO purchases (id, number, op_id, shift_id, cashier_id, supplier_id, total, created_at, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(
+        input.id,
+        input.number,
+        input.opId,
+        input.shiftId,
+        input.cashierId,
+        input.supplierId,
+        input.total,
+        input.createdAt,
+        JSON.stringify({ doc: input.doc, stockDeltas: input.stockDeltas }),
+      );
+    this.addPendingStock(input.opId, input.stockDeltas);
+  }
+
+  insertPurchaseReturn(input: {
+    id: string;
+    number: string;
+    opId: string;
+    orderId: string;
+    shiftId: string | null;
+    cashierId: string;
+    total: string;
+    createdAt: string;
+    doc: unknown;
+    stockDeltas: StockDelta[];
+  }): void {
+    this.db
+      .prepare("INSERT INTO purchase_returns (id, number, op_id, order_id, shift_id, cashier_id, total, created_at, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(
+        input.id,
+        input.number,
+        input.opId,
+        input.orderId,
+        input.shiftId,
+        input.cashierId,
+        input.total,
+        input.createdAt,
+        JSON.stringify({ doc: input.doc, stockDeltas: input.stockDeltas }),
+      );
+    this.addPendingStock(input.opId, input.stockDeltas);
+  }
+
+  insertSupplierPayment(input: { id: string; opId: string; shiftId: string; cashierId: string; supplierId: string; amount: string; createdAt: string; doc: unknown }): void {
+    this.db
+      .prepare("INSERT INTO supplier_payments (id, op_id, shift_id, cashier_id, supplier_id, amount, created_at, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(input.id, input.opId, input.shiftId, input.cashierId, input.supplierId, input.amount, input.createdAt, JSON.stringify({ doc: input.doc }));
+  }
+
+  purchases<T>(options: DocumentFilter): StoredDocument<T>[] {
+    return this.filtered<T>("purchases", options);
+  }
+
+  purchaseByNumber<T>(number: string): StoredDocument<T> | null {
+    return this.documents<T>("purchases", "WHERE d.number = ?", [number], 1)[0] ?? null;
+  }
+
+  purchaseReturns<T>(options: DocumentFilter): StoredDocument<T>[] {
+    return this.filtered<T>("purchase_returns", options);
+  }
+
+  /** Xarid bo'yicha qurilmadagi (bekor qilinmagan) qaytarishlar. */
+  purchaseReturnsForOrder<T>(orderId: string): StoredDocument<T>[] {
+    return this.documents<T>("purchase_returns", "WHERE d.order_id = ? AND d.discarded_at IS NULL", [orderId], 1000);
+  }
+
+  supplierPayments<T>(options: DocumentFilter): StoredDocument<T>[] {
+    return this.filtered<T>("supplier_payments", options);
+  }
+
+  // ─── Ombor ──────────────────────────────────────────────────────────────
+
+  insertStockDocument(input: {
+    id: string;
+    number: string;
+    opId: string;
+    kind: "writeoff" | "transfer" | "count";
+    cashierId: string;
+    total: string | null;
+    createdAt: string;
+    doc: unknown;
+    stockDeltas: StockDelta[];
+  }): void {
+    this.db
+      .prepare("INSERT INTO stock_documents (id, number, op_id, kind, cashier_id, total, created_at, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(input.id, input.number, input.opId, input.kind, input.cashierId, input.total, input.createdAt, JSON.stringify({ doc: input.doc, stockDeltas: input.stockDeltas }));
+    this.addPendingStock(input.opId, input.stockDeltas);
+  }
+
+  stockDocuments<T>(options: DocumentFilter): StoredDocument<T>[] {
+    return this.filtered<T>("stock_documents", options);
+  }
+
+  private sumByProduct(sql: string, into = new Map<string, bigint>()): Map<string, bigint> {
+    for (const row of this.db.prepare(sql).all() as { product_id: string; quantity: string }[]) {
+      into.set(row.product_id, (into.get(row.product_id) ?? 0n) + toMinor(row.quantity, 4));
+    }
+    return into;
+  }
+
+  /** Barcha mahsulotlarning ko'rinadigan qoldig'i (4 kasr, butun sonda). */
+  stockAll(): Map<string, bigint> {
+    return this.sumByProduct("SELECT product_id, quantity FROM stock_pending", this.sumByProduct("SELECT product_id, quantity FROM stock_levels"));
+  }
+
+  /** Faqat serverga yetib bormagan hujjatlar ta'siri. */
+  pendingStockAll(): Map<string, bigint> {
+    return this.sumByProduct("SELECT product_id, quantity FROM stock_pending");
+  }
+
+  /** Serverdagi o'rtacha tannarx (qurilma ombori, oxirgi pull). */
+  stockLevelCosts(): Map<string, string> {
+    const rows = this.db.prepare("SELECT product_id, data FROM stock_levels").all() as { product_id: string; data: string }[];
+    const costs = new Map<string, string>();
+    for (const row of rows) {
+      const cost = (JSON.parse(row.data) as { avgCostPrice?: unknown }).avgCostPrice;
+      if (typeof cost === "string") costs.set(row.product_id, cost);
+    }
+    return costs;
+  }
+
+  /** Yuborilmagan hujjatlarning zaxira ta'siri — mahsulot harakati tarixida "navbatda" bo'lib ko'rinadi. */
+  pendingMovements(productId: string | null, limit: number): PendingMovement[] {
+    const rows = this.db
+      .prepare(
+        `SELECT sp.op_id, sp.product_id, sp.quantity, o.type, o.created_at,
+           COALESCE(s.number, r.number, pu.number, pr.number, sd.number) AS doc_number
+         FROM stock_pending sp
+         JOIN outbox o ON o.op_id = sp.op_id
+         LEFT JOIN sales s ON s.op_id = sp.op_id
+         LEFT JOIN sale_returns r ON r.op_id = sp.op_id
+         LEFT JOIN purchases pu ON pu.op_id = sp.op_id
+         LEFT JOIN purchase_returns pr ON pr.op_id = sp.op_id
+         LEFT JOIN stock_documents sd ON sd.op_id = sp.op_id
+         ${productId ? "WHERE sp.product_id = ?" : ""}
+         ORDER BY o.seq DESC LIMIT ?`,
+      )
+      .all(...(productId ? [productId, limit] : [limit])) as {
+      op_id: string;
+      product_id: string;
+      quantity: string;
+      type: SyncOperationType;
+      created_at: string;
+      doc_number: string | null;
+    }[];
+    return rows.map((row) => ({ opId: row.op_id, productId: row.product_id, quantity: row.quantity, type: row.type, createdAt: row.created_at, number: row.doc_number }));
+  }
+
+  // ─── Yopilgan smenalar ──────────────────────────────────────────────────
+
+  saveShiftHistory(input: { id: string; openedAt: string; closedAt: string; data: unknown }): void {
+    this.db
+      .prepare(
+        "INSERT INTO shift_history (id, opened_at, closed_at, data) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET closed_at = excluded.closed_at, data = excluded.data",
+      )
+      .run(input.id, input.openedAt, input.closedAt, JSON.stringify(input.data));
+  }
+
+  shiftHistory<T>(limit = 50): T[] {
+    const rows = this.db.prepare("SELECT data FROM shift_history ORDER BY closed_at DESC LIMIT ?").all(limit) as { data: string }[];
+    return rows.map((row) => JSON.parse(row.data) as T);
   }
 
   saleById<T>(id: string): StoredDocument<T> | null {
@@ -450,10 +720,8 @@ export class LocalStore {
     return this.documents<T>("sales", "WHERE d.number = ?", [number], 1)[0] ?? null;
   }
 
-  returns<T>(options: { limit: number; shiftId?: string }): StoredDocument<T>[] {
-    return options.shiftId
-      ? this.documents<T>("sale_returns", "WHERE d.shift_id = ?", [options.shiftId], options.limit)
-      : this.documents<T>("sale_returns", "", [], options.limit);
+  returns<T>(options: DocumentFilter): StoredDocument<T>[] {
+    return this.filtered<T>("sale_returns", options);
   }
 
   /** Chek bo'yicha qurilmadagi (bekor qilinmagan) qaytarishlar. */
@@ -490,8 +758,18 @@ export class LocalStore {
   unsyncedOps(): (OutboxOp & { number: string | null; total: string | null })[] {
     const rows = this.db
       .prepare(
-        `SELECT o.*, COALESCE(s.number, r.number) AS doc_number, COALESCE(s.total, r.total) AS doc_total
-         FROM outbox o LEFT JOIN sales s ON s.op_id = o.op_id LEFT JOIN sale_returns r ON r.op_id = o.op_id
+        `SELECT o.*,
+           COALESCE(s.number, r.number, pu.number, pr.number, sd.number) AS doc_number,
+           COALESCE(s.total, r.total, pu.total, pr.total, m.amount, p.amount, sp.amount, sd.total) AS doc_total
+         FROM outbox o
+         LEFT JOIN sales s ON s.op_id = o.op_id
+         LEFT JOIN sale_returns r ON r.op_id = o.op_id
+         LEFT JOIN cash_movements m ON m.op_id = o.op_id
+         LEFT JOIN customer_payments p ON p.op_id = o.op_id
+         LEFT JOIN purchases pu ON pu.op_id = o.op_id
+         LEFT JOIN purchase_returns pr ON pr.op_id = o.op_id
+         LEFT JOIN supplier_payments sp ON sp.op_id = o.op_id
+         LEFT JOIN stock_documents sd ON sd.op_id = o.op_id
          WHERE o.status IN ('pending', 'rejected') ORDER BY o.seq`,
       )
       .all() as (OutboxRow & { doc_number: string | null; doc_total: string | null })[];
@@ -500,8 +778,14 @@ export class LocalStore {
 
   private documentDeltas(opId: string): StockDelta[] {
     const row = this.db
-      .prepare("SELECT data FROM sales WHERE op_id = ? AND discarded_at IS NULL UNION ALL SELECT data FROM sale_returns WHERE op_id = ? AND discarded_at IS NULL")
-      .get(opId, opId) as { data: string } | undefined;
+      .prepare(
+        `SELECT data FROM sales WHERE op_id = ? AND discarded_at IS NULL
+         UNION ALL SELECT data FROM sale_returns WHERE op_id = ? AND discarded_at IS NULL
+         UNION ALL SELECT data FROM purchases WHERE op_id = ? AND discarded_at IS NULL
+         UNION ALL SELECT data FROM purchase_returns WHERE op_id = ? AND discarded_at IS NULL
+         UNION ALL SELECT data FROM stock_documents WHERE op_id = ? AND discarded_at IS NULL`,
+      )
+      .get(opId, opId, opId, opId, opId) as { data: string } | undefined;
     return row ? ((JSON.parse(row.data) as { stockDeltas?: StockDelta[] }).stockDeltas ?? []) : [];
   }
 
@@ -523,6 +807,11 @@ export class LocalStore {
       this.db.prepare("DELETE FROM stock_pending WHERE op_id = ?").run(opId);
       this.db.prepare("UPDATE sales SET discarded_at = ? WHERE op_id = ?").run(now.toISOString(), opId);
       this.db.prepare("UPDATE sale_returns SET discarded_at = ? WHERE op_id = ?").run(now.toISOString(), opId);
+      this.db.prepare("UPDATE cash_movements SET discarded_at = ? WHERE op_id = ?").run(now.toISOString(), opId);
+      this.db.prepare("UPDATE customer_payments SET discarded_at = ? WHERE op_id = ?").run(now.toISOString(), opId);
+      for (const table of ["purchases", "purchase_returns", "supplier_payments", "stock_documents"]) {
+        this.db.prepare(`UPDATE ${table} SET discarded_at = ? WHERE op_id = ?`).run(now.toISOString(), opId);
+      }
       this.db.prepare("DELETE FROM outbox WHERE op_id = ?").run(opId);
       return true;
     });
