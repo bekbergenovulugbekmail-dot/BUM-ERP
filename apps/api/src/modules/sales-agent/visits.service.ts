@@ -9,11 +9,11 @@
  *  - Yakunlash: joy sifati, siyosat talab qilsa rasm, buyurtma bo'lmasa sabab ("Boshqa" — izoh bilan); davomiylik serverda.
  * Sana va vaqt — server; agent faqat o'z tashriflarini, supervayzer — kompaniyaniki ko'radi.
  */
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { AppError, badRequest, conflict, notFound } from "@bum/shared";
 import { salesReps } from "../../db/schema/crm.js";
-import { customers } from "../../db/schema/sales.js";
-import { agentVisitPhotos, agentVisits } from "../../db/schema/sales-agent.js";
+import { customers, salesOrders } from "../../db/schema/sales.js";
+import { agentOrders, agentVisitPhotos, agentVisits } from "../../db/schema/sales-agent.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type AuditEntry, type RequestMeta } from "../../shared/audit.js";
 import { distanceMeters, isValidCoordinate, pointOf } from "../../shared/geo.js";
@@ -206,14 +206,22 @@ export async function completeVisit(
     throw badRequest("Tashrifni yakunlashdan oldin do'kon rasmini oling", { reason: "photo_required" });
   }
 
-  // Buyurtma bilan bog'lanish F bosqichida: hozircha har yakunlangan tashrif — buyurtmasiz, sabab majburiy
-  const comment = input.noOrderComment?.trim() || null;
-  if (!input.noOrderReason) {
+  // Tashrifda yuborilgan (tasdiqlangan yoki tasdiq kutayotgan) buyurtma bo'lsa — natija "ordered", sabab talab qilinmaydi
+  const [linked] = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(agentOrders)
+    .innerJoin(salesOrders, eq(salesOrders.id, agentOrders.orderId))
+    .where(and(eq(agentOrders.visitId, visit.id), isNotNull(agentOrders.submittedAt), ne(salesOrders.status, "cancelled")));
+  const ordered = linked!.count > 0;
+  const comment = ordered ? null : input.noOrderComment?.trim() || null;
+  const reason = ordered ? null : (input.noOrderReason ?? null);
+  if (!ordered && !reason) {
     throw badRequest("Buyurtma bo'lmagan tashrif uchun sababni tanlang", { reason: "no_order_reason_required" });
   }
-  if (input.noOrderReason === "other" && (comment?.length ?? 0) < 3) {
+  if (reason === "other" && (comment?.length ?? 0) < 3) {
     throw badRequest("\"Boshqa\" sababi uchun izoh yozing", { reason: "comment_required" });
   }
+  const result = ordered ? "ordered" : "no_order";
 
   const [store] = await tx
     .select({ latitude: customers.latitude, longitude: customers.longitude })
@@ -228,14 +236,14 @@ export async function completeVisit(
     .update(agentVisits)
     .set({
       status: "completed",
-      result: "no_order",
+      result,
       completedAt: now,
       endLatitude: input.latitude.toFixed(6),
       endLongitude: input.longitude.toFixed(6),
       endAccuracy: input.accuracy.toFixed(2),
       endDistanceMeters: distance,
       durationSeconds,
-      noOrderReason: input.noOrderReason,
+      noOrderReason: reason,
       noOrderComment: comment,
       notes: input.notes?.trim() || null,
       updatedAt: now,
@@ -245,14 +253,16 @@ export async function completeVisit(
     action: "VISIT_COMPLETED",
     resource: "agent_visits",
     resourceId: visit.id,
-    details: { customerId: visit.customerId, result: "no_order", durationSeconds, distanceMeters: distance },
+    details: { customerId: visit.customerId, result, durationSeconds, distanceMeters: distance },
   });
-  await audit(tx, context, meta, {
-    action: "VISIT_NO_ORDER",
-    resource: "agent_visits",
-    resourceId: visit.id,
-    details: { customerId: visit.customerId, reason: input.noOrderReason, comment },
-  });
+  if (!ordered) {
+    await audit(tx, context, meta, {
+      action: "VISIT_NO_ORDER",
+      resource: "agent_visits",
+      resourceId: visit.id,
+      details: { customerId: visit.customerId, reason, comment },
+    });
+  }
   return { visit: await visitById(tx, context.company.id, visit.id) };
 }
 

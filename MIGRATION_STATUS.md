@@ -661,7 +661,7 @@ Foydalanuvchi talabi bilan, production'da (app.bum-erp.uz) sinov davomida:
   - inventarizatsiya qo'llanganda ortiqcha — 4100, kamomad — 5500 (bitta jurnal yozuvi)
   - moliya dashboardi: oylik tushum/chiqim valyutali kassalardan joriy kurs bilan asosiy valyutada
   - tizimdan chiqish (`logout`) audit jurnaliga yoziladi (kirish va xato urinish avval ham yozilardi)
-- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `sales-currency` (2), `distribution` (4), `inventory-journal` (1), `sales-agent` (3), `sales-agent-stores` (2), `sales-agent-location` (3 — sifat va shubhali nuqtalar, supervayzer ruxsatlari va kompaniya chegarasi, siyosat va saqlash muddati), `sales-agent-visits` (2 — geofence/sifat/ochiq tashrif/sabab, rasmlar va supervayzer ro'yxati); API jami 239 (51 fayl)
+- **Testlar:** `category-scope` (3), avtomatik SKU, `customer-balance` (3), `print-settings` (2), `cashback` (2), `currencies` (2), `product-currency` (1), `purchase-currency` (2), `pos-currency` (3), `sales-currency` (2), `distribution` (4), `inventory-journal` (1), `sales-agent` (3), `sales-agent-stores` (2), `sales-agent-location` (3 — sifat va shubhali nuqtalar, supervayzer ruxsatlari va kompaniya chegarasi, siyosat va saqlash muddati), `sales-agent-visits` (2 — geofence/sifat/ochiq tashrif/sabab, rasmlar va supervayzer ro'yxati), `sales-agent-orders` (2 — katalog, idempotent qoralama, geofence/qoldiq/bekor qilish; nasiya, kredit limiti rad va tasdiq, yetkazish kuni, tashrif natijasi); API jami 241 (52 fayl)
 
 ## Sotuv agenti loyihasi (2026-09-12)
 
@@ -676,7 +676,7 @@ xarita — Yandex Maps (`MapProvider` orqasida, kalit env'da), lokatsiya — avv
 | C | Do'kon koordinatasi; sana bo'yicha hudud/marshrut; do'konlar, profil, qarzdorlar | ✅ `61f648b` |
 | D | Lokatsiya kuzatuvi, sifat tekshiruvi, saqlash muddati; supervayzer xaritasi | ✅ |
 | E | Tashrif: boshlash/yakunlash, buyurtmasiz sabab, rasm | ✅ |
-| F | Katalog, dona/blok, draft (idempotent), yetkazish kuni, nasiya, kredit limiti, geofence bilan buyurtma | |
+| F | Katalog, dona/blok, draft (idempotent), yetkazish kuni, nasiya, kredit limiti, geofence bilan buyurtma | ✅ |
 | G | Aksiyalar (serverda hisoblash) | |
 | H | Agent dashboardi, prospektlar, supervayzer tafsiloti va lokatsiya tarixi | |
 | I | Offline kesh, xavfsizlik testlari, E2E, yakuniy hisobot | |
@@ -728,6 +728,18 @@ xarita — Yandex Maps (`MapProvider` orqasida, kalit env'da), lokatsiya — avv
 - tashrifi bor savdo agentini o'chirish rad etiladi (faolsizlantirish)
 - web agent: do'kon sahifasida "Tashrifni boshlash" (yangi GPS o'lchovi bilan), ochiq tashrif taymeri, rasm turi va kamera orqali rasm (brauzerda 1600 px JPEG ga siqiladi), "Tashrifni yakunlash" oynasi (sabab, izoh); boshqa do'konda ochiq tashrif bo'lsa havola; Sotuv sahifasida ochiq tashrif banneri va do'kon kartalarida holat
 - web Distributsiya → "Tashriflar": kun va agent filtri, ko'rsatkichlar, buyurtmasiz sabablar diagrammasi, jadval (vaqt, davomiylik, natija, masofa) va rasmni ko'rish
+- **D va E** commit `2fad8d7`, production'ga deploy qilindi (API va web SUCCESS; yangi endpointlar 401, bundle'da yangi matnlar)
+
+**F — Agent buyurtmasi** (migratsiya 0024):
+- jadval `agent_orders` (1:1 `sales_orders`): agent, do'kon, tashrif, mijoz so'rov identifikatori (`ao_rep_request_key` — takror buyurtma yo'q), to'lov turi (`cash`/`card`/`credit`) va muddati, dona/blok qatorlari, yuborilgan joy va masofa, kredit tasdig'i (`pending`/`approved`/`rejected`)
+- `GET /api/sales-agent/catalog` — faqat sotiladigan faol mahsulotlar (kategoriya cheklovi bilan), sahifalab, qidiruv; dona narxi (valyuta kursi bilan asosiy valyutada), blok — mahsulot sotuv birligi yoki mahsulotga xos konversiya (narxi = dona × koeffitsient), ombordagi mavjud qoldiq; rasm — imzolangan havola
+- `PUT /orders/drafts/:clientRequestId` — qoralama: birinchi so'rov yaratadi, takroriysi o'sha buyurtmani yangilaydi; miqdor serverda (dona + blok × koeffitsient), narx — prays-list (agent narx/chegirma o'zgartira olmaydi); yuborilgan buyurtmani o'zgartirish — 409
+- `POST /orders/:id/submit` — bitta tranzaksiya: hudud, joy sifati, do'kon koordinatasi majburiy (`store_location_missing`), geofence (buzilsa — buyurtma yaratilmaydi; hodisa, audit `GEO_FENCE_ORDER_ATTEMPT` do'kon va agent koordinatalari, masofa, radius bilan va supervayzerlarga "Geo-fence buzilishi" bildirishnomasi), yetkazish kuni (`assigned` — bugungi marshrut biriktirishidagi kun, agent o'zgartira olmaydi; `choose` — bugundan `maxDeliveryDays` gacha, majburiy), nasiya muddati (siyosat), joriy narx bilan qayta hisob, qoldiq (`out_of_stock`), kredit limiti (qarz + jo'natilmagan tasdiqlangan buyurtmalar + shu buyurtma; siyosat `block` — 400 `credit_limit`, `approval` — tasdiq kutadi va supervayzerga bildirishnoma), ochiq tashrifga bog'lash, tasdiqlash. Qayta yuborish natijani o'zgartirmaydi. Audit: `ORDER_CREATED`, `ORDER_SUBMITTED`, `CREDIT_ORDER`, `ORDER_CANCELLED`
+- zaxira chiqimi, qarz va jurnal — mavjud jo'natish qoidasi bo'yicha (ombor "jo'natish"da); tizimda zaxira band qilinmaydi, shuning uchun yuborishda qoldiq tasdiqlangan-jo'natilmagan buyurtmalarni hisobga olmaydi
+- supervayzer: `GET /supervisor/orders?approval=&date=`, `POST /supervisor/orders/:id/approve` (qoldiq qayta tekshiriladi) va `/reject` (sabab bilan, buyurtma bekor qilinadi)
+- tashrif: shu tashrifda yuborilgan buyurtma bo'lsa yakunlash sababsiz, natija `ordered`
+- web agent: do'kon sahifasida "Buyurtma berish"/"Qoralamani davom ettirish" va so'nggi buyurtmalar; buyurtma sahifasi — qidiruv, dona va blok tugmalari, darhol jami, to'lov turi va muddat, yetkazish kuni (siyosat bo'yicha), qoralama har o'zgarishda qurilmada saqlanadi (yangilash/tarmoq uzilishi), "Saqlash" va tasdiqlash oynasi (do'kon, masofa, qarz, qolgan kredit, yetkazish, to'lov, qatorlar, jami), yuborishda yangi GPS o'lchovi; server sabablari uz/ru/kk xabarlarga aylanadi
+- web Distributsiya → "Agent buyurtmalari": tasdiq kutayotganlar va kun bo'yicha yuborilganlar, tasdiqlash va rad etish
 
 ### Distributsiya (`/api/distribution`)
 
@@ -751,12 +763,15 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
 | POST | `/location`, `/location/events` | `sales_agent.use` |
 | GET | `/visits/current`, `/visits` (`?date=`), `/visits/:visitId/photos/:photoId/url` | `sales_agent.use` (o'z tashriflari) |
 | POST | `/visits/start`, `/visits/:visitId/complete`, `/visits/:visitId/photos/uploads`, `/visits/:visitId/photos` | `sales_agent.use` |
+| GET | `/catalog` (`?search=&categoryId=&limit=&offset=`), `/catalog/:productId/image`, `/orders` (`?state=&customerId=`), `/orders/:orderId` | `sales_agent.use` |
+| PUT / POST | `/orders/drafts/:clientRequestId`, `/orders/:orderId/submit`, `/orders/:orderId/cancel` | `sales_agent.use` |
 | GET / PUT | `/policy` | o'qish — agent yoki `sales_agent.supervise`; yozish — `sales_agent.supervise` |
 | GET | `/supervisor/agents` | `sales_agent.location.view` |
 | GET | `/supervisor/live` (`?since=`) | `sales_agent.location.live` |
 | GET | `/supervisor/agents/:salesRepId/history` (`?date=`) | `sales_agent.location.history` (audit) |
 | GET | `/supervisor/events` (`?date=&type=&salesRepId=&limit=`) | `sales_agent.supervise` |
 | GET | `/supervisor/visits` (`?date=&salesRepId=&limit=`), `/supervisor/visits/:visitId/photos/:photoId/url` | `sales_agent.supervise` |
+| GET / POST | `/supervisor/orders` (`?approval=&date=&salesRepId=`), `/supervisor/orders/:orderId/approve`, `/supervisor/orders/:orderId/reject` | `sales_agent.supervise` |
 
 ---
 

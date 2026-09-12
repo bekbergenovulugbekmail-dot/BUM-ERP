@@ -94,6 +94,49 @@ export type Debtor = AgentStore & { dueDate: string | null; daysOverdue: number 
 
 export const num = (value: string | number | null | undefined): number => Number(value ?? 0) || 0;
 
+export type PaymentType = "cash" | "card" | "credit";
+
+/** `GET /api/sales-agent/catalog` — narxlar asosiy valyutada, qoldiq asosiy birlikda. */
+export type CatalogProduct = {
+  id: string;
+  name: string;
+  sku: string;
+  categoryId: string | null;
+  unitName: string;
+  hasImage: boolean;
+  available: string;
+  piecePrice: string;
+  box: { unitId: string; unitName: string; factor: string; price: string } | null;
+};
+
+export type AgentOrderLine = { productId: string; pieces: string; boxes: string; boxUnitId: string | null; boxFactor: string | null };
+
+/** `/api/sales-agent/orders/*` — agent buyurtmasi (ro'yxatda `items` yo'q). */
+export type AgentOrder = {
+  id: string;
+  number: string;
+  status: OrderStatus;
+  orderDate: string;
+  deliveryDate: string | null;
+  currency: string;
+  totalAmount: string;
+  paidAmount: string;
+  notes: string | null;
+  customerId: string;
+  customerName: string;
+  visitId: string | null;
+  clientRequestId: string;
+  paymentType: PaymentType;
+  paymentDueDate: string | null;
+  lines: AgentOrderLine[];
+  submittedAt: string | null;
+  submitDistanceMeters: number | null;
+  approvalStatus: "pending" | "approved" | "rejected" | null;
+  rejectionReason: string | null;
+  updatedAt: string;
+  items?: { productId: string; productName: string; quantity: string; unitPrice: string; discountPercent: string; lineTotal: string }[];
+};
+
 /** Taymer: "4:05", "1:02:09". */
 export function formatClock(totalSeconds: number): string {
   const seconds = Math.max(0, Math.floor(totalSeconds));

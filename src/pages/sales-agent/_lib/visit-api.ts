@@ -79,14 +79,36 @@ export async function uploadVisitPhoto(
 }
 
 const LOCATION_REASONS = new Set(["low_accuracy", "stale", "invalid"]);
+const ORDER_REASONS = new Set([
+  "credit_limit",
+  "out_of_stock",
+  "due_date_required",
+  "due_date_past",
+  "delivery_date_required",
+  "delivery_date_out_of_range",
+  "store_location_missing",
+  "empty_order",
+]);
 
-export function visitErrorMessage(error: unknown, t: TFunction<"agent">): string {
+/** Server xatosi (sabab kodi bilan) → agent tilidagi xabar; `action` — geofence matni tashrif yoki buyurtma uchun. */
+export function visitErrorMessage(error: unknown, t: TFunction<"agent">, action: "visit" | "order" = "visit"): string {
   if (error instanceof ApiError) {
-    const details = (error.details ?? {}) as { reason?: string; distanceMeters?: number; radiusMeters?: number };
+    const details = (error.details ?? {}) as {
+      reason?: string;
+      distanceMeters?: number;
+      radiusMeters?: number;
+      limit?: string;
+      exposure?: string;
+      available?: string;
+    };
     if (details.reason === "geofence" && typeof details.distanceMeters === "number") {
-      return t("visit.geofence", { distance: details.distanceMeters, radius: details.radiusMeters });
+      return t(`${action}.geofence`, { distance: details.distanceMeters, radius: details.radiusMeters });
     }
     if (details.reason && LOCATION_REASONS.has(details.reason)) return t(`location.rejected.${details.reason}`);
+    if (details.reason === "photo_required") return t("visit.photo.required");
+    if (details.reason && ORDER_REASONS.has(details.reason)) {
+      return t(`order.error.${details.reason}`, { limit: details.limit, exposure: details.exposure, available: details.available });
+    }
     if (error.code === "LOCATION_DENIED") return t("location.denied");
     if (error.code === "LOCATION_UNAVAILABLE") return t("location.unavailable");
     if (error.code === "UPLOAD_FAILED") return t("visit.photo.upload_failed");

@@ -9,6 +9,7 @@ import { formatMoney } from "@/hooks/use-currencies.ts";
 import { cn } from "@/lib/utils.ts";
 import EmptyState from "../_components/empty-state.tsx";
 import LocationBanner from "../_components/location-banner.tsx";
+import OrderEntry from "../_components/order-entry.tsx";
 import VisitPanel from "../_components/visit-panel.tsx";
 import { originParams, useAgentLocation } from "../_lib/agent-location.ts";
 import { formatDistance, num, type AgentMe, type StoreProfile } from "../_lib/types.ts";
@@ -70,6 +71,7 @@ export default function AgentStorePage() {
 
       <LocationBanner location={position} />
       <VisitPanel store={store} />
+      <OrderEntry customerId={store.id} />
 
       <div className="rounded-2xl border border-border bg-card p-4 space-y-2.5 text-sm">
         {store.contactName && (

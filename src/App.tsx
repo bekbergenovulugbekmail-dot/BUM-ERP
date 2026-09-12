@@ -22,6 +22,7 @@ import AgentSalesPage from "./pages/sales-agent/sales/page.tsx";
 import AgentDebtorsPage from "./pages/sales-agent/debtors/page.tsx";
 import AgentStoresPage from "./pages/sales-agent/stores/page.tsx";
 import AgentStorePage from "./pages/sales-agent/stores/store-page.tsx";
+import AgentOrderPage from "./pages/sales-agent/stores/order-page.tsx";
 import AgentPromotionsPage from "./pages/sales-agent/promotions/page.tsx";
 import ManufacturingPage from "./pages/manufacturing/page.tsx";
 import HRPage from "./pages/hr/page.tsx";
@@ -131,6 +132,7 @@ function MainApp() {
             <Route path="debtors" element={<AgentDebtorsPage />} />
             <Route path="stores" element={<AgentStoresPage />} />
             <Route path="stores/:customerId" element={<AgentStorePage />} />
+            <Route path="stores/:customerId/order" element={<AgentOrderPage />} />
             <Route path="promotions" element={<AgentPromotionsPage />} />
           </Route>
 

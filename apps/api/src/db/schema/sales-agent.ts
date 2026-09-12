@@ -24,7 +24,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { distributionRoutes, salesReps } from "./crm.js";
 import { companies, users } from "./platform.js";
-import { customers } from "./sales.js";
+import { customers, salesOrders } from "./sales.js";
 import { pk, timestamps } from "./_shared.js";
 
 export const agentLocationEventType = pgEnum("agent_location_event_type", [
@@ -192,4 +192,60 @@ export const agentVisitPhotos = pgTable(
     takenAt: timestamp("taken_at", { withTimezone: true }).notNull(),
   },
   (t) => [index("avp_company_visit_idx").on(t.companyId, t.visitId), uniqueIndex("avp_storage_key_key").on(t.storageKey)],
+);
+
+// ─── Agent buyurtmalari ──────────────────────────────────────────────────────
+
+export const orderPaymentType = pgEnum("order_payment_type", ["cash", "card", "credit"]);
+/** Kredit limitidan oshgan buyurtma (siyosat "approval") — supervayzer qarori. */
+export const agentOrderApproval = pgEnum("agent_order_approval", ["pending", "approved", "rejected"]);
+
+/** Agent kiritgan qator: dona va blok alohida (sotuv qatorida — asosiy birlikdagi jami). */
+export type AgentOrderLine = {
+  productId: string;
+  pieces: string;
+  boxes: string;
+  boxUnitId: string | null;
+  boxFactor: string | null;
+};
+
+/**
+ * Sotuv buyurtmasining agent qismi (1:1 `sales_orders`): kim, qaysi tashrifda, to'lov turi va muddati,
+ * mijoz so'rov identifikatori (qayta urinishda takror buyurtma yaratilmaydi), yuborilgan joy va masofa, tasdiq.
+ */
+export const agentOrders = pgTable(
+  "agent_orders",
+  {
+    orderId: uuid("order_id")
+      .primaryKey()
+      .references(() => salesOrders.id, { onDelete: "cascade" }),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    salesRepId: uuid("sales_rep_id").notNull().references(() => salesReps.id, { onDelete: "restrict" }),
+    customerId: uuid("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+    visitId: uuid("visit_id").references(() => agentVisits.id, { onDelete: "set null" }),
+    clientRequestId: uuid("client_request_id").notNull(),
+    paymentType: orderPaymentType("payment_type").notNull().default("cash"),
+    paymentDueDate: date("payment_due_date"),
+    lines: jsonb("lines").$type<AgentOrderLine[]>().notNull().default([]),
+
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    submitLatitude: numeric("submit_latitude", { precision: 9, scale: 6 }),
+    submitLongitude: numeric("submit_longitude", { precision: 9, scale: 6 }),
+    submitAccuracy: numeric("submit_accuracy", { precision: 8, scale: 2 }),
+    submitDistanceMeters: integer("submit_distance_meters"),
+
+    approvalStatus: agentOrderApproval("approval_status"),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    rejectionReason: text("rejection_reason"),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("ao_rep_request_key").on(t.salesRepId, t.clientRequestId),
+    index("ao_company_rep_idx").on(t.companyId, t.salesRepId, t.updatedAt),
+    index("ao_company_approval_idx").on(t.companyId, t.approvalStatus),
+    index("ao_visit_idx").on(t.visitId),
+  ],
 );

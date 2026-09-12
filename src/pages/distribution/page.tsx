@@ -2,7 +2,7 @@ import { useState } from "react";
 import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import {
-  Truck, Route, Users, CalendarRange, Radar, SlidersHorizontal, ClipboardCheck,
+  Truck, Route, Users, CalendarRange, Radar, SlidersHorizontal, ClipboardCheck, ShoppingCart,
   MapPinned, UserCheck, CalendarCheck, CircleDollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
@@ -13,12 +13,13 @@ import AssignmentsSection from "./_components/assignments-section.tsx";
 import SalesRepsSection from "./_components/sales-reps-section.tsx";
 import MonitoringSection from "./_components/monitoring-section.tsx";
 import VisitsSection from "./_components/visits-section.tsx";
+import OrdersSection from "./_components/orders-section.tsx";
 import AgentPolicySection from "./_components/agent-policy-section.tsx";
 import { num, type DistributionRoute, type SalesRepStats } from "./_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
-type TabKey = "routes" | "assignments" | "reps" | "visits" | "monitoring" | "policy";
+type TabKey = "routes" | "assignments" | "reps" | "orders" | "visits" | "monitoring" | "policy";
 
 export default function DistributionPage() {
   const { t } = useTranslation("distribution");
@@ -30,6 +31,7 @@ export default function DistributionPage() {
     { key: "assignments" as const, icon: CalendarRange, visible: true },
     { key: "reps" as const, icon: Users, visible: true },
     // Tashriflar va siyosat — nazorat ruxsati; lokatsiya — alohida ruxsat (Supervayzer)
+    { key: "orders" as const, icon: ShoppingCart, visible: can("sales_agent.supervise") },
     { key: "visits" as const, icon: ClipboardCheck, visible: can("sales_agent.supervise") },
     { key: "monitoring" as const, icon: Radar, visible: can("sales_agent.location.view") },
     { key: "policy" as const, icon: SlidersHorizontal, visible: can("sales_agent.supervise") },
@@ -153,6 +155,7 @@ export default function DistributionPage() {
         {activeTab === "routes" && <RoutesSection />}
         {activeTab === "assignments" && <AssignmentsSection />}
         {activeTab === "reps" && <SalesRepsSection />}
+        {activeTab === "orders" && <OrdersSection />}
         {activeTab === "visits" && <VisitsSection />}
         {activeTab === "monitoring" && <MonitoringSection />}
         {activeTab === "policy" && <AgentPolicySection />}

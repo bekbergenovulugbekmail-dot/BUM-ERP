@@ -169,6 +169,13 @@
       "when": 1789169336211,
       "tag": "0023_agent_visits",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789170679443,
+      "tag": "0024_agent_orders",
+      "breakpoints": true
     }
   ]
 }

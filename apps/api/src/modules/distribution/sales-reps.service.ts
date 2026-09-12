@@ -13,7 +13,7 @@ import { and, asc, eq, getTableColumns, ne, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
 import { distributionRoutes, leads, routeVisits, salesReps } from "../../db/schema/crm.js";
 import { companyMembers } from "../../db/schema/platform.js";
-import { agentVisits } from "../../db/schema/sales-agent.js";
+import { agentOrders, agentVisits } from "../../db/schema/sales-agent.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
@@ -175,7 +175,8 @@ export async function deleteSalesRep(tx: Tx, tenant: TenantContext, salesRepId: 
       used: sql<boolean>`exists (select 1 from ${leads} where ${leads.salesRepId} = ${rep.id})
         or exists (select 1 from ${distributionRoutes} where ${distributionRoutes.salesRepId} = ${rep.id})
         or exists (select 1 from ${routeVisits} where ${routeVisits.salesRepId} = ${rep.id})
-        or exists (select 1 from ${agentVisits} where ${agentVisits.salesRepId} = ${rep.id})`,
+        or exists (select 1 from ${agentVisits} where ${agentVisits.salesRepId} = ${rep.id})
+        or exists (select 1 from ${agentOrders} where ${agentOrders.salesRepId} = ${rep.id})`,
     })
     .from(sql`(select 1) as probe`);
   if (usage?.used) throw conflict("Agentga lid, marshrut yoki tashrif bog'langan — faolsizlantiring");

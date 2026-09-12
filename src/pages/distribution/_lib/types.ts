@@ -175,6 +175,25 @@ export type VisitsSummary = {
   reasons: Partial<Record<NoOrderReason, number>>;
 };
 
+/** `GET /supervisor/orders` — agent yuborgan buyurtmalar. */
+export type SupervisorOrder = {
+  id: string;
+  number: string;
+  status: "draft" | "confirmed" | "shipped" | "delivered" | "returned" | "cancelled";
+  orderDate: string;
+  deliveryDate: string | null;
+  currency: string;
+  totalAmount: string;
+  customerName: string;
+  salesRepName: string;
+  paymentType: "cash" | "card" | "credit";
+  paymentDueDate: string | null;
+  submittedAt: string;
+  submitDistanceMeters: number | null;
+  approvalStatus: "pending" | "approved" | "rejected" | null;
+  rejectionReason: string | null;
+};
+
 /** `GET /supervisor/agents/:id/history?date=`. */
 export type AgentLocationHistory = {
   agent: { id: string; name: string; code: string };

@@ -15,6 +15,11 @@
  *   POST /visits/:visitId/photos/uploads            rasm uchun imzolangan yuklash URL
  *   POST /visits/:visitId/photos                    yuklangan rasmni biriktirish
  *   GET  /visits/:visitId/photos/:photoId/url       rasmni ko'rish (imzolangan, 5 daqiqa)
+ *   GET  /catalog (?search=&categoryId=&limit=&offset=), GET /catalog/:productId/image   katalog (dona/blok, qoldiq)
+ *   GET  /orders (?state=draft|submitted&customerId=), GET /orders/:orderId              o'z buyurtmalari
+ *   PUT  /orders/drafts/:clientRequestId            qoralama (idempotent: bir identifikator — bitta buyurtma)
+ *   POST /orders/:orderId/submit                    yuborish (geofence, kredit, qoldiq — atomar)
+ *   POST /orders/:orderId/cancel                    yuborilmagan / tasdiq kutayotganini bekor qilish
  * Siyosat:
  *   GET  /policy                                    sales_agent.use yoki sales_agent.supervise
  *   PUT  /policy                                    sales_agent.supervise
@@ -25,6 +30,8 @@
  *   GET  /supervisor/events (?date=&type=&salesRepId=&limit=)   sales_agent.supervise
  *   GET  /supervisor/visits (?date=&salesRepId=&limit=)        sales_agent.supervise — tashriflar va sabablar
  *   GET  /supervisor/visits/:visitId/photos/:photoId/url       sales_agent.supervise
+ *   GET  /supervisor/orders (?approval=&date=&salesRepId=)     sales_agent.supervise — agent buyurtmalari
+ *   POST /supervisor/orders/:orderId/approve|reject            sales_agent.supervise — kredit limiti tasdig'i
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
@@ -32,9 +39,10 @@ import { z } from "zod";
 import { forbidden, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { companies } from "../../db/schema/platform.js";
-import { agentLocationEvents, agentVisitPhotos, agentVisits } from "../../db/schema/sales-agent.js";
+import { agentLocationEvents, agentOrders, agentVisitPhotos, agentVisits } from "../../db/schema/sales-agent.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
+import { qtySchema } from "../../shared/decimal.js";
 import type { GeoPoint } from "../../shared/geo.js";
 import { storageProvider } from "../../shared/storage.js";
 import { authOf, requireAuth } from "../auth/guard.js";
@@ -47,6 +55,18 @@ import {
 } from "../company/tenant.js";
 import { todayIso } from "../finance/cash.service.js";
 import { requireAgent, type AgentContext } from "./agent-context.js";
+import {
+  agentCatalog,
+  approveAgentOrder,
+  cancelAgentOrder,
+  catalogImageUrl,
+  getAgentOrder,
+  listAgentOrders,
+  rejectAgentOrder,
+  saveAgentDraft,
+  submitAgentOrder,
+  supervisorOrders,
+} from "./agent-orders.service.js";
 import { recordAgentLocation, reportLocationProblem } from "./location.service.js";
 import { getSalesAgentPolicy, salesAgentPolicySchema, saveSalesAgentPolicy } from "./policy.service.js";
 import { agentDebtors, agentStore, agentStores, agentToday } from "./stores.service.js";
@@ -137,6 +157,41 @@ const supervisorVisitsQuery = z.object({
   salesRepId: z.uuid().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(300),
 });
+
+const catalogQuery = z.object({
+  search: z.string().trim().min(1).max(100).optional(),
+  categoryId: z.uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).max(10_000).default(0),
+});
+const productParams = z.object({ productId: z.uuid() });
+const orderLine = z.strictObject({
+  productId: z.uuid(),
+  pieces: qtySchema.default("0"),
+  boxes: qtySchema.default("0"),
+});
+const draftBody = z.strictObject({
+  customerId: z.uuid(),
+  items: z.array(orderLine).min(1).max(200),
+  paymentType: z.enum(agentOrders.paymentType.enumValues).default("cash"),
+  paymentDueDate: isoDate.nullable().optional(),
+  deliveryDate: isoDate.nullable().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+});
+const draftParams = z.object({ clientRequestId: z.uuid() });
+const orderParams = z.object({ orderId: z.uuid() });
+const agentOrdersQuery = z.object({
+  state: z.enum(["draft", "submitted"]).optional(),
+  customerId: z.uuid().optional(),
+});
+const cancelBody = z.strictObject({ reason: z.string().trim().max(500).nullable().optional() });
+const supervisorOrdersQuery = z.object({
+  approval: z.enum(agentOrders.approvalStatus.enumValues).optional(),
+  date: isoDate.optional(),
+  salesRepId: z.uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(200),
+});
+const rejectBody = z.strictObject({ reason: z.string().trim().min(3).max(500) });
 
 const originOf = (query: { lat?: number; lng?: number }): GeoPoint | null =>
   query.lat !== undefined && query.lng !== undefined ? { latitude: query.lat, longitude: query.lng } : null;
@@ -275,6 +330,50 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
     return visitPhotoUrl(db, context.company.id, ids, client, context.agent.id);
   });
 
+  // ─── Katalog va buyurtmalar ──────────────────────────────────────────────
+
+  app.get("/catalog", async (req) => {
+    const query = catalogQuery.parse(req.query);
+    return agentCatalog(db, await readAgent(req), query);
+  });
+
+  app.get("/catalog/:productId/image", async (req, reply) => {
+    const { productId } = productParams.parse(req.params);
+    const client = storageProvider.client;
+    if (!client) return storageUnavailable(reply);
+    return catalogImageUrl(db, await readAgent(req), productId, client);
+  });
+
+  app.get("/orders", async (req) => {
+    const query = agentOrdersQuery.parse(req.query);
+    return { orders: await listAgentOrders(db, await readAgent(req), query) };
+  });
+
+  app.get("/orders/:orderId", async (req) => {
+    const { orderId } = orderParams.parse(req.params);
+    return { order: await getAgentOrder(db, await readAgent(req), orderId) };
+  });
+
+  app.put("/orders/drafts/:clientRequestId", async (req) => {
+    const { clientRequestId } = draftParams.parse(req.params);
+    const body = draftBody.parse(req.body);
+    return { order: await writeAgent(req, (tx, context) => saveAgentDraft(tx, context, clientRequestId, body, requestMeta(req))) };
+  });
+
+  app.post("/orders/:orderId/submit", async (req) => {
+    const { orderId } = orderParams.parse(req.params);
+    const body = locationBody.parse(req.body);
+    const outcome = await writeAgent(req, (tx, context) => submitAgentOrder(tx, context, orderId, body, requestMeta(req)));
+    if ("blocked" in outcome) throw outcome.blocked;
+    return { order: outcome.order };
+  });
+
+  app.post("/orders/:orderId/cancel", async (req) => {
+    const { orderId } = orderParams.parse(req.params);
+    const { reason } = cancelBody.parse(req.body ?? {});
+    return { order: await writeAgent(req, (tx, context) => cancelAgentOrder(tx, context, orderId, reason ?? null, requestMeta(req))) };
+  });
+
   // ─── Siyosat ─────────────────────────────────────────────────────────────
 
   app.get("/policy", async (req) => {
@@ -325,6 +424,32 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
     const query = supervisorVisitsQuery.parse(req.query);
     const tenant = await readTenantWith(req, "sales_agent.supervise");
     return supervisorVisits(db, tenant, { ...query, date: query.date ?? todayIso() });
+  });
+
+  app.get("/supervisor/orders", async (req) => {
+    const query = supervisorOrdersQuery.parse(req.query);
+    return { orders: await supervisorOrders(db, await readTenantWith(req, "sales_agent.supervise"), query) };
+  });
+
+  app.post("/supervisor/orders/:orderId/approve", async (req) => {
+    const { orderId } = orderParams.parse(req.params);
+    const order = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      await requirePermission(tx, tenant, "sales_agent.supervise");
+      return approveAgentOrder(tx, tenant, orderId, requestMeta(req));
+    });
+    return { order };
+  });
+
+  app.post("/supervisor/orders/:orderId/reject", async (req) => {
+    const { orderId } = orderParams.parse(req.params);
+    const { reason } = rejectBody.parse(req.body);
+    const order = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      await requirePermission(tx, tenant, "sales_agent.supervise");
+      return rejectAgentOrder(tx, tenant, orderId, reason, requestMeta(req));
+    });
+    return { order };
   });
 
   app.get("/supervisor/visits/:visitId/photos/:photoId/url", async (req, reply) => {
