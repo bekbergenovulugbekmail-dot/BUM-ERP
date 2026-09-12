@@ -766,6 +766,7 @@ xarita — Yandex Maps (`MapProvider` orqasida, kalit env'da), lokatsiya — avv
 - xavfsizlik testlari `sales-agent-security` (2): autentifikatsiyasiz 401; agent supervayzer va ERP (moliya, sotuv, katalog, distributsiya) API'lariga 403; boshqa agent/kompaniya do'koni, buyurtmasi, tashrifi — 404; soxta `insideGeofence`/`distanceMeters` — 400, uzoqdan — 403; boshqa agent nomidan lokatsiya — 400; lokatsiya cheklovi (13-nuqta 429)
 - frontend unit testlar: `order-draft` (3 — server/qurilma nusxasi ustunligi, yangi identifikator, tozalash), `types` (3 — taymer, masofa, aksiya qoidasi matni)
 - brauzer E2E (Playwright) — o'rnatilmagan va bajarilmagan; API oqimlari `app.inject` integratsiya testlarida HTTP darajasida tekshirilgan
+- **G–I** commit `4fd9e13`, production'ga deploy qilindi (API va web SUCCESS; `/dashboard`, `/prospects`, `/supervisor/promotions`, `/supervisor/prospects` 401; bundle'da yangi ekranlar; `sw.js` — `erp-assets-v2`). Lokal: API 247/247 (55 fayl, `--maxWorkers=2`), frontend unit 11/11, web tsc, lint va `vite build` o'tdi
 
 ### Distributsiya (`/api/distribution`)
 
