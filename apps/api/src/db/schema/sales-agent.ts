@@ -253,6 +253,30 @@ export const agentVisitPhotos = pgTable(
   (t) => [index("avp_company_visit_idx").on(t.companyId, t.visitId), uniqueIndex("avp_storage_key_key").on(t.storageKey)],
 );
 
+/** Mijoz (do'kon) vitrina rasmi — agent mijoz yonida kamera bilan oladi; har mijozda oxirgi 5 tasi saqlanadi. */
+export const customerPhotos = pgTable(
+  "customer_photos",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    salesRepId: uuid("sales_rep_id").references(() => salesReps.id, { onDelete: "set null" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    content: bytea("content").notNull(),
+    contentType: varchar("content_type", { length: 50 }).notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    latitude: numeric("latitude", { precision: 9, scale: 6 }).notNull(),
+    longitude: numeric("longitude", { precision: 9, scale: 6 }).notNull(),
+    accuracy: numeric("accuracy", { precision: 8, scale: 2 }).notNull(),
+    takenAt: timestamp("taken_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("cph_company_customer_taken_idx").on(t.companyId, t.customerId, t.takenAt)],
+);
+
 // ─── Agent buyurtmalari ──────────────────────────────────────────────────────
 
 export const orderPaymentType = pgEnum("order_payment_type", ["cash", "card", "credit"]);

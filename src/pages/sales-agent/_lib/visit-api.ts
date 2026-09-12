@@ -94,6 +94,17 @@ export async function uploadVisitPhoto(visitId: string, file: File, kind: PhotoK
   return photo;
 }
 
+/** Mijoz vitrina rasmi — kichik JPEG, bazada; joy bilan (server mijoz hududida olinganini tekshiradi). */
+export async function uploadCustomerPhoto(customerId: string, file: File, point: LocationPayload) {
+  const small = await compressImage(file, 1280, 0.72);
+  const { photo } = await api.post<{ photo: { id: string; takenAt: string } }>(`/api/sales-agent/customers/${customerId}/photo`, {
+    contentType: small.type || "image/jpeg",
+    data: await base64Of(small),
+    ...point,
+  });
+  return photo;
+}
+
 const LOCATION_REASONS = new Set(["low_accuracy", "stale", "invalid"]);
 const VISIT_REASONS = new Set([
   "storefront_photo_required",

@@ -8,15 +8,17 @@ import { useApiQuery } from "@/lib/query.ts";
 import { formatMoney } from "@/hooks/use-currencies.ts";
 import { cn } from "@/lib/utils.ts";
 import { mapAppUrl } from "@/lib/maps/index.ts";
+import CustomerHistorySection from "../_components/customer-history.tsx";
+import CustomerPanel from "../_components/customer-panel.tsx";
 import EmptyState from "../_components/empty-state.tsx";
 import LocationBanner from "../_components/location-banner.tsx";
 import OrderEntry from "../_components/order-entry.tsx";
 import WorkSessionCard from "../_components/work-session-card.tsx";
 import VisitPanel from "../_components/visit-panel.tsx";
 import { originParams, useAgentLocation } from "../_lib/agent-location.ts";
-import { formatDistance, num, type AgentMe, type StoreProfile } from "../_lib/types.ts";
+import { formatDistance, num, type AgentMe, type CustomerHistory, type StoreProfile } from "../_lib/types.ts";
 
-/** Do'kon profili: aloqa, qarz va kredit, buyurtmalar, tashrif kunlari, masofa. */
+/** Mijoz profili: tashrif, aloqa, qarz va kredit, tarix (buyurtmalar, to'lovlar, tashriflar), tahrirlash, joylashuv va rasm. */
 export default function AgentStorePage() {
   const { t } = useTranslation("agent");
   const { lng = "uz", customerId } = useParams<{ lng: string; customerId: string }>();
@@ -27,11 +29,12 @@ export default function AgentStorePage() {
     originParams(position),
   );
   const store = query.data?.store;
+  const history = useApiQuery<CustomerHistory>(customerId ? `/api/sales-agent/customers/${customerId}/history` : null).data;
   const money = (value: string | number) => formatMoney(num(value), company.currency);
 
   const back = (
     <Button asChild variant="ghost" className="h-11 -ml-2">
-      <Link to={`/${lng}/sales-agent/stores`}>
+      <Link to={`/${lng}/sales-agent/customers`}>
         <ArrowLeft className="h-5 w-5 mr-1" /> {t("back")}
       </Link>
     </Button>
@@ -118,6 +121,8 @@ export default function AgentStorePage() {
         </div>
       </div>
 
+      <CustomerPanel store={store} history={history} />
+
       <div className="grid grid-cols-2 gap-3">
         <div className={cn("rounded-2xl border p-4", debt > 0 ? "border-amber-500/40 bg-amber-500/5" : "border-border bg-card")}>
           <p className="text-xs text-muted-foreground">{t("store.debt")}</p>
@@ -134,30 +139,14 @@ export default function AgentStorePage() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">{t("store.orders_90")}</span>
-          <span className="font-semibold">
-            {store.ordersLast90Days.count} · {money(store.ordersLast90Days.total)}
-          </span>
-        </div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("store.recent_orders")}</p>
-        {store.recentOrders.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("store.never")}</p>
-        ) : (
-          <div className="divide-y divide-border">
-            {store.recentOrders.map((order) => (
-              <div key={order.id} className="flex items-center justify-between py-2 text-sm">
-                <div>
-                  <p className="font-medium">{order.number}</p>
-                  <p className="text-xs text-muted-foreground">{order.orderDate} · {t(`order.status.${order.status}`)}</p>
-                </div>
-                <span className="font-semibold">{money(order.totalAmount)}</span>
-              </div>
-            ))}
-          </div>
-        )}
+      <div className="flex items-center justify-between rounded-2xl border border-border bg-card px-4 py-3 text-sm">
+        <span className="text-muted-foreground">{t("store.orders_90")}</span>
+        <span className="font-semibold tabular-nums">
+          {store.ordersLast90Days.count} · {money(store.ordersLast90Days.total)}
+        </span>
       </div>
+
+      <CustomerHistorySection history={history} currency={company.currency} />
 
       {store.notes && <p className="text-sm text-muted-foreground px-1">{store.notes}</p>}
     </div>

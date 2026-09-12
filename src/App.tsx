@@ -19,8 +19,8 @@ import ModuleGuard from "./components/module-guard.tsx";
 import SalesAgentLayout from "./pages/sales-agent/layout.tsx";
 import AgentDashboardPage from "./pages/sales-agent/dashboard/page.tsx";
 import AgentSalesPage from "./pages/sales-agent/sales/page.tsx";
-import AgentDebtorsPage from "./pages/sales-agent/debtors/page.tsx";
-import AgentStoresPage from "./pages/sales-agent/stores/page.tsx";
+import AgentCustomersPage from "./pages/sales-agent/customers/page.tsx";
+import AgentReportsPage from "./pages/sales-agent/reports/page.tsx";
 import AgentStorePage from "./pages/sales-agent/stores/store-page.tsx";
 import AgentOrderPage from "./pages/sales-agent/stores/order-page.tsx";
 import AgentPromotionsPage from "./pages/sales-agent/promotions/page.tsx";
@@ -130,8 +130,11 @@ function MainApp() {
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<AgentDashboardPage />} />
             <Route path="sales" element={<AgentSalesPage />} />
-            <Route path="debtors" element={<AgentDebtorsPage />} />
-            <Route path="stores" element={<AgentStoresPage />} />
+            <Route path="customers" element={<AgentCustomersPage />} />
+            {/* Eski havolalar: Do'konlar va Qarzdorlar "Mijozlar" bo'limiga birlashtirildi */}
+            <Route path="debtors" element={<Navigate to="../customers?filter=debtors" replace />} />
+            <Route path="stores" element={<Navigate to="../customers" replace />} />
+            <Route path="reports" element={<AgentReportsPage />} />
             <Route path="stores/:customerId" element={<AgentStorePage />} />
             <Route path="stores/:customerId/order" element={<AgentOrderPage />} />
             <Route path="promotions" element={<AgentPromotionsPage />} />

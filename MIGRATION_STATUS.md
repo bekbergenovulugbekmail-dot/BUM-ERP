@@ -778,7 +778,7 @@ Foydalanuvchi `BUMERP_SOTUVAGE.docx` (68 bo'lim) yubordi: pullik xarita API'si y
 | V2 | Pullik xarita API'si olib tashlandi: sxematik SVG xarita, "Xaritada ochish" — qurilma ilovasi | ✅ |
 | V3 | Ish sessiyasi: "Ishni boshlash/yakunlash", lokatsiya faqat ish vaqtida | ✅ |
 | V4 | Tashrif v2: majburiy vitrina/polka rasmi (kamera), minimal vaqt, hududdan chiqish siyosati, BUYURTMA / BUYURTMA YO'Q | ✅ |
-| V5 | Mijozlar bo'limi (tarix, tahrirlash, joylashuv, rasm), 5 bandli menyu | ⏳ |
+| V5 | Mijozlar bo'limi (tarix, tahrirlash, joylashuv, rasm), 5 bandli menyu | ✅ |
 | V6 | Katalog UX (brend, rasm, mahsulot oynasi, pastki "Buyurtmani yakunlash") | ⏳ |
 | V7 | Hisobotlar (FROM/TO), bildirishnoma qabul qiluvchilari, radius 100/200/300/500 | ⏳ |
 | V8 | Audit nomlari, chegara/xavfsizlik/buxgalteriya testlari, yakuniy hisobot | ⏳ |
@@ -817,6 +817,19 @@ Foydalanuvchi `BUMERP_SOTUVAGE.docx` (68 bo'lim) yubordi: pullik xarita API'si y
 - web Distributsiya: siyosatda "Tashrif" bo'limi; Tashriflar jadvalida "bekor", hududdan chiqishlar soni va tashqaridagi daqiqalar
 - cheklov: brauzer galereyadan tanlashni to'liq taqiqlay olmaydi (`capture` — Android Chrome va iOS Safari'da kamerani ochadi, ba'zi brauzerlarda galereya ham taklif qilinadi); rasm vaqti va joyi server tomonidan yoziladi, EXIF'ga ishonilmaydi
 - testlar: `sales-agent-visit-flow` (2) — standart siyosat bilan to'liq oqim; boshqa agent testlari tashrif oqimisiz siyosat bilan (`test/agent-policy.ts`); frontend `visit-timer` (3)
+- **V4** commit `71e860e`, production'ga deploy qilindi (API va web SUCCESS; `.../photos/:id/content` 401, bundle'da tashrif oqimi)
+
+**V5 — Mijozlar bo'limi va 5 bandli menyu** (migratsiya 0030) + **Hisobotlar** (V7 ning bir qismi):
+- agent menyusi aniq 5 band: Bosh sahifa, Sotuv, Mijozlar, Aksiyalar, Hisobotlar; eski "Do'konlar" va "Qarzdorlar" havolalari Mijozlar'ga yo'naltiriladi
+- "Sotuv agenti" roliga `sales_agent.customer.edit`, `customer.location.edit`, `customer.photo.create` (spetsifikatsiya RBAC); migratsiya mavjud rollarga takror ishlasa o'zgarmaydigan qilib qo'shadi, kompaniya rolni tahrirlab olib qo'yishi mumkin
+- `GET /api/sales-agent/customers/:id/history` — buyurtmalar soni (agentniki alohida), savdo, o'rtacha buyurtma, buyurtmalar oralig'i (kun), to'lovlar, agentning o'z tashriflari; so'nggi 20 ta buyurtma/to'lov/tashrif; oxirgi vitrina rasmi
+- `PATCH /customers/:id` — faqat mas'ul shaxs, telefon, manzil, izoh (limit, chegirma, muddat — 400); audit `CUSTOMER_UPDATED` (`source: sales_agent`)
+- `PUT /customers/:id/location` — ish vaqtida, sifatli GPS; koordinata bo'lsa faqat undan geofence radiusi ichida (403), bo'lmasa birinchi saqlash; audit `CUSTOMER_LOCATION_UPDATE` (oldingi va yangi koordinata, siljish)
+- `POST /customers/:id/photo`, `GET /customers/:id/photo` — vitrina rasmi (kamera, mijoz hududida, turi baytlardan, 3 MB), jadval `customer_photos`, har mijozda oxirgi 5 tasi; audit `CUSTOMER_PHOTO_ADDED`
+- boshqa agentning mijozi — 404; ruxsat olib qo'yilsa — 403
+- `GET /api/sales-agent/reports?from=&to=` (93 kungacha, standart — joriy oy): sotuv (to'lov turi, kunlar, top 10 mahsulot va mijoz), tashriflar (natija, bekor, o'rtacha vaqt, sabablar), plan (oylik reja davr kunlariga taqsimlanadi), qarz (joriy holat va davrda yig'ilgan to'lov), aksiyalar; faqat sessiyadagi agent (so'rovdagi `salesRepId` e'tiborsiz)
+- web agent: Mijozlar (Hammasi / Qarzdorlar / Kechikkan, qidiruv, muddat rangi), mijoz profilida tahrirlash oynasi, "Joylashuvni saqlash", vitrina rasmi va tarix (ko'rsatkichlar, Buyurtmalar/To'lovlar/Tashriflar); Hisobotlar — FROM/TO, tez davrlar, bo'limlar (uz/ru/kk)
+- testlar: `sales-agent-customers` (2), `sales-agent-reports` (2), frontend `report-range` (2)
 
 ### Distributsiya (`/api/distribution`)
 
@@ -840,6 +853,8 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
 | GET / POST | `/work-session`, `/work-session/start`, `/work-session/end` | `sales_agent.use` |
 | POST | `/location` (faqat faol ish sessiyasida), `/location/events` | `sales_agent.use` |
 | GET / POST / PATCH | `/team`, `/team/supervisors`, `/team/:salesRepId` | `sales_agent.agents.manage` |
+| GET | `/customers/:customerId/history`, `/customers/:customerId/photo`, `/reports` (`?from=&to=`) | `sales_agent.use` (o'z mijozi / o'zi) |
+| PATCH / PUT / POST | `/customers/:customerId`, `/customers/:customerId/location`, `/customers/:customerId/photo` | `sales_agent.customer.edit` / `.location.edit` / `.photo.create` |
 | GET | `/visits/current`, `/visits` (`?date=`), `/visits/:visitId/photos/:photoId/url` | `sales_agent.use` (o'z tashriflari) |
 | POST | `/visits/start`, `/visits/:visitId/complete`, `/visits/:visitId/photos/uploads`, `/visits/:visitId/photos`, `/visits/:visitId/photos/direct` | `sales_agent.use` |
 | GET | `/visits/:visitId/photos/:photoId/content`, `/supervisor/visits/:visitId/photos/:photoId/content` | agent — o'z tashrifi; supervayzer — `sales_agent.supervise` |

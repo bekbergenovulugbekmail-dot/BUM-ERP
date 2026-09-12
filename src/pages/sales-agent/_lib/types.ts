@@ -110,6 +110,67 @@ export type StoreProfile = AgentStore & {
 export type DebtorStatus = "overdue" | "today" | "soon" | "later" | "unscheduled";
 export type Debtor = AgentStore & { dueDate: string | null; daysOverdue: number | null; status: DebtorStatus };
 
+/** `GET /api/sales-agent/customers/:id/history` — tashriflar faqat agentning o'ziniki. */
+export type CustomerHistory = {
+  stats: {
+    orderCount: number;
+    myOrderCount: number;
+    salesTotal: string;
+    averageOrder: string;
+    averageIntervalDays: number | null;
+    firstOrderDate: string | null;
+    lastOrderDate: string | null;
+    paymentsTotal: string;
+    lastPaymentDate: string | null;
+    visitCount: number;
+    orderedVisitCount: number;
+    lastVisitDate: string | null;
+  };
+  orders: { id: string; number: string; orderDate: string; status: OrderStatus; totalAmount: string; paidAmount: string; byMe: boolean }[];
+  payments: { id: string; amount: string; method: string; paymentDate: string }[];
+  visits: {
+    id: string;
+    visitDate: string;
+    startedAt: string;
+    status: "in_progress" | "completed";
+    result: "ordered" | "no_order" | null;
+    noOrderReason: NoOrderReason | null;
+    durationSeconds: number | null;
+    invalidatedAt: string | null;
+  }[];
+  photo: { id: string; takenAt: string } | null;
+};
+
+/** `GET /api/sales-agent/reports?from=&to=` — agentning o'z hisobotlari (summalar asosiy valyutada). */
+export type AgentReport = {
+  from: string;
+  to: string;
+  currency: string;
+  sales: {
+    orderCount: number;
+    total: string;
+    cash: string;
+    card: string;
+    credit: string;
+    averageOrder: string;
+    customerCount: number;
+    byDay: { date: string; amount: string; orders: number }[];
+    topProducts: { productId: string; name: string; quantity: string; amount: string }[];
+    topCustomers: { customerId: string; name: string; amount: string; orders: number }[];
+  };
+  visits: {
+    total: number;
+    ordered: number;
+    noOrder: number;
+    invalid: number;
+    averageMinutes: number | null;
+    reasons: Partial<Record<NoOrderReason, number>>;
+  };
+  plan: { target: string; achieved: string; percent: number };
+  debt: { customers: number; total: string; overdueCustomers: number; collected: string };
+  promotions: { applied: number; discountTotal: string; items: { promotionId: string; name: string; count: number; discountAmount: string }[] };
+};
+
 export const num = (value: string | number | null | undefined): number => Number(value ?? 0) || 0;
 
 export type PaymentType = "cash" | "card" | "credit";

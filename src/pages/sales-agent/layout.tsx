@@ -7,7 +7,7 @@
 import { NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
-  LayoutDashboard, ShoppingCart, Wallet, Store, BadgePercent, LogOut, Globe, UserX, RefreshCw, MapPin, MapPinOff, WifiOff,
+  LayoutDashboard, ShoppingCart, Users, BadgePercent, BarChart3, LogOut, Globe, UserX, RefreshCw, MapPin, MapPinOff, WifiOff,
   type LucideIcon,
 } from "lucide-react";
 import { DEFAULT_SALES_AGENT_POLICY, type SalesAgentPolicy } from "@bum/shared";
@@ -29,9 +29,9 @@ import type { AgentMe, WorkSession } from "./_lib/types.ts";
 const NAV: { path: string; labelKey: string; icon: LucideIcon }[] = [
   { path: "dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard },
   { path: "sales", labelKey: "nav.sales", icon: ShoppingCart },
-  { path: "debtors", labelKey: "nav.debtors", icon: Wallet },
-  { path: "stores", labelKey: "nav.stores", icon: Store },
+  { path: "customers", labelKey: "nav.customers", icon: Users },
   { path: "promotions", labelKey: "nav.promotions", icon: BadgePercent },
+  { path: "reports", labelKey: "nav.reports", icon: BarChart3 },
 ];
 
 function Spinner() {

@@ -7,6 +7,10 @@
  *   GET  /stores (?scope=today|all&search=&lat=&lng=&limit=)   do'konlar (joy berilsa — yaqinidan)
  *   GET  /stores/:customerId (?lat=&lng=)           do'kon profili va bugungi tashrifi (faqat agentga ochiq do'kon)
  *   GET  /debtors (?filter=overdue|today|soon|all&lat=&lng=)   qarzdorlar
+ *   GET  /customers/:customerId/history             mijoz tarixi: buyurtmalar, to'lovlar, o'z tashriflari, o'rtachalar
+ *   PATCH /customers/:customerId                    aloqa ma'lumotlari (sales_agent.customer.edit)
+ *   PUT  /customers/:customerId/location            joylashuv — mijoz yonida (sales_agent.customer.location.edit)
+ *   POST /customers/:customerId/photo, GET .../photo   vitrina rasmi (sales_agent.customer.photo.create)
  *   POST /location                                  joriy lokatsiya (server sifatni tekshiradi)
  *   POST /location/events                           ruxsat berilmadi / aniqlab bo'lmadi
  *   GET  /visits/current, GET /visits (?date=)      ochiq tashrif, kunlik tashriflar
@@ -24,6 +28,7 @@
  *   POST /orders/:orderId/cancel                    yuborilmagan / tasdiq kutayotganini bekor qilish
  *   GET  /promotions (?filter=active|upcoming|ending_soon)     aksiyalar (hisoblash buyurtmada, serverda)
  *   GET  /dashboard                                 bugungi savdo va plan, tashriflar, oylik plan, o'rin
+ *   GET  /reports (?from=&to=)                      hisobotlar: sotuv, tashrif, plan, qarz, aksiya (93 kungacha, faqat o'zi)
  *   GET  /prospects, POST /prospects                yangi mijoz topish (o'zi yuborganlari)
  * Siyosat:
  *   GET  /policy                                    sales_agent.use yoki sales_agent.supervise
@@ -87,8 +92,10 @@ import { recordAgentLocation, reportLocationProblem } from "./location.service.j
 import { getSalesAgentPolicy, salesAgentPolicySchema, saveSalesAgentPolicy } from "./policy.service.js";
 import { agentPromotions, createPromotion, deletePromotion, listPromotions, updatePromotion } from "./promotions.service.js";
 import { agentDashboard } from "./dashboard.service.js";
+import { agentReport } from "./reports.service.js";
 import { createSalesAgent, listTeam, supervisorCandidates, updateTeamMember } from "./team.service.js";
 import { currentWorkSession, endWorkSession, startWorkSession } from "./work-session.service.js";
+import { addCustomerPhoto, customerHistory, customerPhotoContent, saveCustomerLocation, updateAgentCustomer } from "./customers.service.js";
 import { convertProspect, createProspect, listAgentProspects, rejectProspect, supervisorProspects } from "./prospects.service.js";
 import { agentDebtors, agentStore, agentStores, agentToday } from "./stores.service.js";
 import {
@@ -187,8 +194,34 @@ const directPhotoBody = z.strictObject({
 /** JSON'dagi base64 rasm uchun (3 MB → ~4 MB matn). */
 const DIRECT_PHOTO_BODY_LIMIT = 6 * 1024 * 1024;
 
+const optionalText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .transform((value) => value || null)
+    .nullable()
+    .optional();
+/** Faqat aloqa ma'lumotlari — moliyaviy maydonlar (limit, chegirma, muddat) rad etiladi. */
+const customerPatchBody = z.strictObject({
+  contactName: optionalText(200),
+  phone: optionalText(20),
+  address: optionalText(500),
+  notes: optionalText(1000),
+});
+const customerLocationBody = z.strictObject(locationFields);
+const customerPhotoBody = z.strictObject({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  accuracy: z.number().min(0).max(100_000),
+  recordedAt: z.iso.datetime({ offset: true }).transform((value) => new Date(value)).optional(),
+  contentType: z.string().trim().toLowerCase().max(100),
+  data: z.string().min(8).max(4_100_000).regex(/^[A-Za-z0-9+/]+={0,2}$/, "base64 emas"),
+});
+
 const isoDate = z.iso.date();
 const dateQuery = z.object({ date: isoDate.optional() });
+const reportQuery = z.object({ from: isoDate.optional(), to: isoDate.optional() });
 const historyParams = z.object({ salesRepId: z.uuid() });
 const liveQuery = z.object({ since: z.iso.datetime({ offset: true }).transform((value) => new Date(value)).optional() });
 const eventsQuery = z.object({
@@ -306,6 +339,16 @@ function writeAgent<T>(req: FastifyRequest, fn: (tx: Tx, context: AgentContext) 
   });
 }
 
+/** Agent amali qo'shimcha ruxsat bilan (masalan, mijozni tahrirlash). */
+function writeAgentWith<T>(req: FastifyRequest, permission: Permission, fn: (tx: Tx, context: AgentContext) => Promise<T>): Promise<T> {
+  return withTransaction(async (tx) => {
+    const tenant = await requireTenantForWrite(tx, authOf(req).user);
+    await requirePermission(tx, tenant, "sales_agent.use");
+    await requirePermission(tx, tenant, permission);
+    return fn(tx, await requireAgent(tx, tenant));
+  });
+}
+
 async function readTenantWith(req: FastifyRequest, permission: Permission): Promise<TenantContext> {
   const tenant = await requireTenant(db, authOf(req).user);
   await requirePermission(db, tenant, permission);
@@ -381,6 +424,46 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
   app.get("/debtors", async (req) => {
     const query = debtorsQuery.parse(req.query);
     return { debtors: await agentDebtors(db, await readAgent(req), { filter: query.filter, origin: originOf(query) }) };
+  });
+
+  // ─── Mijozlar ────────────────────────────────────────────────────────────
+
+  app.get("/customers/:customerId/history", async (req) => {
+    const { customerId } = storeParams.parse(req.params);
+    return customerHistory(db, await readAgent(req), customerId);
+  });
+
+  app.patch("/customers/:customerId", async (req) => {
+    const { customerId } = storeParams.parse(req.params);
+    const body = customerPatchBody.parse(req.body);
+    const store = await writeAgentWith(req, "sales_agent.customer.edit", (tx, context) =>
+      updateAgentCustomer(tx, context, customerId, body, requestMeta(req)),
+    );
+    return { store };
+  });
+
+  app.put("/customers/:customerId/location", async (req) => {
+    const { customerId } = storeParams.parse(req.params);
+    const body = customerLocationBody.parse(req.body);
+    const store = await writeAgentWith(req, "sales_agent.customer.location.edit", (tx, context) =>
+      saveCustomerLocation(tx, context, customerId, body, requestMeta(req)),
+    );
+    return { store };
+  });
+
+  app.post("/customers/:customerId/photo", { bodyLimit: DIRECT_PHOTO_BODY_LIMIT }, async (req, reply) => {
+    const { customerId } = storeParams.parse(req.params);
+    const { data, contentType: _declared, ...point } = customerPhotoBody.parse(req.body);
+    const photo = await writeAgentWith(req, "sales_agent.customer.photo.create", (tx, context) =>
+      addCustomerPhoto(tx, context, customerId, { ...point, data: Buffer.from(data, "base64") }, requestMeta(req)),
+    );
+    reply.status(201);
+    return { photo };
+  });
+
+  app.get("/customers/:customerId/photo", async (req, reply) => {
+    const { customerId } = storeParams.parse(req.params);
+    return sendPhoto(reply, await customerPhotoContent(db, await readAgent(req), customerId));
   });
 
   // ─── Ish sessiyasi ───────────────────────────────────────────────────────
@@ -554,6 +637,12 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
   // ─── Bosh sahifa va yangi mijozlar ───────────────────────────────────────
 
   app.get("/dashboard", async (req) => agentDashboard(db, await readAgent(req)));
+
+  app.get("/reports", async (req) => {
+    const query = reportQuery.parse(req.query);
+    const today = todayIso();
+    return agentReport(db, await readAgent(req), { from: query.from ?? `${today.slice(0, 7)}-01`, to: query.to ?? today });
+  });
 
   app.get("/prospects", async (req) => ({ prospects: await listAgentProspects(db, await readAgent(req)) }));
 

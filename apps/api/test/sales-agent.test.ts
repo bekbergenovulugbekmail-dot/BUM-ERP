@@ -35,7 +35,13 @@ const call = (cookie: string, method: Method, url: string, payload?: object) =>
 
 describe("Sotuv agenti roli va ish joyi", () => {
   it("rol faqat agent ish joyiga ruxsat beradi; profil bog'langan faol agentdan; ERP API'lari 403", async () => {
-    expect(DEFAULT_ROLES.find((role) => role.name === "Sotuv agenti")!.permissions).toEqual(["sales_agent.use"]);
+    // Faqat agent ish joyi va o'z mijozining aloqa/joylashuv/rasm amallari (spetsifikatsiya RBAC) — ERP ruxsati yo'q
+    expect(DEFAULT_ROLES.find((role) => role.name === "Sotuv agenti")!.permissions).toEqual([
+      "sales_agent.use",
+      "sales_agent.customer.edit",
+      "sales_agent.customer.location.edit",
+      "sales_agent.customer.photo.create",
+    ]);
     const owner = company.ownerCookie;
     const agent = await addEmployee(app, company, "Sotuv agenti");
 
@@ -101,12 +107,12 @@ describe("Sotuv agenti roli va ish joyi", () => {
 
     // 0020 (rollar) va 0027 (agent qo'shish ruxsati) — ketma-ket, ikki marta
     const migrations = await Promise.all(
-      ["0020_sales_agent_roles.sql", "0027_sales_agent_team.sql"].map((file) =>
+      ["0020_sales_agent_roles.sql", "0027_sales_agent_team.sql", "0030_customer_photos.sql"].map((file) =>
         readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), "utf8"),
       ),
     );
     const permissionStatements = (sqlText: string) =>
-      sqlText.split("--> statement-breakpoint").filter((statement) => !/ALTER TABLE/i.test(statement));
+      sqlText.split("--> statement-breakpoint").filter((statement) => !/ALTER TABLE|CREATE (TABLE|INDEX|TYPE)/i.test(statement));
     const run = async () => {
       for (const migration of migrations) {
         for (const statement of permissionStatements(migration)) await db.execute(sql.raw(statement));
@@ -117,7 +123,11 @@ describe("Sotuv agenti roli va ish joyi", () => {
 
     const companyRoles = await db.select().from(roles).where(eq(roles.companyId, company.companyId));
     const byName = new Map(companyRoles.map((r) => [r.name, r]));
-    expect(byName.get("Sotuv agenti")).toMatchObject({ permissions: ["sales_agent.use"], isSystem: true });
+    // 0030 mavjud rolga mijoz ruxsatlarini qo'shadi — takror ishlaganda ikkilanmaydi
+    expect(byName.get("Sotuv agenti")).toMatchObject({ isSystem: true });
+    expect([...byName.get("Sotuv agenti")!.permissions].sort()).toEqual(
+      [...DEFAULT_ROLES.find((r) => r.name === "Sotuv agenti")!.permissions].sort(),
+    );
     expect([...byName.get("Supervayzer")!.permissions].sort()).toEqual(
       [...DEFAULT_ROLES.find((r) => r.name === "Supervayzer")!.permissions].sort(),
     );

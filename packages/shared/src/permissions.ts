@@ -284,8 +284,9 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     description: "Mobil agent ish joyi: marshrut, do'konlar, buyurtma",
     color: "#10b981",
     isSystem: true,
-    // Faqat agent ish joyi — ERP bo'limlari va boshqa agentlarning ma'lumoti ko'rinmaydi
-    permissions: ["sales_agent.use"],
+    // Faqat agent ish joyi — ERP bo'limlari va boshqa agentlarning ma'lumoti ko'rinmaydi.
+    // Mijoz aloqa ma'lumoti, joylashuvi (mijoz yonida) va vitrina rasmi — spetsifikatsiya RBAC bo'yicha; kompaniya olib qo'yishi mumkin
+    permissions: ["sales_agent.use", "sales_agent.customer.edit", "sales_agent.customer.location.edit", "sales_agent.customer.photo.create"],
   },
   {
     name: "Supervayzer",
