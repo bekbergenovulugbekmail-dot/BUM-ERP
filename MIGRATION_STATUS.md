@@ -1025,6 +1025,8 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 - belgi va imzo: `apps/desktop/build/icon.ico` (16–256 px) — ilova, o'rnatuvchi va o'chirgich belgisi. Imzo: `CSC_LINK` (.pfx) va `CSC_KEY_PASSWORD` muhitda berilsa electron-builder SHA-256 va RFC 3161 vaqt tamg'asi bilan imzolaydi; berilmasa imzosiz yig'iladi (SmartScreen "noma'lum nashriyotchi")
 - desktop versiyasi 0.2.0
 - testlar: `pos-deletions-releases` (2). To'liq API: 285/285 (72 fayl); desktop 26 (o'chirilgan yozuvlar, nisbiy manzildan token bilan yangilanish, rus lug'ati butunligi va o'girish)
+- commit `ddced68`; API va web deploy (2026-09-12, SUCCESS). Production tekshiruvi: `/api/platform/desktop-releases` va `/api/pos-device/releases/:id/download` — 401 (marshrut bor, kirishsiz), nginx 5 MB yuklashni API'ga o'tkazadi (oldingi 3 MB chegarasi — 413 bo'lardi)
+- o'rnatuvchi (lokal, git'da emas): `apps/desktop/release/BUM-POS-KASSA-Setup-0.2.0.exe` — 111 681 056 bayt, SHA-256 `989617a1a417441e0fb0f08042770e0ffe00fd7d00fdc53f7dd2393aac9fe162`, `app.asar` 2.8 MB (dev paketlarsiz), imzosiz (sertifikat yo'q)
 - qolgan (foydalanuvchi): kod imzolash sertifikati (OV/EV) — sotib olinadi; 0.2.0 o'rnatuvchisini Admin panel → "Desktop kassa" orqali yuklab e'lon qilish (platforma admini kirishi kerak)
 
 ### Distributsiya (`/api/distribution`)
