@@ -5,23 +5,24 @@
  *  - Qurilma har sinxron siklida kursorlarni biroz orqaga suradi (kechikib commit bo'lgan tranzaksiyalar uchun);
  *    qatorlar qurilmada `id` bo'yicha upsert qilinadi, takror kelishi zararsiz.
  *  - Faqat qurilma kompaniyasi; qoldiq — faqat qurilma ombori. Kassirlar: a'zolik yoki foydalanuvchi o'zgarsa qayta
- *    keladi (faolsizlantirilgani `active: false` bilan), ruxsatlari bilan; parol/PIN xeshlari hech qachon yuborilmaydi.
+ *    keladi (faolsizlantirilgani `active: false` bilan), ruxsatlari bilan; rol ruxsatlari o'zgarsa (rol tahriri, migratsiya,
+ *    yangi ruxsat) — config xeshi o'zgaradi va hamma kassirlar qayta keladi; parol/PIN xeshlari hech qachon yuborilmaydi.
  *  - Kompaniya sozlamalari (rekvizitlar, keshbek, chek va etiketka shablonlari) — xeshi qurilmadagidan farq qilsagina (`config`).
  */
 import { createHash } from "node:crypto";
-import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { POS_APPEARANCE_KEY, POS_QUICK_SALE_KEY, parsePosAppearance, parsePosQuickSale } from "@bum/shared";
 import { brands, categories, products, unitConversions, units } from "../../db/schema/catalog.js";
 import { companyCurrencies } from "../../db/schema/finance.js";
 import { stockLevels, warehouses } from "../../db/schema/inventory.js";
 import { syncDeletions } from "../../db/schema/pos.js";
-import { companies, companyMembers, settings, users } from "../../db/schema/platform.js";
+import { companies, companyMembers, roles, settings, users } from "../../db/schema/platform.js";
 import { suppliers } from "../../db/schema/purchase.js";
 import { customers } from "../../db/schema/sales.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { LABELS_SETTING_KEY, RECEIPT_SETTING_KEY, parseLabelSettings, parseReceiptTemplate } from "../company/print-settings.service.js";
-import { membershipPermissions } from "../company/tenant.js";
+import { permissionsFromRoles } from "../company/tenant.js";
 import { getCashbackSettings } from "../sales/cashback.service.js";
 import type { DeviceContext } from "./device-auth.js";
 
@@ -60,8 +61,11 @@ function toPage<T extends { cursorAt: string; id: string }>(rows: T[], limit: nu
   };
 }
 
-/** Kassa uchun kompaniya sozlamalari va ularning xeshi (o'zgarmagan bo'lsa qurilmaga qayta yuborilmaydi). */
-export async function posConfig(conn: DbOrTx, companyId: string) {
+/**
+ * Kassa uchun kompaniya sozlamalari va ularning xeshi (o'zgarmagan bo'lsa qurilmaga qayta yuborilmaydi).
+ * `accessDigest` — kassirlar ruxsatlari xeshi: xeshga qo'shiladi (o'zi yuborilmaydi), ruxsat o'zgarsa config ham yangilanadi.
+ */
+export async function posConfig(conn: DbOrTx, companyId: string, accessDigest = "") {
   const [company] = await conn
     .select({ name: companies.name, address: companies.address, phone: companies.phone, taxId: companies.taxId, currency: companies.currency })
     .from(companies)
@@ -82,7 +86,13 @@ export async function posConfig(conn: DbOrTx, companyId: string) {
     /** Tezkor sotuv assortimenti (web: Sozlamalar → Kassa qurilmalari), tartibi bilan. */
     quickSale: parsePosQuickSale(printValue(POS_QUICK_SALE_KEY)),
   };
-  return { hash: createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 32), ...body };
+  return { hash: createHash("sha256").update(JSON.stringify(body)).update(accessDigest).digest("hex").slice(0, 32), ...body };
+}
+
+/** Kursor vaqti mikrosekundlarda (qurilma orqaga surgan kursor boshqa kasr uzunligida bo'lishi mumkin). */
+function cursorMicros(value: string): bigint {
+  const match = /^(.+:\d{2})(?:\.(\d{1,6}))?Z$/.exec(value);
+  return match ? BigInt(Date.parse(`${match[1]}Z`)) * 1000n + BigInt((match[2] ?? "").padEnd(6, "0")) : 0n;
 }
 
 export async function pullChanges(
@@ -258,7 +268,9 @@ export async function pullChanges(
     .orderBy(asc(companyCurrencies.updatedAt), asc(companyCurrencies.id))
     .limit(take);
 
-  // A'zolik yoki foydalanuvchi o'zgarsa kassir qayta yuboriladi
+  // Kassirlar. A'zolik yoki foydalanuvchi o'zgarsa — kursor bo'yicha qayta keladi. Ruxsatlar esa a'zolik yozuvidan tashqarida
+  // ham o'zgaradi (rol tahriri, migratsiya, katalogga yangi ruxsat): hamma a'zolar ruxsatlari xeshi config xeshiga qo'shiladi,
+  // qurilmadagi xesh boshqa bo'lsa kassirlar kursorsiz to'liq qayta yuboriladi
   const cashierChangedAt = sql`greatest(${companyMembers.updatedAt}, ${users.updatedAt})`;
   const memberRows = await conn
     .select({
@@ -275,21 +287,37 @@ export async function pullChanges(
     })
     .from(companyMembers)
     .innerJoin(users, eq(users.id, companyMembers.userId))
-    .where(and(eq(companyMembers.companyId, companyId), afterCursor(cashierChangedAt, companyMembers.id, cursors.cashiers)))
-    .orderBy(asc(cashierChangedAt), asc(companyMembers.id))
-    .limit(take);
-  const cashierRows = [];
-  for (const { companyRole, roleId, memberActive, userActive, allowedWarehouseIds, ...member } of memberRows) {
-    const permissions = await membershipPermissions(conn, companyId, { companyRole, roleId });
+    .where(eq(companyMembers.companyId, companyId))
+    .orderBy(asc(cashierChangedAt), asc(companyMembers.id));
+  const roleRows = await conn
+    .select({ id: roles.id, name: roles.name, companyId: roles.companyId, permissions: roles.permissions, isActive: roles.isActive })
+    .from(roles)
+    .where(or(eq(roles.companyId, companyId), isNull(roles.companyId)));
+  const allCashiers = memberRows.map(({ companyRole, roleId, memberActive, userActive, allowedWarehouseIds, ...member }) => {
+    const permissions = permissionsFromRoles(companyId, { companyRole, roleId }, roleRows);
     const warehouseAllowed = allowedWarehouseIds.length === 0 || allowedWarehouseIds.includes(context.device.warehouseId);
-    cashierRows.push({
+    return {
       ...member,
       role: companyRole,
       permissions,
       /** Shu qurilmada ishlay oladi: faol a'zo va foydalanuvchi, `pos.use`, qurilma omboriga ruxsat. */
       active: memberActive && userActive && warehouseAllowed && permissions.includes("pos.use"),
-    });
-  }
+    };
+  });
+  const accessDigest = createHash("sha256")
+    .update(JSON.stringify([...allCashiers].sort((a, b) => (a.id < b.id ? -1 : 1)).map((row) => [row.id, row.role, row.permissions, row.active])))
+    .digest("hex");
+  const config = await posConfig(conn, companyId, accessDigest);
+  const resendCashiers = configHash !== undefined && config.hash !== configHash;
+  const cashierCursor = cursors.cashiers;
+  const cashierRows = allCashiers
+    .filter((row) => {
+      if (resendCashiers || !cashierCursor) return true;
+      const at = cursorMicros(row.cursorAt);
+      const after = cursorMicros(cashierCursor.t);
+      return at > after || (at === after && row.id > cashierCursor.id);
+    })
+    .slice(0, take);
 
   const supplierRows = await conn
     .select({
@@ -337,7 +365,6 @@ export async function pullChanges(
     deletions: toPage(deletionRows, limit, cursors.deletions),
   } satisfies Record<PullEntity, Page<unknown>>;
 
-  const config = await posConfig(conn, companyId);
   return {
     serverTime: new Date().toISOString(),
     company: {

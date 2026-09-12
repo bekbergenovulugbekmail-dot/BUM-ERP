@@ -152,6 +152,27 @@ export async function membershipPermissions(
   return role.permissions.filter(isPermission);
 }
 
+export type RoleRecord = { id: string; name: string; companyId: string | null; permissions: string[]; isActive: boolean };
+
+/**
+ * `membershipPermissions` bilan aynan bir xil qoida, oldindan yuklangan rollar bo'yicha (ko'p a'zo — bitta so'rov):
+ * to'liq ruxsatli rol — hammasi; kompaniyaning o'z roli global standart roldan ustun; faol bo'lmagan rol — hech narsa.
+ */
+export function permissionsFromRoles(
+  companyId: string,
+  membership: { companyRole: string; roleId: string | null },
+  roleRows: RoleRecord[],
+): Permission[] {
+  if (isFullAccessRole(membership.companyRole)) return [...ALL_PERMISSIONS];
+  const matches = roleRows.filter(
+    (role) =>
+      (membership.roleId ? role.id === membership.roleId : role.name === membership.companyRole) && (role.companyId === companyId || role.companyId === null),
+  );
+  const role = matches.find((item) => item.companyId === companyId) ?? matches[0];
+  if (!role || !role.isActive) return [];
+  return role.permissions.filter(isPermission);
+}
+
 export async function requirePermission(
   conn: DbOrTx,
   tenant: TenantContext,

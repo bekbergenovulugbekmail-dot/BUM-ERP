@@ -132,7 +132,7 @@ export default function SettingsScreen({
               {section === "hotkeys" && <HotkeysPanel prefs={prefs} save={save} />}
               {section === "sale" && <SalePanel prefs={prefs} save={save} />}
               {section === "payment" && <PaymentPanel prefs={prefs} save={save} />}
-              {section === "scales" && <ScalesPanel permissions={status.cashier?.permissions ?? []} />}
+              {section === "scales" && <ScalesPanel permissions={overview.permissions} />}
               {section === "general" && <GeneralPanel prefs={prefs} save={save} overview={overview} onStatus={onStatus} />}
               {section === "security" && <SecurityPanel prefs={prefs} save={save} />}
               {section === "version" && <VersionPanel overview={overview} pending={status.sync.pending} />}

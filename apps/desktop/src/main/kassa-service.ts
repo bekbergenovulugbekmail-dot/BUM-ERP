@@ -469,6 +469,8 @@ export class KassaService {
   // ─── Holat ───────────────────────────────────────────────────────────────
 
   status(): AppStatus {
+    // Kassir ruxsatlari pull'da yangilanadi — ekranga eskirgan nusxa berilmasin
+    if (this.cashier) this.cashier = this.store.cashier(this.cashier.userId) ?? this.cashier;
     const counts = this.store.counts();
     return {
       appVersion: this.options.appVersion,

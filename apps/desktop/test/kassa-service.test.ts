@@ -344,6 +344,8 @@ describe("Kassa xizmati (main jarayon)", () => {
     expect(kassa.productByCode({ code: label("220012301234") })).toBeNull();
 
     store.saveCashier({ id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true, permissions: ["pos.use", "scale.view", "scale.manage", "scale.sync"] });
+    // Pull'da yangilangan ruxsatlar holatda darhol ko'rinadi (ekran eskirgan nusxani olmaydi)
+    expect(kassa.status().cashier!.permissions).toContain("scale.manage");
     expect(kassa.scaleSaveBarcode(format)).toEqual(format);
     expect(kassa.productByCode({ code: label("220012301234") })).toMatchObject({ id: "w1", isWeighted: true, pluCode: 123, scannedQuantity: "1.234" });
     expect(kassa.productByCode({ code: label("229999900500") })).toBeNull();
