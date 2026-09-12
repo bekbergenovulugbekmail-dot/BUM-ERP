@@ -40,6 +40,20 @@ export class OfflineError extends Error {
   }
 }
 
+const TLS_ERROR = /^(ERR_TLS_|ERR_SSL_|CERT_|UNABLE_TO_(GET|VERIFY)|DEPTH_ZERO_|SELF_SIGNED_)/;
+
+/**
+ * Internet bor, lekin manzil noto'g'ri bo'lsa kassir "aloqa yo'q" deb o'ylamasin: sertifikat boshqa domenniki
+ * (DNS eski serverga qaraydi) yoki domen topilmadi. Boshqa holatlarda — standart xabar.
+ */
+function networkFailureMessage(error: unknown): string | undefined {
+  const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+  if (typeof code !== "string") return undefined;
+  if (TLS_ERROR.test(code)) return "Server sertifikati bu manzilga mos emas — manzilni tekshiring (masalan https://www.bum-erp.uz)";
+  if (code === "ENOTFOUND") return "Server topilmadi — manzilni tekshiring";
+  return undefined;
+}
+
 export type SetupOptions = {
   companies: { id: string; name: string }[];
   company: { id: string; name: string } | null;
@@ -83,8 +97,8 @@ export function createApiClient(options: {
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs),
       });
-    } catch {
-      throw new OfflineError();
+    } catch (error) {
+      throw new OfflineError(networkFailureMessage(error));
     }
     const raw = await response.text();
     const json = parseBody(raw);

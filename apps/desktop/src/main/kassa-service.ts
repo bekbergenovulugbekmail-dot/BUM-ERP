@@ -439,17 +439,24 @@ export class KassaService {
 
   // ─── Ro'yxatdan o'tkazish ───────────────────────────────────────────────
 
-  private setupClient(apiUrl: string) {
+  /** Server manzili → origin. Sxemasiz kiritilsa (`www.bum-erp.uz`) — https; yo'l va so'rov qismi tashlanadi. */
+  private static apiOrigin(raw: string): string {
+    const text = String(raw ?? "").trim();
     let url: URL;
     try {
-      url = new URL(apiUrl);
+      url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`);
     } catch {
       throw new KassaError("BAD_REQUEST", "Server manzili noto'g'ri");
     }
+    if (!url.hostname.includes(".") && url.hostname !== "localhost") throw new KassaError("BAD_REQUEST", "Server manzili noto'g'ri");
     if (url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
       throw new KassaError("BAD_REQUEST", "Server manzili https bo'lishi kerak");
     }
-    return createApiClient({ baseUrl: url.origin, appVersion: this.options.appVersion, fetchImpl: this.options.fetchImpl });
+    return url.origin;
+  }
+
+  private setupClient(apiUrl: string) {
+    return createApiClient({ baseUrl: KassaService.apiOrigin(apiUrl), appVersion: this.options.appVersion, fetchImpl: this.options.fetchImpl });
   }
 
   async setupOptions(input: { apiUrl: string; phone: string; password: string; companyId?: string }) {
@@ -461,7 +468,7 @@ export class KassaService {
     const client = this.setupClient(input.apiUrl);
     const registration = await client.setupRegister({ ...input, platform: this.options.platform });
     this.vault.save(registration.token);
-    this.store.setMeta("apiUrl", new URL(input.apiUrl).origin);
+    this.store.setMeta("apiUrl", KassaService.apiOrigin(input.apiUrl));
     this.store.setMeta("device", registration.device);
     this.store.setMeta("company", registration.company);
     this.connect();

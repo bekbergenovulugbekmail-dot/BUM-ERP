@@ -155,6 +155,37 @@ describe("Kassa xizmati (main jarayon)", () => {
     await expect(kassa.register({ apiUrl: "https://bum-erp.uz", phone: "x", password: "right", warehouseId: "w1", name: "K" })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
+  it("server manzili: sxemasiz — https qo'shiladi; sertifikat mos emas yoki domen topilmadi — aniq xabar", async () => {
+    const api = fakeApi();
+    const requested: string[] = [];
+    const tracking = service({ ...api, fetchImpl: (async (input: URL | RequestInfo, init?: RequestInit) => {
+      requested.push(String(input));
+      return api.fetchImpl(input, init);
+    }) as typeof fetch });
+    await expect(tracking.setupOptions({ apiUrl: "  www.bum-erp.uz ", phone: "+998900000001", password: "right" })).resolves.toMatchObject({ warehouses: [{ id: "w1" }] });
+    expect(requested).toEqual(["https://www.bum-erp.uz/api/pos-device/setup/options"]);
+    await expect(tracking.setupOptions({ apiUrl: "kassa", phone: "+998900000001", password: "right" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    const failing = (code: string) =>
+      new KassaService(store, vault, {
+        appVersion: "0.1.0",
+        platform: "win32",
+        fetchImpl: (async () => {
+          throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(code), { code }) });
+        }) as typeof fetch,
+      });
+    await expect(failing("ERR_TLS_CERT_ALTNAME_INVALID").setupOptions({ apiUrl: "bum-erp.uz", phone: "+998900000001", password: "right" })).rejects.toMatchObject({
+      name: "OfflineError",
+      message: expect.stringContaining("sertifikati bu manzilga mos emas"),
+    });
+    await expect(failing("ENOTFOUND").setupOptions({ apiUrl: "bum-erp.uz", phone: "+998900000001", password: "right" })).rejects.toMatchObject({
+      message: "Server topilmadi — manzilni tekshiring",
+    });
+    await expect(failing("ECONNRESET").setupOptions({ apiUrl: "bum-erp.uz", phone: "+998900000001", password: "right" })).rejects.toMatchObject({
+      message: "Server bilan aloqa yo'q",
+    });
+  });
+
   it("kassir: birinchi kirish onlayn PIN bilan, keyin offline PIN; o'chirilgan kassir kira olmaydi; smena navbatga", async () => {
     const api = fakeApi();
     const kassa = service(api);

@@ -9,7 +9,7 @@ type Options = KassaChannels["setup:options"]["output"];
 
 /** Qurilmani ro'yxatdan o'tkazish: server, rahbar telefon/parol → kompaniya va ombor → kassa nomi. */
 export default function SetupScreen({ onDone }: { onDone: (status: AppStatus) => void }) {
-  const [apiUrl, setApiUrl] = useState("https://bum-erp.uz");
+  const [apiUrl, setApiUrl] = useState("https://www.bum-erp.uz");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [options, setOptions] = useState<Options | null>(null);
@@ -56,6 +56,7 @@ export default function SetupScreen({ onDone }: { onDone: (status: AppStatus) =>
           <div className="space-y-1">
             <Label htmlFor="setup-url">Server manzili</Label>
             <Input id="setup-url" value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} disabled={Boolean(options)} />
+            <p className="text-xs text-muted-foreground">Masalan: https://www.bum-erp.uz</p>
           </div>
           <div className="space-y-1">
             <Label htmlFor="setup-phone">Rahbar telefoni</Label>

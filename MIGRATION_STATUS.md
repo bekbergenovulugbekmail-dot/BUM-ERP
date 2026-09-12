@@ -1027,7 +1027,8 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 - testlar: `pos-deletions-releases` (2). To'liq API: 285/285 (72 fayl); desktop 26 (o'chirilgan yozuvlar, nisbiy manzildan token bilan yangilanish, rus lug'ati butunligi va o'girish)
 - commit `ddced68`; API va web deploy (2026-09-12, SUCCESS). Production tekshiruvi: `/api/platform/desktop-releases` va `/api/pos-device/releases/:id/download` — 401 (marshrut bor, kirishsiz), nginx 5 MB yuklashni API'ga o'tkazadi (oldingi 3 MB chegarasi — 413 bo'lardi)
 - o'rnatuvchi (lokal, git'da emas): `apps/desktop/release/BUM-POS-KASSA-Setup-0.2.0.exe` — 111 681 056 bayt, SHA-256 `989617a1a417441e0fb0f08042770e0ffe00fd7d00fdc53f7dd2393aac9fe162`, `app.asar` 2.8 MB (dev paketlarsiz), imzosiz (sertifikat yo'q)
-- qolgan (foydalanuvchi): kod imzolash sertifikati (OV/EV) — sotib olinadi; 0.2.0 o'rnatuvchisini Admin panel → "Desktop kassa" orqali yuklab e'lon qilish (platforma admini kirishi kerak)
+- 0.2.1 (foydalanuvchi sinovi, 2026-09-12): ro'yxatdan o'tishda `bum-erp.uz` (sxemasiz) — "Server manzili noto'g'ri". Tuzatildi: sxemasiz manzilga https qo'shiladi; tarmoq xatosida sertifikat mos emas / domen topilmadi — aniq xabar; standart manzil `https://www.bum-erp.uz`. Sabab ikkinchisi: `bum-erp.uz` DNS'da hali eski A `95.46.96.77` (sertifikati boshqa domenniki, curl 60), `www.bum-erp.uz` Railway'ga CNAME va ishlaydi. Desktop 27 test, e2e 2/2
+- qolgan (foydalanuvchi): `bum-erp.uz` DNS yozuvini Railway'ga o'tkazish (yuqoridagi "Keyingi qadam" → DNS); kod imzolash sertifikati (OV/EV) — sotib olinadi; o'rnatuvchini Admin panel → "Desktop kassa" orqali yuklab e'lon qilish (platforma admini kirishi kerak)
 
 ### Distributsiya (`/api/distribution`)
 
