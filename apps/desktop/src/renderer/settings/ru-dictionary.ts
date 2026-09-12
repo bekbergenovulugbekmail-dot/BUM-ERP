@@ -247,6 +247,8 @@ export const RU_PHRASES: Record<string, string> = {
 
   // ─── Sotuv ekrani (pos-screen.tsx) ───
   "☰ Menyu": "☰ Меню",
+  "Menyu": "Меню",
+  "Bo'limlar": "Разделы",
   "Ombor:": "Склад:",
   "Kassa": "Касса",
   "Sotuv valyutasi": "Валюта продажи",

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
+import { Banknote, Calculator, Clock, History, House, Keyboard, LockKeyhole, LogOut, Menu, Printer, RefreshCw, Store, Truck, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
 import {
@@ -8,7 +9,6 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -88,6 +88,51 @@ const FIXED_HOTKEYS: [string, string][] = [
   ["+ / −", "Miqdorni oshirish / kamaytirish"],
   ["Delete", "Qatorni o'chirish"],
 ];
+
+type MenuTone = "primary" | "amber" | "sky" | "emerald" | "rose" | "slate";
+
+/** Menyu qatori ikonkasi: fon va rang (mavzu tokenlari bilan; qorong'i mavzularda ham o'qiladi). */
+const MENU_TONES: Record<MenuTone, { box: string; icon: string }> = {
+  primary: { box: "bg-primary/10", icon: "text-primary" },
+  amber: { box: "bg-amber-500/15", icon: "text-amber-600 dark:text-amber-400" },
+  sky: { box: "bg-sky-500/15", icon: "text-sky-600 dark:text-sky-400" },
+  emerald: { box: "bg-emerald-500/15", icon: "text-emerald-600 dark:text-emerald-400" },
+  rose: { box: "bg-destructive/10", icon: "text-destructive" },
+  slate: { box: "bg-muted", icon: "text-foreground" },
+};
+
+function MenuRow({
+  icon: Icon,
+  label,
+  tone = "slate",
+  shortcut,
+  badge,
+  disabled,
+  onSelect,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  tone?: MenuTone;
+  shortcut?: string;
+  badge?: number;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <DropdownMenuItem disabled={disabled} onSelect={onSelect} className="gap-3 rounded-lg px-2 py-1.5">
+      <span className={`flex size-8 shrink-0 items-center justify-center rounded-md ${MENU_TONES[tone].box}`}>
+        <Icon className={`size-4 ${MENU_TONES[tone].icon}`} />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-sm font-medium">{label}</span>
+      {badge ? <span className="rounded-full bg-amber-500 px-1.5 text-xs font-semibold tabular-nums text-white">{badge}</span> : null}
+      {shortcut && <Kbd className="h-6 min-w-8 rounded-md border border-border bg-background px-1.5">{shortcut}</Kbd>}
+    </DropdownMenuItem>
+  );
+}
+
+function MenuGroupLabel({ children }: { children: string }) {
+  return <DropdownMenuLabel className="px-2 pt-2.5 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{children}</DropdownMenuLabel>;
+}
 
 const cartInput = (cart: CartLine[]): CartLineInput[] =>
   cart.map((line) => ({ productId: line.productId, unitId: line.unitId, quantity: line.quantity, ...(line.priceOverride ? { unitPrice: line.priceOverride } : {}) }));
@@ -568,61 +613,78 @@ export default function PosScreen({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="secondary" size="sm" className="gap-2">
-            ☰ Menyu
-            {unsyncedCount > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-xs text-white">{unsyncedCount}</span>}
+            <Menu className="size-4" />
+            Menyu
+            {unsyncedCount > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-xs font-semibold text-white">{unsyncedCount}</span>}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-80">
-          <DropdownMenuLabel>
-            Ombor: {status.device?.warehouseName}
-            <span className="block text-xs font-normal text-muted-foreground">
-              Kassa {status.device?.code} · {status.device?.name}
+        <DropdownMenuContent align="start" sideOffset={6} className="w-[22rem] rounded-xl p-2 shadow-xl">
+          <div className="flex items-center gap-3 rounded-lg bg-muted/70 px-3 py-2.5">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <Store className="size-5" />
             </span>
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-xs text-muted-foreground">Sotuv valyutasi</DropdownMenuLabel>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{status.device?.warehouseName}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                Kassa {status.device?.code} · {status.device?.name}
+              </p>
+            </div>
+          </div>
+
+          <MenuGroupLabel>Sotuv valyutasi</MenuGroupLabel>
           {[base, ...(context?.currencies ?? []).map((currency) => currency.code)].map((code) => (
             <DropdownMenuCheckboxItem
               key={code}
+              className="rounded-lg py-2 pr-2.5 pl-9"
               checked={activeCurrencies.includes(code)}
               onSelect={(event) => event.preventDefault()}
               onCheckedChange={() => toggleCurrency(code)}
             >
-              {code}
+              <span className="font-semibold">{code}</span>
               {code !== base && (
-                <span className="ml-auto text-xs text-muted-foreground">{fmtMoney(context?.currencies.find((currency) => currency.code === code)?.rate, base)}</span>
+                <span className="ml-auto text-xs tabular-nums text-muted-foreground">{fmtMoney(context?.currencies.find((currency) => currency.code === code)?.rate, base)}</span>
               )}
             </DropdownMenuCheckboxItem>
           ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => setDialog("unsynced")}>
-            Sinxron bo'lmagan cheklar {unsyncedCount > 0 ? `(${unsyncedCount})` : ""}
-            <DropdownMenuShortcut>F8</DropdownMenuShortcut>
+
+          <DropdownMenuSeparator className="my-1.5" />
+          <MenuGroupLabel>Cheklar</MenuGroupLabel>
+          <MenuRow
+            icon={RefreshCw}
+            tone={unsyncedCount > 0 ? "amber" : "sky"}
+            label="Sinxron bo'lmagan cheklar"
+            badge={unsyncedCount}
+            shortcut={hotkeys.unsynced}
+            onSelect={() => setDialog("unsynced")}
+          />
+          <MenuRow icon={Undo2} tone="rose" label="Mahsulotni qaytarish" shortcut={hotkeys.return} onSelect={() => setDialog("return")} />
+          <MenuRow icon={Clock} tone="primary" label="Kechiktirilgan cheklar" shortcut={hotkeys.held} onSelect={() => setDialog("held")} />
+
+          <DropdownMenuSeparator className="my-1.5" />
+          <MenuGroupLabel>Kassa</MenuGroupLabel>
+          <MenuRow icon={Banknote} tone="emerald" label="Pul qutisini ochish" onSelect={() => void openDrawer()} />
+          <MenuRow icon={LockKeyhole} tone="amber" label="Smenani yopish" disabled={!status.shift} onSelect={() => setDialog("shift")} />
+          <MenuRow icon={Printer} label="Printer va pul qutisi" onSelect={() => setDialog("prefs")} />
+          <MenuRow icon={Keyboard} label="Tugmalar" shortcut={hotkeys.help} onSelect={() => setDialog("help")} />
+
+          <DropdownMenuSeparator className="my-1.5" />
+          <MenuGroupLabel>Bo'limlar</MenuGroupLabel>
+          <MenuRow icon={History} tone="primary" label="Sotuv tarixi" onSelect={() => onNavigate("history")} />
+          <MenuRow icon={Calculator} tone="emerald" label="Kassa: kirim-chiqim, X/Z-hisobot" onSelect={() => onNavigate("kassa")} />
+          <MenuRow icon={Truck} tone="sky" label="Xarid: ta'minotchidan tovar" onSelect={() => onNavigate("purchase")} />
+          <MenuRow icon={House} label="Bosh sahifa" onSelect={onExit} />
+
+          <DropdownMenuSeparator className="my-1.5" />
+          <DropdownMenuItem className="gap-3 rounded-lg px-2 py-2" onSelect={() => void call("cashier:logout").then(onStatus)}>
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+              {(status.cashier?.name ?? status.cashier?.phone ?? "?").trim().charAt(0).toUpperCase()}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium">{status.cashier?.name ?? status.cashier?.phone}</span>
+              <span className="block text-xs text-muted-foreground">Kassirni almashtirish</span>
+            </span>
+            <LogOut className="size-4 text-muted-foreground" />
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setDialog("return")}>
-            Mahsulotni qaytarish
-            <DropdownMenuShortcut>F7</DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setDialog("held")}>
-            Kechiktirilgan cheklar
-            <DropdownMenuShortcut>F6</DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void openDrawer()}>Pul qutisini ochish</DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem disabled={!status.shift} onSelect={() => setDialog("shift")}>
-            Smenani yopish
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setDialog("prefs")}>Printer va pul qutisi</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setDialog("help")}>
-            Tugmalar
-            <DropdownMenuShortcut>F1</DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => onNavigate("history")}>Sotuv tarixi</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onNavigate("kassa")}>Kassa: kirim-chiqim, X/Z-hisobot</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onNavigate("purchase")}>Xarid: ta'minotchidan tovar</DropdownMenuItem>
-          <DropdownMenuItem onSelect={onExit}>Bosh sahifa</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void call("cashier:logout").then(onStatus)}>Kassirni almashtirish</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <div className="min-w-0 text-sm">
