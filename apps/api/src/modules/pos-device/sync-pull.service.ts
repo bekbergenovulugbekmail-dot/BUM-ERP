@@ -15,6 +15,7 @@ import { brands, categories, products, unitConversions, units } from "../../db/s
 import { companyCurrencies } from "../../db/schema/finance.js";
 import { stockLevels, warehouses } from "../../db/schema/inventory.js";
 import { companies, companyMembers, settings, users } from "../../db/schema/platform.js";
+import { suppliers } from "../../db/schema/purchase.js";
 import { customers } from "../../db/schema/sales.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { RECEIPT_SETTING_KEY, parseReceiptTemplate } from "../company/print-settings.service.js";
@@ -33,6 +34,7 @@ export const PULL_ENTITIES = [
   "stockLevels",
   "currencies",
   "cashiers",
+  "suppliers",
 ] as const;
 export type PullEntity = (typeof PULL_ENTITIES)[number];
 export type PullCursor = { t: string; id: string };
@@ -150,6 +152,7 @@ export async function pullChanges(
       taxIncluded: products.taxIncluded,
       minStock: products.minStock,
       trackBatch: products.trackBatch,
+      trackExpiry: products.trackExpiry,
       isActive: products.isActive,
       isSaleable: products.isSaleable,
       isPurchaseable: products.isPurchaseable,
@@ -262,6 +265,22 @@ export async function pullChanges(
     });
   }
 
+  const supplierRows = await conn
+    .select({
+      id: suppliers.id,
+      name: suppliers.name,
+      code: suppliers.code,
+      phone: suppliers.phone,
+      currency: suppliers.currency,
+      totalDebt: suppliers.totalDebt,
+      isActive: suppliers.isActive,
+      cursorAt: cursorText(suppliers.updatedAt),
+    })
+    .from(suppliers)
+    .where(and(eq(suppliers.companyId, companyId), afterCursor(suppliers.updatedAt, suppliers.id, cursors.suppliers)))
+    .orderBy(asc(suppliers.updatedAt), asc(suppliers.id))
+    .limit(take);
+
   const entities = {
     units: toPage(unitRows, limit, cursors.units),
     unitConversions: toPage(conversionRows, limit, cursors.unitConversions),
@@ -273,6 +292,7 @@ export async function pullChanges(
     stockLevels: toPage(stockRows, limit, cursors.stockLevels),
     currencies: toPage(currencyRows, limit, cursors.currencies),
     cashiers: toPage(cashierRows, limit, cursors.cashiers),
+    suppliers: toPage(supplierRows, limit, cursors.suppliers),
   } satisfies Record<PullEntity, Page<unknown>>;
 
   const config = await posConfig(conn, companyId);

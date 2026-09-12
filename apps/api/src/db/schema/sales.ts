@@ -452,6 +452,9 @@ export const posCashMovements = pgTable(
     category: varchar("category", { length: 64 }),
     notes: text("notes"),
     expenseId: uuid("expense_id").references(() => expenses.id, { onDelete: "set null" }),
+    /** Ta'minotchiga to'lov / qaytgan pul: `supplier_payment` yoki `purchase_return` hujjati. */
+    referenceType: varchar("reference_type", { length: 40 }),
+    referenceId: uuid("reference_id"),
     cashierId: uuid("cashier_id").references(() => users.id, { onDelete: "set null" }),
     cashierName: varchar("cashier_name", { length: 200 }),
     /** Qurilmada bajarilgan vaqt (offline bo'lishi mumkin). */
@@ -462,7 +465,7 @@ export const posCashMovements = pgTable(
     index("pcm_shift_idx").on(t.shiftId, t.occurredAt),
     index("pcm_company_occurred_idx").on(t.companyId, t.occurredAt),
     check("pcm_type", sql`${t.type} in ('in', 'out')`),
-    check("pcm_kind", sql`${t.kind} in ('collection', 'change_fund', 'expense', 'other_in', 'other_out')`),
+    check("pcm_kind", sql`${t.kind} in ('collection', 'change_fund', 'expense', 'other_in', 'other_out', 'supplier_payment', 'supplier_refund')`),
     check("pcm_amount_positive", sql`${t.amount} > 0`),
   ],
 );

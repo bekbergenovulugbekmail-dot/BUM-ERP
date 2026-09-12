@@ -28,6 +28,7 @@ import {
   purchaseOrders,
   purchaseReceiptItems,
   purchaseReceipts,
+  purchaseReturns,
   supplierPayments,
   suppliers,
 } from "../../db/schema/purchase.js";
@@ -58,6 +59,8 @@ const { legacyId: _l5, companyId: _c5, ...paymentFields } = getTableColumns(supp
 export type PurchaseOrderStatus = (typeof purchaseOrders.status.enumValues)[number];
 
 export type OrderItemInput = {
+  /** Faqat kassada xarid (offline): qurilmada yaratilgan qator ID'si — qaytarish shunga bog'lanadi. */
+  id?: string;
   productId: string;
   unitId: string;
   orderedQty: string;
@@ -81,13 +84,13 @@ export type OrderInput = {
   items: OrderItemInput[];
 };
 
-async function prepareItems(tx: Tx, companyId: string, items: OrderItemInput[]) {
+async function prepareItems(tx: Tx, companyId: string, items: OrderItemInput[], rateOverrides?: Record<string, string>) {
   if (items.length === 0) throw badRequest("Buyurtmada kamida bitta mahsulot bo'lishi kerak");
 
   const baseCurrency = await companyCurrency(tx, companyId);
   const rates = new Map<string, string>([[baseCurrency, "1.0000"]]);
   const rateOf = async (code: string) => {
-    if (!rates.has(code)) rates.set(code, await currencyRate(tx, companyId, code));
+    if (!rates.has(code)) rates.set(code, rateOverrides?.[code] ?? (await currencyRate(tx, companyId, code)));
     return rates.get(code)!;
   };
 
@@ -205,6 +208,7 @@ async function assertSupplierAndWarehouse(tx: Tx, tenant: TenantContext, supplie
 async function insertItems(tx: Tx, companyId: string, orderId: string, items: Awaited<ReturnType<typeof prepareItems>>["items"]) {
   await tx.insert(purchaseOrderItems).values(
     items.map((item) => ({
+      ...(item.id ? { id: item.id } : {}),
       companyId,
       orderId,
       productId: item.productId,
@@ -312,12 +316,28 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
     .where(eq(purchaseOrderCurrencies.orderId, orderId))
     .orderBy(asc(purchaseOrderCurrencies.currency));
 
+  const returns = await conn
+    .select({
+      id: purchaseReturns.id,
+      number: purchaseReturns.number,
+      returnDate: purchaseReturns.returnDate,
+      totalAmount: purchaseReturns.totalAmount,
+      refundMethod: purchaseReturns.refundMethod,
+      refundAmount: purchaseReturns.refundAmount,
+      reason: purchaseReturns.reason,
+      createdAt: purchaseReturns.createdAt,
+    })
+    .from(purchaseReturns)
+    .where(eq(purchaseReturns.orderId, orderId))
+    .orderBy(asc(purchaseReturns.createdAt));
+
   return {
     ...order,
     currencyTotals,
     items,
     receipts: receipts.map((r) => ({ ...r, items: receiptItems.filter((i) => i.receiptId === r.id) })),
     payments,
+    returns,
   };
 }
 
@@ -390,20 +410,33 @@ export async function listOrders(
 
 // ─── Buyurtma hayot sikli ────────────────────────────────────────────────────
 
-export async function createOrder(tx: Tx, tenant: TenantContext, input: OrderInput, meta: RequestMeta) {
+/** Kassada xarid (desktop kassa, offline): qurilmadagi ID, raqam (`K01-P000001`), qurilma, vaqt va kurslar. */
+export type DirectOrderOptions = {
+  id?: string;
+  number?: string;
+  deviceId?: string;
+  createdAt?: Date;
+  rates?: Record<string, string>;
+  /** Tasdiqlangan holda yaratish (kassada xarid darhol qabul qilinadi). */
+  confirmed?: boolean;
+};
+
+export async function createOrder(tx: Tx, tenant: TenantContext, input: OrderInput, meta: RequestMeta, options: DirectOrderOptions = {}) {
   const companyId = tenant.company.id;
   await assertSupplierAndWarehouse(tx, tenant, input.supplierId, input.warehouseId);
   await assertProductsInScope(tx, tenant, input.items.map((i) => i.productId));
-  const { items, totals, currencyTotals } = await prepareItems(tx, companyId, input.items);
+  const { items, totals, currencyTotals } = await prepareItems(tx, companyId, input.items, options.rates);
 
-  const number = await nextDocumentNumber(tx, {
-    table: purchaseOrders,
-    column: purchaseOrders.number,
-    companyColumn: purchaseOrders.companyId,
-    companyId,
-    prefix: `PO-${input.orderDate.slice(0, 4)}-`,
-    width: 4,
-  });
+  const number =
+    options.number ??
+    (await nextDocumentNumber(tx, {
+      table: purchaseOrders,
+      column: purchaseOrders.number,
+      companyColumn: purchaseOrders.companyId,
+      companyId,
+      prefix: `PO-${input.orderDate.slice(0, 4)}-`,
+      width: 4,
+    }));
 
   const [order] = await tx
     .insert(purchaseOrders)
@@ -418,6 +451,10 @@ export async function createOrder(tx: Tx, tenant: TenantContext, input: OrderInp
       currency: await companyCurrency(tx, companyId),
       ...totals,
       createdBy: tenant.user.id,
+      ...(options.id ? { id: options.id } : {}),
+      ...(options.deviceId ? { deviceId: options.deviceId } : {}),
+      ...(options.createdAt ? { createdAt: options.createdAt } : {}),
+      ...(options.confirmed ? { status: "confirmed" as const } : {}),
     })
     .returning({ id: purchaseOrders.id });
   await insertItems(tx, companyId, order!.id, items);
@@ -427,7 +464,12 @@ export async function createOrder(tx: Tx, tenant: TenantContext, input: OrderInp
     action: "PURCHASE_ORDER_CREATED",
     resource: "purchase_orders",
     resourceId: order!.id,
-    details: { number, supplierId: input.supplierId, totalAmount: totals.totalAmount },
+    details: {
+      number,
+      supplierId: input.supplierId,
+      totalAmount: totals.totalAmount,
+      ...(options.deviceId ? { deviceId: options.deviceId, confirmed: !!options.confirmed } : {}),
+    },
   });
   return getOrder(tx, tenant, order!.id);
 }
@@ -527,7 +569,17 @@ export type ReceiptInput = {
   items: { orderItemId: string; receivedQty: string; batchNumber?: string | null; expiryDate?: string | null }[];
 };
 
-export async function receiveGoods(tx: Tx, tenant: TenantContext, orderId: string, input: ReceiptInput, meta: RequestMeta) {
+/** Kassada xarid qabuli: qurilmadagi kurslar (tannarx va qarz shu kursda) va qabul vaqti. */
+export type ReceiveOptions = { rates?: Record<string, string>; occurredAt?: Date };
+
+export async function receiveGoods(
+  tx: Tx,
+  tenant: TenantContext,
+  orderId: string,
+  input: ReceiptInput,
+  meta: RequestMeta,
+  options: ReceiveOptions = {},
+) {
   const companyId = tenant.company.id;
   const order = await lockOrder(tx, tenant, orderId);
   if (order.status !== "confirmed" && order.status !== "partial" && order.status !== "paid") {
@@ -610,7 +662,7 @@ export async function receiveGoods(tx: Tx, tenant: TenantContext, orderId: strin
 
     // Qiymat qator valyutasida; tannarx va kreditorlar asosiy valyutada — qabul kunidagi (joriy) kurs bilan
     const lineCurrency = orderItem.currency ?? baseCurrency;
-    const rate = orderItem.currency ? await currencyRate(tx, companyId, orderItem.currency) : "1.0000";
+    const rate = orderItem.currency ? (options.rates?.[orderItem.currency] ?? (await currencyRate(tx, companyId, orderItem.currency))) : "1.0000";
     const baseValue = orderItem.currency ? rescale(value * toMinor(rate, 4), 6, 2) : value;
 
     const factor = await unitFactorToBase(tx, companyId, product, orderItem.unitId);
@@ -668,6 +720,7 @@ export async function receiveGoods(tx: Tx, tenant: TenantContext, orderId: strin
       referenceType: "purchase_receipt",
       referenceId: receipt!.id,
       notes: `Xarid: ${order.number}`,
+      occurredAt: options.occurredAt,
     });
 
     // Xaridda belgilangan yangi sotuv narxi mahsulotga yoziladi

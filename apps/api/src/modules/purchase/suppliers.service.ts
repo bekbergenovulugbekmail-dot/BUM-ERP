@@ -36,6 +36,8 @@ export function purchaseAudit(
 }
 
 export type SupplierInput = {
+  /** Faqat desktop kassa sinxroni: qurilmada yaratilgan ta'minotchi ID'si (offline xaridlar shunga bog'langan). */
+  id?: string;
   name: string;
   /** Berilmasa — avtomatik (S-0001). */
   code?: string;

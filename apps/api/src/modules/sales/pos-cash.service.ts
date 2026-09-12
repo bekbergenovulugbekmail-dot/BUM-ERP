@@ -27,14 +27,18 @@ import { assertShiftOperator, getShift, lockShift, type SaleConflict } from "./p
 
 export const CASH_MOVEMENT_KINDS = ["collection", "change_fund", "expense", "other_in", "other_out"] as const;
 export type CashMovementKind = (typeof CASH_MOVEMENT_KINDS)[number];
+/** Ichki turlar: kassada xarid/qarz to'lovi va ta'minotchi qaytargan pul (hujjati o'zida — bu yerda buxgalteriya yo'q). */
+export type ShiftCashMovementKind = CashMovementKind | "supplier_payment" | "supplier_refund";
 
-const INCOMING: readonly CashMovementKind[] = ["change_fund", "other_in"];
-const LABELS: Record<CashMovementKind, string> = {
+const INCOMING: readonly ShiftCashMovementKind[] = ["change_fund", "other_in", "supplier_refund"];
+const LABELS: Record<ShiftCashMovementKind, string> = {
   collection: "Inkassatsiya",
   change_fund: "Almashtirish puli",
   expense: "Kassadan xarajat",
   other_in: "Kassaga kirim",
   other_out: "Kassadan chiqim",
+  supplier_payment: "Ta'minotchiga to'lov",
+  supplier_refund: "Ta'minotchidan qaytgan pul",
 };
 
 const { companyId: _companyId, ...movementFields } = getTableColumns(posCashMovements);
@@ -54,8 +58,10 @@ export async function posCashMovement(
   tenant: TenantContext,
   input: {
     shiftId: string;
-    kind: CashMovementKind;
+    kind: ShiftCashMovementKind;
     amount: string;
+    /** Ta'minotchi turlarida: to'lov yoki qaytarish hujjati. */
+    reference?: { type: string; id: string } | null;
     /** Xarajat kategoriyasi (standart "kassa"). */
     category?: string | null;
     notes?: string | null;
@@ -157,6 +163,8 @@ export async function posCashMovement(
       category,
       notes,
       expenseId,
+      referenceType: input.reference?.type ?? null,
+      referenceId: input.reference?.id ?? null,
       cashierId: tenant.user.id,
       cashierName: tenant.user.name,
       occurredAt,

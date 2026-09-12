@@ -50,6 +50,11 @@ export type SupplierPaymentInput = {
   cashAccountId?: string | null;
   reference?: string | null;
   notes?: string | null;
+  /**
+   * Desktop kassa sinxroni: pul qurilmada berilgan — qarzdan ortig'i buyurtmasiz ham avans bo'lib yoziladi, kassa
+   * qoldig'i yetmasa ham chiqim yoziladi (natijada `overpaid`).
+   */
+  offline?: boolean;
 };
 
 export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input: SupplierPaymentInput, meta: RequestMeta) {
@@ -123,7 +128,8 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
   const balanceRow = await lockSupplierBalance(tx, companyId, supplier.id, currency);
   const debt = toMinor(balanceRow.debt);
   const book = toMinor(balanceRow.bookValue);
-  if (!order && amount > debt) {
+  const overpaid = !order && amount > debt ? amount - (debt > 0n ? debt : 0n) : 0n;
+  if (overpaid > 0n && !input.offline) {
     throw badRequest(
       `To'lov ta'minotchi qarzidan ortiq (qarz ${fromMinor(debt > 0n ? debt : 0n)} ${currency}) — avans uchun buyurtmani tanlang`,
     );
@@ -173,6 +179,7 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
     category: "purchase",
     referenceType: "supplier_payment",
     referenceId: payment!.id,
+    allowOverdraft: input.offline,
   });
 
   const lines: { accountId: string; debit?: string; credit?: string }[] = [
@@ -240,9 +247,10 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
       baseAmount: fromMinor(baseAmount),
       fxAmount: fromMinor(fx),
       cashAccountId: account.id,
+      ...(overpaid > 0n ? { advance: fromMinor(overpaid) } : {}),
     },
   });
-  return { payment: updated!, created: true };
+  return { payment: updated!, created: true, overpaid: overpaid > 0n ? fromMinor(overpaid) : null };
 }
 
 export async function listSupplierPayments(

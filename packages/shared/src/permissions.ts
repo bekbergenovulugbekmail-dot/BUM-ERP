@@ -45,6 +45,8 @@ export const PERMISSIONS = {
   "purchase.edit":        { label: "Xaridni tahrirlash",           group: "Xarid" },
   "purchase.approve":     { label: "Xaridni tasdiqlash",           group: "Xarid" },
   "purchase.cancel":      { label: "Xaridni bekor qilish",         group: "Xarid" },
+  /** Qabul qilingan tovarni ta'minotchiga qaytarish (zaxira, qarz va jurnal teskari). */
+  "purchase.return":      { label: "Ta'minotchiga qaytarish",      group: "Xarid" },
 
   // ─── Moliya ────────────────────────────────────────────────────────────────
   "finance.view":         { label: "Moliyani ko'rish",             group: "Moliya" },
@@ -213,7 +215,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     isSystem: true,
     permissions: [
       "products.view", "products.create", "products.edit", "products.manage",
-      "purchase.view", "purchase.create", "purchase.edit", "purchase.approve", "purchase.cancel",
+      "purchase.view", "purchase.create", "purchase.edit", "purchase.approve", "purchase.cancel", "purchase.return",
       "warehouse.view", "warehouse.manage", "warehouse.receive",
       "finance.view",
       "analytics.view",

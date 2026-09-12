@@ -24,6 +24,7 @@ import {
 import { companies, users } from "./platform.js";
 import { products, units } from "./catalog.js";
 import { warehouses } from "./inventory.js";
+import { posDevices } from "./pos.js";
 import { cashAccounts, journalEntries } from "./finance.js";
 import { legacyId, money, percent, pk, price, qty, timestamps } from "./_shared.js";
 
@@ -115,6 +116,8 @@ export const purchaseOrders = pgTable(
 
     notes: text("notes"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    /** Kassada xarid (desktop kassa, offline): qurilma; `created_at` — xarid qurilmada yozilgan vaqt. */
+    deviceId: uuid("device_id").references(() => posDevices.id, { onDelete: "set null" }),
     ...timestamps(),
   },
   (t) => [
@@ -152,6 +155,8 @@ export const purchaseOrderItems = pgTable(
     /** Qabulda mahsulotning yangi sotuv narxi (asosiy birlik uchun) va valyutasi; null — o'zgarmaydi. */
     salesPrice: price("sales_price"),
     salesCurrency: varchar("sales_currency", { length: 3 }),
+    /** Ta'minotchiga qaytarilgan miqdor (qator birligida), qabul qilinganidan oshmaydi. */
+    returnedQty: qty("returned_qty").notNull().default("0"),
     notes: text("notes"),
     ...timestamps(),
   },
@@ -160,6 +165,7 @@ export const purchaseOrderItems = pgTable(
     index("poi_company_product_idx").on(t.companyId, t.productId),
     check("poi_ordered_positive", sql`${t.orderedQty} > 0`),
     check("poi_received_not_over", sql`${t.receivedQty} >= 0 AND ${t.receivedQty} <= ${t.orderedQty}`),
+    check("poi_returned_not_over", sql`${t.returnedQty} >= 0 AND ${t.returnedQty} <= ${t.receivedQty}`),
   ],
 );
 
@@ -305,6 +311,73 @@ export const supplierBalances = pgTable(
   (t) => [
     uniqueIndex("sb_supplier_currency_key").on(t.supplierId, t.currency),
     index("sb_company_supplier_idx").on(t.companyId, t.supplierId),
+  ],
+);
+
+// ─── purchase_returns ────────────────────────────────────────────────────────
+
+/**
+ * Ta'minotchiga qaytarish (qisman): zaxira qabul tannarxida chiqadi, ta'minotchi qarzi (valyuta bo'yicha) va
+ * kreditorlar kamayadi. Ta'minotchi pul qaytarsa — kassa/bankka kirim (`refund_*`), qarz shunga qaytadi.
+ */
+export const purchaseReturns = pgTable(
+  "purchase_returns",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    orderId: uuid("order_id").notNull().references(() => purchaseOrders.id, { onDelete: "restrict" }),
+    supplierId: uuid("supplier_id").notNull().references(() => suppliers.id, { onDelete: "restrict" }),
+    warehouseId: uuid("warehouse_id").notNull().references(() => warehouses.id, { onDelete: "restrict" }),
+    number: varchar("number", { length: 32 }).notNull(),
+    returnDate: date("return_date").notNull(),
+    deviceId: uuid("device_id").references(() => posDevices.id, { onDelete: "set null" }),
+
+    /** Asosiy valyutadagi kitob qiymati (qabul tannarxi ulushi). */
+    totalAmount: money("total_amount").notNull(),
+    refundMethod: varchar("refund_method", { length: 16 }),
+    refundAmount: money("refund_amount").notNull().default("0"),
+    cashAccountId: uuid("cash_account_id").references(() => cashAccounts.id, { onDelete: "set null" }),
+
+    reason: text("reason"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("prt_company_number_key").on(t.companyId, t.number),
+    index("prt_order_idx").on(t.orderId),
+    index("prt_company_date_idx").on(t.companyId, t.returnDate),
+    check("prt_refund_method", sql`${t.refundMethod} is null or ${t.refundMethod} in ('cash', 'card')`),
+    check("prt_amounts_non_negative", sql`${t.totalAmount} >= 0 AND ${t.refundAmount} >= 0`),
+  ],
+);
+
+export const purchaseReturnItems = pgTable(
+  "purchase_return_items",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    returnId: uuid("return_id").notNull().references(() => purchaseReturns.id, { onDelete: "cascade" }),
+    orderItemId: uuid("order_item_id").notNull().references(() => purchaseOrderItems.id, { onDelete: "restrict" }),
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+    unitId: uuid("unit_id").notNull().references(() => units.id),
+    quantity: qty("quantity").notNull(),
+    /** Asosiy birlik tannarxi (asosiy valyutada). */
+    costPrice: price("cost_price").notNull().default("0"),
+    /** Asosiy valyutada (kitob qiymati). */
+    lineTotal: money("line_total").notNull(),
+    /** Qator valyutasi (null — asosiy) va shu valyutadagi qarz kamayishi. */
+    currency: varchar("currency", { length: 3 }),
+    foreignTotal: money("foreign_total").notNull().default("0"),
+    ...timestamps(),
+  },
+  (t) => [
+    index("prti_return_idx").on(t.returnId),
+    index("prti_order_item_idx").on(t.orderItemId),
+    check("prti_qty_positive", sql`${t.quantity} > 0`),
   ],
 );
 

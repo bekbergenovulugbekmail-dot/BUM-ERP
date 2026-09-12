@@ -10,6 +10,7 @@
  *   POST /push                     (token) offline amallar navbati: bir martalik (opId) — smena, chek, qaytarish, mijoz
  *   GET  /receipts/:number         (token) qaytarish uchun chek (qurilma omboridagi, qaytarilgan miqdorlar bilan)
  *   GET  /sales                    (token) sotuv tarixi: qurilma omboridagi barcha kassa cheklari (sana, kursor)
+ *   GET  /purchases/:number        (token) ta'minotchiga qaytarish uchun xarid (qabul va qaytarilgan miqdorlar)
  *
  * /api/pos/devices — web (sessiya, `pos.devices.manage`):
  *   GET  /                         qurilmalar ro'yxati
@@ -32,7 +33,7 @@ import { companyCurrency } from "../finance/accounts.service.js";
 import { listConflicts, resolveConflict } from "./conflicts.service.js";
 import { cashierTenant, deviceOf, requireDevice } from "./device-auth.js";
 import { deviceWarehouses, listDevices, registerDevice, setupTenant, updateDevice } from "./devices.service.js";
-import { findDeviceReceipt, listDeviceSales } from "./receipts.service.js";
+import { findDevicePurchase, findDeviceReceipt, listDeviceSales } from "./receipts.service.js";
 import { DEFAULT_PULL_LIMIT, PULL_ENTITIES, pullChanges } from "./sync-pull.service.js";
 import { MAX_OPS_PER_PUSH, pushOperations } from "./sync-push.service.js";
 
@@ -187,6 +188,11 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
     scoped.get("/sales", async (req) => {
       const query = salesQuery.parse(req.query);
       return listDeviceSales(db, deviceOf(req), query);
+    });
+
+    scoped.get("/purchases/:number", async (req) => {
+      const { number } = receiptParams.parse(req.params);
+      return { purchase: await findDevicePurchase(db, deviceOf(req), number) };
     });
   });
 }

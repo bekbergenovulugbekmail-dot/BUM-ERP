@@ -865,8 +865,9 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 |---|---|---|
 | D0 | Poydevor: qurilma va token, kassir PIN, lokal SQLite, pull/push sinxron, offline smena | ✅ commit `92cf40a`, API deploy (production `/api/pos-device/session` → 401) |
 | D1 | POS: yuqori menyu, shtrix-kod, tezkor tugmalar, valyutalar, kechiktirilgan/qisman qaytarish, chek printeri, offline sotuv sinxroni (qoldiq ziddiyati) | ✅ commit `f4fbd55`, API deploy (yangi endpointlar production'da 401) |
-| D2 | Sotuv tarixi, kassa (inkassatsiya, smena/kassir/to'lov turi hisobotlari) | ✅ (pastda) |
-| D3–D9 | Xarid, ombor, inventarizatsiya, etiketka, ma'lumotlar, analitika, sozlamalar va avtomatik yangilanish, offline testlar | ⏳ |
+| D2 | Sotuv tarixi, kassa (inkassatsiya, smena/kassir/to'lov turi hisobotlari) | ✅ server commit `d38a250`, API deploy (yangi endpointlar production'da 401); desktop kodi — D4 commitida |
+| D3 | Xarid (offline, ta'minotchiga qaytarish va to'lov) | ✅ server commit (migratsiya 0034), API deploy; desktop kodi — D4 commitida (bir xil fayllar) |
+| D4–D9 | Ombor, inventarizatsiya, etiketka, ma'lumotlar, analitika, sozlamalar va avtomatik yangilanish, offline testlar | ⏳ |
 
 **D0 — server** (migratsiya 0031):
 - jadvallar `pos_devices` (kompaniya, ombor, nomi, `code` K01/K02…, token SHA-256 xeshi, faollik, versiya, oxirgi pull/push) va `pos_sync_operations` (qurilma + `op_id` unikal, tur, kassir, `applied`/`rejected`, natija yoki xato, qurilmadagi vaqt); `pos_shifts.device_id`
@@ -918,13 +919,30 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 - web: `GET/POST /api/sales/pos/shifts/:shiftId/cash-movements` (`pos.use`)
 - qurilma: `GET /api/pos-device/sales?from&to&cursor` — qurilma omboridagi barcha kassa cheklari (kassa kodi, kassir, mijoz)
 - testlar: `pos-kassa-sync` (3) — kirim/chiqim, xarajat ruxsati va hujjati, kutilgan naqd va smena farqi, web harakati; qarzdan ortiq to'lov balansga; sotuv tarixi sahifalab va ombor izolyatsiyasi. To'liq API: 272/272 (65 fayl)
-- server qismi alohida commit va API deploy; desktop D2 kodi D3 bilan birga commit qilinadi (bir xil fayllarda)
+- server qismi alohida commit va API deploy; desktop D2–D3 kodi D4 bilan birga commit qilinadi (bir xil fayllarda)
 
 **D2 — desktop** (lokal baza v3: naqd harakatlari, mijoz to'lovlari, yopilgan smenalar):
 - kassa bo'limi: X-hisobot qurilmadagi hujjatlardan (tushum turi — naqd/karta/bank/o'tkazma/balans/keshbek/qarz/chet valyuta, qaytarishlar, mijoz to'lovlari, naqd harakatlari, kassirlar, kutilgan naqd, serverga yuborilmaganlar soni); kirim/chiqim (xarajat — ruxsat bilan), mijoz to'lovi (qarz/balans, naqd/karta), smenani yopish — Z-hisobot tarixda saqlanadi, termal chop etiladi
 - sotuv tarixi: shu kassa cheklari va qaytarishlari (offline, sana oralig'i, qidiruv, holat), chek tafsiloti, qayta chop etish, tarixdan qaytarishga o'tish; barcha kassalar cheklari — serverdan (internet bilan, sahifalab)
 - kassa ekrani menyusidan va bosh sahifadan bo'limlarga o'tish
 - testlar: 16
+
+**D3 — server** (migratsiya 0034, faqat qo'shimcha; `pcm_kind` CHECK kengaytirildi):
+- `purchase_returns` va `purchase_return_items`, `purchase_order_items.returned_qty` (qabul qilinganidan oshmaydi), `purchase_orders.device_id`; `pos_cash_movements` da `supplier_payment` / `supplier_refund` turlari va hujjatga havola
+- ruxsat `purchase.return` (Direktor, Xarid menejeri; migratsiya mavjud rollarga qo'shadi)
+- ta'minotchiga qisman qaytarish (web va kassa): zaxira `return_out`, jurnal DR kreditorlar / CR tovar zaxirasi — qabul tannarxi ulushida, ta'minotchi qarzi valyuta bo'yicha kamayadi, oxirgi qoldiq aniq summa; ta'minotchi pul qaytarsa — kassa/bankka kirim va qarz shunga qaytadi. Web: `POST /api/purchase/orders/:id/returns` (raqam `PR-2026-0001`), buyurtmada `returns`
+- `push`: `supplier.create`, `purchase.complete` (kassada xarid — bitta tranzaksiyada tasdiqlangan buyurtma `K01-P000001` qurilmadagi ID/qator ID'lari va kurslar bilan, to'liq qabul: zaxira, tannarx, partiya, yangi sotuv narxi, qarz, jurnal; darhol to'lov — naqd smena chiqimi, karta — bank), `purchase.return` (`K01-R000001`, qaytgan naqd — smena kirimi), `supplier.payment` (qarzdan ortig'i avans — `supplier_overpaid`)
+- offline to'lovda kassa qoldig'i yetmasa ham chiqim yoziladi; offline qaytarishda qoldiq yetmasa — manfiy qoldiq va `stock_shortage`
+- `pull`: `suppliers` (qarz bilan), mahsulotda `trackExpiry`; qurilma: `GET /api/pos-device/purchases/:number`
+- testlar: `pos-purchase-sync` (3) — kassada xarid va to'lov, ruxsat va band raqam; qisman qaytarish, qaytgan pul, web qaytarish va chegara; ta'minotchiga ortiqcha to'lov, pull va xaridni topish. To'liq API: 275/275 (66 fayl)
+
+**D3 — desktop** (lokal baza v4: ta'minotchilar, xaridlar, qaytarishlar, ta'minotchiga to'lovlar):
+- xarid ekrani: ta'minotchi (qidiruv, offline yangi), mahsulot qidiruvi va skaner (sotilmaydigan xomashyo ham), miqdor, ta'minotchi narxi va valyutasi, yangi sotuv narxi, partiya/yaroqlilik (majburiy bo'lsa), valyuta bo'yicha va asosiy valyutada jami, darhol to'lov (smenadan naqd yoki karta, `purchase.approve`), bugungi xaridlar va sinxron holati
+- ta'minotchiga qaytarish (shu kassa xaridi offline, boshqasi — internet bilan), qaytgan pul; ta'minotchiga to'lov dialogi
+- ko'rinadigan qoldiq xarid va qaytarish bilan darhol o'zgaradi; ta'minotchi qarzi qurilmada taxminiy yangilanadi
+- X/Z-hisobotda ta'minotchilarga to'lov (naqd/karta) va qaytgan pul; kutilgan naqdga ta'sir qiladi
+- sinxron: sikl ketayotganda navbatga tushgan hujjat — sikl tugagach darhol yana bir sikl (30 soniyalik davriy sinxronni kutmaydi); qo'lda sinxron ketayotgan sikl tugashini kutib yangisini boshlaydi
+- testlar: 18
 
 ### Distributsiya (`/api/distribution`)
 

@@ -7,10 +7,59 @@ import { badRequest, notFound } from "@bum/shared";
 import { products, units } from "../../db/schema/catalog.js";
 import { users } from "../../db/schema/platform.js";
 import { posDevices } from "../../db/schema/pos.js";
+import { purchaseOrderItems, purchaseOrders, suppliers } from "../../db/schema/purchase.js";
 import { customers, salesOrderItems, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import type { DeviceContext } from "./device-auth.js";
+
+/** Ta'minotchiga qaytarish uchun xarid (raqam bo'yicha, qurilma omboridagi): qabul va qaytarilgan miqdorlar bilan. */
+export async function findDevicePurchase(conn: DbOrTx, context: DeviceContext, number: string) {
+  const [order] = await conn
+    .select({
+      id: purchaseOrders.id,
+      number: purchaseOrders.number,
+      status: purchaseOrders.status,
+      supplierId: purchaseOrders.supplierId,
+      supplierName: suppliers.name,
+      totalAmount: purchaseOrders.totalAmount,
+      paidAmount: purchaseOrders.paidAmount,
+      createdAt: purchaseOrders.createdAt,
+    })
+    .from(purchaseOrders)
+    .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
+    .where(
+      and(
+        eq(purchaseOrders.companyId, context.company.id),
+        eq(purchaseOrders.number, number),
+        eq(purchaseOrders.warehouseId, context.device.warehouseId),
+      ),
+    )
+    .limit(1);
+  if (!order) throw notFound("Xarid topilmadi");
+
+  const items = await conn
+    .select({
+      id: purchaseOrderItems.id,
+      productId: purchaseOrderItems.productId,
+      productName: products.name,
+      unitId: purchaseOrderItems.unitId,
+      unitName: units.shortName,
+      orderedQty: purchaseOrderItems.orderedQty,
+      receivedQty: purchaseOrderItems.receivedQty,
+      returnedQty: purchaseOrderItems.returnedQty,
+      unitPrice: purchaseOrderItems.unitPrice,
+      lineTotal: purchaseOrderItems.lineTotal,
+      currency: purchaseOrderItems.currency,
+    })
+    .from(purchaseOrderItems)
+    .innerJoin(products, eq(products.id, purchaseOrderItems.productId))
+    .innerJoin(units, eq(units.id, purchaseOrderItems.unitId))
+    .where(eq(purchaseOrderItems.orderId, order.id))
+    .orderBy(asc(purchaseOrderItems.createdAt), asc(purchaseOrderItems.id));
+
+  return { ...order, items };
+}
 
 /** Sotuv tarixi (internet bilan): qurilma omboridagi barcha kassa cheklari — boshqa kassalar va web ham. */
 export async function listDeviceSales(conn: DbOrTx, context: DeviceContext, options: { from?: string; to?: string; limit: number; cursor?: string }) {

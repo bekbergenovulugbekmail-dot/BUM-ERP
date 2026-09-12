@@ -11,11 +11,17 @@
  *  - Chek (`sale.complete`) jismonan bo'lgan: zaxira yetmasa, narx/kurs o'zgargan, balans yetmasa va h.k. — rad
  *    etilmaydi, `pos_sync_conflicts` ga yoziladi (rahbar ko'rib chiqadi).
  */
+import { randomUUID } from "node:crypto";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AppError, badRequest, conflict, notFound } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { posSyncConflicts, posSyncOperations, type PosSyncError } from "../../db/schema/pos.js";
+import { purchaseOrderItems, purchaseOrders, purchaseReturns, suppliers } from "../../db/schema/purchase.js";
+import { completeDirectPurchase } from "../purchase/direct-purchase.service.js";
+import { recordSupplierPayment } from "../purchase/payments.service.js";
+import { returnPurchaseItems } from "../purchase/returns.service.js";
+import { createSupplier } from "../purchase/suppliers.service.js";
 import { customers, posCashMovements, posShifts, salesOrderItems, salesOrders, salesReturns } from "../../db/schema/sales.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
@@ -138,6 +144,81 @@ export const syncOperationSchema = z.discriminatedUnion("type", [
       purpose: z.enum(["deposit", "debt"]),
       amount: decimalSchema({ scale: 2, positive: true }),
       method: z.enum(["cash", "card"]),
+      notes,
+    }),
+  }),
+  z.strictObject({
+    ...common,
+    type: z.literal("supplier.create"),
+    payload: z.strictObject({
+      supplierId: z.uuid(),
+      name: z.string().trim().min(1).max(200),
+      phone: z.string().trim().max(20).nullable().optional(),
+    }),
+  }),
+  z.strictObject({
+    ...common,
+    type: z.literal("purchase.complete"),
+    payload: z.strictObject({
+      purchaseId: z.uuid(),
+      number: deviceNumber,
+      supplierId: z.uuid(),
+      items: z
+        .array(
+          z.strictObject({
+            id: z.uuid(),
+            productId: z.uuid(),
+            unitId: z.uuid(),
+            quantity: positiveQty,
+            unitPrice: priceSchema,
+            taxRate: percentSchema.optional(),
+            discountPercent: percentSchema.optional(),
+            currency: currencyCode.nullable().optional(),
+            salesPrice: priceSchema.nullable().optional(),
+            batchNumber: z.string().trim().max(64).nullable().optional(),
+            expiryDate: z.iso.date().nullable().optional(),
+          }),
+        )
+        .min(1)
+        .max(500)
+        .refine((items) => new Set(items.map((item) => item.id)).size === items.length, "Xarid qatori identifikatori takrorlangan"),
+      rates: z.record(currencyCode, decimalSchema({ scale: 4, positive: true })).optional(),
+      notes,
+      payment: z
+        .strictObject({ shiftId: z.uuid(), amount: decimalSchema({ scale: 2, positive: true }), method: z.enum(["cash", "card"]) })
+        .nullable()
+        .optional(),
+    }),
+  }),
+  z.strictObject({
+    ...common,
+    type: z.literal("purchase.return"),
+    payload: z.strictObject({
+      returnId: z.uuid(),
+      number: deviceNumber,
+      orderId: z.uuid(),
+      items: z
+        .array(z.strictObject({ orderItemId: z.uuid(), quantity: positiveQty }))
+        .min(1)
+        .max(500)
+        .refine((items) => new Set(items.map((item) => item.orderItemId)).size === items.length, "Mahsulot qatori takrorlangan"),
+      reason: notes,
+      refund: z
+        .strictObject({ shiftId: z.uuid(), amount: decimalSchema({ scale: 2, positive: true }), method: z.enum(["cash", "card"]) })
+        .nullable()
+        .optional(),
+    }),
+  }),
+  z.strictObject({
+    ...common,
+    type: z.literal("supplier.payment"),
+    payload: z.strictObject({
+      paymentId: z.uuid(),
+      shiftId: z.uuid(),
+      supplierId: z.uuid(),
+      amount: decimalSchema({ scale: 2, positive: true }),
+      method: z.enum(["cash", "card"]),
+      orderId: z.uuid().nullable().optional(),
       notes,
     }),
   }),
@@ -391,6 +472,133 @@ async function applyOperation(tx: Tx, context: DeviceContext, op: SyncOperation,
       );
       await recordConflicts(tx, context, op, { type: "customer", id: payload.customerId }, result.conflicts);
       return { paymentId: payload.paymentId, customer: result.customer, conflicts: result.conflicts.map((item) => item.kind) };
+    }
+    case "supplier.create": {
+      const payload = op.payload;
+      await requirePermission(tx, tenant, "purchase.create");
+      const [taken] = await tx.select({ id: suppliers.id }).from(suppliers).where(eq(suppliers.id, payload.supplierId)).limit(1);
+      if (taken) throw conflict("Ta'minotchi identifikatori band");
+      const supplier = await createSupplier(tx, tenant, { id: payload.supplierId, name: payload.name, phone: payload.phone ?? null }, meta);
+      return { supplierId: supplier.id, code: supplier.code };
+    }
+    case "purchase.complete": {
+      const payload = op.payload;
+      await requirePermission(tx, tenant, "purchase.create");
+      await requirePermission(tx, tenant, "warehouse.receive");
+      if (payload.payment) {
+        await requirePermission(tx, tenant, "purchase.approve");
+        await deviceShift(tx, context, payload.payment.shiftId);
+      }
+      assertDeviceNumber(context, payload.number);
+      const [taken] = await tx
+        .select({ id: purchaseOrders.id })
+        .from(purchaseOrders)
+        .where(
+          or(eq(purchaseOrders.id, payload.purchaseId), and(eq(purchaseOrders.companyId, context.company.id), eq(purchaseOrders.number, payload.number))),
+        )
+        .limit(1);
+      if (taken) throw conflict("Xarid identifikatori yoki raqami band");
+      const [itemTaken] = await tx
+        .select({ id: purchaseOrderItems.id })
+        .from(purchaseOrderItems)
+        .where(inArray(purchaseOrderItems.id, payload.items.map((item) => item.id)))
+        .limit(1);
+      if (itemTaken) throw conflict("Xarid qatori identifikatori band");
+      const result = await completeDirectPurchase(
+        tx,
+        tenant,
+        {
+          supplierId: payload.supplierId,
+          warehouseId: context.device.warehouseId,
+          notes: payload.notes ?? null,
+          items: payload.items.map(({ quantity, ...item }) => ({ ...item, orderedQty: quantity })),
+          payment: payload.payment ?? null,
+          offline: { id: payload.purchaseId, number: payload.number, occurredAt: op.createdAt, deviceId: context.device.id, rates: payload.rates },
+        },
+        meta,
+      );
+      return { ...result, conflicts: [] };
+    }
+    case "purchase.return": {
+      const payload = op.payload;
+      await requirePermission(tx, tenant, "purchase.return");
+      assertDeviceNumber(context, payload.number);
+      if (payload.refund) await deviceShift(tx, context, payload.refund.shiftId);
+      const [taken] = await tx
+        .select({ id: purchaseReturns.id })
+        .from(purchaseReturns)
+        .where(
+          or(eq(purchaseReturns.id, payload.returnId), and(eq(purchaseReturns.companyId, context.company.id), eq(purchaseReturns.number, payload.number))),
+        )
+        .limit(1);
+      if (taken) throw conflict("Qaytarish identifikatori yoki raqami band");
+      const result = await returnPurchaseItems(
+        tx,
+        tenant,
+        payload.orderId,
+        {
+          items: payload.items,
+          reason: payload.reason ?? null,
+          refund: payload.refund ? { amount: payload.refund.amount, method: payload.refund.method } : null,
+          offline: { id: payload.returnId, number: payload.number, occurredAt: op.createdAt, deviceId: context.device.id },
+        },
+        meta,
+      );
+      if (payload.refund?.method === "cash") {
+        await posCashMovement(
+          tx,
+          tenant,
+          {
+            shiftId: payload.refund.shiftId,
+            kind: "supplier_refund",
+            amount: payload.refund.amount,
+            notes: payload.number,
+            reference: { type: "purchase_return", id: payload.returnId },
+            offline: { id: randomUUID(), occurredAt: op.createdAt, deviceId: context.device.id },
+          },
+          meta,
+        );
+      }
+      await recordConflicts(tx, context, op, { type: "purchase_return", id: payload.returnId }, result.conflicts);
+      return { ...result.return, returnId: result.return.id, conflicts: result.conflicts.map((item) => item.kind) };
+    }
+    case "supplier.payment": {
+      const payload = op.payload;
+      await requirePermission(tx, tenant, "purchase.approve");
+      await deviceShift(tx, context, payload.shiftId);
+      const date = op.createdAt.toISOString().slice(0, 10);
+      const paid = await recordSupplierPayment(
+        tx,
+        tenant,
+        {
+          supplierId: payload.supplierId,
+          orderId: payload.orderId ?? null,
+          amount: payload.amount,
+          method: payload.method,
+          paymentDate: date,
+          notes: payload.notes ?? null,
+          offline: true,
+        },
+        meta,
+      );
+      if (payload.method === "cash") {
+        await posCashMovement(
+          tx,
+          tenant,
+          {
+            shiftId: payload.shiftId,
+            kind: "supplier_payment",
+            amount: payload.amount,
+            notes: payload.notes ?? null,
+            reference: { type: "supplier_payment", id: paid.payment.id },
+            offline: { id: payload.paymentId, occurredAt: op.createdAt, deviceId: context.device.id },
+          },
+          meta,
+        );
+      }
+      const found: SaleConflict[] = paid.overpaid ? [{ kind: "supplier_overpaid", details: { supplierId: payload.supplierId, advance: paid.overpaid } }] : [];
+      await recordConflicts(tx, context, op, { type: "supplier_payment", id: paid.payment.id }, found);
+      return { paymentId: paid.payment.id, advance: paid.overpaid, conflicts: found.map((item) => item.kind) };
     }
   }
 }

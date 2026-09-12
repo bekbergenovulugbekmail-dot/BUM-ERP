@@ -10,6 +10,7 @@
  *   POST   /orders/:orderId/confirm                       purchase.approve
  *   POST   /orders/:orderId/cancel                        purchase.cancel
  *   POST   /orders/:orderId/receipts                      warehouse.receive (+ ombor ruxsati)
+ *   POST   /orders/:orderId/returns                       purchase.return (qisman; ta'minotchi qaytargan pul bilan)
  *   GET    /payments (?supplierId=&orderId=&limit=&cursor=)   purchase.view
  *   POST   /payments                                      purchase.approve (201 yangi / 200 takroriy reference)
  */
@@ -32,6 +33,7 @@ import {
   updateOrder,
 } from "./orders.service.js";
 import { listSupplierPayments, recordSupplierPayment } from "./payments.service.js";
+import { returnPurchaseItems } from "./returns.service.js";
 import { createSupplier, getSupplier, listSuppliers, updateSupplier } from "./suppliers.service.js";
 
 const nullableText = (max: number) =>
@@ -112,6 +114,15 @@ const receiptBody = z.strictObject({
     )
     .min(1)
     .max(500),
+});
+
+const purchaseReturnBody = z.strictObject({
+  items: z.array(z.strictObject({ orderItemId: z.uuid(), quantity: positiveQty })).min(1).max(500),
+  reason: nullableText(1000),
+  refund: z
+    .strictObject({ amount: decimalSchema({ scale: 2, positive: true }), method: z.enum(["cash", "card"]) })
+    .nullable()
+    .optional(),
 });
 
 const paymentBody = z.strictObject({
@@ -240,6 +251,17 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
     const result = await writeInTenant(req, "warehouse.receive", (tx, tenant) =>
       receiveGoods(tx, tenant, orderId, body, requestMeta(req)),
     );
+    reply.status(201);
+    return result;
+  });
+
+  app.post("/orders/:orderId/returns", async (req, reply) => {
+    const { orderId } = orderParams.parse(req.params);
+    const body = purchaseReturnBody.parse(req.body);
+    const result = await writeInTenant(req, "purchase.return", async (tx, tenant) => {
+      const created = await returnPurchaseItems(tx, tenant, orderId, body, requestMeta(req));
+      return { return: created.return, order: await getOrder(tx, tenant, orderId) };
+    });
     reply.status(201);
     return result;
   });

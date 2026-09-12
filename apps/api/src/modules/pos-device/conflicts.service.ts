@@ -20,6 +20,8 @@ export const CONFLICT_KINDS = {
   cashback_insufficient: "Keshbek yetmadi (farqi qarzga)",
   shift_closed: "Yopilgan smenaga chek",
   customer_duplicate_phone: "Shu telefonli mijoz bor edi",
+  debt_overpaid: "Mijoz qarzidan ortiq to'landi (farqi balansga)",
+  supplier_overpaid: "Ta'minotchi qarzidan ortiq to'landi (avans)",
 } as const;
 
 export async function listConflicts(conn: DbOrTx, tenant: TenantContext, options: { resolved?: boolean; limit: number }) {
