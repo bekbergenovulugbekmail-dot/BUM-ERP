@@ -852,6 +852,7 @@ Foydalanuvchi `BUMERP_SOTUVAGE.docx` (68 bo'lim) yubordi: pullik xarita API'si y
 - HR → Xodimlar'dagi "Sotuv agenti qo'shish" tugmasi i18n orqali; `GET /api/hr/employees` da sotuv agenti uchun `salesRepId`, `agentRegion`, `supervisorName` — ro'yxat kartasida hudud va supervayzer (spetsifikatsiya 44-bo'lim)
 - uz/ru/kk kalitlari to'liq mos (agent 350, distribution 251, map 7 — skript bilan tekshirildi)
 - Lokal yakuniy tekshiruv: API 262/262 (62 fayl, `--maxWorkers=2`), frontend unit 16/16, API va web `tsc`, ESLint, `vite build` — o'tdi
+- **V6–V8** commit `6652467`, production'ga deploy qilindi (API va web SUCCESS; `/catalog/filters`, `/policy/recipients`, `/reports` 401; bundle'da katalog filtrlari, bildirishnoma oluvchilari, "BUYURTMANI YAKUNLASH"; `sw.js` yangilangan)
 - qolgan: production'da S3; telefonda qo'lda sinov (kamera, GPS, menyu); native ilova (fondagi kuzatuv, faqat kamera); agent bo'yicha yetkazish siyosati; bazadagi rasmlar saqlash muddati (foydalanuvchi tasdig'i bilan); bum-erp.uz TLS/DNS
 
 ### Distributsiya (`/api/distribution`)
