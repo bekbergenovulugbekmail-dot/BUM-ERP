@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Plus, Search, Users, Phone, Building2, Pencil, Trash2, User } from "lucide-react";
+import { Plus, Search, Users, Phone, Building2, Pencil, Trash2, User, MapPin, UserCheck } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -62,6 +63,7 @@ function toBody(form: FormState, includeSensitive: boolean) {
 type EmployeeBody = ReturnType<typeof toBody>;
 
 export default function EmployeesSection() {
+  const { t } = useTranslation("distribution");
   const { can } = usePermissions();
   const canManage = can("hr.manage");
   const canAddAgent = can("sales_agent.agents.manage");
@@ -170,7 +172,7 @@ export default function EmployeesSection() {
         )}
         {canAddAgent && (
           <Button size="sm" variant="secondary" onClick={() => setAgentOpen(true)}>
-            <Plus className="h-3.5 w-3.5 mr-1" /> Sotuv agenti qo'shish
+            <Plus className="h-3.5 w-3.5 mr-1" /> {t("team.add")}
           </Button>
         )}
       </div>
@@ -221,6 +223,16 @@ export default function EmployeesSection() {
                       {emp.phone && (
                         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                           <Phone className="h-3 w-3" /> {emp.phone}
+                        </div>
+                      )}
+                      {emp.salesRepId && (
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1.5">
+                            <MapPin className="h-3 w-3" /> {t("team.region")}: {emp.agentRegion || "—"}
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <UserCheck className="h-3 w-3" /> {t("team.supervisor")}: {emp.supervisorName ?? t("team.no_supervisor")}
+                          </span>
                         </div>
                       )}
                     </div>

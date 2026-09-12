@@ -21,6 +21,8 @@ export type LocalDraft = {
   paymentType: PaymentType;
   paymentDueDate: string;
   deliveryDate: string;
+  /** Buyurtma izohi (nasiyada — nasiya izohi). */
+  notes: string;
   /** Oxirgi o'zgarish vaqti (ms); 0 — hali o'zgartirilmagan. */
   changedAt: number;
 };
@@ -30,7 +32,10 @@ const storageKey = (customerId: string) => `bum:agent-order:${customerId}`;
 export function readLocalDraft(customerId: string): LocalDraft | null {
   try {
     const raw = localStorage.getItem(storageKey(customerId));
-    return raw ? (JSON.parse(raw) as LocalDraft) : null;
+    if (!raw) return null;
+    // Eski nusxada `notes` bo'lmasligi mumkin
+    const parsed = JSON.parse(raw) as Omit<LocalDraft, "notes"> & { notes?: string };
+    return { ...parsed, notes: parsed.notes ?? "" };
   } catch {
     return null;
   }
@@ -64,6 +69,7 @@ function fromServer(order: AgentOrder): LocalDraft {
     paymentType: order.paymentType,
     paymentDueDate: order.paymentDueDate ?? "",
     deliveryDate: order.deliveryDate ?? "",
+    notes: order.notes ?? "",
     changedAt: Date.parse(order.updatedAt),
     lines: order.lines.map((line) => {
       const item = order.items?.find((row) => row.productId === line.productId);
@@ -88,5 +94,5 @@ export function initialDraft(customerId: string, server: AgentOrder | null): Loc
     return local && local.requestId === server.clientRequestId && local.changedAt > serverDraft.changedAt ? local : serverDraft;
   }
   if (local && local.lines.length > 0) return local;
-  return { requestId: crypto.randomUUID(), customerId, lines: [], paymentType: "cash", paymentDueDate: "", deliveryDate: "", changedAt: 0 };
+  return { requestId: crypto.randomUUID(), customerId, lines: [], paymentType: "cash", paymentDueDate: "", deliveryDate: "", notes: "", changedAt: 0 };
 }

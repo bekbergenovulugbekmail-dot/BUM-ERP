@@ -106,7 +106,7 @@ describe("Tashriflar", () => {
     expect(far.json().details.distanceMeters).toBeGreaterThan(5000);
     // Rad etilgan urinish saqlanadi (tranzaksiya bekor qilinmaydi)
     expect(await db.$count(agentLocationEvents, eq(agentLocationEvents.type, "geofence_block"))).toBe(1);
-    expect(await actionCount("GEO_FENCE_BLOCK")).toBe(1);
+    expect(await actionCount("GEOFENCE_BLOCK")).toBe(1);
 
     const blurry = await start(ali.cookie, baraka, near, 500);
     expect(blurry.statusCode).toBe(400);
@@ -147,7 +147,7 @@ describe("Tashriflar", () => {
       id: visit.id,
       noOrderReason: "has_stock",
     });
-    for (const action of ["VISIT_STARTED", "VISIT_COMPLETED", "VISIT_NO_ORDER"]) expect(await actionCount(action)).toBe(1);
+    for (const action of ["VISIT_START", "VISIT_END", "NO_ORDER"]) expect(await actionCount(action)).toBe(1);
 
     // Koordinatasiz do'kon — geofence yo'q, masofa noma'lum
     const second = await start(ali.cookie, mega);
@@ -195,7 +195,7 @@ describe("Tashriflar", () => {
     expect(attached.statusCode).toBe(201);
     const photoId = attached.json().photo.id as string;
     expect((await attach({ key })).statusCode).toBe(409);
-    expect(await actionCount("STORE_PHOTO_ADDED")).toBe(1);
+    expect(await actionCount("SHELF_PHOTO")).toBe(1);
 
     expect((await finish()).statusCode).toBe(200);
     expect((await attach({ key })).statusCode).toBe(409); // yakunlangan tashrif

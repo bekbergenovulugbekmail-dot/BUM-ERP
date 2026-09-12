@@ -12,7 +12,7 @@
  */
 import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { AppError, FULL_ACCESS_ROLES, badRequest, conflict, notFound, type SalesAgentPolicy } from "@bum/shared";
-import { products, unitConversions, units } from "../../db/schema/catalog.js";
+import { brands, categories, products, unitConversions, units } from "../../db/schema/catalog.js";
 import { routeCustomers, salesReps } from "../../db/schema/crm.js";
 import { stockLevels, warehouses } from "../../db/schema/inventory.js";
 import { notifications } from "../../db/schema/notifications.js";
@@ -106,10 +106,39 @@ async function agentWarehouseId(conn: DbOrTx, companyId: string) {
   return warehouse?.id ?? null;
 }
 
+/** Sotiladigan faol mahsulotlar sharti — xodimning kategoriya doirasi bilan. */
+function saleableScope(companyId: string, scope: string[] | null) {
+  return and(
+    eq(products.companyId, companyId),
+    eq(products.isActive, true),
+    eq(products.isSaleable, true),
+    scope === null ? undefined : scope.length > 0 ? inArray(products.categoryId, scope) : sql`false`,
+  );
+}
+
+/** Katalog filtrlari: agentga ko'rinadigan mahsulotlardagi kategoriya va brendlar. */
+export async function catalogFilters(conn: DbOrTx, context: AgentContext) {
+  const where = saleableScope(context.company.id, await categoryScope(conn, context));
+  const categoryRows = await conn
+    .selectDistinct({ id: categories.id, name: categories.name })
+    .from(products)
+    .innerJoin(categories, eq(categories.id, products.categoryId))
+    .where(where)
+    .orderBy(asc(categories.name));
+  const brandRows = await conn
+    .selectDistinct({ id: brands.id, name: brands.name })
+    .from(products)
+    .innerJoin(brands, eq(brands.id, products.brandId))
+    .where(where)
+    .orderBy(asc(brands.name));
+  return { categories: categoryRows, brands: brandRows };
+}
+
 export async function agentCatalog(
   conn: DbOrTx,
   context: AgentContext,
-  options: { search?: string; categoryId?: string; limit: number; offset: number },
+  options: { search?: string; categoryId?: string; brandId?: string; limit: number; offset: number },
+  client: StorageClient | null = null,
 ) {
   const companyId = context.company.id;
   const warehouseId = await agentWarehouseId(conn, companyId);
@@ -122,6 +151,10 @@ export async function agentCatalog(
       name: products.name,
       sku: products.sku,
       categoryId: products.categoryId,
+      categoryName: categories.name,
+      brandId: products.brandId,
+      brandName: brands.name,
+      imageKey: products.imageKey,
       baseUnitId: products.baseUnitId,
       salesUnitId: products.salesUnitId,
       unitName: units.shortName,
@@ -134,13 +167,13 @@ export async function agentCatalog(
     })
     .from(products)
     .innerJoin(units, eq(units.id, products.baseUnitId))
+    .leftJoin(categories, eq(categories.id, products.categoryId))
+    .leftJoin(brands, eq(brands.id, products.brandId))
     .where(
       and(
-        eq(products.companyId, companyId),
-        eq(products.isActive, true),
-        eq(products.isSaleable, true),
-        scope === null ? undefined : scope.length > 0 ? inArray(products.categoryId, scope) : sql`false`,
+        saleableScope(companyId, scope),
         options.categoryId ? eq(products.categoryId, options.categoryId) : undefined,
+        options.brandId ? eq(products.brandId, options.brandId) : undefined,
         pattern ? or(ilike(products.name, pattern), ilike(products.sku, pattern), ilike(products.barcode, pattern)) : undefined,
       ),
     )
@@ -153,7 +186,7 @@ export async function agentCatalog(
   const promotionsByProduct = await activePromotions(conn, companyId, todayIso(), page.map((row) => row.id));
   const rates = new Map<string, string>();
   const items = [];
-  for (const { baseUnitId: _baseUnitId, salesUnitId: _salesUnitId, salesPrice, salesCurrency, ...row } of page) {
+  for (const { baseUnitId: _baseUnitId, salesUnitId: _salesUnitId, salesPrice, salesCurrency, imageKey, ...row } of page) {
     // Narxi boshqa valyutada — sotuv buyurtmasi bilan bir xil: joriy kurs bilan asosiy valyutada
     let piecePrice = salesPrice;
     if (salesCurrency) {
@@ -163,6 +196,8 @@ export async function agentCatalog(
     const box = boxes.get(row.id);
     items.push({
       ...row,
+      /** Kichik rasm uchun imzolangan havola (5 daqiqa); fayl saqlash sozlanmagan bo'lsa null. */
+      imageUrl: client && imageKey ? client.signedUrl("GET", imageKey, VIEW_TTL) : null,
       piecePrice,
       box: box ? { ...box, price: mul4(piecePrice, box.factor) } : null,
       promotions: promotionsByProduct.get(row.id) ?? [],
@@ -284,12 +319,18 @@ async function assertStock(tx: Tx, companyId: string, warehouseId: string, items
   }
 }
 
-/** `sales_agent.supervise` ruxsati bor (yoki to'liq huquqli) faol a'zolarga shaxsiy bildirishnoma. */
+/**
+ * Hodisa bildirishnomasi: siyosatda shu hodisa uchun oluvchilar tanlangan bo'lsa — faqat ularga (faol a'zolar), aks holda
+ * `sales_agent.supervise` ruxsati bor yoki to'liq huquqli faol a'zolarga.
+ */
 async function notifySupervisors(
   tx: Tx,
   companyId: string,
+  policy: SalesAgentPolicy,
+  event: keyof SalesAgentPolicy["notificationRecipients"],
   input: { title: string; message: string; relatedType: string; relatedId: string; link: string },
 ) {
+  const chosen = new Set(policy.notificationRecipients[event]);
   const members = await tx
     .select({
       userId: companyMembers.userId,
@@ -307,6 +348,10 @@ async function notifySupervisors(
     .where(and(eq(companyMembers.companyId, companyId), eq(companyMembers.isActive, true)));
   const recipients = new Set<string>();
   for (const member of members) {
+    if (chosen.size > 0) {
+      if (chosen.has(member.userId)) recipients.add(member.userId);
+      continue;
+    }
     const fullAccess = (FULL_ACCESS_ROLES as readonly string[]).includes(member.companyRole);
     if (fullAccess || (member.roleActive && member.permissions?.includes("sales_agent.supervise"))) recipients.add(member.userId);
   }
@@ -502,7 +547,7 @@ export async function saveAgentDraft(tx: Tx, context: AgentContext, clientReques
       lines,
     });
     await audit(tx, context, meta, {
-      action: "ORDER_CREATED",
+      action: "ORDER_DRAFT",
       resource: "sales_orders",
       resourceId: orderId,
       details: { number: order.number, customerId: input.customerId, clientRequestId },
@@ -575,8 +620,8 @@ export async function submitAgentOrder(
       radiusMeters: policy.geofenceRadiusMeters,
     };
     await insertLocationEvent(tx, context, "geofence_block", input, details);
-    await audit(tx, context, meta, { action: "GEO_FENCE_ORDER_ATTEMPT", resource: "sales_orders", resourceId: orderId, severity: "warning", details });
-    await notifySupervisors(tx, companyId, {
+    await audit(tx, context, meta, { action: "GEOFENCE_ORDER_ATTEMPT", resource: "sales_orders", resourceId: orderId, severity: "warning", details });
+    await notifySupervisors(tx, companyId, policy, "geofence", {
       title: "Geo-fence buzilishi",
       message: `Xodim: ${context.agent.name}. Do'kon: ${store.name}. Ruxsat: ${policy.geofenceRadiusMeters} m. Agent masofasi: ${formatMeters(distance)}. Vaqt: ${clock(new Date())}`,
       relatedType: "sales_orders",
@@ -647,11 +692,23 @@ export async function submitAgentOrder(
       const exposure = toMinor(customer!.totalDebt) + toMinor(open!.amount) + toMinor(order!.totalAmount);
       if (exposure > limit) {
         if (policy.creditLimitPolicy === "block") {
-          throw badRequest(`Kredit limitidan oshadi (limit ${fromMinor(limit)}, qarz va ochiq buyurtmalar bilan ${fromMinor(exposure)})`, {
-            reason: "credit_limit",
-            limit: fromMinor(limit),
-            exposure: fromMinor(exposure),
+          // Rad etiladi, lekin bildirishnoma va audit saqlanadi (xato tranzaksiyadan keyin qaytariladi)
+          const details = { number: row.number, customerId: row.customerId, limit: fromMinor(limit), exposure: fromMinor(exposure) };
+          await notifySupervisors(tx, companyId, policy, "creditLimit", {
+            title: "Kredit limiti oshdi",
+            message: `${context.agent.name}: ${store.name}, ${row.number} — limit ${details.limit}, qarz va ochiq buyurtmalar bilan ${details.exposure}`,
+            relatedType: "sales_orders",
+            relatedId: orderId,
+            link: "/distribution",
           });
+          await audit(tx, context, meta, { action: "CREDIT_LIMIT_EXCEEDED", resource: "sales_orders", resourceId: orderId, severity: "warning", details });
+          return {
+            blocked: badRequest(`Kredit limitidan oshadi (limit ${details.limit}, qarz va ochiq buyurtmalar bilan ${details.exposure})`, {
+              reason: "credit_limit",
+              limit: details.limit,
+              exposure: details.exposure,
+            }),
+          };
         }
         pendingApproval = true;
       }
@@ -681,7 +738,7 @@ export async function submitAgentOrder(
     .where(eq(agentOrders.orderId, orderId));
 
   if (pendingApproval) {
-    await notifySupervisors(tx, companyId, {
+    await notifySupervisors(tx, companyId, policy, "approval", {
       title: "Buyurtma tasdiq kutmoqda",
       message: `${context.agent.name}: ${store.name}, ${row.number} — ${order!.totalAmount} (kredit limitidan oshadi)`,
       relatedType: "sales_orders",
@@ -692,7 +749,7 @@ export async function submitAgentOrder(
     await confirmOrder(tx, context, orderId, meta);
   }
   await audit(tx, context, meta, {
-    action: "ORDER_SUBMITTED",
+    action: "ORDER_SUBMIT",
     resource: "sales_orders",
     resourceId: orderId,
     details: {
@@ -740,7 +797,7 @@ export async function cancelAgentOrder(tx: Tx, context: AgentContext, orderId: s
     if (row.status !== "draft") throw conflict("Tasdiqlangan buyurtmani ombor yoki menejer bekor qiladi");
     await cancelOrder(tx, context, orderId, reason, meta);
     await tx.update(agentOrders).set({ updatedAt: new Date() }).where(eq(agentOrders.orderId, orderId));
-    await audit(tx, context, meta, { action: "ORDER_CANCELLED", resource: "sales_orders", resourceId: orderId, details: { number: row.number, reason } });
+    await audit(tx, context, meta, { action: "ORDER_CANCEL", resource: "sales_orders", resourceId: orderId, details: { number: row.number, reason } });
   }
   return orderView(tx, companyId, orderId, context.agent.id);
 }

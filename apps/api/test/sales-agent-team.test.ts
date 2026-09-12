@@ -90,7 +90,11 @@ describe("Sotuv agenti qo'shish", () => {
     expect((await call(session.cookie, "GET", "/api/sales-agent/me")).json().agent).toMatchObject({ id: agent.id, name: "Ali Valiyev" });
 
     const hrList = (await call(company.ownerCookie, "GET", "/api/hr/employees")).json().employees;
-    expect(hrList).toEqual([expect.objectContaining({ name: "Ali Valiyev", positionName: "Sotuv agenti" })]);
+    // Xodimlar ro'yxatida: lavozim, holat, hudud va supervayzer
+    expect(hrList).toEqual([
+      expect.objectContaining({ name: "Ali Valiyev", positionName: "Sotuv agenti", status: "active", salesRepId: agent.id, agentRegion: "Chilonzor" }),
+    ]);
+    expect(hrList[0].supervisorName).toEqual(expect.any(String));
     const supervisors = (await call(supervisor.cookie, "GET", "/api/sales-agent/team/supervisors")).json().supervisors;
     expect(supervisors.map((s: { userId: string }) => s.userId)).toContain(supervisor.id);
     expect((await call(supervisor.cookie, "GET", "/api/sales-agent/team")).json().agents).toHaveLength(1);

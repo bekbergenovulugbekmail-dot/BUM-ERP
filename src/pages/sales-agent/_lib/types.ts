@@ -212,6 +212,11 @@ export type AgentDashboard = {
   };
   rank: { position: number; total: number } | null;
   prospectsThisMonth: number;
+  /** Bugungi marshrut mijozlari va qarzdorlar (joriy holat). */
+  customers: { planned: number; ordered: number; notOrdered: number; debtors: number; overdueDebtors: number; debtTotal: string };
+  averageOrderToday: string;
+  /** Oyning top 5 mahsuloti (summa bo'yicha). */
+  topProducts: { productId: string; name: string; quantity: string; amount: string }[];
 };
 
 export type ProspectStatus = "new" | "converted" | "rejected";
@@ -266,6 +271,11 @@ export type CatalogProduct = {
   name: string;
   sku: string;
   categoryId: string | null;
+  categoryName: string | null;
+  brandId: string | null;
+  brandName: string | null;
+  /** Kichik rasm havolasi (imzolangan, qisqa muddatli); fayl saqlash yo'q bo'lsa null. */
+  imageUrl: string | null;
   unitName: string;
   hasImage: boolean;
   available: string;

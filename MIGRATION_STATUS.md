@@ -779,9 +779,9 @@ Foydalanuvchi `BUMERP_SOTUVAGE.docx` (68 bo'lim) yubordi: pullik xarita API'si y
 | V3 | Ish sessiyasi: "Ishni boshlash/yakunlash", lokatsiya faqat ish vaqtida | ✅ |
 | V4 | Tashrif v2: majburiy vitrina/polka rasmi (kamera), minimal vaqt, hududdan chiqish siyosati, BUYURTMA / BUYURTMA YO'Q | ✅ |
 | V5 | Mijozlar bo'limi (tarix, tahrirlash, joylashuv, rasm), 5 bandli menyu | ✅ |
-| V6 | Katalog UX (brend, rasm, mahsulot oynasi, pastki "Buyurtmani yakunlash") | ⏳ |
-| V7 | Hisobotlar (FROM/TO), bildirishnoma qabul qiluvchilari, radius 100/200/300/500 | ⏳ |
-| V8 | Audit nomlari, chegara/xavfsizlik/buxgalteriya testlari, yakuniy hisobot | ⏳ |
+| V6 | Katalog UX (brend, rasm, mahsulot oynasi, pastki "Buyurtmani yakunlash") | ✅ |
+| V7 | Hisobotlar (FROM/TO), bildirishnoma qabul qiluvchilari, radius 100/200/300/500 | ✅ (hisobotlar V5 da, radius V4 da) |
+| V8 | Audit nomlari, chegara/xavfsizlik/buxgalteriya testlari, yakuniy hisobot | ✅ |
 
 **V1 — Agentni Xodimlar bo'limidan yaratish** (migratsiya 0027):
 - ruxsat `sales_agent.agents.manage` (Direktor, Supervayzer, Savdo menejeri, HR menejeri); Direktorga `sales_agent.customer.edit`, `customer.location.edit`, `customer.photo.create` (V5 da ishlatiladi). Migratsiya mavjud rollarga takror ishlasa o'zgarmaydigan qilib qo'shadi
@@ -830,6 +830,29 @@ Foydalanuvchi `BUMERP_SOTUVAGE.docx` (68 bo'lim) yubordi: pullik xarita API'si y
 - `GET /api/sales-agent/reports?from=&to=` (93 kungacha, standart — joriy oy): sotuv (to'lov turi, kunlar, top 10 mahsulot va mijoz), tashriflar (natija, bekor, o'rtacha vaqt, sabablar), plan (oylik reja davr kunlariga taqsimlanadi), qarz (joriy holat va davrda yig'ilgan to'lov), aksiyalar; faqat sessiyadagi agent (so'rovdagi `salesRepId` e'tiborsiz)
 - web agent: Mijozlar (Hammasi / Qarzdorlar / Kechikkan, qidiruv, muddat rangi), mijoz profilida tahrirlash oynasi, "Joylashuvni saqlash", vitrina rasmi va tarix (ko'rsatkichlar, Buyurtmalar/To'lovlar/Tashriflar); Hisobotlar — FROM/TO, tez davrlar, bo'limlar (uz/ru/kk)
 - testlar: `sales-agent-customers` (2), `sales-agent-reports` (2), frontend `report-range` (2)
+- **V5** commit `c7c6766`, production'ga deploy qilindi (API va web SUCCESS; `/reports`, `/customers/:id/history` 401, bundle'da yangi bo'limlar)
+
+**V6 — Katalog va buyurtma sahifasi:**
+- `GET /api/sales-agent/catalog` — `brandId` filtri; har mahsulotda `brandName`, `categoryName`, `imageUrl` (fayl saqlash bo'lsa imzolangan 5 daqiqalik havola, aks holda null); `GET /catalog/filters` — agentga ko'rinadigan (kategoriya cheklovi bilan) sotiladigan mahsulotlardagi kategoriya va brendlar
+- web: yuqorida do'kon va buyurtma jami; qidiruv (debounce, server sahifalash) + kategoriya/brend tanlovi; kartada rasm, "-10%" yoki "AKSIYA" belgisi, brend · kategoriya, dona/blok narxi, tanlangan miqdor; kartani bosganda mahsulot oynasi (katta rasm, narxlar, qoldiq, aksiya qoidasi, dona/blok) — "SAQLASH" ro'yxatga qaytaradi (qidiruv, filtr va sahifa saqlanadi); nasiya izohi (buyurtma izohi); pastda "BUYURTMANI YAKUNLASH" → tasdiqlash oynasi
+- qoralama izohi qurilmada ham saqlanadi (eski nusxalar mos)
+
+**V7 — Bosh sahifa, bildirishnoma oluvchilar, kredit limiti:**
+- `GET /dashboard` — `customers` (bugungi marshrutdagi mijozlar: buyurtma bergan/bermagan, qarzdorlar soni, kechikkanlar, jami qarz), `averageOrderToday`, `topProducts` (oyning top 5 mahsuloti)
+- siyosat `notificationRecipients` (`geofence`, `approval`, `creditLimit` — foydalanuvchi ID'lari; bo'sh — standart: `sales_agent.supervise` va to'liq huquqli a'zolar); saqlashda faqat kompaniyaning faol a'zolari (`recipient_invalid`); `GET /policy/recipients` — nomzodlar (faol a'zolar, rol)
+- kredit limiti oshsa (siyosat `block`): buyurtma rad etiladi, lekin tanlangan oluvchilarga "Kredit limiti oshdi" bildirishnomasi va audit `CREDIT_LIMIT_EXCEEDED` saqlanadi (xato tranzaksiyadan keyin qaytariladi)
+- web: bosh sahifada o'rtacha buyurtma, bugungi mijozlar (marshrutda / buyurtma berdi / buyurtmasiz), qarzdorlar havolasi, oyning top mahsulotlari; Distributsiya → Agent siyosati → "Bildirishnomalar" (hodisa bo'yicha oluvchilar)
+- testlar: `sales-agent-catalog-notify` (2)
+
+**V8 — Audit nomlari, chegara va xavfsizlik testlari, yakuniy tekshiruv:**
+- sotuv agenti audit hodisalari spetsifikatsiya nomlarida: `GEOFENCE_BLOCK`, `GEOFENCE_ORDER_ATTEMPT`, `VISIT_START`, `VISIT_END`, `STORE_PHOTO`, `SHELF_PHOTO` (boshqa rasmlar — `VISIT_PHOTO`), `ORDER_DRAFT`, `ORDER_SUBMIT`, `ORDER_CANCEL`, `NO_ORDER`; `WORK_SESSION_START/END`, `CREDIT_ORDER`, `PROMOTION_APPLIED`, `CUSTOMER_UPDATED`, `CUSTOMER_LOCATION_UPDATE` avvaldan. Bazadagi eski yozuvlar o'zgartirilmaydi (qaytarib bo'lmaydigan o'zgartirish yo'q)
+- qarorlar: `LOGIN`/`LOGOUT` — mavjud auth nomlari (`login_success`, `login_failed`, `logout`) saqlandi (ERP audit ro'yxati buzilmasin); `LOCATION_UPDATE` auditga har nuqta uchun yozilmaydi — iz `agent_locations` da (ish sessiyasiga bog'langan), aks holda audit jurnali lokatsiya saqlash muddati va maxfiylik siyosatini chetlab o'tardi
+- `sales-agent-boundaries` (3): geofence 199/200 m — ruxsat, 201 m — rad (tashrif va buyurtma, `distanceMeters` aniq); eskirgan va aniqligi past joy — rad; soxta `distanceMeters`/`insideGeofence` — 400; agent HR, moliya va admin API'lariga — 403; boshqa agent/kompaniya mijozi — 404; soxta `companyId`/`agentId`/`salesRepId` — so'rovda e'tiborsiz, tanada 400; buxgalteriya — agentning nasiya buyurtmasi mavjud jo'natish oqimida bitta qarz (30 000) va bitta muvozanatli jurnal yozuvi, takroriy yuborish va jo'natish yangi yozuv yaratmaydi
+- service worker: Mijozlar tarixi va hisobotlar oflayn o'qish keshiga qo'shildi; ish sessiyasi holati va rasmlar keshlanmaydi
+- HR → Xodimlar'dagi "Sotuv agenti qo'shish" tugmasi i18n orqali; `GET /api/hr/employees` da sotuv agenti uchun `salesRepId`, `agentRegion`, `supervisorName` — ro'yxat kartasida hudud va supervayzer (spetsifikatsiya 44-bo'lim)
+- uz/ru/kk kalitlari to'liq mos (agent 350, distribution 251, map 7 — skript bilan tekshirildi)
+- Lokal yakuniy tekshiruv: API 262/262 (62 fayl, `--maxWorkers=2`), frontend unit 16/16, API va web `tsc`, ESLint, `vite build` — o'tdi
+- qolgan: production'da S3; telefonda qo'lda sinov (kamera, GPS, menyu); native ilova (fondagi kuzatuv, faqat kamera); agent bo'yicha yetkazish siyosati; bazadagi rasmlar saqlash muddati (foydalanuvchi tasdig'i bilan); bum-erp.uz TLS/DNS
 
 ### Distributsiya (`/api/distribution`)
 
@@ -858,7 +881,8 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
 | GET | `/visits/current`, `/visits` (`?date=`), `/visits/:visitId/photos/:photoId/url` | `sales_agent.use` (o'z tashriflari) |
 | POST | `/visits/start`, `/visits/:visitId/complete`, `/visits/:visitId/photos/uploads`, `/visits/:visitId/photos`, `/visits/:visitId/photos/direct` | `sales_agent.use` |
 | GET | `/visits/:visitId/photos/:photoId/content`, `/supervisor/visits/:visitId/photos/:photoId/content` | agent — o'z tashrifi; supervayzer — `sales_agent.supervise` |
-| GET | `/catalog` (`?search=&categoryId=&limit=&offset=`), `/catalog/:productId/image`, `/orders` (`?state=&customerId=`), `/orders/:orderId` | `sales_agent.use` |
+| GET | `/catalog` (`?search=&categoryId=&brandId=&limit=&offset=`), `/catalog/filters`, `/catalog/:productId/image`, `/orders` (`?state=&customerId=`), `/orders/:orderId` | `sales_agent.use` |
+| GET | `/policy/recipients` | `sales_agent.supervise` |
 | PUT / POST | `/orders/drafts/:clientRequestId`, `/orders/:orderId/submit`, `/orders/:orderId/cancel` | `sales_agent.use` |
 | GET / PUT | `/policy` | o'qish — agent yoki `sales_agent.supervise`; yozish — `sales_agent.supervise` |
 | GET | `/supervisor/agents` | `sales_agent.location.view` |

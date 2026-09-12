@@ -8,15 +8,16 @@
  *  - o'rin — kompaniyaning faol agentlari orasida oylik savdo bo'yicha
  */
 import { and, count, countDistinct, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
+import { products } from "../../db/schema/catalog.js";
 import { salesReps } from "../../db/schema/crm.js";
 import { companies } from "../../db/schema/platform.js";
-import { customerPayments, salesOrders } from "../../db/schema/sales.js";
+import { customerPayments, salesOrderItems, salesOrders } from "../../db/schema/sales.js";
 import { agentOrders, agentProspects, agentVisits } from "../../db/schema/sales-agent.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
 import { todayIso } from "../finance/cash.service.js";
 import type { AgentContext } from "./agent-context.js";
-import { agentToday } from "./stores.service.js";
+import { agentDebtors, agentToday } from "./stores.service.js";
 
 /** Savdo hisoblanadigan holatlar (qoralama, tasdiq kutayotgan, bekor va qaytarilgan — yo'q). */
 export const SOLD_STATUSES = ["confirmed", "shipped", "delivered"] as const;
@@ -80,6 +81,31 @@ export async function agentDashboard(conn: DbOrTx, context: AgentContext) {
     );
   const visited = new Set(visitedRows.map((row) => row.customerId));
   const remainingStores = [...planned].filter((id) => !visited.has(id)).length;
+
+  // Bugungi mijozlar: marshrutdagilardan buyurtma bergan/bermagan; qarzdorlar — agentga ochiq mijozlar (joriy holat)
+  const soldBy = and(eq(agentOrders.companyId, companyId), eq(agentOrders.salesRepId, salesRepId), isNotNull(agentOrders.submittedAt), inArray(salesOrders.status, [...SOLD_STATUSES]));
+  const orderedRows = await conn
+    .selectDistinct({ customerId: agentOrders.customerId })
+    .from(agentOrders)
+    .innerJoin(salesOrders, eq(salesOrders.id, agentOrders.orderId))
+    .where(and(soldBy, eq(salesOrders.orderDate, today)));
+  const orderedToday = new Set(orderedRows.map((row) => row.customerId));
+  const debtors = await agentDebtors(conn, context, { filter: "all", origin: null });
+  const topProducts = await conn
+    .select({
+      productId: salesOrderItems.productId,
+      name: products.name,
+      quantity: sql<string>`sum(${salesOrderItems.quantity})::numeric(18,4)::text`,
+      amount: sql<string>`coalesce(sum(${salesOrderItems.lineTotal}), 0)::numeric(18,2)::text`,
+    })
+    .from(salesOrderItems)
+    .innerJoin(salesOrders, eq(salesOrders.id, salesOrderItems.orderId))
+    .innerJoin(agentOrders, eq(agentOrders.orderId, salesOrders.id))
+    .innerJoin(products, eq(products.id, salesOrderItems.productId))
+    .where(and(soldBy, gte(salesOrders.orderDate, monthStart)))
+    .groupBy(salesOrderItems.productId, products.name)
+    .orderBy(sql`sum(${salesOrderItems.lineTotal}) desc`)
+    .limit(5);
 
   const target = toMinor(context.agent.monthlyTarget);
   const remaining = positive(target - achieved);
@@ -145,6 +171,18 @@ export async function agentDashboard(conn: DbOrTx, context: AgentContext) {
       orderCount: monthOrders,
       bestDay: best ? { date: best.date, amount: best.amount } : null,
     },
+    /** Bugungi marshrut mijozlari va qarzdorlar. */
+    customers: {
+      planned: planned.size,
+      ordered: [...planned].filter((id) => orderedToday.has(id)).length,
+      notOrdered: [...planned].filter((id) => !orderedToday.has(id)).length,
+      debtors: debtors.length,
+      overdueDebtors: debtors.filter((debtor) => debtor.status === "overdue").length,
+      debtTotal: fromMinor(debtors.reduce((sum, debtor) => sum + toMinor(debtor.totalDebt), 0n)),
+    },
+    averageOrderToday: todayRow && todayRow.orders > 0 ? fromMinor(todaySales / BigInt(todayRow.orders)) : "0.00",
+    /** Oy bo'yicha top 5 mahsulot (summa). */
+    topProducts,
     rank: (activeReps?.value ?? 0) > 1 ? { position: ahead + 1, total: activeReps!.value } : null,
     prospectsThisMonth: prospects?.value ?? 0,
   };

@@ -176,7 +176,8 @@ describe("Tashrif oqimi (standart siyosat)", () => {
     expect((await call(supervisor.cookie, "GET", supervisorLink)).statusCode).toBe(200);
     const kassir = await addEmployee(app, company, "Kassir");
     expect((await call(kassir.cookie, "GET", supervisorLink)).statusCode).toBe(403);
-    expect(await actionCount("STORE_PHOTO_ADDED")).toBe(2);
+    expect(await actionCount("STORE_PHOTO")).toBe(1);
+    expect(await actionCount("SHELF_PHOTO")).toBe(1);
   });
 
   it("hududdan chiqish: pause vaqtni to'xtatadi, invalidate tashrifni bekor qiladi; 'Do'kon yopiq' va yangi sabablar", async () => {

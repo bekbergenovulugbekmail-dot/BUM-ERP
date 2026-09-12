@@ -59,6 +59,10 @@ export type Employee = {
   updatedAt: string;
   departmentName: string | null;
   positionName: string | null;
+  /** Ro'yxatda: sotuv agenti bo'lsa — agent, hudud va supervayzer. */
+  salesRepId?: string | null;
+  agentRegion?: string | null;
+  supervisorName?: string | null;
 };
 
 export type EmployeeStats = {

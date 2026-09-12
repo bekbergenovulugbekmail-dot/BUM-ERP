@@ -10,7 +10,7 @@
  *  - davomat/maosh tarixi bor xodim o'chirilardi — endi faqat ishdan bo'shatish (`terminated`)
  *  - `update` / `delete` to'xtatilgan kompaniyada ham yozardi; o'qish ruxsatsiz edi
  */
-import { and, asc, eq, getTableColumns, ilike, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, ilike, isNull, ne, or, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
 import { salesReps } from "../../db/schema/crm.js";
 import { attendances, departments, employees, leaves, positions, salaryPayments } from "../../db/schema/hr.js";
@@ -65,10 +65,25 @@ export async function listEmployees(
 ) {
   const pattern = options.search ? `%${options.search.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
   const rows = await conn
-    .select({ ...employeeFields, departmentName: departments.name, positionName: positions.name })
+    .select({
+      ...employeeFields,
+      departmentName: departments.name,
+      positionName: positions.name,
+      /** Sotuv agenti bo'lsa — hudud va supervayzer (ro'yxatda ko'rinadi). */
+      salesRepId: salesReps.id,
+      agentRegion: salesReps.region,
+      supervisorName: sql<string | null>`(select u."name" from "users" u where u."id" = ${salesReps.supervisorUserId})`,
+    })
     .from(employees)
     .leftJoin(departments, eq(departments.id, employees.departmentId))
     .leftJoin(positions, eq(positions.id, employees.positionId))
+    .leftJoin(
+      salesReps,
+      and(
+        eq(salesReps.companyId, employees.companyId),
+        or(eq(salesReps.employeeId, employees.id), and(isNull(salesReps.employeeId), eq(salesReps.userId, employees.userId))),
+      ),
+    )
     .where(
       and(
         eq(employees.companyId, tenant.company.id),

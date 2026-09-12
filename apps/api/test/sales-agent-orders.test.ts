@@ -150,7 +150,7 @@ describe("Agent buyurtmalari", () => {
     expect(far.statusCode).toBe(403);
     expect(far.json().details).toMatchObject({ reason: "geofence", radiusMeters: 200 });
     // Buyurtma yaratilmaydi, lekin urinish, audit va supervayzer bildirishnomasi saqlanadi
-    expect(await actionCount("GEO_FENCE_ORDER_ATTEMPT")).toBe(1);
+    expect(await actionCount("GEOFENCE_ORDER_ATTEMPT")).toBe(1);
     expect(await db.$count(agentLocationEvents, eq(agentLocationEvents.type, "geofence_block"))).toBe(1);
     const [alert] = await db.select().from(notifications).where(eq(notifications.userId, supervisor.id));
     expect(alert).toMatchObject({ title: "Geo-fence buzilishi", relatedId: order.id, isGlobal: false });
@@ -164,7 +164,7 @@ describe("Agent buyurtmalari", () => {
     expect(sent.json().order).toMatchObject({ status: "confirmed", approvalStatus: null });
     expect(sent.json().order.submitDistanceMeters).toBeLessThan(80);
     expect((await submit(order.id)).json().order.status).toBe("confirmed");
-    expect(await actionCount("ORDER_SUBMITTED")).toBe(1);
+    expect(await actionCount("ORDER_SUBMIT")).toBe(1);
     expect((await save({ items: [{ productId, pieces: "1" }] })).statusCode).toBe(409);
 
     // Koordinatasiz do'kon — geofence tekshirib bo'lmaydi
@@ -179,7 +179,7 @@ describe("Agent buyurtmalari", () => {
 
     const cancelled = await call(ali.cookie, "POST", `/api/sales-agent/orders/${big.id}/cancel`, {});
     expect(cancelled.json().order.status).toBe("cancelled");
-    expect(await actionCount("ORDER_CANCELLED")).toBe(1);
+    expect(await actionCount("ORDER_CANCEL")).toBe(1);
     expect((await call(ali.cookie, "POST", `/api/sales-agent/orders/${order.id}/cancel`, {})).statusCode).toBe(409);
 
     const drafts = (await call(ali.cookie, "GET", "/api/sales-agent/orders?state=draft")).json().orders;
@@ -258,7 +258,7 @@ describe("Agent buyurtmalari", () => {
     const done = await call(ali.cookie, "POST", `/api/sales-agent/visits/${visit.id}/complete`, { ...near, accuracy: 10, recordedAt: iso() });
     expect(done.statusCode).toBe(200);
     expect(done.json().visit).toMatchObject({ result: "ordered", noOrderReason: null });
-    expect(await actionCount("VISIT_NO_ORDER")).toBe(0);
+    expect(await actionCount("NO_ORDER")).toBe(0);
 
     // Agent yetkazish kunini tanlaydi — faqat ruxsat etilgan oraliqda
     await call(supervisor.cookie, "PUT", "/api/sales-agent/policy", { ...DEFAULT_SALES_AGENT_POLICY, ...LEGACY_VISIT_POLICY, deliveryDateMode: "choose", maxDeliveryDays: 2 });

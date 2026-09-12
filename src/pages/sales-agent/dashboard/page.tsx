@@ -1,6 +1,6 @@
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Award, CalendarDays, CreditCard, HandCoins, ShoppingCart, Store, Target, UserPlus } from "lucide-react";
+import { Award, CalendarDays, CreditCard, HandCoins, Package, Receipt, ShoppingCart, Target, UserPlus, Users, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { formatMoney } from "@/hooks/use-currencies.ts";
@@ -65,7 +65,7 @@ export default function AgentDashboardPage() {
           <div className="grid grid-cols-2 gap-3">
             {[
               { icon: ShoppingCart, label: t("dash.orders"), value: String(data.today.orderCount) },
-              { icon: Store, label: t("dash.ordered_stores"), value: String(data.today.orderedStores) },
+              { icon: Receipt, label: t("dash.average_order"), value: money(data.averageOrderToday) },
               { icon: CreditCard, label: t("dash.credit_sales"), value: money(data.today.creditSalesAmount) },
               { icon: HandCoins, label: t("dash.collected"), value: money(data.today.collectedAmount) },
             ].map((card) => (
@@ -91,6 +91,58 @@ export default function AgentDashboardPage() {
               <span>{t("dash.visits_left", { count: data.today.remainingStores })}</span>
             </div>
           </div>
+
+          <div className="space-y-3 rounded-2xl border border-border bg-card p-4">
+            <p className="flex items-center gap-2 text-sm font-semibold">
+              <Users className="h-4 w-4" /> {t("dash.customers")}
+            </p>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl bg-muted/50 py-2">
+                <p className="text-lg font-bold tabular-nums">{data.customers.planned}</p>
+                <p className="text-[11px] text-muted-foreground">{t("dash.customers_planned")}</p>
+              </div>
+              <div className="rounded-xl bg-emerald-500/10 py-2">
+                <p className="text-lg font-bold tabular-nums text-emerald-700 dark:text-emerald-400">{data.customers.ordered}</p>
+                <p className="text-[11px] text-muted-foreground">{t("dash.customers_ordered")}</p>
+              </div>
+              <div className="rounded-xl bg-amber-500/10 py-2">
+                <p className="text-lg font-bold tabular-nums text-amber-700 dark:text-amber-400">{data.customers.notOrdered}</p>
+                <p className="text-[11px] text-muted-foreground">{t("dash.customers_not_ordered")}</p>
+              </div>
+            </div>
+            {data.customers.debtors > 0 && (
+              <Link
+                to={`/${lng}/sales-agent/customers?filter=debtors`}
+                className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/30 px-3 py-2 text-sm active:bg-accent"
+              >
+                <span className="flex items-center gap-2">
+                  <Wallet className="h-4 w-4 text-amber-600" />
+                  {t("dash.debtors", { count: data.customers.debtors })}
+                  {data.customers.overdueDebtors > 0 && (
+                    <span className="text-xs text-destructive">· {t("dash.debtors_overdue", { count: data.customers.overdueDebtors })}</span>
+                  )}
+                </span>
+                <span className="font-semibold tabular-nums">{money(data.customers.debtTotal)}</span>
+              </Link>
+            )}
+          </div>
+
+          {data.topProducts.length > 0 && (
+            <div className="space-y-2 rounded-2xl border border-border bg-card p-4">
+              <p className="flex items-center gap-2 text-sm font-semibold">
+                <Package className="h-4 w-4" /> {t("dash.top_products")}
+              </p>
+              <ol className="divide-y divide-border text-sm">
+                {data.topProducts.map((product, index) => (
+                  <li key={product.productId} className="flex items-center gap-3 py-1.5">
+                    <span className="w-4 text-xs text-muted-foreground tabular-nums">{index + 1}</span>
+                    <span className="min-w-0 flex-1 truncate">{product.name}</span>
+                    <span className="font-semibold tabular-nums">{money(product.amount)}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
 
           <div className="space-y-2 rounded-2xl border border-border bg-card p-4">
             <p className="flex items-center gap-2 text-sm font-semibold">

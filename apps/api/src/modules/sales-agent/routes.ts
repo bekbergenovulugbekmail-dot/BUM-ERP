@@ -21,7 +21,8 @@
  *   POST /visits/:visitId/photos/direct             S3 sozlanmaganda: rasm bazaga (base64, 3 MB gacha)
  *   GET  /visits/:visitId/photos/:photoId/url       rasmni ko'rish havolasi (imzolangan 5 daqiqa yoki /content)
  *   GET  /visits/:visitId/photos/:photoId/content   bazadagi rasm
- *   GET  /catalog (?search=&categoryId=&limit=&offset=), GET /catalog/:productId/image   katalog (dona/blok, qoldiq)
+ *   GET  /catalog (?search=&categoryId=&brandId=&limit=&offset=), GET /catalog/:productId/image   katalog (dona/blok, qoldiq, rasm)
+ *   GET  /catalog/filters                           kategoriya va brendlar (agentga ko'rinadigan mahsulotlardan)
  *   GET  /orders (?state=draft|submitted&customerId=), GET /orders/:orderId              o'z buyurtmalari
  *   PUT  /orders/drafts/:clientRequestId            qoralama (idempotent: bir identifikator — bitta buyurtma)
  *   POST /orders/:orderId/submit                    yuborish (geofence, kredit, qoldiq — atomar)
@@ -33,6 +34,7 @@
  * Siyosat:
  *   GET  /policy                                    sales_agent.use yoki sales_agent.supervise
  *   PUT  /policy                                    sales_agent.supervise
+ *   GET  /policy/recipients                         sales_agent.supervise — bildirishnoma oluvchi nomzodlar (faol a'zolar)
  * Supervayzer:
  *   GET  /supervisor/agents                         sales_agent.location.view — holat, oxirgi joy, bugungi marshrut
  *   GET  /supervisor/agents/:salesRepId             sales_agent.location.view — bugungi do'konlar, tashrif holati, savdo
@@ -79,6 +81,7 @@ import { requireAgent, type AgentContext } from "./agent-context.js";
 import {
   agentCatalog,
   approveAgentOrder,
+  catalogFilters,
   cancelAgentOrder,
   catalogImageUrl,
   getAgentOrder,
@@ -89,7 +92,7 @@ import {
   supervisorOrders,
 } from "./agent-orders.service.js";
 import { recordAgentLocation, reportLocationProblem } from "./location.service.js";
-import { getSalesAgentPolicy, salesAgentPolicySchema, saveSalesAgentPolicy } from "./policy.service.js";
+import { getSalesAgentPolicy, recipientCandidates, salesAgentPolicySchema, saveSalesAgentPolicy } from "./policy.service.js";
 import { agentPromotions, createPromotion, deletePromotion, listPromotions, updatePromotion } from "./promotions.service.js";
 import { agentDashboard } from "./dashboard.service.js";
 import { agentReport } from "./reports.service.js";
@@ -239,6 +242,7 @@ const supervisorVisitsQuery = z.object({
 const catalogQuery = z.object({
   search: z.string().trim().min(1).max(100).optional(),
   categoryId: z.uuid().optional(),
+  brandId: z.uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).max(10_000).default(0),
 });
@@ -563,8 +567,10 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/catalog", async (req) => {
     const query = catalogQuery.parse(req.query);
-    return agentCatalog(db, await readAgent(req), query);
+    return agentCatalog(db, await readAgent(req), query, storageProvider.client);
   });
+
+  app.get("/catalog/filters", async (req) => catalogFilters(db, await readAgent(req)));
 
   app.get("/catalog/:productId/image", async (req, reply) => {
     const { productId } = productParams.parse(req.params);
@@ -732,6 +738,11 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
       throw forbidden("Bu amal uchun ruxsat yo'q: sales_agent.use");
     }
     return { policy: await getSalesAgentPolicy(db, tenant.company.id) };
+  });
+
+  app.get("/policy/recipients", async (req) => {
+    const tenant = await readTenantWith(req, "sales_agent.supervise");
+    return { recipients: await recipientCandidates(db, tenant.company.id) };
   });
 
   app.put("/policy", async (req) => {

@@ -17,6 +17,19 @@ export type CreditLimitPolicy = "block" | "approval";
  */
 export type VisitExitPolicy = "pause" | "invalidate" | "flag";
 
+/**
+ * Bildirishnoma oluvchilar (foydalanuvchi ID'lari) hodisa bo'yicha; bo'sh ro'yxat — standart: `sales_agent.supervise`
+ * ruxsati bor va to'liq huquqli faol a'zolar.
+ */
+export type NotificationRecipients = {
+  /** Geofence buzilishi (uzoqdan buyurtma urinishi). */
+  geofence: string[];
+  /** Buyurtma supervayzer tasdig'ini kutmoqda. */
+  approval: string[];
+  /** Kredit limiti oshdi (buyurtma rad etildi). */
+  creditLimit: string[];
+};
+
 export type SalesAgentPolicy = {
   /** Buyurtma berish uchun do'kondan ruxsat etilgan masofa, metr. */
   geofenceRadiusMeters: number;
@@ -45,6 +58,7 @@ export type SalesAgentPolicy = {
   /** Nasiya (qarzga) buyurtmada to'lov muddati majburiy. */
   creditDueDateRequired: boolean;
   creditLimitPolicy: CreditLimitPolicy;
+  notificationRecipients: NotificationRecipients;
 };
 
 /** Raqamli maydonlar chegarasi: [min, max]. */
@@ -78,6 +92,7 @@ export const DEFAULT_SALES_AGENT_POLICY: SalesAgentPolicy = {
   maxDeliveryDays: 7,
   creditDueDateRequired: true,
   creditLimitPolicy: "block",
+  notificationRecipients: { geofence: [], approval: [], creditLimit: [] },
 };
 
 /** Agent "onlayn": oxirgi lokatsiya shuncha daqiqa ichida kelgan. */

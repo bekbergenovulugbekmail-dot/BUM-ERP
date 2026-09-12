@@ -233,7 +233,7 @@ export async function startVisit(
   if (distance !== null && distance > policy.geofenceRadiusMeters) {
     const details = { action: "visit_start", customerId: store.id, distanceMeters: distance, radiusMeters: policy.geofenceRadiusMeters };
     await insertLocationEvent(tx, context, "geofence_block", input, details);
-    await audit(tx, context, meta, { action: "GEO_FENCE_BLOCK", resource: "customers", resourceId: store.id, severity: "warning", details });
+    await audit(tx, context, meta, { action: "GEOFENCE_BLOCK", resource: "customers", resourceId: store.id, severity: "warning", details });
     return {
       blocked: new AppError(
         "FORBIDDEN",
@@ -266,7 +266,7 @@ export async function startVisit(
     })
     .returning({ id: agentVisits.id });
   await audit(tx, context, meta, {
-    action: "VISIT_STARTED",
+    action: "VISIT_START",
     resource: "agent_visits",
     resourceId: created!.id,
     details: { customerId: store.id, distanceMeters: distance },
@@ -314,7 +314,7 @@ async function closeVisit(
     })
     .where(eq(agentVisits.id, visit.id));
   await audit(tx, context, meta, {
-    action: "VISIT_COMPLETED",
+    action: "VISIT_END",
     resource: "agent_visits",
     resourceId: visit.id,
     details: { customerId: visit.customerId, result: fields.result, durationSeconds, distanceMeters: distance, invalid: visit.invalidatedAt !== null },
@@ -378,7 +378,7 @@ export async function completeVisit(
   await closeVisit(tx, context, visit, policy, input, distance, { result, reason, comment, notes: input.notes?.trim() || null }, meta);
   if (!ordered) {
     await audit(tx, context, meta, {
-      action: "VISIT_NO_ORDER",
+      action: "NO_ORDER",
       resource: "agent_visits",
       resourceId: visit.id,
       details: { customerId: visit.customerId, reason, comment },
@@ -530,7 +530,7 @@ async function insertVisitPhoto(
   const timerStarted = input.kind === "storefront" && !visit.timerStartedAt;
   if (timerStarted) await tx.update(agentVisits).set({ timerStartedAt: now, updatedAt: now }).where(eq(agentVisits.id, visit.id));
   await audit(tx, context, meta, {
-    action: "STORE_PHOTO_ADDED",
+    action: input.kind === "storefront" ? "STORE_PHOTO" : input.kind === "shelf" ? "SHELF_PHOTO" : "VISIT_PHOTO",
     resource: "agent_visits",
     resourceId: visit.id,
     details: {

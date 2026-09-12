@@ -15,8 +15,9 @@ const urlsToCache = [
 // bosh sahifa, buyurtmalar, ochiq tashrif, yangi mijozlar): tarmoq birinchi, internet bo'lmasa oxirgi nusxa.
 // Yozish so'rovlari (buyurtma yuborish, lokatsiya, tashrif) hech qachon keshlanmaydi va navbatga qo'yilmaydi —
 // geofence va kredit serverda, internet bilan tekshiriladi. Supervayzer ma'lumotlari va rasm havolalari keshlanmaydi.
-const AGENT_READ = /^\/api\/sales-agent\/(me|policy|today|stores|catalog|debtors|promotions|dashboard|orders|visits\/current|prospects)(\/|$)/;
-const NOT_CACHED = /\/(image|url)$/;
+// Ish sessiyasi holati keshdan ko'rsatilmaydi (ish boshlangan/tugaganini faqat server biladi); rasmlar keshlanmaydi
+const AGENT_READ = /^\/api\/sales-agent\/(me|policy|today|stores|catalog|debtors|promotions|dashboard|orders|visits\/current|prospects|customers|reports)(\/|$)/;
+const NOT_CACHED = /\/(image|url|photo|content)$/;
 
 // Install — cache offline page and icons
 self.addEventListener("install", (event) => {

@@ -1,14 +1,17 @@
 import { useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { toast } from "sonner";
-import { ArrowLeft, ImageIcon, Loader2, Minus, Plus, Save, Search, Send } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ImageIcon, Loader2, Minus, Plus, Save, Search } from "lucide-react";
 import type { SalesAgentPolicy } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
+import { Textarea } from "@/components/ui/textarea.tsx";
 import { ApiError, api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { formatMoney } from "@/hooks/use-currencies.ts";
@@ -31,91 +34,49 @@ import {
 } from "../_lib/types.ts";
 
 const PAGE_SIZE = 30;
+const ALL = "all";
 const PAYMENT_TYPES: PaymentType[] = ["cash", "card", "credit"];
 const shiftIso = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
-type RowProduct = Omit<DraftLine, "pieces" | "boxes"> & { hasImage: boolean; available: string | null; promotions: Promotion[] };
+type RowProduct = Omit<DraftLine, "pieces" | "boxes"> & {
+  hasImage: boolean;
+  imageUrl: string | null;
+  available: string | null;
+  promotions: Promotion[];
+  brandName: string | null;
+  categoryName: string | null;
+};
+type CatalogFilters = { categories: { id: string; name: string }[]; brands: { id: string; name: string }[] };
 
-function QtyStepper({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
+/** Ro'yxat belgisi: eng katta foiz chegirma ("-10%") yoki "AKSIYA". */
+function promoBadge(promotions: Promotion[], t: TFunction<"agent">): string | null {
+  const percent = Math.max(0, ...promotions.filter((promotion) => promotion.type === "percent_discount").map((promotion) => num(promotion.discountPercent)));
+  if (percent > 0) return `-${percent}%`;
+  return promotions.length > 0 ? t("promo.badge") : null;
+}
+
+function QtyStepper({ id, label, value, onChange }: { id: string; label: string; value: number; onChange: (value: number) => void }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="w-9 text-xs text-muted-foreground">{label}</span>
-      <Button type="button" variant="secondary" size="icon" className="h-10 w-10" disabled={value <= 0} onClick={() => onChange(value - 1)}>
-        <Minus className="h-4 w-4" />
+    <div className="flex items-center gap-2">
+      <Label htmlFor={id} className="w-12 text-sm text-muted-foreground">
+        {label}
+      </Label>
+      <Button type="button" variant="secondary" size="icon" className="h-12 w-12" disabled={value <= 0} onClick={() => onChange(value - 1)}>
+        <Minus className="h-5 w-5" />
       </Button>
       <Input
+        id={id}
         type="number"
         inputMode="numeric"
         min={0}
-        className="h-10 w-16 text-center text-base"
+        className="h-12 w-20 text-center text-lg"
         placeholder="0"
         value={value === 0 ? "" : value}
         onChange={(e) => onChange(Number(e.target.value))}
       />
-      <Button type="button" variant="secondary" size="icon" className="h-10 w-10" onClick={() => onChange(value + 1)}>
-        <Plus className="h-4 w-4" />
+      <Button type="button" variant="secondary" size="icon" className="h-12 w-12" onClick={() => onChange(value + 1)}>
+        <Plus className="h-5 w-5" />
       </Button>
-    </div>
-  );
-}
-
-function ProductRow({
-  product,
-  line,
-  money,
-  onChange,
-  onImage,
-}: {
-  product: RowProduct;
-  line: DraftLine | undefined;
-  money: (value: number | string) => string;
-  onChange: (field: "pieces" | "boxes", value: number) => void;
-  onImage: () => void;
-}) {
-  const { t } = useTranslation("agent");
-  const pieces = line?.pieces ?? 0;
-  const boxes = line?.boxes ?? 0;
-  const totalPieces = pieces + boxes * num(product.box?.factor);
-  const lineTotal = pieces * num(product.piecePrice) + boxes * num(product.box?.price);
-  const available = product.available === null ? null : num(product.available);
-
-  return (
-    <div className={cn("rounded-2xl border bg-card p-3 space-y-2", totalPieces > 0 ? "border-primary/50" : "border-border")}>
-      <div className="flex gap-3">
-        <button
-          type="button"
-          aria-label={t("order.image")}
-          disabled={!product.hasImage}
-          onClick={onImage}
-          className="h-14 w-14 shrink-0 rounded-xl bg-muted flex items-center justify-center enabled:active:bg-accent"
-        >
-          <ImageIcon className={cn("h-6 w-6", product.hasImage ? "text-primary" : "text-muted-foreground/50")} />
-        </button>
-        <div className="min-w-0 flex-1">
-          <p className="font-medium leading-tight">{product.name}</p>
-          {product.promotions.length > 0 && (
-            <p className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-medium text-destructive">
-              <span className="rounded bg-destructive px-1.5 py-0.5 text-[10px] font-bold text-destructive-foreground">{t("promo.badge")}</span>
-              {product.promotions.map((promotion) => promotionRule(promotion, t)).join(" · ")}
-            </p>
-          )}
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {t("order.piece")}: {money(product.piecePrice)}
-            {product.box && ` · ${t("order.box")}: ${money(product.box.price)}`}
-          </p>
-          {product.box && <p className="text-[11px] text-muted-foreground">{t("order.box_factor", { factor: num(product.box.factor) })}</p>}
-          {available !== null && (
-            <p className={cn("text-[11px]", available <= 0 ? "text-destructive" : "text-muted-foreground")}>
-              {t("order.available", { count: available })}
-            </p>
-          )}
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-2">
-        <QtyStepper label={t("order.piece")} value={pieces} onChange={(value) => onChange("pieces", value)} />
-        {product.box && <QtyStepper label={t("order.box")} value={boxes} onChange={(value) => onChange("boxes", value)} />}
-      </div>
-      {totalPieces > 0 && <p className="text-sm font-semibold">{t("order.line_total", { count: totalPieces, amount: money(lineTotal) })}</p>}
     </div>
   );
 }
@@ -129,6 +90,140 @@ function SummaryRow({ label, value, strong }: { label: string; value: string; st
   );
 }
 
+/** Katalog kartasi: rasm, aksiya belgisi, brend va kategoriya, narx; bosilganda mahsulot oynasi. */
+function ProductCard({
+  product,
+  line,
+  money,
+  onOpen,
+}: {
+  product: RowProduct;
+  line: DraftLine | undefined;
+  money: (value: number | string) => string;
+  onOpen: () => void;
+}) {
+  const { t } = useTranslation("agent");
+  const totalPieces = (line?.pieces ?? 0) + (line?.boxes ?? 0) * num(product.box?.factor);
+  const badge = promoBadge(product.promotions, t);
+  const available = product.available === null ? null : num(product.available);
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className={cn(
+        "flex w-full items-center gap-3 rounded-2xl border bg-card p-3 text-left transition-colors active:bg-accent",
+        totalPieces > 0 ? "border-primary/60 ring-1 ring-primary/30" : "border-border",
+      )}
+    >
+      <div className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted">
+        {product.imageUrl ? (
+          <img src={product.imageUrl} alt="" loading="lazy" className="h-full w-full object-cover" />
+        ) : (
+          <ImageIcon className="h-6 w-6 text-muted-foreground/50" />
+        )}
+        {badge && (
+          <span className="absolute left-0 top-0 rounded-br-lg bg-destructive px-1.5 py-0.5 text-[10px] font-bold text-destructive-foreground">
+            {badge}
+          </span>
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="line-clamp-2 font-medium leading-tight">{product.name}</p>
+        {(product.brandName || product.categoryName) && (
+          <p className="truncate text-[11px] text-muted-foreground">{[product.brandName, product.categoryName].filter(Boolean).join(" · ")}</p>
+        )}
+        <p className="mt-0.5 text-xs">
+          <span className="font-semibold tabular-nums">{money(product.piecePrice)}</span>
+          {product.box && (
+            <span className="text-muted-foreground">
+              {" "}
+              · {t("order.box")}: {money(product.box.price)}
+            </span>
+          )}
+        </p>
+        {available !== null && available <= 0 && <p className="text-[11px] text-destructive">{t("order.available", { count: available })}</p>}
+      </div>
+      {totalPieces > 0 && (
+        <span className="shrink-0 rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground tabular-nums">{totalPieces}</span>
+      )}
+    </button>
+  );
+}
+
+/** Mahsulot oynasi: katta rasm, narx, qoldiq, aksiya qoidasi, dona/blok; SAQLASH ro'yxatga qaytaradi (qidiruv va sahifa saqlanadi). */
+function ProductDialog({
+  product,
+  line,
+  money,
+  onSave,
+  onClose,
+}: {
+  product: RowProduct;
+  line: DraftLine | undefined;
+  money: (value: number | string) => string;
+  onSave: (pieces: number, boxes: number) => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation("agent");
+  const [pieces, setPieces] = useState(line?.pieces ?? 0);
+  const [boxes, setBoxes] = useState(line?.boxes ?? 0);
+  const clean = (value: number) => Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
+  const totalPieces = pieces + boxes * num(product.box?.factor);
+  const lineTotal = pieces * num(product.piecePrice) + boxes * num(product.box?.price);
+  const available = product.available === null ? null : num(product.available);
+  const subtitle = [product.brandName, product.categoryName].filter(Boolean).join(" · ");
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[92vh] max-w-md overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="pr-6">{product.name}</DialogTitle>
+          <DialogDescription>{subtitle || t("order.catalog")}</DialogDescription>
+        </DialogHeader>
+        {product.imageUrl ? (
+          <img src={product.imageUrl} alt={product.name} className="max-h-72 w-full rounded-xl bg-muted object-contain" />
+        ) : (
+          <div className="flex h-28 items-center justify-center gap-2 rounded-xl bg-muted text-xs text-muted-foreground">
+            <ImageIcon className="h-5 w-5" /> {t("order.no_image")}
+          </div>
+        )}
+        <div className="space-y-1 text-sm">
+          <SummaryRow label={t("order.price_piece")} value={money(product.piecePrice)} />
+          {product.box && (
+            <SummaryRow label={t("order.price_box")} value={`${money(product.box.price)} · ${t("order.box_factor", { factor: num(product.box.factor) })}`} />
+          )}
+          {available !== null && (
+            <p className={cn("text-xs", available <= 0 ? "text-destructive" : "text-muted-foreground")}>{t("order.available", { count: available })}</p>
+          )}
+        </div>
+        {product.promotions.length > 0 && (
+          <div className="space-y-0.5 rounded-xl bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            {product.promotions.map((promotion) => (
+              <p key={promotion.id}>
+                <span className="font-semibold">{promotion.name}</span>: {promotionRule(promotion, t)}
+              </p>
+            ))}
+          </div>
+        )}
+        <div className="space-y-2">
+          <QtyStepper id="product-pieces" label={t("order.piece")} value={pieces} onChange={(value) => setPieces(clean(value))} />
+          {product.box && <QtyStepper id="product-boxes" label={t("order.box")} value={boxes} onChange={(value) => setBoxes(clean(value))} />}
+        </div>
+        {totalPieces > 0 && <p className="text-sm font-semibold">{t("order.line_total", { count: totalPieces, amount: money(lineTotal) })}</p>}
+        <DialogFooter className="gap-2">
+          <Button variant="secondary" className="h-12" onClick={onClose}>
+            {t("visit.cancel")}
+          </Button>
+          <Button className="h-12" onClick={() => onSave(pieces, boxes)}>
+            <CheckCircle2 className="mr-2 h-5 w-5" /> {t("order.dialog_save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDraft: AgentOrder | null }) {
   const { t } = useTranslation("agent");
   const { lng = "uz" } = useParams<{ lng: string }>();
@@ -137,18 +232,27 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
   const position = useAgentLocation();
   const policy = useApiQuery<{ policy: SalesAgentPolicy }>("/api/sales-agent/policy").data?.policy;
   const store = useApiQuery<{ store: StoreProfile }>(`/api/sales-agent/stores/${customerId}`, originParams(position)).data?.store;
+  const filters = useApiQuery<CatalogFilters>("/api/sales-agent/catalog/filters").data;
 
   const [draft, setDraft] = useState<LocalDraft>(() => initialDraft(customerId, serverDraft));
   const [saved, setSaved] = useState<AgentOrder | null>(serverDraft);
   const [search, setSearch] = useState("");
   const [debounced] = useDebounce(search.trim(), 300);
+  const [categoryId, setCategoryId] = useState(ALL);
+  const [brandId, setBrandId] = useState(ALL);
   const [offset, setOffset] = useState(0);
   const [confirming, setConfirming] = useState(false);
-  const [preview, setPreview] = useState<{ url: string; name: string } | null>(null);
+  const [openProduct, setOpenProduct] = useState<RowProduct | null>(null);
 
   const catalog = useApiQuery<{ products: CatalogProduct[]; nextOffset: number | null }>(
     "/api/sales-agent/catalog",
-    { search: debounced || undefined, offset, limit: PAGE_SIZE },
+    {
+      search: debounced || undefined,
+      categoryId: categoryId === ALL ? undefined : categoryId,
+      brandId: brandId === ALL ? undefined : brandId,
+      offset,
+      limit: PAGE_SIZE,
+    },
     { placeholderData: (previous) => previous },
   ).data;
 
@@ -161,14 +265,12 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
     writeLocalDraft(stamped);
   };
 
-  const setQty = (product: RowProduct, field: "pieces" | "boxes", value: number) => {
-    const clean = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
+  const setLine = (product: RowProduct, pieces: number, boxes: number) => {
     const existing = draft.lines.find((line) => line.productId === product.productId);
-    const { hasImage: _hasImage, available: _available, promotions: _promotions, ...base } = product;
-    const line: DraftLine = { ...(existing ?? { ...base, pieces: 0, boxes: 0 }), [field]: clean };
-    const lines = existing
-      ? draft.lines.map((row) => (row.productId === product.productId ? line : row))
-      : [...draft.lines, line];
+    const { hasImage: _hasImage, imageUrl: _imageUrl, available: _available, promotions: _promotions, brandName: _brand, categoryName: _category, ...base } =
+      product;
+    const line: DraftLine = { ...(existing ?? base), pieces, boxes };
+    const lines = existing ? draft.lines.map((row) => (row.productId === product.productId ? line : row)) : [...draft.lines, line];
     update({ ...draft, lines: lines.filter((row) => row.pieces > 0 || row.boxes > 0) });
   };
 
@@ -179,6 +281,7 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
         paymentType: body.paymentType,
         paymentDueDate: body.paymentType === "credit" && body.paymentDueDate ? body.paymentDueDate : null,
         deliveryDate: policy?.deliveryDateMode === "choose" && body.deliveryDate ? body.deliveryDate : null,
+        notes: body.notes.trim() || null,
         items: body.lines.map((line) => ({ productId: line.productId, pieces: String(line.pieces), boxes: String(line.boxes) })),
       }),
     { invalidate: false },
@@ -228,15 +331,6 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
     }
   };
 
-  const openImage = async (product: RowProduct) => {
-    try {
-      const { url } = await api.get<{ url: string }>(`/api/sales-agent/catalog/${product.productId}/image`);
-      setPreview({ url, name: product.name });
-    } catch (err) {
-      toast.error(errorMessage(err));
-    }
-  };
-
   const lineOf = (productId: string) => draft.lines.find((line) => line.productId === productId);
   const catalogRows: RowProduct[] = (catalog?.products ?? []).map((product) => ({
     productId: product.id,
@@ -244,41 +338,94 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
     piecePrice: product.piecePrice,
     box: product.box ? { unitName: product.box.unitName, factor: product.box.factor, price: product.box.price } : null,
     hasImage: product.hasImage,
+    imageUrl: product.imageUrl,
     available: product.available,
     promotions: product.promotions,
+    brandName: product.brandName,
+    categoryName: product.categoryName,
   }));
   const shownIds = new Set(catalogRows.map((row) => row.productId));
-  const selectedOnly = draft.lines.filter((line) => !shownIds.has(line.productId));
+  const selectedOnly: RowProduct[] = draft.lines
+    .filter((line) => !shownIds.has(line.productId))
+    .map((line) => ({ ...line, hasImage: false, imageUrl: null, available: null, promotions: [], brandName: null, categoryName: null }));
   const totalPieces = draft.lines.reduce((sum, line) => sum + line.pieces + line.boxes * num(line.box?.factor), 0);
   const total = draft.lines.reduce((sum, line) => sum + line.pieces * num(line.piecePrice) + line.boxes * num(line.box?.price), 0);
   const busy = save.isPending || submit.isPending;
+  const resetPage = () => setOffset(0);
 
   return (
     <div className="pb-44">
       <div className="sticky top-14 z-20 space-y-2 border-b border-border bg-background/95 px-4 pb-2 pt-3 backdrop-blur">
         <div className="flex items-center gap-2">
-          <Button asChild variant="ghost" size="icon" className="h-10 w-10 -ml-2">
+          <Button asChild variant="ghost" size="icon" className="-ml-2 h-10 w-10">
             <Link to={`/${lng}/sales-agent/stores/${customerId}`} aria-label={t("back")}>
               <ArrowLeft className="h-5 w-5" />
             </Link>
           </Button>
-          <div className="min-w-0">
-            <p className="font-semibold truncate">{store?.name ?? "…"}</p>
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-semibold">{store?.name ?? "…"}</p>
             <p className="text-xs text-muted-foreground">{saved ? t("order.draft_number", { number: saved.number }) : t("order.new")}</p>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="text-[11px] text-muted-foreground">{t("order.total")}</p>
+            <p className="text-lg font-bold tabular-nums">{money(total)}</p>
           </div>
         </div>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
           <Input
+            id="order-search"
             className="h-11 pl-10 text-base"
             placeholder={t("order.search")}
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
-              setOffset(0);
+              resetPage();
             }}
           />
         </div>
+        {filters && (filters.categories.length > 0 || filters.brands.length > 0) && (
+          <div className="grid grid-cols-2 gap-2">
+            <Select
+              value={categoryId}
+              onValueChange={(value) => {
+                setCategoryId(value);
+                resetPage();
+              }}
+            >
+              <SelectTrigger className="h-10" aria-label={t("order.filter.category")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t("order.filter.category_all")}</SelectItem>
+                {filters.categories.map((category) => (
+                  <SelectItem key={category.id} value={category.id}>
+                    {category.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={brandId}
+              onValueChange={(value) => {
+                setBrandId(value);
+                resetPage();
+              }}
+            >
+              <SelectTrigger className="h-10" aria-label={t("order.filter.brand")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t("order.filter.brand_all")}</SelectItem>
+                {filters.brands.map((brand) => (
+                  <SelectItem key={brand.id} value={brand.id}>
+                    {brand.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       <div className="space-y-4 p-4">
@@ -318,6 +465,10 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
             </div>
           )}
           <div className="space-y-1">
+            <Label htmlFor="order-notes">{draft.paymentType === "credit" ? t("order.credit_note") : t("order.note")}</Label>
+            <Textarea id="order-notes" rows={2} maxLength={1000} value={draft.notes} onChange={(e) => update({ ...draft, notes: e.target.value })} />
+          </div>
+          <div className="space-y-1">
             <Label htmlFor="order-delivery">{t("order.delivery_date")}</Label>
             {policy?.deliveryDateMode === "choose" ? (
               <Input
@@ -338,38 +489,21 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
         {selectedOnly.length > 0 && (
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("order.selected")}</p>
-            {selectedOnly.map((line) => {
-              const product: RowProduct = { ...line, hasImage: false, available: null, promotions: [] };
-              return (
-                <ProductRow
-                  key={line.productId}
-                  product={product}
-                  line={line}
-                  money={money}
-                  onChange={(field, value) => setQty(product, field, value)}
-                  onImage={() => undefined}
-                />
-              );
-            })}
+            {selectedOnly.map((product) => (
+              <ProductCard key={product.productId} product={product} line={lineOf(product.productId)} money={money} onOpen={() => setOpenProduct(product)} />
+            ))}
           </div>
         )}
 
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("order.catalog")}</p>
           {!catalog ? (
-            Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-32 rounded-2xl" />)
+            Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-2xl" />)
           ) : catalogRows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">{t("order.no_products")}</p>
           ) : (
             catalogRows.map((product) => (
-              <ProductRow
-                key={product.productId}
-                product={product}
-                line={lineOf(product.productId)}
-                money={money}
-                onChange={(field, value) => setQty(product, field, value)}
-                onImage={() => void openImage(product)}
-              />
+              <ProductCard key={product.productId} product={product} line={lineOf(product.productId)} money={money} onOpen={() => setOpenProduct(product)} />
             ))
           )}
           {catalog && (offset > 0 || catalog.nextOffset !== null) && (
@@ -393,23 +527,39 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
       <div className="fixed inset-x-0 bottom-16 z-30 space-y-2 border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">{t("order.summary", { products: draft.lines.length, pieces: totalPieces })}</span>
-          <span className="text-lg font-bold">{money(total)}</span>
+          <span className="text-lg font-bold tabular-nums">{money(total)}</span>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-[auto_1fr] gap-2">
           <Button
             variant="secondary"
-            className="h-12"
+            size="icon"
+            className="h-12 w-12"
+            aria-label={t("order.save")}
+            title={t("order.save")}
             disabled={busy || draft.lines.length === 0}
             onClick={() => void persist().then((order) => order && toast.success(t("order.saved")))}
           >
-            {save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-            {t("order.save")}
+            {save.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
           </Button>
-          <Button className="h-12" disabled={busy || draft.lines.length === 0} onClick={() => void openConfirm()}>
-            <Send className="mr-2 h-4 w-4" /> {t("order.review")}
+          <Button className="h-12 text-base font-bold" disabled={busy || draft.lines.length === 0} onClick={() => void openConfirm()}>
+            {t("order.finish")}
           </Button>
         </div>
       </div>
+
+      {openProduct && (
+        <ProductDialog
+          key={openProduct.productId}
+          product={openProduct}
+          line={lineOf(openProduct.productId)}
+          money={money}
+          onClose={() => setOpenProduct(null)}
+          onSave={(pieces, boxes) => {
+            setLine(openProduct, pieces, boxes);
+            setOpenProduct(null);
+          }}
+        />
+      )}
 
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent className="max-h-[90vh] max-w-md overflow-y-auto">
@@ -434,9 +584,10 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
                 label={t("order.payment")}
                 value={`${t(`order.payment_type.${saved.paymentType}`)}${saved.paymentDueDate ? ` · ${saved.paymentDueDate}` : ""}`}
               />
+              {saved.notes && <SummaryRow label={saved.paymentType === "credit" ? t("order.credit_note") : t("order.note")} value={saved.notes} />}
               <div className="divide-y divide-border rounded-xl border border-border">
-                {saved.items?.map((item) => (
-                  <div key={item.productId} className="flex items-center justify-between gap-3 px-3 py-2">
+                {saved.items?.map((item, index) => (
+                  <div key={`${item.productId}-${index}`} className="flex items-center justify-between gap-3 px-3 py-2">
                     <span className="min-w-0 truncate">
                       {item.productName} × {num(item.quantity)}
                     </span>
@@ -473,22 +624,14 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <Dialog open={preview !== null} onOpenChange={(open) => !open && setPreview(null)}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{preview?.name}</DialogTitle>
-          </DialogHeader>
-          {preview && <img src={preview.url} alt={preview.name} className="max-h-[75vh] w-full rounded-xl bg-muted object-contain" />}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
 
 /**
- * Buyurtma: katalogdan dona va blok, to'lov turi (nasiya — muddat), yetkazish kuni (siyosat bo'yicha), tasdiqlash
- * oynasida do'kon, masofa, qarz, kredit, jami; yuborishda yangi GPS o'lchovi — geofence, kredit va qoldiq serverda.
+ * Buyurtma: katalog (rasm, kategoriya/brend filtri, qidiruv, sahifalash), mahsulot oynasida dona/blok, yuqorida jami,
+ * to'lov turi (nasiya — muddat va izoh), yetkazish kuni (siyosat bo'yicha), pastda "BUYURTMANI YAKUNLASH" va
+ * tasdiqlash oynasi; yuborishda yangi GPS o'lchovi — geofence, tashrif, kredit va qoldiq serverda.
  */
 export default function AgentOrderPage() {
   const { customerId = "" } = useParams<{ customerId: string }>();
