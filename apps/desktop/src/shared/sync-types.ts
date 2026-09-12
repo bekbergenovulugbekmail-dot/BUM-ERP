@@ -460,6 +460,8 @@ export type PosConfig = {
   labels?: unknown;
   /** Kassa mavzusi qulfi (web: Sozlamalar → Kassa qurilmalari); eski server — yo'q. */
   appearance?: { locked: boolean; theme: string };
+  /** Tezkor sotuv assortimenti (tartibi bilan); eski server — yo'q. */
+  quickSale?: { productIds: string[] };
 };
 
 export type WireOperation = {

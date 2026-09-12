@@ -154,9 +154,9 @@ export class LocalStore {
       case "products":
         this.db
           .prepare(
-            `INSERT INTO products (id, name, sku, barcode, search, is_active, is_saleable, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `INSERT INTO products (id, name, sku, barcode, search, is_active, is_saleable, category_id, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (id) DO UPDATE SET name = excluded.name, sku = excluded.sku, barcode = excluded.barcode, search = excluded.search,
-               is_active = excluded.is_active, is_saleable = excluded.is_saleable, data = excluded.data`,
+               is_active = excluded.is_active, is_saleable = excluded.is_saleable, category_id = excluded.category_id, data = excluded.data`,
           )
           .run(
             text(row.id),
@@ -166,6 +166,7 @@ export class LocalStore {
             searchText(row.name, row.sku, row.barcode),
             row.isActive ? 1 : 0,
             row.isSaleable ? 1 : 0,
+            typeof row.categoryId === "string" ? row.categoryId : null,
             data,
           );
         return;
@@ -243,20 +244,36 @@ export class LocalStore {
   }
 
   /** Faol mahsulotlar; `saleableOnly: false` — xarid uchun (sotilmaydigan xomashyo ham). */
-  searchProducts(query: string, limit = 50, options: { saleableOnly?: boolean } = {}): Record<string, unknown>[] {
+  searchProducts(
+    query: string,
+    limit = 50,
+    options: { saleableOnly?: boolean; categoryIds?: string[]; offset?: number } = {},
+  ): Record<string, unknown>[] {
     const needle = query.trim().toLowerCase();
     const saleable = options.saleableOnly === false ? "" : "AND is_saleable = 1";
+    // Kategoriya tabi: kategoriya va uning ichki kategoriyalari
+    const categoryIds = options.categoryIds ?? [];
+    const category = categoryIds.length > 0 ? `AND category_id IN (${categoryIds.map(() => "?").join(", ")})` : "";
+    const offset = Math.max(0, Math.floor(Number(options.offset) || 0));
     const rows = (
       needle
         ? this.db
             .prepare(
-              `SELECT data FROM products WHERE is_active = 1 ${saleable} AND (barcode = ? OR sku = ? OR search LIKE ?)
-               ORDER BY CASE WHEN barcode = ? OR sku = ? THEN 0 ELSE 1 END, name LIMIT ?`,
+              `SELECT data FROM products WHERE is_active = 1 ${saleable} ${category} AND (barcode = ? OR sku = ? OR search LIKE ?)
+               ORDER BY CASE WHEN barcode = ? OR sku = ? THEN 0 ELSE 1 END, name LIMIT ? OFFSET ?`,
             )
-            .all(query.trim(), query.trim(), `%${needle.replace(/[%_]/g, "")}%`, query.trim(), query.trim(), limit)
-        : this.db.prepare(`SELECT data FROM products WHERE is_active = 1 ${saleable} ORDER BY name LIMIT ?`).all(limit)
+            .all(...categoryIds, query.trim(), query.trim(), `%${needle.replace(/[%_]/g, "")}%`, query.trim(), query.trim(), limit, offset)
+        : this.db.prepare(`SELECT data FROM products WHERE is_active = 1 ${saleable} ${category} ORDER BY name LIMIT ? OFFSET ?`).all(...categoryIds, limit, offset)
     ) as { data: string }[];
     return rows.map((row) => JSON.parse(row.data) as Record<string, unknown>);
+  }
+
+  /** Sotiladigan faol mahsulotlar soni kategoriya bo'yicha (null — kategoriyasiz). */
+  saleableCountsByCategory(): Map<string | null, number> {
+    const rows = this.db
+      .prepare("SELECT category_id AS categoryId, count(*) AS n FROM products WHERE is_active = 1 AND is_saleable = 1 GROUP BY category_id")
+      .all() as { categoryId: string | null; n: number }[];
+    return new Map(rows.map((row) => [row.categoryId, row.n]));
   }
 
   counts(): { products: number; customers: number; cashiers: number; pending: number; rejected: number } {

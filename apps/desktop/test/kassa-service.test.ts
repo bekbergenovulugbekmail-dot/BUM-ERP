@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { readFile, rm } from "node:fs/promises";
+import { readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -206,6 +206,117 @@ describe("Kassa xizmati (main jarayon)", () => {
     // Qulf olindi — kassirning o'z tanlovi qaytadi
     store.setMeta("config", { ...(store.getMeta<Record<string, unknown>>("config") ?? {}), appearance: { locked: false, theme: "high-contrast" } });
     expect(kassa.prefs()).toMatchObject({ theme: "green", themeLock: null });
+  });
+
+  it("tezkor sotuv: assortiment tartibi, kategoriya tablari, qidiruv, aksiya narxi (chekda ham), rasm keshi, ko'rinish sozlamasi", async () => {
+    const api = fakeApi();
+    const imageDir = path.join(tmpdir(), `bum-images-${randomBytes(4).toString("hex")}`);
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("rasm")]);
+    let imageRequests = 0;
+    const fetchImpl = (async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/pos-device/products/p2/image") {
+        if (!api.state.online) throw new TypeError("fetch failed");
+        imageRequests += 1;
+        return new Response(png, { headers: { "content-type": "image/png" } });
+      }
+      return api.fetchImpl(input, init);
+    }) as typeof fetch;
+    const options = { appVersion: "0.1.0", platform: "win32", fetchImpl, imageDir };
+    const kassa = new KassaService(store, vault, options);
+    try {
+      await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+      await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+      const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+      store.applyPull(
+        pullResponse({
+          units: { rows: [{ id: "unit-d", name: "Dona", shortName: "dona", isBase: true, isActive: true }] },
+          categories: {
+            rows: [
+              { id: "c-drinks", name: "Ichimliklar", parentId: null, sortOrder: 1, isActive: true },
+              { id: "c-soda", name: "Gazli", parentId: "c-drinks", sortOrder: 0, isActive: true },
+              { id: "c-food", name: "Oziq-ovqat", parentId: null, sortOrder: 2, isActive: true },
+            ],
+          },
+          products: {
+            rows: [
+              product("p1", "Cola", { categoryId: "c-soda", promoPrice: "8000.0000", promoPriceEnd: day(1) }),
+              product("p2", "Choy", { categoryId: "c-drinks", imageKey: "db/product-image/a.png" }),
+              product("p3", "Non", { categoryId: "c-food", promoPrice: "1000.0000", promoPriceEnd: day(-1) }),
+              product("p4", "Sovun", { isSaleable: false }),
+            ],
+          },
+          stockLevels: { rows: [{ id: "s1", productId: "p1", warehouseId: "w1", quantity: "5.0000", reservedQty: "0.0000" }] },
+        }),
+      );
+
+      // Assortiment tanlanmagan; tanlangach — tartib saqlanadi, sotilmaydigan va yo'q mahsulot ko'rsatilmaydi (offline — config'dan)
+      expect(kassa.quickSale({})).toEqual({ configured: false, products: [], categories: [] });
+      store.setMeta("config", { ...(store.getMeta<Record<string, unknown>>("config") ?? {}), quickSale: { productIds: ["p3", "p4", "yo'q", "p1", "p2"] } });
+      const view = kassa.quickSale({});
+      expect(view.products.map((row) => row.id)).toEqual(["p3", "p1", "p2"]);
+      // Ichki kategoriya (Gazli) ota tabga qo'shiladi
+      const tabs = [
+        { id: "c-drinks", name: "Ichimliklar", products: 2 },
+        { id: "c-food", name: "Oziq-ovqat", products: 1 },
+      ];
+      expect(view.categories).toEqual(tabs);
+      expect(kassa.quickSale({ categoryId: "c-drinks" }).products.map((row) => row.id)).toEqual(["p1", "p2"]);
+      expect(kassa.quickSale({ query: "cho" }).products.map((row) => row.id)).toEqual(["p2"]);
+      expect(kassa.posCategories()).toEqual(tabs);
+      expect(kassa.products({ query: "", categoryId: "c-drinks" }).map((row) => row.id)).toEqual(["p2", "p1"]);
+      expect(kassa.products({ query: "", categoryId: "c-food" }).map((row) => row.id)).toEqual(["p3"]);
+
+      // Aksiya: amaldagi — narx, aksiyasiz narx chizib ko'rsatiladi; muddati o'tgani — oddiy narx
+      const [non, cola, choy] = view.products;
+      expect(cola).toMatchObject({ price: "8000.0000", regularPrice: "10000.0000", promo: { endsAt: day(1) }, imageVersion: null });
+      expect(non).toMatchObject({ price: "10000.0000", regularPrice: "10000.0000", promo: null });
+      expect(choy!.imageVersion).toMatch(/^[0-9a-f]{16}$/);
+
+      // Chek aksiya narxida; aksiyasiz narxni yuborish — narx o'zgartirish (sales.edit yo'q)
+      kassa.openShift({ openingCash: "0" });
+      const saleInput = (lines: { productId: string; unitId: string; quantity: string; unitPrice?: string }[], amountPaid: string) => ({
+        customerId: null,
+        lines,
+        saleCurrencies: [],
+        paymentMethod: "cash" as const,
+        amountPaid,
+        cashbackAmount: null,
+        balanceAmount: null,
+        changeToBalance: false,
+        currencyPayments: [],
+      });
+      expect(kassa.completeSale(saleInput([{ productId: "p1", unitId: "unit-d", quantity: "2" }], "16000"))).toMatchObject({ total: "16000.00", change: "0.00" });
+      expect(() => kassa.completeSale(saleInput([{ productId: "p1", unitId: "unit-d", quantity: "1", unitPrice: "10000" }], "10000"))).toThrow("sales.edit");
+      await kassa.syncNow();
+      const pushedSale = api.state.pushed.find((op) => op.type === "sale.complete")!;
+      expect(Number((pushedSale.payload.items as { unitPrice: string }[])[0]!.unitPrice)).toBe(8000);
+
+      // Ko'rinish sozlamasi: kartalar (standart) yoki jadval
+      expect(kassa.prefs().productView).toBe("cards");
+      expect(kassa.savePrefs({ ...kassa.prefs(), productView: "table" }).productView).toBe("table");
+      expect(kassa.savePrefs({ ...kassa.prefs(), productView: "grid" as never }).productView).toBe("cards");
+
+      // Rasm: rasmsiz — null (tarmoqsiz); bor — serverdan bir marta, keyin keshdan (offline ham)
+      expect(await kassa.productImage({ productId: "p1" })).toBeNull();
+      expect((await kassa.productImage({ productId: "p2" }))!.data.equals(png)).toBe(true);
+      api.state.online = false;
+      const cached = await kassa.productImage({ productId: "p2" });
+      expect(cached).toMatchObject({ contentType: "image/png" });
+      expect(cached!.data.equals(png)).toBe(true);
+      expect(imageRequests).toBe(1);
+
+      // Rasm almashtirildi (yangi kalit): offline va keshda yo'q — null (belgi); internet qaytgach yangisi, eski versiya o'chadi
+      store.applyPull(pullResponse({ products: { rows: [product("p2", "Choy", { categoryId: "c-drinks", imageKey: "db/product-image/b.png" })] } }));
+      expect(await kassa.productImage({ productId: "p2" })).toBeNull();
+      api.state.online = true;
+      const restarted = new KassaService(store, vault, options);
+      expect((await restarted.productImage({ productId: "p2" }))!.data.equals(png)).toBe(true);
+      expect(imageRequests).toBe(2);
+      expect((await readdir(imageDir)).filter((name) => name.startsWith("p2-"))).toHaveLength(1);
+    } finally {
+      await rm(imageDir, { recursive: true, force: true });
+    }
   });
 
   it("server manzili: sxemasiz — https qo'shiladi; sertifikat mos emas yoki domen topilmadi — aniq xabar", async () => {

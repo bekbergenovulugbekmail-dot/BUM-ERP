@@ -26,7 +26,7 @@
  *    statistika oxirgi 500 ta buyurtmadan
  */
 import { and, asc, desc, eq, getTableColumns, gte, ilike, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
-import { badRequest, forbidden, notFound } from "@bum/shared";
+import { activePromoPrice, badRequest, forbidden, notFound } from "@bum/shared";
 import { products, units } from "../../db/schema/catalog.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import {
@@ -110,6 +110,8 @@ export type PricingOptions = {
   trustedPricing?: boolean;
   /** Offline kassa: sotuv lahzasidagi kurslar (joriy kurs o'rniga). */
   rates?: Record<string, string>;
+  /** Kassa (POS): shu sanada amaldagi aksiya narxi (`promoPrice`, `promoPriceEnd` gacha) prays-list narxi hisoblanadi. */
+  promoDate?: string;
 };
 
 /** `sales.edit` ruxsatisiz, lekin ishonchli narxlashda prays-listdan farq qilgan qator (offline kassa nomuvofiqligi). */
@@ -141,6 +143,8 @@ export async function prepareSalesItems(
       baseUnitId: products.baseUnitId,
       salesPrice: products.salesPrice,
       salesCurrency: products.salesCurrency,
+      promoPrice: products.promoPrice,
+      promoPriceEnd: products.promoPriceEnd,
       taxRate: products.taxRate,
       taxIncluded: products.taxIncluded,
       isActive: products.isActive,
@@ -181,7 +185,9 @@ export async function prepareSalesItems(
 
     const unitId = item.unitId ?? product.baseUnitId;
     const factor = await unitFactorToBase(tx, companyId, product, unitId);
-    const unitBasePrice = await basePrice(product.salesPrice, product.salesCurrency);
+    // Aksiya narxini server hisoblaydi — kassa ko'rsatgan narx faqat taqqoslanadi
+    const promo = options.promoDate ? activePromoPrice(product, options.promoDate) : null;
+    const unitBasePrice = await basePrice(promo ?? product.salesPrice, product.salesCurrency);
     const listPrice = fromMinor(rescale(toMinor(unitBasePrice, 4) * toMinor(factor, 4), 8, 4), 4);
     const unitPrice = item.unitPrice ?? listPrice;
     const discountPercent = item.discountPercent ?? customerDiscount;

@@ -404,7 +404,9 @@ export async function completeSale(
     tenant,
     input.items,
     customerDiscount,
-    offline ? { trustedPricing: true, rates: offline.rates } : {},
+    offline
+      ? { trustedPricing: true, rates: offline.rates, promoDate: offline.soldAt.toISOString().slice(0, 10) }
+      : { promoDate: todayIso() },
   );
   if (priceChanges.length > 0) conflicts.push({ kind: "price_changed", details: { items: priceChanges } });
   const total = toMinor(totals.totalAmount);

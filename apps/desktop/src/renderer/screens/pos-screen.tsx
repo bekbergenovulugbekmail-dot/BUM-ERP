@@ -14,7 +14,18 @@ import {
 import { Input } from "@/components/ui/input.tsx";
 import { Kbd } from "@/components/ui/kbd.tsx";
 import { useHIDScanner } from "@/hooks/use-hid-scanner.ts";
-import type { AppStatus, CartLineInput, DevicePrefs, HeldReceipt, LocalSale, PosContext, PosCustomer, PosProduct } from "../../shared/kassa-api.js";
+import type {
+  AppStatus,
+  CartLineInput,
+  DevicePrefs,
+  HeldReceipt,
+  LocalSale,
+  PosCategory,
+  PosContext,
+  PosCustomer,
+  PosProduct,
+  QuickSaleView,
+} from "../../shared/kassa-api.js";
 import { fromMinor, toMinor } from "../../shared/money.js";
 import { computeSale, type SaleCalc } from "../../shared/sale-calc.js";
 import type { PaymentMethod, SyncState } from "../../shared/sync-types.js";
@@ -23,6 +34,7 @@ import { call, errorText } from "../kassa.ts";
 import CustomerDialog from "../pos/customer-dialog.tsx";
 import HeldDialog from "../pos/held-dialog.tsx";
 import PrefsDialog from "../pos/prefs-dialog.tsx";
+import { CategoryChips, ProductCard, ProductDetailDialog, ProductImage, PromoBadges } from "../pos/product-grid.tsx";
 import { DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_LABELS, keyName } from "../../shared/hotkeys.js";
 import ReceiptDialog from "../pos/receipt-dialog.tsx";
 import { printSale } from "../pos/receipt.ts";
@@ -49,6 +61,9 @@ type CartLine = {
 type DialogName = "customer" | "return" | "unsynced" | "held" | "shift" | "prefs" | "help";
 
 const QTY = /^\d{1,14}(\.\d{1,4})?$/;
+/** Barcha mahsulotlar ro'yxati sahifasi va chegarasi (100 minglab mahsulotda ham ekranga shuncha). */
+const PAGE = 120;
+const MAX_LIST = 960;
 
 type PayKey = "cash" | "card" | "bank";
 const EMPTY_TENDER: Record<PayKey, string> = { cash: "", card: "", bank: "" };
@@ -98,6 +113,15 @@ export default function PosScreen({
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState<PosProduct[]>([]);
   const [productsVersion, setProductsVersion] = useState(0);
+  /** Tezkor sotuv (kompaniya assortimenti) yoki barcha mahsulotlar; qidiruv doim barcha mahsulotlar bo'yicha. */
+  const [tab, setTab] = useState<"quick" | "all">("quick");
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [categories, setCategories] = useState<PosCategory[]>([]);
+  const [quick, setQuick] = useState<QuickSaleView | null>(null);
+  const [limit, setLimit] = useState(PAGE);
+  const [detail, setDetail] = useState<PosProduct | null>(null);
+  const quickReady = useRef(false);
+  const productsRequest = useRef(0);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [selected, setSelected] = useState(0);
   const [customer, setCustomer] = useState<PosCustomer | null>(null);
@@ -143,15 +167,44 @@ export default function PosScreen({
     );
   }, [lastSyncAt]);
 
+  const showQuick = tab === "quick" && query.trim() === "";
+  const quickCategory = tab === "quick" ? categoryId : null;
+
   useEffect(() => {
+    call("pos:quick-sale", { categoryId: quickCategory }).then(
+      (view) => {
+        setQuick(view);
+        // Birinchi ochilishda assortiment tanlanmagan bo'lsa — barcha mahsulotlar
+        if (!quickReady.current) {
+          quickReady.current = true;
+          if (!view.configured) setTab("all");
+        }
+      },
+      (err: unknown) => setNotice({ tone: "error", text: errorText(err) }),
+    );
+  }, [quickCategory, productsVersion, lastSyncAt]);
+
+  useEffect(() => {
+    call("pos:categories").then(setCategories, () => undefined);
+  }, [lastSyncAt]);
+
+  useEffect(() => {
+    if (showQuick) return;
+    // Eng oxirgi so'rov javobi ko'rsatiladi (tez yozilganda eski javob ustiga yozmasin)
+    const request = ++productsRequest.current;
     const timer = setTimeout(
       () => {
-        call("pos:products", { query, limit: 80 }).then(setProducts, (err: unknown) => setNotice({ tone: "error", text: errorText(err) }));
+        call("pos:products", { query, limit, categoryId }).then(
+          (list) => {
+            if (request === productsRequest.current) setProducts(list);
+          },
+          (err: unknown) => setNotice({ tone: "error", text: errorText(err) }),
+        );
       },
       query ? 150 : 0,
     );
     return () => clearTimeout(timer);
-  }, [query, productsVersion, lastSyncAt]);
+  }, [query, limit, categoryId, showQuick, productsVersion, lastSyncAt]);
 
   const base = context?.baseCurrency ?? status.company?.currency ?? "UZS";
   const permissions = context?.permissions ?? status.cashier?.permissions ?? [];
@@ -397,8 +450,24 @@ export default function PosScreen({
     }
   };
 
+  const switchTab = (next: "quick" | "all") => {
+    setTab(next);
+    setCategoryId(null);
+    setLimit(PAGE);
+  };
+
+  const pickCategory = (id: string | null) => {
+    setCategoryId(id);
+    setLimit(PAGE);
+  };
+
+  const setProductView = (productView: DevicePrefs["productView"]) => {
+    if (!prefs || prefs.productView === productView) return;
+    call("device:save-prefs", { ...prefs, productView }).then(setPrefs, (err: unknown) => setNotice({ tone: "error", text: errorText(err) }));
+  };
+
   const handleKey = (event: KeyboardEvent) => {
-    if (dialog || receipt) return;
+    if (dialog || receipt || detail) return;
     const pickMethod = (method: PayKey) => {
       if (!enabledMethods.some((item) => item.key === method)) return;
       // Summa kiritilgan bo'lsa — qolgan summa shu usulga (aralash to'lov); aks holda usul tanlanadi (aniq summa)
@@ -454,6 +523,11 @@ export default function PosScreen({
   const unsyncedCount = status.sync.pending + status.sync.rejected;
   const shiftTotals = status.shift?.totals;
   const errors = calc?.errors.filter((error) => error !== "Savatcha bo'sh") ?? [];
+  const productView = prefs?.productView ?? "cards";
+  const shownProducts = showQuick ? (quick?.products ?? []) : products;
+  const discountPercent = num(customer?.discountPercent ?? "0");
+  const cartQty = new Map<string, number>();
+  for (const line of cart) cartQty.set(line.productId, (cartQty.get(line.productId) ?? 0) + num(line.quantity));
 
   const header = (
     <header className="flex items-center gap-3 border-b border-border bg-card px-3 py-2">
@@ -595,6 +669,16 @@ export default function PosScreen({
         </DialogContent>
       </Dialog>
       <ReceiptDialog sale={receipt} context={context} prefs={prefs} onClose={() => setReceipt(null)} />
+      <ProductDetailDialog
+        product={detail}
+        base={base}
+        discountPercent={num(customer?.discountPercent ?? "0")}
+        onClose={() => setDetail(null)}
+        onAdd={(product, quantity) => {
+          addProduct(product, quantity);
+          setDetail(null);
+        }}
+      />
     </>
   );
 
@@ -652,47 +736,127 @@ export default function PosScreen({
               className="h-11 text-base"
               placeholder="Mahsulot nomi, SKU yoki shtrix-kod (F2)"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setLimit(PAGE);
+              }}
             />
           </form>
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-card">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-muted/80 text-left text-xs text-muted-foreground backdrop-blur">
-                <tr>
-                  <th className="px-3 py-2">Mahsulot</th>
-                  <th className="px-3 py-2">SKU</th>
-                  <th className="px-3 py-2 text-right">Narx</th>
-                  <th className="px-3 py-2 text-right">Qoldiq</th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((product) => {
-                  const stock = num(product.stock);
-                  return (
-                    <tr key={product.id} className="cursor-pointer border-t border-border hover:bg-primary/5" onClick={() => addProduct(product)}>
-                      <td className="px-3 py-2 font-medium">{product.name}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{product.sku}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">
-                        {product.price === null ? <span className="text-destructive">kurs yo'q</span> : fmtMoney(product.price, base)}
-                        {product.salesCurrency && product.salesCurrency !== base && (
-                          <span className="block text-xs text-muted-foreground">{fmtMoney(product.salesPrice, product.salesCurrency)}</span>
-                        )}
-                      </td>
-                      <td className={`px-3 py-2 text-right tabular-nums ${stock < 0 ? "text-destructive" : stock === 0 ? "text-amber-600" : ""}`}>
-                        {fmtQty(product.stock)} {product.unitName}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {products.length === 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-lg border border-border bg-card p-0.5" role="tablist" aria-label="Mahsulotlar">
+              {(["quick", "all"] as const).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === key}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${tab === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => switchTab(key)}
+                >
+                  {key === "quick" ? `Tezkor sotuv${quick?.configured ? ` · ${quick.products.length}` : ""}` : "Barcha mahsulotlar"}
+                </button>
+              ))}
+            </div>
+            {query.trim() !== "" && tab === "quick" && <span className="text-xs text-muted-foreground">qidiruv — barcha mahsulotlar bo'yicha</span>}
+            <div className="ml-auto flex rounded-lg border border-border bg-card p-0.5" aria-label="Ko'rinish">
+              {(["cards", "table"] as const).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={productView === key}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium ${productView === key ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => setProductView(key)}
+                >
+                  {key === "cards" ? "Kartalar" : "Jadval"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <CategoryChips categories={showQuick ? (quick?.categories ?? []) : categories} active={categoryId} onPick={pickCategory} />
+          <div className={`min-h-0 flex-1 overflow-y-auto ${productView === "table" ? "rounded-xl border border-border bg-card" : ""}`}>
+            {showQuick && quick && !quick.configured ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+                <p className="max-w-md text-sm text-muted-foreground">
+                  Tezkor sotuv assortimenti hali tanlanmagan. Rahbar web'da tanlaydi: Sozlamalar → Kassa qurilmalari → Tezkor sotuv (eng ko'p sotilganlar
+                  tavsiyasi bilan).
+                </p>
+                <Button variant="secondary" onClick={() => switchTab("all")}>
+                  Barcha mahsulotlar
+                </Button>
+              </div>
+            ) : productView === "cards" ? (
+              <div className={`grid gap-2 ${showQuick ? "grid-cols-[repeat(auto-fill,minmax(12.5rem,1fr))]" : "grid-cols-[repeat(auto-fill,minmax(10rem,1fr))]"}`}>
+                {shownProducts.map((product) => (
+                  <ProductCard
+                    key={product.id}
+                    product={product}
+                    base={base}
+                    discountPercent={discountPercent}
+                    inCart={cartQty.get(product.id) ?? 0}
+                    onAdd={(picked) => addProduct(picked)}
+                    onDetails={setDetail}
+                  />
+                ))}
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-muted/80 text-left text-xs text-muted-foreground backdrop-blur">
                   <tr>
-                    <td colSpan={4} className="px-3 py-10 text-center text-muted-foreground">
-                      Mahsulot topilmadi
-                    </td>
+                    <th className="px-3 py-2">Mahsulot</th>
+                    <th className="px-3 py-2">SKU</th>
+                    <th className="px-3 py-2 text-right">Narx</th>
+                    <th className="px-3 py-2 text-right">Qoldiq</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {shownProducts.map((product) => {
+                    const stock = num(product.stock);
+                    return (
+                      <tr key={product.id} className="cursor-pointer border-t border-border hover:bg-primary/5" onClick={() => addProduct(product)}>
+                        <td className="px-3 py-1.5 font-medium">
+                          <span className="flex items-center gap-2">
+                            <ProductImage product={product} className="h-9 w-9 shrink-0 rounded-md text-xs" />
+                            <span className="min-w-0">
+                              {product.name}
+                              <span className="ml-2 inline-flex gap-1 align-middle">
+                                <PromoBadges product={product} discountPercent={0} />
+                              </span>
+                            </span>
+                          </span>
+                        </td>
+                        <td className="px-3 py-1.5 text-muted-foreground">{product.sku}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {product.price === null ? (
+                            <span className="text-destructive">kurs yo'q</span>
+                          ) : (
+                            <span className={product.promo ? "font-semibold text-destructive" : ""}>{fmtMoney(product.price, base)}</span>
+                          )}
+                          {product.promo && product.regularPrice && product.regularPrice !== product.price && (
+                            <s className="block text-xs text-muted-foreground">{fmtMoney(product.regularPrice, base)}</s>
+                          )}
+                          {product.salesCurrency && product.salesCurrency !== base && (
+                            <span className="block text-xs text-muted-foreground">{fmtMoney(product.salesPrice, product.salesCurrency)}</span>
+                          )}
+                        </td>
+                        <td className={`px-3 py-1.5 text-right tabular-nums ${stock < 0 ? "text-destructive" : stock === 0 ? "text-amber-600" : ""}`}>
+                          {fmtQty(product.stock)} {product.unitName}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            {shownProducts.length === 0 && !(showQuick && quick && !quick.configured) && (
+              <p className="px-3 py-10 text-center text-sm text-muted-foreground">Mahsulot topilmadi</p>
+            )}
+            {!showQuick && products.length >= limit && limit < MAX_LIST && (
+              <div className="p-2 text-center">
+                <Button variant="secondary" size="sm" onClick={() => setLimit(limit + PAGE)}>
+                  Yana ko'rsatish
+                </Button>
+              </div>
+            )}
           </div>
           {notice && (
             <p className={`rounded-lg px-3 py-2 text-sm ${notice.tone === "error" ? "bg-destructive/10 text-destructive" : "bg-sky-500/10 text-sky-700"}`}>{notice.text}</p>

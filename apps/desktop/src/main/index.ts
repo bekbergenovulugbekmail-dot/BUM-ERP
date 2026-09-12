@@ -5,7 +5,7 @@
  *  - Chek chop etish: yashirin oynada HTML → tanlangan printerga dialogsiz (termal qog'oz kengligi, balandlik mazmun bo'yicha).
  *  - Tashqi havolalar va yangi oynalar bloklanadi.
  */
-import { app, BrowserWindow, ipcMain, Menu, safeStorage, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, protocol, safeStorage, shell } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { rm, writeFile } from "node:fs/promises";
@@ -18,6 +18,11 @@ import { KassaService, toKassaError, type AppUpdater, type ReceiptPrinter, type 
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
+
+// Mahsulot rasmlari: renderer `bum-image://product/<id>?v=<versiya>` — main keshdan yoki serverdan beradi (disk yo'li va
+// token renderer'ga ochilmaydi). Ilova tayyor bo'lishidan oldin ro'yxatdan o'tadi.
+protocol.registerSchemesAsPrivileged([{ scheme: "bum-image", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+const PRODUCT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function tokenVault(store: LocalStore): TokenVault {
   return {
@@ -157,6 +162,8 @@ function registerIpc(service: KassaService) {
     "shift:close": (input) => service.closeShift(input),
     "pos:context": () => service.posContext(),
     "pos:products": (input) => service.products(input),
+    "pos:categories": () => service.posCategories(),
+    "pos:quick-sale": (input) => service.quickSale(input),
     "pos:product-by-code": (input) => service.productByCode(input),
     "pos:products-by-ids": (input) => service.productsByIds(input),
     "pos:customers": (input) => service.customers(input),
@@ -248,6 +255,16 @@ if (!app.requestSingleInstanceLock()) {
       printer: receiptPrinter,
       updater,
       downloadDir: app.getPath("temp"),
+      imageDir: path.join(app.getPath("userData"), "product-images"),
+    });
+    protocol.handle("bum-image", async (request) => {
+      const url = new URL(request.url);
+      const productId = url.pathname.replace(/^\/+/, "");
+      if (url.hostname !== "product" || !PRODUCT_ID.test(productId)) return new Response(null, { status: 400 });
+      const image = await service.productImage({ productId }).catch(() => null);
+      return image
+        ? new Response(new Uint8Array(image.data), { headers: { "content-type": image.contentType, "cache-control": "private, max-age=3600" } })
+        : new Response(null, { status: 404 });
     });
     registerIpc(service);
     createWindow();

@@ -630,6 +630,18 @@ export const RU_PHRASES: Record<string, string> = {
   "Obuna": "Подписка",
   "Dastur tili": "Язык программы",
   "Tashqi ko'rinish": "Внешний вид",
+  // Tezkor sotuv (pos-screen.tsx, pos/product-grid.tsx)
+  "Tezkor sotuv": "Быстрая продажа",
+  "Kartalar": "Карточки",
+  "Jadval": "Таблица",
+  "Yana ko'rsatish": "Показать ещё",
+  "Savatga": "В корзину",
+  "Soliq": "Налог",
+  "(narx ichida)": "(включён в цену)",
+  "Narx valyutada:": "Цена в валюте:",
+  "qidiruv — barcha mahsulotlar bo'yicha": "поиск — по всем товарам",
+  "Tezkor sotuv assortimenti hali tanlanmagan. Rahbar web'da tanlaydi: Sozlamalar → Kassa qurilmalari → Tezkor sotuv (eng ko'p sotilganlar tavsiyasi bilan).":
+    "Ассортимент быстрой продажи ещё не выбран. Руководитель выбирает его в веб-версии: Настройки → Кассовые устройства → Быстрая продажа (с подсказкой самых продаваемых).",
   "Valyutalar": "Валюты",
   "Qaynoq tugmalar": "Горячие клавиши",
   "Savdo sozlamalari": "Настройки продаж",
@@ -1062,4 +1074,9 @@ export const RU_PATTERNS: [string, string][] = [
 
   // ─── Kechiktirilgan chek nomi (kassa-service.ts: `Chek HH:MM`) ───
   ["Chek {}", "Чек {}"],
+
+  // ─── Tezkor sotuv (pos-screen.tsx, pos/product-grid.tsx) ───
+  ["Tezkor sotuv · {}", "Быстрая продажа · {}"],
+  ["· shtrix-kod {}", "· штрихкод {}"],
+  ["— {} gacha", "— до {}"],
 ];

@@ -13,7 +13,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { badRequest, notFound, type Permission } from "@bum/shared";
-import { products } from "../../db/schema/catalog.js";
+import { productImages, products } from "../../db/schema/catalog.js";
 import { expenses } from "../../db/schema/finance.js";
 import { employees } from "../../db/schema/hr.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -129,6 +129,7 @@ export async function attachFile(
   const stored = await headUpload(client, FILE_KINDS[input.kind], input.key);
 
   await saveTarget(tx, input.kind, input.targetId, input.key);
+  if (input.kind === "product-image" && isDatabaseKey(previous)) await tx.delete(productImages).where(eq(productImages.productId, input.targetId));
   await writeAuditLog(
     {
       userId: tenant.user.id,
@@ -155,6 +156,7 @@ export async function detachFile(
   if (!previous) throw notFound("Fayl biriktirilmagan");
 
   await saveTarget(tx, input.kind, input.targetId, null);
+  if (input.kind === "product-image" && isDatabaseKey(previous)) await tx.delete(productImages).where(eq(productImages.productId, input.targetId));
   await writeAuditLog(
     {
       userId: tenant.user.id,
@@ -171,8 +173,91 @@ export async function detachFile(
   return { previous };
 }
 
-export async function fileUrl(conn: DbOrTx, tenant: TenantContext, input: { kind: FileKind; targetId: string }, client: StorageClient) {
+/** Ko'rish havolasi: bazadagi rasm — API'ning autentifikatsiyali `/content` yo'li; saqlashdagi fayl — imzolangan URL (saqlash yo'q — null). */
+export async function fileUrl(conn: DbOrTx, tenant: TenantContext, input: { kind: FileKind; targetId: string }, client: StorageClient | null) {
   const key = await loadTarget(conn, tenant, input.kind, input.targetId, false);
   if (!key) throw notFound("Fayl biriktirilmagan");
+  if (isDatabaseKey(key)) {
+    return { url: `/api/files/${input.kind}/${input.targetId}/content?v=${encodeURIComponent(key.slice(key.lastIndexOf("/") + 1))}`, expiresIn: VIEW_TTL };
+  }
+  if (!client) return null;
   return { url: client.signedUrl("GET", key, VIEW_TTL), expiresIn: VIEW_TTL };
+}
+
+// ─── Bazadagi mahsulot rasmi (fayl saqlash sozlanmagan) ─────────────────────
+
+/** Bazadagi fayl kaliti prefiksi — S3 sozlanmagan bo'lsa mahsulot rasmi `product_images` da saqlanadi. */
+export const DATABASE_KEY_PREFIX = "db/";
+
+export function isDatabaseKey(key: string | null | undefined): key is string {
+  return typeof key === "string" && key.startsWith(DATABASE_KEY_PREFIX);
+}
+
+/** Fayl boshidagi imzo e'lon qilingan rasm turiga mos — rasm nomi ostida boshqa mazmun saqlanmasin. */
+export function matchesImageSignature(data: Buffer, contentType: string): boolean {
+  if (contentType === "image/jpeg") return data.length > 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
+  if (contentType === "image/png") return data.length > 8 && data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (contentType === "image/webp") return data.length > 12 && data.toString("latin1", 0, 4) === "RIFF" && data.toString("latin1", 8, 12) === "WEBP";
+  return false;
+}
+
+/** Mahsulot rasmini bazaga yozish (bitta so'rov, 5 MB gacha): tur, hajm va fayl imzosi tekshiriladi, eski rasm almashtiriladi. */
+export async function saveProductImageContent(
+  tx: Tx,
+  tenant: TenantContext,
+  input: { productId: string; contentType: string; data: Buffer },
+  meta: RequestMeta,
+) {
+  const rules = FILE_KINDS["product-image"];
+  const contentType = (input.contentType.split(";")[0] ?? "").trim().toLowerCase();
+  if (!(rules.types as readonly string[]).includes(contentType)) throw badRequest(`Fayl turi ruxsat etilmagan: ${rules.types.join(", ")}`);
+  if (input.data.length === 0) throw badRequest("Fayl bo'sh");
+  if (input.data.length > rules.maxBytes) throw badRequest(`Fayl hajmi ${rules.maxBytes / MB} MB dan oshmasligi kerak`);
+  if (!matchesImageSignature(input.data, contentType)) throw badRequest("Fayl mazmuni tanlangan rasm turiga mos emas");
+
+  const previous = await loadTarget(tx, tenant, "product-image", input.productId, true);
+  const key = `${DATABASE_KEY_PREFIX}product-image/${randomUUID()}.${EXTENSIONS[contentType]}`;
+  const image = { key, content: input.data, contentType, sizeBytes: input.data.length };
+  await tx
+    .insert(productImages)
+    .values({ productId: input.productId, companyId: tenant.company.id, ...image })
+    .onConflictDoUpdate({ target: productImages.productId, set: { ...image, updatedAt: new Date() } });
+  await saveTarget(tx, "product-image", input.productId, key);
+  await writeAuditLog(
+    {
+      userId: tenant.user.id,
+      userName: tenant.user.name,
+      companyId: tenant.company.id,
+      action: "FILE_ATTACHED",
+      resource: "product-image",
+      resourceId: input.productId,
+      details: { key, size: input.data.length, replaced: previous, storage: "database" },
+      ...meta,
+    },
+    tx,
+  );
+  return { key, previous: previous !== key ? previous : null };
+}
+
+export type ProductImageSource =
+  | { kind: "none" }
+  | { kind: "database"; key: string; content: Buffer; contentType: string }
+  | { kind: "storage"; key: string };
+
+/** Mahsulot rasmi qayerda: bazada (mazmuni bilan), saqlashda (kalit) yoki yo'q. Boshqa kompaniya mahsuloti — 404. */
+export async function loadProductImage(conn: DbOrTx, companyId: string, productId: string): Promise<ProductImageSource> {
+  const [product] = await conn
+    .select({ key: products.imageKey })
+    .from(products)
+    .where(and(eq(products.id, productId), eq(products.companyId, companyId)))
+    .limit(1);
+  if (!product) throw notFound("Mahsulot topilmadi");
+  if (!product.key) return { kind: "none" };
+  if (!isDatabaseKey(product.key)) return { kind: "storage", key: product.key };
+  const [image] = await conn
+    .select({ content: productImages.content, contentType: productImages.contentType })
+    .from(productImages)
+    .where(and(eq(productImages.productId, productId), eq(productImages.companyId, companyId), eq(productImages.key, product.key)))
+    .limit(1);
+  return image ? { kind: "database", key: product.key, ...image } : { kind: "none" };
 }

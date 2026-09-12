@@ -232,6 +232,14 @@ const MIGRATIONS: string[] = [
   CREATE INDEX stock_documents_kind_idx ON stock_documents (kind, created_at);
   CREATE INDEX stock_documents_op_idx ON stock_documents (op_id);
   `,
+  // v6 — tezkor sotuv: kategoriya bo'yicha filtr (100 minglab mahsulotda ham indeks bilan); rasm kaliti (`imageKey`)
+  // pull'ga keyin qo'shilgani uchun mahsulotlar bir marta qayta olinadi (kursor tashlanadi)
+  `
+  ALTER TABLE products ADD COLUMN category_id TEXT;
+  UPDATE products SET category_id = json_extract(data, '$.categoryId');
+  CREATE INDEX products_category_idx ON products (category_id, name);
+  UPDATE meta SET value = json_remove(value, '$.products') WHERE key = 'cursors' AND json_valid(value);
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

@@ -4,10 +4,10 @@
  * (hammasi `pos.devices.manage`). Nomuvofiqlik — kassada offline qilingan amal serverda boshqacha holatga tushgani
  * (qoldiq yetmadi, narx o'zgargan…): amal allaqachon yozilgan, rahbar tekshirib «Ko'rib chiqildi» qiladi.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { POS_THEMES, POS_THEME_LABELS, type PosAppearance } from "@bum/shared";
-import { AlertTriangle, CheckCircle2, Download, Monitor, Pencil, Save, X } from "lucide-react";
+import { MAX_QUICK_SALE_ITEMS, POS_THEMES, POS_THEME_LABELS, QUICK_SALE_PERIODS, activePromoPrice, type PosAppearance, type QuickSalePeriod } from "@bum/shared";
+import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, Download, ImageIcon, Monitor, Pencil, Plus, Save, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
@@ -179,6 +179,273 @@ function AppearanceCard() {
             {POS_THEME_LABELS[theme]}
           </Button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+const QUICK_SALE_PATH = "/api/pos/devices/quick-sale";
+
+type QuickSaleProduct = {
+  id: string;
+  name: string;
+  sku: string;
+  barcode: string | null;
+  categoryName: string | null;
+  unitName: string | null;
+  salesPrice: string;
+  salesCurrency: string | null;
+  /** Bugun amaldagi aksiya narxi. */
+  promoPrice: string | null;
+  promoPriceEnd: string | null;
+  hasImage: boolean;
+  isActive: boolean;
+  isSaleable: boolean;
+};
+type QuickSaleResponse = { productIds: string[]; products: QuickSaleProduct[] };
+type QuickSaleSuggestion = { product: QuickSaleProduct; quantity: string; revenue: string; receipts: number };
+type CatalogProduct = {
+  id: string;
+  name: string;
+  sku: string;
+  barcode: string | null;
+  salesPrice: string;
+  salesCurrency: string | null;
+  promoPrice: string | null;
+  promoPriceEnd: string | null;
+  imageKey: string | null;
+  isActive: boolean;
+  isSaleable: boolean;
+};
+
+const amount = (value: string, currency?: string | null) =>
+  `${Number(value).toLocaleString("uz-UZ", { maximumFractionDigits: 2 })}${currency ? ` ${currency}` : ""}`;
+
+function QuickSalePrice({ product }: { product: QuickSaleProduct }) {
+  if (!product.promoPrice) return <span className="tabular-nums">{amount(product.salesPrice, product.salesCurrency)}</span>;
+  return (
+    <span className="tabular-nums">
+      <span className="rounded bg-destructive px-1 text-[10px] font-bold uppercase text-white">Aksiya</span>{" "}
+      <span className="font-semibold text-destructive">{amount(product.promoPrice, product.salesCurrency)}</span> <s>{amount(product.salesPrice)}</s>
+    </span>
+  );
+}
+
+/**
+ * Tezkor sotuv assortimenti: kassada katta rasmli kartalar (bosilganda savatga +1), tartibi shu ro'yxatdagidek.
+ * Tavsiya — oxirgi 7/30/90 kunda kassada eng ko'p sotilganlar (qaytarilgani ayirilgan).
+ */
+function QuickSaleCard() {
+  const saved = useApiQuery<QuickSaleResponse>(QUICK_SALE_PATH);
+  const [draft, setDraft] = useState<QuickSaleProduct[] | null>(null);
+  const [days, setDays] = useState<QuickSalePeriod>(30);
+  const [search, setSearch] = useState("");
+  const [term, setTerm] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setTerm(search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const suggestions = useApiQuery<{ suggestions: QuickSaleSuggestion[] }>(`${QUICK_SALE_PATH}/suggestions`, { days, limit: 40 });
+  const found = useApiQuery<{ products: CatalogProduct[] }>(term ? "/api/catalog/products" : null, { search: term, isActive: true, limit: 20 });
+  const save = useApiMutation((productIds: string[]) => api.put<QuickSaleResponse>(QUICK_SALE_PATH, { productIds }), { invalidate: [QUICK_SALE_PATH] });
+
+  if (saved.error) return <p className="text-sm text-destructive">{errorMessage(saved.error)}</p>;
+  if (!saved.data) return <Skeleton className="h-40 rounded-xl" />;
+
+  const list = draft ?? saved.data.products;
+  const inList = new Set(list.map((product) => product.id));
+  const full = list.length >= MAX_QUICK_SALE_ITEMS;
+  const edit = (next: QuickSaleProduct[]) => setDraft(next.slice(0, MAX_QUICK_SALE_ITEMS));
+  const add = (product: QuickSaleProduct) => {
+    if (!inList.has(product.id)) edit([...list, product]);
+  };
+  const move = (index: number, delta: -1 | 1) => {
+    const target = index + delta;
+    if (target < 0 || target >= list.length) return;
+    const next = [...list];
+    [next[index], next[target]] = [next[target]!, next[index]!];
+    edit(next);
+  };
+  const submit = async () => {
+    try {
+      await save.mutateAsync(list.map((product) => product.id));
+      setDraft(null);
+      toast.success("Tezkor sotuv saqlandi — kassalarga sinxronda boradi");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+  const today = new Date().toISOString().slice(0, 10);
+  const fromCatalog = (product: CatalogProduct): QuickSaleProduct => {
+    const promoPrice = activePromoPrice(product, today);
+    return {
+      id: product.id,
+      name: product.name,
+      sku: product.sku,
+      barcode: product.barcode,
+      categoryName: null,
+      unitName: null,
+      salesPrice: product.salesPrice,
+      salesCurrency: product.salesCurrency,
+      promoPrice,
+      promoPriceEnd: promoPrice ? product.promoPriceEnd : null,
+      hasImage: Boolean(product.imageKey),
+      isActive: product.isActive,
+      isSaleable: product.isSaleable,
+    };
+  };
+  const suggestionRows = suggestions.data?.suggestions ?? [];
+  const missing = suggestionRows.filter((row) => !inList.has(row.product.id));
+  const results = (found.data?.products ?? []).filter((product) => product.isSaleable);
+
+  const addButton = (product: QuickSaleProduct) => (
+    <Button size="sm" variant="secondary" className="shrink-0" disabled={inList.has(product.id) || full} onClick={() => add(product)}>
+      {inList.has(product.id) ? (
+        "Qo'shilgan"
+      ) : (
+        <>
+          <Plus className="h-4 w-4 mr-1" /> Qo'shish
+        </>
+      )}
+    </Button>
+  );
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-2">
+      <div className="min-w-0 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-medium">
+            Assortiment{" "}
+            <span className="font-normal text-muted-foreground">
+              · {list.length} / {MAX_QUICK_SALE_ITEMS}
+            </span>
+          </p>
+          <div className="flex gap-1.5">
+            {draft && (
+              <Button size="sm" variant="ghost" disabled={save.isPending} onClick={() => setDraft(null)}>
+                Bekor qilish
+              </Button>
+            )}
+            <Button size="sm" disabled={!draft || save.isPending} onClick={() => void submit()}>
+              <Save className="h-4 w-4 mr-1.5" /> Saqlash
+            </Button>
+          </div>
+        </div>
+        {list.length === 0 ? (
+          <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            Hali mahsulot tanlanmagan. Tavsiyadan yoki qidiruvdan qo'shing — kassada "Tezkor sotuv" tabida katta rasmli kartalar bo'lib chiqadi.
+          </p>
+        ) : (
+          <ol className="max-h-[28rem] divide-y overflow-y-auto rounded-lg border">
+            {list.map((product, index) => (
+              <li key={product.id} className="flex items-center gap-2 px-2 py-1.5 text-sm">
+                <span className="w-6 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{index + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-center gap-1.5 font-medium">
+                    <span className="truncate">{product.name}</span>
+                    {product.hasImage && <ImageIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="Rasm bor" />}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {product.sku}
+                    {product.categoryName ? ` · ${product.categoryName}` : ""} · <QuickSalePrice product={product} />
+                  </p>
+                </div>
+                <Button size="icon" variant="ghost" className="h-7 w-7" disabled={index === 0} onClick={() => move(index, -1)} aria-label="Yuqoriga">
+                  <ArrowUp className="h-4 w-4" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-7 w-7" disabled={index === list.length - 1} onClick={() => move(index, 1)} aria-label="Pastga">
+                  <ArrowDown className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7 text-destructive"
+                  onClick={() => edit(list.filter((item) => item.id !== product.id))}
+                  aria-label="Olib tashlash"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+
+      <div className="min-w-0 space-y-5">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium">Kassada eng ko'p sotilganlar</p>
+            <div className="flex gap-1">
+              {QUICK_SALE_PERIODS.map((period) => (
+                <Button key={period} size="sm" variant={days === period ? "default" : "secondary"} onClick={() => setDays(period)}>
+                  {period} kun
+                </Button>
+              ))}
+            </div>
+          </div>
+          {suggestions.error ? (
+            <p className="text-sm text-destructive">{errorMessage(suggestions.error)}</p>
+          ) : !suggestions.data ? (
+            <Skeleton className="h-24 rounded-lg" />
+          ) : suggestionRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Oxirgi {days} kunda kassa sotuvi yo'q.</p>
+          ) : (
+            <>
+              <div className="max-h-64 divide-y overflow-y-auto rounded-lg border">
+                {suggestionRows.map((row, index) => (
+                  <div key={row.product.id} className="flex items-center gap-2 px-2 py-1.5 text-sm">
+                    <span className="w-6 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{index + 1}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate">{row.product.name}</p>
+                      <p className="text-xs tabular-nums text-muted-foreground">
+                        {amount(row.quantity)} {row.product.unitName ?? ""} · {row.receipts} chek · {amount(row.revenue)}
+                      </p>
+                    </div>
+                    {addButton(row.product)}
+                  </div>
+                ))}
+              </div>
+              <Button size="sm" variant="outline" disabled={missing.length === 0 || full} onClick={() => edit([...list, ...missing.map((row) => row.product)])}>
+                Hammasini qo'shish ({missing.length})
+              </Button>
+            </>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="quick-sale-search" className="text-sm font-medium">
+            Mahsulot qidirish
+          </label>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input id="quick-sale-search" className="pl-8" placeholder="Nomi, SKU yoki shtrix-kod" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+          {term &&
+            (found.error ? (
+              <p className="text-sm text-destructive">{errorMessage(found.error)}</p>
+            ) : !found.data ? (
+              <Skeleton className="h-16 rounded-lg" />
+            ) : results.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Sotiladigan mahsulot topilmadi</p>
+            ) : (
+              <div className="max-h-64 divide-y overflow-y-auto rounded-lg border">
+                {results.map((product) => {
+                  const row = fromCatalog(product);
+                  return (
+                    <div key={product.id} className="flex items-center gap-2 px-2 py-1.5 text-sm">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate">{product.name}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {product.sku} · <QuickSalePrice product={row} />
+                        </p>
+                      </div>
+                      {addButton(row)}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+        </div>
       </div>
     </div>
   );
@@ -413,6 +680,12 @@ export default function PosDevicesSection() {
           </SettingsGroup>
           <SettingsGroup title="Kassa ko'rinishi" description="Mavzu faqat ko'rinish: hisob, qoldiq va to'lovga ta'sir qilmaydi">
             <AppearanceCard />
+          </SettingsGroup>
+          <SettingsGroup
+            title="Tezkor sotuv"
+            description="Kassada rasmli kartalar bilan tez sotiladigan mahsulotlar. Aksiya narxi mahsulot kartasidan olinadi va serverda hisoblanadi"
+          >
+            <QuickSaleCard />
           </SettingsGroup>
           <SettingsGroup title="Qurilmalar" description="O'chirilgan qurilma serverga ulana olmaydi; qayta yoqilganda offline navbatini yuboradi">
             <DevicesTable />

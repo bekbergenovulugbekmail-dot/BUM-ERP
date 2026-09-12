@@ -9,7 +9,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -40,10 +40,12 @@ import type {
   LocalSupplierPayment,
   MovementPage,
   MovementRow,
+  PosCategory,
   PosContext,
   PosCustomer,
   PosProduct,
   PosSupplier,
+  QuickSaleView,
   PriceInput,
   PriceRow,
   PurchaseInput,
@@ -69,7 +71,16 @@ import type {
 } from "../shared/kassa-api.js";
 import { CUSTOMER_FIELDS, PRICE_FIELDS, SUPPLIER_FIELDS } from "../shared/sync-types.js";
 import { computeLine, fromMinor, mulDivRound, rescale, toMinor } from "../shared/money.js";
-import { computeSale, estimateCashback, listPrice, unitFactor, type CalcConversion, type CalcProduct } from "../shared/sale-calc.js";
+import {
+  activePromoPrice,
+  computeSale,
+  estimateCashback,
+  listPrice,
+  promoDateOf,
+  unitFactor,
+  type CalcConversion,
+  type CalcProduct,
+} from "../shared/sale-calc.js";
 import type {
   AmountLine,
   AnalyticsReport,
@@ -152,6 +163,7 @@ export const DEFAULT_PREFS: DevicePrefs = {
   theme: "light",
   themeLock: null,
   fontScale: "normal",
+  productView: "cards",
   hotkeys: { ...DEFAULT_HOTKEYS },
   blockNegativeStock: false,
   defaultPaymentMethod: "cash",
@@ -174,7 +186,16 @@ const clampInt = (value: unknown, min: number, max: number, fallback: number) =>
 const LABEL_MM = { min: 10, max: 300 };
 const MAX_LABELS_HTML = 30_000_000;
 
-type ProductRow = CalcProduct & { sku: string; barcode: string | null; isActive: boolean; isSaleable: boolean };
+type ProductRow = CalcProduct & { sku: string; barcode: string | null; isActive: boolean; isSaleable: boolean; imageKey?: string | null };
+type CategoryRow = { id: string; name: string; parentId: string | null; sortOrder?: number; isActive: boolean };
+
+const IMAGE_EXTENSIONS = [
+  ["jpg", "image/jpeg"],
+  ["png", "image/png"],
+  ["webp", "image/webp"],
+] as const;
+/** Rasm kaliti o'zgarsa (almashtirilgan) — boshqa versiya: renderer manzili va disk keshi yangilanadi. */
+const imageVersionOf = (key: string | null | undefined) => (key ? createHash("sha256").update(key).digest("hex").slice(0, 16) : null);
 /** Pull'dan kelgan (yoki kassada o'zgartirilgan) valyuta. */
 type LocalCurrencyRow = {
   id: string;
@@ -413,6 +434,8 @@ export class KassaService {
       updater?: AppUpdater;
       /** Yangilanish o'rnatuvchisi yuklanadigan papka (standart — tizim vaqtinchalik papkasi). */
       downloadDir?: string;
+      /** Mahsulot rasmlari keshi (yo'q bo'lsa rasmlar ko'rsatilmaydi — o'rniga belgi). */
+      imageDir?: string;
     },
   ) {
     this.connect();
@@ -714,6 +737,7 @@ export class KassaService {
     const units = this.unitNames();
     const base = this.baseCurrency();
     const rates = this.rates();
+    const today = promoDateOf();
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -724,17 +748,139 @@ export class KassaService {
       unitName: units.get(row.baseUnitId) ?? "",
       salesPrice: row.salesPrice,
       salesCurrency: row.salesCurrency,
-      price: listPrice(row, "1", base, rates),
+      price: listPrice(row, "1", base, rates, today),
+      regularPrice: listPrice(row, "1", base, rates),
+      promo: activePromoPrice(row, today) === null ? null : { endsAt: row.promoPriceEnd ?? null },
       taxRate: row.taxRate,
       taxIncluded: row.taxIncluded,
       stock: fromMinor(stock.get(row.id) ?? 0n, 4),
+      imageVersion: imageVersionOf(row.imageKey),
     }));
   }
 
-  products(input: { query: string; limit?: number }): PosProduct[] {
+  products(input: { query: string; limit?: number; offset?: number; categoryId?: string | null }): PosProduct[] {
     this.requireCashier();
-    const limit = Math.min(Math.max(input.limit ?? 60, 1), 200);
-    return this.toPosProducts(this.store.searchProducts(String(input.query ?? ""), limit) as ProductRow[]);
+    const limit = Math.min(Math.max(Number(input.limit) || 60, 1), 1000);
+    const categoryIds = input.categoryId ? this.categoryTree().withChildren(String(input.categoryId)) : undefined;
+    return this.toPosProducts(this.store.searchProducts(String(input.query ?? ""), limit, { categoryIds, offset: input.offset }) as ProductRow[]);
+  }
+
+  /** Kategoriyalar daraxti: ichki kategoriyalar bilan to'plam va yuqori darajadagi ota (tsiklga chidamli). */
+  private categoryTree() {
+    const rows = this.store.records<CategoryRow>("categories");
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const children = new Map<string, string[]>();
+    for (const row of rows) if (row.parentId) children.set(row.parentId, [...(children.get(row.parentId) ?? []), row.id]);
+    return {
+      byId,
+      withChildren(categoryId: string): string[] {
+        const result = new Set([categoryId]);
+        const queue = [categoryId];
+        while (queue.length > 0) {
+          for (const child of children.get(queue.shift()!) ?? []) {
+            if (!result.has(child)) {
+              result.add(child);
+              queue.push(child);
+            }
+          }
+        }
+        return [...result];
+      },
+      rootOf(categoryId: string): CategoryRow | null {
+        let current = byId.get(categoryId) ?? null;
+        const seen = new Set<string>();
+        while (current?.parentId && byId.has(current.parentId) && !seen.has(current.id)) {
+          seen.add(current.id);
+          current = byId.get(current.parentId)!;
+        }
+        return current;
+      },
+    };
+  }
+
+  /** Kategoriya tablari: mahsulot soni bo'yicha yuqori darajadagi faol kategoriyalar (ichki kategoriyalari qo'shiladi). */
+  private categoryTabs(counts: Iterable<[string | null, number]>): PosCategory[] {
+    const tree = this.categoryTree();
+    const totals = new Map<string, number>();
+    for (const [categoryId, count] of counts) {
+      const root = categoryId ? tree.rootOf(categoryId) : null;
+      if (root?.isActive) totals.set(root.id, (totals.get(root.id) ?? 0) + count);
+    }
+    return [...totals]
+      .map(([id, products]) => ({ row: tree.byId.get(id)!, products }))
+      .sort((a, b) => (a.row.sortOrder ?? 0) - (b.row.sortOrder ?? 0) || a.row.name.localeCompare(b.row.name))
+      .map(({ row, products }) => ({ id: row.id, name: row.name, products }));
+  }
+
+  posCategories(): PosCategory[] {
+    this.requireCashier();
+    return this.categoryTabs(this.store.saleableCountsByCategory());
+  }
+
+  /**
+   * Tezkor sotuv: kompaniya tanlagan mahsulotlar (tartibi bilan; pull config — offline ham). Sotilmaydigan yoki o'chirilgan
+   * mahsulot ko'rsatilmaydi; kategoriya va qidiruv shu ro'yxat ichida.
+   */
+  quickSale(input: { categoryId?: string | null; query?: string }): QuickSaleView {
+    this.requireCashier();
+    const ids = this.config()?.quickSale?.productIds ?? [];
+    const rows: ProductRow[] = [];
+    for (const id of ids) {
+      const row = this.store.product<ProductRow>(id);
+      if (row?.isActive && row.isSaleable) rows.push(row);
+    }
+    const all = this.toPosProducts(rows);
+    const counts = new Map<string | null, number>();
+    for (const product of all) counts.set(product.categoryId, (counts.get(product.categoryId) ?? 0) + 1);
+    const allowed = input.categoryId ? new Set(this.categoryTree().withChildren(String(input.categoryId))) : null;
+    const needle = String(input.query ?? "").trim().toLowerCase();
+    const products = all.filter(
+      (product) =>
+        (!allowed || (product.categoryId !== null && allowed.has(product.categoryId))) &&
+        (!needle || product.name.toLowerCase().includes(needle) || product.sku.toLowerCase() === needle || product.barcode === needle),
+    );
+    return { configured: ids.length > 0, products, categories: this.categoryTabs(counts) };
+  }
+
+  private readonly imageMisses = new Map<string, number>();
+
+  /**
+   * Mahsulot rasmi: diskdagi kesh (rasm versiyasi bo'yicha), bo'lmasa serverdan yuklab keshlanadi. Rasm yo'q, internet yo'q
+   * va keshda yo'q — null (renderer belgi ko'rsatadi). Topilmagan rasm 10 daqiqa, xato — 1 daqiqa qayta so'ralmaydi.
+   */
+  async productImage(input: { productId: string }): Promise<{ data: Buffer; contentType: string } | null> {
+    const dir = this.options.imageDir;
+    const product = this.store.product<ProductRow>(String(input.productId));
+    const version = imageVersionOf(product?.imageKey);
+    if (!dir || !product || !version) return null;
+    const base = path.join(dir, `${product.id}-${version}`);
+    for (const [ext, contentType] of IMAGE_EXTENSIONS) {
+      try {
+        return { data: await readFile(`${base}.${ext}`), contentType };
+      } catch {
+        // keyingi kengaytma
+      }
+    }
+    const missKey = `${product.id}:${version}`;
+    if ((this.imageMisses.get(missKey) ?? 0) > Date.now() || !this.api) return null;
+    try {
+      const image = await this.api.productImage(product.id);
+      if (!image) {
+        this.imageMisses.set(missKey, Date.now() + 10 * 60_000);
+        return null;
+      }
+      const ext = IMAGE_EXTENSIONS.find(([, contentType]) => contentType === image.contentType)?.[0];
+      if (!ext) return null;
+      await mkdir(dir, { recursive: true });
+      // Shu mahsulotning eski versiyalari o'chiriladi; yozish vaqtinchalik fayl orqali (yarim fayl keshda qolmasin)
+      for (const name of await readdir(dir)) if (name.startsWith(`${product.id}-`)) await rm(path.join(dir, name), { force: true });
+      await writeFile(`${base}.${ext}.tmp`, image.data);
+      await rename(`${base}.${ext}.tmp`, `${base}.${ext}`);
+      return image;
+    } catch {
+      this.imageMisses.set(missKey, Date.now() + 60_000);
+      return null;
+    }
   }
 
   /** Etiketka va hujjatlardan qo'shish uchun: berilgan ID'lardagi faol mahsulotlar (tartib saqlanadi). */
@@ -884,7 +1030,8 @@ export class KassaService {
       if (!product || !product.isActive || !product.isSaleable) throw new KassaError("BAD_REQUEST", `${product?.name ?? "Mahsulot"}: sotilmaydi`);
       const factor = unitFactor(product, String(line.unitId), conversions);
       if (!factor) throw new KassaError("BAD_REQUEST", `${product.name}: bu o'lchov birligidan asosiy birlikka konversiya yo'q`);
-      const list = listPrice(product, factor, base, rates);
+      // Aksiya narxi sotuv kunida (server offline chekni ham shu sana bilan tekshiradi)
+      const list = listPrice(product, factor, base, rates, promoDateOf());
       if (list === null) throw new KassaError("BAD_REQUEST", `${product.salesCurrency} valyutasi yoqilmagan — narxni hisoblab bo'lmaydi`);
       const unitPrice = line.unitPrice ?? list;
       const discountPercent = line.discountPercent ?? customerDiscount;
@@ -3119,6 +3266,7 @@ export class KassaService {
       theme: isPosTheme(deviceTheme) ? deviceTheme : "light",
       themeLock: null,
       fontScale: input.fontScale === "large" ? "large" : "normal",
+      productView: input.productView === "table" ? "table" : "cards",
       hotkeys,
       blockNegativeStock: !!input.blockNegativeStock,
       enabledPaymentMethods: methods,

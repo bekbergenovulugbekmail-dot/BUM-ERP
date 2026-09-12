@@ -281,6 +281,13 @@
       "when": 1789216225135,
       "tag": "0039_currency_rate_history",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1789219840248,
+      "tag": "0040_product_images",
+      "breakpoints": true
     }
   ]
 }

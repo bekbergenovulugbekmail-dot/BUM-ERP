@@ -60,13 +60,24 @@ export type PosProduct = {
   unitName: string;
   salesPrice: string;
   salesCurrency: string | null;
-  /** Asosiy valyutada, asosiy birlikda; narx valyutasi kursi yo'q bo'lsa — null (sotib bo'lmaydi). */
+  /** Asosiy valyutada, asosiy birlikda (bugun aksiya bo'lsa — aksiya narxi); narx valyutasi kursi yo'q bo'lsa — null (sotib bo'lmaydi). */
   price: string | null;
+  /** Aksiyasiz narx (aksiya bo'lsa chizib ko'rsatiladi). */
+  regularPrice: string | null;
+  /** Bugun amaldagi aksiya: oxirgi kuni (null — muddatsiz); aksiya yo'q — null. */
+  promo: { endsAt: string | null } | null;
   taxRate: string;
   taxIncluded: boolean;
   /** Qurilmadagi qoldiq: server qoldig'i + sinxron bo'lmagan cheklar/qaytarishlar (asosiy birlikda). */
   stock: string;
+  /** Rasm bor: `bum-image://product/<id>?v=<imageVersion>` (keshlanadi, offline — keshdagisi). */
+  imageVersion: string | null;
 };
+
+export type PosCategory = { id: string; name: string; products: number };
+
+/** Tezkor sotuv: kompaniya assortimenti (tartibi bilan) va undagi kategoriyalar. */
+export type QuickSaleView = { configured: boolean; products: PosProduct[]; categories: PosCategory[] };
 
 /** Jismoniy/yuridik shaxs rekvizitlari (mijoz va ta'minotchi uchun umumiy). */
 export type PartyDetails = {
@@ -591,6 +602,8 @@ export type DevicePrefs = {
   /** Faqat o'qish: kompaniya qulflagan mavzu (null — qulf yo'q, kassir o'zi tanlaydi). */
   themeLock: PosTheme | null;
   fontScale: "normal" | "large";
+  /** Kassa ekranidagi mahsulotlar: rasmli kartalar yoki ixcham jadval. */
+  productView: "cards" | "table";
   hotkeys: Record<HotkeyAction, string>;
   /** Qoldiq yetmasa sotishni taqiqlash (standart — ogohlantirib sotiladi, server nomuvofiqlik qayd etadi). */
   blockNegativeStock: boolean;
@@ -687,7 +700,9 @@ export type KassaChannels = {
   "shift:open": { input: { openingCash: string }; output: AppStatus };
   "shift:close": { input: { closingCash: string }; output: AppStatus };
   "pos:context": { input: void; output: PosContext };
-  "pos:products": { input: { query: string; limit?: number }; output: PosProduct[] };
+  "pos:products": { input: { query: string; limit?: number; offset?: number; categoryId?: string | null }; output: PosProduct[] };
+  "pos:categories": { input: void; output: PosCategory[] };
+  "pos:quick-sale": { input: { categoryId?: string | null; query?: string }; output: QuickSaleView };
   "pos:product-by-code": { input: { code: string }; output: PosProduct | null };
   "pos:products-by-ids": { input: { ids: string[] }; output: PosProduct[] };
   "pos:customers": { input: { query: string }; output: PosCustomer[] };

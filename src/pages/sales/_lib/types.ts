@@ -164,6 +164,9 @@ export type ProductOption = {
   salesPrice: string;
   /** Narx valyutasi; null — asosiy valyuta. Sotuvda joriy kurs bilan hisoblanadi. */
   salesCurrency: string | null;
+  /** Aksiya narxi (sotuv narxi valyutasida) va oxirgi kuni; POS da server shu narxni qo'llaydi. */
+  promoPrice?: string | null;
+  promoPriceEnd?: string | null;
   taxRate: string;
   taxIncluded: boolean;
   isActive: boolean;

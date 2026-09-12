@@ -30,6 +30,7 @@ import {
   type Customer, type PaymentMethod, type PosCustomerSummary, type PosShift, type ProductOption,
   type SalesOrderDetail, type WarehouseOption,
 } from "@/pages/sales/_lib/types.ts";
+import { activePromoPrice } from "@bum/shared";
 
 type CartItem = {
   productId: string;
@@ -263,7 +264,9 @@ export default function POSPage() {
   const onCredit = debtAmount >= 0.01;
 
   // Narxi boshqa valyutada belgilangan mahsulot — joriy kurs bilan (server ham shunday hisoblaydi)
-  const basePriceOf = (p: ProductOption) => currencies.toBase(p.salesPrice, p.salesCurrency);
+  // Aksiya narxi — server bilan bir xil sana (UTC) bo'yicha; server narxni o'zi hisoblaydi va solishtiradi
+  const promoOf = (p: ProductOption) => activePromoPrice(p, new Date().toISOString().slice(0, 10));
+  const basePriceOf = (p: ProductOption) => currencies.toBase(promoOf(p) ?? p.salesPrice, p.salesCurrency);
 
   const addToCart = (p: ProductOption) => {
     const stock = stockOf(p.id);
@@ -557,6 +560,12 @@ export default function POSPage() {
                     <p className="text-xs font-medium leading-tight line-clamp-2">{p.name}</p>
                     <p className="text-[11px] text-muted-foreground font-mono mt-0.5">{p.sku}</p>
                     <p className="text-sm font-bold mt-1 text-primary">{fmt(basePriceOf(p) || 0)} so'm</p>
+                    {promoOf(p) && (
+                      <p className="text-[10px] text-muted-foreground">
+                        <span className="font-semibold text-destructive">AKSIYA</span>{" "}
+                        <s>{fmt(currencies.toBase(p.salesPrice, p.salesCurrency) || 0)}</s>
+                      </p>
+                    )}
                     {p.salesCurrency && p.salesCurrency !== currencies.base && (
                       <p className="text-[10px] text-muted-foreground">{formatMoney(p.salesPrice, p.salesCurrency)}</p>
                     )}

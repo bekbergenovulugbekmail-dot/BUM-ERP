@@ -152,8 +152,33 @@ export function createApiClient(options: {
     /** Kurs o'zgarishlari tarixi; kassir ruxsati (`currency_rates.view`) serverda tekshiriladi. */
     currencyHistory: (cashierId: string, code?: string) =>
       request<{ history: RemoteRateChange[] }>("GET", `/api/pos-device/currencies/history?${searchParams({ cashierId, code })}`),
+    /** Mahsulot rasmi (bayt; S3 dagisi — server imzolangan havolaga yo'naltiradi). Rasm yo'q yoki rasm emas — null. */
+    productImage: async (productId: string): Promise<{ data: Buffer; contentType: string } | null> => {
+      let response: Response;
+      try {
+        response = await fetchImpl(new URL(`/api/pos-device/products/${encodeURIComponent(productId)}/image`, options.baseUrl), {
+          headers: { "x-app-version": options.appVersion, ...(options.token ? { authorization: `Bearer ${options.token}` } : {}) },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (error) {
+        throw new OfflineError(networkFailureMessage(error));
+      }
+      if (response.status === 404) return null;
+      if (!response.ok) {
+        if (response.status >= 502 && response.status <= 504) throw new OfflineError();
+        const json = parseBody(await response.text());
+        throw new ApiError(response.status, json?.code ?? "HTTP_ERROR", json?.message ?? `HTTP ${response.status}`, json?.details);
+      }
+      const contentType = (response.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+      if (!IMAGE_CONTENT_TYPES.includes(contentType)) return null;
+      const data = Buffer.from(await response.arrayBuffer());
+      return data.length > 0 && data.length <= MAX_IMAGE_BYTES ? { data, contentType } : null;
+    },
   };
 }
+
+export const IMAGE_CONTENT_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 function searchParams(query: Record<string, string | number | undefined>): string {
   const params = new URLSearchParams();

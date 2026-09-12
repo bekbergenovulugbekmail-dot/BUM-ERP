@@ -17,11 +17,14 @@
  *   GET  /currencies/history       (token) kurs o'zgarishlari tarixi ?cashierId&code — kassirda `currency_rates.view`
  *   GET  /app-update               (token) yangi versiya bormi (joriy — `x-app-version`), o'rnatuvchi manzili va SHA-256
  *   GET  /releases/:id/download    (token) e'lon qilingan desktop relizini yuklab olish (bo'laklab oqim)
+ *   GET  /products/:id/image       (token) mahsulot rasmi (bazadagisi — mazmun, S3 dagisi — imzolangan havolaga 302)
  *
  * /api/pos/devices — web (sessiya, `pos.devices.manage`):
  *   GET  /                         qurilmalar ro'yxati va e'lon qilingan o'rnatuvchi (`installer`)
  *   GET  /installer/:id/download   o'rnatuvchini yuklab olish (yangi kassa o'rnatish uchun)
  *   GET  /appearance, PUT /appearance   kassa mavzusi: kompaniya qulfi va qulflangan mavzu
+ *   GET  /quick-sale, PUT /quick-sale   tezkor sotuv assortimenti (tartibi bilan, 200 tagacha)
+ *   GET  /quick-sale/suggestions   ?days=7|30|90 — kassada eng ko'p sotilganlar (qaytarishlar ayirilgan)
  *   PATCH /:deviceId               nomi, o'chirish/yoqish
  *   GET  /conflicts                offline sinxron nomuvofiqliklari (`resolved=true` — yopilganlari)
  *   POST /conflicts/:conflictId/resolve   ko'rib chiqildi
@@ -30,8 +33,12 @@ import { Readable } from "node:stream";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { POS_THEMES, badRequest } from "@bum/shared";
+import { MAX_QUICK_SALE_ITEMS, POS_THEMES, badRequest, notFound, type QuickSalePeriod } from "@bum/shared";
 import { getPosAppearance, savePosAppearance } from "./appearance.service.js";
+import { quickSaleAssortment, quickSaleSuggestions, savePosQuickSale } from "./quick-sale.service.js";
+import { VIEW_TTL, loadProductImage } from "../files/files.service.js";
+import { sendStoredImage } from "../files/routes.js";
+import { storageProvider } from "../../shared/storage.js";
 import { db } from "../../db/client.js";
 import { stockMovementType } from "../../db/schema/inventory.js";
 import { posDevices } from "../../db/schema/pos.js";
@@ -93,6 +100,14 @@ const movementsQuery = z.object({
 const productParams = z.object({ productId: z.uuid() });
 const releaseParams = z.object({ releaseId: z.uuid() });
 const appearanceBody = z.strictObject({ locked: z.boolean(), theme: z.enum(POS_THEMES) });
+const quickSaleBody = z.strictObject({ productIds: z.array(z.uuid()).max(MAX_QUICK_SALE_ITEMS) });
+const suggestionsQuery = z.object({
+  days: z
+    .enum(["7", "30", "90"])
+    .default("30")
+    .transform((value) => Number(value) as QuickSalePeriod),
+  limit: z.coerce.number().int().min(1).max(100).default(40),
+});
 const currencyHistoryQuery = z.object({
   cashierId: z.uuid(),
   code: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional(),
@@ -295,6 +310,15 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
       await requirePermission(db, tenant, "currency_rates.view");
       return { history: await listRateHistory(db, context.company.id, { code, limit }) };
     });
+
+    scoped.get("/products/:productId/image", async (req, reply) => {
+      const { productId } = productParams.parse(req.params);
+      const image = await loadProductImage(db, deviceOf(req).company.id, productId);
+      if (image.kind === "database") return sendStoredImage(reply, image);
+      const client = storageProvider.client;
+      if (image.kind === "storage" && client) return reply.redirect(client.signedUrl("GET", image.key, VIEW_TTL), 302);
+      throw notFound("Mahsulot rasmi yo'q");
+    });
   });
 }
 
@@ -328,6 +352,30 @@ export async function posDevicesAdminRoutes(app: FastifyInstance): Promise<void>
       return savePosAppearance(tx, tenant, body, requestMeta(req));
     });
     return { appearance };
+  });
+
+  app.get("/quick-sale", async (req) => {
+    const tenant = await requireTenant(db, authOf(req).user);
+    await requirePermission(db, tenant, "pos.devices.manage");
+    return quickSaleAssortment(db, tenant.company.id);
+  });
+
+  app.put("/quick-sale", async (req) => {
+    const body = quickSaleBody.parse(req.body);
+    const companyId = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      await requirePermission(tx, tenant, "pos.devices.manage");
+      await savePosQuickSale(tx, tenant, body, requestMeta(req));
+      return tenant.company.id;
+    });
+    return quickSaleAssortment(db, companyId);
+  });
+
+  app.get("/quick-sale/suggestions", async (req) => {
+    const query = suggestionsQuery.parse(req.query);
+    const tenant = await requireTenant(db, authOf(req).user);
+    await requirePermission(db, tenant, "pos.devices.manage");
+    return { days: query.days, suggestions: await quickSaleSuggestions(db, tenant.company.id, query) };
   });
 
   app.get("/installer/:releaseId/download", async (req, reply) => {

@@ -31,6 +31,8 @@ const CHANNELS = new Set([
   "shift:close",
   "pos:context",
   "pos:products",
+  "pos:categories",
+  "pos:quick-sale",
   "pos:product-by-code",
   "pos:products-by-ids",
   "pos:customers",

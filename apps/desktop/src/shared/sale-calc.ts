@@ -18,7 +18,20 @@ export type CalcProduct = {
   taxRate: string;
   taxIncluded: boolean;
   categoryId: string | null;
+  /** Aksiya narxi (sotuv narxi valyutasida) va oxirgi kuni (null — muddatsiz). */
+  promoPrice?: string | null;
+  promoPriceEnd?: string | null;
 };
+
+/** Sotuv sanasi aksiya uchun — server bilan bir xil (UTC kuni, YYYY-MM-DD). */
+export const promoDateOf = (at: Date = new Date()): string => at.toISOString().slice(0, 10);
+
+/** Amaldagi aksiya narxi — serverdagi `activePromoPrice` (packages/shared) bilan aynan bir xil qoida. */
+export function activePromoPrice(product: Pick<CalcProduct, "promoPrice" | "promoPriceEnd">, date: string): string | null {
+  if (product.promoPrice === null || product.promoPrice === undefined || product.promoPrice === "") return null;
+  if (product.promoPriceEnd && product.promoPriceEnd < date) return null;
+  return product.promoPrice;
+}
 
 export type CalcConversion = { fromUnitId: string; toUnitId: string; factor: string; productId: string | null };
 
@@ -31,13 +44,17 @@ export function unitFactor(product: Pick<CalcProduct, "id" | "baseUnitId">, unit
   return matches[0]?.factor ?? null;
 }
 
-/** Prays-list narxi asosiy valyutada, tanlangan birlikda. Narx valyutasi yoqilmagan bo'lsa — null. */
-export function listPrice(product: CalcProduct, factor: string, baseCurrency: string, rates: Record<string, string>): string | null {
-  let unitBase = product.salesPrice;
+/**
+ * Prays-list narxi asosiy valyutada, tanlangan birlikda; `promoDate` berilsa — shu kunda amaldagi aksiya narxi (kassa
+ * serveri ham shunday hisoblaydi). Narx valyutasi yoqilmagan bo'lsa — null.
+ */
+export function listPrice(product: CalcProduct, factor: string, baseCurrency: string, rates: Record<string, string>, promoDate?: string): string | null {
+  const price = (promoDate ? activePromoPrice(product, promoDate) : null) ?? product.salesPrice;
+  let unitBase = price;
   if (product.salesCurrency && product.salesCurrency !== baseCurrency) {
     const rate = rates[product.salesCurrency];
     if (!rate) return null;
-    unitBase = scalePrice(product.salesPrice, rate);
+    unitBase = scalePrice(price, rate);
   }
   return scalePrice(unitBase, factor);
 }

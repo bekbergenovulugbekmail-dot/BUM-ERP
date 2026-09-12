@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeSale, listPrice, unitFactor, type SaleCalcInput } from "../src/shared/sale-calc.js";
+import { activePromoPrice, computeSale, listPrice, promoDateOf, unitFactor, type SaleCalcInput } from "../src/shared/sale-calc.js";
 
 const input = (overrides: Partial<SaleCalcInput>): SaleCalcInput => ({
   lines: [],
@@ -109,5 +109,22 @@ describe("Chek hisobi (serverdagi completeSale bilan bir xil)", () => {
     expect(unitFactor(product, "litr", conversions)).toBeNull();
     expect(listPrice(product, "6", "UZS", { USD: "12650.0000" })).toBe("759000.0000");
     expect(listPrice(product, "1", "UZS", {})).toBeNull();
+  });
+
+  it("aksiya narxi: oxirgi kun ham kiradi, muddatsiz, o'tgani va bo'shi yo'q; valyuta va birlik bilan", () => {
+    const base = { id: "p1", name: "Cola", baseUnitId: "dona", salesPrice: "10", salesCurrency: "USD", taxRate: "0", taxIncluded: false, categoryId: null };
+    expect(activePromoPrice({ promoPrice: "8", promoPriceEnd: "2026-09-12" }, "2026-09-12")).toBe("8");
+    expect(activePromoPrice({ promoPrice: "8", promoPriceEnd: "2026-09-11" }, "2026-09-12")).toBeNull();
+    expect(activePromoPrice({ promoPrice: "8", promoPriceEnd: null }, "2030-01-01")).toBe("8");
+    expect(activePromoPrice({ promoPrice: null, promoPriceEnd: "2030-01-01" }, "2026-09-12")).toBeNull();
+    expect(activePromoPrice({}, "2026-09-12")).toBeNull();
+
+    const promo = { ...base, promoPrice: "8", promoPriceEnd: "2026-09-12" };
+    expect(listPrice(promo, "6", "UZS", { USD: "12650" }, "2026-09-12")).toBe("607200.0000");
+    expect(listPrice(promo, "6", "UZS", { USD: "12650" }, "2026-09-13")).toBe("759000.0000");
+    // Sana berilmasa — aksiyasiz narx (masalan, kartadagi chizilgan narx)
+    expect(listPrice(promo, "1", "UZS", { USD: "12650" })).toBe("126500.0000");
+    expect(promoDateOf(new Date("2026-09-12T23:30:00+05:00"))).toBe("2026-09-12");
+    expect(promoDateOf(new Date("2026-09-13T04:59:00+05:00"))).toBe("2026-09-12");
   });
 });

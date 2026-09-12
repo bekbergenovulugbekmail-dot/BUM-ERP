@@ -12,6 +12,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  customType,
   date,
   index,
   integer,
@@ -197,6 +198,30 @@ export const products = pgTable(
     uniqueIndex("products_legacy_id_key").on(t.legacyId),
     check("products_prices_non_negative", sql`${t.purchasePrice} >= 0 AND ${t.salesPrice} >= 0`),
   ],
+);
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
+/**
+ * Mahsulot rasmi bazada — fayl saqlash (S3) sozlanmagan bo'lsa. `products.image_key` shu yozuvning `key` i (`db/…`)
+ * bo'lgandagina amalda; mahsulotga bitta rasm, almashtirilganda ustiga yoziladi.
+ */
+export const productImages = pgTable(
+  "product_images",
+  {
+    productId: uuid("product_id")
+      .primaryKey()
+      .references(() => products.id, { onDelete: "cascade" }),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    content: bytea("content").notNull(),
+    contentType: varchar("content_type", { length: 50 }).notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    ...timestamps(),
+  },
+  (t) => [index("product_images_company_idx").on(t.companyId), check("product_images_size_check", sql`${t.sizeBytes} > 0`)],
 );
 
 // ─── batches ─────────────────────────────────────────────────────────────────
