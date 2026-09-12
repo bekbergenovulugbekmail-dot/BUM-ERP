@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -21,6 +21,8 @@ function fakeApi() {
     analyticsQuery: null as Record<string, string> | null,
     update: { configured: false, available: false, mandatory: false, current: null, latest: null, url: null, sha256: null, notes: null } as Record<string, unknown>,
     installer: Buffer.alloc(0),
+    interruptAt: null as number | null,
+    rangeHeaders: [] as string[],
   };
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const fetchImpl = (async (input: URL | RequestInfo, init?: RequestInit) => {
@@ -85,6 +87,31 @@ function fakeApi() {
           ],
           nextCursor: "c1",
         });
+      case "/api/pos-device/releases/r2/download": {
+        // Range'ni qo'llab-quvvatlaydigan server; `interruptAt` — shu baytda aloqa uziladi
+        if (!authed) return json(401, { code: "UNAUTHENTICATED", message: "token" });
+        const headers = init?.headers as Record<string, string>;
+        state.rangeHeaders.push(headers.range ?? "");
+        const etag = `"${createHash("sha256").update(state.installer).digest("hex")}"`;
+        const match = /^bytes=(\d+)-$/.exec(headers.range ?? "");
+        const start = match && headers["if-range"] === etag ? Number(match[1]) : 0;
+        const cut = state.interruptAt !== null && state.interruptAt > start ? state.interruptAt : null;
+        state.interruptAt = null;
+        let sent = false;
+        const stream = new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            if (!sent) {
+              sent = true;
+              controller.enqueue(new Uint8Array(state.installer.subarray(start, cut ?? state.installer.length)));
+              if (cut === null) controller.close();
+              return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 30));
+            controller.error(new TypeError("terminated"));
+          },
+        });
+        return new Response(stream, { status: start > 0 ? 206 : 200, headers: { etag } });
+      }
       case "/api/pos-device/releases/r1/download":
         // Server bazasidagi reliz — faqat qurilma tokeni bilan
         if (!authed) return json(401, { code: "UNAUTHENTICATED", message: "token" });
@@ -663,6 +690,27 @@ describe("Kassa xizmati (main jarayon)", () => {
       await expect(kassa.downloadUpdate()).resolves.toMatchObject({ latest: "0.3.0", downloaded: true });
     } finally {
       await rm(nextFile, { force: true });
+    }
+
+    // Uzilgan yuklab olish: 27% va 70% da aloqa uziladi — har safar `.part` dan (Range) davom etadi, 0 dan emas
+    const large = randomBytes(300_000);
+    api.state.installer = large;
+    api.state.update = { ...api.state.update, latest: "0.4.0", url: "/api/pos-device/releases/r2/download", sha256: createHash("sha256").update(large).digest("hex") };
+    const largeFile = path.join(tmpdir(), "BUM-POS-KASSA-Setup-0.4.0.exe");
+    try {
+      api.state.interruptAt = 81_000;
+      await expect(kassa.downloadUpdate()).rejects.toMatchObject({ code: "OFFLINE" });
+      await expect(kassa.checkUpdate()).resolves.toMatchObject({ downloaded: false, partialBytes: 81_000 });
+      api.state.interruptAt = 210_000;
+      await expect(kassa.downloadUpdate()).rejects.toMatchObject({ code: "OFFLINE" });
+      await expect(kassa.checkUpdate()).resolves.toMatchObject({ partialBytes: 210_000 });
+      await expect(kassa.downloadUpdate()).resolves.toMatchObject({ latest: "0.4.0", downloaded: true, partialBytes: 0 });
+      expect(api.state.rangeHeaders).toEqual(["", "bytes=81000-", "bytes=210000-"]);
+      expect((await readFile(largeFile)).equals(large)).toBe(true);
+      await expect(kassa.checkUpdate()).resolves.toMatchObject({ downloaded: true, partialBytes: 0 });
+    } finally {
+      await rm(largeFile, { force: true });
+      await rm(`${largeFile}.part`, { force: true });
     }
     await expect(kassa.installUpdate()).rejects.toMatchObject({ code: "CHECKSUM_MISMATCH" });
   });

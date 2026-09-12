@@ -815,6 +815,8 @@ export const RU_PHRASES: Record<string, string> = {
   "Masalan: https://www.bum-erp.uz": "Например: https://www.bum-erp.uz",
   "Server sertifikati bu manzilga mos emas — manzilni tekshiring (masalan https://www.bum-erp.uz)": "Сертификат сервера не подходит к этому адресу — проверьте адрес (например, https://www.bum-erp.uz)",
   "Server topilmadi — manzilni tekshiring": "Сервер не найден — проверьте адрес",
+  "Yuklab olishni davom ettirish": "Продолжить загрузку",
+  "Yuklab olish uzildi — qayta bosing, to'xtagan joyidan davom etadi": "Загрузка прервалась — нажмите ещё раз, она продолжится с места остановки",
   "Qurilma allaqachon ro'yxatdan o'tgan": "Устройство уже зарегистрировано",
   "Qurilma ro'yxatdan o'tmagan": "Устройство не зарегистрировано",
   "PIN 4–8 raqamdan iborat bo'lsin": "PIN должен состоять из 4–8 цифр",
@@ -901,6 +903,7 @@ export const RU_PHRASES: Record<string, string> = {
 };
 
 export const RU_PATTERNS: [string, string][] = [
+  ["Oldingi yuklab olish uzilgan: {} MB yuklangan — shu joydan davom etadi.", "Предыдущая загрузка прервалась: загружено {} МБ — продолжится с этого места."],
   // ─── Sotuv ekrani va chek (pos-screen.tsx, receipt-dialog.tsx, held-dialog.tsx) ───
   ["{}: {} valyutasi yoqilmagan — narx yo'q", "{}: валюта {} не включена — нет цены"],
   ["\"{}\" — mahsulot topilmadi", "«{}» — товар не найден"],

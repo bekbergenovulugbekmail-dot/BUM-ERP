@@ -260,6 +260,13 @@
       "when": 1789206344625,
       "tag": "0036_pos_deletions_releases",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1789212888317,
+      "tag": "0037_resumable_desktop_releases",
+      "breakpoints": true
     }
   ]
 }

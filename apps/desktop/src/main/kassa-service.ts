@@ -8,9 +8,12 @@
  * sifatida qayd etadi) — kassir ekranda ogohlantirishni ko'radi.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
+import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_PATTERN } from "../shared/hotkeys.js";
 import type {
   AppStatus,
@@ -3013,18 +3016,37 @@ export class KassaService {
     }
   }
 
+  /** Faylni oqim bilan xeshlash (100 MB+ o'rnatuvchi xotiraga to'liq yuklanmaydi). */
+  private static async hashFile(file: string) {
+    const hash = createHash("sha256");
+    for await (const chunk of createReadStream(file)) hash.update(chunk as Buffer);
+    return hash.digest("hex");
+  }
+
   private static async fileMatches(file: string, sha256: string) {
     try {
-      return createHash("sha256").update(await readFile(file)).digest("hex") === sha256;
+      return (await KassaService.hashFile(file)) === sha256;
     } catch {
       return false;
     }
+  }
+
+  private static async fileSize(file: string) {
+    return (await stat(file).catch(() => null))?.size ?? 0;
+  }
+
+  /** Uzilgan yuklab olish: qaysi reliz va qism fayl (`.part`). */
+  private partialUpdate() {
+    return this.store.getMeta<{ version: string; sha256: string; file: string }>("updatePartial");
   }
 
   private async toUpdateInfo(remote: RemoteUpdate): Promise<UpdateInfo> {
     const saved = this.savedUpdate();
     const downloaded =
       remote.available && !!saved && saved.version === remote.latest && saved.sha256 === remote.sha256 && (await KassaService.fileMatches(saved.file, saved.sha256));
+    const partial = this.partialUpdate();
+    const partialBytes =
+      !downloaded && remote.available && partial && partial.version === remote.latest && partial.sha256 === remote.sha256 ? await KassaService.fileSize(partial.file) : 0;
     return {
       configured: remote.configured,
       available: remote.available,
@@ -3033,6 +3055,7 @@ export class KassaService {
       latest: remote.latest,
       notes: remote.notes,
       downloaded,
+      partialBytes,
     };
   }
 
@@ -3056,24 +3079,56 @@ export class KassaService {
     const target = sameOrigin ? new URL(remote.url, apiUrl!) : new URL(remote.url);
     const info = await this.toUpdateInfo(remote);
     if (info.downloaded) return info;
+
+    const file = path.join(this.options.downloadDir ?? tmpdir(), `BUM-POS-KASSA-Setup-${remote.latest}.exe`);
+    const part = `${file}.part`;
+    // Uzilgan yuklab olish faqat shu reliz (versiya va SHA-256) uchun davom etadi; boshqasining qismi o'chiriladi
+    const previous = this.partialUpdate();
+    if (!previous || previous.version !== remote.latest || previous.sha256 !== remote.sha256 || previous.file !== part) {
+      if (previous?.file) await rm(previous.file, { force: true });
+      await rm(part, { force: true });
+      this.store.setMeta("updatePartial", { version: remote.latest, sha256: remote.sha256, file: part });
+    }
+    const offset = await KassaService.fileSize(part);
+    const headers: Record<string, string> = sameOrigin && token ? { authorization: `Bearer ${token}`, "x-app-version": this.options.appVersion } : {};
+    if (offset > 0) {
+      headers.range = `bytes=${offset}-`;
+      // ETag = SHA-256: server boshqa fayl bersa Range e'tiborsiz qolib butun fayl keladi (qismlar aralashmaydi)
+      headers["if-range"] = `"${remote.sha256}"`;
+    }
     let response: Response;
     try {
-      response = await (this.options.fetchImpl ?? fetch)(target, {
-        headers: sameOrigin && token ? { authorization: `Bearer ${token}`, "x-app-version": this.options.appVersion } : {},
-        signal: AbortSignal.timeout(15 * 60_000),
-      });
+      response = await (this.options.fetchImpl ?? fetch)(target, { headers, signal: AbortSignal.timeout(60 * 60_000) });
     } catch {
       throw new KassaError("OFFLINE", "Yangilanishni yuklab bo'lmadi — internetni tekshiring");
     }
-    if (!response.ok) throw new KassaError("DOWNLOAD_FAILED", `Yangilanish yuklanmadi (HTTP ${response.status})`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (createHash("sha256").update(bytes).digest("hex") !== remote.sha256) {
+    if (response.status === 416 && offset > 0) {
+      // Qism fayl serverdagidan uzun — boshidan
+      await rm(part, { force: true });
+      return this.downloadUpdate();
+    }
+    if ((response.status !== 200 && response.status !== 206) || !response.body) {
+      throw new KassaError("DOWNLOAD_FAILED", `Yangilanish yuklanmadi (HTTP ${response.status})`);
+    }
+    const append = response.status === 206 && offset > 0;
+    const handle = await open(part, append ? "a" : "w");
+    try {
+      // Har bo'lak diskka yozilgach keyingisi o'qiladi — uzilsa ham yozilgan qism saqlanadi
+      for await (const chunk of Readable.fromWeb(response.body as unknown as WebReadableStream)) await handle.write(chunk as Buffer);
+    } catch {
+      throw new KassaError("OFFLINE", "Yuklab olish uzildi — qayta bosing, to'xtagan joyidan davom etadi");
+    } finally {
+      await handle.close();
+    }
+    if ((await KassaService.hashFile(part)) !== remote.sha256) {
+      await rm(part, { force: true });
+      this.store.deleteMeta("updatePartial");
       throw new KassaError("CHECKSUM_MISMATCH", "Yuklangan fayl nazorat yig'indisi mos emas — o'rnatilmaydi");
     }
-    const file = path.join(this.options.downloadDir ?? tmpdir(), `BUM-POS-KASSA-Setup-${remote.latest}.exe`);
-    await writeFile(file, bytes);
+    await rename(part, file);
+    this.store.deleteMeta("updatePartial");
     this.store.setMeta("updateFile", { version: remote.latest, file, sha256: remote.sha256 });
-    return { ...info, downloaded: true };
+    return { ...info, downloaded: true, partialBytes: 0 };
   }
 
   /** Yuklangan o'rnatuvchini ishga tushirish (fayl qayta tekshiriladi). Lokal baza va navbat saqlanib qoladi. */

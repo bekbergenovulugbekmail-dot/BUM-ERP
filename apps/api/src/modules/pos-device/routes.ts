@@ -39,7 +39,7 @@ import { authOf, requireAuth } from "../auth/guard.js";
 import { assertCompanyWritable, effectivePermissions, requirePermission, requireTenant, requireTenantForWrite } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { listConflicts, resolveConflict } from "./conflicts.service.js";
-import { currentRelease, downloadableRelease, releaseChunks } from "../platform/desktop-releases.service.js";
+import { currentRelease, downloadableRelease, parseByteRange, releaseByteRange, releaseChunks } from "../platform/desktop-releases.service.js";
 import { desktopUpdate } from "./app-update.service.js";
 import { deviceAnalytics } from "./device-analytics.service.js";
 import { cashierTenant, deviceOf, requireDevice } from "./device-auth.js";
@@ -89,15 +89,30 @@ const movementsQuery = z.object({
 const productParams = z.object({ productId: z.uuid() });
 const releaseParams = z.object({ releaseId: z.uuid() });
 
-/** O'rnatuvchini bazadagi bo'laklardan oqim bilan yuborish (xotirada bitta 4 MB bo'lak). */
-function sendRelease(reply: FastifyReply, release: { id: string; fileName: string; size: number; sha256: string }) {
-  return reply
+/**
+ * O'rnatuvchini bazadagi bo'laklardan oqim bilan yuborish (xotirada bitta bo'lak). HTTP Range: uzilgan yuklab olish
+ * to'xtagan joyidan davom etadi; `If-Range` ETag (SHA-256) mos kelmasa — butun fayl (boshqa reliz qismi qo'shilib ketmasin).
+ */
+function sendRelease(req: FastifyRequest, reply: FastifyReply, release: { id: string; fileName: string; size: number; sha256: string; chunkSize: number }) {
+  const etag = `"${release.sha256}"`;
+  reply
     .header("content-type", "application/octet-stream")
-    .header("content-length", String(release.size))
     .header("content-disposition", `attachment; filename="${release.fileName.replace(/[^\w.-]/g, "_")}"`)
+    .header("accept-ranges", "bytes")
+    .header("etag", etag)
     .header("x-content-sha256", release.sha256)
-    .header("cache-control", "no-store")
-    .send(Readable.from(releaseChunks(db, release.id)));
+    .header("cache-control", "no-store");
+  const ifRange = req.headers["if-range"];
+  const range = typeof ifRange === "string" && ifRange !== etag ? null : parseByteRange(req.headers.range, release.size);
+  if (range === "unsatisfiable") return reply.status(416).header("content-range", `bytes */${release.size}`).send();
+  if (range) {
+    return reply
+      .status(206)
+      .header("content-range", `bytes ${range.start}-${range.end}/${release.size}`)
+      .header("content-length", String(range.end - range.start + 1))
+      .send(Readable.from(releaseByteRange(db, release.id, release.chunkSize, range.start, range.end)));
+  }
+  return reply.header("content-length", String(release.size)).send(Readable.from(releaseChunks(db, release.id)));
 }
 const analyticsQuery = z
   .object({ from: z.iso.date(), to: z.iso.date(), cashierId: z.uuid() })
@@ -173,7 +188,7 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
 
     scoped.get("/releases/:releaseId/download", async (req, reply) => {
       const { releaseId } = releaseParams.parse(req.params);
-      return sendRelease(reply, await downloadableRelease(db, releaseId));
+      return sendRelease(req, reply, await downloadableRelease(db, releaseId));
     });
 
     scoped.post("/cashiers/login", async (req) => {
@@ -285,7 +300,7 @@ export async function posDevicesAdminRoutes(app: FastifyInstance): Promise<void>
     const { releaseId } = releaseParams.parse(req.params);
     const tenant = await requireTenant(db, authOf(req).user);
     await requirePermission(db, tenant, "pos.devices.manage");
-    return sendRelease(reply, await downloadableRelease(db, releaseId));
+    return sendRelease(req, reply, await downloadableRelease(db, releaseId));
   });
 
   app.get("/conflicts", async (req) => {

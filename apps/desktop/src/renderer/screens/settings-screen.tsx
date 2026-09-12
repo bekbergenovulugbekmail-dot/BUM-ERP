@@ -518,11 +518,14 @@ function VersionPanel({ overview, pending }: { overview: SettingsOverview; pendi
                 {info.mandatory && <span className="ml-2 text-destructive">majburiy</span>}
               </p>
               {info.notes && <p className="whitespace-pre-line text-muted-foreground">{info.notes}</p>}
-              {pending > 0 && <p className="text-amber-700">Navbatda {pending} ta amal bor — ular o'rnatishdan keyin ham saqlanadi va yuboriladi.</p>}
+              {!info.downloaded && info.partialBytes > 0 && (
+                <p className="text-muted-foreground">Oldingi yuklab olish uzilgan: {(info.partialBytes / 1024 / 1024).toFixed(1)} MB yuklangan — shu joydan davom etadi.</p>
+              )}
+              {pending > 0 &&<p className="text-amber-700">Navbatda {pending} ta amal bor — ular o'rnatishdan keyin ham saqlanadi va yuboriladi.</p>}
               <div className="flex gap-2">
                 {!info.downloaded ? (
                   <Button disabled={busy !== null} onClick={() => void run("download")}>
-                    {busy === "download" ? "Yuklanmoqda…" : "Yuklab olish"}
+                    {busy === "download" ? "Yuklanmoqda…" : info.partialBytes > 0 ? "Yuklab olishni davom ettirish" : "Yuklab olish"}
                   </Button>
                 ) : (
                   <Button disabled={busy !== null} onClick={() => void run("install")}>

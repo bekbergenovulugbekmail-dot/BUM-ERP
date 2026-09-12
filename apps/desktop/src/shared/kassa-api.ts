@@ -606,6 +606,8 @@ export type UpdateInfo = {
   notes: string | null;
   /** Yuklab olingan va SHA-256 tekshirilgan o'rnatuvchi tayyor. */
   downloaded: boolean;
+  /** Uzilgan yuklab olishning diskdagi qismi (bayt) — "Yuklab olish" shu joydan davom etadi. */
+  partialBytes: number;
 };
 
 /** Sozlamalar oynasi uchun qurilmadagi ma'lumotlar (offline ham). */

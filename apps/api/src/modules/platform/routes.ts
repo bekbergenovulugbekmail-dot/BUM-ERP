@@ -14,7 +14,11 @@
  *   POST  /users/:userId/platform-admin  platforma adminini tayinlash (faqat bootstrap admin)
  *   GET   /settings, PUT /settings       platforma sozlamalari (ro'yxatdan o'tish ham)
  *   GET   /desktop-releases              desktop kassa relizlari
- *   POST  /desktop-releases?version=&fileName=   o'rnatuvchini yuklash (application/octet-stream, oqim bilan)
+ *   POST  /desktop-releases/uploads      bo'laklab yuklashni boshlash/davom ettirish {version, fileName, size, sha256, chunkSize}
+ *   GET   /desktop-releases/uploads/:id  serverdagi bo'laklar (qayerdan davom etish)
+ *   PUT   /desktop-releases/uploads/:id/chunks/:index   bitta bo'lak (octet-stream, ixtiyoriy x-chunk-sha256)
+ *   POST  /desktop-releases/uploads/:id/complete | /abort   SHA-256 tekshirib yakunlash (mos emas — 422) | bekor qilish
+ *   POST  /desktop-releases?version=&fileName=   o'rnatuvchini bitta oqim bilan yuklash (400 MB gacha)
  *   PATCH /desktop-releases/:releaseId   izoh, majburiy versiya
  *   POST  /desktop-releases/:releaseId/publish | /archive   e'lon qilish (oldingisi arxivga) | arxivlash
  *
@@ -44,13 +48,23 @@ import {
   setCompanyStatus,
 } from "./company.service.js";
 import {
+  DEFAULT_UPLOAD_CHUNK_BYTES,
   MAX_RELEASE_BYTES,
+  MAX_STREAM_RELEASE_BYTES,
+  MAX_UPLOAD_CHUNK_BYTES,
+  MIN_UPLOAD_CHUNK_BYTES,
   RELEASE_VERSION,
+  abortUpload,
   archiveRelease,
+  completeUpload,
   listReleases,
   publishRelease,
+  putChunk,
+  readChunkBody,
+  startUpload,
   updateRelease,
   uploadRelease,
+  uploadState,
 } from "./desktop-releases.service.js";
 import {
   getPlatformSettings,
@@ -105,16 +119,22 @@ const userStatusBody = z.object({ isActive: z.boolean() });
 const platformAdminBody = z.strictObject({ isPlatformAdmin: z.boolean() });
 
 const releaseParams = z.object({ releaseId: z.uuid() });
+// Xavfsiz nom: faqat harf, raqam, bo'shliq va `_ . ( ) -` — yo'l (../, \) bo'lolmaydi
+const releaseFileName = z.string().trim().min(5).max(200).regex(/^[\w .()-]+\.exe$/i, "Fayl nomi .exe bilan tugasin");
+const releaseVersion = z.string().trim().regex(RELEASE_VERSION, "Versiya formati: 1.2.3");
 const releaseUploadQuery = z.object({
-  version: z.string().trim().regex(RELEASE_VERSION, "Versiya formati: 1.2.3"),
-  fileName: z
-    .string()
-    .trim()
-    .min(5)
-    .max(200)
-    .regex(/^[\w .()-]+\.exe$/i, "Fayl nomi .exe bilan tugasin")
-    .default("BUM-POS-KASSA-Setup.exe"),
+  version: releaseVersion,
+  fileName: releaseFileName.default("BUM-POS-KASSA-Setup.exe"),
 });
+const uploadStartBody = z.strictObject({
+  version: releaseVersion,
+  fileName: releaseFileName,
+  size: z.number().int().min(2).max(MAX_RELEASE_BYTES),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/, "SHA-256 — 64 ta kichik hex belgi"),
+  chunkSize: z.number().int().min(MIN_UPLOAD_CHUNK_BYTES).max(MAX_UPLOAD_CHUNK_BYTES).default(DEFAULT_UPLOAD_CHUNK_BYTES),
+});
+const uploadParams = z.object({ uploadId: z.uuid() });
+const chunkParams = z.object({ uploadId: z.uuid(), index: z.coerce.number().int().min(0).max(100_000) });
 const releasePatchBody = z.strictObject({
   notes: z.string().trim().max(2000).nullable().optional(),
   minVersion: z.string().trim().regex(RELEASE_VERSION, "Majburiy versiya formati: 1.2.3").nullable().optional(),
@@ -213,7 +233,49 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/desktop-releases", async () => ({ releases: await listReleases(db) }));
 
-  app.post("/desktop-releases", { bodyLimit: MAX_RELEASE_BYTES }, async (req, reply) => {
+  // ─ bo'laklab, davom ettiriladigan yuklash
+  app.post("/desktop-releases/uploads", async (req, reply) => {
+    const body = uploadStartBody.parse(req.body);
+    const { user } = authOf(req);
+    const upload = await withTransaction((tx) => startUpload(tx, body, user, requestMeta(req)));
+    reply.status(201);
+    return { upload };
+  });
+
+  app.get("/desktop-releases/uploads/:uploadId", async (req) => {
+    const { uploadId } = uploadParams.parse(req.params);
+    return { upload: await uploadState(db, uploadId) };
+  });
+
+  app.put("/desktop-releases/uploads/:uploadId/chunks/:index", { bodyLimit: MAX_UPLOAD_CHUNK_BYTES + 1024 }, async (req) => {
+    const { uploadId, index } = chunkParams.parse(req.params);
+    if (!(req.body instanceof Readable)) throw badRequest("Bo'lak application/octet-stream sifatida yuborilsin");
+    const data = await readChunkBody(req.body);
+    const header = req.headers["x-chunk-sha256"];
+    const chunkSha256 = typeof header === "string" && /^[a-f0-9]{64}$/.test(header) ? header : undefined;
+    return withTransaction((tx) => putChunk(tx, uploadId, index, data, chunkSha256));
+  });
+
+  app.post("/desktop-releases/uploads/:uploadId/complete", async (req, reply) => {
+    const { uploadId } = uploadParams.parse(req.params);
+    const { user } = authOf(req);
+    const result = await withTransaction((tx) => completeUpload(tx, uploadId, user, requestMeta(req)));
+    if (!result.verified) {
+      // `failed` holati saqlandi (tranzaksiya yakunlandi) — mijozga aniq xato
+      reply.status(422);
+      return { code: "CHECKSUM_MISMATCH", message: result.message, details: { release: result.release } };
+    }
+    return { release: result.release };
+  });
+
+  app.post("/desktop-releases/uploads/:uploadId/abort", async (req) => {
+    const { uploadId } = uploadParams.parse(req.params);
+    const { user } = authOf(req);
+    return { aborted: await withTransaction((tx) => abortUpload(tx, uploadId, user, requestMeta(req))) };
+  });
+
+  // ─ bitta oqim bilan (400 MB gacha)
+  app.post("/desktop-releases", { bodyLimit: MAX_STREAM_RELEASE_BYTES }, async (req, reply) => {
     const { version, fileName } = releaseUploadQuery.parse(req.query);
     if (!(req.body instanceof Readable)) throw badRequest("Fayl application/octet-stream sifatida yuborilsin");
     const stream = req.body;

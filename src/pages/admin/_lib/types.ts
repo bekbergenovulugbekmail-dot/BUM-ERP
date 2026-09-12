@@ -115,11 +115,21 @@ export type DesktopRelease = {
   sha256: string;
   notes: string | null;
   minVersion: string | null;
-  status: "draft" | "published" | "archived";
+  /** uploading — qisman (davom ettirish mumkin); failed — SHA-256 mos kelmadi. */
+  status: "uploading" | "draft" | "published" | "archived" | "failed";
+  chunkSize: number;
+  expectedSize: number | null;
+  expectedSha256: string | null;
+  error: string | null;
+  /** Serverdagi bo'laklar hajmi (yuklanayotganda — qancha qabul qilingan). */
+  receivedBytes?: number;
   publishedAt: string | null;
   createdAt: string;
   uploadedByName?: string | null;
 };
+
+/** `POST /api/platform/desktop-releases/uploads` — bo'laklab yuklash sessiyasi. */
+export type ReleaseUpload = DesktopRelease & { totalChunks: number; receivedChunks: number[]; receivedBytes: number };
 
 /** Audit `details` — jsonb; ro'yxatda bir qatorli matn. */
 export function formatDetails(details: unknown): string | null {

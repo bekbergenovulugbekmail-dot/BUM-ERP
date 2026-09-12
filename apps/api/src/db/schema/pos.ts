@@ -155,14 +155,22 @@ export const desktopReleases = pgTable(
     notes: text("notes"),
     /** Bundan eski versiyalar uchun yangilanish majburiy. */
     minVersion: varchar("min_version", { length: 32 }),
+    /** uploading (qisman) → draft (to'liq, SHA-256 tekshirilgan) → published → archived; failed — SHA-256 mos kelmadi. */
     status: varchar("status", { length: 16 }).notNull().default("draft"),
+    /** Bo'lak hajmi (bayt): bo'laklab yuklashda mijoz tanlaydi, bitta oqim bilan yuklanganda — 4 MB. */
+    chunkSize: integer("chunk_size").notNull().default(4 * 1024 * 1024),
+    /** Bo'laklab yuklash sessiyasi: mijoz aytgan hajm va SHA-256 — yakunlashda server hisoblagani bilan solishtiriladi. */
+    expectedSize: integer("expected_size"),
+    expectedSha256: varchar("expected_sha256", { length: 64 }),
+    /** `failed` sababi. */
+    error: text("error"),
     uploadedBy: uuid("uploaded_by").references(() => users.id, { onDelete: "set null" }),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     ...timestamps(),
   },
   (t) => [
     uniqueIndex("desktop_releases_version_key").on(t.version),
-    check("desktop_releases_status", sql`${t.status} in ('draft', 'published', 'archived')`),
+    check("desktop_releases_status", sql`${t.status} in ('uploading', 'draft', 'published', 'archived', 'failed')`),
   ],
 );
 

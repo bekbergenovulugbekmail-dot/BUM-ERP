@@ -1032,6 +1032,36 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 - yangi kassa o'rnatish web'dan: Sozlamalar → "Kassa qurilmalari" → "Ilovani o'rnatish" — e'lon qilingan o'rnatuvchi (versiya, hajm, izoh, SHA-256) va "Yuklab olish" (`pos.devices.manage`, sessiya bilan). API: `GET /api/pos/devices` javobida `installer`, `GET /api/pos/devices/installer/:releaseId/download` (kassir — 403, kirishsiz — 401); nginx uzoq yuklab olish qoidasiga qo'shildi. Test `pos-deletions-releases` kengaytirildi. Commit `25848e6`, API va web deploy SUCCESS; production (`www.bum-erp.uz`): yangi marshrut kirishsiz 401, sozlamalar sahifasi 200
 - qolgan (foydalanuvchi): `bum-erp.uz` DNS yozuvini Railway'ga o'tkazish (yuqoridagi "Keyingi qadam" → DNS); kod imzolash sertifikati (OV/EV) — sotib olinadi; o'rnatuvchini Admin panel → "Desktop kassa" orqali yuklab e'lon qilish (platforma admini kirishi kerak)
 
+## Desktop POS master prompt (2026-09-12) — audit, reja va bosqichlar
+
+Talablar hujjati: `BUMERP_DESKTOP.docx` — aralash to'lov, tezkor sotuv, 9 mavzu, valyuta kurslari, tarozi, davom ettiriladigan o'rnatuvchi yuklash/yuklab olish.
+
+**Audit (mavjud holat, kod bo'yicha):**
+- to'lov: web POS va offline `sale.complete` — bitta asosiy usul (`paymentMethod` + `amountPaid`) + balans/keshbek + har valyutaga bitta naqd/karta; `customer_payments` to'lov taqsimoti vazifasini bajaradi (usul, summa, valyuta, kurs, hisob, jurnal); `pos_shifts` da bank/o'tkazma yig'indisi yo'q; qaytarishda bitta `refundMethod`; web savdoda idempotentlik kaliti yo'q (offline — `opId` bor)
+- valyuta: `company_currencies` va `exchange_rates` tarixi (eski kurs saqlanmaydi); hujjatlarda kurs snapshot bor va qayta hisoblanmaydi; `currency_rates.*` ruxsatlari yo'q; kassada faqat ko'rish
+- mavzular: faqat yorug'/qorong'i (`.dark`), sozlama qurilma darajasida (kassir bo'yicha emas), ~119 qattiq rang klassi
+- tezkor sotuv: yo'q; POS ro'yxati — jadval (rasm, kategoriya tablari yo'q); mahsulot rasmi `imageKey` (S3, production'da sozlanmagan) pull'da yo'q; aksiya narxi (`promoPrice`) kassada ham, serverda ham narx hisobiga qo'llanmaydi
+- tarozi: yo'q — tortiladigan mahsulot/PLU maydonlari va serial/USB kutubxonasi yo'q
+- o'rnatuvchi: bitta so'rovda oqim bilan yuklash (uzilsa 0% dan), yuklab olishda Range yo'q
+
+| # | Bosqich | Holat |
+|---|---------|-------|
+| K1 | Davom ettiriladigan o'rnatuvchi: bo'laklab yuklash, HTTP Range bilan yuklab olish, `.part` | ✅ |
+| K2 | Aralash to'lov (naqd + karta + bank) — server, offline sinxron, qaytarishda tarkib, smena yig'indilari, idempotentlik | ⏳ |
+| K3 | Valyuta kurslari — ruxsatlar, tarix (eski → yangi), kassadan tahrirlash, offline holat | ⏳ |
+| K4 | 9 mavzu, kassir tanlovi, kompaniya qulfi | ⏳ |
+| K5 | Tezkor sotuv — assortiment, 7/30/90 kunlik top, rasm keshi, kategoriya, aksiya narxi | ⏳ |
+| K6 | Tarozi — ScaleProvider adapterlari, sozlamalar, sinxron navbati, og'irlik (protokol hujjati bo'lmasa — simulyator va aniq hisobot, soxta "ulandi" yo'q) | ⏳ |
+
+**K1 — davom ettiriladigan o'rnatuvchi** (migratsiya 0037 — faqat yangi ustunlar va holatlar):
+- `desktop_releases`: `uploading` (qisman) → `draft` (to'liq, SHA-256 tekshirilgan) → `published` → `archived`; `failed` — SHA-256 mos emas. Ustunlar `chunk_size`, `expected_size`, `expected_sha256`, `error`
+- API (platforma admini): `POST /api/platform/desktop-releases/uploads` {version, fileName, size, sha256, chunkSize 1–16 MB} — shu fayl bilan yuklanayotgan sessiya bo'lsa o'shani qaytaradi (davom ettirish), boshqa fayl — 409, `failed` versiya qayta boshlanadi; `GET …/uploads/:id` — serverdagi bo'laklar; `PUT …/uploads/:id/chunks/:index` (octet-stream, `x-chunk-sha256`) — hajm aniq tekshiriladi, yo'lda buzilgan bo'lak 400 (`chunk_checksum`), takroriy bo'lak ustiga yoziladi (ikki marta sanalmaydi), sessiya `FOR SHARE` bilan (yakunlash bilan to'qnashmaydi, bo'laklar parallel); `POST …/complete` — barcha bo'laklar va hajm, SHA-256 serverda bo'laklar bo'yicha, mos kelmasa `failed` (bo'laklar o'chiriladi) va 422 `CHECKSUM_MISMATCH`; `POST …/abort`. Tugallanmagan reliz e'lon qilinmaydi va arxivlanmaydi. Audit `DESKTOP_RELEASE_UPLOAD_STARTED / UPLOADED / UPLOAD_FAILED / UPLOAD_ABORTED`. Xavfsiz fayl nomi (yo'l belgilarisiz), 1 GB chegara
+- yuklab olish (qurilma tokeni; web `pos.devices.manage`): `Accept-Ranges`, `ETag` (= SHA-256), bitta oraliq va suffix `Range`, `If-Range` mos kelmasa — butun fayl, fayldan tashqari — 416; xotirada bitta bo'lak. Katta fayl bitta so'rovga bog'lanmaydi (Railway proksi)
+- web Admin → "Desktop kassa": fayl SHA-256 si brauzerda bo'laklab (`packages/shared` `Sha256` — `crypto.subtle` butun faylni talab qiladi), 8 MB bo'laklar 3 parallel, har bo'lak SHA-256 bilan, qayta urinish (eksponensial kutish, 6 marta), "To'xtatish" / "Davom ettirish"; sahifa yangilansa shu faylni qayta tanlash yetarli; relizlar ro'yxatida qisman yuklangan qism (MB / MB, %), bekor qilish, yaroqsiz sababi
+- desktop: yangilanish `.part` faylga (har bo'lak diskka yozilgach keyingisi o'qiladi); uzilsa keyingi bosishda `Range` + `If-Range` bilan davom etadi; boshqa relizning qismi o'chiriladi; 416 — boshidan; yakunda SHA-256 oqim bilan (100 MB+ xotiraga yuklanmaydi), mos kelmasa qism o'chiriladi; Sozlamalar → Ilova versiyasi: "Yuklab olishni davom ettirish" va yuklangan MB
+- relizlar platforma darajasida (kompaniyaga tegishli emas) — himoya: platforma admini, qurilma tokeni yoki kompaniyada `pos.devices.manage`
+- testlar: `desktop-release-resumable` (2) — 27% da uzilish va davom, buzilgan va noto'g'ri hajmdagi bo'lak, takroriy bo'lak, 70% dan davom, teskari tartib, SHA-256 va e'lon, Range (27% dan, bo'laklar chegarasi, suffix, If-Range, 416), web Range; SHA-256 mos kelmasa `failed` va e'lon qilinmaydi, qayta boshlash, bekor qilish, parallel sessiyalar; `shared-sha256` (node:crypto bilan solishtirish); desktop 27 — yuklab olish 27% va 70% da uzilib davom etadi (`Range` sarlavhalari va fayl tekshiriladi)
+
 ### Distributsiya (`/api/distribution`)
 
 O'qish — `distribution.view`, yozish — `distribution.manage`.
