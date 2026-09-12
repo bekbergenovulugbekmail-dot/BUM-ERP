@@ -7,7 +7,7 @@ import { warehouses } from "../src/db/schema/inventory.js";
 import { desktopReleaseChunks } from "../src/db/schema/pos.js";
 import { RELEASE_CHUNK_BYTES } from "../src/modules/platform/desktop-releases.service.js";
 import { buildServer } from "../src/server.js";
-import { createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
 
 const ENV_KEYS = ["DESKTOP_LATEST_VERSION", "DESKTOP_DOWNLOAD_URL", "DESKTOP_SHA256", "DESKTOP_MIN_VERSION", "DESKTOP_RELEASE_NOTES"] as const;
 
@@ -122,6 +122,7 @@ describe("Desktop kassa relizlari (platforma admini → qurilma)", () => {
 
     // E'lon qilinmagan — qurilmaga taklif qilinmaydi va yuklab bo'lmaydi
     expect((await check("0.1.0")).json().update).toMatchObject({ configured: false, available: false });
+    expect((await app.inject({ method: "GET", url: "/api/pos/devices", headers: { cookie: ownerCookie } })).json().installer).toBeNull();
     const downloadUrl = `/api/pos-device/releases/${release.id}/download`;
     expect((await app.inject({ method: "GET", url: downloadUrl, headers: { authorization: device.authorization() } })).statusCode).toBe(404);
 
@@ -156,6 +157,18 @@ describe("Desktop kassa relizlari (platforma admini → qurilma)", () => {
     expect(downloaded.statusCode).toBe(200);
     expect(downloaded.headers["x-content-sha256"]).toBe(sha256);
     expect(downloaded.rawPayload.equals(installer)).toBe(true);
+
+    // Web: yangi kassa o'rnatish uchun — `pos.devices.manage` bor foydalanuvchi yuklab oladi, kassir yo'q
+    const devicesList = await app.inject({ method: "GET", url: "/api/pos/devices", headers: { cookie: ownerCookie } });
+    expect(devicesList.json().installer).toMatchObject({ id: release.id, version: "0.2.0", size: installer.length, sha256, notes: "Rus tili" });
+    const webDownloadUrl = `/api/pos/devices/installer/${release.id}/download`;
+    const webDownload = await app.inject({ method: "GET", url: webDownloadUrl, headers: { cookie: ownerCookie } });
+    expect(webDownload.statusCode).toBe(200);
+    expect(webDownload.headers["content-disposition"]).toBe('attachment; filename="BUM-POS-KASSA-Setup-0.2.0.exe"');
+    expect(webDownload.rawPayload.equals(installer)).toBe(true);
+    const cashier = await addEmployee(app, { ownerCookie }, "Kassir");
+    expect((await app.inject({ method: "GET", url: webDownloadUrl, headers: { cookie: cashier.cookie } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "GET", url: webDownloadUrl })).statusCode).toBe(401);
 
     // Yangi reliz e'lon qilinsa oldingisi arxivga o'tadi
     const next = await upload(adminCookie, "0.3.0", Buffer.concat([Buffer.from("MZ"), randomBytes(1024)]), "BUM-POS-KASSA-Setup-0.3.0.exe");

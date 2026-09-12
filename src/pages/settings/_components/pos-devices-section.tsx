@@ -6,12 +6,12 @@
  */
 import { useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Monitor, Pencil, Save, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, Monitor, Pencil, Save, X } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
-import { api, errorMessage } from "@/lib/api.ts";
+import { api, apiUrl, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { cn } from "@/lib/utils.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
@@ -35,6 +35,18 @@ type Device = {
   createdAt: string;
   registeredByName: string | null;
 };
+
+type Installer = {
+  id: string;
+  version: string;
+  fileName: string;
+  size: number;
+  sha256: string;
+  notes: string | null;
+  publishedAt: string | null;
+};
+
+type DevicesResponse = { devices: Device[]; installer: Installer | null };
 
 type Conflict = {
   id: string;
@@ -106,8 +118,33 @@ function ConflictDetails({ conflict }: { conflict: Conflict }) {
   );
 }
 
+/** Yangi kassa o'rnatish: e'lon qilingan BUM POS KASSA o'rnatuvchisi (sessiya cookie bilan yuklanadi). */
+function InstallerCard() {
+  const installer = useApiQuery<DevicesResponse>(DEVICES_PATH).data?.installer;
+  if (installer === undefined) return <Skeleton className="h-16 rounded-xl" />;
+  if (!installer) {
+    return <p className="text-sm text-muted-foreground">Ilova o'rnatuvchisi hali e'lon qilinmagan — platforma administratoriga murojaat qiling.</p>;
+  }
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+      <div className="flex-1 min-w-0 space-y-0.5">
+        <p className="text-sm font-medium">
+          BUM POS KASSA {installer.version} <span className="text-muted-foreground font-normal">· Windows 10/11 · {(installer.size / 1024 / 1024).toFixed(0)} MB</span>
+        </p>
+        {installer.notes && <p className="text-xs text-muted-foreground">{installer.notes}</p>}
+        <p className="text-[11px] text-muted-foreground font-mono break-all">SHA-256: {installer.sha256}</p>
+      </div>
+      <Button asChild className="shrink-0">
+        <a href={apiUrl(`${DEVICES_PATH}/installer/${installer.id}/download`)} download={installer.fileName}>
+          <Download className="h-4 w-4 mr-1.5" /> Yuklab olish
+        </a>
+      </Button>
+    </div>
+  );
+}
+
 function DevicesTable() {
-  const devicesQuery = useApiQuery<{ devices: Device[] }>(DEVICES_PATH);
+  const devicesQuery = useApiQuery<DevicesResponse>(DEVICES_PATH);
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const update = useApiMutation(
     ({ id, ...patch }: { id: string; name?: string; isActive?: boolean }) => api.patch<{ device: Device }>(`${DEVICES_PATH}/${id}`, patch),
@@ -135,8 +172,8 @@ function DevicesTable() {
   if (devices.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        Hali qurilma yo'q. BUM POS KASSA ilovasini o'rnating va «Kassa qurilmalarini boshqarish» ruxsati bor login bilan
-        ro'yxatdan o'tkazing.
+        Hali qurilma yo'q. Yuqoridagi o'rnatuvchini kassa kompyuteriga o'rnating, server manzili
+        https://www.bum-erp.uz va «Kassa qurilmalarini boshqarish» ruxsati bor login bilan ro'yxatdan o'tkazing.
       </p>
     );
   }
@@ -330,6 +367,9 @@ export default function PosDevicesSection() {
         <p className="text-sm text-muted-foreground">Bu bo'lim uchun «Kassa qurilmalarini boshqarish» ruxsati kerak.</p>
       ) : (
         <>
+          <SettingsGroup title="Ilovani o'rnatish" description="Kassa kompyuteriga o'rnating va server manzili, rahbar telefoni va paroli bilan bir marta ro'yxatdan o'tkazing">
+            <InstallerCard />
+          </SettingsGroup>
           <SettingsGroup title="Qurilmalar" description="O'chirilgan qurilma serverga ulana olmaydi; qayta yoqilganda offline navbatini yuboradi">
             <DevicesTable />
           </SettingsGroup>

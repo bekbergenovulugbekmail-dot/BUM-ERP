@@ -18,13 +18,14 @@
  *   GET  /releases/:id/download    (token) e'lon qilingan desktop relizini yuklab olish (bo'laklab oqim)
  *
  * /api/pos/devices — web (sessiya, `pos.devices.manage`):
- *   GET  /                         qurilmalar ro'yxati
+ *   GET  /                         qurilmalar ro'yxati va e'lon qilingan o'rnatuvchi (`installer`)
+ *   GET  /installer/:id/download   o'rnatuvchini yuklab olish (yangi kassa o'rnatish uchun)
  *   PATCH /:deviceId               nomi, o'chirish/yoqish
  *   GET  /conflicts                offline sinxron nomuvofiqliklari (`resolved=true` — yopilganlari)
  *   POST /conflicts/:conflictId/resolve   ko'rib chiqildi
  */
 import { Readable } from "node:stream";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { badRequest } from "@bum/shared";
@@ -87,6 +88,17 @@ const movementsQuery = z.object({
 });
 const productParams = z.object({ productId: z.uuid() });
 const releaseParams = z.object({ releaseId: z.uuid() });
+
+/** O'rnatuvchini bazadagi bo'laklardan oqim bilan yuborish (xotirada bitta 4 MB bo'lak). */
+function sendRelease(reply: FastifyReply, release: { id: string; fileName: string; size: number; sha256: string }) {
+  return reply
+    .header("content-type", "application/octet-stream")
+    .header("content-length", String(release.size))
+    .header("content-disposition", `attachment; filename="${release.fileName.replace(/[^\w.-]/g, "_")}"`)
+    .header("x-content-sha256", release.sha256)
+    .header("cache-control", "no-store")
+    .send(Readable.from(releaseChunks(db, release.id)));
+}
 const analyticsQuery = z
   .object({ from: z.iso.date(), to: z.iso.date(), cashierId: z.uuid() })
   .refine((range) => range.from <= range.to && (Date.parse(range.to) - Date.parse(range.from)) / 86_400_000 <= 366, {
@@ -161,14 +173,7 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
 
     scoped.get("/releases/:releaseId/download", async (req, reply) => {
       const { releaseId } = releaseParams.parse(req.params);
-      const release = await downloadableRelease(db, releaseId);
-      reply
-        .header("content-type", "application/octet-stream")
-        .header("content-length", String(release.size))
-        .header("content-disposition", `attachment; filename="${release.fileName.replace(/[^\w.-]/g, "_")}"`)
-        .header("x-content-sha256", release.sha256)
-        .header("cache-control", "no-store");
-      return reply.send(Readable.from(releaseChunks(db, release.id)));
+      return sendRelease(reply, await downloadableRelease(db, releaseId));
     });
 
     scoped.post("/cashiers/login", async (req) => {
@@ -266,7 +271,21 @@ export async function posDevicesAdminRoutes(app: FastifyInstance): Promise<void>
   app.get("/", async (req) => {
     const tenant = await requireTenant(db, authOf(req).user);
     await requirePermission(db, tenant, "pos.devices.manage");
-    return { devices: await listDevices(db, tenant) };
+    const release = await currentRelease(db);
+    return {
+      devices: await listDevices(db, tenant),
+      // Yangi kassa o'rnatish uchun — platforma admini e'lon qilgan o'rnatuvchi
+      installer: release
+        ? { id: release.id, version: release.version, fileName: release.fileName, size: release.size, sha256: release.sha256, notes: release.notes, publishedAt: release.publishedAt }
+        : null,
+    };
+  });
+
+  app.get("/installer/:releaseId/download", async (req, reply) => {
+    const { releaseId } = releaseParams.parse(req.params);
+    const tenant = await requireTenant(db, authOf(req).user);
+    await requirePermission(db, tenant, "pos.devices.manage");
+    return sendRelease(reply, await downloadableRelease(db, releaseId));
   });
 
   app.get("/conflicts", async (req) => {
