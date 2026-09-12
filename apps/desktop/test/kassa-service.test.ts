@@ -35,8 +35,13 @@ function fakeApi() {
         return body.password === "right"
           ? json(200, { companies: [company], company, warehouses: [{ id: "w1", name: "Asosiy", code: "MAIN", isDefault: true }] })
           : json(401, { code: "UNAUTHENTICATED", message: "Telefon raqam yoki parol noto'g'ri" });
-      case "/api/pos-device/setup/register":
+      case "/api/pos-device/setup/register": {
+        // Serverdagi qat'iy sxema kabi: noma'lum maydon — 400
+        const allowed = ["phone", "password", "companyId", "warehouseId", "name", "appVersion", "platform"];
+        const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
+        if (unknown.length > 0) return json(400, { code: "VALIDATION_ERROR", message: `Noma'lum maydon: ${unknown.join(", ")}` });
         return json(201, { token: state.token, device: { ...deviceInfo, isActive: true }, company });
+      }
       case "/api/pos-device/cashiers/login":
         if (!authed) return json(401, { code: "UNAUTHENTICATED", message: "token" });
         return body.password === "kassir"

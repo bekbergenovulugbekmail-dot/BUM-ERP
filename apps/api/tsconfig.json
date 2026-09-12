@@ -15,5 +15,7 @@
     "allowImportingTsExtensions": true,
     "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["src", "test", "drizzle.config.ts", "vitest.config.ts"]
+  "include": ["src", "test", "drizzle.config.ts", "vitest.config.ts"],
+  // Desktop kassa kodini chaqiradigan uchdan-uchga test — desktop kodi o'z tsconfig'ida tekshiriladi
+  "exclude": ["test/desktop-offline-e2e.test.ts"]
 }

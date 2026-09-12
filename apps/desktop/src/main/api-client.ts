@@ -101,11 +101,19 @@ export function createApiClient(options: {
   return {
     setupOptions: (input: { phone: string; password: string; companyId?: string }) =>
       request<SetupOptions>("POST", "/api/pos-device/setup/options", { ...credentials(input.phone, input.password), ...(input.companyId ? { companyId: input.companyId } : {}) }, false),
+    // Server sxemasi qat'iy — faqat ruxsat etilgan maydonlar (ortiqchasi, masalan apiUrl, 400 beradi)
     setupRegister: (input: { phone: string; password: string; companyId?: string; warehouseId: string; name: string; platform: string }) =>
       request<Registration>(
         "POST",
         "/api/pos-device/setup/register",
-        { ...input, ...(input.companyId ? {} : { companyId: undefined }), appVersion: options.appVersion },
+        {
+          ...credentials(input.phone, input.password),
+          ...(input.companyId ? { companyId: input.companyId } : {}),
+          warehouseId: input.warehouseId,
+          name: input.name,
+          platform: input.platform,
+          appVersion: options.appVersion,
+        },
         false,
       ),
     session: () => request<{ device: DeviceInfo; company: CompanyInfo; serverTime: string }>("GET", "/api/pos-device/session"),

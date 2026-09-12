@@ -871,8 +871,8 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 | D5 | Etiketka (web shablonlari, etiketka printeri) | ✅ (pastda) |
 | D6 | Ma'lumotlar: jismoniy/yuridik shaxslar, rekvizitlar, narxlar (offline tahrir) | ✅ (pastda) |
 | D7 | Analitika: ko'rsatkichlar, savdo, kirim-chiqim, qarzdorlik-haqdorlik, mahsulot, kategoriya tannarxi | ✅ (pastda) |
-| D8 | Sozlamalar (skrinshot bo'yicha), yangilanish (SHA-256 tekshiruvi bilan) va o'rnatuvchi | ✅ (pastda) |
-| D9 | Offline testlar va yakuniy hisobot | ⏳ |
+| D8 | Sozlamalar (skrinshot bo'yicha), yangilanish (SHA-256 tekshiruvi bilan) va o'rnatuvchi | ✅ commit `9ce088c` (D6–D8), API va web deploy |
+| D9 | Uchdan-uchga offline testlar va yakuniy hisobot | ✅ (pastda) |
 
 **D0 — server** (migratsiya 0031):
 - jadvallar `pos_devices` (kompaniya, ombor, nomi, `code` K01/K02…, token SHA-256 xeshi, faollik, versiya, oxirgi pull/push) va `pos_sync_operations` (qurilma + `op_id` unikal, tur, kassir, `applied`/`rejected`, natija yoki xato, qurilmadagi vaqt); `pos_shifts.device_id`
@@ -992,6 +992,28 @@ Qarorlar (foydalanuvchi, 2026-09-12): **Electron + SQLite**; offline sotuvda lok
 - desktop yangilanish: o'rnatuvchi yuklanadi, SHA-256 mos kelmasa saqlanmaydi, o'rnatishdan oldin fayl qayta tekshiriladi, NSIS o'rnatuvchi alohida jarayonda ishga tushadi va ilova yopiladi (lokal baza va navbat foydalanuvchi papkasida saqlanadi). Yangi paket qo'shilmagan
 - o'rnatuvchi: `pnpm --filter @bum/desktop dist:win` (electron-builder NSIS, `BUM-POS-KASSA-Setup-<versiya>.exe`); reliz uchun fayl SHA-256 ni `DESKTOP_SHA256` ga yozish kerak
 - testlar: `pos-app-update` (1); desktop 23. To'liq API: 281/281 (70 fayl)
+
+**D9 — uchdan-uchga offline sinov va yakuniy holat:**
+- `apps/api/test/desktop-offline-e2e.test.ts`: haqiqiy desktop xizmati (lokal SQLite, navbat, PIN) haqiqiy API serverga ulanadi, "internet" o'chirib-yoqiladi:
+  - to'liq offline ish kuni — smena, yangi ta'minotchi (yuridik), xarid va smenadan to'lov, yangi mijoz, chek, qisman qaytarish, qoldiqdan ortiq chek, inkassatsiya, hisobdan chiqarish, inventarizatsiya, narx va mijoz tahriri, smena yopish (13 amal navbatda) → internet qaytgach hammasi qabul qilinadi: qoldiq (5 + 10 − 12 + 2 − 7 − 1 = −3, sanoq 0 → 0), ta'minotchi qarzi 35 000, smena kutilgan naqdi 190 000 va farq 0, `stock_shortage` nomuvofiqligi, yangi narx va mijoz manzili; qurilma qoldig'i va narxi serverdagi bilan bir xil, navbat bo'sh
+  - push javobi yo'qolganda (server bajardi, qurilma bilmadi) — qayta yuborishda chek ham, qoldiq ham takrorlanmaydi
+- sinov haqiqiy xatoni topdi: qurilmani ro'yxatdan o'tkazishda desktop so'rovga ortiqcha `apiUrl` maydonini qo'shardi, serverning qat'iy sxemasi 400 qaytarardi — tuzatildi; desktop soxta serveri endi noma'lum maydonni rad etadi (qayta chiqmasin)
+- API tsconfig bu testni o'tkazib yuboradi (desktop kodi o'z tsconfig'ida tekshiriladi); vitest ishga tushiradi
+
+**BUM POS KASSA — yakuniy holat (foydalanuvchi so'ragan 11 bo'lim):**
+1. POS — yuqori menyu (ombor, valyuta, sinxron bo'lmagan cheklar, mahsulotni qaytarish), skaner, tezkor tugmalar, kechiktirilgan cheklar, chek printeri va pul qutisi — D1
+2. Sotuv tarixi — shu kassa (offline) va barcha kassalar (server) — D2
+3. Kassa bo'limi — X/Z-hisobot, kirim-chiqim, xarajat, mijoz to'lovlari — D2
+4. Xarid — ta'minotchi, valyutali narx, partiya, darhol to'lov, qaytarish — D3
+5. Ombor — qoldiqlar, hisobdan chiqarish, ko'chirish — D4
+6. Mahsulotlar harakati — D4
+7. Inventarizatsiya — D4
+8. Etiketka — D5
+9. Ma'lumotlar — mijozlar, yetkazib beruvchilar, yuridik/jismoniy shaxslar, narxlar — D6
+10. Analitika — asosiy ko'rsatkichlar, savdo, kirim-chiqim, qarzdorlik-haqdorlik, mahsulotlar tahlili, kategoriya bo'yicha tannarx — D7
+11. Sozlamalar — skrinshotdagi tuzilma — D8
+- asosiy afzallik: sotuv, xarid, ombor, inventarizatsiya, ma'lumotnoma tahriri va hisobotlar internet bo'lmasa ham ishlaydi; internet qaytganda navbat tartib bilan yuboriladi, har amal bir marta bajariladi, jismonan bo'lgan hujjat rad etilmaydi — farqlar `pos_sync_conflicts` da (web: `GET /api/pos/devices/conflicts`)
+- ochiq qolganlar: web'da nomuvofiqliklar ro'yxati sahifasi (API bor), serverda o'chirilgan mahsulot/mijozni qurilmadan olib tashlash (hozir faolsizlantirish sinxron bo'ladi), rus tili (hozir o'zbek lotin va kirill), reliz o'rnatuvchisini imzolash va `DESKTOP_*` o'zgaruvchilarini Railway'da o'rnatish
 
 ### Distributsiya (`/api/distribution`)
 
