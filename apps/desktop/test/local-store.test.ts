@@ -44,6 +44,35 @@ describe("Lokal ombor", () => {
     expect(store.cashiers()).toEqual([expect.objectContaining({ userId: "u1", active: true })]);
   });
 
+  it("serverda o'chirilgan kategoriya va brend lokal nusxadan olib tashlanadi (noma'lum tur — e'tiborsiz)", () => {
+    const at = (time: string, id: string) => ({ t: `2026-09-12T${time}:00.000000Z`, id });
+    store.applyPull(
+      pullResponse({
+        products: { rows: [product("p1", "Coca Cola 1L")], cursor: at("09:00", "p1") },
+        categories: { rows: [{ id: "c1", name: "Ichimliklar" }, { id: "c2", name: "Shirinliklar" }], cursor: at("09:00", "c2") },
+        brands: { rows: [{ id: "b1", name: "Coca" }], cursor: at("09:00", "b1") },
+      }),
+    );
+    store.applyPull(
+      pullResponse({
+        // Shu sahifada eski qator qayta kelsa ham o'chirish keyin qo'llanadi
+        categories: { rows: [{ id: "c1", name: "Ichimliklar" }], cursor: at("09:01", "c1") },
+        deletions: {
+          rows: [
+            { id: "d1", entity: "categories", entityId: "c1" },
+            { id: "d2", entity: "brands", entityId: "b1" },
+            { id: "d3", entity: "products", entityId: "p1" },
+          ],
+          cursor: at("09:10", "d3"),
+        },
+      }),
+    );
+    expect(store.records<{ id: string }>("categories").map((row) => row.id)).toEqual(["c2"]);
+    expect(store.records("brands")).toEqual([]);
+    expect(store.counts().products).toBe(1);
+    expect(store.getCursors().deletions).toEqual(at("09:10", "d3"));
+  });
+
   it("offline navbat: tartib, server javobi bo'yicha yakunlash, javobsizlari navbatda qoladi", () => {
     const a = store.enqueue({ type: "shift.open", cashierId: "u1", payload: { shiftId: "s1", openingCash: "0" } });
     const b = store.enqueue({ type: "shift.close", cashierId: "u1", payload: { shiftId: "s1", closingCash: "0" } });

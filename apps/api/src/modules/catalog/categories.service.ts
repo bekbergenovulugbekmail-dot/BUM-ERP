@@ -9,6 +9,7 @@
 import { and, count, eq } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
 import { brands, categories, products } from "../../db/schema/catalog.js";
+import { syncDeletions } from "../../db/schema/pos.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import type { TenantContext } from "../company/tenant.js";
@@ -164,6 +165,8 @@ export async function deleteCategory(tx: Tx, tenant: TenantContext, id: string, 
   if ((children?.n ?? 0) > 0) throw conflict("Bu kategoriyaning ichki kategoriyalari mavjud");
 
   await tx.delete(categories).where(eq(categories.id, id));
+  // Kassa qurilmalari lokal nusxasini ham olib tashlasin
+  await tx.insert(syncDeletions).values({ companyId: tenant.company.id, entity: "categories", entityId: id });
   await audit(tx, tenant, meta, {
     action: "CATEGORY_DELETED",
     resource: "categories",
@@ -241,6 +244,7 @@ export async function deleteBrand(tx: Tx, tenant: TenantContext, id: string, met
   if ((used?.n ?? 0) > 0) throw conflict("Bu brenddagi mahsulotlar mavjud");
 
   await tx.delete(brands).where(eq(brands.id, id));
+  await tx.insert(syncDeletions).values({ companyId: tenant.company.id, entity: "brands", entityId: id });
   await audit(tx, tenant, meta, {
     action: "BRAND_DELETED",
     resource: "brands",

@@ -1,8 +1,11 @@
 /**
- * "Ўзбекча (кирилл)" til sozlamasi: ekrandagi o'zbek lotin matni avtomatik kirillga o'giriladi (matn tugunlari va
- * placeholder/title/aria-label). Kiritish maydonlari, `data-no-translit` va raqam/kodlar (UZS, K01-000123, SKU)
- * o'zgarmaydi. Lotinga qaytishda asl matnlar tiklanadi.
+ * Dastur tili ekranda: o'zbek lotin matni "Ўзбекча (кирилл)" da avtomatik kirillga, "Русский" da lug'at bo'yicha
+ * ruschaga o'giriladi (matn tugunlari va placeholder/title/aria-label). Kiritish maydonlari, `data-no-translit` va
+ * raqam/kodlar (UZS, K01-000123, SKU) o'zgarmaydi. Lotinga (yoki boshqa tilga) o'tishda asl matnlar tiklanadi.
  */
+import { toRussian } from "./translate-ru.ts";
+
+export type UiLanguage = "uz-Latn" | "uz-Cyrl" | "ru";
 const APOSTROPHE = /[ʻʼ'`‘’]/;
 const LETTERS: Record<string, string> = {
   a: "а", b: "б", c: "с", d: "д", e: "е", f: "ф", g: "г", h: "ҳ", i: "и", j: "ж", k: "к", l: "л", m: "м",
@@ -58,7 +61,8 @@ const texts = new WeakMap<Text, Rendered>();
 const attributes = new WeakMap<Element, Map<string, Rendered>>();
 const ATTRIBUTES = ["placeholder", "title", "aria-label"];
 let observer: MutationObserver | null = null;
-let active: "uz-Latn" | "uz-Cyrl" = "uz-Latn";
+let active: UiLanguage = "uz-Latn";
+let convert: (text: string) => string = toCyrillic;
 
 const skipped = (element: Element | null) => !!element?.closest("input, textarea, script, style, [data-no-translit]");
 
@@ -67,7 +71,7 @@ function convertText(node: Text) {
   const current = node.nodeValue ?? "";
   const known = texts.get(node);
   if (known && known.rendered === current) return;
-  const rendered = toCyrillic(current);
+  const rendered = convert(current);
   texts.set(node, { source: current, rendered });
   if (rendered !== current) node.nodeValue = rendered;
 }
@@ -80,7 +84,7 @@ function convertAttributes(element: Element) {
     if (current === null) continue;
     const saved = known?.get(name);
     if (saved && saved.rendered === current) continue;
-    const rendered = toCyrillic(current);
+    const rendered = convert(current);
     if (!known) attributes.set(element, (known = new Map()));
     known.set(name, { source: current, rendered });
     if (rendered !== current) element.setAttribute(name, rendered);
@@ -108,10 +112,18 @@ function restoreAttributes(element: Element) {
   attributes.delete(element);
 }
 
-export function applyScript(language: "uz-Latn" | "uz-Cyrl") {
+export function applyScript(language: UiLanguage) {
   if (language === active) return;
+  // Avvalgi o'girish to'liq qaytariladi, keyin yangi til qo'llanadi (kirill ↔ rus to'g'ridan-to'g'ri)
+  if (active !== "uz-Latn") {
+    observer?.disconnect();
+    observer = null;
+    walk(document.body, restoreText, restoreAttributes);
+  }
   active = language;
-  if (language === "uz-Cyrl") {
+  document.documentElement.lang = language === "ru" ? "ru" : language === "uz-Cyrl" ? "uz-Cyrl" : "uz";
+  if (language !== "uz-Latn") {
+    convert = language === "ru" ? toRussian : toCyrillic;
     walk(document.body, convertText, convertAttributes);
     observer = new MutationObserver((records) => {
       for (const record of records) {
@@ -121,9 +133,5 @@ export function applyScript(language: "uz-Latn" | "uz-Cyrl") {
       }
     });
     observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ATTRIBUTES });
-  } else {
-    observer?.disconnect();
-    observer = null;
-    walk(document.body, restoreText, restoreAttributes);
   }
 }

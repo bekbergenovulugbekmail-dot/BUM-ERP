@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   CashierRecord,
+  DeletionRecord,
   PullCursor,
   PullCursors,
   PullEntity,
@@ -13,7 +14,7 @@ import type {
   SyncOperationType,
   WireOperation,
 } from "../shared/sync-types.js";
-import { PULL_ENTITIES } from "../shared/sync-types.js";
+import { DELETABLE_ENTITIES, PULL_ENTITIES } from "../shared/sync-types.js";
 import { toMinor } from "../shared/money.js";
 import { transaction, type LocalDb } from "./local-db.js";
 
@@ -131,7 +132,10 @@ export class LocalStore {
         const page = response.entities[entity];
         counts[entity] = page?.rows.length ?? 0;
         if (!page) continue;
-        for (const row of page.rows) this.upsert(entity, row);
+        for (const row of page.rows) {
+          if (entity === "deletions") this.removeDeleted(row as DeletionRecord);
+          else this.upsert(entity, row);
+        }
         const next = laterCursor(cursors[entity], page.cursor);
         if (next) cursors[entity] = next;
       }
@@ -197,6 +201,15 @@ export class LocalStore {
       default:
         this.putRecord(entity, text(row.id), data);
     }
+  }
+
+  /**
+   * Serverda o'chirilgan yozuv. `deletions` ro'yxatda upsert'lardan keyin keladi — shu sahifada qayta kelgan eski qator
+   * ham olib tashlanadi. Faqat ma'lum turlar (boshqa jadvallarga tegilmaydi).
+   */
+  private removeDeleted(row: DeletionRecord): void {
+    if (!DELETABLE_ENTITIES.includes(row.entity) || typeof row.entityId !== "string") return;
+    this.db.prepare("DELETE FROM records WHERE entity = ? AND id = ?").run(row.entity, row.entityId);
   }
 
   private putRecord(entity: string, id: string, data: string): void {

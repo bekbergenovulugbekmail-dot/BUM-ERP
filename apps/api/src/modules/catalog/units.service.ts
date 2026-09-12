@@ -11,6 +11,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { badRequest, notFound } from "@bum/shared";
 import { products, unitConversions, units } from "../../db/schema/catalog.js";
+import { syncDeletions } from "../../db/schema/pos.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import type { SessionUser } from "../auth/session.js";
@@ -178,6 +179,8 @@ export async function deleteConversion(tx: Tx, tenant: TenantContext, conversion
     .where(and(eq(unitConversions.id, conversionId), eq(unitConversions.companyId, tenant.company.id)))
     .returning(conversionColumns);
   if (!deleted) throw notFound("Konversiya topilmadi");
+  // Kassa qurilmalari eski koeffitsient bilan sotmasin
+  await tx.insert(syncDeletions).values({ companyId: tenant.company.id, entity: "unitConversions", entityId: conversionId });
 
   await writeAuditLog(
     {

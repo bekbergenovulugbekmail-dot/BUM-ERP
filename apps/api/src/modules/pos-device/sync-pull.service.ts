@@ -14,6 +14,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { brands, categories, products, unitConversions, units } from "../../db/schema/catalog.js";
 import { companyCurrencies } from "../../db/schema/finance.js";
 import { stockLevels, warehouses } from "../../db/schema/inventory.js";
+import { syncDeletions } from "../../db/schema/pos.js";
 import { companies, companyMembers, settings, users } from "../../db/schema/platform.js";
 import { suppliers } from "../../db/schema/purchase.js";
 import { customers } from "../../db/schema/sales.js";
@@ -35,6 +36,8 @@ export const PULL_ENTITIES = [
   "currencies",
   "cashiers",
   "suppliers",
+  /** Serverda butunlay o'chirilgan yozuvlar: `{ entity, entityId }` — qurilma lokal nusxani olib tashlaydi. */
+  "deletions",
 ] as const;
 export type PullEntity = (typeof PULL_ENTITIES)[number];
 export type PullCursor = { t: string; id: string };
@@ -297,6 +300,13 @@ export async function pullChanges(
     .orderBy(asc(suppliers.updatedAt), asc(suppliers.id))
     .limit(take);
 
+  const deletionRows = await conn
+    .select({ id: syncDeletions.id, entity: syncDeletions.entity, entityId: syncDeletions.entityId, cursorAt: cursorText(syncDeletions.deletedAt) })
+    .from(syncDeletions)
+    .where(and(eq(syncDeletions.companyId, companyId), afterCursor(syncDeletions.deletedAt, syncDeletions.id, cursors.deletions)))
+    .orderBy(asc(syncDeletions.deletedAt), asc(syncDeletions.id))
+    .limit(take);
+
   const entities = {
     units: toPage(unitRows, limit, cursors.units),
     unitConversions: toPage(conversionRows, limit, cursors.unitConversions),
@@ -309,6 +319,7 @@ export async function pullChanges(
     currencies: toPage(currencyRows, limit, cursors.currencies),
     cashiers: toPage(cashierRows, limit, cursors.cashiers),
     suppliers: toPage(supplierRows, limit, cursors.suppliers),
+    deletions: toPage(deletionRows, limit, cursors.deletions),
   } satisfies Record<PullEntity, Page<unknown>>;
 
   const config = await posConfig(conn, companyId);

@@ -13,9 +13,17 @@ win:
     - target: nsis
       arch: [x64]
   artifactName: BUM-POS-KASSA-Setup-${version}.${ext}
+  icon: build/icon.ico
+  # Kod imzosi: sertifikat muhitdan beriladi — CSC_LINK (.pfx yo'li yoki base64) va CSC_KEY_PASSWORD.
+  # Berilmasa o'rnatuvchi imzosiz yig'iladi (Windows SmartScreen "noma'lum nashriyotchi" deb ogohlantiradi).
+  signtoolOptions:
+    signingHashAlgorithms: [sha256]
+    rfc3161TimeStampServer: http://timestamp.digicert.com
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   shortcutName: BUM POS KASSA
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico

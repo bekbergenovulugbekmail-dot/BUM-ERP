@@ -7,7 +7,22 @@
  *    saqlanadi va takroriy yuborishda o'sha javob qaytadi.
  */
 import { sql } from "drizzle-orm";
-import { boolean, index, jsonb, pgEnum, pgTable, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  check,
+  customType,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+  varchar,
+} from "drizzle-orm/pg-core";
 import { companies, users } from "./platform.js";
 import { warehouses } from "./inventory.js";
 import { pk, timestamps } from "./_shared.js";
@@ -102,4 +117,63 @@ export const posSyncConflicts = pgTable(
     index("psc_company_open_idx").on(t.companyId, t.resolvedAt, t.createdAt),
     index("psc_device_op_idx").on(t.deviceId, t.opId),
   ],
+);
+
+/**
+ * Serverda butunlay o'chirilgan ma'lumotnoma yozuvi (kategoriya, brend, birlik konversiyasi) — qurilmalar pull'da
+ * (`deletions`) lokal nusxasini olib tashlaydi. Qolgan ma'lumotnomalar o'chirilmaydi, faolsizlantiriladi.
+ */
+export const syncDeletions = pgTable(
+  "sync_deletions",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** Pull turi: `categories`, `brands`, `unitConversions`. */
+    entity: varchar("entity", { length: 32 }).notNull(),
+    entityId: uuid("entity_id").notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (t) => [index("sd_company_deleted_idx").on(t.companyId, t.deletedAt, t.id)],
+);
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
+/**
+ * Desktop kassa relizlari (NSIS o'rnatuvchi): platforma admini yuklaydi, e'lon qiladi; qurilmalar qurilma tokeni bilan
+ * yuklab oladi va SHA-256 ni tekshiradi. Fayl bazada 4 MB bo'laklarda — alohida fayl ombori shart emas.
+ */
+export const desktopReleases = pgTable(
+  "desktop_releases",
+  {
+    id: pk(),
+    version: varchar("version", { length: 32 }).notNull(),
+    fileName: varchar("file_name", { length: 200 }).notNull(),
+    size: integer("size").notNull().default(0),
+    sha256: varchar("sha256", { length: 64 }).notNull(),
+    notes: text("notes"),
+    /** Bundan eski versiyalar uchun yangilanish majburiy. */
+    minVersion: varchar("min_version", { length: 32 }),
+    status: varchar("status", { length: 16 }).notNull().default("draft"),
+    uploadedBy: uuid("uploaded_by").references(() => users.id, { onDelete: "set null" }),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("desktop_releases_version_key").on(t.version),
+    check("desktop_releases_status", sql`${t.status} in ('draft', 'published', 'archived')`),
+  ],
+);
+
+export const desktopReleaseChunks = pgTable(
+  "desktop_release_chunks",
+  {
+    releaseId: uuid("release_id")
+      .notNull()
+      .references(() => desktopReleases.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    data: bytea("data").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.releaseId, t.seq] })],
 );

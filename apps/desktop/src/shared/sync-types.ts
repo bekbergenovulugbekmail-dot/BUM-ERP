@@ -15,8 +15,15 @@ export const PULL_ENTITIES = [
   "currencies",
   "cashiers",
   "suppliers",
+  /** Serverda butunlay o'chirilgan yozuvlar (kategoriya, brend, birlik konversiyasi) — lokal nusxa olib tashlanadi. */
+  "deletions",
 ] as const;
 export type PullEntity = (typeof PULL_ENTITIES)[number];
+
+/** `deletions` sahifasidagi qator. */
+export type DeletionRecord = { id: string; entity: string; entityId: string };
+/** Server o'chira oladigan (va qurilma `records` jadvalida saqlaydigan) turlar. */
+export const DELETABLE_ENTITIES: readonly string[] = ["categories", "brands", "unitConversions"];
 
 /** Kursor: `updated_at` (mikrosekund, UTC) va `id`. */
 export type PullCursor = { t: string; id: string };

@@ -253,6 +253,13 @@
       "when": 1789203003077,
       "tag": "0035_pos_party_details",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1789206344625,
+      "tag": "0036_pos_deletions_releases",
+      "breakpoints": true
     }
   ]
 }

@@ -571,8 +571,8 @@ export type HotkeyAction =
   | "complete";
 
 export type DevicePrefs = {
-  /** Dastur tili: o'zbek lotin yoki kirill (kirill — ekran matni avtomatik o'giriladi). */
-  language: "uz-Latn" | "uz-Cyrl";
+  /** Dastur tili: o'zbek lotin, kirill (avtomatik o'giriladi) yoki rus (lug'at bo'yicha). */
+  language: "uz-Latn" | "uz-Cyrl" | "ru";
   theme: "light" | "dark" | "system";
   fontScale: "normal" | "large";
   hotkeys: Record<HotkeyAction, string>;

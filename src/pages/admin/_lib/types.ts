@@ -106,6 +106,21 @@ export type PlatformSettings = {
   supportEmail: string;
 };
 
+/** `GET /api/platform/desktop-releases` — desktop kassa o'rnatuvchisi. */
+export type DesktopRelease = {
+  id: string;
+  version: string;
+  fileName: string;
+  size: number;
+  sha256: string;
+  notes: string | null;
+  minVersion: string | null;
+  status: "draft" | "published" | "archived";
+  publishedAt: string | null;
+  createdAt: string;
+  uploadedByName?: string | null;
+};
+
 /** Audit `details` — jsonb; ro'yxatda bir qatorli matn. */
 export function formatDetails(details: unknown): string | null {
   if (details === null || details === undefined) return null;

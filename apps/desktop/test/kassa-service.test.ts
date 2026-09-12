@@ -85,6 +85,10 @@ function fakeApi() {
           ],
           nextCursor: "c1",
         });
+      case "/api/pos-device/releases/r1/download":
+        // Server bazasidagi reliz — faqat qurilma tokeni bilan
+        if (!authed) return json(401, { code: "UNAUTHENTICATED", message: "token" });
+        return new Response(state.installer);
       case "/api/pos-device/app-update":
         if (!authed) return json(401, { code: "UNAUTHENTICATED", message: "token" });
         return json(200, { update: state.update });
@@ -618,6 +622,16 @@ describe("Kassa xizmati (main jarayon)", () => {
       expect(installed).toEqual([file]);
     } finally {
       await rm(file, { force: true });
+    }
+    // Nisbiy manzil (server bazasidagi reliz) — API manzilidan, qurilma tokeni bilan
+    const nextBytes = Buffer.from("BUM POS KASSA setup 0.3.0");
+    api.state.installer = nextBytes;
+    api.state.update = { ...api.state.update, latest: "0.3.0", url: "/api/pos-device/releases/r1/download", sha256: createHash("sha256").update(nextBytes).digest("hex") };
+    const nextFile = path.join(tmpdir(), "BUM-POS-KASSA-Setup-0.3.0.exe");
+    try {
+      await expect(kassa.downloadUpdate()).resolves.toMatchObject({ latest: "0.3.0", downloaded: true });
+    } finally {
+      await rm(nextFile, { force: true });
     }
     await expect(kassa.installUpdate()).rejects.toMatchObject({ code: "CHECKSUM_MISMATCH" });
   });

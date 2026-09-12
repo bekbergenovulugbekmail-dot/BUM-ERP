@@ -15,6 +15,7 @@
  *   GET  /stock/:productId         (token) mahsulot qoldig'i kompaniyaning faol omborlarida
  *   GET  /analytics                (token) analitika ?from&to&cashierId — kassirda `analytics.view`
  *   GET  /app-update               (token) yangi versiya bormi (joriy — `x-app-version`), o'rnatuvchi manzili va SHA-256
+ *   GET  /releases/:id/download    (token) e'lon qilingan desktop relizini yuklab olish (bo'laklab oqim)
  *
  * /api/pos/devices — web (sessiya, `pos.devices.manage`):
  *   GET  /                         qurilmalar ro'yxati
@@ -22,6 +23,7 @@
  *   GET  /conflicts                offline sinxron nomuvofiqliklari (`resolved=true` — yopilganlari)
  *   POST /conflicts/:conflictId/resolve   ko'rib chiqildi
  */
+import { Readable } from "node:stream";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -36,6 +38,7 @@ import { authOf, requireAuth } from "../auth/guard.js";
 import { assertCompanyWritable, effectivePermissions, requirePermission, requireTenant, requireTenantForWrite } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { listConflicts, resolveConflict } from "./conflicts.service.js";
+import { currentRelease, downloadableRelease, releaseChunks } from "../platform/desktop-releases.service.js";
 import { desktopUpdate } from "./app-update.service.js";
 import { deviceAnalytics } from "./device-analytics.service.js";
 import { cashierTenant, deviceOf, requireDevice } from "./device-auth.js";
@@ -83,6 +86,7 @@ const movementsQuery = z.object({
   cursor: z.string().max(500).optional(),
 });
 const productParams = z.object({ productId: z.uuid() });
+const releaseParams = z.object({ releaseId: z.uuid() });
 const analyticsQuery = z
   .object({ from: z.iso.date(), to: z.iso.date(), cashierId: z.uuid() })
   .refine((range) => range.from <= range.to && (Date.parse(range.to) - Date.parse(range.from)) / 86_400_000 <= 366, {
@@ -153,7 +157,19 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
       };
     });
 
-    scoped.get("/app-update", async (req) => ({ update: desktopUpdate(appVersionOf(req)) }));
+    scoped.get("/app-update", async (req) => ({ update: desktopUpdate(appVersionOf(req), process.env, await currentRelease(db)) }));
+
+    scoped.get("/releases/:releaseId/download", async (req, reply) => {
+      const { releaseId } = releaseParams.parse(req.params);
+      const release = await downloadableRelease(db, releaseId);
+      reply
+        .header("content-type", "application/octet-stream")
+        .header("content-length", String(release.size))
+        .header("content-disposition", `attachment; filename="${release.fileName.replace(/[^\w.-]/g, "_")}"`)
+        .header("x-content-sha256", release.sha256)
+        .header("cache-control", "no-store");
+      return reply.send(Readable.from(releaseChunks(db, release.id)));
+    });
 
     scoped.post("/cashiers/login", async (req) => {
       const body = cashierLoginBody.parse(req.body);

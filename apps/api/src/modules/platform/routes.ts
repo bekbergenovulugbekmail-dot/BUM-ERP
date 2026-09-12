@@ -13,12 +13,18 @@
  *   POST  /users/:userId/status          faollashtirish / bloklash
  *   POST  /users/:userId/platform-admin  platforma adminini tayinlash (faqat bootstrap admin)
  *   GET   /settings, PUT /settings       platforma sozlamalari (ro'yxatdan o'tish ham)
+ *   GET   /desktop-releases              desktop kassa relizlari
+ *   POST  /desktop-releases?version=&fileName=   o'rnatuvchini yuklash (application/octet-stream, oqim bilan)
+ *   PATCH /desktop-releases/:releaseId   izoh, majburiy versiya
+ *   POST  /desktop-releases/:releaseId/publish | /archive   e'lon qilish (oldingisi arxivga) | arxivlash
  *
  * Bootstrap admin va boshqa platforma adminlariga foydalanuvchi amallari ta'sir
  * qilmaydi (users/user-admin.service.ts). Bootstrap admin `db:seed` orqali yaratiladi.
  */
+import { Readable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { badRequest } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
@@ -37,6 +43,15 @@ import {
   listCompanies,
   setCompanyStatus,
 } from "./company.service.js";
+import {
+  MAX_RELEASE_BYTES,
+  RELEASE_VERSION,
+  archiveRelease,
+  listReleases,
+  publishRelease,
+  updateRelease,
+  uploadRelease,
+} from "./desktop-releases.service.js";
 import {
   getPlatformSettings,
   listUsers,
@@ -88,6 +103,22 @@ const updateUserBody = z.object({ phone: z.string().min(1).max(32) });
 const resetPasswordBody = z.object({ newPassword: z.string().min(1).max(256) });
 const userStatusBody = z.object({ isActive: z.boolean() });
 const platformAdminBody = z.strictObject({ isPlatformAdmin: z.boolean() });
+
+const releaseParams = z.object({ releaseId: z.uuid() });
+const releaseUploadQuery = z.object({
+  version: z.string().trim().regex(RELEASE_VERSION, "Versiya formati: 1.2.3"),
+  fileName: z
+    .string()
+    .trim()
+    .min(5)
+    .max(200)
+    .regex(/^[\w .()-]+\.exe$/i, "Fayl nomi .exe bilan tugasin")
+    .default("BUM-POS-KASSA-Setup.exe"),
+});
+const releasePatchBody = z.strictObject({
+  notes: z.string().trim().max(2000).nullable().optional(),
+  minVersion: z.string().trim().regex(RELEASE_VERSION, "Majburiy versiya formati: 1.2.3").nullable().optional(),
+});
 
 const settingsBody = z.strictObject({
   registrationEnabled: z.boolean().optional(),
@@ -173,6 +204,42 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
     const { user } = authOf(req);
     await withTransaction((tx) => setPlatformAdmin(tx, user, userId, isPlatformAdmin, requestMeta(req)));
     return { ok: true };
+  });
+
+  // ─── Desktop kassa relizlari ─────────────────────────────────────────────
+
+  // O'rnatuvchi xom baytlar bilan keladi — oqim o'zgarmay servisga uzatiladi (hajm chegarasi servisda)
+  app.addContentTypeParser("application/octet-stream", (_req, payload, done) => done(null, payload));
+
+  app.get("/desktop-releases", async () => ({ releases: await listReleases(db) }));
+
+  app.post("/desktop-releases", { bodyLimit: MAX_RELEASE_BYTES }, async (req, reply) => {
+    const { version, fileName } = releaseUploadQuery.parse(req.query);
+    if (!(req.body instanceof Readable)) throw badRequest("Fayl application/octet-stream sifatida yuborilsin");
+    const stream = req.body;
+    const { user } = authOf(req);
+    const release = await withTransaction((tx) => uploadRelease(tx, { version, fileName, stream }, user, requestMeta(req)));
+    reply.status(201);
+    return { release };
+  });
+
+  app.patch("/desktop-releases/:releaseId", async (req) => {
+    const { releaseId } = releaseParams.parse(req.params);
+    const patch = releasePatchBody.parse(req.body);
+    const { user } = authOf(req);
+    return { release: await withTransaction((tx) => updateRelease(tx, releaseId, patch, user, requestMeta(req))) };
+  });
+
+  app.post("/desktop-releases/:releaseId/publish", async (req) => {
+    const { releaseId } = releaseParams.parse(req.params);
+    const { user } = authOf(req);
+    return { release: await withTransaction((tx) => publishRelease(tx, releaseId, user, requestMeta(req))) };
+  });
+
+  app.post("/desktop-releases/:releaseId/archive", async (req) => {
+    const { releaseId } = releaseParams.parse(req.params);
+    const { user } = authOf(req);
+    return { release: await withTransaction((tx) => archiveRelease(tx, releaseId, user, requestMeta(req))) };
   });
 
   // ─── Sozlamalar ──────────────────────────────────────────────────────────

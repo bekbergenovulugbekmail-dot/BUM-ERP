@@ -2,8 +2,9 @@
  * Offline kassa sinxroni nomuvofiqliklari (`pos_sync_conflicts`) — web'da rahbar ko'rib chiqadi va yopadi.
  * Amal (chek, qaytarish, mijoz) allaqachon yozilgan; bu ro'yxat — tekshirish kerak bo'lgan joylar.
  */
-import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { notFound } from "@bum/shared";
+import { products } from "../../db/schema/catalog.js";
 import { users } from "../../db/schema/platform.js";
 import { posDevices, posSyncConflicts } from "../../db/schema/pos.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -26,7 +27,42 @@ export const CONFLICT_KINDS = {
   record_changed: "Kassadagi tahrir serverdagi yangi o'zgarish bilan to'qnashdi (server qiymati saqlandi)",
 } as const;
 
+/** Nomuvofiqliklar ro'yxati: turi nomi va tafsilotdagi mahsulotlar nomi bilan (web sahifasi uchun). */
 export async function listConflicts(conn: DbOrTx, tenant: TenantContext, options: { resolved?: boolean; limit: number }) {
+  const rows = await conflictRows(conn, tenant, options);
+  const productIds = new Set<string>();
+  for (const row of rows) {
+    const items = (row.details as { items?: unknown }).items;
+    if (!Array.isArray(items)) continue;
+    for (const item of items) {
+      const id = (item as { productId?: unknown }).productId;
+      if (typeof id === "string" && UUID.test(id)) productIds.add(id);
+    }
+  }
+  const names = new Map(
+    productIds.size > 0
+      ? (
+          await conn
+            .select({ id: products.id, name: products.name })
+            .from(products)
+            .where(and(eq(products.companyId, tenant.company.id), inArray(products.id, [...productIds])))
+        ).map((row) => [row.id, row.name])
+      : [],
+  );
+  return rows.map((row) => ({
+    ...row,
+    kindLabel: CONFLICT_KINDS[row.kind as keyof typeof CONFLICT_KINDS] ?? row.kind,
+    productNames: Object.fromEntries(
+      ((row.details as { items?: { productId?: string }[] }).items ?? []).flatMap((item) =>
+        item?.productId && names.has(item.productId) ? [[item.productId, names.get(item.productId)!]] : [],
+      ),
+    ),
+  }));
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function conflictRows(conn: DbOrTx, tenant: TenantContext, options: { resolved?: boolean; limit: number }) {
   return conn
     .select({
       id: posSyncConflicts.id,

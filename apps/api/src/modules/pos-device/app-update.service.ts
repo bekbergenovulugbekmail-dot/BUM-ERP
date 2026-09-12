@@ -27,12 +27,29 @@ export type DesktopUpdate = {
   notes: string | null;
 };
 
-export function desktopUpdate(current: string | undefined, env: NodeJS.ProcessEnv = process.env): DesktopUpdate {
+/** Platforma admini e'lon qilgan reliz (bazada) — muhit o'zgaruvchilaridan ustun. */
+export type PublishedRelease = { id: string; version: string; sha256: string; notes: string | null; minVersion: string | null };
+
+export function desktopUpdate(current: string | undefined, env: NodeJS.ProcessEnv = process.env, release: PublishedRelease | null = null): DesktopUpdate {
   const version = current && SEMVER.test(current) ? current : null;
+  if (release && SEMVER.test(release.version)) {
+    return {
+      configured: true,
+      available: version !== null && compareVersions(release.version, version) > 0,
+      mandatory: version !== null && !!release.minVersion && SEMVER.test(release.minVersion) && compareVersions(version, release.minVersion) < 0,
+      current: version,
+      latest: release.version,
+      // Qurilma tokeni bilan yuklanadi (API manziliga nisbatan)
+      url: `/api/pos-device/releases/${release.id}/download`,
+      sha256: release.sha256,
+      notes: release.notes,
+    };
+  }
   const latest = env.DESKTOP_LATEST_VERSION?.trim() ?? "";
   const url = env.DESKTOP_DOWNLOAD_URL?.trim() ?? "";
   const sha256 = env.DESKTOP_SHA256?.trim().toLowerCase() ?? "";
   const minimum = env.DESKTOP_MIN_VERSION?.trim() ?? "";
+  // Zaxira yo'l: tashqi manzildagi reliz (Railway o'zgaruvchilari)
   if (!SEMVER.test(latest) || !url.startsWith("https://") || !/^[a-f0-9]{64}$/.test(sha256)) {
     return { configured: false, available: false, mandatory: false, current: version, latest: null, url: null, sha256: null, notes: null };
   }

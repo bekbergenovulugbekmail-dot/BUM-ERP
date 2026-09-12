@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import {
-  Settings, Shield, Users, Building2, ListChecks, Puzzle, Bell, MapPin, Lock, ReceiptText, Tag, Gift, Coins,
+  Settings, Shield, Users, Building2, ListChecks, Puzzle, Bell, MapPin, Lock, ReceiptText, Tag, Gift, Coins, Monitor,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import { useTranslation } from "react-i18next";
@@ -17,13 +17,14 @@ import ReceiptSection from "./_components/receipt-section.tsx";
 import LabelsSection from "./_components/labels-section.tsx";
 import CashbackSection from "./_components/cashback-section.tsx";
 import CurrenciesSection from "./_components/currencies-section.tsx";
+import PosDevicesSection from "./_components/pos-devices-section.tsx";
 
 // Takliflar (invitations) bo'limi yo'q — yakuniy qaror: xodim loginini kompaniya egasi o'zi ochadi
 export default function SettingsPage() {
   const { t } = useTranslation("modules");
   const [tab, setTab] = useState<
-    | "company" | "currencies" | "branches" | "receipt" | "labels" | "cashback" | "modules" | "roles" | "users" | "audit"
-    | "notifications" | "security"
+    | "company" | "currencies" | "branches" | "receipt" | "labels" | "cashback" | "pos-devices" | "modules" | "roles" | "users"
+    | "audit" | "notifications" | "security"
   >("company");
 
   const TABS = [
@@ -33,6 +34,7 @@ export default function SettingsPage() {
     { key: "receipt"       as const, label: "Chek",                      icon: ReceiptText },
     { key: "labels"        as const, label: "Etiketka",                  icon: Tag },
     { key: "cashback"      as const, label: "Keshbek",                   icon: Gift },
+    { key: "pos-devices"   as const, label: "Kassa qurilmalari",         icon: Monitor },
     { key: "modules"       as const, label: t("settings.tab.modules"),   icon: Puzzle },
     { key: "roles"         as const, label: t("settings.tab.roles"),     icon: Shield },
     { key: "users"         as const, label: t("settings.tab.users"),     icon: Users },
@@ -80,6 +82,7 @@ export default function SettingsPage() {
         {tab === "receipt"       && <ReceiptSection />}
         {tab === "labels"        && <LabelsSection />}
         {tab === "cashback"      && <CashbackSection />}
+        {tab === "pos-devices"   && <PosDevicesSection />}
         {tab === "modules"       && <ModulesSection />}
         {tab === "roles"         && <RolesSection />}
         {tab === "users"         && <UsersSection />}

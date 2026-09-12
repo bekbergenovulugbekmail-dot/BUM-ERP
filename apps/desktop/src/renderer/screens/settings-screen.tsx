@@ -186,12 +186,13 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
 function LanguagePanel({ prefs, save }: { prefs: DevicePrefs; save: SaveFn }) {
   return (
     <>
-      <Title hint="Kirill yozuvida ekrandagi matn avtomatik o'giriladi; mahsulot kodlari va raqamlar o'zgarmaydi.">Dastur tili</Title>
+      <Title hint="Ekrandagi matn tanlangan tilga o'giriladi; mahsulot nomlari, kodlar va raqamlar o'zgarmaydi.">Dastur tili</Title>
       <Choice
         value={prefs.language}
         options={[
           { value: "uz-Latn", label: "O'zbekcha (lotin)" },
           { value: "uz-Cyrl", label: "Ўзбекча (кирилл)" },
+          { value: "ru", label: "Русский" },
         ]}
         onChange={(language) => void save({ language })}
       />

@@ -12,7 +12,7 @@ import { useParams, Link, Navigate } from "react-router-dom";
 import { motion } from "motion/react";
 import {
   LayoutDashboard, Building2, Users, ListChecks,
-  Shield, Layers, ArrowLeft, Settings, PlusCircle, ExternalLink, LogOut,
+  Shield, Layers, ArrowLeft, Settings, PlusCircle, ExternalLink, LogOut, MonitorDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import { isAdminSubdomain } from "@/lib/subdomain.ts";
@@ -24,10 +24,11 @@ import AdminAuditLog         from "./_components/admin-audit-log.tsx";
 import AdminUsers            from "./_components/admin-users.tsx";
 import AdminCreateCompany    from "./_components/admin-create-company.tsx";
 import AdminPlatformSettings from "./_components/admin-platform-settings.tsx";
+import AdminDesktopReleases  from "./_components/admin-desktop-releases.tsx";
 import AdminLoginPage        from "./login.tsx";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Tab = "overview" | "companies" | "create-company" | "users" | "audit" | "settings";
+type Tab = "overview" | "companies" | "create-company" | "users" | "audit" | "desktop" | "settings";
 
 const TABS: { id: Tab; label: string; icon: React.FC<{ className?: string }> }[] = [
   { id: "overview",        label: "Umumiy ko'rinish",  icon: LayoutDashboard },
@@ -35,6 +36,7 @@ const TABS: { id: Tab; label: string; icon: React.FC<{ className?: string }> }[]
   { id: "create-company",  label: "Yangi kompaniya",    icon: PlusCircle },
   { id: "users",           label: "Foydalanuvchilar",   icon: Users },
   { id: "audit",           label: "Audit jurnali",      icon: ListChecks },
+  { id: "desktop",         label: "Desktop kassa",      icon: MonitorDown },
   { id: "settings",        label: "Sozlamalar",          icon: Settings },
 ];
 
@@ -167,6 +169,7 @@ function AdminDashboard() {
           {tab === "create-company"  && <AdminCreateCompany />}
           {tab === "users"           && <AdminUsers     />}
           {tab === "audit"           && <AdminAuditLog  />}
+          {tab === "desktop"         && <AdminDesktopReleases />}
           {tab === "settings"        && <AdminPlatformSettings />}
         </motion.div>
       </main>

@@ -2924,7 +2924,7 @@ export class KassaService {
       hotkeys[action] = key;
     }
     const prefs: DevicePrefs = {
-      language: input.language === "uz-Cyrl" ? "uz-Cyrl" : "uz-Latn",
+      language: input.language === "uz-Cyrl" || input.language === "ru" ? input.language : "uz-Latn",
       theme: input.theme === "dark" || input.theme === "system" ? input.theme : "light",
       fontScale: input.fontScale === "large" ? "large" : "normal",
       hotkeys,
@@ -3034,17 +3034,27 @@ export class KassaService {
     return this.toUpdateInfo(await this.remoteUpdate());
   }
 
-  /** O'rnatuvchini yuklab olish: faqat https, SHA-256 server bergan qiymatga mos kelsagina saqlanadi. */
+  /**
+   * O'rnatuvchini yuklab olish: SHA-256 server bergan qiymatga mos kelsagina saqlanadi. Nisbiy manzil — server bazasidagi
+   * reliz (API manzili bilan, qurilma tokeni bilan); tashqi manzil — faqat https, tokensiz.
+   */
   async downloadUpdate(): Promise<UpdateInfo> {
     this.requireCashier();
     const remote = await this.remoteUpdate();
     if (!remote.available || !remote.url || !remote.sha256 || !remote.latest) throw new KassaError("CONFLICT", "Yangi versiya yo'q");
-    if (!remote.url.startsWith("https://")) throw new KassaError("BAD_REQUEST", "Yangilanish manzili xavfsiz emas");
+    const apiUrl = this.store.getMeta<string>("apiUrl");
+    const token = this.vault.load();
+    const sameOrigin = remote.url.startsWith("/");
+    if (sameOrigin ? !apiUrl : !remote.url.startsWith("https://")) throw new KassaError("BAD_REQUEST", "Yangilanish manzili xavfsiz emas");
+    const target = sameOrigin ? new URL(remote.url, apiUrl!) : new URL(remote.url);
     const info = await this.toUpdateInfo(remote);
     if (info.downloaded) return info;
     let response: Response;
     try {
-      response = await (this.options.fetchImpl ?? fetch)(remote.url, { signal: AbortSignal.timeout(15 * 60_000) });
+      response = await (this.options.fetchImpl ?? fetch)(target, {
+        headers: sameOrigin && token ? { authorization: `Bearer ${token}`, "x-app-version": this.options.appVersion } : {},
+        signal: AbortSignal.timeout(15 * 60_000),
+      });
     } catch {
       throw new KassaError("OFFLINE", "Yangilanishni yuklab bo'lmadi — internetni tekshiring");
     }
