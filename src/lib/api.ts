@@ -26,7 +26,24 @@ export class ApiError extends Error {
 
 export type QueryParams = Record<string, string | number | boolean | null | undefined>;
 
-export function apiUrl(path: string, query?: QueryParams): string {
+/**
+ * Joriy brauzer tabining biznesi (URL `/{biznes}/...`) — har API so'rovida `x-bum-company`; null — foydalanuvchining
+ * saqlangan aktiv kompaniyasi. Har tabning o'z JS muhiti bor — bir nechta biznes parallel tablarda aralashmaydi;
+ * server kontekstni foydalanuvchining a'zoliklari bo'yicha tekshiradi.
+ */
+let companyContext: string | null = null;
+
+export const COMPANY_HEADER = "x-bum-company";
+
+export function setCompanyContext(key: string | null): void {
+  companyContext = key;
+}
+
+export function getCompanyContext(): string | null {
+  return companyContext;
+}
+
+function buildUrl(path: string, query?: QueryParams): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
@@ -35,15 +52,25 @@ export function apiUrl(path: string, query?: QueryParams): string {
   return `${BASE_URL}${path}${search ? `?${search}` : ""}`;
 }
 
-type RequestOptions = { query?: QueryParams; body?: unknown; signal?: AbortSignal };
+/** Brauzer o'zi yuklaydigan manzillar (rasm, yuklab olish, WebSocket): biznes konteksti so'rov parametrida. */
+export function apiUrl(path: string, query?: QueryParams): string {
+  return buildUrl(path, companyContext ? { ...query, bumCompany: companyContext } : query);
+}
+
+/** `company` — so'rov biznesi (undefined — joriy tab konteksti, null — saqlangan aktiv kompaniya). */
+type RequestOptions = { query?: QueryParams; body?: unknown; signal?: AbortSignal; company?: string | null };
 
 async function send(method: string, path: string, options: RequestOptions): Promise<Response> {
   let response: Response;
+  const headers: Record<string, string> = {};
+  if (options.body !== undefined) headers["content-type"] = "application/json";
+  const company = options.company === undefined ? companyContext : options.company;
+  if (company) headers[COMPANY_HEADER] = company;
   try {
-    response = await fetch(apiUrl(path, options.query), {
+    response = await fetch(buildUrl(path, options.query), {
       method,
       credentials: "include",
-      headers: options.body !== undefined ? { "content-type": "application/json" } : undefined,
+      headers,
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
     });
@@ -78,7 +105,8 @@ async function json<T>(method: string, path: string, options: RequestOptions = {
 }
 
 export const api = {
-  get: <T>(path: string, query?: QueryParams, signal?: AbortSignal) => json<T>("GET", path, { query, signal }),
+  get: <T>(path: string, query?: QueryParams, signal?: AbortSignal, company?: string | null) =>
+    json<T>("GET", path, { query, signal, company }),
   post: <T>(path: string, body?: unknown) => json<T>("POST", path, { body: body ?? {} }),
   put: <T>(path: string, body?: unknown) => json<T>("PUT", path, { body: body ?? {} }),
   patch: <T>(path: string, body?: unknown) => json<T>("PATCH", path, { body: body ?? {} }),

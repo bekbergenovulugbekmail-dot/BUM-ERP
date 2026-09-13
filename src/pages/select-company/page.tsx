@@ -13,6 +13,7 @@
  * Also accessible from the sidebar switcher for quick switching.
  */
 import { useParams, useNavigate } from "react-router-dom";
+import { companyPathKey } from "@bum/shared";
 import { useState } from "react";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { useMyCompanies, useSwitchCompany } from "@/hooks/use-company.ts";
@@ -66,11 +67,12 @@ function CompanyList() {
   const currentUser = useCurrentUser();
   const [switching, setSwitching] = useState<string | null>(null);
 
-  const handleSelect = async (companyId: string) => {
+  const handleSelect = async (companyId: string, slug: string | null) => {
     setSwitching(companyId);
     try {
       await switchCompany.mutateAsync(companyId);
-      navigate(`/${lng}/dashboard`, { replace: true });
+      // Biznes manziliga: /{slug}/dashboard (boshqa biznesni yangi tabda ham ochish mumkin)
+      navigate(`/${companyPathKey(slug, companyId) ?? lng}/dashboard`, { replace: true });
     } catch {
       setSwitching(null);
     }
@@ -118,7 +120,7 @@ function CompanyList() {
               initial={{ opacity: 0, x: -16 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.25, delay: i * 0.06 }}
-              onClick={() => { void handleSelect(company.id); }}
+              onClick={() => { void handleSelect(company.id, company.slug); }}
               disabled={isSwitching || !company.membershipActive}
               className={[
                 "w-full flex items-center gap-4 p-4 rounded-2xl border text-left transition-all cursor-pointer group",

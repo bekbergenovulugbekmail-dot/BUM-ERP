@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button.tsx";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.tsx";
-import { SUPPORTED_LOCALES, SUPPORTED_LOCALES_ARRAY, setLocaleInPath } from "@/i18n.ts";
+import { SUPPORTED_LOCALES, SUPPORTED_LOCALES_ARRAY, changeLocale, pathHasLocale, setLocaleInPath } from "@/i18n.ts";
 import { AgentLocationContext } from "./_lib/agent-location.ts";
 import { useLocationTracking, type AgentLocation } from "./_lib/use-location-tracking.ts";
 import { useOnline } from "./_lib/use-online.ts";
@@ -58,7 +58,11 @@ export function LanguageMenu() {
           <DropdownMenuItem
             key={code}
             className={cn("cursor-pointer", i18n.language === code && "font-medium")}
-            onClick={() => navigate(setLocaleInPath(code, location.pathname, location.search, location.hash))}
+            onClick={() => {
+              // Biznes manzilida (/{biznes}/sales-agent) til URL'da emas — faqat almashtiriladi
+              if (pathHasLocale(location.pathname)) navigate(setLocaleInPath(code, location.pathname, location.search, location.hash));
+              else void changeLocale(code);
+            }}
           >
             <span className="mr-2">{SUPPORTED_LOCALES[code].emoji}</span>
             {SUPPORTED_LOCALES[code].nativeName}

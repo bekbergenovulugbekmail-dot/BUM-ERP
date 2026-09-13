@@ -1,6 +1,7 @@
 // v2: v1 API javoblarini ham keshlab qo'yardi (tizimdan chiqqandan keyin ham qolardi) — nomi almashgani uchun o'chadi
 const CACHE_NAME = "erp-assets-v2";
-const AGENT_API_CACHE = "agent-api-v1";
+// v2: kesh kaliti biznes bo'yicha (bir nechta biznes bitta brauzerda) — eski kalitlar o'chadi
+const AGENT_API_CACHE = "agent-api-v2";
 const OFFLINE_URL = "/offline.html";
 
 const urlsToCache = [
@@ -53,20 +54,43 @@ self.addEventListener("message", (event) => {
   if (event.data?.type === "clear-agent-cache") event.waitUntil(caches.delete(AGENT_API_CACHE));
 });
 
+// Tab biznesi (sarlavha yoki parametr) — bir biznesning oflayn ma'lumoti boshqasiga berilmasin
+function companyOf(request) {
+  return request.headers.get("x-bum-company") || new URL(request.url).searchParams.get("bumCompany") || "";
+}
+
+function cacheKey(request) {
+  const url = new URL(request.url);
+  url.searchParams.delete("bumCompany");
+  url.searchParams.set("__company", companyOf(request));
+  return url.toString();
+}
+
+async function cachedFallback(request) {
+  const cache = await caches.open(AGENT_API_CACHE);
+  const exact = await cache.match(cacheKey(request));
+  if (exact) return exact;
+  // Shu yo'l va shu biznesning boshqa parametrli nusxasi (masalan, boshqa joydan masofa bilan)
+  const path = new URL(request.url).pathname;
+  const company = companyOf(request);
+  for (const key of await cache.keys()) {
+    const url = new URL(key.url);
+    if (url.pathname === path && url.searchParams.get("__company") === company) return cache.match(key);
+  }
+  return undefined;
+}
+
 function agentRead(request) {
   return fetch(request)
     .then((response) => {
       if (response.ok) {
         const clone = response.clone();
-        caches.open(AGENT_API_CACHE).then((cache) => cache.put(request, clone));
+        caches.open(AGENT_API_CACHE).then((cache) => cache.put(cacheKey(request), clone));
       }
       return response;
     })
     .catch(() =>
-      caches
-        .open(AGENT_API_CACHE)
-        // Aynan shu so'rov, bo'lmasa shu yo'lning boshqa parametrli nusxasi (masalan, boshqa joydan masofa bilan)
-        .then((cache) => cache.match(request).then((exact) => exact ?? cache.match(request, { ignoreSearch: true })))
+      cachedFallback(request)
         .then(
           (cached) =>
             cached ??

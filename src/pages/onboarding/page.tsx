@@ -33,7 +33,8 @@ import {
   SelectValue,
 } from "@/components/ui/select.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
-import { AUTH_ME_KEY, useApiQuery } from "@/lib/query.ts";
+import { companyPathKey } from "@bum/shared";
+import { authMeKey, useApiQuery } from "@/lib/query.ts";
 import { useAuth, useCurrentUser, type Me } from "@/hooks/use-auth.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -198,14 +199,15 @@ function RegistrationWizard() {
         language:    form.language,
       });
       // Sessiya cookie'si serverda o'rnatildi — boshqa keshlar tozalanib, joriy foydalanuvchi yoziladi
-      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== AUTH_ME_KEY[0] });
-      queryClient.setQueryData(AUTH_ME_KEY, result.user);
+      queryClient.removeQueries();
+      queryClient.setQueryData(authMeKey(), result.user);
       toast.success("Kompaniya muvaffaqiyatli yaratildi!", {
         description: result.company.trialEndsAt
           ? `Sinov muddati: ${format(new Date(result.company.trialEndsAt), "dd.MM.yyyy")} gacha`
           : undefined,
       });
-      navigate(`/${lng}/dashboard`, { replace: true });
+      // Yangi biznes manziliga (`/{slug}/dashboard`)
+      navigate(`/${companyPathKey(result.company.slug, result.company.id) ?? lng}/dashboard`, { replace: true });
     } catch (err) {
       toast.error(errorMessage(err, "Xatolik yuz berdi. Qayta urinib ko'ring."));
       // Telefon band / parol talabi — ma'lumot kiritish qadamiga qaytiladi

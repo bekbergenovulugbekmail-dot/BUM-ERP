@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { DefaultProviders } from "./components/providers/default.tsx";
+import BaseSegment from "./components/providers/base-segment.tsx";
 import LocaleWrapper from "./components/providers/locale-wrapper.tsx";
 import { SAVED_OR_DEFAULT_LOCALE, setLocaleInPath } from "./i18n.ts";
 import "./i18n.ts";
@@ -113,13 +114,13 @@ function MainApp() {
         {/* Tenant portal: app.bum-erp.uz/t/:slug */}
         <Route path="/t/:slug" element={<TenantPortalPage />} />
 
-        {/* All localized routes */}
+        {/* Birinchi bo'lak: til (/uz/login) yoki biznes (/bonnu-market/purchase) — `lng` parametri ikkalasini ham bildiradi */}
         <Route
           path="/:lng"
           element={
-            <LocaleWrapper>
+            <BaseSegment>
               <Outlet />
-            </LocaleWrapper>
+            </BaseSegment>
           }
         >
           {/* Onboarding: outside ERPLayout */}

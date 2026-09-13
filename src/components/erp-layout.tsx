@@ -30,6 +30,7 @@ import {
   CreditCard,
   Lock,
   KeyRound,
+  ExternalLink,
   type LucideIcon,
 } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -53,9 +54,12 @@ import { MODULE_GROUPS } from "@/lib/modules.ts";
 import {
   SUPPORTED_LOCALES,
   SUPPORTED_LOCALES_ARRAY,
+  changeLocale,
+  pathHasLocale,
   setLocaleInPath,
   type SupportedLocale,
 } from "@/i18n.ts";
+import { companyPathKey } from "@bum/shared";
 import { SignInButton } from "@/components/ui/signin.tsx";
 import NotificationCenter from "@/components/notification-center.tsx";
 import PWAInstallBanner from "@/components/pwa-install-banner.tsx";
@@ -220,8 +224,12 @@ function TopBar({ onMenuToggle }: { onMenuToggle?: () => void }) {
   }, []);
 
   const handleLocale = (lng: SupportedLocale) => {
-    const newPath = setLocaleInPath(lng, location.pathname, location.search, location.hash);
-    navigate(newPath);
+    // Biznes manzilida (/{biznes}/...) til URL'da emas — faqat almashtiriladi va saqlanadi
+    if (!pathHasLocale(location.pathname)) {
+      void changeLocale(lng);
+      return;
+    }
+    navigate(setLocaleInPath(lng, location.pathname, location.search, location.hash));
   };
 
   return (
@@ -434,13 +442,26 @@ function CompanySwitcher() {
             className="cursor-pointer"
             onClick={async () => {
               await switchCompany.mutateAsync(c.id);
-              navigate(`/${lng}/dashboard`);
+              navigate(`/${companyPathKey(c.slug, c.id) ?? lng}/dashboard`);
             }}
           >
             <Building2 className="mr-2 h-4 w-4" />
             <span className="truncate">{c.name}</span>
-            {c.isCurrent && (
+            {c.isCurrent ? (
               <span className="ml-auto text-xs text-primary">✓</span>
+            ) : (
+              // Bir nechta biznes bitta brauzerda parallel — yangi tabda
+              <a
+                href={`/${companyPathKey(c.slug, c.id)}/dashboard`}
+                target="_blank"
+                rel="noopener"
+                title="Yangi tabda ochish"
+                aria-label={`${c.name} — yangi tabda ochish`}
+                className="ml-auto rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
             )}
           </DropdownMenuItem>
         ))}
@@ -640,7 +661,7 @@ function LicenseBlockedScreen({ reason, companyName, lng }: { reason: AccessDeni
                 key={c.id}
                 onClick={async () => {
                   await switchCompany.mutateAsync(c.id);
-                  navigate(`/${lng}/dashboard`);
+                  navigate(`/${companyPathKey(c.slug, c.id) ?? lng}/dashboard`);
                 }}
                 className="w-full flex items-center gap-3 p-3 rounded-xl border border-border hover:border-primary/40 hover:bg-accent transition-colors text-left"
               >

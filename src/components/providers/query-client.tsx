@@ -21,7 +21,8 @@ const queryClient = new QueryClient({
 if (typeof window !== "undefined") {
   // Sessiya tugagan (muddati, parol almashtirildi, admin bekor qildi): foydalanuvchi — yo'q, layout login'ga o'tkazadi
   window.addEventListener(UNAUTHENTICATED_EVENT, () => {
-    queryClient.setQueryData(AUTH_ME_KEY, null);
+    // Barcha biznes kontekstlaridagi `/me`
+    queryClient.setQueriesData({ queryKey: AUTH_ME_KEY }, null);
   });
 }
 

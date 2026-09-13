@@ -72,6 +72,7 @@ import { requestMeta } from "../../shared/audit.js";
 import { decimalSchema, moneySchema, qtySchema } from "../../shared/decimal.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 import { SESSION_COOKIE } from "../auth/session.js";
+import { COMPANY_CONTEXT_QUERY, companyKeyFrom } from "../company/company-context.js";
 import { effectivePermissions, requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import { recipientCandidates } from "../sales-agent/policy.service.js";
 import { requireDeliveryAgent, type DeliveryAgentContext } from "./agent-context.js";
@@ -590,7 +591,7 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
 
   const hub = new DeliveryRealtimeHub(app.log);
   app.addHook("onClose", async () => hub.close());
-  const upgrades = new WeakMap<FastifyRequest, { token: string; access: RealtimeAccess }>();
+  const upgrades = new WeakMap<FastifyRequest, { token: string; access: RealtimeAccess; companyKey: string | null }>();
 
   app.get(
     "/ws",
@@ -600,10 +601,12 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
       preHandler: async (req) => {
         if (!originAllowed(req.headers.origin, req.headers.host)) throw forbidden("Ruxsat etilmagan manba");
         const token = req.cookies[SESSION_COOKIE] ?? "";
-        const access = await resolveRealtimeAccess(token);
+        // Tab biznesi — WebSocket sarlavha yubora olmaydi, shuning uchun so'rov parametrida
+        const companyKey = companyKeyFrom((req.query as Record<string, unknown> | undefined)?.[COMPANY_CONTEXT_QUERY]);
+        const access = await resolveRealtimeAccess(token, companyKey);
         if (access === "unauthenticated") throw unauthenticated();
         if (access === "forbidden") throw forbidden("Dostavka real-time uchun ruxsat yo'q");
-        upgrades.set(req, { token, access });
+        upgrades.set(req, { token, access, companyKey });
       },
     },
     async (socket, req) => {
@@ -612,7 +615,7 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
         socket.close(CLOSE_CODES.forbidden);
         return;
       }
-      await hub.add(socket, upgrade.token, upgrade.access);
+      await hub.add(socket, upgrade.token, upgrade.access, upgrade.companyKey);
     },
   );
 

@@ -7,9 +7,19 @@
  *
  * Qulflangan ekran (LOCK): sessiya saqlanadi, lekin `requireAuth` 423 LOCKED qaytaradi — faqat `requireSession`
  * ishlatadigan /api/auth/me, /lock, /unlock ochiq. Chiqish (LOGOUT) sessiyani bekor qiladi — PIN endi ishlamaydi.
+ *
+ * Biznes konteksti (tab): `x-bum-company` / `bumCompany` — foydalanuvchining faol a'zoligi bo'lgan kompaniya shu so'rov
+ * uchun aktiv bo'ladi (company/company-context.ts); boshqa biznes — 403.
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { AppError, forbidden, unauthenticated } from "@bum/shared";
+import { db } from "../../db/client.js";
+import {
+  COMPANY_CONTEXT_HEADER,
+  COMPANY_CONTEXT_QUERY,
+  companyKeyFrom,
+  resolveCompanyContext,
+} from "../company/company-context.js";
 import {
   SESSION_COOKIE,
   clearSessionCookie,
@@ -24,7 +34,7 @@ declare module "fastify" {
   }
 }
 
-/** Yaroqli sessiya (qulflangan bo'lsa ham). */
+/** Yaroqli sessiya (qulflangan bo'lsa ham) + so'rovdagi biznes konteksti. */
 export async function requireSession(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const token = req.cookies[SESSION_COOKIE];
   const session = token ? await validateSession(token) : null;
@@ -33,7 +43,11 @@ export async function requireSession(req: FastifyRequest, reply: FastifyReply): 
     if (token) clearSessionCookie(reply);
     throw unauthenticated();
   }
-  req.auth = session;
+  const query = req.query && typeof req.query === "object" ? (req.query as Record<string, unknown>) : null;
+  const key = companyKeyFrom(req.headers[COMPANY_CONTEXT_HEADER]) ?? companyKeyFrom(query?.[COMPANY_CONTEXT_QUERY]);
+  // Parametr marshrut sxemalariga yetib bormaydi (qat'iy sxemalar noma'lum maydonni rad etadi)
+  if (query) Reflect.deleteProperty(query, COMPANY_CONTEXT_QUERY);
+  req.auth = key ? { ...session, user: await resolveCompanyContext(db, session.user, key) } : session;
 }
 
 export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Promise<void> {

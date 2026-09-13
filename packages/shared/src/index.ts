@@ -13,3 +13,4 @@ export * from "./sha256.ts";
 export * from "./pos-appearance.ts";
 export * from "./pos-quick-sale.ts";
 export * from "./subscription.ts";
+export * from "./company-paths.ts";

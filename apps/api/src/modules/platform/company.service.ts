@@ -11,7 +11,7 @@
  *    kompaniyada yozish amallari company/tenant.ts da yopiladi
  */
 import { desc, eq, like, or, sql } from "drizzle-orm";
-import { DEFAULT_ROLES, effectiveSubscriptionStatus, notFound } from "@bum/shared";
+import { DEFAULT_ROLES, RESERVED_COMPANY_PATHS, effectiveSubscriptionStatus, notFound } from "@bum/shared";
 import { warehouses } from "../../db/schema/inventory.js";
 import { seedFinanceDefaults } from "../finance/accounts.service.js";
 import { branches, companies, companyMembers, roles, users } from "../../db/schema/platform.js";
@@ -27,12 +27,8 @@ const OWNER_ROLE = "Business Owner";
 export const COMPANY_STATUSES = ["active", "trial", "pending", "suspended", "cancelled"] as const;
 export type CompanyStatus = (typeof COMPANY_STATUSES)[number];
 
-/** Convex'dagi RESERVED_SLUGS bilan bir xil — subdomen va marshrutlar bilan to'qnashmasin. */
-const RESERVED_SLUGS = new Set([
-  "admin", "app", "auth", "www", "api", "mail", "ftp",
-  "support", "billing", "status", "dev", "staging",
-  "help", "docs", "blog", "t", "tenant", "platform",
-]);
+/** Subdomen, ilova yo'llari (`/{slug}/{bo'lim}`) va til kodlari bilan to'qnashmasin. */
+const RESERVED_SLUGS = new Set(RESERVED_COMPANY_PATHS);
 
 /** Convex'dagi nameToSlug: "ALKON MCHJ" → "alkon-mchj", "Mega Trade" → "mega-trade". */
 export function nameToSlug(name: string): string {

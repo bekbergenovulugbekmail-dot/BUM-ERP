@@ -21,6 +21,7 @@ import { db } from "../../db/client.js";
 import { deliveryAgents } from "../../db/schema/delivery.js";
 import { env } from "../../env.js";
 import { peekSession } from "../auth/session.js";
+import { resolveCompanyContext } from "../company/company-context.js";
 import { effectivePermissions, requireTenant } from "../company/tenant.js";
 import { DELIVERY_CHANNEL, parseDeliveryBusEvent, type DeliveryBusEvent } from "./realtime-bus.js";
 
@@ -37,12 +38,13 @@ export const realtimeTiming = { recheckMs: 60_000, heartbeatMs: 30_000 };
 export const MAX_CONNECTIONS_PER_USER = 5;
 export const CLOSE_CODES = { unauthenticated: 4401, forbidden: 4403, tooMany: 4409, restart: 1012, unavailable: 1011, shutdown: 1001 } as const;
 
-export async function resolveRealtimeAccess(token: string): Promise<RealtimeAccess | "unauthenticated" | "forbidden"> {
+/** @param companyKey tab biznesi (`bumCompany`); null — foydalanuvchining saqlangan aktiv kompaniyasi. */
+export async function resolveRealtimeAccess(token: string, companyKey: string | null = null): Promise<RealtimeAccess | "unauthenticated" | "forbidden"> {
   const session = await peekSession(token);
   if (!session) return "unauthenticated";
   let tenant;
   try {
-    tenant = await requireTenant(db, session.user);
+    tenant = await requireTenant(db, await resolveCompanyContext(db, session.user, companyKey));
   } catch (error) {
     if (error instanceof AppError) return "forbidden";
     throw error;
@@ -98,7 +100,7 @@ export function messageFor(access: RealtimeAccess, event: DeliveryBusEvent): Del
   }
 }
 
-type Client = { socket: WebSocket; token: string; access: RealtimeAccess; alive: boolean };
+type Client = { socket: WebSocket; token: string; companyKey: string | null; access: RealtimeAccess; alive: boolean };
 
 export class DeliveryRealtimeHub {
   private readonly clients = new Set<Client>();
@@ -114,7 +116,7 @@ export class DeliveryRealtimeHub {
     return this.clients.size;
   }
 
-  async add(socket: WebSocket, token: string, access: RealtimeAccess) {
+  async add(socket: WebSocket, token: string, access: RealtimeAccess, companyKey: string | null = null) {
     if (this.closed) {
       socket.close(CLOSE_CODES.shutdown);
       return;
@@ -123,7 +125,7 @@ export class DeliveryRealtimeHub {
     for (const extra of own.slice(0, Math.max(0, own.length - MAX_CONNECTIONS_PER_USER + 1))) {
       extra.socket.close(CLOSE_CODES.tooMany, "too many connections");
     }
-    const client: Client = { socket, token, access, alive: true };
+    const client: Client = { socket, token, companyKey, access, alive: true };
     this.clients.add(client);
     socket.on("pong", () => {
       client.alive = true;
@@ -158,7 +160,7 @@ export class DeliveryRealtimeHub {
     for (const client of [...this.clients]) {
       let access: Awaited<ReturnType<typeof resolveRealtimeAccess>>;
       try {
-        access = await resolveRealtimeAccess(client.token);
+        access = await resolveRealtimeAccess(client.token, client.companyKey);
       } catch (error) {
         this.log.warn({ err: error }, "delivery realtime: qayta tekshirishda xato");
         continue;

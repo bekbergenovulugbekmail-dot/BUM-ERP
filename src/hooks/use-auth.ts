@@ -10,8 +10,8 @@
 import { useCallback, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AccessDenialReason, SubscriptionStatus } from "@bum/shared";
-import { api, ApiError, errorMessage } from "@/lib/api.ts";
-import { AUTH_ME_KEY } from "@/lib/query.ts";
+import { api, ApiError, errorMessage, getCompanyContext } from "@/lib/api.ts";
+import { AUTH_ME_KEY, authMeKey } from "@/lib/query.ts";
 import type { CompanyStatus } from "./use-company.ts";
 
 /** `GET /api/auth/me` javobi. */
@@ -61,9 +61,9 @@ function loginPath(): string {
   return `/${lng}/login`;
 }
 
-async function fetchMe(signal?: AbortSignal): Promise<Me | null> {
+async function fetchMe(signal: AbortSignal | undefined, company: string | null): Promise<Me | null> {
   try {
-    return (await api.get<{ user: Me }>("/api/auth/me", undefined, signal)).user;
+    return (await api.get<{ user: Me }>("/api/auth/me", undefined, signal, company)).user;
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) return null;
     throw error;
@@ -71,9 +71,10 @@ async function fetchMe(signal?: AbortSignal): Promise<Me | null> {
 }
 
 function useMeQuery() {
+  const company = getCompanyContext();
   return useQuery<Me | null, ApiError>({
-    queryKey: AUTH_ME_KEY,
-    queryFn: ({ signal }) => fetchMe(signal),
+    queryKey: [AUTH_ME_KEY[0], company],
+    queryFn: ({ signal }) => fetchMe(signal, company),
     staleTime: 60_000,
   });
 }
@@ -81,6 +82,11 @@ function useMeQuery() {
 /** Convex'dagi `users.getCurrentUser` kabi: `undefined` — yuklanmoqda, `null` — kirilmagan. */
 export function useCurrentUser(): Me | null | undefined {
   return useMeQuery().data;
+}
+
+/** `/me` xatosi (masalan, URL'dagi biznesga kirish yo'q — 403 `company_access_denied`). */
+export function useMeError(): ApiError | null {
+  return useMeQuery().error;
 }
 
 export function useAuth() {
@@ -92,8 +98,9 @@ export function useAuth() {
   /** Boshqa foydalanuvchi yoki kompaniya ma'lumoti keshda qolmasligi uchun. */
   const replaceSession = useCallback(
     (user: Me | null) => {
-      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== AUTH_ME_KEY[0] });
-      queryClient.setQueryData(AUTH_ME_KEY, user);
+      // Barcha bizneslar keshi (boshqa biznes kontekstidagi `/me` ham) — yangi sessiya bilan qayta olinadi
+      queryClient.removeQueries();
+      queryClient.setQueryData(authMeKey(), user);
     },
     [queryClient],
   );

@@ -52,6 +52,12 @@ export function setLocaleInPath(
   return `/${targetLocale}${pathname}${search}${hash}`;
 }
 
+/** URL til bilan boshlanadimi (`/uz/...`); biznes manzili (`/{biznes}/...`) — yo'q, u yerda til faqat saqlanadi. */
+export function pathHasLocale(pathname: string): boolean {
+  const first = pathname.split("/").filter(Boolean)[0];
+  return first !== undefined && isSupportedLocale(first.toLowerCase());
+}
+
 export async function changeLocale(lng: SupportedLocale) {
   try {
     await i18n.changeLanguage(lng);

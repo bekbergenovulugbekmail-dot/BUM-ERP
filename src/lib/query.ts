@@ -12,16 +12,22 @@ import {
   useQueryClient,
   type UseQueryOptions,
 } from "@tanstack/react-query";
-import { api, type ApiError, type QueryParams } from "./api.ts";
+import { api, getCompanyContext, type ApiError, type QueryParams } from "./api.ts";
 
+/** Prefiks (barcha bizneslar); aniq kalit — `authMeKey()`. */
 export const AUTH_ME_KEY = ["/api/auth/me"] as const;
+
+/** Joriy tab biznesidagi foydalanuvchi (`/me` biznes kontekstiga bog'liq). */
+export const authMeKey = () => [AUTH_ME_KEY[0], getCompanyContext()] as const;
 
 type QueryOptions<T> = Omit<UseQueryOptions<T, ApiError>, "queryKey" | "queryFn">;
 
 export function useApiQuery<T>(path: string | null, params?: QueryParams, options: QueryOptions<T> = {}) {
+  // Kalitda biznes: tabda boshqa biznesga o'tilsa kesh aralashmaydi; so'rov kalitdagi biznes bilan yuboriladi
+  const company = getCompanyContext();
   return useQuery<T, ApiError>({
-    queryKey: [path, params ?? {}],
-    queryFn: ({ signal }) => api.get<T>(path!, params, signal),
+    queryKey: [path, params ?? {}, company],
+    queryFn: ({ signal }) => api.get<T>(path!, params, signal, company),
     ...options,
     enabled: path !== null && (options.enabled ?? true),
   });
