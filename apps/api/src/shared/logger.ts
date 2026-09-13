@@ -4,7 +4,8 @@ import { env, isProd } from "../env.js";
 const isTest = env.NODE_ENV === "test";
 
 export const logger = pino({
-  level: isTest ? "silent" : isProd ? "info" : "debug",
+  // Testda jim; tushunarsiz 500'ni ko'rish uchun TEST_LOG_LEVEL=error
+  level: isTest ? (process.env.TEST_LOG_LEVEL ?? "silent") : isProd ? "info" : "debug",
   /** Parol, token, PIN hech qachon logga tushmasin. */
   redact: {
     paths: [

@@ -19,7 +19,8 @@ export const pool = new pg.Pool({
   connectionString: env.DATABASE_URL,
   max: isProd ? 20 : 5,
   idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 10_000,
+  // Testda (Docker'dagi Postgres, kam xotirali mashina) yangi ulanish 10 s dan uzoq ochilishi mumkin
+  connectionTimeoutMillis: env.NODE_ENV === "test" ? 30_000 : 10_000,
 });
 
 pool.on("error", (err) => {
