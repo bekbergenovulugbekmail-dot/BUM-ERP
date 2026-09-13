@@ -18,6 +18,29 @@ import { KassaService, toKassaError, type AppUpdater, type ReceiptPrinter, type 
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
+let quitting = false;
+
+// Sinov va ishlab chiqish: alohida foydalanuvchi papkasi — o'rnatilgan kassa bilan "bitta nusxa" qulfi va bazasi to'qnashmasin
+if (process.env.KASSA_USER_DATA && !app.isPackaged) app.setPath("userData", process.env.KASSA_USER_DATA);
+
+/** Printer drayveri javob bermasa yashirin chop etish oynasi abadiy qolib, ilova yopilishini to'sib qo'yardi. */
+const PRINT_TIMEOUT_MS = 60_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
 
 // Mahsulot rasmlari: renderer `bum-image://product/<id>?v=<versiya>` — main keshdan yoki serverdan beradi (disk yo'li va
 // token renderer'ga ochilmaydi). Ilova tayyor bo'lishidan oldin ro'yxatdan o'tadi.
@@ -56,18 +79,22 @@ const receiptPrinter: ReceiptPrinter = {
       const heightPx = Number(await win.webContents.executeJavaScript("document.documentElement.scrollHeight", true)) || 600;
       // px → mikron (96 dpi); pastda qirqish uchun zaxira
       const heightMicrons = Math.max(Math.ceil(((heightPx * 25.4) / 96) * 1000) + 8000, 30_000);
-      await new Promise<void>((resolve, reject) => {
-        win.webContents.print(
-          {
-            silent: true,
-            printBackground: true,
-            ...(prefs.printerName ? { deviceName: prefs.printerName } : {}),
-            margins: { marginType: "none" },
-            pageSize: { width: prefs.paperWidth * 1000, height: heightMicrons },
-          },
-          (success, reason) => (success ? resolve() : reject(new Error(reason || "Chop etilmadi"))),
-        );
-      });
+      await withTimeout(
+        new Promise<void>((resolve, reject) => {
+          win.webContents.print(
+            {
+              silent: true,
+              printBackground: true,
+              ...(prefs.printerName ? { deviceName: prefs.printerName } : {}),
+              margins: { marginType: "none" },
+              pageSize: { width: prefs.paperWidth * 1000, height: heightMicrons },
+            },
+            (success, reason) => (success ? resolve() : reject(new Error(reason || "Chop etilmadi"))),
+          );
+        }),
+        PRINT_TIMEOUT_MS,
+        "Printer javob bermadi",
+      );
     } finally {
       win.destroy();
     }
@@ -79,19 +106,23 @@ const receiptPrinter: ReceiptPrinter = {
     try {
       await writeFile(file, html, "utf8");
       await win.loadFile(file);
-      await new Promise<void>((resolve, reject) => {
-        win.webContents.print(
-          {
-            silent: true,
-            printBackground: true,
-            ...(options.printerName ? { deviceName: options.printerName } : {}),
-            ...(options.layout === "roll"
-              ? { margins: { marginType: "none" as const }, pageSize: { width: Math.round(options.widthMm * 1000), height: Math.round(options.heightMm * 1000) } }
-              : { pageSize: "A4" as const }),
-          },
-          (success, reason) => (success ? resolve() : reject(new Error(reason || "Chop etilmadi"))),
-        );
-      });
+      await withTimeout(
+        new Promise<void>((resolve, reject) => {
+          win.webContents.print(
+            {
+              silent: true,
+              printBackground: true,
+              ...(options.printerName ? { deviceName: options.printerName } : {}),
+              ...(options.layout === "roll"
+                ? { margins: { marginType: "none" as const }, pageSize: { width: Math.round(options.widthMm * 1000), height: Math.round(options.heightMm * 1000) } }
+                : { pageSize: "A4" as const }),
+            },
+            (success, reason) => (success ? resolve() : reject(new Error(reason || "Chop etilmadi"))),
+          );
+        }),
+        PRINT_TIMEOUT_MS,
+        "Printer javob bermadi",
+      );
     } finally {
       win.destroy();
       await rm(file, { force: true });
@@ -134,12 +165,19 @@ function createWindow() {
   else void mainWindow.loadFile(path.join(here, "../renderer/index.html"));
   mainWindow.on("closed", () => {
     mainWindow = null;
+    // Asosiy oyna yopildi — ilova to'liq chiqadi (yashirin chop etish oynasi qolgan bo'lsa ham jarayon osilib qolmaydi)
+    app.quit();
   });
 }
 
 function registerIpc(service: KassaService) {
   const handlers: { [C in KassaChannel]: (input: KassaChannels[C]["input"]) => KassaChannels[C]["output"] | Promise<KassaChannels[C]["output"]> } = {
     "app:status": () => service.status(),
+    "app:quit": () => {
+      // Javob renderer'ga qaytgach yopiladi
+      setImmediate(() => app.quit());
+    },
+    "device:unpair": () => service.unpair(),
     "setup:options": (input) => service.setupOptions(input),
     "setup:register": (input) => service.register(input),
     "cashier:list": () => service.cashiers(),
@@ -252,8 +290,14 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (mainWindow?.isMinimized()) mainWindow.restore();
-    mainWindow?.focus();
+    if (quitting || !app.isReady()) return;
+    // Oyna yo'q (yopilgan) bo'lsa — qayta ochiladi, aks holda qayta ishga tushirish hech narsa ko'rsatmay qolardi
+    if (!mainWindow) {
+      createWindow();
+      return;
+    }
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
   });
 
   void app.whenReady().then(() => {
@@ -282,7 +326,14 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     service.start();
 
-    app.on("before-quit", () => service.stop());
+    app.on("before-quit", () => {
+      if (quitting) return;
+      quitting = true;
+      service.shutdown();
+      // Osilib qolgan yashirin (chop etish) oynalar chiqishni to'smasin; baribir chiqmasa — 5 soniyadan keyin majburan
+      for (const win of BrowserWindow.getAllWindows()) if (win !== mainWindow) win.destroy();
+      setTimeout(() => app.exit(0), 5_000).unref();
+    });
   });
 
   app.on("window-all-closed", () => app.quit());

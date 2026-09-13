@@ -208,6 +208,10 @@ export const RU_PHRASES: Record<string, string> = {
   "Kassa bloklangan": "Касса заблокирована",
   "— davom etish uchun PIN kiriting": "— введите PIN, чтобы продолжить",
   "Boshqa kassir": "Другой кассир",
+  "Dasturni yopish": "Закрыть программу",
+  "Qurilmani uzish": "Отключить устройство",
+  "Uzilmoqda…": "Отключение…",
+  "Dasturni to'liq yopish yoki qurilmani boshqa kompaniyaga ulash uchun uzish:": "Полностью закрыть программу или отключить устройство, чтобы подключить его к другой компании:",
 
   // ─── Bosh ekran (home-screen.tsx) ───
   "Smena": "Смена",

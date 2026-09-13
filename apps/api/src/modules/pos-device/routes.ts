@@ -227,7 +227,7 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
     // Obuna tugagan: holat va yangilanish ochiq (kassa sababni ko'rsatadi); sinxron, kassir kirishi va boshqa amallar yopiq
     scoped.addHook("preHandler", async (req) => {
       const url = req.routeOptions.url ?? "";
-      if (url.endsWith("/session") || url.endsWith("/app-update") || url.includes("/releases/")) return;
+      if (url.endsWith("/session") || url.endsWith("/app-update") || url.endsWith("/unregister") || url.includes("/releases/")) return;
       assertDeviceSubscription(deviceOf(req));
     });
 
@@ -249,6 +249,26 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
     });
 
     scoped.get("/app-update", async (req) => ({ update: desktopUpdate(appVersionOf(req), process.env, await currentRelease(db)) }));
+
+    // Kassadan "Qurilmani uzish": qurilma o'zini o'chiradi (token bekor) — keyin boshqa kompaniyaga ulanishi mumkin
+    scoped.post("/unregister", async (req) => {
+      const context = deviceOf(req);
+      await withTransaction(async (tx) => {
+        await tx.update(posDevices).set({ isActive: false, updatedAt: new Date() }).where(eq(posDevices.id, context.device.id));
+        await writeAuditLog(
+          {
+            companyId: context.company.id,
+            action: "POS_DEVICE_UNREGISTERED",
+            resource: "pos_devices",
+            resourceId: context.device.id,
+            details: { code: context.device.code, name: context.device.name, by: "device" },
+            ...requestMeta(req),
+          },
+          tx,
+        );
+      });
+      return { ok: true };
+    });
 
     scoped.get("/releases/:releaseId/download", async (req, reply) => {
       const { releaseId } = releaseParams.parse(req.params);

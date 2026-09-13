@@ -9,6 +9,8 @@ const { contextBridge, ipcRenderer } = electron;
 
 const CHANNELS = new Set([
   "app:status",
+  "app:quit",
+  "device:unpair",
   "setup:options",
   "setup:register",
   "cashier:list",

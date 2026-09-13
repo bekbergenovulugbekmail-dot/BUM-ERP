@@ -22,6 +22,7 @@ import {
 import { PAYMENT_LABELS, fmtMoney, fmtTime } from "../format.ts";
 import { call, errorText } from "../kassa.ts";
 import PrefsDialog from "../pos/prefs-dialog.tsx";
+import ExitActions from "../settings/exit-actions.tsx";
 import ScalesPanel from "../settings/scales-panel.tsx";
 import { usePrefersDark } from "../settings/prefers-dark.ts";
 import { PosThemePreview } from "../settings/theme-preview.tsx";
@@ -791,6 +792,10 @@ function LogoutPanel({ status, onStatus }: { status: AppStatus; onStatus: (statu
       <Button variant="destructive" onClick={() => void call("cashier:logout").then(onStatus)}>
         Chiqish
       </Button>
+      <div className="mt-6 max-w-2xl border-t border-border pt-4">
+        <p className="mb-3 text-sm text-muted-foreground">Dasturni to'liq yopish yoki qurilmani boshqa kompaniyaga ulash uchun uzish:</p>
+        <ExitActions status={status} onStatus={onStatus} />
+      </div>
     </>
   );
 }

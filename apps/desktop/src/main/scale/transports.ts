@@ -3,7 +3,7 @@
  * COM port Windows PowerShell'dagi .NET `System.IO.Ports.SerialPort` orqali alohida jarayonda, vaqt chegarasi bilan.
  * Bu qatlamda protokol yo'q — faqat berilgan baytlarni yuborish va javobni yig'ish.
  */
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { createConnection } from "node:net";
 import type { ScaleConnection, SerialConnection } from "../../shared/scale-types.js";
 
@@ -105,6 +105,14 @@ const firstLine = (text: string) =>
     .find(Boolean)
     ?.slice(0, 200) ?? "";
 
+/** Ishlayotgan COM port (PowerShell) jarayonlari — ilova yopilganda fonda qolib ketmasin (Windows bola jarayonni o'zi yopmaydi). */
+const activeSerialChildren = new Set<ChildProcess>();
+
+export function killActiveSerialProcesses(): void {
+  for (const child of activeSerialChildren) if (child.exitCode === null) child.kill();
+  activeSerialChildren.clear();
+}
+
 export function serialExchange(connection: SerialConnection, options: ExchangeOptions, platform: string = process.platform): Promise<Buffer> {
   if (!COM_PORT.test(connection.port)) return Promise.reject(new ScaleError("BAD_CONFIG", "COM port nomi noto'g'ri (masalan COM3)"));
   if (platform !== "win32") return Promise.reject(new ScaleError("NOT_SUPPORTED", "COM port faqat Windows'da qo'llab-quvvatlanadi"));
@@ -127,10 +135,12 @@ export function serialExchange(connection: SerialConnection, options: ExchangeOp
         BUM_SCALE_TIMEOUT: String(options.timeoutMs),
       },
     });
+    activeSerialChildren.add(child);
     const finish = (error: ScaleError | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(guard);
+      activeSerialChildren.delete(child);
       if (child.exitCode === null) child.kill();
       if (error) reject(error);
       else resolve(received());

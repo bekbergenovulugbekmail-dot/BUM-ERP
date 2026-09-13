@@ -8,10 +8,10 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { effectiveSubscriptionStatus, forbidden, unauthenticated } from "@bum/shared";
 import { db } from "../../db/client.js";
-import { companies, users } from "../../db/schema/platform.js";
+import { companies, companyMembers, users } from "../../db/schema/platform.js";
 import { posDevices } from "../../db/schema/pos.js";
 import { subscriptions } from "../../db/schema/subscription.js";
 import { warehouses } from "../../db/schema/inventory.js";
@@ -117,6 +117,15 @@ export function deviceOf(req: FastifyRequest): DeviceContext {
 export async function cashierTenant(conn: DbOrTx, context: DeviceContext, cashierId: string): Promise<TenantContext> {
   const [user] = await conn.select().from(users).where(eq(users.id, cashierId)).limit(1);
   if (!user || !user.isActive) throw forbidden("Kassir faol emas");
+  const [member] = await conn
+    .select({ isActive: companyMembers.isActive })
+    .from(companyMembers)
+    .where(and(eq(companyMembers.companyId, context.company.id), eq(companyMembers.userId, user.id)))
+    .limit(1);
+  // Umumiy "kirishingiz cheklangan" o'rniga aniq sabab — kassir boshqa kompaniya xodimi bo'lishi mumkin
+  if (!member || !member.isActive) {
+    throw forbidden(`Bu foydalanuvchi «${context.company.name}» kompaniyasining faol xodimi emas. Boshqa kompaniya bilan ishlash uchun kassada «Qurilmani uzish» ni bosing.`);
+  }
   const tenant = await requireTenant(conn, { ...user, activeCompanyId: context.company.id });
   await requirePermission(conn, tenant, "pos.use");
   assertWarehouseAccess(tenant, context.device.warehouseId);

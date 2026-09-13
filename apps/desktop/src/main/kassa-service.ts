@@ -129,7 +129,7 @@ import { SyncEngine } from "./sync-engine.js";
 import { parseWeightBarcode, type WeightBarcodeFormat } from "../shared/scale-barcode.js";
 import type { ScaleConfigInput, ScaleQueueStatus } from "../shared/scale-types.js";
 import { ScaleService, type ScaleCatalogItem } from "./scale/scale-service.js";
-import { ScaleError } from "./scale/transports.js";
+import { ScaleError, killActiveSerialProcesses } from "./scale/transports.js";
 
 export class KassaError extends Error {
   readonly code: string;
@@ -595,6 +595,64 @@ export class KassaService {
   logout(): AppStatus {
     this.cashier = null;
     return this.status();
+  }
+
+  /**
+   * Qurilmani kompaniyadan uzish (boshqa kompaniyaga ulash yoki kassani topshirish). Ma'lumot yo'qolmasligi uchun
+   * yuborilmagan yoki rad etilgan amal, ochiq smena bo'lsa — rad. Server imkon bo'lsa qurilmani o'chiradi (token bekor);
+   * internet bo'lmasa ham lokal token va kompaniya ma'lumotlari o'chiriladi (serverdagi yozuvni web'dan o'chirish mumkin).
+   */
+  async unpair(): Promise<{ status: AppStatus; serverRevoked: boolean }> {
+    if (!this.api) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
+    // Kassir chiqariladi — kutish paytida yangi sotuv yoki amal navbatga tushmasin
+    this.cashier = null;
+    this.stop();
+    await this.engine?.whenIdle();
+
+    const counts = this.store.counts();
+    if (counts.pending > 0) {
+      this.start(this.intervalMs || undefined);
+      throw new KassaError("CONFLICT", `Serverga yuborilmagan ${counts.pending} ta amal bor — avval internetga ulanib sinxronlang`);
+    }
+    if (counts.rejected > 0) {
+      this.start(this.intervalMs || undefined);
+      throw new KassaError("CONFLICT", `Rad etilgan ${counts.rejected} ta amal bor — avval ularni ko'rib chiqing (qayta yuborish yoki bekor qilish)`);
+    }
+    if (this.store.getMeta<LocalShift>("shift")) {
+      this.start(this.intervalMs || undefined);
+      throw new KassaError("CONFLICT", "Smena ochiq — avval smenani yoping");
+    }
+
+    let serverRevoked = false;
+    try {
+      await this.api.unregister();
+      serverRevoked = true;
+    } catch (error) {
+      // 401 — server qurilmani allaqachon o'chirgan; internet yo'q yoki boshqa server xatosi — lokal uzish baribir bajariladi
+      if (error instanceof ApiError) serverRevoked = error.status === 401;
+      else if (!(error instanceof OfflineError)) throw error;
+    }
+
+    this.vault.clear();
+    this.store.resetCompanyData();
+    this.api = null;
+    this.engine = null;
+    return { status: this.status(), serverRevoked };
+  }
+
+  /**
+   * Ilova yopilishida: davriy sinxron to'xtaydi, tarozi (COM) jarayonlari yopiladi, lokal baza yopiladi. Sinxron sikli
+   * ketayotgan bo'lsa baza ochiq qoldiriladi — jarayon chiqishi uni yopadi (har yozuv tranzaksiyada saqlangan).
+   */
+  shutdown(): void {
+    this.stop();
+    killActiveSerialProcesses();
+    if (this.engine?.busy) return;
+    try {
+      this.store.db.close();
+    } catch {
+      // Baza allaqachon yopilgan
+    }
   }
 
   /** Kassir kirgan va ruxsati bor; ruxsatlar oxirgi pull'dagi yozuvdan (server o'zgartirsa — darhol kuchga kiradi). */

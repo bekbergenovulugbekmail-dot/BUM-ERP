@@ -71,6 +71,9 @@ export default function HomeScreen({
           <Button size="sm" variant="ghost" onClick={() => void run(() => call("cashier:logout"))}>
             Chiqish
           </Button>
+          <Button size="sm" variant="ghost" onClick={() => void call("app:quit").catch(() => undefined)}>
+            Dasturni yopish
+          </Button>
         </div>
       </header>
 

@@ -87,6 +87,16 @@ export class SyncEngine {
     return this.sync();
   }
 
+  /** Sinxron sikli hozir ketyaptimi. */
+  get busy(): boolean {
+    return this.running !== null;
+  }
+
+  /** Ketayotgan sikl tugashini kutadi (yangisini boshlamaydi) — qurilma uzilishidan oldin. */
+  async whenIdle(): Promise<void> {
+    while (this.running) await this.running.catch(() => undefined);
+  }
+
   private emit(state: SyncStatus["state"], error: string | null = null) {
     this.state = state;
     this.lastError = error;

@@ -132,6 +132,8 @@ export function createApiClient(options: {
         false,
       ),
     session: () => request<{ device: DeviceInfo; company: CompanyInfo; serverTime: string }>("GET", "/api/pos-device/session"),
+    /** Kassadan "Qurilmani uzish": qurilma serverda o'chiriladi, token bekor bo'ladi. */
+    unregister: () => request<{ ok: true }>("POST", "/api/pos-device/unregister", {}),
     cashierLogin: (phone: string, password: string) =>
       request<{ cashier: Omit<CashierRecord, "userId" | "active"> & { id: string } }>("POST", "/api/pos-device/cashiers/login", credentials(phone, password)),
     pull: (cursors: PullCursors, limit?: number, configHash?: string) =>

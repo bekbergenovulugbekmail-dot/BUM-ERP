@@ -94,6 +94,16 @@ export function laterCursor(a: PullCursor | undefined, b: PullCursor | null | un
   return b.id > a.id ? b : a;
 }
 
+/** Kompaniyaga tegishli jadvallar (qurilma uzilganda tozalanadi). */
+const COMPANY_TABLES = [
+  "records", "products", "customers", "stock_levels", "cashier_pins", "outbox", "sales", "sale_returns", "held_receipts",
+  "stock_pending", "cash_movements", "customer_payments", "shift_history", "suppliers", "purchases", "purchase_returns",
+  "supplier_payments", "stock_documents", "scale_sync_queue", "scale_plu_state",
+] as const;
+
+/** Qurilma (kompyuter) sozlamalari — kompaniya almashsa ham qoladi. */
+const DEVICE_META_KEYS = ["devicePrefs", "scaleSettings", "updateFile", "updatePartial"];
+
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 const searchText = (...parts: unknown[]) => parts.map(text).join(" ").toLowerCase();
 
@@ -118,6 +128,19 @@ export class LocalStore {
 
   deleteMeta(key: string): void {
     this.db.prepare("DELETE FROM meta WHERE key = ?").run(key);
+  }
+
+  /**
+   * Qurilma kompaniyadan uzilganda: kompaniya ma'lumotnomalari, kassirlar va PIN'lar, navbat, hujjatlar va kursorlar o'chadi
+   * (hammasi serverda bor — chaqiruvchi yuborilmagan amal qolmaganini tekshiradi). Shu kompyuter uskunasining sozlamalari
+   * (printer, pul qutisi, ko'rinish, tarozilar ulanishi) va yuklab olingan yangilanish qoladi.
+   */
+  resetCompanyData(): void {
+    this.inTransaction(() => {
+      for (const table of COMPANY_TABLES) this.db.exec(`DELETE FROM ${table}`);
+      this.db.prepare(`DELETE FROM meta WHERE key NOT IN (${DEVICE_META_KEYS.map(() => "?").join(", ")})`).run(...DEVICE_META_KEYS);
+    });
+    this.changedProducts.clear();
   }
 
   getCursors(): PullCursors {

@@ -696,6 +696,8 @@ export type SettingsOverview = {
 
 export type KassaChannels = {
   "app:status": { input: void; output: AppStatus };
+  "app:quit": { input: void; output: void };
+  "device:unpair": { input: void; output: { status: AppStatus; serverRevoked: boolean } };
   "setup:options": {
     input: { apiUrl: string; phone: string; password: string; companyId?: string };
     output: { companies: { id: string; name: string }[]; company: { id: string; name: string } | null; warehouses: { id: string; name: string; code: string; isDefault: boolean }[] };

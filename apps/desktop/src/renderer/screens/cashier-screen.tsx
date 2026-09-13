@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import type { AppStatus, KassaChannels } from "../../shared/kassa-api.js";
 import { call, errorText } from "../kassa.ts";
+import ExitActions from "../settings/exit-actions.tsx";
 
 type Cashier = KassaChannels["cashier:list"]["output"][number];
 
@@ -139,6 +140,10 @@ export default function CashierScreen({ status, onDone }: { status: AppStatus; o
         )}
 
         {error && <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+
+        <div className="border-t border-border pt-4">
+          <ExitActions status={status} onStatus={onDone} />
+        </div>
       </section>
     </main>
   );
