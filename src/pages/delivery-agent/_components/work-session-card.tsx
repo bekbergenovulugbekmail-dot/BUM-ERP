@@ -5,6 +5,7 @@ import { Briefcase, Loader2, Power } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { api } from "@/lib/api.ts";
 import { deliveryErrorMessage } from "@/lib/delivery/errors.ts";
+import { useLiveInterval } from "@/lib/delivery/realtime.ts";
 import type { WorkSession } from "@/lib/delivery/types.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { freshPosition } from "@/pages/sales-agent/_lib/visit-api.ts";
@@ -19,7 +20,8 @@ const INVALIDATE = ["/api/delivery/agent"];
 export default function DeliveryWorkSessionCard({ variant = "full" }: { variant?: "full" | "compact" }) {
   const { t, i18n } = useTranslation("delivery");
   const [confirming, setConfirming] = useState(false);
-  const query = useApiQuery<{ session: WorkSession | null }>("/api/delivery/agent/work-session", undefined, { refetchInterval: 60_000 });
+  const interval = useLiveInterval(60_000);
+  const query = useApiQuery<{ session: WorkSession | null }>("/api/delivery/agent/work-session", undefined, { refetchInterval: interval });
   const session = query.data?.session;
   const onDuty = session?.status === "active";
 

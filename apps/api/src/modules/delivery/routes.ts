@@ -23,6 +23,10 @@
  *   POST /tasks/:taskId/return                     delivery.return — qaytgan mahsulot omborga (zaxira, qarz, jurnal)
  *   POST /tasks/:taskId/payment-review             delivery.manage — to'lov farqini ko'rib chiqish
  *   POST /tasks/:taskId/otp                        delivery.manage — OTP berish (kod javobda bir marta)
+ *   POST /auto-assign/preview                      delivery.assign — avtomatik biriktirish rejasi (hech narsa yozilmaydi)
+ *   POST /auto-assign                              delivery.assign — rejadagi juftliklarni qayta tekshirib biriktirish
+ * Real-time:
+ *   GET  /ws (WebSocket)                           delivery.view yoki bog'langan faol yetkazuvchi; Origin tekshiriladi
  * Yetkazuvchi agent (delivery.accept + bog'langan faol agent; agent, kompaniya va mijoz ID'si so'rovdan olinmaydi):
  *   GET  /agent/me, GET /agent/dashboard, GET /agent/tasks (?scope=today|upcoming|history&lat=&lng=), GET /agent/tasks/:taskId
  *   GET  /agent/work-session, POST /agent/work-session/start, POST /agent/work-session/end
@@ -44,6 +48,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import {
+  AppError,
+  DELIVERY_AUTO_ASSIGN_STRATEGIES,
   DELIVERY_COLLECTION_METHODS,
   DELIVERY_FAILURE_REASONS,
   DELIVERY_LOCATION_BATCH_MAX,
@@ -53,8 +59,10 @@ import {
   DELIVERY_STATUSES,
   DELIVERY_TIME_RE,
   DELIVERY_VEHICLE_TYPES,
+  badRequest,
   forbidden,
-  type AppError,
+  unauthenticated,
+  type DeliveryPolicy,
   type Permission,
 } from "@bum/shared";
 import { db } from "../../db/client.js";
@@ -63,9 +71,12 @@ import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
 import { decimalSchema, moneySchema, qtySchema } from "../../shared/decimal.js";
 import { authOf, requireAuth } from "../auth/guard.js";
+import { SESSION_COOKIE } from "../auth/session.js";
 import { effectivePermissions, requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import { recipientCandidates } from "../sales-agent/policy.service.js";
 import { requireDeliveryAgent, type DeliveryAgentContext } from "./agent-context.js";
+import { applyAutoAssign, planAutoAssign } from "./auto-assign.service.js";
+import { CLOSE_CODES, DeliveryRealtimeHub, originAllowed, resolveRealtimeAccess, type RealtimeAccess } from "./realtime.js";
 import { localDate } from "./task.repo.js";
 import {
   acceptDelivery,
@@ -532,6 +543,78 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
     const otp = await writeTenantWith(req, "delivery.manage", (tx, tenant) => issueDeliveryOtp(tx, tenant, taskId, requestMeta(req)));
     return { otp };
   });
+
+  // ─── Avtomatik biriktirish ───────────────────────────────────────────────
+
+  const autoAssignPreviewBody = z.strictObject({
+    date: isoDate,
+    strategy: z.enum(DELIVERY_AUTO_ASSIGN_STRATEGIES).optional(),
+    taskIds: z.array(z.uuid()).min(1).max(200).optional(),
+  });
+  const autoAssignApplyBody = z
+    .strictObject({
+      date: isoDate,
+      strategy: z.enum(DELIVERY_AUTO_ASSIGN_STRATEGIES).optional(),
+      assignments: z.array(z.strictObject({ taskId: z.uuid(), deliveryAgentId: z.uuid() })).min(1).max(200).optional(),
+    })
+    .refine((body) => !body.assignments || new Set(body.assignments.map((item) => item.taskId)).size === body.assignments.length, {
+      message: "Yetkazma takrorlangan",
+    });
+
+  const assertAutoAssign = (policy: DeliveryPolicy, date: string) => {
+    if (!policy.autoAssign.enabled) {
+      throw new AppError("CONFLICT", "Avtomatik biriktirish siyosatda o'chirilgan", { reason: "auto_assign_disabled" });
+    }
+    if (date < localDate()) throw badRequest("O'tgan kun uchun biriktirilmaydi — avval qayta rejalang", { reason: "date_in_past" });
+  };
+
+  app.post("/auto-assign/preview", async (req) => {
+    const body = autoAssignPreviewBody.parse(req.body);
+    const tenant = await readTenantWith(req, "delivery.assign");
+    const policy = await getDeliveryPolicy(db, tenant.company.id);
+    assertAutoAssign(policy, body.date);
+    return { plan: await planAutoAssign(db, tenant.company.id, policy, body) };
+  });
+
+  app.post("/auto-assign", async (req) => {
+    const body = autoAssignApplyBody.parse(req.body);
+    const result = await writeTenantWith(req, "delivery.assign", async (tx, tenant) => {
+      const policy = await getDeliveryPolicy(tx, tenant.company.id);
+      assertAutoAssign(policy, body.date);
+      return applyAutoAssign(tx, tenant, policy, body, requestMeta(req), "manual");
+    });
+    return { result };
+  });
+
+  // ─── Real-time (WebSocket) ───────────────────────────────────────────────
+
+  const hub = new DeliveryRealtimeHub(app.log);
+  app.addHook("onClose", async () => hub.close());
+  const upgrades = new WeakMap<FastifyRequest, { token: string; access: RealtimeAccess }>();
+
+  app.get(
+    "/ws",
+    {
+      websocket: true,
+      // Ulanishdan oldin (HTTP javob bilan rad etiladi): Origin, sessiya, kompaniya va ruxsat
+      preHandler: async (req) => {
+        if (!originAllowed(req.headers.origin, req.headers.host)) throw forbidden("Ruxsat etilmagan manba");
+        const token = req.cookies[SESSION_COOKIE] ?? "";
+        const access = await resolveRealtimeAccess(token);
+        if (access === "unauthenticated") throw unauthenticated();
+        if (access === "forbidden") throw forbidden("Dostavka real-time uchun ruxsat yo'q");
+        upgrades.set(req, { token, access });
+      },
+    },
+    async (socket, req) => {
+      const upgrade = upgrades.get(req);
+      if (!upgrade) {
+        socket.close(CLOSE_CODES.forbidden);
+        return;
+      }
+      await hub.add(socket, upgrade.token, upgrade.access);
+    },
+  );
 
   // ─── Yetkazuvchi agent ish joyi ──────────────────────────────────────────
 

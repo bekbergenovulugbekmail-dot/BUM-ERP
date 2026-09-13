@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, HandCoins, Phone, Wallet } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { formatTime } from "@/lib/delivery/format.ts";
+import { useLiveInterval } from "@/lib/delivery/realtime.ts";
 import { num, type AgentDebts } from "@/lib/delivery/types.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { useDeliveryAgent } from "../_lib/context.ts";
@@ -16,7 +17,8 @@ export default function DeliveryDebtsPage() {
   const { lng = "uz" } = useParams<{ lng: string }>();
   const { can, money } = useDeliveryAgent();
   const allowed = can("delivery.view_debt");
-  const data = useApiQuery<AgentDebts>(allowed ? "/api/delivery/agent/debts" : null, undefined, { refetchInterval: 120_000 }).data;
+  const interval = useLiveInterval(120_000);
+  const data = useApiQuery<AgentDebts>(allowed ? "/api/delivery/agent/debts" : null, undefined, { refetchInterval: interval }).data;
 
   if (!allowed) return <Navigate to={`/${lng}/delivery-agent/dashboard`} replace />;
 

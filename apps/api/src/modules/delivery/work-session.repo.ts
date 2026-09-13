@@ -6,6 +6,7 @@ import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { AppError } from "@bum/shared";
 import { deliveryAgents, deliveryLocationLatest, deliveryWorkSessions } from "../../db/schema/delivery.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
+import { publishDeliveryEvent } from "./realtime-bus.js";
 
 /** Shundan uzoq ochiq qolgan sessiya avtomatik yopiladi (yakunlash unutilganda shaxsiy vaqt kuzatilmasin). */
 export const MAX_DELIVERY_SESSION_HOURS = 16;
@@ -35,9 +36,15 @@ export async function endDeliverySessions(tx: Tx, deliveryAgentIds: string[], re
     .update(deliveryWorkSessions)
     .set({ status: "ended", endedAt: now, endReason: reason, updatedAt: now })
     .where(and(inArray(deliveryWorkSessions.deliveryAgentId, deliveryAgentIds), eq(deliveryWorkSessions.status, "active")))
-    .returning({ id: deliveryWorkSessions.id });
+    .returning({ id: deliveryWorkSessions.id, companyId: deliveryWorkSessions.companyId, deliveryAgentId: deliveryWorkSessions.deliveryAgentId });
   await tx.delete(deliveryLocationLatest).where(inArray(deliveryLocationLatest.deliveryAgentId, deliveryAgentIds));
+  await publishSessionsEnded(tx, ended);
   return ended.length;
+}
+
+/** Yopilgan sessiyalar — boshqaruvchi xaritasi va agentning o'z ekrani yangilansin. */
+async function publishSessionsEnded(tx: Tx, ended: { companyId: string; deliveryAgentId: string }[]) {
+  for (const row of ended) await publishDeliveryEvent(tx, { type: "session", companyId: row.companyId, deliveryAgentId: row.deliveryAgentId });
 }
 
 /**
@@ -82,9 +89,10 @@ export async function autoEndStaleDeliverySessions(tx: Tx, now = new Date()) {
       updatedAt: now,
     })
     .where(and(eq(deliveryWorkSessions.status, "active"), lt(deliveryWorkSessions.startedAt, cutoff)))
-    .returning({ deliveryAgentId: deliveryWorkSessions.deliveryAgentId });
+    .returning({ deliveryAgentId: deliveryWorkSessions.deliveryAgentId, companyId: deliveryWorkSessions.companyId });
   if (ended.length > 0) {
     await tx.delete(deliveryLocationLatest).where(inArray(deliveryLocationLatest.deliveryAgentId, ended.map((row) => row.deliveryAgentId)));
+    await publishSessionsEnded(tx, ended);
   }
   return ended.length;
 }

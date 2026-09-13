@@ -14,6 +14,7 @@ import { apiUrl } from "@/lib/api.ts";
 import { deliveryErrorMessage } from "@/lib/delivery/errors.ts";
 import { coordsOf, formatDateTime, formatDistance, timeWindow } from "@/lib/delivery/format.ts";
 import { num, type DeliveryTaskDetail } from "@/lib/delivery/types.ts";
+import { useLiveInterval } from "@/lib/delivery/realtime.ts";
 import { mapAppUrl } from "@/lib/maps/index.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import TaskDialog, { type TaskDialogKind } from "./task-dialogs.tsx";
@@ -45,7 +46,8 @@ function DrawerBody({ taskId, money }: { taskId: string; money: Money }) {
   const { t, i18n } = useTranslation("delivery");
   const { can } = usePermissions();
   const [dialog, setDialog] = useState<TaskDialogKind | null>(null);
-  const query = useApiQuery<{ task: DeliveryTaskDetail }>(`/api/delivery/tasks/${taskId}`, undefined, { refetchInterval: 30_000 });
+  const interval = useLiveInterval(30_000);
+  const query = useApiQuery<{ task: DeliveryTaskDetail }>(`/api/delivery/tasks/${taskId}`, undefined, { refetchInterval: interval });
   const task = query.data?.task;
 
   if (!task) {
@@ -238,6 +240,7 @@ function DrawerBody({ taskId, money }: { taskId: string; money: Money }) {
                 <span className={event.action === "GEOFENCE_BLOCK" || event.action === "OTP_FAILED" ? "font-medium text-destructive" : "font-medium"}>
                   {t(`event.${event.action}`, { defaultValue: event.action })}
                 </span>
+                {event.details?.auto ? ` · ${t("drawer.auto_assigned")}` : ""}
                 {event.actorName ? ` · ${event.actorName}` : ""}
                 {event.distanceMeters !== null ? ` · ${formatDistance(event.distanceMeters)}` : ""}
                 {event.offline ? ` · ${t("task.offline_event")}` : ""}

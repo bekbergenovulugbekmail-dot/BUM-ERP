@@ -126,6 +126,66 @@ export type DeliveryProofKind = (typeof DELIVERY_PROOF_KINDS)[number];
 export const DELIVERY_MISMATCH_POLICIES = ["approval", "debt", "block"] as const;
 export type DeliveryMismatchPolicy = (typeof DELIVERY_MISMATCH_POLICIES)[number];
 
+/**
+ * Avtomatik biriktirish strategiyasi: balanced — shu kunda eng kam ochiq yetkazmasi bor agent (teng bo'lsa — yaqini);
+ * nearest — agentning oxirgi to'xtash joyi (yoki ish vaqtidagi joriy joyi) mijozga eng yaqini (teng bo'lsa — kam yuklangani).
+ */
+export const DELIVERY_AUTO_ASSIGN_STRATEGIES = ["balanced", "nearest"] as const;
+export type DeliveryAutoAssignStrategy = (typeof DELIVERY_AUTO_ASSIGN_STRATEGIES)[number];
+
+export type DeliveryAutoAssignPolicy = {
+  /** Supervayzer "Avtomatik biriktirish" ni ishlata oladi. */
+  enabled: boolean;
+  /** Yetkazma yaratilganda (buyurtma tasdiqlanganda) darhol biriktiriladi. */
+  onCreate: boolean;
+  strategy: DeliveryAutoAssignStrategy;
+  /** Agentga bir kunda ko'pi bilan shuncha ochiq yetkazma. */
+  maxTasksPerAgent: number;
+  /** Agentning boshlang'ich nuqtasidan mijozgacha chegara, km; 0 — cheklanmagan. */
+  maxDistanceKm: number;
+  /** Agent ish jadvalida shu hafta kuni bo'lmasa — biriktirilmaydi. */
+  respectSchedule: boolean;
+  /** Bugungi yetkazma faqat ish sessiyasi ochiq agentga. */
+  requireOnDuty: boolean;
+  /** Mahsulot og'irligi ma'lum bo'lsa — agent transportining maks. yukidan oshmaydi. */
+  respectCapacity: boolean;
+  /** Agent filiali belgilangan bo'lsa — faqat shu filial omboridan yetkazmalar. */
+  respectBranch: boolean;
+};
+
+export const DELIVERY_AUTO_ASSIGN_LIMITS = {
+  maxTasksPerAgent: [1, 200],
+  maxDistanceKm: [0, 500],
+} as const;
+
+/** Biriktirilmay qolish sabablari (supervayzerga ko'rsatiladi). */
+export const DELIVERY_AUTO_ASSIGN_SKIP_REASONS = [
+  "no_agents",
+  "schedule",
+  "off_duty",
+  "task_limit",
+  "load_limit",
+  "branch",
+  "too_far",
+  "task_not_ready",
+  "agent_unavailable",
+] as const;
+export type DeliveryAutoAssignSkipReason = (typeof DELIVERY_AUTO_ASSIGN_SKIP_REASONS)[number];
+
+/**
+ * WebSocket xabari (`/api/delivery/ws`): faqat ID, holat va amal nomi — ma'lumotning o'zi REST orqali (ruxsat bilan)
+ * qayta olinadi. `resync` — server hodisalarni o'tkazib yuborgan bo'lishi mumkin, hammasini yangilash kerak.
+ */
+export type DeliveryRealtimeMessage =
+  | { type: "ready"; manager: boolean; agent: boolean }
+  | { type: "task"; taskId: string; status: DeliveryStatus | null; action: string }
+  | { type: "location"; deliveryAgentId: string }
+  | { type: "session"; deliveryAgentId: string }
+  | { type: "agents" }
+  | { type: "policy" }
+  | { type: "resync" }
+  | { type: "pong" };
+
 export type DeliveryConfirmation = {
   /** Mijozga yuborilgan bir martalik kod (SMS sozlanmagan bo'lsa — supervayzer aytadi). */
   otp: boolean;
@@ -167,6 +227,7 @@ export type DeliveryPolicy = {
   /** Geofence buzilishida supervayzerga bildirishnoma. */
   geofenceAlerts: boolean;
   notificationRecipients: DeliveryNotificationRecipients;
+  autoAssign: DeliveryAutoAssignPolicy;
 };
 
 export const DELIVERY_POLICY_LIMITS = {
@@ -201,6 +262,17 @@ export const DEFAULT_DELIVERY_POLICY: DeliveryPolicy = {
   offlineMaxAgeHours: 24,
   geofenceAlerts: true,
   notificationRecipients: { failed: [], mismatch: [], geofence: [] },
+  autoAssign: {
+    enabled: false,
+    onCreate: false,
+    strategy: "balanced",
+    maxTasksPerAgent: 30,
+    maxDistanceKm: 0,
+    respectSchedule: true,
+    requireOnDuty: false,
+    respectCapacity: true,
+    respectBranch: true,
+  },
 };
 
 /** Agent "onlayn": oxirgi lokatsiya shuncha daqiqa ichida. */

@@ -3,9 +3,13 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Save } from "lucide-react";
 import {
+  DELIVERY_AUTO_ASSIGN_LIMITS,
+  DELIVERY_AUTO_ASSIGN_STRATEGIES,
   DELIVERY_MISMATCH_POLICIES,
   DELIVERY_POLICY_LIMITS,
   GEOFENCE_RADIUS_PRESETS,
+  type DeliveryAutoAssignPolicy,
+  type DeliveryAutoAssignStrategy,
   type DeliveryMismatchPolicy,
   type DeliveryPolicy,
 } from "@bum/shared";
@@ -21,11 +25,15 @@ import { deliveryErrorMessage } from "@/lib/delivery/errors.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 
 type NumericField = keyof typeof DELIVERY_POLICY_LIMITS;
+type AutoNumericField = keyof typeof DELIVERY_AUTO_ASSIGN_LIMITS;
 type Options = Omit<DeliveryPolicy, NumericField>;
 type SwitchField = "deliveryRequiredByDefault" | "collectOnDelivery" | "requireCustomerLocation" | "offlineActionsAllowed" | "geofenceAlerts";
+type AutoSwitchField = "enabled" | "onCreate" | "respectSchedule" | "requireOnDuty" | "respectCapacity" | "respectBranch";
 type Recipient = { userId: string; name: string; role: string };
 
 const NUMERIC_FIELDS = Object.keys(DELIVERY_POLICY_LIMITS) as NumericField[];
+const AUTO_NUMERIC_FIELDS = Object.keys(DELIVERY_AUTO_ASSIGN_LIMITS) as AutoNumericField[];
+const AUTO_SWITCHES: AutoSwitchField[] = ["enabled", "onCreate", "respectSchedule", "requireOnDuty", "respectCapacity", "respectBranch"];
 const LOCATION_FIELDS: NumericField[] = [
   "maxAccuracyMeters",
   "maxLocationAgeSeconds",
@@ -38,7 +46,10 @@ const CONFIRMATION_KEYS = ["photo", "signature", "otp"] as const;
 const NOTIFY_EVENTS = ["failed", "mismatch", "geofence"] as const;
 type NotifyEvent = (typeof NOTIFY_EVENTS)[number];
 
-/** Dostavka siyosati (`delivery.manage`): geofence va GPS sifati, tasdiqlash usullari, to'lov farqi, oflayn, bildirishnomalar. */
+/**
+ * Dostavka siyosati (`delivery.manage`): geofence va GPS sifati, tasdiqlash usullari, to'lov farqi, oflayn,
+ * avtomatik biriktirish qoidalari, bildirishnomalar.
+ */
 export default function PolicySection() {
   const policy = useApiQuery<{ policy: DeliveryPolicy }>("/api/delivery/policy").data?.policy;
   if (!policy) return <Skeleton className="h-96 rounded-2xl" />;
@@ -50,6 +61,9 @@ function PolicyForm({ initial }: { initial: DeliveryPolicy }) {
   const [numbers, setNumbers] = useState(
     () => Object.fromEntries(NUMERIC_FIELDS.map((field) => [field, String(initial[field])])) as Record<NumericField, string>,
   );
+  const [autoNumbers, setAutoNumbers] = useState(
+    () => Object.fromEntries(AUTO_NUMERIC_FIELDS.map((field) => [field, String(initial.autoAssign[field])])) as Record<AutoNumericField, string>,
+  );
   const [options, setOptions] = useState<Options>(() => {
     const picked = { ...initial } as Partial<DeliveryPolicy>;
     for (const field of NUMERIC_FIELDS) delete picked[field];
@@ -59,6 +73,7 @@ function PolicyForm({ initial }: { initial: DeliveryPolicy }) {
   const candidates = useApiQuery<{ recipients: Recipient[] }>("/api/delivery/policy/recipients").data?.recipients;
 
   const setNumber = (field: NumericField, value: string) => setNumbers((current) => ({ ...current, [field]: value }));
+  const setAuto = (patch: Partial<DeliveryAutoAssignPolicy>) => setOptions((current) => ({ ...current, autoAssign: { ...current.autoAssign, ...patch } }));
 
   const toggleRecipient = (event: NotifyEvent, userId: string, checked: boolean) =>
     setOptions((current) => {
@@ -66,19 +81,34 @@ function PolicyForm({ initial }: { initial: DeliveryPolicy }) {
       return { ...current, notificationRecipients: { ...current.notificationRecipients, [event]: checked ? [...list, userId] : list } };
     });
 
+  const parseBounded = (raw: string, [min, max]: readonly [number, number]) => {
+    const value = Number(raw);
+    return raw.trim() !== "" && Number.isInteger(value) && value >= min && value <= max ? value : null;
+  };
+
   const handleSave = async () => {
     const parsed = {} as Record<NumericField, number>;
     for (const field of NUMERIC_FIELDS) {
-      const [min, max] = DELIVERY_POLICY_LIMITS[field];
-      const value = Number(numbers[field]);
-      if (numbers[field].trim() === "" || !Number.isInteger(value) || value < min || value > max) {
+      const value = parseBounded(numbers[field], DELIVERY_POLICY_LIMITS[field]);
+      if (value === null) {
+        const [min, max] = DELIVERY_POLICY_LIMITS[field];
         toast.error(t("policy.invalid", { field: t(`policy.field.${field}`), min, max }));
         return;
       }
       parsed[field] = value;
     }
+    const autoParsed = {} as Record<AutoNumericField, number>;
+    for (const field of AUTO_NUMERIC_FIELDS) {
+      const value = parseBounded(autoNumbers[field], DELIVERY_AUTO_ASSIGN_LIMITS[field]);
+      if (value === null) {
+        const [min, max] = DELIVERY_AUTO_ASSIGN_LIMITS[field];
+        toast.error(t("policy.invalid", { field: t(`policy.auto.${field}`), min, max }));
+        return;
+      }
+      autoParsed[field] = value;
+    }
     try {
-      await save.mutateAsync({ ...options, ...parsed });
+      await save.mutateAsync({ ...options, ...parsed, autoAssign: { ...options.autoAssign, ...autoParsed } });
       toast.success(t("policy.saved"));
     } catch (error) {
       toast.error(deliveryErrorMessage(error, t));
@@ -181,6 +211,59 @@ function PolicyForm({ initial }: { initial: DeliveryPolicy }) {
               ))}
             </SelectContent>
           </Select>
+        </div>
+      </div>
+
+      <div className="space-y-4 rounded-2xl border border-border bg-card p-4">
+        <div>
+          <p className="text-sm font-semibold">{t("policy.section.auto")}</p>
+          <p className="text-xs text-muted-foreground">{t("policy.auto.hint")}</p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {AUTO_SWITCHES.map((key) => (
+            <label key={key} className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-border px-3 py-2.5">
+              <span className="text-sm">{t(`policy.auto.${key}`)}</span>
+              <Switch checked={options.autoAssign[key]} onCheckedChange={(checked) => setAuto({ [key]: checked })} />
+            </label>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="space-y-1">
+            <Label>{t("policy.auto.strategy")}</Label>
+            <Select value={options.autoAssign.strategy} onValueChange={(value) => setAuto({ strategy: value as DeliveryAutoAssignStrategy })}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DELIVERY_AUTO_ASSIGN_STRATEGIES.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {t(`auto.strategy_option.${value}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {AUTO_NUMERIC_FIELDS.map((field) => {
+            const [min, max] = DELIVERY_AUTO_ASSIGN_LIMITS[field];
+            return (
+              <div key={field} className="space-y-1">
+                <Label htmlFor={`delivery-auto-${field}`}>{t(`policy.auto.${field}`)}</Label>
+                <Input
+                  id={`delivery-auto-${field}`}
+                  type="number"
+                  inputMode="numeric"
+                  min={min}
+                  max={max}
+                  step={1}
+                  value={autoNumbers[field]}
+                  onChange={(e) => setAutoNumbers((current) => ({ ...current, [field]: e.target.value }))}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  {t(`policy.auto.${field}_hint`)} · {min}–{max}
+                </p>
+              </div>
+            );
+          })}
         </div>
       </div>
 

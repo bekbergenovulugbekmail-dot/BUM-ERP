@@ -4,6 +4,7 @@ import { AlarmClock, RotateCcw, Scale } from "lucide-react";
 import { LateBadge, StatusBadge } from "@/components/delivery/badges.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { usePermissions } from "@/hooks/use-company.ts";
+import { useLiveInterval } from "@/lib/delivery/realtime.ts";
 import { num, type DeliveryTaskRow } from "@/lib/delivery/types.ts";
 import { useApiQuery } from "@/lib/query.ts";
 
@@ -55,12 +56,13 @@ function Panel({ title, icon, tasks, empty, render, onOpenTask }: {
 export default function ControlSection({ money, onOpenTask }: { money: Money; onOpenTask: (taskId: string) => void }) {
   const { t } = useTranslation("delivery");
   const { can } = usePermissions();
-  const reviews = useApiQuery<TaskPage>(can("delivery.manage") ? "/api/delivery/tasks" : null, { reviewPending: true, limit: 200 }, { refetchInterval: 60_000 }).data
+  const interval = useLiveInterval(60_000);
+  const reviews = useApiQuery<TaskPage>(can("delivery.manage") ? "/api/delivery/tasks" : null, { reviewPending: true, limit: 200 }, { refetchInterval: interval }).data
     ?.tasks;
   const returns = useApiQuery<TaskPage>(can("delivery.return") ? "/api/delivery/tasks" : null, { status: "failed,partially_delivered", limit: 200 }, {
-    refetchInterval: 60_000,
+    refetchInterval: interval,
   }).data?.tasks.filter((task) => task.status === "failed" || task.returnedAt === null);
-  const overdue = useApiQuery<TaskPage>("/api/delivery/tasks", { overdue: true, limit: 200 }, { refetchInterval: 60_000 }).data?.tasks;
+  const overdue = useApiQuery<TaskPage>("/api/delivery/tasks", { overdue: true, limit: 200 }, { refetchInterval: interval }).data?.tasks;
 
   return (
     <div className="grid gap-4 lg:grid-cols-3">

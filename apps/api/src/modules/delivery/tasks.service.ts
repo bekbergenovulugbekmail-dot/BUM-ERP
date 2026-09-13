@@ -26,6 +26,8 @@ import { fromMinor, mulDivRound, toMinor } from "../../shared/decimal.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
 import type { TenantContext } from "../company/tenant.js";
 import { getDeliveryPolicy } from "./policy.service.js";
+import { applyAutoAssign } from "./auto-assign.service.js";
+import { publishDeliveryEvent } from "./realtime-bus.js";
 import { assertTransition, deliveryAudit, hhmm, insertDeliveryEvent, localDate, localTime, lockTask, type DeliveryTaskRow } from "./task.repo.js";
 
 const OPEN: DeliveryStatus[] = [...OPEN_DELIVERY_STATUSES];
@@ -203,6 +205,9 @@ export async function createDeliveryTask(
   if (input.deliveryAgentId) {
     if (options.allowAssign === false) throw forbidden("Agentga biriktirish uchun ruxsat kerak (delivery.assign)");
     await assignDeliveryTask(tx, tenant, task!.id, { deliveryAgentId: input.deliveryAgentId, routeOrder: input.routeOrder ?? null }, meta, { allowReassign: false });
+  } else if (policy.autoAssign.enabled && policy.autoAssign.onCreate && scheduledDate >= today) {
+    // Siyosat bo'yicha darhol avtomatik biriktirish; mos agent bo'lmasa yetkazma "tayyor" qoladi (xato emas)
+    await applyAutoAssign(tx, tenant, policy, { date: scheduledDate, taskIds: [task!.id] }, meta, "on_create");
   }
   return task!.id;
 }
@@ -237,7 +242,11 @@ export async function assignDeliveryTask(
   taskId: string,
   input: { deliveryAgentId: string; scheduledDate?: string; routeOrder?: number | null },
   meta: RequestMeta,
-  options: { allowReassign: boolean },
+  options: {
+    allowReassign: boolean;
+    /** Avtomatik biriktirish (hodisa va auditda belgilanadi). */
+    auto?: { strategy: import("@bum/shared").DeliveryAutoAssignStrategy; trigger: "manual" | "on_create"; distanceMeters: number | null };
+  },
 ) {
   const companyId = tenant.company.id;
   const task = await lockTask(tx, companyId, taskId);
@@ -273,9 +282,10 @@ export async function assignDeliveryTask(
     })
     .where(eq(deliveryTasks.id, task.id));
   const action = changesAgent ? "REASSIGNED" : "ASSIGNED";
-  const details = { fromAgentId: task.deliveryAgentId, toAgentId: agent.id, scheduledDate, routeOrder };
+  const details = { fromAgentId: task.deliveryAgentId, toAgentId: agent.id, scheduledDate, routeOrder, ...(options.auto ? { auto: options.auto } : {}) };
   await insertDeliveryEvent(tx, task, { action, fromStatus: task.status, toStatus: "assigned", actorUserId: tenant.user.id, details });
-  await deliveryAudit(tx, tenant, meta, changesAgent ? "DELIVERY_REASSIGNED" : "DELIVERY_ASSIGNED", task.id, { number: task.number, ...details });
+  const auditAction = options.auto ? "DELIVERY_AUTO_ASSIGNED" : changesAgent ? "DELIVERY_REASSIGNED" : "DELIVERY_ASSIGNED";
+  await deliveryAudit(tx, tenant, meta, auditAction, task.id, { number: task.number, ...details });
 }
 
 export async function unassignDeliveryTask(tx: Tx, tenant: TenantContext, taskId: string, meta: RequestMeta) {
@@ -436,6 +446,8 @@ export async function setDeliveryRouteOrder(
   if (rows.some((row) => !OPEN.includes(row.status))) throw badRequest("Yakunlangan yetkazma tartibi o'zgarmaydi");
   for (const [index, id] of input.taskIds.entries()) {
     await tx.update(deliveryTasks).set({ routeOrder: index + 1, updatedAt: new Date() }).where(eq(deliveryTasks.id, id));
+    const status = rows.find((row) => row.id === id)!.status;
+    await publishDeliveryEvent(tx, { type: "task", companyId: tenant.company.id, taskId: id, agentIds: [input.deliveryAgentId], status, action: "ROUTE_ORDER" });
   }
   await deliveryAudit(tx, tenant, meta, "DELIVERY_ROUTE_ORDER", input.taskIds[0]!, { deliveryAgentId: input.deliveryAgentId, date: input.date, taskIds: input.taskIds });
 }

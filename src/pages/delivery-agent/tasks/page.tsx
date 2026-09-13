@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { deliveryErrorMessage } from "@/lib/delivery/errors.ts";
 import { coordsOf } from "@/lib/delivery/format.ts";
+import { useLiveInterval } from "@/lib/delivery/realtime.ts";
 import type { DeliveryTaskRow } from "@/lib/delivery/types.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { cn } from "@/lib/utils.ts";
@@ -27,8 +28,9 @@ export default function DeliveryTasksPage() {
   const raw = params.get("scope");
   const scope: Scope = SCOPES.includes(raw as Scope) ? (raw as Scope) : "today";
   const { money, queue, location } = useDeliveryAgent();
+  const interval = useLiveInterval(60_000);
   const query = useApiQuery<{ tasks: DeliveryTaskRow[] }>("/api/delivery/agent/tasks", { scope }, {
-    refetchInterval: scope === "today" ? 60_000 : undefined,
+    refetchInterval: scope === "today" ? interval : undefined,
   });
   const tasks = query.data?.tasks;
 

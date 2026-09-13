@@ -5,6 +5,7 @@ import { isOpenDeliveryStatus, type DeliveryStatus } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { coordsOf } from "@/lib/delivery/format.ts";
+import { useLiveInterval } from "@/lib/delivery/realtime.ts";
 import { num, type AgentDashboard, type DeliveryTaskRow } from "@/lib/delivery/types.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { cn } from "@/lib/utils.ts";
@@ -23,9 +24,9 @@ export default function DeliveryDashboardPage() {
   const { t } = useTranslation("delivery");
   const { lng = "uz" } = useParams<{ lng: string }>();
   const { me, money, queue, location } = useDeliveryAgent();
-  const dashboard = useApiQuery<{ dashboard: AgentDashboard }>("/api/delivery/agent/dashboard", undefined, { refetchInterval: 60_000 }).data
-    ?.dashboard;
-  const tasks = useApiQuery<{ tasks: DeliveryTaskRow[] }>("/api/delivery/agent/tasks", { scope: "today" }, { refetchInterval: 60_000 }).data?.tasks;
+  const interval = useLiveInterval(60_000);
+  const dashboard = useApiQuery<{ dashboard: AgentDashboard }>("/api/delivery/agent/dashboard", undefined, { refetchInterval: interval }).data?.dashboard;
+  const tasks = useApiQuery<{ tasks: DeliveryTaskRow[] }>("/api/delivery/agent/tasks", { scope: "today" }, { refetchInterval: interval }).data?.tasks;
 
   const next = tasks
     ?.map((task) => ({ task, status: projectedStatus(task.status, queue.items.filter((item) => item.taskId === task.id)) as DeliveryStatus }))

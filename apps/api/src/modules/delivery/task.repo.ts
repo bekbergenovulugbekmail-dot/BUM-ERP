@@ -8,6 +8,7 @@ import { deliveryEvents, deliveryTasks } from "../../db/schema/delivery.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import type { TenantContext } from "../company/tenant.js";
+import { publishDeliveryEvent } from "./realtime-bus.js";
 
 export type DeliveryTaskRow = typeof deliveryTasks.$inferSelect;
 
@@ -55,7 +56,24 @@ export type DeliveryEventInput = {
   offline?: boolean;
 };
 
-export async function insertDeliveryEvent(tx: Tx, task: { id: string; companyId: string }, input: DeliveryEventInput) {
+/**
+ * Hodisa (tarix) yozuvi + real-time xabar (commit bo'lganda). Xabar oluvchi agentlar: yetkazmaning joriy agenti va
+ * biriktirishdagi yangi/eski agent (`details.toAgentId` / `fromAgentId`).
+ */
+export async function insertDeliveryEvent(
+  tx: Tx,
+  task: { id: string; companyId: string; deliveryAgentId?: string | null; status?: DeliveryStatus },
+  input: DeliveryEventInput,
+) {
+  const agentIds = [task.deliveryAgentId, input.details?.toAgentId, input.details?.fromAgentId].filter((id): id is string => typeof id === "string");
+  await publishDeliveryEvent(tx, {
+    type: "task",
+    companyId: task.companyId,
+    taskId: task.id,
+    agentIds: [...new Set(agentIds)],
+    status: input.toStatus ?? task.status ?? null,
+    action: input.action,
+  });
   const [event] = await tx
     .insert(deliveryEvents)
     .values({

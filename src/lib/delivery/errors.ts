@@ -37,6 +37,7 @@ const KNOWN_REASONS = new Set([
   "not_assigned",
   "on_route",
   "recipient_invalid",
+  "auto_assign_disabled",
 ]);
 
 /** Tarmoq xatosi (internet yo'q yoki service worker keshida javob yo'q) — amal navbatga qo'yilishi mumkin. */

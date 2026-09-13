@@ -22,6 +22,7 @@ import { ApiError, api, apiUrl } from "@/lib/api.ts";
 import { deliveryErrorMessage } from "@/lib/delivery/errors.ts";
 import { coordsOf, formatDateTime, formatDistance, timeWindow } from "@/lib/delivery/format.ts";
 import { num, type ConfirmSummary, type DeliveryTaskDetail, type DeliveryTaskRow } from "@/lib/delivery/types.ts";
+import { useLiveInterval } from "@/lib/delivery/realtime.ts";
 import { mapAppUrl } from "@/lib/maps/index.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { cn } from "@/lib/utils.ts";
@@ -151,7 +152,8 @@ function TaskView({ taskId }: { taskId: string }) {
   const { lng = "uz" } = useParams<{ lng: string }>();
   const queryClient = useQueryClient();
   const { policy, location, queue, onDuty, can, money } = useDeliveryAgent();
-  const query = useApiQuery<{ task: DeliveryTaskDetail }>(`/api/delivery/agent/tasks/${taskId}`, undefined, { refetchInterval: 60_000 });
+  const interval = useLiveInterval(60_000);
+  const query = useApiQuery<{ task: DeliveryTaskDetail }>(`/api/delivery/agent/tasks/${taskId}`, undefined, { refetchInterval: interval });
   const [busy, setBusy] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [success, setSuccess] = useState<Success | null>(null);

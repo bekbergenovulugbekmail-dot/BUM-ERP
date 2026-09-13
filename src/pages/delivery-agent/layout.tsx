@@ -21,6 +21,8 @@ import { formatMoney } from "@/hooks/use-currencies.ts";
 import { ApiError, errorMessage } from "@/lib/api.ts";
 import { deliveryErrorMessage } from "@/lib/delivery/errors.ts";
 import { formatDateTime } from "@/lib/delivery/format.ts";
+import { RealtimeBadge } from "@/components/delivery/badges.tsx";
+import { DeliveryRealtimeContext, LIVE_FALLBACK_MS, useDeliveryRealtime } from "@/lib/delivery/realtime.ts";
 import { num, type DeliveryMe, type WorkSession } from "@/lib/delivery/types.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { cn } from "@/lib/utils.ts";
@@ -191,8 +193,9 @@ export default function DeliveryAgentLayout() {
   const allowed = can("delivery.accept");
   const meQuery = useApiQuery<DeliveryMe>(allowed ? "/api/delivery/agent/me" : null);
   const policy = useApiQuery<{ policy: DeliveryPolicy }>(meQuery.data ? "/api/delivery/policy" : null).data?.policy ?? DEFAULT_DELIVERY_POLICY;
+  const realtime = useDeliveryRealtime(Boolean(meQuery.data));
   const workSession = useApiQuery<{ session: WorkSession | null }>(meQuery.data ? "/api/delivery/agent/work-session" : null, undefined, {
-    refetchInterval: 60_000,
+    refetchInterval: realtime === "live" ? LIVE_FALLBACK_MS : 60_000,
   }).data?.session;
   const onDuty = workSession?.status === "active";
   const location = useDeliveryTracking(onDuty, policy.trackingIntervalSeconds, policy.trackingDistanceMeters);
@@ -222,6 +225,7 @@ export default function DeliveryAgentLayout() {
           {t("title")} · {currentUser.companyName}
         </p>
       </div>
+      {meQuery.data && <RealtimeBadge status={realtime} compact />}
       {meQuery.data && <LocationIndicator location={location} onDuty={onDuty} />}
       <LanguageMenu />
       <Button variant="ghost" size="icon" className="h-10 w-10" title={t("logout")} onClick={() => signout()}>
@@ -271,7 +275,9 @@ export default function DeliveryAgentLayout() {
         ) : onDuty && location.status === "denied" ? (
           <LocationRequired onRequest={location.request} />
         ) : (
-          <Outlet context={outlet} />
+          <DeliveryRealtimeContext.Provider value={realtime}>
+            <Outlet context={outlet} />
+          </DeliveryRealtimeContext.Provider>
         )}
       </main>
       <nav className={cn("fixed inset-x-0 bottom-0 z-30 grid border-t border-border bg-card pb-safe", nav.length === 5 ? "grid-cols-5" : "grid-cols-4")}>

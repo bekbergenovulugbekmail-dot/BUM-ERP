@@ -2,6 +2,8 @@
  * `/api/delivery/*` javob turlari (apps/api/src/modules/delivery). Summalar va miqdorlar — numeric satr.
  */
 import type {
+  DeliveryAutoAssignSkipReason,
+  DeliveryAutoAssignStrategy,
   DeliveryCollectionMethod,
   DeliveryFailureReason,
   DeliveryPaymentReview,
@@ -292,6 +294,41 @@ export type AgentTrack = {
   points: { latitude: string; longitude: string; accuracy: string | null; recordedAt: string; suspicious: boolean }[];
   sessions: WorkSession[];
   events: { taskId: string; number: string; action: string; latitude: string | null; longitude: string | null; distanceMeters: number | null; occurredAt: string }[];
+};
+
+export type AutoAssignProposal = {
+  taskId: string;
+  number: string;
+  customerName: string;
+  deliveryAgentId: string;
+  agentCode: string;
+  agentName: string | null;
+  distanceMeters: number | null;
+  openTasksAfter: number;
+  loadKgAfter: number | null;
+};
+
+export type AutoAssignSkip = {
+  taskId: string;
+  number: string | null;
+  customerName: string | null;
+  reason: DeliveryAutoAssignSkipReason;
+  counts?: Partial<Record<DeliveryAutoAssignSkipReason, number>>;
+};
+
+export type AutoAssignPlan = {
+  date: string;
+  strategy: DeliveryAutoAssignStrategy;
+  proposals: AutoAssignProposal[];
+  skipped: AutoAssignSkip[];
+  agents: { id: string; code: string; name: string | null; openTasks: number; loadKg: number; maxLoadKg: number | null; onDuty: boolean }[];
+};
+
+export type AutoAssignResult = {
+  date: string;
+  strategy: DeliveryAutoAssignStrategy;
+  assigned: AutoAssignProposal[];
+  skipped: AutoAssignSkip[];
 };
 
 export type ReadyOrder = {

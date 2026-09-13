@@ -37,6 +37,7 @@ import type { TenantContext } from "../company/tenant.js";
 import { checkLocationQuality, type LocationInput } from "../sales-agent/location.service.js";
 import type { DeliveryAgentContext } from "./agent-context.js";
 import { getDeliveryPolicy } from "./policy.service.js";
+import { publishDeliveryEvent } from "./realtime-bus.js";
 import { localDate, localDayStart } from "./task.repo.js";
 
 const REQUESTS_PER_MINUTE = 12;
@@ -96,6 +97,7 @@ export async function startDeliverySession(tx: Tx, context: DeliveryAgentContext
     })
     .returning(sessionFields);
   await sessionAudit(tx, context, meta, "WORK_SESSION_START", created!.id, { accuracy: Math.round(input.accuracy), module: "delivery" });
+  await publishDeliveryEvent(tx, { type: "session", companyId: context.company.id, deliveryAgentId: context.deliveryAgent.id });
   return { session: created!, created: true };
 }
 
@@ -131,6 +133,7 @@ export async function endDeliverySession(tx: Tx, context: DeliveryAgentContext, 
     durationMinutes: Math.round((now.getTime() - session.startedAt.getTime()) / 60_000),
     module: "delivery",
   });
+  await publishDeliveryEvent(tx, { type: "session", companyId: context.company.id, deliveryAgentId: context.deliveryAgent.id });
   return ended!;
 }
 
@@ -210,6 +213,8 @@ export async function recordDeliveryLocations(tx: Tx, context: DeliveryAgentCont
       .insert(deliveryLocationLatest)
       .values({ companyId: context.company.id, deliveryAgentId: context.deliveryAgent.id, ...values })
       .onConflictDoUpdate({ target: deliveryLocationLatest.deliveryAgentId, set: values });
+    // Faqat oxirgi joy yangilanganda — xarita yangilansin (koordinata xabarda emas)
+    await publishDeliveryEvent(tx, { type: "location", companyId: context.company.id, deliveryAgentId: context.deliveryAgent.id });
   }
   return result;
 }

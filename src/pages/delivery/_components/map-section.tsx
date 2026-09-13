@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { deliveryErrorMessage } from "@/lib/delivery/errors.ts";
 import { coordsOf, formatDateTime, formatTime } from "@/lib/delivery/format.ts";
+import { useLiveInterval } from "@/lib/delivery/realtime.ts";
 import type { AgentTrack, LiveAgent } from "@/lib/delivery/types.ts";
 import type { LatLng, MapCircle, MapMarker } from "@/lib/maps/index.ts";
 import { useApiQuery } from "@/lib/query.ts";
@@ -23,7 +24,8 @@ import { todayLocal } from "@/pages/sales/_lib/types.ts";
  */
 export default function MapSection({ onOpenTask }: { onOpenTask: (taskId: string) => void }) {
   const { t, i18n } = useTranslation("delivery");
-  const live = useApiQuery<{ agents: LiveAgent[]; serverTime: string }>("/api/delivery/agents/live", undefined, { refetchInterval: 30_000 });
+  const interval = useLiveInterval(30_000);
+  const live = useApiQuery<{ agents: LiveAgent[]; serverTime: string }>("/api/delivery/agents/live", undefined, { refetchInterval: interval });
   const policy = useApiQuery<{ policy: DeliveryPolicy }>("/api/delivery/policy").data?.policy ?? DEFAULT_DELIVERY_POLICY;
   const agents = useMemo(() => live.data?.agents ?? [], [live.data]);
   const [agentId, setAgentId] = useState("");

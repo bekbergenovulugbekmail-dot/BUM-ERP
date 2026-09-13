@@ -14,7 +14,8 @@ export default defineConfig({
     },
     // API bir domenda ko'rinadi — sessiya cookie'si telefondan (LAN IP) ochilganda ham ishlaydi
     proxy: {
-      "/api": { target: process.env.API_PROXY_TARGET ?? "http://localhost:3000" },
+      // ws: true — dostavka real-time (/api/delivery/ws)
+      "/api": { target: process.env.API_PROXY_TARGET ?? "http://localhost:3000", ws: true },
     },
   },
   plugins: [react(), tailwindcss()],

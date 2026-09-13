@@ -22,6 +22,7 @@ import { todayIso } from "../finance/cash.service.js";
 import { createEmployee as createHrEmployee } from "../hr/employees.service.js";
 import { createEmployee as createAccount } from "../users/user-admin.service.js";
 import { setMemberAccess } from "../users/member-access.js";
+import { publishDeliveryEvent } from "./realtime-bus.js";
 import { endDeliverySessions } from "./work-session.repo.js";
 
 export const DELIVERY_AGENT_ROLE = "Dostavka agenti";
@@ -234,6 +235,7 @@ export async function createDeliveryAgent(tx: Tx, tenant: TenantContext, input: 
     territory: input.territory ?? null,
     supervisorUserId: input.supervisorUserId ?? null,
   });
+  await publishDeliveryEvent(tx, { type: "agents", companyId });
   return getDeliveryAgent(tx, companyId, agent!.id);
 }
 
@@ -292,5 +294,6 @@ export async function updateDeliveryAgent(tx: Tx, tenant: TenantContext, deliver
     agent.id,
     { changes: Object.keys(patch) },
   );
+  await publishDeliveryEvent(tx, { type: "agents", companyId });
   return getDeliveryAgent(tx, companyId, agent.id);
 }

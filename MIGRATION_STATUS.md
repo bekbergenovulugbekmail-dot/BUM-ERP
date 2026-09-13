@@ -1184,10 +1184,33 @@ Talab: "BUM ERP — DOSTAVKA / DELIVERY MASTER PROMPT" (1–62 bo'lim). Asosiy p
 - web: `offline-queue` (5), `actions` (6), `errors` (6), `filters` (3), `use-delivery-tracking` (3); to'liq web — 10 fayl, 39 test
 - tsc (API testlar bilan, web), lint (o'zgargan va yangi fayllar), `vite build` — toza
 
+**D9 — real-time (WebSocket)** (migratsiyasiz; bog'liqlik `@fastify/websocket` 11.3.0, dev `@types/ws`):
+- `GET /api/delivery/ws`: ulanishdan oldin (HTTP javob bilan rad) — sessiya cookie'si (401), Origin (ilova manzili yoki shu host; boshqa saytdan cookie bilan ulanish — 403), aktiv kompaniya va ruxsat: `delivery.view` yoki bog'langan faol yetkazuvchi (403)
+- hodisa shinasi — PostgreSQL `NOTIFY bum_delivery` tranzaksiya ichida: faqat COMMIT bo'lganda yetkaziladi (bekor qilingan amal hodisa bermaydi), API bir nechta nusxada ham ishlaydi. LISTEN — bitta ajratilgan ulanish, faqat mijoz bor paytda
+- hodisalar: har yetkazma hodisasi (yaratish, biriktirish, holatlar, isbot, to'lov, geofence rad etilishi, OTP xatosi, qaytarish, ko'rib chiqish), kunlik tartib, ish sessiyasi (boshlash, yakunlash, avtomatik yopish, faolsizlantirish), oxirgi joy yangilanishi, agent yaratish/tahrir, siyosat
+- kim nimani oladi: boshqaruvchi — kompaniya yetkazmalari, sessiyalar va agentlar; lokatsiya — faqat `delivery.view_location`; agent — faqat o'z yetkazmalari (joriy, yangi va olib tashlangan agent) va o'z sessiyasi; boshqa kompaniya — hech narsa. Xabarda faqat ID, holat va amal nomi — ma'lumot REST orqali ruxsat bilan qayta olinadi
+- har 60 s sessiya va ruxsat qayta tekshiriladi, faollik vaqti cho'zilmaydi (`peekSession`): sessiya tugagan — 4401, ruxsat yoki kompaniya o'zgargan — 4403; ping 30 s; foydalanuvchiga 5 ulanish; LISTEN uzilsa mijozlar 1012 bilan yopiladi va qayta ulanib ma'lumotni yangilaydi
+- web (`useDeliveryRealtime`): agent ish joyi va supervayzer sahifasi; xabarlar 1 s da (lokatsiya 5 s da) birlashtirilib tegishli so'rovlar yangilanadi; qayta ulanish 1–30 s, internet yo'q paytda urinmaydi, 4401/4403 da to'xtaydi; jonli ulanishda davriy so'rovlar 5 daqiqaga siyraklashadi, uzilganda odatiy 30–60 s; holat belgisi "Jonli" / "Davriy yangilanish"
+- nginx: `location = /api/delivery/ws` — Upgrade sarlavhalari, 3600 s; Vite proksi `ws: true`
+
+**D10 — avtomatik biriktirish** (migratsiyasiz — siyosatga `autoAssign`, standart: o'chiq; eski saqlangan siyosat standart bilan birlashtiriladi):
+- qoidalar: faol login, a'zolik va profil; ish jadvali (hafta kuni); bugungi yetkazma uchun ish sessiyasi (ixtiyoriy); kunlik ochiq yetkazma limiti (1–200, standart 30); agent filiali — buyurtma ombori filiali; transport maks. yuki (mahsulot og'irligi × asosiy birlikdagi miqdor; og'irlik birligi kg/g/t bo'lmasa — yuk tekshirilmaydi); masofa chegarasi (0 — cheklanmagan)
+- strategiya: `balanced` — eng kam ochiq yetkazma (teng bo'lsa yaqini), `nearest` — eng yaqin (teng bo'lsa kam yuklangani); boshlang'ich nuqta — shu kundagi oxirgi yetkazma mijozi, bo'lmasa bugun uchun ish vaqtidagi joriy joy (30 daqiqagacha); tartib — ustuvorlik, vaqt oynasi, yaratilgan vaqt. Ochko'z taqsimlash — marshrut optimallashtirish (TSP) emas
+- API: `POST /auto-assign/preview` — reja, hech narsa yozilmaydi (biriktirilmay qolganlar sababi va agentlar kesimida sanoq bilan); `POST /auto-assign` — rejadagi juftliklar kompaniya advisory qulfi va FOR UPDATE ostida qayta tekshirilib mavjud `assignDeliveryTask` orqali biriktiriladi (hodisa `details.auto` — strategiya, trigger, masofa; audit `DELIVERY_AUTO_ASSIGNED`; real-time); o'zgarib qolgan juftlik o'tkazib yuboriladi. Ruxsat `delivery.assign`; siyosat o'chiq — 409 `auto_assign_disabled`; o'tgan sana — 400
+- siyosatda "yaratilganda darhol" — buyurtma tasdiqlanib yetkazma yaratilganda biriktiriladi; mos agent bo'lmasa yetkazma "tayyor" qoladi (tasdiqlash xato bermaydi)
+- web: supervayzer sahifasida "Avtomatik biriktirish" (sana, strategiya → reja jadvali: yetkazma, mijoz, agent, masofa, yuklama; sabablar → "Qo'llash" va natija), Sozlamalarda qoidalar bo'limi, tafsilot tarixida "avtomatik" belgisi
+
+**D9–D10 testlari:**
+- API: `delivery-auto-assign` (6 — sof qoidalar va strategiya taqqoslash, reja yozmasligi, teng taqsimlash, hodisa va audit, qayta qo'llash, nearest/balanced boshlang'ich nuqta bilan, masofa chegarasi, limit va jadval sanog'i, ishdagi agent, yaratilganda biriktirish, o'chiq siyosat, ruxsatlar, o'tgan sana, qat'iy tana, boshqa kompaniya yetkazmasi va agenti); `delivery-realtime` (5 — filtrlash va Origin, 401/403 rad etish, boshqaruvchi/agent/boshqa kompaniya hodisalari, lokatsiya va sessiya, boshqa agentga o'tkazish, rollback'da hodisa yo'qligi, sessiya bekor qilinsa 4401, faolsizlantirilsa yopilish)
+- web: `realtime` (4 — so'rov prefikslari, qayta ulanish kutishi, manzil, buzilgan xabar)
+- to'liq API: 86 fayl, 330 test — 4 qismda (120 + 93 + 73 + 44), hammasi o'tdi; to'liq web: 11 fayl, 43 test
+- tsc (API testlar bilan, web), lint (yangi va o'zgargan fayllar), `vite build` — toza
+
 **TEKSHIRILMAGAN / QILINMAGAN:**
-- brauzerda va haqiqiy Android telefonda qo'lda E2E (kamera, GPS, imzo, oflayn navbat) — faqat avtomatik testlar
-- WebSocket yo'q — ro'yxatlar 30–60 soniyada qayta so'raladi
-- avtomatik biriktirish va marshrut optimallashtirish yo'q (arxitektura tayyor, faqat qo'lda tartib)
+- brauzerda va haqiqiy Android telefonda qo'lda E2E (kamera, GPS, imzo, oflayn navbat, real-time) — faqat avtomatik testlar (WebSocket — Fastify `injectWS` bilan, Railway edge va nginx orqali brauzer ulanishi qo'lda sinalmagan)
+- marshrut optimallashtirish (TSP) yo'q — avtomatik biriktirish ochko'z taqsimlash va qo'lda tartib
+- yuk sig'imi: mahsulot formasida og'irlik birligi maydoni yo'q — birligi kiritilmagan mahsulotda yuk tekshirilmaydi
+- ruxsat olib tashlanganda ochiq WebSocket 60 soniyagacha ishlab turishi mumkin (keyingi qayta tekshiruvgacha); ma'lumotning o'zi REST'da darhol himoyalangan
 - ekran qulflanganda fondagi lokatsiya — brauzer cheklovi, native Android ilova kerak
 - "faqat kamera" — `capture` atributi; ba'zi brauzerlar galereyani ham taklif qiladi
 - SMS orqali OTP — production'da SMS provayder yo'q
@@ -1200,6 +1223,8 @@ Agent yo'llari — `delivery.accept` va bog'langan faol yetkazuvchi (agent, komp
 
 | Metod | Yo'l | Ruxsat |
 |---|---|---|
+| GET (WebSocket) | `/ws` | `delivery.view` yoki bog'langan faol yetkazuvchi; Origin tekshiriladi |
+| POST | `/auto-assign/preview`, `/auto-assign` | `delivery.assign` (siyosatda yoqilgan bo'lsa) |
 | GET / PUT | `/policy`, `/policy/recipients` | o'qish — `delivery.view` yoki agent; yozish — `delivery.manage` |
 | GET / POST / PATCH | `/agents` (`?activeOnly=&branchId=&territory=`), `/agents/supervisors`, `/agents/:agentId` | `delivery.view` / `delivery.manage` |
 | GET | `/agents/live`, `/agents/:agentId/track` (`?date=`, audit) | `delivery.view_location` |
@@ -1290,5 +1315,6 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
    - brauzer va kassada qo'lda sinov: aralash to'lov, qaytarish tarkibi, tezkor sotuv (rasm yuklash → kassada ko'rinish), mavzular, kurs tahriri, tarozi simulyatori
 5. **Dostavka moduli — qolgan:**
    - brauzerda va Android telefonda qo'lda sinov: HR'da dostavka agenti qo'shish → telefon bilan kirish → ish sessiyasi → buyurtma ("Yetkazib berish kerak") → supervayzer biriktiradi → qabul → yo'lga chiqish → 200 m geofence → rasm, imzo, OTP (supervayzer kodi) → to'lov farqi → qisman yetkazish → omborga qaytarish; oflayn navbat (samolyot rejimi)
-   - avtomatik biriktirish va marshrut optimallashtirish; WebSocket (hozir so'rovlar bilan yangilanadi)
+   - real-time va avtomatik biriktirishni brauzerda sinash: ikki oynada (supervayzer va yetkazuvchi) "Jonli" belgisi, biriktirish/holat o'zgarishi darhol ko'rinishi; Sozlamalarda avtomatik biriktirishni yoqish → reja → qo'llash; "yaratilganda darhol" bilan buyurtma tasdiqlash
+   - marshrut optimallashtirish (TSP); mahsulot formasiga og'irlik birligi maydoni (yuk sig'imi tekshiruvi uchun)
    - native Android ilova (ekran qulflanganda fondagi lokatsiya); SMS provayder (OTP SMS); qisman qoldiqni qayta yetkazish; filial/hudud ma'lumotnomasi

@@ -94,6 +94,29 @@ export async function validateSession(token: string): Promise<ActiveSession | nu
   return { sessionId: row.session.id, user: row.user };
 }
 
+/**
+ * Tokenni faollik vaqtini YANGILAMASDAN tekshiradi — uzoq ulanishlarni (WebSocket) davriy qayta tekshirish uchun:
+ * ochiq qolgan oyna sessiyaning faolsizlik muddatini cho'zmasin.
+ */
+export async function peekSession(token: string): Promise<ActiveSession | null> {
+  const now = new Date();
+  const [row] = await db
+    .select({ session: sessions, user: users })
+    .from(sessions)
+    .innerJoin(users, eq(users.id, sessions.userId))
+    .where(
+      and(
+        eq(sessions.tokenHash, hashToken(token)),
+        isNull(sessions.revokedAt),
+        gt(sessions.expiresAt, now),
+        gt(sessions.idleExpiresAt, now),
+      ),
+    )
+    .limit(1);
+  if (!row || !row.user.isActive) return null;
+  return { sessionId: row.session.id, user: row.user };
+}
+
 export async function revokeSession(token: string): Promise<void> {
   await db
     .update(sessions)

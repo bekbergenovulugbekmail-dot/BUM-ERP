@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { api } from "@/lib/api.ts";
 import { deliveryErrorMessage } from "@/lib/delivery/errors.ts";
 import { timeWindow } from "@/lib/delivery/format.ts";
+import { useLiveInterval } from "@/lib/delivery/realtime.ts";
 import type { DeliveryAgentRow, DeliveryTaskRow } from "@/lib/delivery/types.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { EMPTY_FILTERS, STATUS_GROUPS, filtersToQuery, type StatusFilter, type TaskFilters } from "../_lib/filters.ts";
@@ -34,12 +35,13 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
   const [search, setSearch] = useState(filters.search);
   const agents = useApiQuery<{ agents: DeliveryAgentRow[] }>("/api/delivery/agents").data?.agents;
   const params = filtersToQuery(filters);
+  const interval = useLiveInterval(60_000);
   const query = useInfiniteQuery({
     queryKey: ["/api/delivery/tasks", params],
     queryFn: ({ pageParam, signal }) => api.get<TaskPage>("/api/delivery/tasks", { ...params, cursor: pageParam, limit: PAGE_SIZE }, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
-    refetchInterval: 60_000,
+    refetchInterval: interval,
   });
   const rows = query.data?.pages.flatMap((page) => page.tasks);
   const set = (patch: Partial<TaskFilters>) => onFiltersChange({ ...filters, ...patch });

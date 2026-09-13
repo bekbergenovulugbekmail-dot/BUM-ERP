@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
+import { useLiveInterval } from "@/lib/delivery/realtime.ts";
 import type { SupervisorDashboard } from "@/lib/delivery/types.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { cn } from "@/lib/utils.ts";
@@ -19,7 +20,8 @@ type Props = {
 export default function TodaySection({ money, onOpenTasks, onOpenControl }: Props) {
   const { t } = useTranslation("delivery");
   const [date, setDate] = useState(todayLocal);
-  const dashboard = useApiQuery<{ dashboard: SupervisorDashboard }>("/api/delivery/dashboard", { date }, { refetchInterval: 60_000 }).data?.dashboard;
+  const interval = useLiveInterval(60_000);
+  const dashboard = useApiQuery<{ dashboard: SupervisorDashboard }>("/api/delivery/dashboard", { date }, { refetchInterval: interval }).data?.dashboard;
   const day = { dateFrom: date, dateTo: date };
 
   const tiles = dashboard

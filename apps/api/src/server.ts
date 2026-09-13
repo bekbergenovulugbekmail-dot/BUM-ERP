@@ -8,6 +8,7 @@ import type { FastifyBaseLogger } from "fastify";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
+import websocket from "@fastify/websocket";
 import { env, features, isProd } from "./env.js";
 import { logger } from "./shared/logger.js";
 import { registerErrorHandler } from "./shared/errors.js";
@@ -64,6 +65,9 @@ export async function buildServer() {
       path: "/",
     },
   });
+
+  // Real-time (dostavka): mijozdan faqat "ping" keladi — katta xabar kerak emas
+  await app.register(websocket, { options: { maxPayload: 1024 } });
 
   registerErrorHandler(app);
 
