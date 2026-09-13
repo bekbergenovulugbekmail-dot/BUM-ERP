@@ -1373,6 +1373,55 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
 
 ---
 
+## Kassa: dasturdan to'liq chiqish va qurilmani uzish (2026-09-13)
+
+Muammo (skrinshotlar): BUM POS KASSA "Bonnu Market" holatida osilib qolar, oyna yopilgach jarayonlar qolar edi; boshqa kompaniya xodimi (+998999999999) kirganda "Bu kompaniyaga kirishingiz cheklangan" dan boshqa yo'l yo'q edi.
+
+- Chiqish: asosiy oyna yopilsa ilova to'liq tugaydi (`before-quit` — sinxron to'xtaydi, tarozi COM jarayonlari o'ldiriladi, SQLite yopiladi; 5 s dan keyin majburiy `app.exit`); chop etish 60 s timeout bilan (printer osilib qolmasin); ikkinchi nusxa ochilsa oyna qayta yaratiladi
+- Tugmalar: kassir ekranida (xato ostida), Sozlamalar → Chiqish va bosh sahifada "Dasturni yopish"; "Qurilmani uzish" — navbatda yuborilmagan amal, rad etilgan amal yoki ochiq smena bo'lsa 409 (ma'lumot yo'qolmaydi); serverda qurilma faolsizlanadi (`POST /api/pos-device/unregister`, audit `POS_DEVICE_UNREGISTERED`), qurilmada kompaniya ma'lumotlari tozalanadi, qurilma sozlamalari (printer, tarozi, yangilanish fayli) qoladi
+- Kassir boshqa kompaniya xodimi bo'lsa aniq xabar: "Bu foydalanuvchi «…» kompaniyasining faol xodimi emas. Boshqa kompaniya bilan ishlash uchun kassada «Qurilmani uzish» ni bosing."
+- Testlar: desktop `kassa-exit` (4 — uzishda navbat/smena himoyasi, server rad etsa ham lokal tozalash, sinxron paytida yopish), API `pos-device-unregister` (2); desktop to'liq — 9 fayl, 54 test; Electron smoke (alohida `KASSA_USER_DATA`): 2 marta ochib-yopildi, 4 jarayon ham tugadi
+- **Qilinmagan:** o'rnatuvchi 0.4.1 qurilmagan va e'lon qilinmagan — platforma admini Admin → "Desktop kassa" orqali yuklaydi; haqiqiy kassada (printer, tarozi) qo'lda sinov
+
+## Multi-business: biznes manzili va parallel tablar (2026-09-13)
+
+- Manzil: `app.bum-erp.uz/{biznes}/{bo'lim}` (masalan `/bonnumarket/purchase`, `/hadichamarket/distribution`); slug band yoki yaroqsiz bo'lsa — kompaniya ID'si; til bilan qolgan sahifalar — `/uz/login`, `/uz/admin`, `/uz/select-company`, `/uz/onboarding`; eski `/uz/dashboard` havolalari joriy biznes manziliga yo'naltiriladi
+- Tab konteksti: har API so'rovida `x-bum-company` (rasm, yuklab olish, WebSocket — `bumCompany` parametri). Server kontekstni foydalanuvchining FAOL a'zoligi bo'yicha tekshiradi: boshqa biznes, mavjud bo'lmagan yoki noto'g'ri manzil, nofaol a'zolik — 403 `company_access_denied`; saqlangan aktiv kompaniya o'zgarmaydi — bir necha biznes bitta Chrome'da parallel tablarda, ma'lumot aralashmaydi
+- React Query kalitlari va `/me` biznes bo'yicha; service worker agent oflayn keshi biznes bo'yicha (`agent-api-v2`); dostavka real-time — tab biznesida; kompaniya almashtirgichda "yangi tabda ochish"; kirish yo'q biznes uchun ekran va o'z bizneslari ro'yxati
+- Testlar: API `company-context` (3 — ikki biznes parallel, yozish izolyatsiyasi, parametr, 403/401), web `company-context` (3); production: sessiyasiz `x-bum-company` — 401, `/bonnu-market/purchase` — 200, bundle'da sarlavha bor
+- **Tekshirilmagan:** brauzerda ikki tabda qo'lda (Bonnu Market va Hadicha Market bir vaqtda)
+
+## Xarita, optimal marshrut va hudud bo'yicha dostavka (2026-09-14)
+
+Talab: agent nazorati xaritasi (bosilganda ochilmas yoki boshqa saytga o'tar edi), "Dostavka / Marshrut bo'yicha" — eng qisqa yo'l va navigatorga o'tish, "Hudud bo'yicha" — "Magazin 1 — Zakaz bor…" → "[ Barchasini dostavshikka biriktirish ]". Pullik xarita API'si ishlatilmaydi.
+
+- **Xarita:** sxematik SVG o'rniga OpenStreetMap + Leaflet 1.9.4 (bepul, kalitsiz; o'z tile serveri — `VITE_MAP_TILE_URL`). Do'konlar tartib raqami bilan, marshrut chiziqlari, geofence, hududlar; belgi bosilganda — ma'lumot va Google Maps / Yandex / Android navigator havolalari (matn DOM orqali — XSS yo'q). Internet bo'lmasa xarita qatlami yuklanmaydi, lekin belgilar va chiziqlar chiziladi (ogohlantirish bilan). Kompyuterda "Xaritada ochish" endi ilova ichidagi oynada (telefonda — navigator ilovasi)
+- **Marshrut algoritmi** (`apps/api/src/shared/route-optimizer.ts`, ochiq yo'l, assimetrik matritsa): 12 nuqtagacha aniq (Held–Karp), ko'prog'i — eng yaqin qo'shni (12 boshlanish) + 2-opt + Or-opt. Masofa — yo'l bo'yicha bepul OSRM (`ROUTING_OSRM_URL`, standart — OSRM loyihasining ommaviy serveri; "off" — o'chiq; faqat koordinatalar yuboriladi), javob bo'lmasa to'g'ri chiziq × 1,3 (reja baribir hisoblanadi, "taxminiy" belgisi)
+- **Dostavka API:** `POST /route-plan` (dostavshikning kunlik ochiq yetkazmalari; yo'ldagilar oldinda, koordinatasizlar oxirida; boshlanish — berilgan joy yoki bugun uchun dostavshikning 2 soatdan yangi GPS nuqtasi; `apply` — tartib saqlanadi), `GET /dispatch` (yetkazmasi yaratilmagan buyurtmalar + biriktirilmagan "tayyor" yetkazmalar, mijoz hududi va distribyutsiya marshrutidagi o'rni bilan), `POST /dispatch/assign` (buyurtmalardan yetkazma yaratish va yetkazmalarni bitta dostavshikka — bitta tranzaksiyada, biri xato bo'lsa hech biri; keyin shu kunlar uchun eng qisqa tartib), `GET /agent/route` (dostavshikka tavsiya, yozilmaydi). Audit `DELIVERY_BULK_ASSIGNED`
+- **Distribyutsiya API:** `GET /map`, `POST /routes/:routeId/optimize`
+- **Migratsiya 0044** — faqat qo'shimcha: `customers.city`, `customers.district` (bo'sh bo'lishi mumkin) va indeks; mavjud ma'lumot o'zgarmaydi
+- **Web:** Dostavka → Buyurtmalar: "Hudud bo'yicha" (shahar → mahalla) / "Marshrut bo'yicha" / "Hammasi", do'kon qatorida "Zakaz bor", guruhda "Barchasini dostavshikka biriktirish" (dostavshik, ixtiyoriy sana, eng qisqa tartib → xaritada marshrut va navigator havolalari), belgilab biriktirish; Xarita → "Kunlik marshrut" (hisoblash, saqlash); dostavshik ilovasi → Yetkazmalar → "Optimal marshrut" (hozirgi joydan, Google Maps 9 nuqtadan ko'p bo'lsa bo'laklab, Yandex bitta marshrutda); Distribyutsiya → "Xarita" tabi (marshrutlar rangida, marshrutsiz do'konlar, "Optimal tartib") va Marshrutlar → "Optimal tartib"; mijoz formasida "Shahar / tuman", "Mahalla / hudud"; tillar uz/ru/kk
+- **Testlar:** API `route-optimizer` (5 — to'liq sanab chiqish bilan tenglik, assimetriya, 120 nuqta sifati va vaqti), `routing-service` (4 — OSRM javobi, xato/timeout'da taxminiy reja, tarmoqsiz), `delivery-dispatch` (6 — Urganch → Luchevoy stsenariysi, atomarlik, supervayzer rejasi va saqlash, dostavshik GPS'idan, ruxsat va boshqa kompaniya izolyatsiyasi, distribyutsiya xaritasi va optimallashtirish); tegishli to'plam (delivery, distribution, sales, route) — 28 fayl, 87 test; web `navigation` (4); to'liq web — 14 fayl, 56 test; tsc, lint, `vite build` — toza
+- **Production:** API va web deploy qilindi (web birinchi urinishda yiqildi — commit qilinmagan `apps/mobile/package.json` Docker ichida `pnpm install` ni ishga tushirgan; lockfile moslashtirilib qayta deploy — SUCCESS); yangi endpointlar sessiyasiz 401
+- **Tekshirilmagan / cheklovlar:** brauzerda qo'lda; production'dan OSRM ommaviy serveriga haqiqiy so'rov (Railway tarmog'idan) — tekshirish uchun tizimga kirgan sessiya kerak; OSRM ommaviy serveri adolatli foydalanish cheklovli — ko'p dostavshikda o'z OSRM serveri (Docker `osrm-backend` + Geofabrik O'zbekiston xaritasi, bepul) tavsiya etiladi; hudud (shahar/mahalla) mavjud mijozlarda bo'sh — kiritilgunicha "Hudud ko'rsatilmagan" guruhida; hudud poligonlari (territoriya chegarasi) ma'lumotnomasi yo'q — `MapView` poligonni qo'llaydi, lekin ma'lumot manbai yo'q; to'liq API regressiyasi (90+ fayl) bu o'zgarishdan keyin hali ishga tushirilmagan
+
+## Android ilova (2026-09-14)
+
+**Texnologiya — Capacitor 8.4.3** (`apps/mobile`). Sabab: mavjud React/Vite ilova va API to'liq qayta ishlatiladi — sotuv agenti, dostavshik, distribyutsiya, do'kon, buyurtma, marshrut, xarita va statuslar bitta kodda, web deploy darhol hamma telefonga yetadi; native qism faqat brauzer qila olmaydigan joyda. React Native yoki Kotlin — barcha ekranlarni qayta yozish va ikki kodni parallel yuritish demakdir.
+
+- ilova production web manzilini ochadi (`BUM_APP_URL`, standart — Railway domeni; `bum-erp.uz` DNS ulangach almashtiriladi): cookie sessiya, biznes manzili, service worker oflayn keshi va real-time web bilan bir xil; server ochilmasa — ilova ichidagi oflayn sahifa. appId `uz.bumerp.app`, minSdk 24, target/compile 36, launcher ikonka — BUM logotipi
+- native: fondagi GPS — `@capacitor-community/background-geolocation` 1.2.26 (doimiy bildirishnomali xizmat, ekran qulflanganda ham, faqat ish sessiyasida; `ACCESS_BACKGROUND_LOCATION` so'ralmaydi; soxta GPS — `mocked` belgisi serverga), bildirishnoma — `@capacitor/local-notifications` 8.3.1 (yangi / bekor qilingan / o'zgargan yetkazma — real-time xabardan, ilova fonda bo'lganda; FCM/tashqi push xizmatisiz), kamera (web sahifadagi rasm olish), `geo:` / Google Maps / Yandex havolalari tizim ilovasida
+- web tomoni: `src/lib/native/` — `platform`, `geolocation` (Android — fondagi xizmat, brauzer — `watchPosition`), `notifications`; dostavshik va sotuv agenti GPS hook'lari shu adapterda; brauzerda xatti-harakat o'zgarmadi (web testlari 14 fayl, 56 test)
+- versiyalar `minimumReleaseAge` (3 kun) qoidasiga mos tanlandi (8.5.2 hali yetilmagan — Railway web build'i shu sabab bir marta yiqilgan)
+- build: Gradle 8.14.3, AGP 8.13.0, **JDK 21** (Capacitor 8 talabi; mashinada Android Studio JBR 21 — `%USERPROFILE%\.jdks\jbr-21.0.11`), `gradle.properties` — 900 MB heap, bitta worker
+
+**APK QURILMADI — blocker:** bu kompyuterda Gradle build ikki marta tizim tomonidan xotira yetishmagani uchun to'xtatildi (8 GB dan 1,4–1,5 GB bo'sh — Docker, boshqa ilovalar; build ~2,5 GB talab qiladi). Loyiha tayyor, qurish:
+- Android Studio: Open → `apps/mobile/android` → Settings → Gradle JDK = 21 → Build → Build APK(s)
+- yoki buyruq bilan (og'ir ilovalar yopilgach yoki boshqa kompyuterda): `pnpm install`, `JAVA_HOME` = JDK 21, `ANDROID_HOME` = Android SDK, `cd apps/mobile` → `pnpm apk:debug` → `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk`
+- release: imzo kaliti (`keytool -genkey …`, egasida saqlanadi, repoga tushmaydi — `.gitignore`), `signingConfigs` va `pnpm apk:release`; Google Play'ga joylash — Play Console hisobi (bir martalik pullik ro'yxatdan o'tish — egasining qarori) yoki APK'ni to'g'ridan-to'g'ri tarqatish
+
+**Tekshirilmagan:** APK qurilmagan va telefonda sinalmagan (fondagi GPS, bildirishnoma, kamera, navigator intentlari, oflayn sahifa); iOS yo'q
+
 ## Keyingi qadam
 
 1. **Brauzerda sinov (lokal)** — boshlandi 2026-09-11:
@@ -1414,3 +1463,6 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
    - deploydan keyin production'da: kompaniyalar obunasi (Admin → Kompaniyalar → Obuna ustuni) mavjud holatga mosligini ko'rish — trial sanalari, muddatsiz active, litsenziyalar soni
    - brauzerda qo'lda: egasi — Obuna sahifasi → tarif tanlash; admin — To'lovlar → tasdiqlash; HR → xodim qo'shish BEPUL/dasturdan foydalanadi, 4-foydalanuvchida qo'shimcha tarif; "Ekranni bloklash" → PIN; trial tugaganda menyu va Bosh sahifa xabari
    - to'lov shlyuzi (Payme / Click) — hozir admin qo'lda tasdiqlaydi; qo'shimcha litsenziya tugashiga yaqin ogohlantirish; agent ish joylarida qulf ekrani; desktop kassada obuna holati ekrani
+7. **Kassa (chiqish va uzish) — qolgan:** o'rnatuvchi 0.4.1 ni qurish va platforma admini orqali e'lon qilish; haqiqiy kassada: kirish → ish → "Qurilmani uzish" → boshqa kompaniya bilan qayta ulash → "Dasturni yopish" (Diskpetcherda jarayon qolmasligi)
+8. **Multi-business — qolgan:** brauzerda ikki tabda qo'lda (masalan `/bonnu-market/purchase` va `/hadicha-market/distribution`), kompaniya almashtirgichdagi "yangi tabda ochish"
+9. **Xarita va marshrut — qolgan:** mijozlarga shahar/mahalla kiritish (mavjud mijozlarda bo'sh); production'da tizimga kirib "Kunlik marshrut" — manba "yo'l bo'yicha" chiqishini ko'rish (OSRM ommaviy serveri Railway'dan javob beradimi); ko'p dostavshikda o'z OSRM serveri; to'liq API regressiyasi

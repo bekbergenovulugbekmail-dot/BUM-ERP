@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BUM ERP</string>
+    <string name="title_activity_main">BUM ERP</string>
+    <string name="package_name">uz.bumerp.app</string>
+    <string name="custom_url_scheme">uz.bumerp.app</string>
+    <!-- Fondagi GPS xizmati bildirishnoma kanali (Sozlamalar → Bildirishnomalar da ko'rinadi) -->
+    <string name="capacitor_background_geolocation_notification_channel_name">Ish vaqtidagi lokatsiya</string>
+</resources>
