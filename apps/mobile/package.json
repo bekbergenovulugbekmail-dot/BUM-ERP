@@ -1,0 +1,22 @@
+{
+  "name": "@bum/mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BUM ERP Android ilovasi (Capacitor): production web ilovani ochadi, fondagi GPS va bildirishnomalar native",
+  "type": "module",
+  "scripts": {
+    "sync": "cap sync android",
+    "open": "cap open android",
+    "apk:debug": "cap sync android && cd android && gradlew.bat assembleDebug",
+    "apk:release": "cap sync android && cd android && gradlew.bat assembleRelease"
+  },
+  "dependencies": {
+    "@capacitor-community/background-geolocation": "1.2.26",
+    "@capacitor/android": "8.4.3",
+    "@capacitor/core": "8.4.3",
+    "@capacitor/local-notifications": "8.3.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.4.3"
+  }
+}

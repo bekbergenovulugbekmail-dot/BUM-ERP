@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="uz">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>BUM ERP</title>
+    <style>
+      :root { color-scheme: light dark; --bg: #f6f7fb; --fg: #111827; --muted: #6b7280; --accent: #4f46e5; }
+      @media (prefers-color-scheme: dark) { :root { --bg: #0b1020; --fg: #f3f4f6; --muted: #9ca3af; } }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--fg);
+        font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 24px; box-sizing: border-box; }
+      main { max-width: 360px; text-align: center; }
+      h1 { font-size: 20px; margin: 16px 0 8px; }
+      p { color: var(--muted); margin: 0 0 24px; }
+      button { background: var(--accent); color: #fff; border: 0; border-radius: 12px; padding: 14px 24px; font-size: 16px; width: 100%; }
+      .logo { width: 56px; height: 56px; border-radius: 16px; background: var(--accent); color: #fff; display: inline-grid; place-items: center; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="logo">BUM</div>
+      <h1>Server bilan aloqa yo'q</h1>
+      <p>Internetni tekshiring va qayta urining. Ish vaqtida olingan GPS nuqtalari telefonda saqlanadi va aloqa tiklanganda yuboriladi.</p>
+      <button type="button" onclick="location.href = window.BUM_APP_URL || '/'">Qayta urinish</button>
+    </main>
+  </body>
+</html>

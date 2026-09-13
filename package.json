@@ -13,6 +13,7 @@
     "prettier-check": "prettier --check ."
   },
   "dependencies": {
+    "@capacitor/core": "8.4.3",
     "@hookform/resolvers": "^5.7.1",
     "@tanstack/react-query": "^5.101.4",
     "@types/jsbarcode": "^3.11.4",

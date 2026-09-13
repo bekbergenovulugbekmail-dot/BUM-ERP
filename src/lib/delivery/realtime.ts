@@ -11,6 +11,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { DeliveryRealtimeMessage } from "@bum/shared";
 import { apiUrl } from "@/lib/api.ts";
+import { notifyInBackground } from "@/lib/native/notifications.ts";
 
 export type RealtimeStatus = "connecting" | "live" | "offline";
 
@@ -55,6 +56,24 @@ export function invalidationPrefixes(message: DeliveryRealtimeMessage): string[]
   }
 }
 
+/** Yetkazuvchi telefoniga bildirishnoma beriladigan yetkazma hodisalari (Android ilova fonda bo'lganda). */
+export type AgentNotice = "assigned" | "changed" | "cancelled";
+
+export function agentNoticeOf(message: DeliveryRealtimeMessage): AgentNotice | null {
+  if (message.type !== "task") return null;
+  if (message.action === "ASSIGNED") return "assigned";
+  if (message.action === "CANCELLED") return "cancelled";
+  return message.action === "REASSIGNED" || message.action === "UNASSIGNED" || message.action === "RESCHEDULED" ? "changed" : null;
+}
+
+/** Bir paketdagi hodisalar — bitta bildirishnoma matni. */
+export function agentNoticeText(counts: Record<AgentNotice, number>): { title: string; body: string } | null {
+  if (counts.assigned > 0) return { title: "Yangi yetkazma", body: `Sizga ${counts.assigned} ta yangi yetkazma biriktirildi` };
+  if (counts.cancelled > 0) return { title: "Yetkazma bekor qilindi", body: `${counts.cancelled} ta yetkazma bekor qilindi` };
+  if (counts.changed > 0) return { title: "Yetkazmalar o'zgardi", body: "Yetkazmalar ro'yxati yoki sanasi o'zgardi — ilovani oching" };
+  return null;
+}
+
 /** Qayta ulanish kutishi: 1, 2, 4 … 30 s, yarmi tasodifiy (hamma bir vaqtda ulanmasin). */
 export function reconnectDelay(attempt: number, random: () => number = Math.random): number {
   const base = Math.min(30_000, 1000 * 2 ** Math.max(0, attempt));
@@ -89,9 +108,17 @@ export function useDeliveryRealtime(enabled: boolean): RealtimeStatus {
     let batchTimer: number | undefined;
     let locationTimer: number | undefined;
     const pending = new Set<string>();
+    // Faqat yetkazuvchi qurilmasi (boshqaruvchi emas) — o'z yetkazmalari haqida bildirishnoma
+    let agentOnly = false;
+    const notices: Record<AgentNotice, number> = { assigned: 0, changed: 0, cancelled: 0 };
 
     const flush = () => {
       batchTimer = undefined;
+      const notice = agentNoticeText(notices);
+      notices.assigned = 0;
+      notices.changed = 0;
+      notices.cancelled = 0;
+      if (notice) void notifyInBackground(notice.title, notice.body);
       const prefixes = [...pending];
       pending.clear();
       if (prefixes.length === 0) return;
@@ -121,8 +148,11 @@ export function useDeliveryRealtime(enabled: boolean): RealtimeStatus {
         if (!message) return;
         if (message.type === "ready") {
           attempt = 0;
+          agentOnly = message.agent && !message.manager;
           setStatus("live");
         }
+        const notice = agentOnly ? agentNoticeOf(message) : null;
+        if (notice) notices[notice] += 1;
         if (message.type === "location") {
           if (locationTimer === undefined) {
             locationTimer = window.setTimeout(() => {

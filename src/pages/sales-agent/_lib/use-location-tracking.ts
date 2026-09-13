@@ -1,11 +1,12 @@
 /**
- * Agent lokatsiyasi kuzatuvi — ilova ochiq paytda (brauzer `watchPosition`).
+ * Agent lokatsiyasi kuzatuvi — brauzerda ilova ochiq paytda (`watchPosition`), Android ilovada fonda ham (ekran
+ * qulflanganda, doimiy bildirishnoma bilan) — `@/lib/native/geolocation.ts`.
  * Serverga siyosatdagi oraliqda yoki 50 m dan ko'p siljiganda yuboriladi; server sifatni tekshiradi va rad etsa sababini
  * qaytaradi. Ruxsat berilmasa — holat "denied" (sotuv amallari bloklanadi) va serverga bir marta xabar beriladi.
- * Telefon qulflanganda yoki boshqa ilovaga o'tilganda brauzer lokatsiya bermaydi — fonda kuzatuv native ilovada.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "@/lib/api.ts";
+import { locationSupported, watchLocation } from "@/lib/native/geolocation.ts";
 
 export type TrackingStatus = "locating" | "active" | "rejected" | "denied" | "unavailable";
 
@@ -35,7 +36,8 @@ type LocationResponse = { accepted: boolean; reason?: string; message?: string; 
 
 const MOVE_THRESHOLD_METERS = 50;
 const ORIGIN_THRESHOLD_METERS = 100;
-const supported = () => typeof navigator !== "undefined" && "geolocation" in navigator;
+const supported = locationSupported;
+const BACKGROUND_NOTICE = { title: "BUM ERP — savdo agenti", message: "Ish vaqti: lokatsiya marshrut uchun yuborilmoqda" };
 
 /** Taxminiy masofa (faqat yuborish qarori uchun; aniq hisob serverda). */
 function roughMeters(a: Point, b: Point) {
@@ -73,10 +75,10 @@ export function useLocationTracking(enabled: boolean, intervalSeconds: number): 
 
   useEffect(() => {
     if (!enabled || !supported()) return;
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        const point = { latitude: position.coords.latitude, longitude: position.coords.longitude };
-        const accuracy = position.coords.accuracy;
+    return watchLocation(
+      (fix) => {
+        const point = { latitude: fix.latitude, longitude: fix.longitude };
+        const accuracy = fix.accuracy;
         if (!origin.current || roughMeters(origin.current, point) >= ORIGIN_THRESHOLD_METERS) origin.current = point;
         const stableOrigin = origin.current;
         setState((previous) => ({
@@ -99,7 +101,7 @@ export function useLocationTracking(enabled: boolean, intervalSeconds: number): 
             latitude: point.latitude,
             longitude: point.longitude,
             accuracy,
-            recordedAt: new Date(position.timestamp).toISOString(),
+            recordedAt: new Date(fix.timestamp).toISOString(),
           })
           .then((result) => {
             lastSent.current = { at: Date.now(), point };
@@ -115,18 +117,16 @@ export function useLocationTracking(enabled: boolean, intervalSeconds: number): 
             sending.current = false;
           });
       },
-      (error) => {
-        const denied = error.code === error.PERMISSION_DENIED;
+      (failure) => {
         setState((previous) => ({
           ...previous,
-          status: denied ? "denied" : previous.point ? previous.status : "unavailable",
-          message: error.message || null,
+          status: failure.denied ? "denied" : previous.point ? previous.status : "unavailable",
+          message: failure.message || null,
         }));
-        report(denied ? "permission_denied" : "update_failure", error.message);
+        report(failure.denied ? "permission_denied" : "update_failure", failure.message);
       },
-      { enableHighAccuracy: true, maximumAge: 10_000, timeout: 30_000 },
+      { background: BACKGROUND_NOTICE },
     );
-    return () => navigator.geolocation.clearWatch(watchId);
   }, [enabled, attempt, report]);
 
   /** "Lokatsiyani yoqish" — qayta so'rash (brauzer ruxsat oynasi yoki GPS). */

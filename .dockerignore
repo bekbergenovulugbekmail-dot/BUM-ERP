@@ -10,6 +10,10 @@ dist-ssr
 *.log
 coverage
 
+# Android ilova native loyihasi (Gradle, build natijalari) — server image'lariga kerak emas.
+# apps/mobile/package.json qoladi: workspace lockfile bilan mos bo'lishi kerak
+apps/mobile/android
+
 # Maxfiy qiymatlar image'ga tushmasin — muhit o'zgaruvchilari orqali beriladi
 .env*
 !.env.example

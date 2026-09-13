@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { invalidationPrefixes, parseRealtimeMessage, realtimeUrl, reconnectDelay } from "./realtime.ts";
+import { agentNoticeOf, agentNoticeText, invalidationPrefixes, parseRealtimeMessage, realtimeUrl, reconnectDelay } from "./realtime.ts";
 
 describe("dostavka real-time mijozi", () => {
   it("xabar turi bo'yicha yangilanadigan so'rovlar", () => {
@@ -24,6 +24,22 @@ describe("dostavka real-time mijozi", () => {
 
   it("manzil: shu domen, http → ws", () => {
     expect(realtimeUrl()).toBe(`ws://${window.location.host}/api/delivery/ws`);
+  });
+
+  it("yetkazuvchi bildirishnomasi: faqat biriktirish, bekor qilish va o'zgarish; bir paket — bitta matn", () => {
+    const task = (action: string) => ({ type: "task" as const, taskId: "t1", status: null, action });
+    expect(agentNoticeOf(task("ASSIGNED"))).toBe("assigned");
+    expect(agentNoticeOf(task("CANCELLED"))).toBe("cancelled");
+    expect(agentNoticeOf(task("REASSIGNED"))).toBe("changed");
+    expect(agentNoticeOf(task("RESCHEDULED"))).toBe("changed");
+    expect(agentNoticeOf(task("ROUTE_ORDER"))).toBeNull();
+    expect(agentNoticeOf(task("ARRIVED"))).toBeNull();
+    expect(agentNoticeOf({ type: "location", deliveryAgentId: "a1" })).toBeNull();
+
+    expect(agentNoticeText({ assigned: 3, changed: 1, cancelled: 1 })?.body).toBe("Sizga 3 ta yangi yetkazma biriktirildi");
+    expect(agentNoticeText({ assigned: 0, changed: 2, cancelled: 1 })?.title).toBe("Yetkazma bekor qilindi");
+    expect(agentNoticeText({ assigned: 0, changed: 1, cancelled: 0 })?.title).toBe("Yetkazmalar o'zgardi");
+    expect(agentNoticeText({ assigned: 0, changed: 0, cancelled: 0 })).toBeNull();
   });
 
   it("buzilgan xabar e'tiborsiz qoladi", () => {

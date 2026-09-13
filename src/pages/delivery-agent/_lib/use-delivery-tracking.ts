@@ -1,14 +1,16 @@
 /**
- * Yetkazuvchi lokatsiyasi — faqat faol ish sessiyasida va ilova ochiq paytda (brauzer `watchPosition`).
+ * Yetkazuvchi lokatsiyasi — faqat faol ish sessiyasida. Brauzerda — ilova ochiq paytda (`watchPosition`); Android
+ * ilovada — fonda ham (ekran qulflanganda, doimiy bildirishnoma bilan), `@/lib/native/geolocation.ts`.
  * Nuqta siyosatdagi oraliqda yoki siljish chegarasidan ko'p yurilganda buferga olinadi va paket bilan yuboriladi;
  * internet yo'q bo'lsa bufer qurilmada saqlanadi (200 tagacha) va qaytganda yuboriladi. Server sifatni tekshiradi.
- * Telefon qulflanganda yoki boshqa ilovaga o'tilganda brauzer lokatsiya bermaydi — fondagi kuzatuv faqat native ilovada.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "@/lib/api.ts";
+import { locationSupported, watchLocation } from "@/lib/native/geolocation.ts";
 
 export type TrackingStatus = "locating" | "active" | "rejected" | "denied" | "unavailable";
-export type BufferedPoint = { latitude: number; longitude: number; accuracy: number; recordedAt: string };
+/** `mocked` — Android ilova soxta GPS (mock location) ni aniqlasa; server shubhali deb belgilaydi. */
+export type BufferedPoint = { latitude: number; longitude: number; accuracy: number; recordedAt: string; mocked?: boolean };
 
 export type DeliveryLocation = {
   status: TrackingStatus;
@@ -27,7 +29,8 @@ export const LOCATION_BUFFER_KEY = "bum:delivery-locations";
 const BUFFER_MAX = 200;
 const BATCH = 20;
 const ORIGIN_THRESHOLD_METERS = 100;
-const supported = () => typeof navigator !== "undefined" && "geolocation" in navigator;
+const supported = locationSupported;
+const BACKGROUND_NOTICE = { title: "BUM ERP — dostavka", message: "Ish vaqti: lokatsiya yetkazmalar uchun yuborilmoqda" };
 
 /** Taxminiy masofa (faqat yuborish qarori uchun; aniq hisob serverda). */
 export function roughMeters(a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }) {
@@ -113,13 +116,14 @@ export function useDeliveryTracking(enabled: boolean, intervalSeconds: number, d
 
   useEffect(() => {
     if (!enabled || !supported()) return;
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
+    return watchLocation(
+      (fix) => {
         const next: BufferedPoint = {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-          recordedAt: new Date(position.timestamp).toISOString(),
+          latitude: fix.latitude,
+          longitude: fix.longitude,
+          accuracy: fix.accuracy,
+          recordedAt: new Date(fix.timestamp).toISOString(),
+          ...(fix.mocked ? { mocked: true } : {}),
         };
         if (!origin.current || roughMeters(origin.current, next) >= ORIGIN_THRESHOLD_METERS) origin.current = { latitude: next.latitude, longitude: next.longitude };
         const stableOrigin = origin.current;
@@ -136,13 +140,11 @@ export function useDeliveryTracking(enabled: boolean, intervalSeconds: number, d
         setState((previous) => ({ ...previous, buffered: readBuffer().length }));
         void flush();
       },
-      (error) => {
-        const denied = error.code === error.PERMISSION_DENIED;
-        setState((previous) => ({ ...previous, status: denied ? "denied" : previous.point ? previous.status : "unavailable" }));
+      (failure) => {
+        setState((previous) => ({ ...previous, status: failure.denied ? "denied" : previous.point ? previous.status : "unavailable" }));
       },
-      { enableHighAccuracy: true, maximumAge: 10_000, timeout: 30_000 },
+      { background: BACKGROUND_NOTICE },
     );
-    return () => navigator.geolocation.clearWatch(watchId);
   }, [enabled, attempt, flush]);
 
   const request = useCallback(() => {
