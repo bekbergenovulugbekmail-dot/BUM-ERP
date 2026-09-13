@@ -4,9 +4,12 @@
  *   app.get("/me", { preHandler: requireAuth }, async (req) => {
  *     const { user } = authOf(req);
  *   });
+ *
+ * Qulflangan ekran (LOCK): sessiya saqlanadi, lekin `requireAuth` 423 LOCKED qaytaradi — faqat `requireSession`
+ * ishlatadigan /api/auth/me, /lock, /unlock ochiq. Chiqish (LOGOUT) sessiyani bekor qiladi — PIN endi ishlamaydi.
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { forbidden, unauthenticated } from "@bum/shared";
+import { AppError, forbidden, unauthenticated } from "@bum/shared";
 import {
   SESSION_COOKIE,
   clearSessionCookie,
@@ -21,7 +24,8 @@ declare module "fastify" {
   }
 }
 
-export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+/** Yaroqli sessiya (qulflangan bo'lsa ham). */
+export async function requireSession(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const token = req.cookies[SESSION_COOKIE];
   const session = token ? await validateSession(token) : null;
   if (!session) {
@@ -30,6 +34,11 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Pro
     throw unauthenticated();
   }
   req.auth = session;
+}
+
+export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+  await requireSession(req, reply);
+  if (req.auth?.lockedAt) throw new AppError("LOCKED", "Ekran bloklangan. Davom etish uchun PIN kiriting.");
 }
 
 export async function requirePlatformAdmin(req: FastifyRequest, reply: FastifyReply): Promise<void> {

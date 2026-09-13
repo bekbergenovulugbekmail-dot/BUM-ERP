@@ -10,6 +10,10 @@ import { cn } from "@/lib/utils.ts";
 import { errorMessage } from "@/lib/api.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
+import { Link, useParams } from "react-router-dom";
+import { Button } from "@/components/ui/button.tsx";
+import { useCurrentUser } from "@/hooks/use-auth.ts";
+import { formatDay, subscriptionBlocked } from "@/lib/subscription.ts";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -104,6 +108,29 @@ function StatCard({
 export default function DashboardPage() {
   const { t } = useTranslation(["dashboard", "common"]);
   const { can, isLoading: permissionsLoading } = usePermissions();
+  const { lng = "uz" } = useParams<{ lng: string }>();
+  const me = useCurrentUser();
+  // Obuna tugagan: ma'lumot saqlangan, ish bo'limlari yopiq — shu yerdan uzaytirishga yo'l
+  const expiredNotice = subscriptionBlocked(me?.subscription) ? (
+    <Card className="border-destructive/40 bg-destructive/5">
+      <CardContent className="py-5 flex flex-col sm:flex-row sm:items-center gap-4">
+        <ShieldAlert className="h-8 w-8 text-destructive shrink-0" />
+        <div className="flex-1">
+          <p className="font-semibold">BUM ERP obunangiz muddati tugagan.</p>
+          <p className="text-sm text-muted-foreground">
+            Tugagan sana: {formatDay(me?.subscription?.expiresAt)}. Ma'lumotlaringiz saqlangan — obuna uzaytirilgach barcha bo'limlar qayta ochiladi.
+          </p>
+        </div>
+        {can("subscription.view") ? (
+          <Button asChild>
+            <Link to={`/${lng}/subscription`}>OBUNANI UZAYTIRISH</Link>
+          </Button>
+        ) : (
+          <p className="text-sm text-muted-foreground">Kompaniya egasiga murojaat qiling.</p>
+        )}
+      </CardContent>
+    </Card>
+  ) : null;
   // Moliyaviy ko'rsatkichlar (foyda, kassa, qarzlar) faqat `analytics.view` bilan
   const canView = can("analytics.view");
   const query = useApiQuery<DashboardKpi>(canView ? "/api/analytics/dashboard" : null);
@@ -131,6 +158,7 @@ export default function DashboardPage() {
     return (
       <div className="p-4 md:p-6 space-y-6">
         {header}
+        {expiredNotice}
         <Card>
           <CardContent className="py-10 flex flex-col items-center text-center gap-2">
             <ShieldAlert className="h-8 w-8 text-muted-foreground" />
@@ -157,6 +185,7 @@ export default function DashboardPage() {
   return (
     <div className="p-4 md:p-6 space-y-6">
       {header}
+      {expiredNotice}
 
       {/* KPI cards */}
       {loading ? (

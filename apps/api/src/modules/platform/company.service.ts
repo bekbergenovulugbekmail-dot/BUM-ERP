@@ -11,13 +11,15 @@
  *    kompaniyada yozish amallari company/tenant.ts da yopiladi
  */
 import { desc, eq, like, or, sql } from "drizzle-orm";
-import { DEFAULT_ROLES, notFound } from "@bum/shared";
+import { DEFAULT_ROLES, effectiveSubscriptionStatus, notFound } from "@bum/shared";
 import { warehouses } from "../../db/schema/inventory.js";
 import { seedFinanceDefaults } from "../finance/accounts.service.js";
 import { branches, companies, companyMembers, roles, users } from "../../db/schema/platform.js";
+import { subscriptions } from "../../db/schema/subscription.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import type { SessionUser } from "../auth/session.js";
+import { startTrial, trialEndFrom } from "../subscription/subscription.service.js";
 import { auditUserAction, insertUser, type NewAccount } from "../users/user-admin.service.js";
 
 const OWNER_ROLE = "Business Owner";
@@ -84,11 +86,12 @@ export type NewCompanyInput = {
 
 export type CreateCompanyOptions = {
   status?: CompanyStatus;
-  trialEndsAt?: Date | null;
   auditAction?: "COMPANY_CREATED" | "COMPANY_REGISTERED";
 };
 
 /**
+ * Har yangi kompaniya — server vaqti bo'yicha 25 kunlik bepul trial va 3 ta included litsenziya (egasi — birinchisi).
+ *
  * @param actor platforma admini; `null` — o'zi ro'yxatdan o'tish (audit egasi nomidan).
  */
 export async function createCompanyWithOwner(
@@ -102,6 +105,8 @@ export async function createCompanyWithOwner(
   const owner = await insertUser(tx, input.owner);
   const auditActor = actor ?? owner;
   const slug = await generateUniqueSlug(tx, input.name);
+  const now = new Date();
+  const trialEndsAt = trialEndFrom(now);
 
   const [company] = await tx
     .insert(companies)
@@ -118,7 +123,7 @@ export async function createCompanyWithOwner(
       language: input.language ?? "uz",
       ownerId: owner.id,
       status: options.status ?? "active",
-      trialEndsAt: options.trialEndsAt ?? null,
+      trialEndsAt,
       isActive: true,
       slug,
     })
@@ -179,6 +184,7 @@ export async function createCompanyWithOwner(
     joinedAt: new Date(),
   });
   await tx.update(users).set({ activeCompanyId: companyId }).where(eq(users.id, owner.id));
+  await startTrial(tx, { companyId, ownerId: owner.id, actor: auditActor, meta, now, trialEndsAt });
 
   await writeAuditLog(
     {
@@ -221,15 +227,31 @@ export async function listCompanies(conn: DbOrTx, filter: { status?: CompanyStat
       ownerPhone: users.phone,
       ownerName: users.name,
       ownerActive: users.isActive,
+      subscriptionStatus: subscriptions.status,
+      subscriptionExpiresAt: subscriptions.expiresAt,
+      includedLicenses: subscriptions.includedLicenses,
+      usedLicenses: sql<number>`(select count(*)::int from "licenses" l where l."company_id" = ${companies.id} and l."status" = 'active')`,
+      pendingPayments: sql<number>`(select count(*)::int from "subscription_payments" p where p."company_id" = ${companies.id} and p."status" = 'pending')`,
     })
     .from(companies)
     .leftJoin(users, eq(users.id, companies.ownerId))
+    .leftJoin(subscriptions, eq(subscriptions.companyId, companies.id))
     .where(filter.status ? eq(companies.status, filter.status) : undefined)
     .orderBy(desc(companies.createdAt));
 
-  return rows.map(({ ownerId, ownerPhone, ownerName, ownerActive, ...company }) => ({
+  const now = new Date();
+  return rows.map(({ ownerId, ownerPhone, ownerName, ownerActive, subscriptionStatus, subscriptionExpiresAt, includedLicenses, usedLicenses, pendingPayments, ...company }) => ({
     ...company,
     owner: ownerId ? { id: ownerId, phone: ownerPhone, name: ownerName, isActive: ownerActive } : null,
+    subscription: subscriptionStatus
+      ? {
+          status: effectiveSubscriptionStatus({ status: subscriptionStatus, expiresAt: subscriptionExpiresAt }, now),
+          expiresAt: subscriptionExpiresAt,
+          includedLicenses,
+          usedLicenses,
+          pendingPayments,
+        }
+      : null,
   }));
 }
 

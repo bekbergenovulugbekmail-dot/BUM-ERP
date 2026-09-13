@@ -30,6 +30,11 @@ export type Employee = {
   membershipActive: boolean;
   joinedAt: string;
   lastSeenAt: string | null;
+  /** Joriy litsenziya (bekor qilinmagan); yo'q — dasturdan foydalanmaydi. */
+  licenseId: string | null;
+  licenseType: "included" | "additional" | null;
+  licenseStatus: "active" | "pending_payment" | "expired" | "revoked" | null;
+  licenseExpiresAt: string | null;
 };
 
 export type Branch = {

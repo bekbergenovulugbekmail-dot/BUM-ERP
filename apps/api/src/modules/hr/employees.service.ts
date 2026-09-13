@@ -11,17 +11,21 @@
  *  - `update` / `delete` to'xtatilgan kompaniyada ham yozardi; o'qish ruxsatsiz edi
  */
 import { and, asc, eq, getTableColumns, ilike, isNull, ne, or, sql } from "drizzle-orm";
-import { badRequest, conflict, notFound } from "@bum/shared";
+import { PIN_PATTERN, badRequest, conflict, forbidden, notFound } from "@bum/shared";
 import { salesReps } from "../../db/schema/crm.js";
 import { attendances, departments, employees, leaves, positions, salaryPayments } from "../../db/schema/hr.js";
-import { companyMembers } from "../../db/schema/platform.js";
+import { companyMembers, users } from "../../db/schema/platform.js";
+import { licenses } from "../../db/schema/subscription.js";
+import { hashPassword } from "../auth/password.js";
 import { setDeliveryAgentsActiveForUser } from "../delivery/work-session.repo.js";
 import { endSessionsForUser } from "../sales-agent/work-session.repo.js";
+import { assignLicense, releaseLicense } from "../subscription/license.service.js";
 import { setMemberAccess } from "../users/member-access.js";
+import { createCompanyAccount } from "../users/user-admin.service.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
-import { effectivePermissions, type TenantContext } from "../company/tenant.js";
+import { effectivePermissions, isFullAccessRole, type TenantContext } from "../company/tenant.js";
 import { hrAudit } from "./org.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...employeeFields } = getTableColumns(employees);
@@ -49,6 +53,19 @@ export type EmployeeInput = {
   notes?: string | null;
 };
 
+/**
+ * "BEPUL" o'chiq — xodim BUM ERP dasturidan foydalanadi: foydalanuvchi (telefon login, parol xeshi, PIN xeshi),
+ * kompaniya a'zoligi, rol va litsenziya. Yoqilgan (bepul) xodimda bularning hech biri yo'q va soni cheklanmaydi.
+ */
+export type SoftwareAccessInput = {
+  phone: string;
+  password: string;
+  pin: string;
+  role: string;
+  /** Included litsenziyalar tugagan bo'lsa — qo'shimcha litsenziya tarifi (to'lov tasdiqlanguncha kirish yopiq). */
+  additionalLicensePlanId?: string | null;
+};
+
 /** Maxfiy maydonlar faqat `hr.manage` bilan ko'rinadi. */
 async function redactor(conn: DbOrTx, tenant: TenantContext) {
   const canSee = (await effectivePermissions(conn, tenant)).includes("hr.manage");
@@ -74,10 +91,20 @@ export async function listEmployees(
       salesRepId: salesReps.id,
       agentRegion: salesReps.region,
       supervisorName: sql<string | null>`(select u."name" from "users" u where u."id" = ${salesReps.supervisorUserId})`,
+      /** Dasturdan foydalanishi: login, a'zolik va joriy litsenziya (bepul xodimda — hammasi NULL). */
+      loginPhone: users.phone,
+      companyRole: companyMembers.companyRole,
+      memberActive: companyMembers.isActive,
+      licenseType: licenses.licenseType,
+      licenseStatus: licenses.status,
+      licenseExpiresAt: licenses.expiresAt,
     })
     .from(employees)
     .leftJoin(departments, eq(departments.id, employees.departmentId))
     .leftJoin(positions, eq(positions.id, employees.positionId))
+    .leftJoin(users, eq(users.id, employees.userId))
+    .leftJoin(companyMembers, and(eq(companyMembers.companyId, employees.companyId), eq(companyMembers.userId, employees.userId)))
+    .leftJoin(licenses, and(eq(licenses.companyId, employees.companyId), eq(licenses.userId, employees.userId), ne(licenses.status, "revoked")))
     .leftJoin(
       salesReps,
       and(
@@ -117,7 +144,83 @@ export async function getEmployee(conn: DbOrTx, tenant: TenantContext, employeeI
     managerName = manager?.name ?? null;
   }
   const redact = await redactor(conn, tenant);
-  return { ...redact(employee), managerName };
+  return {
+    ...redact(employee),
+    managerName,
+    softwareAccess: await softwareAccessOf(conn, tenant.company.id, tenant.company.ownerId, employee.userId),
+  };
+}
+
+/** Xodimning dastur kirishi: login, rol, a'zolik, PIN bormi, joriy litsenziya va kutilayotgan to'lov. */
+async function softwareAccessOf(conn: DbOrTx, companyId: string, ownerId: string | null, userId: string | null) {
+  if (!userId) return null;
+  const [row] = await conn
+    .select({
+      userId: users.id,
+      phone: users.phone,
+      userActive: users.isActive,
+      hasPin: sql<boolean>`${users.pinHash} is not null`,
+      companyRole: companyMembers.companyRole,
+      memberActive: companyMembers.isActive,
+      licenseId: licenses.id,
+      licenseType: licenses.licenseType,
+      licenseStatus: licenses.status,
+      licenseExpiresAt: licenses.expiresAt,
+      pendingPaymentId: sql<string | null>`(select p."id" from "subscription_payments" p where p."license_id" = ${licenses.id} and p."status" = 'pending' limit 1)`,
+    })
+    .from(users)
+    .leftJoin(companyMembers, and(eq(companyMembers.companyId, companyId), eq(companyMembers.userId, users.id)))
+    .leftJoin(licenses, and(eq(licenses.companyId, companyId), eq(licenses.userId, users.id), ne(licenses.status, "revoked")))
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!row) return null;
+  const { licenseId, licenseType, licenseStatus, licenseExpiresAt, pendingPaymentId, ...account } = row;
+  const isOwner = userId === ownerId;
+  return {
+    ...account,
+    isOwner,
+    usesSoftware: account.memberActive === true && (isOwner || licenseId !== null),
+    license:
+      licenseId && licenseType && licenseStatus
+        ? { id: licenseId, type: licenseType, status: licenseStatus, expiresAt: licenseExpiresAt, pendingPaymentId }
+        : null,
+  };
+}
+
+/** Egasi bo'lmagan HR rahbari — beradigan rol ruxsatlari o'z ruxsatlaridan oshmasin (imtiyozni oshirishga qarshi). */
+async function actorPermissionLimit(tx: Tx, tenant: TenantContext): Promise<readonly string[] | null> {
+  if (tenant.company.ownerId === tenant.user.id || isFullAccessRole(tenant.membership.companyRole)) return null;
+  return effectivePermissions(tx, tenant);
+}
+
+async function createSoftwareAccount(
+  tx: Tx,
+  tenant: TenantContext,
+  employee: { id: string; name: string; phone: string | null },
+  software: SoftwareAccessInput,
+  meta: RequestMeta,
+) {
+  const account = await createCompanyAccount(
+    tx,
+    tenant.user,
+    tenant.company.id,
+    {
+      phone: software.phone,
+      password: software.password,
+      name: employee.name,
+      role: software.role,
+      pin: software.pin,
+      employeeId: employee.id,
+      additionalLicensePlanId: software.additionalLicensePlanId ?? null,
+    },
+    meta,
+    await actorPermissionLimit(tx, tenant),
+  );
+  await tx
+    .update(employees)
+    .set({ userId: account.user.id, phone: employee.phone ?? account.user.phone, updatedAt: new Date() })
+    .where(eq(employees.id, employee.id));
+  return account;
 }
 
 export async function employeeStats(conn: DbOrTx, tenant: TenantContext) {
@@ -203,8 +306,15 @@ async function resolveReferences(
   return { departmentId, positionId };
 }
 
-export async function createEmployee(tx: Tx, tenant: TenantContext, input: EmployeeInput, meta: RequestMeta) {
+export async function createEmployee(
+  tx: Tx,
+  tenant: TenantContext,
+  input: EmployeeInput,
+  meta: RequestMeta,
+  software: SoftwareAccessInput | null = null,
+) {
   const companyId = tenant.company.id;
+  if (software && input.userId) throw badRequest("Mavjud foydalanuvchini bog'lash yoki yangi login yaratish — faqat bittasini tanlang");
   const references = await resolveReferences(tx, companyId, input, null);
   const code = await nextDocumentNumber(tx, {
     table: employees,
@@ -223,9 +333,146 @@ export async function createEmployee(tx: Tx, tenant: TenantContext, input: Emplo
     action: "EMPLOYEE_CREATED",
     resource: "employees",
     resourceId: employee!.id,
-    details: { code, name: input.name },
+    details: { code, name: input.name, softwareAccess: software !== null },
   });
+
+  if (software) {
+    const account = await createSoftwareAccount(tx, tenant, { id: employee!.id, name: input.name, phone: input.phone ?? null }, software, meta);
+    await hrAudit(tx, tenant, meta, {
+      action: "SOFTWARE_ACCESS_ENABLED",
+      resource: "employees",
+      resourceId: employee!.id,
+      details: { userId: account.user.id, role: account.role, licenseType: account.license.license.licenseType, licenseStatus: account.license.license.status },
+    });
+  }
   return getEmployee(tx, tenant, employee!.id);
+}
+
+/** Bepul xodim → dasturdan foydalanuvchi (litsenziya, a'zolik, rol, parol, PIN). Mavjud hisob bo'lsa — qayta yoqiladi. */
+export async function enableSoftwareAccess(
+  tx: Tx,
+  tenant: TenantContext,
+  employeeId: string,
+  input: Partial<SoftwareAccessInput>,
+  meta: RequestMeta,
+) {
+  const companyId = tenant.company.id;
+  const [employee] = await tx
+    .select({ id: employees.id, name: employees.name, phone: employees.phone, status: employees.status, userId: employees.userId })
+    .from(employees)
+    .where(and(eq(employees.id, employeeId), eq(employees.companyId, companyId)))
+    .limit(1)
+    .for("update");
+  if (!employee) throw notFound("Xodim topilmadi");
+  if (employee.status === "terminated") throw badRequest("Ishdan bo'shatilgan xodimga dastur kirishi berilmaydi");
+
+  let userId: string;
+  if (!employee.userId) {
+    if (!input.phone || !input.password || !input.pin || !input.role) {
+      throw badRequest("Dasturdan foydalanish uchun telefon (login), parol, PIN va rol kerak");
+    }
+    const account = await createSoftwareAccount(
+      tx,
+      tenant,
+      employee,
+      { phone: input.phone, password: input.password, pin: input.pin, role: input.role, additionalLicensePlanId: input.additionalLicensePlanId },
+      meta,
+    );
+    userId = account.user.id;
+  } else {
+    userId = employee.userId;
+    const [member] = await tx
+      .select({ isActive: companyMembers.isActive })
+      .from(companyMembers)
+      .where(and(eq(companyMembers.companyId, companyId), eq(companyMembers.userId, userId)))
+      .limit(1);
+    if (!member) throw badRequest("Xodimga bog'langan foydalanuvchi kompaniya a'zosi emas");
+    if (member.isActive) {
+      const [current] = await tx
+        .select({ id: licenses.id })
+        .from(licenses)
+        .where(and(eq(licenses.companyId, companyId), eq(licenses.userId, userId), ne(licenses.status, "revoked")))
+        .limit(1);
+      if (current || userId === tenant.company.ownerId) throw conflict("Xodim allaqachon dasturdan foydalanadi");
+    } else {
+      await setMemberAccess(tx, companyId, userId, true, {
+        actor: tenant.user,
+        meta,
+        additionalLicensePlanId: input.additionalLicensePlanId ?? null,
+      });
+    }
+    // Litsenziya (yangi yoki qayta yoqishda berilgani) xodimga bog'lanadi
+    await assignLicense(tx, {
+      companyId,
+      userId,
+      employeeId: employee.id,
+      actor: tenant.user,
+      meta,
+      additionalPlanId: input.additionalLicensePlanId ?? null,
+    });
+    // PIN hisob darajasida — faqat hali o'rnatilmagan bo'lsa (boshqa kompaniyadagi PIN'ni HR almashtirmaydi)
+    if (input.pin) {
+      if (!PIN_PATTERN.test(input.pin)) throw badRequest("PIN 4-8 ta raqamdan iborat bo'lishi kerak");
+      await tx
+        .update(users)
+        .set({ pinHash: await hashPassword(input.pin), pinFailedAttempts: 0, pinLockedUntil: null })
+        .where(and(eq(users.id, userId), isNull(users.pinHash)));
+    }
+  }
+
+  await hrAudit(tx, tenant, meta, {
+    action: "EMPLOYEE_CONVERTED",
+    resource: "employees",
+    resourceId: employee.id,
+    details: { to: "software", userId },
+  });
+  await hrAudit(tx, tenant, meta, { action: "SOFTWARE_ACCESS_ENABLED", resource: "employees", resourceId: employee.id, details: { userId } });
+  return getEmployee(tx, tenant, employee.id);
+}
+
+/**
+ * Dasturdan foydalanuvchi → bepul xodim: kirish o'chadi, sessiyalar bekor, litsenziya bekor (included bo'shaydi),
+ * agent/yetkazuvchi ish joyi yopiladi. Xodim yozuvi va tarixi saqlanadi; hisob bog'liq qoladi (qayta yoqish uchun).
+ * Kompaniya egasi va egalik rolidagi foydalanuvchini bepul qilib bo'lmaydi.
+ */
+export async function disableSoftwareAccess(tx: Tx, tenant: TenantContext, employeeId: string, meta: RequestMeta) {
+  const companyId = tenant.company.id;
+  const [employee] = await tx
+    .select({ id: employees.id, userId: employees.userId })
+    .from(employees)
+    .where(and(eq(employees.id, employeeId), eq(employees.companyId, companyId)))
+    .limit(1)
+    .for("update");
+  if (!employee) throw notFound("Xodim topilmadi");
+  if (!employee.userId) throw badRequest("Xodim dasturdan foydalanmaydi");
+  const userId = employee.userId;
+  if (userId === tenant.company.ownerId) throw forbidden("Kompaniya egasi har doim dasturdan foydalanadi — bepul xodimga aylantirib bo'lmaydi");
+  if (userId === tenant.user.id) throw forbidden("O'zingizni dasturdan uzib bo'lmaydi");
+
+  const [member] = await tx
+    .select({ companyRole: companyMembers.companyRole })
+    .from(companyMembers)
+    .where(and(eq(companyMembers.companyId, companyId), eq(companyMembers.userId, userId)))
+    .limit(1);
+  if (member && isFullAccessRole(member.companyRole)) throw forbidden("Egalik rolidagi foydalanuvchini faqat platforma admini boshqaradi");
+
+  await releaseLicense(tx, { companyId, userId, actor: tenant.user, meta, mode: "revoke", reason: "Bepul xodimga aylantirildi" });
+  if (member) await setMemberAccess(tx, companyId, userId, false, { actor: tenant.user, meta });
+  await endSessionsForUser(tx, companyId, userId);
+  await tx
+    .update(salesReps)
+    .set({ isActive: false, updatedAt: new Date() })
+    .where(and(eq(salesReps.companyId, companyId), eq(salesReps.userId, userId)));
+  await setDeliveryAgentsActiveForUser(tx, companyId, userId, false);
+
+  await hrAudit(tx, tenant, meta, { action: "EMPLOYEE_CONVERTED", resource: "employees", resourceId: employee.id, details: { to: "free", userId } });
+  await hrAudit(tx, tenant, meta, {
+    action: "SOFTWARE_ACCESS_DISABLED",
+    resource: "employees",
+    resourceId: employee.id,
+    details: { userId, sessionsRevoked: true },
+  });
+  return getEmployee(tx, tenant, employee.id);
 }
 
 export async function updateEmployee(

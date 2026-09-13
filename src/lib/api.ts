@@ -9,6 +9,8 @@
 const BASE_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 
 export const UNAUTHENTICATED_EVENT = "bum:unauthenticated";
+/** 423 LOCKED — sessiya ekrani qulflangan (boshqa oynada ham): ilova qulf ekranini ko'rsatadi. */
+export const LOCKED_EVENT = "bum:locked";
 
 export class ApiError extends Error {
   constructor(
@@ -58,6 +60,7 @@ async function send(method: string, path: string, options: RequestOptions): Prom
     if (response.status === 401 && !path.startsWith("/api/auth/") && typeof window !== "undefined") {
       window.dispatchEvent(new Event(UNAUTHENTICATED_EVENT));
     }
+    if (response.status === 423 && typeof window !== "undefined") window.dispatchEvent(new Event(LOCKED_EVENT));
     throw new ApiError(
       response.status,
       payload?.code ?? (response.status >= 500 ? "INTERNAL" : "BAD_REQUEST"),

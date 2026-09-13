@@ -17,11 +17,11 @@
  */
 import { eq } from "drizzle-orm";
 import { AppError, badRequest, conflict, forbidden, notFound, rateLimited } from "@bum/shared";
-import { users } from "../../db/schema/platform.js";
+import { sessions, users } from "../../db/schema/platform.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type AuditEntry, type RequestMeta } from "../../shared/audit.js";
 import { hashPassword, verifyPassword } from "./password.js";
-import type { SessionUser } from "./session.js";
+import type { ActiveSession, SessionUser } from "./session.js";
 
 export const MAX_PIN_ATTEMPTS = 5;
 export const PIN_LOCK_SECONDS = 5 * 60;
@@ -226,6 +226,37 @@ export async function verifyPin(
       action: "pin_unlock_success",
       details: { companyId: user.activeCompanyId },
     });
+  }
+  return result;
+}
+
+/**
+ * Ekranni qulflash (LOCK): sessiya bekor qilinmaydi, faqat `locked_at` belgilanadi. PIN o'rnatilmagan bo'lsa
+ * qulflanmaydi — aks holda ochishning yagona yo'li chiqish bo'lardi.
+ */
+export async function lockSession(tx: Tx, session: ActiveSession, meta: RequestMeta): Promise<void> {
+  const user = await loadForUpdate(tx, session.user.id);
+  if (!user.pinHash) throw badRequest("Ekranni bloklash uchun avval PIN o'rnating");
+  if (!session.lockedAt) {
+    await tx.update(sessions).set({ lockedAt: new Date() }).where(eq(sessions.id, session.sessionId));
+  }
+  await audit(tx, user, meta, { action: "session_locked" });
+}
+
+/**
+ * Faqat shu, hali yaroqli (chiqilmagan, muddati o'tmagan) sessiyaning qulfini PIN bilan ochadi. Yangi sessiya
+ * yaratmaydi: chiqishdan keyin yoki yangi qurilmada PIN yordam bermaydi — parol bilan kirish kerak.
+ * Noto'g'ri PIN hisobi va vaqtincha bloklash `checkPin` da (5 urinish → 5 daqiqa).
+ */
+export async function unlockSession(tx: Tx, session: ActiveSession, pin: string, meta: RequestMeta): Promise<PinResult> {
+  if (!session.lockedAt) return { success: true };
+  const user = await loadForUpdate(tx, session.user.id);
+  if (!user.pinHash) return { success: false, reason: "PIN_NOT_SET" };
+
+  const result = await checkPin(tx, user, user.pinHash, pin, meta, "unlock");
+  if (result.success) {
+    await tx.update(sessions).set({ lockedAt: null }).where(eq(sessions.id, session.sessionId));
+    await audit(tx, user, meta, { action: "session_unlocked" });
   }
   return result;
 }

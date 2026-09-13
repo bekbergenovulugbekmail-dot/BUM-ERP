@@ -47,7 +47,7 @@ export async function registrationRoutes(app: FastifyInstance): Promise<void> {
     await recordHit(bucket, REGISTER_WINDOW_SECONDS);
 
     const { company, session, me } = await withTransaction((tx) =>
-      registerCompany(tx, body, settings, meta),
+      registerCompany(tx, body, meta),
     );
 
     setSessionCookie(reply, session.token, session.expiresAt);

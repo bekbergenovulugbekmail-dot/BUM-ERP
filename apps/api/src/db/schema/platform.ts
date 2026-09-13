@@ -102,6 +102,8 @@ export const sessions = pgTable(
     /** Faolsizlik muddati — har so'rovda uzaytiriladi. */
     idleExpiresAt: timestamp("idle_expires_at", { withTimezone: true }).notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    /** Ekran qulflangan — sessiya saqlanadi, ochish faqat PIN bilan (chiqishdan keyin PIN ishlamaydi). */
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
 
     ipAddress: varchar("ip_address", { length: 64 }),
     userAgent: text("user_agent"),

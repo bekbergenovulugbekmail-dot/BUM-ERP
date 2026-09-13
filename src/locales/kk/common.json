@@ -1,6 +1,7 @@
 {
   "app.name": "BUM ERP",
   "nav.dashboard": "Басқару тақтасы",
+  "nav.subscription": "Жазылым",
   "nav.sales": "Сату",
   "nav.pos": "Касса (POS)",
   "nav.products": "Өнімдер",

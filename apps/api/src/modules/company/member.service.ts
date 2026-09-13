@@ -16,6 +16,7 @@ import { branches, companyMembers, roles, users } from "../../db/schema/platform
 import type { Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { revokeUserSessions, type SessionUser } from "../auth/session.js";
+import { assignLicense, releaseLicense } from "../subscription/license.service.js";
 import {
   assertOwnerMayManage,
   assertPhoneFree,
@@ -36,6 +37,8 @@ export type MemberPatch = {
   /** Mas'ul kategoriyalar (ichki kategoriyalari bilan); bo'sh massiv = barcha kategoriyalar. */
   allowedCategoryIds?: string[];
   isActive?: boolean;
+  /** Qayta yoqishda included litsenziya tugagan bo'lsa — qo'shimcha litsenziya tarifi. */
+  additionalLicensePlanId?: string | null;
 };
 
 function sameSet(a: string[], b: string[]): boolean {
@@ -176,6 +179,18 @@ export async function ownerUpdateMember(
   }
 
   if (patch.isActive !== undefined && patch.isActive !== membership.isActive) {
+    // Qayta yoqish litsenziya bilan (bo'lmasa — license_limit_reached, hech narsa saqlanmaydi); o'chirishda included bo'shaydi
+    if (patch.isActive) {
+      await assignLicense(tx, {
+        companyId: company.id,
+        userId: target.id,
+        actor: owner,
+        meta,
+        additionalPlanId: patch.additionalLicensePlanId ?? null,
+      });
+    } else {
+      await releaseLicense(tx, { companyId: company.id, userId: target.id, actor: owner, meta, mode: "deactivate", reason: "A'zolik o'chirildi" });
+    }
     set.isActive = patch.isActive;
     changes.push(patch.isActive ? "activated" : "deactivated");
   }

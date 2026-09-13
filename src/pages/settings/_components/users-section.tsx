@@ -26,6 +26,8 @@ import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { useActiveCompany } from "@/hooks/use-company.ts";
+import AdditionalLicensePicker from "@/components/subscription/additional-license-picker.tsx";
+import { LICENSE_STATUS_LABEL, LICENSE_TYPE_LABEL, formatDay, licenseLimitOf } from "@/lib/subscription.ts";
 import type { Branch, CompanyRole, Employee } from "../_lib/types.ts";
 
 const FULL_ACCESS = new Set<string>(FULL_ACCESS_ROLES);
@@ -40,6 +42,8 @@ type MemberPatch = {
   allowedWarehouseIds?: string[];
   allowedCategoryIds?: string[];
   isActive?: boolean;
+  /** Qayta yoqishda included litsenziya tugagan bo'lsa — qo'shimcha litsenziya tarifi. */
+  additionalLicensePlanId?: string;
 };
 
 type WarehouseOption = { id: string; name: string; isActive: boolean };
@@ -90,7 +94,8 @@ export default function UsersSection() {
     { invalidate: COMPANY },
   );
   const createEmployee = useApiMutation(
-    (body: { phone: string; password: string; name?: string; role?: string }) => api.post("/api/company/employees", body),
+    (body: { phone: string; password: string; name?: string; role?: string; pin?: string; additionalLicensePlanId?: string }) =>
+      api.post<{ payment: { id: string } | null }>("/api/company/employees", body),
     { invalidate: COMPANY },
   );
   const resetPassword = useApiMutation(
@@ -105,7 +110,11 @@ export default function UsersSection() {
   const [newName, setNewName] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState("");
+  const [newPin, setNewPin] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  // Included litsenziyalar tugagan: yangi xodim yoki qayta yoqish — qo'shimcha litsenziya tarifi tanlanadi
+  const [createLimit, setCreateLimit] = useState<ReturnType<typeof licenseLimitOf>>(null);
+  const [reactivate, setReactivate] = useState<{ employee: Employee; limit: NonNullable<ReturnType<typeof licenseLimitOf>> } | null>(null);
 
   // Tahrirlash va parol tiklash dialoglari
   const [editTarget, setEditTarget] = useState<Employee | null>(null);
@@ -125,23 +134,37 @@ export default function UsersSection() {
     setNewPhone("");
     setNewName("");
     setNewPassword("");
+    setNewPin("");
+    setCreateLimit(null);
     setNewRole(assignableRoles.find((r) => r.name === "Kassir")?.name ?? assignableRoles[0]?.name ?? "");
     setCreateOpen(true);
   };
 
-  const handleCreate = async () => {
+  const handleCreate = async (additionalLicensePlanId?: string) => {
     setFormError(null);
+    if (newPin && !/^\d{4,8}$/.test(newPin)) {
+      setFormError("PIN 4-8 ta raqamdan iborat bo'lishi kerak");
+      return;
+    }
     try {
-      await createEmployee.mutateAsync({
+      const result = await createEmployee.mutateAsync({
         phone: newPhone.trim(),
         password: newPassword,
         name: newName.trim() || undefined,
         role: newRole || undefined,
+        pin: newPin || undefined,
+        additionalLicensePlanId,
       });
-      toast.success("Xodim qo'shildi");
+      toast.success(
+        result.payment
+          ? "Xodim qo'shildi. Qo'shimcha litsenziya to'lovi tasdiqlanguncha u dasturga kira olmaydi."
+          : "Xodim qo'shildi",
+      );
       setCreateOpen(false);
     } catch (err) {
-      setFormError(errorMessage(err));
+      const reached = licenseLimitOf(err);
+      if (reached) setCreateLimit(reached);
+      else setFormError(errorMessage(err));
     }
   };
 
@@ -162,8 +185,11 @@ export default function UsersSection() {
     try {
       await updateMember.mutateAsync({ userId: employee.id, patch });
       toast.success(success);
+      setReactivate(null);
     } catch (err) {
-      toast.error(errorMessage(err));
+      const reached = patch.isActive ? licenseLimitOf(err) : null;
+      if (reached) setReactivate({ employee, limit: reached });
+      else toast.error(errorMessage(err));
     }
   };
 
@@ -212,6 +238,7 @@ export default function UsersSection() {
                   <th className="text-left px-4 py-3 text-xs text-muted-foreground font-medium hidden md:table-cell">Filial</th>
                   <th className="text-center px-4 py-3 text-xs text-muted-foreground font-medium">Rol</th>
                   <th className="text-center px-4 py-3 text-xs text-muted-foreground font-medium">Holat</th>
+                  <th className="text-left px-4 py-3 text-xs text-muted-foreground font-medium hidden lg:table-cell">Litsenziya</th>
                   <th className="text-right px-4 py-3 text-xs text-muted-foreground font-medium hidden md:table-cell">So'nggi faollik</th>
                   {isOwner && <th className="px-4 py-3" />}
                 </tr>
@@ -294,6 +321,19 @@ export default function UsersSection() {
                           {active ? "Faol" : "Bloklangan"}
                         </button>
                       </td>
+                      <td className="px-4 py-3 text-xs hidden lg:table-cell">
+                        {employee.licenseType && employee.licenseStatus ? (
+                          <span>
+                            {LICENSE_TYPE_LABEL[employee.licenseType]} ·{" "}
+                            <span className={employee.licenseStatus === "active" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>
+                              {LICENSE_STATUS_LABEL[employee.licenseStatus]}
+                            </span>
+                            {employee.licenseType === "additional" && employee.licenseExpiresAt ? ` · ${formatDay(employee.licenseExpiresAt)}` : ""}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right text-muted-foreground text-xs hidden md:table-cell">
                         {employee.lastSeenAt ? new Date(employee.lastSeenAt).toLocaleDateString("uz-UZ") : "—"}
                       </td>
@@ -358,6 +398,14 @@ export default function UsersSection() {
               value={newPassword}
               onChange={(e) => { setNewPassword(e.target.value); setFormError(null); }}
             />
+            <Input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="PIN — ekran qulfi uchun (4-8 raqam, ixtiyoriy)"
+              value={newPin}
+              onChange={(e) => { setNewPin(e.target.value.replace(/\D/g, "").slice(0, 8)); setFormError(null); }}
+            />
             <Select value={newRole} onValueChange={setNewRole}>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Rol tanlang" />
@@ -371,6 +419,13 @@ export default function UsersSection() {
             <p className="text-xs text-muted-foreground">
               Filial, omborlar va mas'ul kategoriyalarni yaratilgandan keyin "Tahrirlash" orqali belgilang.
             </p>
+            {createLimit && (
+              <AdditionalLicensePicker
+                counts={createLimit.counts}
+                pending={createEmployee.isPending}
+                onSelect={(planId) => { void handleCreate(planId); }}
+              />
+            )}
             {formError && <ErrorBanner message={formError} />}
           </div>
           <DialogFooter>
@@ -381,6 +436,28 @@ export default function UsersSection() {
             >
               {createEmployee.isPending ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Yaratilmoqda</> : "Yaratish"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Qayta yoqish — litsenziya tugagan */}
+      <Dialog open={reactivate !== null} onOpenChange={(o) => { if (!o) setReactivate(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Litsenziya kerak</DialogTitle>
+            <DialogDescription>{reactivate?.limit.message}</DialogDescription>
+          </DialogHeader>
+          {reactivate && (
+            <AdditionalLicensePicker
+              counts={reactivate.limit.counts}
+              pending={updateMember.isPending}
+              onSelect={(planId) => {
+                void patchMember(reactivate.employee, { isActive: true, additionalLicensePlanId: planId }, "Xodim faollashtirildi — litsenziya to'lovi kutilmoqda");
+              }}
+            />
+          )}
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setReactivate(null)}>Bekor</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -302,6 +302,13 @@
       "when": 1789241174401,
       "tag": "0042_delivery",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1789309706636,
+      "tag": "0043_subscriptions",
+      "breakpoints": true
     }
   ]
 }

@@ -63,6 +63,13 @@ export type Employee = {
   salesRepId?: string | null;
   agentRegion?: string | null;
   supervisorName?: string | null;
+  /** Ro'yxatda: dasturdan foydalanishi — login, a'zolik va joriy litsenziya (bepul xodimda NULL). */
+  loginPhone?: string | null;
+  companyRole?: string | null;
+  memberActive?: boolean | null;
+  licenseType?: "included" | "additional" | null;
+  licenseStatus?: "active" | "pending_payment" | "expired" | "revoked" | null;
+  licenseExpiresAt?: string | null;
 };
 
 export type EmployeeStats = {

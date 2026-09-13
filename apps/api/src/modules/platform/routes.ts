@@ -5,6 +5,11 @@
  *   POST  /companies                     kompaniya + egasi (platformCreateCompany)
  *   GET   /companies/:companyId          tafsilot: egasi, a'zolar, filiallar
  *   POST  /companies/:companyId/status   holat (to'xtatish sababi bilan)
+ *   GET   /companies/:companyId/subscription   obuna, litsenziyalar, tarix, to'lovlar
+ *   PUT   /companies/:companyId/subscription   included litsenziyalar soni {includedLicenses}
+ *   GET   /billing/payments              to'lov so'rovlari (?status=&companyId=&limit=)
+ *   POST  /billing/payments/:id/confirm  to'lovni tasdiqlash — obuna/litsenziya faollashadi (idempotent) {reference?}
+ *   POST  /billing/payments/:id/cancel   so'rovni bekor qilish
  *   GET   /stats                         statistika
  *   GET   /audit-logs                    audit jurnali (?companyId=&resource=&limit=&cursor=)
  *   GET   /users                         foydalanuvchilar (?search=&limit=&offset=)
@@ -28,12 +33,19 @@
 import { Readable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { badRequest } from "@bum/shared";
+import { SUBSCRIPTION_PAYMENT_STATUSES, badRequest } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
 import { listAuditLogs } from "../audit/audit-log.service.js";
 import { authOf, requirePlatformAdmin } from "../auth/guard.js";
+import {
+  cancelPayment,
+  companySubscriptionDetails,
+  confirmPayment,
+  listPayments,
+  setIncludedLicenses,
+} from "../subscription/subscription.service.js";
 import {
   platformChangePhone,
   platformResetPassword,
@@ -140,9 +152,17 @@ const releasePatchBody = z.strictObject({
   minVersion: z.string().trim().regex(RELEASE_VERSION, "Majburiy versiya formati: 1.2.3").nullable().optional(),
 });
 
+const paymentParams = z.object({ paymentId: z.uuid() });
+const paymentsQuery = z.object({
+  status: z.enum(SUBSCRIPTION_PAYMENT_STATUSES).optional(),
+  companyId: z.uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
+const confirmPaymentBody = z.strictObject({ reference: z.string().trim().max(200).optional() });
+const includedLicensesBody = z.strictObject({ includedLicenses: z.number().int().min(1).max(10_000) });
+
 const settingsBody = z.strictObject({
   registrationEnabled: z.boolean().optional(),
-  defaultTrialDays: z.number().int().min(0).max(365).optional(),
   platformName: z.string().trim().min(1).max(100).optional(),
   supportEmail: z.union([z.email().max(255), z.literal("")]).optional(),
 });
@@ -180,6 +200,37 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
       setCompanyStatus(tx, user, companyId, status, reason, requestMeta(req)),
     );
     return { company };
+  });
+
+  // ─── Obuna, litsenziya va to'lovlar ──────────────────────────────────────
+
+  app.get("/companies/:companyId/subscription", async (req) => {
+    const { companyId } = companyParams.parse(req.params);
+    return companySubscriptionDetails(db, companyId);
+  });
+
+  app.put("/companies/:companyId/subscription", async (req) => {
+    const { companyId } = companyParams.parse(req.params);
+    const { includedLicenses } = includedLicensesBody.parse(req.body);
+    const { user } = authOf(req);
+    const subscription = await withTransaction((tx) => setIncludedLicenses(tx, user, companyId, includedLicenses, requestMeta(req)));
+    return { subscription };
+  });
+
+  app.get("/billing/payments", async (req) => ({ payments: await listPayments(db, paymentsQuery.parse(req.query)) }));
+
+  app.post("/billing/payments/:paymentId/confirm", async (req) => {
+    const { paymentId } = paymentParams.parse(req.params);
+    const body = confirmPaymentBody.parse(req.body ?? {});
+    const { user } = authOf(req);
+    return withTransaction((tx) => confirmPayment(tx, user, paymentId, body, requestMeta(req)));
+  });
+
+  app.post("/billing/payments/:paymentId/cancel", async (req) => {
+    const { paymentId } = paymentParams.parse(req.params);
+    const { user } = authOf(req);
+    const payment = await withTransaction((tx) => cancelPayment(tx, { companyId: null, actor: user }, paymentId, requestMeta(req)));
+    return { payment };
   });
 
   // ─── Kuzatuv ─────────────────────────────────────────────────────────────

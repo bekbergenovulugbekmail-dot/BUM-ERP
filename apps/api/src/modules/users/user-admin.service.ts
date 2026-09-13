@@ -17,6 +17,7 @@
  */
 import { and, eq, isNull, ne, or, sql } from "drizzle-orm";
 import {
+  PIN_PATTERN,
   badRequest,
   conflict,
   forbidden,
@@ -25,12 +26,15 @@ import {
   notFound,
 } from "@bum/shared";
 import { branches, companies, companyMembers, roles, users } from "../../db/schema/platform.js";
+import { licenses, subscriptions } from "../../db/schema/subscription.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { assertNotLimited, recordHit } from "../../shared/rate-limit.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { revokeUserSessions, type SessionUser } from "../auth/session.js";
 import { assertCompanyWritable, isFullAccessRole } from "../company/tenant.js";
+import { assertTenantAccess } from "../subscription/access.js";
+import { assignLicense, type AssignLicenseResult } from "../subscription/license.service.js";
 
 /** Convex'dagi userAdmin.MIN_PASSWORD bilan bir xil. */
 export const MIN_PASSWORD_LENGTH = 8;
@@ -264,17 +268,25 @@ export async function resolveOwnedCompany(conn: DbOrTx, user: SessionUser): Prom
       ownerId: companies.ownerId,
       isActive: companies.isActive,
       status: companies.status,
-      trialEndsAt: companies.trialEndsAt,
+      subscriptionStatus: subscriptions.status,
+      subscriptionExpiresAt: subscriptions.expiresAt,
     })
     .from(companies)
+    .leftJoin(subscriptions, eq(subscriptions.companyId, companies.id))
     .where(eq(companies.id, user.activeCompanyId))
     .limit(1);
 
   if (!company || company.ownerId !== user.id) {
     throw forbidden("Xodimlarni faqat kompaniya egasi boshqaradi");
   }
-  // To'xtatilgan, tugatilgan yoki sinov muddati o'tgan kompaniyada ham yopiq
+  // To'xtatilgan, tugatilgan, sinov yoki obuna muddati o'tgan kompaniyada ham yopiq
   assertCompanyWritable(company);
+  assertTenantAccess({
+    access: "business",
+    isOwner: true,
+    subscription: company.subscriptionStatus ? { status: company.subscriptionStatus, expiresAt: company.subscriptionExpiresAt } : null,
+    license: null,
+  });
   return { id: company.id, name: company.name };
 }
 
@@ -330,7 +342,7 @@ export async function findAssignableRole(tx: Tx, companyId: string, name: string
 
   // Avval kompaniyaning o'z roli, bo'lmasa global standart rol
   const [role] = await tx
-    .select({ id: roles.id, name: roles.name })
+    .select({ id: roles.id, name: roles.name, permissions: roles.permissions })
     .from(roles)
     .where(
       and(
@@ -346,24 +358,52 @@ export async function findAssignableRole(tx: Tx, companyId: string, name: string
   return role;
 }
 
-export async function createEmployee(
+export type CompanyAccountInput = NewAccount & {
+  role?: string;
+  /** Ekran qulfini ochish PIN'i (4–8 raqam) — faqat xeshi saqlanadi. */
+  pin?: string | null;
+  /** HR xodimi bilan bog'lash (litsenziyada ham). */
+  employeeId?: string | null;
+  /** Included litsenziyalar tugagan bo'lsa — qo'shimcha litsenziya tarifi. */
+  additionalLicensePlanId?: string | null;
+};
+
+export type CompanyAccount = { user: SessionUser; role: string; license: AssignLicenseResult };
+
+/**
+ * Dasturdan foydalanuvchi xodim: hisob (telefon login + parol xeshi), a'zolik, rol, ixtiyoriy PIN xeshi va litsenziya —
+ * chaqiruvchining bitta tranzaksiyasida. Included litsenziya tugagan va qo'shimcha tarif tanlanmagan bo'lsa
+ * `license_limit_reached` — hech narsa yaratilmaydi (rollback). Parol va PIN auditga yozilmaydi.
+ *
+ * @param actorPermissions egasi bo'lmagan yaratuvchi (HR) — rol ruxsatlari uning o'z ruxsatlaridan oshmasin; `null` — egasi.
+ */
+export async function createCompanyAccount(
   tx: Tx,
-  owner: SessionUser,
-  company: OwnedCompany,
-  input: NewAccount & { role?: string },
+  actor: SessionUser,
+  companyId: string,
+  input: CompanyAccountInput,
   meta: RequestMeta,
-): Promise<{ user: SessionUser; role: string }> {
-  const role = await findAssignableRole(tx, company.id, input.role ?? DEFAULT_EMPLOYEE_ROLE);
-  const user = await insertUser(tx, { ...input, activeCompanyId: company.id });
+  actorPermissions: readonly string[] | null = null,
+): Promise<CompanyAccount> {
+  const role = await findAssignableRole(tx, companyId, input.role ?? DEFAULT_EMPLOYEE_ROLE);
+  if (actorPermissions && role.permissions.some((permission) => !actorPermissions.includes(permission))) {
+    throw forbidden(`"${role.name}" rolida sizda yo'q ruxsatlar bor — bu rolni faqat kompaniya egasi beradi`);
+  }
+  if (input.pin != null && !PIN_PATTERN.test(input.pin)) throw badRequest("PIN 4-8 ta raqamdan iborat bo'lishi kerak");
+
+  const user = await insertUser(tx, { ...input, activeCompanyId: companyId });
+  if (input.pin) {
+    await tx.update(users).set({ pinHash: await hashPassword(input.pin) }).where(eq(users.id, user.id));
+  }
 
   const [branch] = await tx
     .select({ id: branches.id })
     .from(branches)
-    .where(and(eq(branches.companyId, company.id), eq(branches.isDefault, true)))
+    .where(and(eq(branches.companyId, companyId), eq(branches.isDefault, true)))
     .limit(1);
 
   await tx.insert(companyMembers).values({
-    companyId: company.id,
+    companyId,
     userId: user.id,
     companyRole: role.name,
     roleId: role.id,
@@ -375,14 +415,39 @@ export async function createEmployee(
     .set({ memberCount: sql`${roles.memberCount} + 1` })
     .where(eq(roles.id, role.id));
 
-  await auditUserAction(tx, owner, meta, {
-    action: "EMPLOYEE_CREATED",
-    targetId: user.id,
-    companyId: company.id,
-    details: { phone: user.phone, role: role.name },
+  const license = await assignLicense(tx, {
+    companyId,
+    userId: user.id,
+    employeeId: input.employeeId ?? null,
+    actor,
+    meta,
+    additionalPlanId: input.additionalLicensePlanId ?? null,
   });
 
-  return { user, role: role.name };
+  await auditUserAction(tx, actor, meta, {
+    action: "EMPLOYEE_CREATED",
+    targetId: user.id,
+    companyId,
+    details: {
+      phone: user.phone,
+      role: role.name,
+      licenseType: license.license.licenseType,
+      licenseStatus: license.license.status,
+      pinSet: Boolean(input.pin),
+    },
+  });
+
+  return { user, role: role.name, license };
+}
+
+export function createEmployee(
+  tx: Tx,
+  owner: SessionUser,
+  company: OwnedCompany,
+  input: CompanyAccountInput,
+  meta: RequestMeta,
+): Promise<CompanyAccount> {
+  return createCompanyAccount(tx, owner, company.id, input, meta);
 }
 
 export async function ownerResetEmployeePassword(
@@ -420,10 +485,18 @@ export async function listCompanyMembers(conn: DbOrTx, companyId: string) {
       membershipActive: companyMembers.isActive,
       joinedAt: companyMembers.joinedAt,
       lastSeenAt: users.lastSeenAt,
+      licenseId: licenses.id,
+      licenseType: licenses.licenseType,
+      licenseStatus: licenses.status,
+      licenseExpiresAt: licenses.expiresAt,
     })
     .from(companyMembers)
     .innerJoin(users, eq(users.id, companyMembers.userId))
     .leftJoin(branches, eq(branches.id, companyMembers.branchId))
+    .leftJoin(
+      licenses,
+      and(eq(licenses.companyId, companyMembers.companyId), eq(licenses.userId, companyMembers.userId), ne(licenses.status, "revoked")),
+    )
     .where(eq(companyMembers.companyId, companyId))
     .orderBy(companyMembers.joinedAt);
 }

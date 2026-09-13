@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_ROLES } from "@bum/shared";
 import { closeDb, db } from "../src/db/client.js";
 import { auditLogs, branches, companies, roles, users } from "../src/db/schema/platform.js";
+import { subscriptions } from "../src/db/schema/subscription.js";
 import { buildServer } from "../src/server.js";
 import { createUser, me, resetDatabase, signedIn, uniquePhone } from "./helpers.js";
 
@@ -46,7 +47,7 @@ describe("Ro'yxatdan o'tish", () => {
   });
 
   it("admin yoqsa — sinov muddatli kompaniya ochiladi va ega tizimga kiradi", async () => {
-    await settings({ registrationEnabled: true, defaultTrialDays: 10 });
+    await settings({ registrationEnabled: true });
     expect((await app.inject({ method: "GET", url: "/api/registration" })).json()).toEqual({ enabled: true });
 
     const input = valid();
@@ -59,8 +60,12 @@ describe("Ro'yxatdan o'tish", () => {
     expect(profile).toMatchObject({ phone: input.phone, name: "Ali Valiyev", companyRole: "Business Owner" });
 
     const [company] = await db.select().from(companies).where(eq(companies.id, res.json().company.id));
-    const expected = Date.now() + 10 * 24 * 60 * 60 * 1000;
+    // Har yangi kompaniya — 25 kunlik trial (server vaqti)
+    const expected = Date.now() + 25 * 24 * 60 * 60 * 1000;
     expect(Math.abs(company!.trialEndsAt!.getTime() - expected)).toBeLessThan(60_000);
+    const [subscription] = await db.select().from(subscriptions).where(eq(subscriptions.companyId, company!.id));
+    expect(subscription).toMatchObject({ status: "trial", includedLicenses: 3 });
+    expect(Math.abs(subscription!.expiresAt!.getTime() - expected)).toBeLessThan(60_000);
     expect(await db.select().from(branches).where(eq(branches.companyId, company!.id))).toHaveLength(1);
     expect(await db.select().from(roles).where(eq(roles.companyId, company!.id))).toHaveLength(DEFAULT_ROLES.length);
 
@@ -69,10 +74,12 @@ describe("Ro'yxatdan o'tish", () => {
     expect(audit).toMatchObject({ userId: owner!.id, companyId: company!.id });
   });
 
-  it("sinov muddati 0 bo'lsa kompaniya darhol active", async () => {
-    await settings({ registrationEnabled: true, defaultTrialDays: 0 });
+  it("trial sozlama bilan o'chirilmaydi — eski defaultTrialDays kaliti rad etiladi", async () => {
+    expect((await settings({ registrationEnabled: true, defaultTrialDays: 0 })).statusCode).toBe(400);
+    await settings({ registrationEnabled: true });
     const res = await register(valid());
-    expect(res.json().company).toMatchObject({ status: "active", trialEndsAt: null });
+    expect(res.json().company).toMatchObject({ status: "trial" });
+    expect(res.json().company.trialEndsAt).not.toBeNull();
   });
 
   it("band raqam 409, qisqa parol 400, admin qayta yopsa 403", async () => {
@@ -94,14 +101,14 @@ describe("Ro'yxatdan o'tish", () => {
     expect((await register(valid())).statusCode).toBe(429);
   });
 
-  it("sinov muddati tugagan kompaniyada yozish yopiladi, o'qish qoladi", async () => {
-    await settings({ registrationEnabled: true, defaultTrialDays: 14 });
+  it("sinov muddati tugagan kompaniyada ish yopiladi, kompaniya konteksti qoladi", async () => {
+    await settings({ registrationEnabled: true });
     const res = await register(valid());
     const cookie = `bum_session=${res.cookies.find((c) => c.name === "bum_session")!.value}`;
     await db
-      .update(companies)
-      .set({ trialEndsAt: new Date(Date.now() - 1000) })
-      .where(eq(companies.id, res.json().company.id));
+      .update(subscriptions)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(subscriptions.companyId, res.json().company.id));
 
     const patch = await app.inject({ method: "PATCH", url: "/api/company", headers: { cookie }, payload: { city: "Buxoro" } });
     expect(patch.statusCode).toBe(403);

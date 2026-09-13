@@ -17,6 +17,14 @@ export type PlatformCompany = {
   createdAt: string;
   memberCount: number;
   owner: { id: string; phone: string; name: string | null; isActive: boolean } | null;
+  /** Obuna (amaldagi holat) va litsenziyalar. */
+  subscription: {
+    status: "trial" | "active" | "expired" | "cancelled";
+    expiresAt: string | null;
+    includedLicenses: number;
+    usedLicenses: number;
+    pendingPayments: number;
+  } | null;
 };
 
 export type PlatformCompanyDetails = {
@@ -99,9 +107,9 @@ export type PlatformAuditLog = {
   companyName: string;
 };
 
+/** Sinov muddati sozlama emas — har yangi kompaniya 25 kun (obuna tizimi). */
 export type PlatformSettings = {
   registrationEnabled: boolean;
-  defaultTrialDays: number;
   platformName: string;
   supportEmail: string;
 };

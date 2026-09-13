@@ -5,16 +5,23 @@
  * `authenticate` ataylab tranzaksiyadan TASHQARIDA — muvaffaqiyatsiz
  * urinishlar hisobi xato tashlanganda ham saqlanib qolishi kerak.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import {
   badRequest,
+  daysLeft,
+  effectiveSubscriptionStatus,
   forbidden,
   isValidPhone,
+  licenseDenial,
   normalizePhone,
+  trialWarning,
   unauthenticated,
+  type AccessDenialReason,
+  type SubscriptionStatus,
 } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { companies, companyMembers, users } from "../../db/schema/platform.js";
+import { licenses, subscriptions } from "../../db/schema/subscription.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { assertNotLimited, recordHit } from "../../shared/rate-limit.js";
@@ -49,12 +56,25 @@ export type Me = {
   companyCurrency: string | null;
   companySlug: string | null;
   companyRole: string | null;
-  /** Amaldagi holat: faol emas yoki sinov muddati tugagan kompaniya — "suspended" (tenant so'rovlari 403 beradi). */
+  /** Kompaniya holati (platforma admini qarori): faol emas — "suspended", tugatilgan — "cancelled". */
   companyStatus: string | null;
   companySuspendReason: string | null;
+  isCompanyOwner: boolean;
+  /** Obuna (server vaqti bo'yicha amaldagi holat). Tugagan bo'lsa — faqat Bosh sahifa va Obuna ochiq. */
+  subscription: {
+    status: SubscriptionStatus;
+    /** Tugagan obuna trialmi (matn uchun). */
+    isTrial: boolean;
+    expiresAt: string | null;
+    daysLeft: number | null;
+    /** Trial ogohlantirishi: 10 / 5 / 3 / 1 yoki null. */
+    trialWarning: number | null;
+  } | null;
+  /** Foydalanuvchi litsenziyasi bo'yicha kirish taqiqi (egasida doim null). */
+  licenseDenial: AccessDenialReason | null;
+  /** Ekran PIN bilan qulflangan (sessiya saqlanadi). */
+  sessionLocked: boolean;
 };
-
-const TRIAL_EXPIRED = "Sinov muddati tugagan. Platforma admini bilan bog'laning.";
 
 export async function authenticate(
   phoneRaw: string,
@@ -136,8 +156,9 @@ export async function startSession(tx: Tx, auth: Authenticated, meta: RequestMet
 }
 
 /** Convexdagi users.getCurrentUser javobiga mos — xeshlar hech qachon chiqmaydi. */
-export async function buildMe(conn: DbOrTx, user: SessionUser): Promise<Me> {
+export async function buildMe(conn: DbOrTx, user: SessionUser, options: { sessionLocked?: boolean } = {}): Promise<Me> {
   const companyId = user.activeCompanyId;
+  const now = new Date();
 
   const [company] = companyId
     ? await conn
@@ -148,31 +169,58 @@ export async function buildMe(conn: DbOrTx, user: SessionUser): Promise<Me> {
           status: companies.status,
           isActive: companies.isActive,
           suspendReason: companies.suspendReason,
-          trialEndsAt: companies.trialEndsAt,
+          ownerId: companies.ownerId,
+          subscriptionStatus: subscriptions.status,
+          subscriptionExpiresAt: subscriptions.expiresAt,
         })
         .from(companies)
+        .leftJoin(subscriptions, eq(subscriptions.companyId, companies.id))
         .where(eq(companies.id, companyId))
         .limit(1)
     : [];
 
-  // tenant.ts dagi kirish tekshiruvi bilan bir xil qoida
+  // tenant.ts dagi kirish tekshiruvi bilan bir xil qoida (obuna — alohida `subscription` maydonida)
   const blocked = !company
     ? null
     : company.status === "cancelled"
       ? { status: "cancelled", reason: company.suspendReason }
       : company.status === "suspended" || !company.isActive
         ? { status: "suspended", reason: company.suspendReason }
-        : company.status === "trial" && company.trialEndsAt && company.trialEndsAt.getTime() < Date.now()
-          ? { status: "suspended", reason: TRIAL_EXPIRED }
-          : null;
+        : null;
 
   const [membership] = companyId
     ? await conn
-        .select({ companyRole: companyMembers.companyRole })
+        .select({
+          companyRole: companyMembers.companyRole,
+          licenseType: licenses.licenseType,
+          licenseStatus: licenses.status,
+          licenseExpiresAt: licenses.expiresAt,
+        })
         .from(companyMembers)
+        .leftJoin(
+          licenses,
+          and(eq(licenses.companyId, companyMembers.companyId), eq(licenses.userId, companyMembers.userId), ne(licenses.status, "revoked")),
+        )
         .where(and(eq(companyMembers.companyId, companyId), eq(companyMembers.userId, user.id)))
         .limit(1)
     : [];
+
+  const isCompanyOwner = company?.ownerId === user.id;
+  let subscription: Me["subscription"] = null;
+  if (company?.subscriptionStatus) {
+    const status = effectiveSubscriptionStatus({ status: company.subscriptionStatus, expiresAt: company.subscriptionExpiresAt }, now);
+    subscription = {
+      status,
+      isTrial: company.subscriptionStatus === "trial",
+      expiresAt: company.subscriptionExpiresAt?.toISOString() ?? null,
+      daysLeft: daysLeft(company.subscriptionExpiresAt, now),
+      trialWarning: trialWarning(status, company.subscriptionExpiresAt, now),
+    };
+  }
+  const license =
+    membership?.licenseType && membership.licenseStatus
+      ? { type: membership.licenseType, status: membership.licenseStatus, expiresAt: membership.licenseExpiresAt }
+      : null;
 
   return {
     id: user.id,
@@ -189,5 +237,9 @@ export async function buildMe(conn: DbOrTx, user: SessionUser): Promise<Me> {
     companyRole: membership?.companyRole ?? null,
     companyStatus: company ? (blocked?.status ?? company.status) : null,
     companySuspendReason: blocked?.reason ?? null,
+    isCompanyOwner,
+    subscription,
+    licenseDenial: membership && !isCompanyOwner ? licenseDenial(license, now) : null,
+    sessionLocked: options.sessionLocked ?? false,
   };
 }

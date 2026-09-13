@@ -12,7 +12,7 @@ import { useParams, Link, Navigate } from "react-router-dom";
 import { motion } from "motion/react";
 import {
   LayoutDashboard, Building2, Users, ListChecks,
-  Shield, Layers, ArrowLeft, Settings, PlusCircle, ExternalLink, LogOut, MonitorDown,
+  Shield, Layers, ArrowLeft, Settings, PlusCircle, ExternalLink, LogOut, MonitorDown, CreditCard,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import { isAdminSubdomain } from "@/lib/subdomain.ts";
@@ -20,6 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { useAuth, useCurrentUser } from "@/hooks/use-auth.ts";
 import AdminOverview         from "./_components/admin-overview.tsx";
 import AdminCompanies        from "./_components/admin-companies.tsx";
+import AdminBilling          from "./_components/admin-billing.tsx";
 import AdminAuditLog         from "./_components/admin-audit-log.tsx";
 import AdminUsers            from "./_components/admin-users.tsx";
 import AdminCreateCompany    from "./_components/admin-create-company.tsx";
@@ -28,11 +29,12 @@ import AdminDesktopReleases  from "./_components/admin-desktop-releases.tsx";
 import AdminLoginPage        from "./login.tsx";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Tab = "overview" | "companies" | "create-company" | "users" | "audit" | "desktop" | "settings";
+type Tab = "overview" | "companies" | "billing" | "create-company" | "users" | "audit" | "desktop" | "settings";
 
 const TABS: { id: Tab; label: string; icon: React.FC<{ className?: string }> }[] = [
   { id: "overview",        label: "Umumiy ko'rinish",  icon: LayoutDashboard },
   { id: "companies",       label: "Kompaniyalar",       icon: Building2 },
+  { id: "billing",         label: "To'lovlar",          icon: CreditCard },
   { id: "create-company",  label: "Yangi kompaniya",    icon: PlusCircle },
   { id: "users",           label: "Foydalanuvchilar",   icon: Users },
   { id: "audit",           label: "Audit jurnali",      icon: ListChecks },
@@ -166,6 +168,7 @@ function AdminDashboard() {
         >
           {tab === "overview"        && <AdminOverview  />}
           {tab === "companies"       && <AdminCompanies />}
+          {tab === "billing"         && <AdminBilling />}
           {tab === "create-company"  && <AdminCreateCompany />}
           {tab === "users"           && <AdminUsers     />}
           {tab === "audit"           && <AdminAuditLog  />}

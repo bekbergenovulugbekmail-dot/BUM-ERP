@@ -1209,13 +1209,100 @@ Talab: "BUM ERP — DOSTAVKA / DELIVERY MASTER PROMPT" (1–62 bo'lim). Asosiy p
 **TEKSHIRILMAGAN / QILINMAGAN:**
 - brauzerda va haqiqiy Android telefonda qo'lda E2E (kamera, GPS, imzo, oflayn navbat, real-time) — faqat avtomatik testlar (WebSocket — Fastify `injectWS` bilan, Railway edge va nginx orqali brauzer ulanishi qo'lda sinalmagan)
 - marshrut optimallashtirish (TSP) yo'q — avtomatik biriktirish ochko'z taqsimlash va qo'lda tartib
-- yuk sig'imi: mahsulot formasida og'irlik birligi maydoni yo'q — birligi kiritilmagan mahsulotda yuk tekshirilmaydi
+- yuk sig'imi: og'irlik birligi (kg / g / t) mahsulot formasiga 2026-09-13 da qo'shildi; eski, birligi kiritilmagan mahsulotda yuk tekshirilmaydi
 - ruxsat olib tashlanganda ochiq WebSocket 60 soniyagacha ishlab turishi mumkin (keyingi qayta tekshiruvgacha); ma'lumotning o'zi REST'da darhol himoyalangan
 - ekran qulflanganda fondagi lokatsiya — brauzer cheklovi, native Android ilova kerak
 - "faqat kamera" — `capture` atributi; ba'zi brauzerlar galereyani ham taklif qiladi
 - SMS orqali OTP — production'da SMS provayder yo'q
 - filial va hudud jadvallari yo'q — hudud matn, filial `branchId`
 - qisman yetkazilgan qoldiqni qayta yetkazish yo'q (faqat omborga qaytarish)
+
+## Obuna va litsenziya tizimi (2026-09-13)
+
+Talab: "BUM ERP — SUBSCRIPTION & LICENSE SYSTEM MASTER IMPLEMENTATION PROMPT" (1–63 bo'lim). Asosiy prinsip — Employee ≠ User ≠ License: HR xodimi dasturdan foydalanmasligi mumkin (bepul, cheklanmagan); dasturdan foydalanadigan xodim — foydalanuvchi (telefon login, parol xeshi, PIN xeshi), a'zolik, rol va litsenziya. Shu ish bilan birga mahsulot formasiga og'irlik birligi (kg / g / t) qo'shildi.
+
+| # | Bosqich | Holat |
+|---|---------|-------|
+| S1 | Migratsiya 0043: tariflar, obuna, to'lov so'rovlari, litsenziyalar, ikki tarix jadvali, `sessions.locked_at`; mavjud kompaniya va a'zolar uzilmasdan ko'chirildi | ✅ |
+| S2 | Har yangi kompaniya (ro'yxatdan o'tgan va admin yaratgan) — server vaqti bo'yicha 25 kunlik trial, 3 included litsenziya, egasi — birinchisi | ✅ |
+| S3 | Server guard: sessiya → faol a'zolik → obuna/trial → litsenziya → ruxsat — `requireTenant` ichida (bitta SELECT), kassa qurilmasida ham | ✅ |
+| S4 | Litsenziya limiti (obuna qatori FOR UPDATE) va qo'shimcha litsenziya — xodim yaratish, a'zolikni qayta yoqish, HR ulash, agent faollashtirish yo'llarining hammasida | ✅ |
+| S5 | To'lov so'rovi (idempotent) → platforma admini tasdig'i: obuna/litsenziya faollashadi yoki uzayadi (bitta tranzaksiya, takroriy tasdiq zararsiz); muddat tugashi va trial ogohlantirishlari — davriy ish | ✅ |
+| S6 | HR: "BEPUL" tugmasi, bepul → dasturga ulash va aksincha; egasi va egalik roli himoyasi; HR rahbari o'zidan kuchli rol bera olmaydi | ✅ |
+| S7 | PIN ekran qulfi: LOCK sessiyani saqlaydi, LOGOUT tugatadi | ✅ |
+| S8 | Web: Obuna sahifasi, tugaganda menyu (Bosh sahifa + Obuna), trial/tugash banneri, qulf ekrani, HR va Sozlamalarda litsenziya, admin "To'lovlar" va kompaniya obunasi | ✅ (brauzerda qo'lda tekshirilmagan) |
+
+**Migratsiya 0043** — jadvallar: `subscription_plans` (8 boshlang'ich tarif, keyin faqat bazadan), `subscriptions` (kompaniyaga bitta), `subscription_payments`, `subscription_history`, `licenses` (foydalanuvchiga kompaniyada bitta joriy — partial unique), `license_history`. Kompaniya FK lari `restrict`. Mavjud ma'lumot o'chirilmaydi va o'zgartirilmaydi, faqat qo'shiladi:
+- `status = trial` va `trial_ends_at` bor kompaniya — trial, o'sha sana bilan; qolganlari — muddatsiz `active` (tizimdan oldingi mijozlar uzilib qolmasin)
+- included litsenziyalar soni — kamida 3, faol a'zolar ko'p bo'lsa shuncha; har faol a'zo va egaga included litsenziya, HR xodimi bo'lsa bog'lanadi; tarixga `legacy_migrated`
+- Direktor rollariga `subscription.view`, `license.view`; takror ishlasa o'zgarmaydi (testda ikki marta ishlatib tekshirildi)
+
+**Tariflar:**
+
+| Asosiy | Narx | Muddat | Litsenziya | | Qo'shimcha xodim | Narx | Muddat |
+|---|---|---|---|---|---|---|---|
+| 1 oy | 360 000 | 1 oy | 3 | | 1 oy | 100 000 | 1 oy |
+| 3 oy | 900 000 | 3 oy | 3 | | 3 oy | 300 000 | 3 oy |
+| 6 oy | 1 800 000 | 6 + 1 = 7 oy | 3 | | 6 oy | 600 000 | 6 + 1 = 7 oy |
+| 12 oy | 3 600 000 | 12 + 3 = 15 oy | 3 | | 12 oy | 1 200 000 | 12 + 2 = 14 oy |
+
+**Server qoidalari:**
+- kirish darajalari: `business` (standart) — obuna va litsenziya shart; `dashboard` — `/api/analytics/dashboard`, obuna tugaganda ham ochiq; `account` — `/api/company` (ilova qobig'i) va `/api/subscription/*`. Rad etish — 403, `details.reason`: `subscription_expired` (trialda "Sinov muddati tugagan..."), `subscription_cancelled`, `license_required`, `license_pending_payment`, `license_expired`, `license_revoked`
+- egasi litsenziya tekshiruvidan o'tmaydi (kompaniya yaratilganda included beriladi, bo'shatib bo'lmaydi); bepul xodimda foydalanuvchi yo'q — kira olmaydi
+- 4-foydalanuvchi: `license_limit_reached` (hisob bilan) va hech narsa yaratilmaydi; qo'shimcha tarif tanlansa litsenziya `pending_payment` + to'lov so'rovi, tasdiqlanguncha kirish yopiq. Tugagan obunada qo'shimcha litsenziya sotib olinmaydi
+- a'zolik o'chirilsa included bo'shaydi, to'langan qo'shimcha litsenziya xodimda qoladi (muddati tugaguncha); bepul xodimga aylantirishda har qanday litsenziya bekor, kutilayotgan to'lovi ham
+- muddat: oy qo'shish UTC (oyda bunday kun bo'lmasa — oy oxiri; 01.01.2026 + 7 oy = 01.08.2026). Uzaytirish: amaldagi to'langan obuna yoki litsenziya — tugash sanasidan, trial, tugagan va tizimdan oldingi muddatsiz — hozirdan. Trial'dan to'langanga o'tganda qolgan trial kunlari qo'shilmaydi
+- to'lov so'rovi: bir xil `idempotencyKey` — o'sha so'rov (boshqa tarif bilan — 409); yangi obuna so'rovi eski kutilayotganini bekor qiladi; tasdiq to'lov qatorini qulflaydi, `paid` bo'lsa hech narsa qilmaydi, `cancelled` — 409
+- davriy ish (har soat, advisory lock): muddati o'tgan obuna va qo'shimcha litsenziya `expired` + tarix + audit; trial tugashiga 10/5/3/1 kun qolganda egasiga bildirishnoma, har chegara bir marta. Guard bunga bog'liq emas — sanani har so'rovda o'zi tekshiradi
+- kassa qurilmasi: obuna tugasa `/session` va yangilanish ochiq, `pull`, `push`, kassir kirishi va boshqa amallar — 403; sinxron amali obuna yoki kassir litsenziyasi sababli rad etilsa "rejected" deb saqlanmaydi — butun so'rov 403, navbat kassada qoladi va uzaytirilgach yuboriladi
+- PIN: faqat xesh (argon2id), 5 noto'g'ri urinish → 5 daqiqa blok; `POST /api/auth/lock` sessiyani qulflaydi (PIN o'rnatilmagan bo'lsa — 400), qulflangan sessiyada faqat `/me`, `/unlock`, `/logout` — boshqa hamma so'rov 423 `LOCKED`. PIN yangi sessiya ochmaydi: chiqishdan keyin va yangi qurilmada parol kerak
+- audit: `TRIAL_CREATED`, `SUBSCRIPTION_PAYMENT_REQUESTED/CANCELLED`, `SUBSCRIPTION_CREATED`, `SUBSCRIPTION_RENEWED`, `SUBSCRIPTION_EXPIRED`, `SUBSCRIPTION_LICENSES_CHANGED`, `LICENSE_ASSIGNED`, `LICENSE_REVOKED`, `LICENSE_EXPIRED`, `LICENSE_RENEWED`, `ADDITIONAL_LICENSE_REQUESTED/PURCHASED`, `LICENSE_PAYMENT_REQUESTED`, `SOFTWARE_ACCESS_ENABLED/DISABLED`, `EMPLOYEE_CONVERTED`, `session_locked/unlocked`, mavjud `pin_changed`, `USER_PASSWORD_RESET`. Parol va PIN auditga yozilmaydi
+- RBAC: `subscription.view`, `subscription.manage`, `license.view`, `license.manage`, `employee.software_access.manage`. To'liq ruxsatli rol (egasi) — hammasi; Direktor — faqat ko'rish; boshqa standart rollar — yo'q
+
+**O'zgargan qarorlar (oldingi xatti-harakatdan farq):**
+- platforma sozlamasidagi "sinov muddati (kun)" olib tashlandi — trial har doim 25 kun (spec: "every new Company"); saqlangan eski qiymat bazada qoladi, ishlatilmaydi
+- admin yaratgan kompaniya ham trial (ilgari darhol muddatsiz edi); `companies.status` — platforma admini qarori (to'xtatish/tugatish) sifatida qoldi, to'lov tasdiqlanganda `trial` → `active`
+- trial tugagan kompaniyada ilgari o'qish ochiq edi — endi faqat Bosh sahifa va Obuna (spec 30–33)
+- avvalroq foydalanuvchi so'rovi bilan olib tashlangan web avto-qulf qaytarilmadi — faqat qo'lda "Ekranni bloklash" (foydalanuvchi menyusi)
+
+**Web:**
+- `/uz/subscription` (menyu "Obuna", `subscription.view`): joriy tarif, holat, boshlanish/tugash, qolgan kun, "BUM ERP obunangiz muddati tugagan." + OBUNANI UZAYTIRISH; litsenziyalar (Included / Ishlatilgan / Qo'shimcha / Jami faol / Bo'sh); kutilayotgan to'lovlar va bekor qilish; tarif kartalari ("6 oy + 1 oy bonus = 7 oy"); qo'shimcha litsenziya tariflari; litsenziyalar jadvali va uzaytirish; obuna va litsenziya tarixi
+- obuna tugagan: menyuda faqat Bosh sahifa va Obuna, boshqa sahifalar Bosh sahifaga yo'naltiriladi, Bosh sahifada xabar; trial ogohlantirishi va tugash banneri (yuqorida); litsenziyasi yaroqsiz xodimga alohida ekran
+- HR → Xodimlar: "BEPUL (dasturdan foydalanmaydi)" tugmasi ("Bu xodim BUM ERP dasturidan foydalanmaydi. License talab qilinmaydi." / "...foydalanadi. Software license kerak."), login, parol, PIN, rol; limit tugasa qo'shimcha tarif tugmalari ("3 ta included foydalanuvchi litsenziyasi ishlatilgan."); kartada "💻 Dasturdan foydalanadi · License: Included · Faol" yoki "🆓 Bepul · Dastur: Yo'q"; "Dastur" / "Bepul" amallari
+- Sozlamalar → Xodimlar: litsenziya ustuni, PIN (ixtiyoriy), limitda tarif tanlash (yangi xodim va qayta yoqish)
+- qulf: foydalanuvchi menyusida "Ekranni bloklash" (PIN yo'q bo'lsa avval o'rnatish oynasi), "🔒 EKRAN BLOKLANGAN" + PIN; boshqa oynadagi 423 ham qulf ekranini ochadi
+- admin: "To'lovlar" bo'limi (kutilmoqda / tasdiqlangan / bekor; tasdiqlashda hujjat raqami), Kompaniyalar jadvalida obuna ustuni, tafsilotda obuna, litsenziyalar va included sonini o'zgartirish
+
+**Testlar:**
+- API: `subscription-rules` (10 — muddat hisobi, tariflar, uzaytirish oralig'i, amaldagi holat, trial chegaralari, guard darajalari va rad etish sabablari); `subscription` (26 — trial; tariflar; limit va parallel so'rovlar; qo'shimcha litsenziya to'lovgacha yopiq, tasdiq va idempotentlik; qo'shimcha litsenziyani uzaytirish +14 oy; a'zolikni o'chirish/qayta yoqish; trial → active +7 oy, idempotent so'rov, +15 oy uzaytirish; eskisini bekor qilish va tugagandan uzaytirish; to'lovni bekor qilish; tugagan trial va to'langan obuna — biznes API 403, dashboard/obuna/kompaniya 200, ma'lumot saqlanadi, uzaytirilgach ochiladi; davriy ish; faqat bitta xodim litsenziyasi tugashi; trial ogohlantirishi; bepul xodimlar cheklanmasligi va login yo'qligi; dasturga ulash va bepul qilish (sessiyalar bekor, hisob nofaol, qayta yoqish); limitda rollback va qo'shimcha tarif; egasi himoyasi va Direktor; PIN qulfi, boshqa qurilma, chiqishdan keyin PIN ishlamasligi; 5 urinish bloki; soxta maydonlar va sarlavhalar; boshqa kompaniya litsenziyasi/to'lovi 404, Kassir/Direktor/admin ruxsatlari; admin included sonini o'zgartirishi; kassa qurilmasi 403 va amal saqlanmasligi; migratsiya SQL ning mavjud ma'lumotda ikki marta ishlashi)
+- moslashtirilgan testlar: `registration` (25 kun, obuna qatori, eski sozlama kaliti rad etiladi), `platform-ops` (sozlamalarda sinov muddati yo'q), `helpers.createCompany` (litsenziyaga aloqasi yo'q testlar uchun admin beradigan kengroq limit; litsenziya testlari — 3), `delivery-realtime` (ws tip e'loni)
+- to'liq API: 88 fayl, 366 test — 4 qismda `--maxWorkers=1` (120 + 93 + 73 + 80), hammasi o'tdi
+- web: `subscription` (5 — muddat matni, sana va summa, bloklash, limit xatosi, PIN sabablari); to'liq web — 12 fayl, 48 test
+- tsc (API testlar bilan, web), lint (yangi va o'zgargan fayllar), `vite build` — toza
+
+**TEKSHIRILMAGAN / QILINMAGAN:**
+- brauzerda qo'lda E2E (Obuna sahifasi, HR BEPUL oynasi, qulf ekrani, admin tasdig'i) — faqat avtomatik testlar
+- to'lov shlyuzi (Payme/Click) yo'q — faollashtirish faqat platforma admini to'lovni qo'lda tasdiqlaganda; spec'dagi keyingi `SUSPENDED` / `PENDING_PAYMENT` obuna holatlari qo'shilmagan
+- kassada kassir litsenziyasi sinxron o'rtasida tugaganda butun so'rovni 403 qilish yo'li alohida test bilan qoplanmagan (obuna tugashi qoplangan); desktop kassa ilovasi obuna sababini alohida ekran bilan emas, sinxron xatosi matni bilan ko'rsatadi
+- sotuv agenti va yetkazuvchi mobil ish joylarida qulf ekrani yo'q (ERP'da qulflangan sessiya u yerda 423 oladi)
+- migratsiyaning production ma'lumotidagi natijasi deploydan keyin tekshiriladi (test bazasida mavjud ma'lumot bilan tekshirilgan)
+- qo'shimcha litsenziya muddati tugashiga yaqin ogohlantirish yo'q (faqat trial uchun)
+
+### Obuna (`/api/subscription`)
+
+Aktiv kompaniya (companyId so'rovdan olinmaydi); obuna tugaganda ham ochiq.
+
+| Metod | Yo'l | Ruxsat |
+|---|---|---|
+| GET | `/` (holat, litsenziyalar soni, kutilayotgan to'lovlar), `/history` (`?limit=`), `/payments` (`?status=&limit=`) | `subscription.view` |
+| GET | `/plans` | `subscription.view`, `license.view` yoki `employee.software_access.manage` |
+| GET | `/licenses` | `license.view` |
+| POST | `/purchase` `{planId, idempotencyKey}`, `/payments/:paymentId/cancel` | `subscription.manage` |
+| POST | `/licenses/:licenseId/purchase` `{planId, idempotencyKey}` | `license.manage` |
+
+Platforma admini (`/api/platform`): `GET /billing/payments` (`?status=&companyId=&limit=`), `POST /billing/payments/:paymentId/confirm` `{reference?}`, `POST /billing/payments/:paymentId/cancel`, `GET /companies/:companyId/subscription`, `PUT /companies/:companyId/subscription` `{includedLicenses}`; `GET /companies` javobida `subscription`.
+
+Auth: `POST /api/auth/lock`, `POST /api/auth/unlock` `{pin}` (doim 200 `{success, reason}`); `/api/auth/me` — `subscription`, `licenseDenial`, `isCompanyOwner`, `sessionLocked`. HR: `POST /api/hr/employees` `{..., softwareAccess?: {phone, password, pin, role, additionalLicensePlanId?}}`, `POST|DELETE /api/hr/employees/:employeeId/software-access`. Kompaniya: `POST /api/company/employees` `{..., pin?, additionalLicensePlanId?}` → `license`, `payment`; `PATCH /api/company/employees/:userId` `{additionalLicensePlanId?}`.
 
 ### Dostavka (`/api/delivery`)
 
@@ -1316,5 +1403,9 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
 5. **Dostavka moduli — qolgan:**
    - brauzerda va Android telefonda qo'lda sinov: HR'da dostavka agenti qo'shish → telefon bilan kirish → ish sessiyasi → buyurtma ("Yetkazib berish kerak") → supervayzer biriktiradi → qabul → yo'lga chiqish → 200 m geofence → rasm, imzo, OTP (supervayzer kodi) → to'lov farqi → qisman yetkazish → omborga qaytarish; oflayn navbat (samolyot rejimi)
    - real-time va avtomatik biriktirishni brauzerda sinash: ikki oynada (supervayzer va yetkazuvchi) "Jonli" belgisi, biriktirish/holat o'zgarishi darhol ko'rinishi; Sozlamalarda avtomatik biriktirishni yoqish → reja → qo'llash; "yaratilganda darhol" bilan buyurtma tasdiqlash
-   - marshrut optimallashtirish (TSP); mahsulot formasiga og'irlik birligi maydoni (yuk sig'imi tekshiruvi uchun)
+   - marshrut optimallashtirish (TSP)
    - native Android ilova (ekran qulflanganda fondagi lokatsiya); SMS provayder (OTP SMS); qisman qoldiqni qayta yetkazish; filial/hudud ma'lumotnomasi
+6. **Obuna va litsenziya — qolgan:**
+   - deploydan keyin production'da: kompaniyalar obunasi (Admin → Kompaniyalar → Obuna ustuni) mavjud holatga mosligini ko'rish — trial sanalari, muddatsiz active, litsenziyalar soni
+   - brauzerda qo'lda: egasi — Obuna sahifasi → tarif tanlash; admin — To'lovlar → tasdiqlash; HR → xodim qo'shish BEPUL/dasturdan foydalanadi, 4-foydalanuvchida qo'shimcha tarif; "Ekranni bloklash" → PIN; trial tugaganda menyu va Bosh sahifa xabari
+   - to'lov shlyuzi (Payme / Click) — hozir admin qo'lda tasdiqlaydi; qo'shimcha litsenziya tugashiga yaqin ogohlantirish; agent ish joylarida qulf ekrani; desktop kassada obuna holati ekrani

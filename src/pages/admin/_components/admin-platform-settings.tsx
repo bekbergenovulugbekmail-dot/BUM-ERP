@@ -1,7 +1,7 @@
 /**
  * Admin Platform Settings — `GET/PUT /api/platform/settings`
  * - Ro'yxatdan o'tishni yoqish/o'chirish (standart holatda YOPIQ)
- * - Sinov muddati, platforma nomi, qo'llab-quvvatlash email
+ * - Platforma nomi, qo'llab-quvvatlash email (sinov muddati — obuna tizimida, 25 kun)
  * - Bootstrap admin haqida ma'lumot (UI orqali emas — `.env` + `db:seed`)
  */
 import { useState, useEffect } from "react";
@@ -31,7 +31,6 @@ export default function AdminPlatformSettings() {
 
   // Platform settings form
   const [regEnabled,   setRegEnabled]   = useState(false);
-  const [trialDays,    setTrialDays]    = useState(14);
   const [platformName, setPlatformName] = useState("");
   const [supportEmail, setSupportEmail] = useState("");
 
@@ -40,7 +39,6 @@ export default function AdminPlatformSettings() {
   if (platformSettings && platformSettings !== syncedFrom) {
     setSyncedFrom(platformSettings);
     setRegEnabled(platformSettings.registrationEnabled);
-    setTrialDays(platformSettings.defaultTrialDays);
     setPlatformName(platformSettings.platformName);
     setSupportEmail(platformSettings.supportEmail);
   }
@@ -48,7 +46,6 @@ export default function AdminPlatformSettings() {
   const deploymentUrl = typeof window !== "undefined" ? window.location.origin : "—";
 
   const handleSaveSettings = async () => {
-    const days = Math.min(365, Math.max(0, Math.round(trialDays)));
     if (!platformName.trim()) {
       toast.error("Platforma nomi bo'sh bo'lmasin");
       return;
@@ -56,7 +53,6 @@ export default function AdminPlatformSettings() {
     try {
       await saveSettings.mutateAsync({
         registrationEnabled: regEnabled,
-        defaultTrialDays: days,
         platformName: platformName.trim(),
         supportEmail: supportEmail.trim(),
       });
@@ -115,29 +111,14 @@ export default function AdminPlatformSettings() {
                 </button>
               </div>
 
-              {/* Trial days */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-amber-400" />
-                  <Label className="text-xs text-white/70 font-medium">
-                    Sinov muddati (kun)
-                  </Label>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Input
-                    type="number"
-                    min={0}
-                    max={365}
-                    value={trialDays}
-                    onChange={(e) => setTrialDays(parseInt(e.target.value) || 0)}
-                    className={`${inputClass} w-28`}
-                  />
-                  <p className="text-xs text-white/40">
-                    {trialDays === 0
-                      ? "0 = sinov muddatisiz, kompaniya to'g'ridan-to'g'ri aktiv bo'ladi"
-                      : `O'zi ro'yxatdan o'tgan kompaniya ${trialDays} kun sinov rejimida bo'ladi`}
-                  </p>
-                </div>
+              {/* Trial — sozlama emas */}
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-white/4 border border-white/8">
+                <Clock className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                <p className="text-xs text-white/50">
+                  Har yangi kompaniya (ro'yxatdan o'tgan yoki admin yaratgan) server vaqti bo'yicha{" "}
+                  <strong className="text-white/80">25 kunlik bepul trial</strong> va 3 ta foydalanuvchi litsenziyasi bilan ochiladi.
+                  Tariflar va to'lovlar — <strong className="text-white/80">To'lovlar</strong> bo'limida.
+                </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -217,10 +198,8 @@ export default function AdminPlatformSettings() {
               </dd>
             </div>
             <div className="flex flex-col gap-0.5">
-              <dt className="text-xs text-white/40">Standart sinov muddati</dt>
-              <dd className="text-white font-medium">
-                {platformSettings === undefined ? "—" : platformSettings.defaultTrialDays === 0 ? "Yo'q" : `${platformSettings.defaultTrialDays} kun`}
-              </dd>
+              <dt className="text-xs text-white/40">Sinov muddati</dt>
+              <dd className="text-white font-medium">25 kun, 3 foydalanuvchi</dd>
             </div>
           </dl>
         </CardContent>

@@ -9,6 +9,8 @@ export const ERROR_CODES = [
   "BAD_REQUEST",
   "CONFLICT",
   "RATE_LIMITED",
+  /** Sessiya ekrani qulflangan — faqat PIN bilan ochiladi (chiqish va /me ochiq). */
+  "LOCKED",
   "INTERNAL",
 ] as const;
 
@@ -21,6 +23,7 @@ export const HTTP_STATUS: Record<ErrorCode, number> = {
   BAD_REQUEST: 400,
   CONFLICT: 409,
   RATE_LIMITED: 429,
+  LOCKED: 423,
   INTERNAL: 500,
 };
 

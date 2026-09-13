@@ -13,6 +13,7 @@ import { env, features, isProd } from "./env.js";
 import { logger } from "./shared/logger.js";
 import { registerErrorHandler } from "./shared/errors.js";
 import { startMaintenance } from "./shared/maintenance.js";
+import { subscriptionRoutes } from "./modules/subscription/routes.js";
 import { closeDb, pool } from "./db/client.js";
 import { aiRoutes } from "./modules/ai/routes.js";
 import { analyticsRoutes } from "./modules/analytics/routes.js";
@@ -90,6 +91,7 @@ export async function buildServer() {
   await app.register(publicRoutes, { prefix: "/api/public" });
   await app.register(platformRoutes, { prefix: "/api/platform" });
   await app.register(companyRoutes, { prefix: "/api/company" });
+  await app.register(subscriptionRoutes, { prefix: "/api/subscription" });
   await app.register(catalogRoutes, { prefix: "/api/catalog" });
   await app.register(inventoryRoutes, { prefix: "/api/inventory" });
   await app.register(financeRoutes, { prefix: "/api/finance" });

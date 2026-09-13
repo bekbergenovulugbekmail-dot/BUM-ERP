@@ -28,7 +28,7 @@
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { badRequest, isPermission, type Permission } from "@bum/shared";
+import { PIN_PATTERN, badRequest, isPermission, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
@@ -115,6 +115,9 @@ const employeeBody = z.object({
   password: z.string().min(1).max(256),
   name: z.string().max(200).optional(),
   role: z.string().min(1).max(100).optional(),
+  pin: z.string().regex(PIN_PATTERN, "PIN 4-8 ta raqamdan iborat bo'lishi kerak").optional(),
+  /** Included litsenziyalar tugagan bo'lsa — qo'shimcha litsenziya tarifi (to'lov tasdiqlanguncha kirish yopiq). */
+  additionalLicensePlanId: z.uuid().optional(),
 });
 const memberPatchBody = z.strictObject({
   name: z.string().trim().max(200).nullable().optional(),
@@ -125,6 +128,7 @@ const memberPatchBody = z.strictObject({
   /** Mas'ul kategoriyalar; bo'sh — barcha kategoriyalar. */
   allowedCategoryIds: z.array(z.uuid()).max(500).optional(),
   isActive: z.boolean().optional(),
+  additionalLicensePlanId: z.uuid().nullable().optional(),
 });
 const userParams = z.object({ userId: z.uuid() });
 const resetPasswordBody = z.object({ newPassword: z.string().min(1).max(256) });
@@ -168,8 +172,9 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
 
   // ─── Kompaniya ───────────────────────────────────────────────────────────
 
+  // Obuna yoki litsenziya tugagan bo'lsa ham ochiq: ilova qobig'i (menyu, ruxsatlar, obuna sahifasi) shunga tayanadi
   app.get("/", async (req) => {
-    const tenant = await requireTenant(db, authOf(req).user);
+    const tenant = await requireTenant(db, authOf(req).user, { access: "account" });
     return {
       company: await getCompany(db, tenant.company.id),
       membership: {
@@ -245,13 +250,17 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
     const body = employeeBody.parse(req.body);
     const { user } = authOf(req);
 
-    const { user: employee, role } = await withTransaction(async (tx) => {
+    const { user: employee, role, license } = await withTransaction(async (tx) => {
       const company = await resolveOwnedCompany(tx, user);
       return createEmployee(tx, user, company, body, requestMeta(req));
     });
 
     reply.status(201);
-    return { employee: { id: employee.id, phone: employee.phone, name: employee.name, companyRole: role } };
+    return {
+      employee: { id: employee.id, phone: employee.phone, name: employee.name, companyRole: role },
+      license: { id: license.license.id, type: license.license.licenseType, status: license.license.status },
+      payment: license.payment ? { id: license.payment.id, amount: license.payment.amount, status: license.payment.status } : null,
+    };
   });
 
   app.patch("/employees/:userId", async (req) => {

@@ -17,6 +17,7 @@ export type ModuleId =
   | "reports"
   | "analytics"
   | "ai"
+  | "subscription"
   | "settings";
 
 export type ModuleConfig = {
@@ -46,8 +47,12 @@ export const ERP_MODULES: ModuleConfig[] = [
   { id: "reports", labelKey: "nav.reports", path: "reports", icon: "FileBarChart", defaultEnabled: true, group: "insights", permission: "analytics.view" },
   { id: "analytics", labelKey: "nav.analytics", path: "analytics", icon: "BarChart3", defaultEnabled: true, group: "insights", permission: "analytics.view" },
   { id: "ai", labelKey: "nav.ai", path: "ai", icon: "BrainCircuit", defaultEnabled: true, group: "insights", permission: "analytics.view" },
+  { id: "subscription", labelKey: "nav.subscription", path: "subscription", icon: "CreditCard", defaultEnabled: true, group: "system", permission: "subscription.view" },
   { id: "settings", labelKey: "nav.settings", path: "settings", icon: "Settings", defaultEnabled: true, group: "system" },
 ];
+
+/** Obuna tugaganda menyuda qoladigan bo'limlar (server ham faqat shularni ochadi). */
+export const EXPIRED_SUBSCRIPTION_MODULES: readonly ModuleId[] = ["dashboard", "subscription"];
 
 export const MODULE_GROUPS = {
   main: "Asosiy",

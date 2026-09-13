@@ -1,7 +1,8 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { db } from "../src/db/client.js";
 import { users } from "../src/db/schema/platform.js";
+import { subscriptions } from "../src/db/schema/subscription.js";
 import { hashPassword } from "../src/modules/auth/password.js";
 import { SESSION_COOKIE } from "../src/modules/auth/session.js";
 
@@ -61,7 +62,7 @@ export function me(app: FastifyInstance, cookie: string) {
 export async function createCompany(
   app: FastifyInstance,
   adminCookie: string,
-  input: { name?: string; ownerPhone?: string; ownerPassword?: string } = {},
+  input: { name?: string; ownerPhone?: string; ownerPassword?: string; includedLicenses?: number } = {},
 ) {
   seq += 1;
   const owner = {
@@ -78,6 +79,12 @@ export async function createCompany(
   });
   if (res.statusCode !== 201) throw new Error(`Kompaniya yaratilmadi: ${res.statusCode} ${res.body}`);
   const body = res.json() as { company: { id: string; slug: string }; owner: { id: string } };
+  // Yangi kompaniya — 3 litsenziyali trial. Litsenziyaga aloqasi yo'q testlar ko'p xodim qo'shadi, shuning uchun
+  // platforma admini beradigan kengroq limit; litsenziya testlari `includedLicenses: 3` bilan chaqiradi.
+  const includedLicenses = input.includedLicenses ?? 1000;
+  if (includedLicenses !== 3) {
+    await db.update(subscriptions).set({ includedLicenses }).where(eq(subscriptions.companyId, body.company.id));
+  }
 
   const { cookie } = await login(app, owner.phone, owner.password);
   if (!cookie) throw new Error("Kompaniya egasi kira olmadi");

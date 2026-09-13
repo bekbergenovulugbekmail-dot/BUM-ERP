@@ -141,6 +141,13 @@ export const PERMISSIONS = {
   "modules.manage":       { label: "Modullarni boshqarish",        group: "Admin" },
   "audit.view":           { label: "Audit jurnalini ko'rish",      group: "Admin" },
   "company.manage":       { label: "Kompaniya sozlamalari",        group: "Admin" },
+
+  // Obuna va litsenziya: to'lov so'rovi va dasturdan foydalanuvchi xodim — pullik resurs (egasi yoki vakolatli rahbar)
+  "subscription.view":    { label: "Obunani ko'rish",              group: "Obuna" },
+  "subscription.manage":  { label: "Obunani boshqarish (tarif, to'lov)", group: "Obuna" },
+  "license.view":         { label: "Litsenziyalarni ko'rish",      group: "Obuna" },
+  "license.manage":       { label: "Qo'shimcha litsenziya sotib olish", group: "Obuna" },
+  "employee.software_access.manage": { label: "Xodimga dastur kirishini berish/olish", group: "Obuna" },
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -152,8 +159,12 @@ export function isPermission(value: string): value is Permission {
 
 // ─── Rollar ──────────────────────────────────────────────────────────────────
 
+/** To'lov va litsenziya — pullik resurs: faqat egasi (to'liq ruxsatli rol); Direktor faqat ko'radi. */
+const BILLING_MANAGE: readonly Permission[] = ["subscription.manage", "license.manage", "employee.software_access.manage"];
+const BILLING_VIEW: readonly Permission[] = ["subscription.view", "license.view"];
+
 const VIEW_ONLY: Permission[] = ALL_PERMISSIONS.filter(
-  (p) => (p.endsWith(".view") || p === "pos.use") && !p.startsWith("sales_agent.location."),
+  (p) => (p.endsWith(".view") || p === "pos.use") && !p.startsWith("sales_agent.location.") && !BILLING_VIEW.includes(p),
 );
 
 /** Bu ikki rol har doim barcha ruxsatlarga ega (kodda ham bypass qilinadi). */
@@ -188,7 +199,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     color: "#0ea5e9",
     isSystem: true,
     permissions: ALL_PERMISSIONS.filter(
-      (p) => p !== "roles.manage" && p !== "company.manage",
+      (p) => p !== "roles.manage" && p !== "company.manage" && !BILLING_MANAGE.includes(p),
     ),
   },
   {

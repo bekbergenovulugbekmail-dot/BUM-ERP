@@ -35,6 +35,7 @@ import { closeShift, completeSale, openShift, posCustomerPayment, type SaleConfl
 import { CASH_MOVEMENT_KINDS, posCashMovement } from "../sales/pos-cash.service.js";
 import { createCustomer } from "../sales/customers.service.js";
 import { REFUND_METHODS, returnSaleItems } from "../sales/returns.service.js";
+import { isAccessDenial } from "../subscription/access.js";
 import { cashierTenant, type DeviceContext } from "./device-auth.js";
 
 export const MAX_OPS_PER_PUSH = 100;
@@ -907,6 +908,8 @@ export async function pushOperations(context: DeviceContext, rawOps: unknown[], 
       });
       results.push(applied === null ? ((await storedOperation(context.device.id, opId)) ?? { opId, status: "applied" }) : { opId, status: "applied", result: applied });
     } catch (err) {
+      // Obuna yoki kassir litsenziyasi tugagan — amal rad etilgan deb saqlanmaydi: butun so'rov 403, navbat qurilmada qoladi
+      if (isAccessDenial(err)) throw err;
       const error = err instanceof AppError ? errorOf(err) : constraintError(err);
       if (!error) throw err;
       await db.insert(posSyncOperations).values(record("rejected", { error })).onConflictDoNothing();

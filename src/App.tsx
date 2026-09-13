@@ -37,6 +37,7 @@ import ManufacturingPage from "./pages/manufacturing/page.tsx";
 import HRPage from "./pages/hr/page.tsx";
 import AnalyticsPage from "./pages/analytics/page.tsx";
 import SettingsPage from "./pages/settings/page.tsx";
+import SubscriptionPage from "./pages/subscription/page.tsx";
 import OnboardingPage from "./pages/onboarding/page.tsx";
 import AdminPage from "./pages/admin/page.tsx";
 import TenantPortalPage from "./pages/tenant/page.tsx";
@@ -178,6 +179,7 @@ function MainApp() {
             <Route path="reports" element={<ModuleGuard module="reports"><AnalyticsPage /></ModuleGuard>} />
             <Route path="analytics" element={<ModuleGuard module="analytics"><AnalyticsPage /></ModuleGuard>} />
             <Route path="ai" element={<ModuleGuard module="ai"><AnalyticsPage /></ModuleGuard>} />
+            <Route path="subscription" element={<ModuleGuard module="subscription"><SubscriptionPage /></ModuleGuard>} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFound />} />
           </Route>

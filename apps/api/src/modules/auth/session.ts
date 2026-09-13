@@ -28,6 +28,8 @@ export type SessionUser = typeof users.$inferSelect;
 export type ActiveSession = {
   sessionId: string;
   user: SessionUser;
+  /** Ekran qulflangan — faqat /me, /unlock (PIN) va /logout ochiq. */
+  lockedAt: Date | null;
 };
 
 export function hashToken(token: string): string {
@@ -91,7 +93,7 @@ export async function validateSession(token: string): Promise<ActiveSession | nu
     await db.update(users).set({ lastSeenAt: now }).where(eq(users.id, row.user.id));
   }
 
-  return { sessionId: row.session.id, user: row.user };
+  return { sessionId: row.session.id, user: row.user, lockedAt: row.session.lockedAt };
 }
 
 /**
@@ -114,7 +116,7 @@ export async function peekSession(token: string): Promise<ActiveSession | null> 
     )
     .limit(1);
   if (!row || !row.user.isActive) return null;
-  return { sessionId: row.session.id, user: row.user };
+  return { sessionId: row.session.id, user: row.user, lockedAt: row.session.lockedAt };
 }
 
 export async function revokeSession(token: string): Promise<void> {

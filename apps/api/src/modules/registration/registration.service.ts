@@ -2,9 +2,10 @@
  * O'zi ro'yxatdan o'tish (Convex'dagi companies.registerCompany).
  *
  * Qaror: standart holatda YOPIQ — platforma admini sozlamalardan
- * (`registrationEnabled`) yoqadi. Yangi kompaniya `defaultTrialDays` kunlik
- * sinov muddati bilan ochiladi (0 — darhol active); muddat o'tgach yozish
- * amallari yopiladi (company/tenant.ts). Ega darhol tizimga kiritiladi.
+ * (`registrationEnabled`) yoqadi. Yangi kompaniya server vaqti bo'yicha 25 kunlik
+ * bepul trial va 3 ta included litsenziya bilan ochiladi (obuna tizimi,
+ * subscription/subscription.service.ts); muddat o'tgach faqat Bosh sahifa va Obuna
+ * ochiq qoladi. Ega darhol tizimga kiritiladi.
  */
 import { eq } from "drizzle-orm";
 import { users } from "../../db/schema/platform.js";
@@ -12,9 +13,6 @@ import type { Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { startSession } from "../auth/auth.service.js";
 import { createCompanyWithOwner } from "../platform/company.service.js";
-import type { PlatformSettings } from "../platform/platform.service.js";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type RegistrationInput = {
   companyName: string;
@@ -28,14 +26,7 @@ export type RegistrationInput = {
   language?: string;
 };
 
-export async function registerCompany(
-  tx: Tx,
-  input: RegistrationInput,
-  settings: PlatformSettings,
-  meta: RequestMeta,
-) {
-  const trialDays = settings.defaultTrialDays;
-
+export async function registerCompany(tx: Tx, input: RegistrationInput, meta: RequestMeta) {
   const created = await createCompanyWithOwner(
     tx,
     null,
@@ -49,11 +40,7 @@ export async function registerCompany(
       owner: { phone: input.phone, password: input.password, name: input.ownerName ?? null },
     },
     meta,
-    {
-      status: trialDays > 0 ? "trial" : "active",
-      trialEndsAt: trialDays > 0 ? new Date(Date.now() + trialDays * DAY_MS) : null,
-      auditAction: "COMPANY_REGISTERED",
-    },
+    { status: "trial", auditAction: "COMPANY_REGISTERED" },
   );
 
   const [owner] = await tx.select().from(users).where(eq(users.id, created.owner.id)).limit(1);

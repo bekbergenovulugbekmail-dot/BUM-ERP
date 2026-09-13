@@ -7,6 +7,10 @@ import {
   Building2, Search, ChevronDown, Users, MapPin, Mail,
   Phone, Globe, Calendar, X, RefreshCw, Link2, Copy, Check, AlertTriangle,
 } from "lucide-react";
+import {
+  LICENSE_STATUS_LABEL, LICENSE_TYPE_LABEL, SUBSCRIPTION_STATUS_LABEL, formatDay,
+  type CompanyLicense, type SubscriptionHistory, type SubscriptionOverview, type SubscriptionPayment,
+} from "@/lib/subscription.ts";
 import { Input } from "@/components/ui/input.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -142,7 +146,7 @@ export default function AdminCompanies() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-white/8 bg-white/4">
-              {["Kompaniya", "Egasi", "Slug / URL", "A'zolar", "Holat", "Amallar"].map((h) => (
+              {["Kompaniya", "Egasi", "Slug / URL", "A'zolar", "Obuna", "Holat", "Amallar"].map((h) => (
                 <th key={h} className="text-left px-4 py-2.5 text-xs font-medium text-white/40 uppercase tracking-wide">
                   {h}
                 </th>
@@ -152,14 +156,14 @@ export default function AdminCompanies() {
           <tbody>
             {companiesQuery.error ? (
               <tr>
-                <td colSpan={6} className="px-4 py-12 text-center text-white/40 text-sm">
+                <td colSpan={7} className="px-4 py-12 text-center text-white/40 text-sm">
                   {errorMessage(companiesQuery.error)}
                 </td>
               </tr>
             ) : companies === undefined ? (
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={i} className="border-b border-white/5">
-                  {Array.from({ length: 6 }).map((_, j) => (
+                  {Array.from({ length: 7 }).map((_, j) => (
                     <td key={j} className="px-4 py-3">
                       <Skeleton className="h-5 w-full bg-white/5" />
                     </td>
@@ -168,7 +172,7 @@ export default function AdminCompanies() {
               ))
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-12 text-center text-white/30 text-sm">
+                <td colSpan={7} className="px-4 py-12 text-center text-white/30 text-sm">
                   Kompaniyalar topilmadi
                 </td>
               </tr>
@@ -227,6 +231,25 @@ export default function AdminCompanies() {
                       <span>{c.memberCount}</span>
                     </div>
                   </td>
+                  <td className="px-4 py-3 text-xs">
+                    {c.subscription ? (
+                      <div className="space-y-0.5">
+                        <p className={
+                          c.subscription.status === "active" ? "text-green-400"
+                            : c.subscription.status === "trial" ? "text-sky-400" : "text-red-400"
+                        }>
+                          {SUBSCRIPTION_STATUS_LABEL[c.subscription.status]}
+                        </p>
+                        <p className="text-white/40">{c.subscription.expiresAt ? `${formatDay(c.subscription.expiresAt)} gacha` : "Muddatsiz"}</p>
+                        <p className="text-white/40">{c.subscription.usedLicenses}/{c.subscription.includedLicenses} litsenziya</p>
+                        {c.subscription.pendingPayments > 0 && (
+                          <p className="text-amber-400">{c.subscription.pendingPayments} ta to'lov kutilmoqda</p>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-white/25">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={c.status} />
                     {c.trialEndsAt && c.status === "trial" && (
@@ -272,6 +295,7 @@ export default function AdminCompanies() {
       {/* Detail drawer */}
       {selectedId && (
         <CompanyDetailDrawer
+          companyId={selectedId}
           detail={detail}
           onClose={() => setSelectedId(null)}
           onStatusChange={(id, status) => { void handleStatusChange(id, status); }}
@@ -284,8 +308,9 @@ export default function AdminCompanies() {
 // ─── Detail Drawer ────────────────────────────────────────────────────────────
 
 function CompanyDetailDrawer({
-  detail, onClose, onStatusChange,
+  companyId, detail, onClose, onStatusChange,
 }: {
+  companyId: string;
   detail: PlatformCompanyDetails | undefined;
   onClose: () => void;
   onStatusChange: (id: string, s: CompanyStatus) => void;
@@ -391,6 +416,8 @@ function CompanyDetailDrawer({
                 )}
               </InfoSection>
 
+              <CompanySubscriptionSection companyId={companyId} />
+
               {/* Members */}
               <InfoSection title={`A'zolar (${detail.members.length})`}>
                 {detail.members.length === 0 ? (
@@ -445,6 +472,113 @@ function CompanyDetailDrawer({
         </div>
       </div>
     </>
+  );
+}
+
+type CompanySubscriptionDetails = SubscriptionOverview & {
+  company: { id: string; name: string };
+  licenseList: CompanyLicense[];
+  history: SubscriptionHistory;
+  payments: SubscriptionPayment[];
+};
+
+/** Obuna holati, litsenziyalar va included litsenziyalar sonini o'zgartirish (`PUT .../subscription`). */
+function CompanySubscriptionSection({ companyId }: { companyId: string }) {
+  const url = `/api/platform/companies/${companyId}/subscription`;
+  const query = useApiQuery<CompanySubscriptionDetails>(url);
+  const [licensesInput, setLicensesInput] = useState<string | null>(null);
+  const save = useApiMutation((includedLicenses: number) => api.put(url, { includedLicenses }), { invalidate: ["/api/platform"] });
+  const data = query.data;
+
+  if (query.error) {
+    return (
+      <InfoSection title="Obuna va litsenziyalar">
+        <p className="text-xs text-white/40">{errorMessage(query.error)}</p>
+      </InfoSection>
+    );
+  }
+  if (!data) return <Skeleton className="h-24 bg-white/5" />;
+
+  const subscription = data.subscription;
+  const counts = data.licenses;
+  const value = licensesInput ?? String(subscription?.includedLicenses ?? 3);
+
+  const handleSave = async () => {
+    const next = Number(value);
+    if (!Number.isInteger(next) || next < 1) {
+      toast.error("Litsenziyalar soni butun musbat son bo'lsin");
+      return;
+    }
+    try {
+      await save.mutateAsync(next);
+      setLicensesInput(null);
+      toast.success("Included litsenziyalar soni saqlandi");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
+  return (
+    <InfoSection title="Obuna va litsenziyalar">
+      {!subscription ? (
+        <p className="text-xs text-white/40">Obuna yozuvi yo'q</p>
+      ) : (
+        <div className="space-y-2">
+          <div className="text-xs text-white/60 space-y-1">
+            <p>
+              Holat: <span className="text-white font-medium">{SUBSCRIPTION_STATUS_LABEL[subscription.status]}</span>
+              {subscription.planName ? ` · ${subscription.planName}` : ""}
+            </p>
+            <p>Tugaydi: <span className="text-white">{subscription.expiresAt ? formatDay(subscription.expiresAt) : "Muddatsiz"}</span></p>
+            {counts && (
+              <p>
+                Included: {counts.includedUsed}/{counts.includedTotal} · qo'shimcha: {counts.additionalActive}
+                {counts.additionalPending > 0 ? ` (+${counts.additionalPending} to'lov kutmoqda)` : ""}
+              </p>
+            )}
+            {data.pendingPayments.length > 0 && (
+              <p className="text-amber-400">{data.pendingPayments.length} ta to'lov so'rovi — "To'lovlar" bo'limida tasdiqlang</p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-white/40">Included litsenziyalar</span>
+            <Input
+              type="number"
+              min={1}
+              max={10000}
+              value={value}
+              onChange={(e) => setLicensesInput(e.target.value)}
+              className="h-7 w-20 bg-white/5 border-white/10 text-white text-xs"
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-7 text-xs"
+              disabled={save.isPending || Number(value) === subscription.includedLicenses}
+              onClick={() => { void handleSave(); }}
+            >
+              Saqlash
+            </Button>
+          </div>
+          {data.licenseList.length > 0 && (
+            <div className="space-y-1">
+              {data.licenseList.map((license) => (
+                <div key={license.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-white/4 text-[11px]">
+                  <span className="text-white/80 truncate">
+                    {license.employeeName ?? license.userName ?? license.userPhone}
+                    {license.isOwner ? " (egasi)" : ""}
+                  </span>
+                  <span className="text-white/40 shrink-0">
+                    {LICENSE_TYPE_LABEL[license.licenseType]} · {LICENSE_STATUS_LABEL[license.status]}
+                    {license.expiresAt ? ` · ${formatDay(license.expiresAt)}` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </InfoSection>
   );
 }
 

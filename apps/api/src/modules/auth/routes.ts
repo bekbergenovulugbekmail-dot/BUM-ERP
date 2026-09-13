@@ -13,6 +13,8 @@
  *   pin.removePin             → POST /pin/remove
  *   pin.verifyPin             → POST /pin/verify   (doim 200, { success, reason })
  *   pin.setAutoLockTimeout    → PUT  /auto-lock
+ *   (yangi)                   → POST /lock         ekranni qulflash (sessiya saqlanadi; PIN o'rnatilgan bo'lishi shart)
+ *   (yangi)                   → POST /unlock       shu sessiyani PIN bilan ochish (doim 200, { success, reason })
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -23,14 +25,16 @@ import { smsProvider } from "../../shared/sms.js";
 import { changeOwnPassword, verifyCurrentPassword } from "../users/user-admin.service.js";
 import { confirmPasswordReset, requestPasswordReset } from "./password-reset.service.js";
 import { authenticate, buildMe, startSession } from "./auth.service.js";
-import { authOf, requireAuth } from "./guard.js";
+import { authOf, requireAuth, requireSession } from "./guard.js";
 import {
   changePin,
+  lockSession,
   pinFailureError,
   removePin,
   securitySettings,
   setAutoLockTimeout,
   setPin,
+  unlockSession,
   verifyPin,
 } from "./pin.service.js";
 import {
@@ -66,6 +70,7 @@ const verifyPinBody = z.object({
   expectedCompanyId: z.string().nullish(),
 });
 const autoLockBody = z.object({ seconds: z.number() });
+const unlockBody = z.object({ pin: z.string().max(16) });
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post("/login", async (req, reply) => {
@@ -101,8 +106,25 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
-  app.get("/me", { preHandler: requireAuth }, async (req) => {
-    return { user: await buildMe(db, authOf(req).user) };
+  // Qulflangan sessiyada ham ochiq — ilova qulf ekranini ko'rsatishi uchun
+  app.get("/me", { preHandler: requireSession }, async (req) => {
+    const session = authOf(req);
+    return { user: await buildMe(db, session.user, { sessionLocked: session.lockedAt !== null }) };
+  });
+
+  // ─── Ekran qulfi (LOCK ≠ LOGOUT) ─────────────────────────────────────────
+
+  app.post("/lock", { preHandler: requireSession }, async (req) => {
+    const session = authOf(req);
+    await withTransaction((tx) => lockSession(tx, session, requestMeta(req)));
+    return { ok: true, locked: true };
+  });
+
+  /** Doim 200: `{ success, reason }` — urinishlar hisobi commit bo'lishi uchun xato tashlanmaydi. */
+  app.post("/unlock", { preHandler: requireSession }, async (req) => {
+    const { pin } = unlockBody.parse(req.body);
+    const session = authOf(req);
+    return withTransaction((tx) => unlockSession(tx, session, pin, requestMeta(req)));
   });
 
   app.post("/password", { preHandler: requireAuth }, async (req, reply) => {

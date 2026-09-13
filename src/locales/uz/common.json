@@ -1,6 +1,7 @@
 {
   "app.name": "BUM ERP",
   "nav.dashboard": "Dashboard",
+  "nav.subscription": "Obuna",
   "nav.sales": "Sotuv",
   "nav.pos": "Kassa (POS)",
   "nav.products": "Mahsulotlar",

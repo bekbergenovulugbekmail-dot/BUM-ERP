@@ -186,24 +186,21 @@ describe("Sozlamalar", () => {
     // Ro'yxatdan o'tish standart holatda yopiq
     expect((await asAdmin("GET", "/settings")).json().settings).toEqual({
       registrationEnabled: false,
-      defaultTrialDays: 14,
       platformName: "BUM ERP",
       supportEmail: "",
     });
 
     const saved = await asAdmin("PUT", "/settings", {
       registrationEnabled: true,
-      defaultTrialDays: 30,
       supportEmail: "help@bum.uz",
     });
     expect(saved.statusCode).toBe(200);
-    expect(saved.json().settings).toMatchObject({ registrationEnabled: true, defaultTrialDays: 30 });
+    expect(saved.json().settings).toMatchObject({ registrationEnabled: true });
 
-    expect((await asAdmin("PUT", "/settings", { defaultTrialDays: 7 })).statusCode).toBe(200);
+    expect((await asAdmin("PUT", "/settings", { platformName: "BUM" })).statusCode).toBe(200);
     expect((await asAdmin("GET", "/settings")).json().settings).toEqual({
       registrationEnabled: true,
-      defaultTrialDays: 7,
-      platformName: "BUM ERP",
+      platformName: "BUM",
       supportEmail: "help@bum.uz",
     });
 
@@ -211,7 +208,7 @@ describe("Sozlamalar", () => {
       .select()
       .from(settings)
       .where(and(isNull(settings.companyId), eq(settings.group, "platform")));
-    expect(rows.map((r) => r.key).sort()).toEqual(["defaultTrialDays", "registrationEnabled", "supportEmail"]);
+    expect(rows.map((r) => r.key).sort()).toEqual(["platformName", "registrationEnabled", "supportEmail"]);
     expect(await db.select().from(auditLogs).where(eq(auditLogs.action, "PLATFORM_SETTINGS_UPDATED"))).toHaveLength(2);
   });
 

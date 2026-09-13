@@ -27,9 +27,15 @@ import {
   Building2,
   ChevronDown,
   Shield,
+  CreditCard,
+  Lock,
+  KeyRound,
   type LucideIcon,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import type { AccessDenialReason } from "@bum/shared";
 import { NavLink, useParams, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils.ts";
@@ -60,6 +66,12 @@ import { isAgentOnly, isDeliveryAgentOnly } from "@/lib/agent-access.ts";
 import { Authenticated, Unauthenticated } from "@/components/auth-gates.tsx";
 import { useTheme } from "next-themes";
 import { isAdminSubdomain } from "@/lib/subdomain.ts";
+import LockScreen from "@/components/lock-screen.tsx";
+import SetPinDialog from "@/components/set-pin-dialog.tsx";
+import { LOCKED_EVENT, errorMessage } from "@/lib/api.ts";
+import { AUTH_ME_KEY } from "@/lib/query.ts";
+import { requestLock } from "@/lib/session-lock.ts";
+import { ACCESS_DENIAL_LABEL, formatDay, subscriptionBlocked } from "@/lib/subscription.ts";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   LayoutDashboard,
@@ -78,6 +90,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   BrainCircuit,
   Settings,
   PackageCheck,
+  CreditCard,
 };
 
 function getIcon(name: string): LucideIcon {
@@ -311,8 +324,28 @@ function UserMenu() {
   const { lng } = useParams<{ lng: string }>();
   const navigate = useNavigate();
   const currentUser = useCurrentUser();
+  const queryClient = useQueryClient();
+  const [pinDialogOpen, setPinDialogOpen] = useState(false);
+
+  // LOCK — sessiya saqlanadi (LOGOUT emas); PIN bo'lmasa avval o'rnatiladi
+  const lockScreen = async () => {
+    try {
+      if ((await requestLock(queryClient)) === "needs_pin") setPinDialogOpen(true);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
 
   return (
+    <>
+    <SetPinDialog
+      open={pinDialogOpen}
+      onOpenChange={setPinDialogOpen}
+      onSaved={() => {
+        setPinDialogOpen(false);
+        void lockScreen();
+      }}
+    />
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" className="h-8 gap-2 px-2">
@@ -348,6 +381,10 @@ function UserMenu() {
             <DropdownMenuSeparator />
           </>
         )}
+        <DropdownMenuItem className="cursor-pointer" onClick={() => { void lockScreen(); }}>
+          <Lock className="mr-2 h-4 w-4" />
+          Ekranni bloklash
+        </DropdownMenuItem>
         <DropdownMenuItem
           className="cursor-pointer text-destructive focus:text-destructive"
           onClick={() => signout?.()}
@@ -357,6 +394,7 @@ function UserMenu() {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    </>
   );
 }
 
@@ -572,6 +610,93 @@ function SuspendedScreen({
   );
 }
 
+// ─── Litsenziyasi yo'q xodim ekrani ───────────────────────────────────────────
+
+function LicenseBlockedScreen({ reason, companyName, lng }: { reason: AccessDenialReason; companyName: string; lng: string }) {
+  const { signout } = useAuth();
+  const myCompanies = useMyCompanies();
+  const switchCompany = useSwitchCompany();
+  const navigate = useNavigate();
+  const otherCompanies = (myCompanies ?? []).filter((c) => !c.isCurrent && c.membershipActive && c.isActive);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-background to-muted flex items-center justify-center p-4">
+      <div className="max-w-md w-full text-center space-y-6">
+        <div className="mx-auto h-20 w-20 rounded-2xl flex items-center justify-center bg-amber-500/10 border-2 border-amber-500/30">
+          <KeyRound className="h-10 w-10 text-amber-500" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">{ACCESS_DENIAL_LABEL[reason]}</h1>
+          <p className="text-muted-foreground mt-2 text-sm">
+            <span className="font-medium">{companyName}</span> kompaniyasida BUM ERP dasturidan foydalanish uchun faol litsenziya kerak.
+            Kompaniya egasiga murojaat qiling.
+          </p>
+        </div>
+        {otherCompanies.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Boshqa kompaniyaga o'ting</p>
+            {otherCompanies.map((c) => (
+              <button
+                key={c.id}
+                onClick={async () => {
+                  await switchCompany.mutateAsync(c.id);
+                  navigate(`/${lng}/dashboard`);
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl border border-border hover:border-primary/40 hover:bg-accent transition-colors text-left"
+              >
+                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span className="text-sm font-medium">{c.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <Button variant="ghost" onClick={() => signout()} className="w-full text-muted-foreground">
+          <LogOut className="h-4 w-4 mr-2" />
+          Tizimdan chiqish
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Trial ogohlantirishi / obuna tugagani ────────────────────────────────────
+
+function SubscriptionBanner() {
+  const { lng = "uz" } = useParams<{ lng: string }>();
+  const me = useCurrentUser();
+  const permissions = useActiveCompany(Boolean(me?.hasCompany)).data?.permissions;
+  const subscription = me?.subscription;
+  if (!subscription) return null;
+  const blocked = subscriptionBlocked(subscription);
+  if (!blocked && subscription.trialWarning === null) return null;
+  const canView = permissions?.includes("subscription.view") ?? false;
+
+  return (
+    <div
+      role="status"
+      className={cn(
+        "px-4 py-2 text-sm flex flex-wrap items-center gap-x-3 gap-y-1 border-b shrink-0",
+        blocked
+          ? "bg-destructive/10 border-destructive/20 text-destructive"
+          : "bg-amber-50 border-amber-200 text-amber-900 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-200",
+      )}
+    >
+      <span className="font-medium">
+        {blocked
+          ? `BUM ERP obunangiz muddati tugagan (${formatDay(subscription.expiresAt)}). Faqat Bosh sahifa va Obuna ochiq.`
+          : `BUM ERP sinov muddati tugashiga ${subscription.daysLeft} kun qoldi (${formatDay(subscription.expiresAt)}).`}
+      </span>
+      {canView ? (
+        <NavLink to={`/${lng}/subscription`} className="underline font-semibold">
+          {blocked ? "OBUNANI UZAYTIRISH" : "Obunani faollashtirish"}
+        </NavLink>
+      ) : (
+        <span className="opacity-80">Kompaniya egasiga murojaat qiling.</span>
+      )}
+    </div>
+  );
+}
+
 // Main layout
 export default function ERPLayout({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -581,6 +706,14 @@ export default function ERPLayout({ children }: { children: React.ReactNode }) {
   const currentUser = useCurrentUser();
   const myCompanies = useMyCompanies(Boolean(currentUser));
   const permissions = useActiveCompany(Boolean(currentUser?.hasCompany)).data?.permissions;
+  const queryClient = useQueryClient();
+
+  // Boshqa oynada qulflangan sessiya (423) — /me qayta olinadi va qulf ekrani chiqadi
+  useEffect(() => {
+    const onLocked = () => { void queryClient.invalidateQueries({ queryKey: AUTH_ME_KEY }); };
+    window.addEventListener(LOCKED_EVENT, onLocked);
+    return () => window.removeEventListener(LOCKED_EVENT, onLocked);
+  }, [queryClient]);
 
   // HARD BLOCK: admin subdomain must NEVER show ERP layout or onboarding.
   // Redirect to /admin immediately regardless of auth state.
@@ -592,6 +725,11 @@ export default function ERPLayout({ children }: { children: React.ReactNode }) {
   // currentUser===undefined means still loading — don't redirect yet.
   if (currentUser === null) {
     return <Navigate to={`/${lng ?? "uz"}/login`} replace state={{ from: location }} />;
+  }
+
+  // Ekran qulflangan — sessiya saqlangan, faqat PIN bilan ochiladi
+  if (currentUser?.sessionLocked) {
+    return <LockScreen me={currentUser} />;
   }
 
   // Guard: authenticated user with no company.
@@ -624,6 +762,21 @@ export default function ERPLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // Litsenziyasi yo'q / to'lanmagan / tugagan xodim — server ham rad etadi
+  if (currentUser?.licenseDenial) {
+    return (
+      <LicenseBlockedScreen reason={currentUser.licenseDenial} companyName={currentUser.companyName ?? ""} lng={lng ?? "uz"} />
+    );
+  }
+
+  // Obuna tugagan — faqat Bosh sahifa va Obuna (ma'lumot o'chmaydi, uzaytirilgach hammasi ochiladi)
+  if (currentUser && subscriptionBlocked(currentUser.subscription)) {
+    const section = location.pathname.split("/")[2] ?? "";
+    if (section !== "dashboard" && section !== "subscription") {
+      return <Navigate to={`/${lng ?? "uz"}/dashboard`} replace />;
+    }
+  }
+
   // Faqat sotuv agenti ruxsati bor xodim — mobil ish joyiga (ERP menyusi unga kerak emas)
   if (permissions && isAgentOnly(permissions)) {
     return <Navigate to={`/${lng ?? "uz"}/sales-agent`} replace />;
@@ -646,6 +799,7 @@ export default function ERPLayout({ children }: { children: React.ReactNode }) {
       {/* Main content area */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <TopBar onMenuToggle={() => setMobileDrawerOpen(true)} />
+        <SubscriptionBanner />
         <main className="flex-1 overflow-auto pb-16 md:pb-0">
           {children}
         </main>

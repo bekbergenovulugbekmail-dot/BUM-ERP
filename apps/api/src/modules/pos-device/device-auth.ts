@@ -9,14 +9,16 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
-import { forbidden, unauthenticated } from "@bum/shared";
+import { effectiveSubscriptionStatus, forbidden, unauthenticated } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { companies, users } from "../../db/schema/platform.js";
 import { posDevices } from "../../db/schema/pos.js";
+import { subscriptions } from "../../db/schema/subscription.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { requirePermission, requireTenant, type TenantContext } from "../company/tenant.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
+import { accessDenied, subscriptionDenial, type SubscriptionSnapshot } from "../subscription/access.js";
 
 export const DEVICE_TOKEN_PREFIX = "bumpos_";
 
@@ -29,7 +31,15 @@ export function newDeviceToken() {
 
 export type DeviceContext = {
   device: { id: string; name: string; code: string; warehouseId: string; warehouseName: string };
-  company: { id: string; name: string; currency: string; status: string; isActive: boolean; trialEndsAt: Date | null };
+  company: {
+    id: string;
+    name: string;
+    currency: string;
+    status: string;
+    isActive: boolean;
+    trialEndsAt: Date | null;
+    subscription: SubscriptionSnapshot | null;
+  };
 };
 
 declare module "fastify" {
@@ -57,10 +67,13 @@ export async function requireDevice(req: FastifyRequest, _reply: FastifyReply): 
       status: companies.status,
       companyActive: companies.isActive,
       trialEndsAt: companies.trialEndsAt,
+      subscriptionStatus: subscriptions.status,
+      subscriptionExpiresAt: subscriptions.expiresAt,
     })
     .from(posDevices)
     .innerJoin(companies, eq(companies.id, posDevices.companyId))
     .innerJoin(warehouses, eq(warehouses.id, posDevices.warehouseId))
+    .leftJoin(subscriptions, eq(subscriptions.companyId, posDevices.companyId))
     .where(eq(posDevices.tokenHash, hashDeviceToken(token)))
     .limit(1);
   if (!row || !row.isActive) throw unauthenticated("Kassa qurilmasi ro'yxatdan o'tmagan yoki o'chirilgan");
@@ -75,8 +88,24 @@ export async function requireDevice(req: FastifyRequest, _reply: FastifyReply): 
       status: row.status,
       isActive: row.companyActive,
       trialEndsAt: row.trialEndsAt,
+      subscription: row.subscriptionStatus ? { status: row.subscriptionStatus, expiresAt: row.subscriptionExpiresAt } : null,
     },
   };
+}
+
+/**
+ * Obuna tugagan kompaniya qurilmasi: sinxron (pull/push) va kassir kirishi yopiq — butun so'rov 403, ya'ni
+ * kassadagi offline amallar navbatda qoladi va obuna uzaytirilgach yuboriladi (hech narsa yo'qolmaydi).
+ */
+export function assertDeviceSubscription(context: DeviceContext): void {
+  const denial = subscriptionDenial(context.company.subscription);
+  if (denial) throw accessDenied(denial, context.company.subscription);
+}
+
+export function deviceSubscriptionView(context: DeviceContext) {
+  const subscription = context.company.subscription;
+  if (!subscription) return null;
+  return { status: effectiveSubscriptionStatus(subscription), expiresAt: subscription.expiresAt?.toISOString() ?? null };
 }
 
 export function deviceOf(req: FastifyRequest): DeviceContext {

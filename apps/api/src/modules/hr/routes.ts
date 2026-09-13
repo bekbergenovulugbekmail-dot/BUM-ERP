@@ -4,6 +4,9 @@
  *   GET    /departments, /positions (?departmentId=), /employees (?departmentId=&status=&search=&limit=),
  *          /employees/stats, /employees/:employeeId                             hr.view (maxfiy maydonlar — hr.manage)
  *   POST / PATCH / DELETE  /departments, /positions, /employees                  hr.manage
+ *          (POST /employees {softwareAccess} — qo'shimcha employee.software_access.manage)
+ *   POST   /employees/:employeeId/software-access   bepul → dasturdan foydalanuvchi   hr.manage + employee.software_access.manage
+ *   DELETE /employees/:employeeId/software-access   dasturdan foydalanuvchi → bepul   hr.manage + employee.software_access.manage
  *   GET    /attendance (?employeeId=&month=&date=&limit=), /attendance/stats?month=   hr.view
  *   PUT    /attendance, /attendance/bulk                                          hr.attendance
  *   GET    /leaves (?employeeId=&status=&limit=)                                  hr.view
@@ -15,7 +18,7 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { Permission } from "@bum/shared";
+import { PIN_PATTERN, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
@@ -23,7 +26,16 @@ import { decimalSchema, moneySchema, percentSchema, qtySchema } from "../../shar
 import { authOf, requireAuth } from "../auth/guard.js";
 import { requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import { attendanceStats, bulkRecordAttendance, listAttendance, recordAttendance } from "./attendance.service.js";
-import { createEmployee, deleteEmployee, employeeStats, getEmployee, listEmployees, updateEmployee } from "./employees.service.js";
+import {
+  createEmployee,
+  deleteEmployee,
+  disableSoftwareAccess,
+  employeeStats,
+  enableSoftwareAccess,
+  getEmployee,
+  listEmployees,
+  updateEmployee,
+} from "./employees.service.js";
 import { createLeave, decideLeave, deleteLeave, listLeaves } from "./leaves.service.js";
 import {
   createDepartment,
@@ -95,8 +107,29 @@ const employeeBody = z.strictObject({
   baseSalary: moneySchema,
   salaryType: z.enum(["monthly", "hourly", "daily"]),
   notes: nullableText(2000),
+  /** Berilsa — "BEPUL" o'chiq: xodim dasturdan foydalanadi (login, parol, PIN, rol, litsenziya). */
+  softwareAccess: z
+    .strictObject({
+      phone: z.string().min(1).max(32),
+      password: z.string().min(1).max(256),
+      pin: z.string().regex(PIN_PATTERN, "PIN 4-8 ta raqamdan iborat bo'lishi kerak"),
+      role: z.string().trim().min(1).max(100),
+      additionalLicensePlanId: z.uuid().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
 });
-const employeePatch = employeeBody.partial().extend({ status: z.enum(["active", "on_leave", "terminated"]).optional() });
+const employeePatch = employeeBody
+  .omit({ softwareAccess: true })
+  .partial()
+  .extend({ status: z.enum(["active", "on_leave", "terminated"]).optional() });
+const softwareAccessBody = z.strictObject({
+  phone: z.string().min(1).max(32).optional(),
+  password: z.string().min(1).max(256).optional(),
+  pin: z.string().regex(PIN_PATTERN, "PIN 4-8 ta raqamdan iborat bo'lishi kerak").optional(),
+  role: z.string().trim().min(1).max(100).optional(),
+  additionalLicensePlanId: z.uuid().nullable().optional(),
+});
 const employeesQuery = z.object({
   departmentId: z.uuid().optional(),
   status: z.enum(["active", "on_leave", "terminated"]).optional(),
@@ -253,9 +286,31 @@ export async function hrRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/employees", async (req, reply) => {
-    const body = employeeBody.parse(req.body);
-    const employee = await writeInTenant(req, "hr.manage", (tx, t) => createEmployee(tx, t, body, requestMeta(req)));
+    const { softwareAccess, ...body } = employeeBody.parse(req.body);
+    const employee = await writeInTenant(req, "hr.manage", async (tx, t) => {
+      if (softwareAccess) await requirePermission(tx, t, "employee.software_access.manage");
+      return createEmployee(tx, t, body, requestMeta(req), softwareAccess ?? null);
+    });
     reply.status(201);
+    return { employee };
+  });
+
+  app.post("/employees/:employeeId/software-access", async (req) => {
+    const id = param(req, "employeeId");
+    const body = softwareAccessBody.parse(req.body);
+    const employee = await writeInTenant(req, "hr.manage", async (tx, t) => {
+      await requirePermission(tx, t, "employee.software_access.manage");
+      return enableSoftwareAccess(tx, t, id, body, requestMeta(req));
+    });
+    return { employee };
+  });
+
+  app.delete("/employees/:employeeId/software-access", async (req) => {
+    const id = param(req, "employeeId");
+    const employee = await writeInTenant(req, "hr.manage", async (tx, t) => {
+      await requirePermission(tx, t, "employee.software_access.manage");
+      return disableSoftwareAccess(tx, t, id, requestMeta(req));
+    });
     return { employee };
   });
 

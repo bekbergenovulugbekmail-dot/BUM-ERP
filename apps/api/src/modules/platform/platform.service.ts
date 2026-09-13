@@ -74,9 +74,9 @@ export async function listUsers(
 
 // ─── Sozlamalar ──────────────────────────────────────────────────────────────
 
+/** Sinov muddati sozlama emas: har yangi kompaniya — 25 kun (`TRIAL_DAYS`, obuna tizimi). */
 export type PlatformSettings = {
   registrationEnabled: boolean;
-  defaultTrialDays: number;
   platformName: string;
   supportEmail: string;
 };
@@ -86,14 +86,12 @@ const PLATFORM_GROUP = "platform";
 const DEFAULTS: PlatformSettings = {
   // Qaror: o'zi ro'yxatdan o'tish standart holatda YOPIQ — platforma admini yoqadi
   registrationEnabled: false,
-  defaultTrialDays: 14,
   platformName: "BUM ERP",
   supportEmail: "",
 };
 
 const DESCRIPTIONS: Record<keyof PlatformSettings, string> = {
   registrationEnabled: "Yangi kompaniya ro'yxatdan o'tishini yoqish/o'chirish",
-  defaultTrialDays: "Yangi kompaniya uchun sinov muddati (kun)",
   platformName: "Platforma nomi",
   supportEmail: "Qo'llab-quvvatlash email",
 };
@@ -105,10 +103,8 @@ export async function getPlatformSettings(conn: DbOrTx): Promise<PlatformSetting
     .where(and(isNull(settings.companyId), eq(settings.group, PLATFORM_GROUP)));
   const stored = new Map(rows.map((r) => [r.key, r.value]));
 
-  const trialDays = Number.parseInt(stored.get("defaultTrialDays") ?? "", 10);
   return {
     registrationEnabled: (stored.get("registrationEnabled") ?? String(DEFAULTS.registrationEnabled)) === "true",
-    defaultTrialDays: Number.isInteger(trialDays) && trialDays >= 0 ? trialDays : DEFAULTS.defaultTrialDays,
     platformName: stored.get("platformName") ?? DEFAULTS.platformName,
     supportEmail: stored.get("supportEmail") ?? DEFAULTS.supportEmail,
   };

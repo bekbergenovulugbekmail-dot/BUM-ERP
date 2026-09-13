@@ -64,7 +64,7 @@ import { listConflicts, resolveConflict } from "./conflicts.service.js";
 import { currentRelease, downloadableRelease, parseByteRange, releaseByteRange, releaseChunks } from "../platform/desktop-releases.service.js";
 import { desktopUpdate } from "./app-update.service.js";
 import { deviceAnalytics } from "./device-analytics.service.js";
-import { cashierTenant, deviceOf, requireDevice } from "./device-auth.js";
+import { assertDeviceSubscription, cashierTenant, deviceOf, deviceSubscriptionView, requireDevice } from "./device-auth.js";
 import { deviceWarehouses, listDevices, registerDevice, setupTenant, updateDevice } from "./devices.service.js";
 import { deviceProductStock, findDevicePurchase, findDeviceReceipt, listDeviceMovements, listDeviceSales } from "./receipts.service.js";
 import { DEFAULT_PULL_LIMIT, PULL_ENTITIES, pullChanges } from "./sync-pull.service.js";
@@ -224,6 +224,12 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
 
   await app.register(async (scoped) => {
     scoped.addHook("preHandler", requireDevice);
+    // Obuna tugagan: holat va yangilanish ochiq (kassa sababni ko'rsatadi); sinxron, kassir kirishi va boshqa amallar yopiq
+    scoped.addHook("preHandler", async (req) => {
+      const url = req.routeOptions.url ?? "";
+      if (url.endsWith("/session") || url.endsWith("/app-update") || url.includes("/releases/")) return;
+      assertDeviceSubscription(deviceOf(req));
+    });
 
     scoped.get("/session", async (req) => {
       const context = deviceOf(req);
@@ -236,6 +242,7 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
           currency: context.company.currency,
           status: context.company.status,
           trialEndsAt: context.company.trialEndsAt?.toISOString() ?? null,
+          subscription: deviceSubscriptionView(context),
         },
         serverTime: new Date().toISOString(),
       };

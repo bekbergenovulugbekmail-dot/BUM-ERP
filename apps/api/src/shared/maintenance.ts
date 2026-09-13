@@ -12,6 +12,7 @@ import { withTransaction } from "../db/transaction.js";
 import { autoEndStaleDeliverySessions, purgeDeliveryLocations } from "../modules/delivery/work-session.repo.js";
 import { purgeAgentLocations } from "../modules/sales-agent/location.service.js";
 import { autoEndStaleSessions } from "../modules/sales-agent/work-session.repo.js";
+import { processSubscriptionExpiry, type ExpiryResult } from "../modules/subscription/subscription.service.js";
 
 const RETENTION_MS = 24 * 60 * 60 * 1000;
 const INTERVAL_MS = 60 * 60 * 1000;
@@ -67,6 +68,20 @@ export async function purgeExpired(now = new Date()): Promise<PurgeResult | null
   });
 }
 
+/**
+ * Obuna va qo'shimcha litsenziyalar muddati tugashi (holat + tarix + audit) va trial ogohlantirishlari.
+ * Kirish nazorati bunga bog'liq emas — guard har so'rovda sanani o'zi tekshiradi; bu yozuvlarni holatga keltiradi.
+ */
+export async function runSubscriptionExpiry(now = new Date()): Promise<ExpiryResult | null> {
+  return withTransaction(async (tx) => {
+    const lock = await tx.execute<{ locked: boolean }>(
+      sql`select pg_try_advisory_xact_lock(hashtext('maintenance:subscription-expiry')) as locked`,
+    );
+    if (!lock.rows[0]?.locked) return null;
+    return processSubscriptionExpiry(tx, now);
+  });
+}
+
 /** Darhol bir marta, keyin har soatda. Qaytarilgan funksiya to'xtatadi. */
 export function startMaintenance(log: FastifyBaseLogger): () => void {
   let running = false;
@@ -77,6 +92,10 @@ export function startMaintenance(log: FastifyBaseLogger): () => void {
       const result = await purgeExpired();
       if (result && Object.values(result).some((count) => count > 0)) {
         log.info({ purged: result }, "Eskirgan yozuvlar tozalandi");
+      }
+      const expiry = await runSubscriptionExpiry();
+      if (expiry && Object.values(expiry).some((count) => count > 0)) {
+        log.info({ subscriptions: expiry }, "Obuna va litsenziya muddatlari yangilandi");
       }
     } catch (error) {
       log.error({ err: error }, "Davriy tozalash xatosi");

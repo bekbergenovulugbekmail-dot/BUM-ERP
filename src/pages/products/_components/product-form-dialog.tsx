@@ -72,6 +72,7 @@ const schema = z.object({
   isPurchaseable: z.boolean(),
   isManufactured: z.boolean(),
   weight: z.number().optional(),
+  weightUnit: z.enum(["kg", "g", "t"]),
   isWeighted: z.boolean(),
   pluCode: z.number().int().min(1, "PLU 1–999999").max(999999, "PLU 1–999999").optional(),
 });
@@ -92,6 +93,7 @@ const EMPTY_VALUES: FormValues = {
   minStock: 0,
   trackBatch: false, trackExpiry: false,
   isSaleable: true, isPurchaseable: true, isManufactured: false,
+  weightUnit: "kg",
   isWeighted: false,
 };
 
@@ -132,6 +134,8 @@ function toPayload(values: FormValues) {
     isPurchaseable: values.isPurchaseable,
     isManufactured: values.isManufactured,
     weight: numOrNull(values.weight),
+    // Birlik faqat og'irlik kiritilganda (avtomatik biriktirishda transport yuki shu bilan hisoblanadi)
+    weightUnit: numOrNull(values.weight) === null ? null : values.weightUnit,
     isWeighted: values.isWeighted,
     pluCode: values.pluCode ?? null,
   };
@@ -206,6 +210,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
         isPurchaseable: existingProduct.isPurchaseable,
         isManufactured: existingProduct.isManufactured,
         weight: optionalNumber(existingProduct.weight),
+        weightUnit: existingProduct.weightUnit === "g" || existingProduct.weightUnit === "t" ? existingProduct.weightUnit : "kg",
         isWeighted: existingProduct.isWeighted ?? false,
         pluCode: existingProduct.pluCode ?? undefined,
       });
@@ -645,8 +650,21 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                   <div className="grid grid-cols-2 gap-4">
                     <FormField control={form.control} name="weight" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Og'irligi (kg)</FormLabel>
-                        <FormControl><Input type="number" step="0.001" min="0" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.valueAsNumber || undefined)} /></FormControl>
+                        <FormLabel>Og'irligi (1 asosiy birlik)</FormLabel>
+                        <div className="flex gap-2">
+                          <FormControl><Input type="number" step="0.001" min="0" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.valueAsNumber || undefined)} /></FormControl>
+                          <FormField control={form.control} name="weightUnit" render={({ field: unit }) => (
+                            <Select value={unit.value} onValueChange={unit.onChange}>
+                              <SelectTrigger className="w-20" aria-label="Og'irlik birligi"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="kg">kg</SelectItem>
+                                <SelectItem value="g">g</SelectItem>
+                                <SelectItem value="t">t</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          )} />
+                        </div>
+                        <p className="text-xs text-muted-foreground">Dostavkada transport yuk sig'imi shu bilan hisoblanadi</p>
                       </FormItem>
                     )} />
                     <FormField control={form.control} name="pluCode" render={({ field }) => (

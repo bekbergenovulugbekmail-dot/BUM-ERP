@@ -12,6 +12,7 @@ import { z } from "zod";
 import { db } from "../../db/client.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 import { requirePermission, requireTenant, type TenantContext } from "../company/tenant.js";
+import type { TenantAccess } from "../subscription/access.js";
 import { getDashboard } from "./dashboard.service.js";
 import {
   biOverview,
@@ -26,8 +27,8 @@ import {
 const daysQuery = z.object({ days: z.coerce.number().int().min(1).max(366).default(30) });
 const topCustomersQuery = daysQuery.extend({ limit: z.coerce.number().int().min(1).max(50).default(10) });
 
-async function readTenant(req: FastifyRequest): Promise<TenantContext> {
-  const tenant = await requireTenant(db, authOf(req).user);
+async function readTenant(req: FastifyRequest, access: TenantAccess = "business"): Promise<TenantContext> {
+  const tenant = await requireTenant(db, authOf(req).user, { access });
   await requirePermission(db, tenant, "analytics.view");
   return tenant;
 }
@@ -35,7 +36,8 @@ async function readTenant(req: FastifyRequest): Promise<TenantContext> {
 export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", requireAuth);
 
-  app.get("/dashboard", async (req) => getDashboard(db, await readTenant(req)));
+  // Obuna tugaganda ham ochiq (Bosh sahifa + Obuna); hisobotlar — yopiq
+  app.get("/dashboard", async (req) => getDashboard(db, await readTenant(req, "dashboard")));
 
   app.get("/reports/sales", async (req) => {
     const { days } = daysQuery.parse(req.query);

@@ -24,6 +24,8 @@ import {
 import { addEmployee, resetDatabase, signedIn } from "./helpers.js";
 
 type Socket = Awaited<ReturnType<FastifyInstance["injectWS"]>>;
+/** `injectWS` natijasi va `onInit` dagi ulanish turli `ws` tip e'lonlaridan — tinglash uchun umumiy qism yetadi. */
+type MessageSource = { on(event: "message", listener: (data: unknown) => void): unknown };
 type Predicate = (message: DeliveryRealtimeMessage) => boolean;
 
 let app: FastifyInstance;
@@ -52,7 +54,7 @@ beforeEach(async () => {
 });
 
 /** Kelgan xabarlar va kutish (xabar oldin kelgan bo'lsa ham topiladi). */
-function listen(socket: Socket) {
+function listen(socket: MessageSource) {
   const messages: DeliveryRealtimeMessage[] = [];
   const waiters: { predicate: Predicate; resolve: (message: DeliveryRealtimeMessage) => void }[] = [];
   socket.on("message", (data) => {

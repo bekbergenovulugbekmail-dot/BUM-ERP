@@ -9,6 +9,7 @@
  */
 import { useCallback, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { AccessDenialReason, SubscriptionStatus } from "@bum/shared";
 import { api, ApiError, errorMessage } from "@/lib/api.ts";
 import { AUTH_ME_KEY } from "@/lib/query.ts";
 import type { CompanyStatus } from "./use-company.ts";
@@ -27,9 +28,22 @@ export type Me = {
   companyCurrency: string | null;
   companySlug: string | null;
   companyRole: string | null;
-  /** Amaldagi holat — faol emas yoki sinov muddati tugagan kompaniya "suspended". */
+  /** Kompaniya holati (platforma admini qarori): faol emas — "suspended", tugatilgan — "cancelled". */
   companyStatus: CompanyStatus | null;
   companySuspendReason: string | null;
+  isCompanyOwner: boolean;
+  /** Obuna (server vaqti). Tugagan bo'lsa — faqat Bosh sahifa va Obuna ochiq. */
+  subscription: {
+    status: SubscriptionStatus;
+    isTrial: boolean;
+    expiresAt: string | null;
+    daysLeft: number | null;
+    trialWarning: number | null;
+  } | null;
+  /** Foydalanuvchi litsenziyasi bo'yicha kirish taqiqi (egasida doim null). */
+  licenseDenial: AccessDenialReason | null;
+  /** Ekran PIN bilan qulflangan — sessiya saqlangan. */
+  sessionLocked: boolean;
 };
 
 export type AppUser = {
