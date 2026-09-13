@@ -15,6 +15,7 @@ import type {
   DeliveryVehicleType,
   Permission,
 } from "@bum/shared";
+import type { RoutePlan } from "@/lib/maps/route-plan.ts";
 
 export const num = (value: string | number | null | undefined) => Number(value ?? 0) || 0;
 
@@ -89,6 +90,8 @@ export type DeliveryTaskRow = {
   customerAddress: string | null;
   customerLatitude: string | null;
   customerLongitude: string | null;
+  customerCity: string | null;
+  customerDistrict: string | null;
   assignedAt: string | null;
   startedAt: string | null;
   arrivedAt: string | null;
@@ -130,7 +133,7 @@ export type DeliveryEvent = {
   offline: boolean;
 };
 
-export type DeliveryTaskDetail = Omit<DeliveryTaskRow, "agentCode" | "agentName" | "orderNumber" | "orderTotal" | "customerName" | "customerPhone" | "customerAddress" | "customerLatitude" | "customerLongitude"> & {
+export type DeliveryTaskDetail = Omit<DeliveryTaskRow, "agentCode" | "agentName" | "orderNumber" | "orderTotal" | "customerName" | "customerPhone" | "customerAddress" | "customerLatitude" | "customerLongitude" | "customerCity" | "customerDistrict"> & {
   customerNote: string | null;
   deliveryNote: string | null;
   supervisorNote?: string | null;
@@ -343,5 +346,42 @@ export type ReadyOrder = {
   customerId: string;
   customerName: string;
   customerAddress: string | null;
+  customerCity: string | null;
+  customerDistrict: string | null;
+  customerLatitude: string | null;
+  customerLongitude: string | null;
   hasLocation: boolean;
+};
+
+/** `GET /api/delivery/dispatch` qatori: yetkazmasi yaratilmagan buyurtma yoki biriktirilmagan "tayyor" yetkazma. */
+export type DispatchItem = {
+  key: string;
+  kind: "order" | "task";
+  orderId: string;
+  orderNumber: string;
+  taskId: string | null;
+  taskNumber: string | null;
+  date: string | null;
+  totalAmount: string;
+  customerId: string;
+  customerName: string;
+  customerAddress: string | null;
+  city: string | null;
+  district: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  /** Mijoz kiritilgan faol distribyutsiya marshrutlari va undagi o'rni. */
+  routes: { id: string; name: string; color: string | null; position: number }[];
+};
+
+export type DispatchBoard = { items: DispatchItem[]; routes: { id: string; name: string; color: string | null }[]; truncated: boolean };
+
+export type DispatchAssignResult = {
+  taskIds: string[];
+  created: number;
+  assigned: number;
+  dates: string[];
+  optimized: boolean;
+  optimizeError: string | null;
+  routes: { date: string; route: RoutePlan; taskIds: string[]; unlocatedTaskIds: string[] }[];
 };

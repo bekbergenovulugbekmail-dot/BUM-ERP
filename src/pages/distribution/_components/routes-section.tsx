@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, Route, Users, Calendar, ChevronDown, ChevronUp, Trash2, UserPlus } from "lucide-react";
+import { Plus, Route, Users, Calendar, ChevronDown, ChevronUp, Trash2, UserPlus, Sparkles, MapPinOff } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -52,6 +52,9 @@ export default function RoutesSection() {
   const createVisit = useApiMutation((body: Record<string, unknown>) => api.post("/api/distribution/visits", body));
   const updateVisit = useApiMutation(({ id, status }: { id: string; status: VisitStatus }) =>
     api.patch(`/api/distribution/visits/${id}`, { status }));
+  // Mijozlar eng qisqa yo'l tartibiga (koordinatasizlari oxirida)
+  const optimizeRoute = useApiMutation((id: string) =>
+    api.post<{ plan: { totalMeters: number; stops: unknown[] } }>(`/api/distribution/routes/${id}/optimize`, { apply: true }), { invalidate: ["/api/distribution"] });
 
   const [createOpen, setCreateOpen] = useState(false);
   const [expandedRoute, setExpandedRoute] = useState<string | null>(null);
@@ -169,9 +172,23 @@ export default function RoutesSection() {
                 <div className="border-t border-border p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium">Mijozlar tartibi</p>
-                    <Button size="sm" variant="secondary" onClick={() => setAddCustOpen(route.id)}>
-                      <UserPlus className="h-3.5 w-3.5 mr-1" /> Mijoz qo'shish
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={optimizeRoute.isPending || expandedRouteData.customers.length < 2}
+                        title="Mijozlarni eng qisqa yo'l tartibiga qo'yish (koordinatasizlari oxirida)"
+                        onClick={() => void run(async () => {
+                          const result = await optimizeRoute.mutateAsync(route.id);
+                          toast.success(`Optimal tartib saqlandi · ${(result.plan.totalMeters / 1000).toFixed(1)} km`);
+                        })}
+                      >
+                        <Sparkles className="h-3.5 w-3.5 mr-1" /> Optimal tartib
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => setAddCustOpen(route.id)}>
+                        <UserPlus className="h-3.5 w-3.5 mr-1" /> Mijoz qo'shish
+                      </Button>
+                    </div>
                   </div>
                   {expandedRouteData.customers.length === 0 ? (
                     <p className="text-sm text-muted-foreground">Mijozlar yo'q</p>
@@ -181,8 +198,17 @@ export default function RoutesSection() {
                         <div key={rc.id} className="flex items-center gap-3 bg-muted/30 rounded-xl px-3 py-2">
                           <span className="text-xs font-bold text-muted-foreground w-5">{i + 1}</span>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium">{rc.customerName}</p>
-                            {rc.phone && <p className="text-xs text-muted-foreground">{rc.phone}</p>}
+                            <p className="flex items-center gap-1.5 text-sm font-medium">
+                              {(rc.latitude === null || rc.longitude === null) && (
+                                <MapPinOff className="h-3.5 w-3.5 shrink-0 text-amber-600" aria-label="Koordinata yo'q" />
+                              )}
+                              {rc.customerName}
+                            </p>
+                            {(rc.phone || rc.city || rc.district) && (
+                              <p className="text-xs text-muted-foreground">
+                                {[[rc.city, rc.district].filter(Boolean).join(" → "), rc.phone].filter(Boolean).join(" · ")}
+                              </p>
+                            )}
                           </div>
                           <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => void run(() => removeCustomer.mutateAsync({ routeId: route.id, memberId: rc.id }))}>
                             <Trash2 className="h-3 w-3" />

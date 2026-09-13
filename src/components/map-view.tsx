@@ -1,75 +1,206 @@
 /**
- * Sxematik xarita (tashqi xarita xizmatisiz): belgilar, chiziq (kunlik yo'l) va doiralar (geofence) koordinatalardan
- * teng masofali proyeksiyada chiziladi, pastda masshtab chizig'i. Belgi tanlansa — ma'lumot va qurilmaning xarita
- * ilovasida ochish havolasi. Tile/API yuklanmaydi, kalit talab qilinmaydi.
+ * Xarita: OpenStreetMap (bepul, kalitsiz) ustida Leaflet. Belgilar (do'kon, agent; marshrutdagi tartib raqami bilan),
+ * chiziqlar (yo'l bo'yicha marshrut, kunlik iz), doiralar (geofence) va hududlar. Belgi bosilganda — ma'lumot va
+ * navigatsiya havolalari (Google Maps, Yandex, Android navigator). Xarita qatlami yuklanmasa (internet yo'q) ham
+ * belgilar va chiziqlar koordinatalar bo'yicha chiziladi. Pullik xarita API'si ishlatilmaydi.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ExternalLink, MapPinOff, X } from "lucide-react";
+import type { TFunction } from "i18next";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { MapPinOff, Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
-import { mapAppUrl, type LatLng, type MapCircle, type MapMarker } from "@/lib/maps/index.ts";
+import { DEFAULT_MAP_CENTER } from "@/lib/maps/index.ts";
+import { googleDirectionsUrls, navigateToUrl, yandexRouteUrl } from "@/lib/maps/navigation.ts";
+import type { LatLng, MapCircle, MapMarker, MapPolygon, MapPolyline, MapTone } from "@/lib/maps/types.ts";
 
 type Props = {
   markers?: MapMarker[];
+  /** Asosiy chiziq (bitta). */
   polyline?: LatLng[];
+  /** Bir nechta chiziq (masalan, har marshrut o'z rangida). */
+  polylines?: MapPolyline[];
   circles?: MapCircle[];
+  polygons?: MapPolygon[];
   className?: string;
+  /** Belgi bosilganda (masalan, yetkazmani ochish). */
+  onMarkerClick?: (id: string) => void;
 };
 
-const WIDTH = 1000;
-const HEIGHT = 600;
-const PADDING = 60;
-const METERS_PER_DEGREE = 111_320;
-/** Bitta nuqta bo'lsa ham ko'rinadigan eng kichik hudud, metr. */
-const MIN_SPAN_METERS = 400;
-const SCALE_STEPS = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10_000, 20_000, 50_000, 100_000, 200_000];
+/** Xarita qatlami: standart — OpenStreetMap; o'z tile serveringiz bo'lsa `VITE_MAP_TILE_URL`. */
+const TILE_URL = (import.meta.env.VITE_MAP_TILE_URL as string | undefined) || "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>';
 
-const TONE_FILL: Record<NonNullable<MapMarker["tone"]>, string> = {
-  primary: "fill-primary",
-  online: "fill-emerald-500",
-  offline: "fill-muted-foreground",
-  warning: "fill-amber-500",
-  danger: "fill-destructive",
+const TONE_COLORS: Record<MapTone, string> = {
+  primary: "#4f46e5",
+  online: "#10b981",
+  offline: "#94a3b8",
+  warning: "#f59e0b",
+  danger: "#ef4444",
 };
-const TONE_STROKE: Record<NonNullable<MapMarker["tone"]>, string> = {
-  primary: "stroke-primary",
-  online: "stroke-emerald-500",
-  offline: "stroke-muted-foreground",
-  warning: "stroke-amber-500",
-  danger: "stroke-destructive",
-};
+/** Shundan ko'p belgida nomlar doimiy emas — faqat ustiga kelganda. */
+const PERMANENT_LABELS_LIMIT = 40;
+/** Shuncha xato tile ketma-ket bo'lsa — "qatlam yuklanmadi" ogohlantirishi. */
+const TILE_ERROR_THRESHOLD = 4;
 
-function projection(points: LatLng[]) {
-  const lats = points.map((point) => point.latitude);
-  const lngs = points.map((point) => point.longitude);
-  const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
-  const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
-  const lngFactor = Math.cos((centerLat * Math.PI) / 180) * METERS_PER_DEGREE;
-  const spanX = Math.max((Math.max(...lngs) - Math.min(...lngs)) * lngFactor, MIN_SPAN_METERS);
-  const spanY = Math.max((Math.max(...lats) - Math.min(...lats)) * METERS_PER_DEGREE, MIN_SPAN_METERS);
-  const scale = Math.min((WIDTH - PADDING * 2) / spanX, (HEIGHT - PADDING * 2) / spanY);
-  return {
-    x: (point: LatLng) => WIDTH / 2 + (point.longitude - centerLng) * lngFactor * scale,
-    y: (point: LatLng) => HEIGHT / 2 - (point.latitude - centerLat) * METERS_PER_DEGREE * scale,
-    px: (meters: number) => meters * scale,
-  };
+const safeColor = (value: string | undefined) => (value && /^#[0-9a-f]{3,8}$/i.test(value) ? value : null);
+const toLatLng = (point: LatLng): L.LatLngTuple => [point.latitude, point.longitude];
+
+function numberIcon(order: number, color: string) {
+  return L.divIcon({
+    className: "",
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -14],
+    tooltipAnchor: [14, 0],
+    html: `<span class="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-[11px] font-bold text-white shadow-md" style="background:${color}">${Math.trunc(order)}</span>`,
+  });
 }
 
-export default function MapView({ markers = [], polyline = [], circles = [], className }: Props) {
+/** Belgi ma'lumoti — DOM orqali (matn HTML sifatida talqin qilinmaydi). */
+function popupContent(marker: MapMarker, t: TFunction<"map">): HTMLElement {
+  const root = document.createElement("div");
+  root.className = "min-w-40 space-y-1";
+  const title = document.createElement("p");
+  title.className = "m-0! text-sm font-semibold";
+  title.textContent = marker.label ?? t("point");
+  root.append(title);
+  if (marker.description) {
+    const text = document.createElement("p");
+    text.className = "m-0! text-xs text-slate-600";
+    text.textContent = marker.description;
+    root.append(text);
+  }
+  const links = document.createElement("div");
+  links.className = "flex flex-wrap gap-x-3 gap-y-1 pt-1 text-xs font-medium";
+  const add = (href: string, label: string) => {
+    const link = document.createElement("a");
+    link.href = href;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.textContent = label;
+    links.append(link);
+  };
+  add(googleDirectionsUrls(null, [marker])[0]!, t("google"));
+  add(yandexRouteUrl(null, [marker]), t("yandex"));
+  if (typeof navigator !== "undefined" && /android/i.test(navigator.userAgent)) add(navigateToUrl(marker, marker.label), t("navigator"));
+  root.append(links);
+  return root;
+}
+
+function fitTo(map: L.Map, bounds: L.LatLngBounds | null) {
+  if (!bounds?.isValid()) return;
+  map.fitBounds(bounds.pad(0.15), { maxZoom: 16, animate: false });
+}
+
+export default function MapView({ markers = [], polyline = [], polylines = [], circles = [], polygons = [], className, onMarkerClick }: Props) {
   const { t } = useTranslation("map");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const layerRef = useRef<L.LayerGroup | null>(null);
+  const boundsRef = useRef<L.LatLngBounds | null>(null);
+  const fittedKeyRef = useRef("");
+  const clickRef = useRef(onMarkerClick);
+  const [tilesFailed, setTilesFailed] = useState(false);
 
-  const view = useMemo(() => {
-    const points = [...markers, ...polyline, ...circles];
-    if (points.length === 0) return null;
-    const project = projection(points);
-    const scaleMeters = [...SCALE_STEPS].reverse().find((meters) => project.px(meters) <= 220) ?? SCALE_STEPS[0]!;
-    return { project, scaleMeters };
-  }, [markers, polyline, circles]);
+  const hasPoints = markers.length + polyline.length + polylines.length + circles.length + polygons.length > 0;
 
-  const selected = markers.find((marker) => marker.id === selectedId) ?? null;
+  useEffect(() => {
+    clickRef.current = onMarkerClick;
+  });
 
-  if (!view) {
+  // Xarita bir marta yaratiladi; o'lcham o'zgarsa (tab, oyna) qayta hisoblanadi
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !hasPoints) return;
+    const map = L.map(container, { worldCopyJump: true }).setView(toLatLng(DEFAULT_MAP_CENTER), 12);
+    const tiles = L.tileLayer(TILE_URL, { maxZoom: 19, attribution: ATTRIBUTION });
+    let errors = 0;
+    tiles.on("tileerror", () => {
+      errors += 1;
+      if (errors >= TILE_ERROR_THRESHOLD) setTilesFailed(true);
+    });
+    tiles.on("tileload", () => {
+      errors = 0;
+      setTilesFailed(false);
+    });
+    tiles.addTo(map);
+    layerRef.current = L.layerGroup().addTo(map);
+    mapRef.current = map;
+    const observer = new ResizeObserver(() => map.invalidateSize());
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+      map.remove();
+      mapRef.current = null;
+      layerRef.current = null;
+      fittedKeyRef.current = "";
+    };
+  }, [hasPoints]);
+
+  // Ma'lumot o'zgarsa qatlamlar qayta chiziladi; ko'rinish faqat nuqtalar to'plami o'zgarganda moslanadi
+  // (jonli yangilanish foydalanuvchi surgan joyni buzmaydi)
+  useEffect(() => {
+    const map = mapRef.current;
+    const layer = layerRef.current;
+    if (!map || !layer) return;
+    layer.clearLayers();
+    const bounds = L.latLngBounds([]);
+    const extend = (point: LatLng) => bounds.extend(toLatLng(point));
+
+    for (const polygon of polygons) {
+      if (polygon.points.length < 3) continue;
+      const color = safeColor(polygon.color) ?? TONE_COLORS.primary;
+      const shape = L.polygon(polygon.points.map(toLatLng), { color, weight: 2, dashArray: "6 4", fillOpacity: 0.08 }).addTo(layer);
+      if (polygon.label) shape.bindTooltip(polygon.label, { sticky: true });
+      polygon.points.forEach(extend);
+    }
+    for (const circle of circles) {
+      L.circle(toLatLng(circle), { radius: circle.radiusMeters, color: TONE_COLORS[circle.tone ?? "primary"], weight: 2, dashArray: "6 4", fillOpacity: 0.08 }).addTo(layer);
+      extend(circle);
+    }
+    const lines: MapPolyline[] = [...(polyline.length > 1 ? [{ id: "__main", points: polyline }] : []), ...polylines];
+    for (const line of lines) {
+      if (line.points.length < 2) continue;
+      L.polyline(line.points.map(toLatLng), {
+        color: safeColor(line.color) ?? TONE_COLORS.primary,
+        weight: line.weight ?? 4,
+        opacity: 0.85,
+        lineJoin: "round",
+        ...(line.dashed ? { dashArray: "8 6" } : {}),
+      }).addTo(layer);
+      line.points.forEach(extend);
+    }
+    const permanent = markers.length <= PERMANENT_LABELS_LIMIT;
+    for (const marker of markers) {
+      const color = safeColor(marker.color) ?? TONE_COLORS[marker.tone ?? "primary"];
+      const item: L.Layer =
+        marker.order !== undefined
+          ? L.marker(toLatLng(marker), { icon: numberIcon(marker.order, color), title: marker.label ?? "", riseOnHover: true })
+          : L.circleMarker(toLatLng(marker), { radius: 8, color: "#ffffff", weight: 2, fillColor: color, fillOpacity: 1 });
+      if (marker.label) item.bindTooltip(marker.label, { permanent, direction: "right", offset: [marker.order !== undefined ? 4 : 10, 0], opacity: 0.9 });
+      item.bindPopup(() => popupContent(marker, t));
+      item.on("click", () => clickRef.current?.(marker.id));
+      item.addTo(layer);
+      extend(marker);
+    }
+
+    boundsRef.current = bounds.isValid() ? bounds : null;
+    const key = [
+      markers.map((marker) => marker.id).join(","),
+      polyline.length,
+      polylines.map((line) => `${line.id}:${line.points.length}`).join(","),
+      circles.map((circle) => circle.id).join(","),
+      polygons.map((polygon) => polygon.id).join(","),
+    ].join("|");
+    if (key !== fittedKeyRef.current) {
+      fittedKeyRef.current = key;
+      fitTo(map, boundsRef.current);
+    }
+  }, [markers, polyline, polylines, circles, polygons, t, hasPoints]);
+
+  if (!hasPoints) {
     return (
       <div className={cn("flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-muted/30 p-6 text-center", className)}>
         <MapPinOff className="h-8 w-8 text-muted-foreground" />
@@ -78,91 +209,22 @@ export default function MapView({ markers = [], polyline = [], circles = [], cla
     );
   }
 
-  const { project, scaleMeters } = view;
-  const path = polyline.map((point, i) => `${i === 0 ? "M" : "L"}${project.x(point).toFixed(1)},${project.y(point).toFixed(1)}`).join(" ");
-
   return (
-    <div className={cn("relative overflow-hidden rounded-2xl border border-border bg-muted/20", className)}>
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="xMidYMid meet" className="h-full w-full" role="img" aria-label={t("schematic")}>
-        <defs>
-          <pattern id="map-grid" width="50" height="50" patternUnits="userSpaceOnUse">
-            <path d="M 50 0 L 0 0 0 50" className="fill-none stroke-border" strokeWidth="1" />
-          </pattern>
-        </defs>
-        <rect width={WIDTH} height={HEIGHT} fill="url(#map-grid)" />
-
-        {circles.map((circle) => (
-          <circle
-            key={circle.id}
-            cx={project.x(circle)}
-            cy={project.y(circle)}
-            r={Math.max(project.px(circle.radiusMeters), 4)}
-            className={cn("fill-primary/10", TONE_STROKE[circle.tone ?? "primary"])}
-            strokeWidth="2"
-            strokeDasharray="6 4"
-          />
-        ))}
-
-        {path && <path d={path} className="fill-none stroke-primary" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />}
-
-        {markers.map((marker) => {
-          const cx = project.x(marker);
-          const cy = project.y(marker);
-          const active = marker.id === selectedId;
-          return (
-            <g
-              key={marker.id}
-              role="button"
-              tabIndex={0}
-              aria-label={marker.label ?? marker.id}
-              className="cursor-pointer focus:outline-none"
-              onClick={() => setSelectedId(active ? null : marker.id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") setSelectedId(active ? null : marker.id);
-              }}
-            >
-              <circle cx={cx} cy={cy} r={active ? 13 : 10} className={cn(TONE_FILL[marker.tone ?? "primary"], "stroke-background")} strokeWidth="3" />
-              {marker.label && (
-                <text x={cx + 16} y={cy + 5} className="fill-foreground text-[20px] font-medium" paintOrder="stroke" stroke="var(--background, #fff)" strokeWidth="4">
-                  {marker.label}
-                </text>
-              )}
-            </g>
-          );
-        })}
-
-        <g transform={`translate(${PADDING / 2}, ${HEIGHT - PADDING / 2})`}>
-          <line x1="0" y1="0" x2={project.px(scaleMeters)} y2="0" className="stroke-foreground" strokeWidth="3" />
-          <line x1="0" y1="-6" x2="0" y2="6" className="stroke-foreground" strokeWidth="3" />
-          <line x1={project.px(scaleMeters)} y1="-6" x2={project.px(scaleMeters)} y2="6" className="stroke-foreground" strokeWidth="3" />
-          <text x={project.px(scaleMeters) + 10} y="7" className="fill-foreground text-[20px]">
-            {scaleMeters >= 1000 ? t("scale_km", { value: scaleMeters / 1000 }) : t("scale_m", { value: scaleMeters })}
-          </text>
-        </g>
-      </svg>
-
-      <span className="pointer-events-none absolute right-3 top-2 rounded bg-background/80 px-2 py-0.5 text-[11px] text-muted-foreground">
-        {t("schematic")}
-      </span>
-
-      {selected && (
-        <div className="absolute inset-x-3 bottom-3 flex items-start gap-3 rounded-xl border border-border bg-card p-3 text-sm shadow-sm">
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold truncate">{selected.label ?? t("point")}</p>
-            {selected.description && <p className="text-xs text-muted-foreground">{selected.description}</p>}
-            <a
-              className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-              href={mapAppUrl(selected.latitude, selected.longitude, selected.label)}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <ExternalLink className="h-3.5 w-3.5" /> {t("open")}
-            </a>
-          </div>
-          <button type="button" aria-label={t("close")} className="text-muted-foreground hover:text-foreground" onClick={() => setSelectedId(null)}>
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+    <div className={cn("relative isolate overflow-hidden rounded-2xl border border-border bg-muted/20", className)}>
+      <div ref={containerRef} className="h-full min-h-60 w-full" role="region" aria-label={t("title")} />
+      <button
+        type="button"
+        title={t("fit")}
+        aria-label={t("fit")}
+        className="absolute right-3 top-3 z-[1000] flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-foreground shadow-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary"
+        onClick={() => mapRef.current && fitTo(mapRef.current, boundsRef.current)}
+      >
+        <Maximize2 className="h-4 w-4" />
+      </button>
+      {tilesFailed && (
+        <span className="pointer-events-none absolute bottom-3 left-3 right-14 z-[1000] rounded-lg bg-card/95 px-2 py-1 text-[11px] text-amber-700 shadow-sm dark:text-amber-400">
+          {t("tiles_offline")}
+        </span>
       )}
     </div>
   );

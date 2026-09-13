@@ -7,6 +7,8 @@
  *   POST   /routes, PATCH / DELETE /routes/:routeId                       distribution.manage
  *   POST   /routes/:routeId/customers, PUT /routes/:routeId/customers/order,
  *          DELETE /routes/:routeId/customers/:memberId                   distribution.manage
+ *   POST   /routes/:routeId/optimize ({ apply })                          distribution.view (apply — distribution.manage) — eng qisqa yo'l tartibi
+ *   GET    /map                                                           distribution.view — marshrutlar va do'konlar xaritada
  *   GET    /visits (?routeId=&salesRepId=&status=&dateFrom=&dateTo=&limit=)   distribution.view
  *   POST   /visits, PATCH /visits/:visitId                                distribution.manage
  *   GET    /assignments (?dateFrom=&dateTo=&salesRepId=)                  distribution.view
@@ -28,10 +30,12 @@ import {
   createVisit,
   deleteAssignment,
   deleteRoute,
+  distributionMap,
   getRoute,
   listAssignments,
   listRoutes,
   listVisits,
+  planRouteCustomersOrder,
   removeRouteCustomer,
   reorderRouteCustomers,
   updateRoute,
@@ -75,6 +79,7 @@ const routeBody = z.strictObject({
 const routePatch = routeBody.partial().extend({ isActive: z.boolean().optional() });
 const routeCustomerBody = z.strictObject({ customerId: z.uuid(), visitNotes: nullableText(1000) });
 const reorderBody = z.strictObject({ memberIds: z.array(z.uuid()).max(1000) });
+const optimizeBody = z.strictObject({ apply: z.boolean().default(true) });
 
 const visitStatuses = ["planned", "in_progress", "completed", "cancelled"] as const;
 const visitBody = z.strictObject({
@@ -207,6 +212,21 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
     const { memberIds } = reorderBody.parse(req.body);
     return { route: await writeInTenant(req, (tx, tenant) => reorderRouteCustomers(tx, tenant, routeId, memberIds, requestMeta(req))) };
   });
+
+  app.post("/routes/:routeId/optimize", async (req) => {
+    const { routeId } = routeParams.parse(req.params);
+    const { apply } = optimizeBody.parse(req.body ?? {});
+    const tenant = await requireTenant(db, authOf(req).user);
+    await requirePermission(db, tenant, apply ? "distribution.manage" : "distribution.view");
+    const { plan, memberIds } = await planRouteCustomersOrder(db, tenant, routeId);
+    const applied = apply && memberIds.length > 0;
+    const route = applied
+      ? await writeInTenant(req, (tx, writer) => reorderRouteCustomers(tx, writer, routeId, memberIds, requestMeta(req)))
+      : await getRoute(db, tenant, routeId);
+    return { route, plan, applied };
+  });
+
+  app.get("/map", async (req) => distributionMap(db, await readTenant(req)));
 
   app.delete("/routes/:routeId/customers/:memberId", async (req, reply) => {
     const { routeId, memberId } = memberParams.parse(req.params);

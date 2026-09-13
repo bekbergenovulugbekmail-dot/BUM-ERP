@@ -50,10 +50,31 @@ export type RouteMember = {
   customerName: string;
   phone: string | null;
   address: string | null;
+  city: string | null;
+  district: string | null;
+  latitude: string | null;
+  longitude: string | null;
   totalDebt: string;
 };
 
 export type RouteDetail = Omit<DistributionRoute, "customerCount"> & { customers: RouteMember[] };
+
+/** `GET /api/distribution/map` — faol marshrutlar do'konlari (tartibda) va marshrutsiz koordinatali do'konlar. */
+export type MapStore = {
+  customerId: string;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  city: string | null;
+  district: string | null;
+  latitude: string | null;
+  longitude: string | null;
+};
+
+export type DistributionMapData = {
+  routes: (DistributionRoute & { customers: (MapStore & { routeId: string; memberId: string; sortOrder: number })[] })[];
+  unrouted: MapStore[];
+};
 
 export type VisitStatus = "planned" | "in_progress" | "completed" | "cancelled";
 

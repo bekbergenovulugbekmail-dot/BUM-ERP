@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { canDeliveryTransition, isOpenDeliveryStatus } from "@bum/shared";
 import { LateBadge, PriorityBadge, StatusBadge } from "@/components/delivery/badges.tsx";
+import LocationLink from "@/components/maps/location-link.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -15,7 +16,6 @@ import { deliveryErrorMessage } from "@/lib/delivery/errors.ts";
 import { coordsOf, formatDateTime, formatDistance, timeWindow } from "@/lib/delivery/format.ts";
 import { num, type DeliveryTaskDetail } from "@/lib/delivery/types.ts";
 import { useLiveInterval } from "@/lib/delivery/realtime.ts";
-import { mapAppUrl } from "@/lib/maps/index.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import TaskDialog, { type TaskDialogKind } from "./task-dialogs.tsx";
 
@@ -149,11 +149,9 @@ function DrawerBody({ taskId, money }: { taskId: string; money: Money }) {
             </Button>
           )}
           {target ? (
-            <Button asChild size="sm" variant="ghost">
-              <a href={mapAppUrl(target.latitude, target.longitude, task.customer.name)} target="_blank" rel="noreferrer">
-                <MapPin className="mr-1.5 h-3.5 w-3.5" /> {t("task.map")}
-              </a>
-            </Button>
+            <LocationLink latitude={target.latitude} longitude={target.longitude} label={task.customer.name}>
+              <MapPin className="mr-1.5 h-3.5 w-3.5" /> {t("task.map")}
+            </LocationLink>
           ) : (
             <span className="text-xs text-amber-600">{t("task.no_location")}</span>
           )}

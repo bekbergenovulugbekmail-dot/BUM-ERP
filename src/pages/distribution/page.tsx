@@ -17,11 +17,12 @@ import OrdersSection from "./_components/orders-section.tsx";
 import PromotionsSection from "./_components/promotions-section.tsx";
 import ProspectsSection from "./_components/prospects-section.tsx";
 import AgentPolicySection from "./_components/agent-policy-section.tsx";
+import StoresMapSection from "./_components/stores-map-section.tsx";
 import { num, type DistributionRoute, type SalesRepStats } from "./_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
-type TabKey = "routes" | "assignments" | "reps" | "orders" | "visits" | "prospects" | "promotions" | "monitoring" | "policy";
+type TabKey = "routes" | "map" | "assignments" | "reps" | "orders" | "visits" | "prospects" | "promotions" | "monitoring" | "policy";
 
 export default function DistributionPage() {
   const { t } = useTranslation("distribution");
@@ -30,6 +31,7 @@ export default function DistributionPage() {
 
   const tabs = [
     { key: "routes" as const, icon: Route, visible: true },
+    { key: "map" as const, icon: MapPinned, visible: true },
     { key: "assignments" as const, icon: CalendarRange, visible: true },
     { key: "reps" as const, icon: Users, visible: true },
     // Tashriflar va siyosat — nazorat ruxsati; lokatsiya — alohida ruxsat (Supervayzer)
@@ -157,6 +159,7 @@ export default function DistributionPage() {
         transition={{ duration: 0.15 }}
       >
         {activeTab === "routes" && <RoutesSection />}
+        {activeTab === "map" && <StoresMapSection />}
         {activeTab === "assignments" && <AssignmentsSection />}
         {activeTab === "reps" && <SalesRepsSection />}
         {activeTab === "orders" && <OrdersSection />}

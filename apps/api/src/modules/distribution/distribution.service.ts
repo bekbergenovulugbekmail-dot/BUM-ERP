@@ -12,14 +12,16 @@
  *  - mijozlar tartibini o'zgartirish yo'q edi; o'chirilgan mijozdan keyin tartib raqami takrorlanardi
  *  - yozish amallari to'xtatilgan kompaniyada ham ishlardi; o'qish `distribution.view` (CRM'dan alohida)
  */
-import { and, asc, desc, eq, getTableColumns, gte, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, isNotNull, lte, notExists, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
 import { distributionRoutes, routeAssignments, routeCustomers, routeVisits, salesReps } from "../../db/schema/crm.js";
 import { customers } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
+import { pointOf } from "../../shared/geo.js";
 import type { TenantContext } from "../company/tenant.js";
 import { assertCustomer } from "../crm/leads.service.js";
+import { planRoute, type RoutePlan } from "../routing/routing.service.js";
 import { assertSalesRep, distributionAudit } from "./sales-reps.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...routeFields } = getTableColumns(distributionRoutes);
@@ -89,6 +91,10 @@ export async function getRoute(conn: DbOrTx, tenant: TenantContext, routeId: str
       customerName: customers.name,
       phone: customers.phone,
       address: customers.address,
+      city: customers.city,
+      district: customers.district,
+      latitude: customers.latitude,
+      longitude: customers.longitude,
       totalDebt: customers.totalDebt,
     })
     .from(routeCustomers)
@@ -225,6 +231,79 @@ export async function reorderRouteCustomers(
     details: { count: memberIds.length },
   });
   return getRoute(tx, tenant, routeId);
+}
+
+/** Marshrut mijozlarining eng qisqa yo'l tartibi (boshlanish erkin); koordinatasiz mijozlar joriy tartibida oxirida. */
+export async function planRouteCustomersOrder(conn: DbOrTx, tenant: TenantContext, routeId: string): Promise<{ plan: RoutePlan; memberIds: string[] }> {
+  const route = await getRoute(conn, tenant, routeId);
+  const located = route.customers.flatMap((member) => {
+    const point = pointOf(member.latitude, member.longitude);
+    return point ? [{ id: member.id, ...point }] : [];
+  });
+  const plan = await planRoute(null, located);
+  const placed = new Set(plan.stops.map((stop) => stop.id));
+  return { plan, memberIds: [...plan.stops.map((stop) => stop.id), ...route.customers.filter((member) => !placed.has(member.id)).map((member) => member.id)] };
+}
+
+/**
+ * Xarita: faol marshrutlar (rang, agent) va ularning mijozlari tartibda; hech bir faol marshrutda bo'lmagan koordinatali
+ * faol mijozlar alohida.
+ */
+export async function distributionMap(conn: DbOrTx, tenant: TenantContext) {
+  const companyId = tenant.company.id;
+  const routes = await listRoutes(conn, tenant);
+  const members = await conn
+    .select({
+      routeId: routeCustomers.routeId,
+      memberId: routeCustomers.id,
+      customerId: routeCustomers.customerId,
+      sortOrder: routeCustomers.sortOrder,
+      name: customers.name,
+      phone: customers.phone,
+      address: customers.address,
+      city: customers.city,
+      district: customers.district,
+      latitude: customers.latitude,
+      longitude: customers.longitude,
+    })
+    .from(routeCustomers)
+    .innerJoin(distributionRoutes, eq(distributionRoutes.id, routeCustomers.routeId))
+    .innerJoin(customers, eq(customers.id, routeCustomers.customerId))
+    .where(and(eq(distributionRoutes.companyId, companyId), eq(distributionRoutes.isActive, true)))
+    .orderBy(asc(routeCustomers.routeId), asc(routeCustomers.sortOrder), asc(routeCustomers.createdAt));
+  const unrouted = await conn
+    .select({
+      customerId: customers.id,
+      name: customers.name,
+      phone: customers.phone,
+      address: customers.address,
+      city: customers.city,
+      district: customers.district,
+      latitude: customers.latitude,
+      longitude: customers.longitude,
+    })
+    .from(customers)
+    .where(
+      and(
+        eq(customers.companyId, companyId),
+        eq(customers.isActive, true),
+        isNotNull(customers.latitude),
+        isNotNull(customers.longitude),
+        notExists(
+          conn
+            .select({ one: sql`1` })
+            .from(routeCustomers)
+            .innerJoin(distributionRoutes, eq(distributionRoutes.id, routeCustomers.routeId))
+            .where(and(eq(routeCustomers.customerId, customers.id), eq(distributionRoutes.isActive, true))),
+        ),
+      ),
+    )
+    .orderBy(asc(customers.name))
+    .limit(3000);
+  return {
+    routes: routes.map((route) => ({ ...route, customers: members.filter((member) => member.routeId === route.id) })),
+    unrouted,
+  };
 }
 
 // ─── Tashriflar ──────────────────────────────────────────────────────────────

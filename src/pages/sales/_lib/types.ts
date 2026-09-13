@@ -25,6 +25,9 @@ export type Customer = {
   /** Do'kon joylashuvi (numeric satr); agent masofasi va geofence uchun. */
   latitude: string | null;
   longitude: string | null;
+  /** Hudud: shahar/tuman va mahalla (dostavkani hudud bo'yicha taqsimlash). */
+  city: string | null;
+  district: string | null;
   discountPercent: string;
   creditLimit: string;
   paymentTermDays: number;

@@ -100,6 +100,8 @@ const customerBody = z.strictObject({
   contactName: nullableText(200),
   latitude: z.number().min(-90).max(90).nullable().optional(),
   longitude: z.number().min(-180).max(180).nullable().optional(),
+  city: nullableText(100),
+  district: nullableText(100),
 });
 const customerPatch = customerBody.partial().extend({ isActive: z.boolean().optional() });
 const customersQuery = z.object({

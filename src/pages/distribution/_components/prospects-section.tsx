@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
-import { mapAppUrl } from "@/lib/maps/index.ts";
+import LocationLink from "@/components/maps/location-link.tsx";
 import type { DistProspect, DistributionRoute } from "../_lib/types.ts";
 
 type Status = "new" | "converted" | "rejected" | "all";
@@ -120,14 +120,9 @@ export default function ProspectsSection() {
                     </td>
                     <td className="whitespace-nowrap px-3 py-2">
                       {prospect.latitude && prospect.longitude ? (
-                        <a
-                          className="inline-flex items-center gap-1 text-primary hover:underline"
-                          href={mapAppUrl(prospect.latitude, prospect.longitude, prospect.name)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
+                        <LocationLink appearance="link" latitude={prospect.latitude} longitude={prospect.longitude} label={prospect.name}>
                           <MapPin className="h-3.5 w-3.5" /> {t("prospects.map")}
-                        </a>
+                        </LocationLink>
                       ) : (
                         "—"
                       )}

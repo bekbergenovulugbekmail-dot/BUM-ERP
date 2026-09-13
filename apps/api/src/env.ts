@@ -36,6 +36,12 @@ const schema = z.object({
   /** Markaziy bank valyuta kurslari (JSON). */
   CBU_RATES_URL: z.string().url().default("https://cbu.uz/uz/arkhiv-kursov-valyut/json/"),
 
+  /**
+   * Marshrut (yo'l bo'yicha masofa va chiziq) — bepul ochiq manbali OSRM. Standart — OSRM loyihasining ommaviy serveri
+   * (kichik hajm uchun); ko'p foydalanishda o'z OSRM serveringiz manzili. "off" — faqat to'g'ri chiziq bo'yicha taxmin.
+   */
+  ROUTING_OSRM_URL: z.union([z.literal("off"), z.string().url()]).default("https://router.project-osrm.org"),
+
   ANTHROPIC_API_KEY: z.string().optional(),
   /** AI yordamchi modeli — standart: eng so'nggi Sonnet. */
   ANTHROPIC_MODEL: z.string().min(1).default("claude-sonnet-5"),

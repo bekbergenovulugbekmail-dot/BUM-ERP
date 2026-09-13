@@ -1168,7 +1168,7 @@ Talab: "BUM ERP — DOSTAVKA / DELIVERY MASTER PROMPT" (1–62 bo'lim). Asosiy p
 - oflayn amal: `occurredAt` 120 s gacha — onlayn; eskirog'i — siyosat ruxsati va `offlineMaxAgeHours` ichida, qurilma soati 60 s dan oldinda — rad; amal vaqtida ish sessiyasi ochiq bo'lishi, GPS yangiligi amal vaqtiga nisbatan tekshiriladi
 - maxfiylik: agent faqat o'ziga biriktirilgan yetkazmani ko'radi (boshqasi — 404), supervayzer izohi, koordinatalar va hodisa tafsilotlari agentga berilmaydi, qarz — `delivery.view_debt` bilan; lokatsiya faqat faol ish sessiyasida qabul qilinadi, nuqtalar auditga yozilmaydi, iz ko'rish auditga yoziladi (`LOCATION_HISTORY_VIEWED`), saqlash muddati tugagan nuqtalar tozalanadi
 - bildirishnoma faqat: yetkazilmadi, to'lov farqi (approval), geofence buzilishi — siyosatdagi oluvchilar yoki dostavka boshqaruvchilari
-- xarita: tashqi yoki pullik xarita API'si yo'q — sxematik `MapView` va qurilmaning xarita ilovasi (`geo:` / Apple Maps / OpenStreetMap havolasi)
+- xarita: pullik xarita API'si yo'q — 2026-09-14 dan OpenStreetMap + Leaflet (`MapView`), navigatsiya — Google Maps / Yandex / Android navigator havolasi (pastda "Xarita, optimal marshrut va hudud bo'yicha dostavka")
 
 **Web:**
 - yetkazuvchi `/uz/delivery-agent` (faqat yetkazuvchi ruxsatlari bor xodim ERP'dan shu yerga yo'naltiriladi): Bosh sahifa (progress, qolgan, yo'lda, kechikkan, yig'ilgan pul naqd/karta/bank, yig'ilishi kutilayotgan, to'lov farqi, mijozlar qarzi, keyingi yetkazma), Yetkazmalar (bugun / keyingi / tarix — mijoz, buyurtma №, summa, sana va vaqt oynasi, to'lov turi, taxminiy masofa, ustuvorlik, holat, KECHIKDI), yetkazma sahifasi (qadamlar, XARITADA OCHISH, MIJOZGA YETDIM, topshirish: rasm — kamera, imzo — canvas PNG, to'lov, OTP; tasdiqlash oynasi — qabul qilingan miqdor, talablar, farq ogohlantirishi; "yetkazib bo'lmadi" — sabablar, "Boshqa" uchun izoh; natija ekrani va KEYINGI YETKAZMA), Mijozlar, Qarz/To'lov (ruxsat bilan), Hisobotlar (davr)
@@ -1208,7 +1208,7 @@ Talab: "BUM ERP — DOSTAVKA / DELIVERY MASTER PROMPT" (1–62 bo'lim). Asosiy p
 
 **TEKSHIRILMAGAN / QILINMAGAN:**
 - brauzerda va haqiqiy Android telefonda qo'lda E2E (kamera, GPS, imzo, oflayn navbat, real-time) — faqat avtomatik testlar (WebSocket — Fastify `injectWS` bilan, Railway edge va nginx orqali brauzer ulanishi qo'lda sinalmagan)
-- marshrut optimallashtirish (TSP) yo'q — avtomatik biriktirish ochko'z taqsimlash va qo'lda tartib
+- ~~marshrut optimallashtirish (TSP) yo'q~~ — 2026-09-14 da qo'shildi (kunlik marshrut, taqsimotda eng qisqa tartib); avtomatik biriktirishning o'zi hamon ochko'z taqsimlash
 - yuk sig'imi: og'irlik birligi (kg / g / t) mahsulot formasiga 2026-09-13 da qo'shildi; eski, birligi kiritilmagan mahsulotda yuk tekshirilmaydi
 - ruxsat olib tashlanganda ochiq WebSocket 60 soniyagacha ishlab turishi mumkin (keyingi qayta tekshiruvgacha); ma'lumotning o'zi REST'da darhol himoyalangan
 - ekran qulflanganda fondagi lokatsiya — brauzer cheklovi, native Android ilova kerak
@@ -1312,6 +1312,9 @@ Agent yo'llari — `delivery.accept` va bog'langan faol yetkazuvchi (agent, komp
 |---|---|---|
 | GET (WebSocket) | `/ws` | `delivery.view` yoki bog'langan faol yetkazuvchi; Origin tekshiriladi |
 | POST | `/auto-assign/preview`, `/auto-assign` | `delivery.assign` (siyosatda yoqilgan bo'lsa) |
+| POST | `/route-plan` `{deliveryAgentId, date, origin?, apply?}` — kunlik eng qisqa marshrut | `delivery.view` (saqlash — `delivery.manage_routes`) |
+| GET / POST | `/dispatch` — yetkazmasiz buyurtmalar + biriktirilmagan yetkazmalar (hudud, marshrut); `/dispatch/assign` `{orderIds, taskIds, deliveryAgentId, scheduledDate?, optimize}` | `delivery.manage` / `delivery.assign` (+ `delivery.manage` — buyurtmadan) |
+| GET | `/agent/route` (`?lat=&lng=`) — bugungi optimal tartib (tavsiya, yozilmaydi) | agent |
 | GET / PUT | `/policy`, `/policy/recipients` | o'qish — `delivery.view` yoki agent; yozish — `delivery.manage` |
 | GET / POST / PATCH | `/agents` (`?activeOnly=&branchId=&territory=`), `/agents/supervisors`, `/agents/:agentId` | `delivery.view` / `delivery.manage` |
 | GET | `/agents/live`, `/agents/:agentId/track` (`?date=`, audit) | `delivery.view_location` |
@@ -1331,6 +1334,8 @@ O'qish — `distribution.view`, yozish — `distribution.manage`.
 | GET / POST / PATCH / DELETE | `/sales-reps` (`?includeInactive=`), `/sales-reps/stats`, `/sales-reps/:salesRepId` |
 | GET / POST / PATCH / DELETE | `/routes` (`?includeInactive=`), `/routes/:routeId` (mijozlar bilan) |
 | POST / PUT / DELETE | `/routes/:routeId/customers`, `/routes/:routeId/customers/order`, `/routes/:routeId/customers/:memberId` |
+| POST | `/routes/:routeId/optimize` `{apply}` — eng qisqa yo'l tartibi (ko'rish — `distribution.view`) |
+| GET | `/map` — faol marshrutlar do'konlari tartibda va marshrutsiz koordinatali do'konlar |
 | GET / POST / PATCH | `/visits` (`?routeId=&salesRepId=&status=&dateFrom=&dateTo=`), `/visits/:visitId` |
 | GET / POST / DELETE | `/assignments` (`?dateFrom=&dateTo=&salesRepId=`), `/assignments/:assignmentId` |
 
@@ -1403,7 +1408,7 @@ Agent yo'llari — `sales_agent.use` va tizim foydalanuvchisiga bog'langan faol 
 5. **Dostavka moduli — qolgan:**
    - brauzerda va Android telefonda qo'lda sinov: HR'da dostavka agenti qo'shish → telefon bilan kirish → ish sessiyasi → buyurtma ("Yetkazib berish kerak") → supervayzer biriktiradi → qabul → yo'lga chiqish → 200 m geofence → rasm, imzo, OTP (supervayzer kodi) → to'lov farqi → qisman yetkazish → omborga qaytarish; oflayn navbat (samolyot rejimi)
    - real-time va avtomatik biriktirishni brauzerda sinash: ikki oynada (supervayzer va yetkazuvchi) "Jonli" belgisi, biriktirish/holat o'zgarishi darhol ko'rinishi; Sozlamalarda avtomatik biriktirishni yoqish → reja → qo'llash; "yaratilganda darhol" bilan buyurtma tasdiqlash
-   - marshrut optimallashtirish (TSP)
+   - ~~marshrut optimallashtirish (TSP)~~ — 2026-09-14 da qilindi; brauzerda qo'lda: Dostavka → Buyurtmalar → "Hudud bo'yicha" → "Barchasini dostavshikka biriktirish", Xarita → "Kunlik marshrut", dostavshik telefonida "Optimal marshrut" → Google Maps/Yandex
    - native Android ilova (ekran qulflanganda fondagi lokatsiya); SMS provayder (OTP SMS); qisman qoldiqni qayta yetkazish; filial/hudud ma'lumotnomasi
 6. **Obuna va litsenziya — qolgan:**
    - deploydan keyin production'da: kompaniyalar obunasi (Admin → Kompaniyalar → Obuna ustuni) mavjud holatga mosligini ko'rish — trial sanalari, muddatsiz active, litsenziyalar soni

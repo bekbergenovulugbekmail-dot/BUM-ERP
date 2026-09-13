@@ -1,9 +1,21 @@
 {
-  "schematic": "Sxematik ko'rinish · tashqi xarita xizmatisiz",
+  "title": "Xarita",
   "empty": "Ko'rsatish uchun lokatsiya yo'q",
   "open": "Xaritada ochish",
   "point": "Nuqta",
   "close": "Yopish",
+  "fit": "Hammasini ko'rsatish",
+  "tiles_offline": "Xarita qatlami yuklanmadi — internetni tekshiring (belgilar ko'rinib turadi)",
+  "google": "Google Maps",
+  "yandex": "Yandex",
+  "navigator": "Navigator",
   "scale_m": "{{value}} m",
-  "scale_km": "{{value}} km"
+  "scale_km": "{{value}} km",
+  "duration_min": "{{minutes}} daq",
+  "duration_h": "{{hours}} soat {{minutes}} daq",
+  "source_road": "yo'l bo'yicha",
+  "source_straight": "taxminiy (to'g'ri chiziq bo'yicha)",
+  "route.origin": "Boshlanish",
+  "route.google_part": "Google Maps {{part}}/{{total}}",
+  "route.unlocated": "Koordinata yo'q — marshrutga kirmadi"
 }

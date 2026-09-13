@@ -88,6 +88,9 @@ export const customers = pgTable(
     /** Do'kon joylashuvi (WGS-84): agentga masofa va geofence uchun. */
     latitude: numeric("latitude", { precision: 9, scale: 6 }),
     longitude: numeric("longitude", { precision: 9, scale: 6 }),
+    /** Hudud: shahar yoki tuman (masalan "Urganch") va mahalla/hudud ("Luchevoy") — dostavkani hudud bo'yicha taqsimlash. */
+    city: varchar("city", { length: 100 }),
+    district: varchar("district", { length: 100 }),
 
     discountPercent: percent("discount_percent").notNull().default("0"),
     creditLimit: money("credit_limit").notNull().default("0"),
@@ -109,6 +112,7 @@ export const customers = pgTable(
     uniqueIndex("customers_company_code_key").on(t.companyId, t.code),
     index("customers_company_active_idx").on(t.companyId, t.isActive),
     index("customers_company_phone_idx").on(t.companyId, t.phone),
+    index("customers_company_region_idx").on(t.companyId, t.city, t.district),
     check("customers_balance_non_negative", sql`${t.balance} >= 0`),
     check("customers_cashback_non_negative", sql`${t.cashbackBalance} >= 0`),
     check("customers_party_type", sql`${t.partyType} in ('individual', 'legal')`),

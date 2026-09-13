@@ -1,9 +1,21 @@
 {
-  "schematic": "Сызба · сыртқы карта қызметінсіз",
+  "title": "Карта",
   "empty": "Көрсетуге орналасу жоқ",
   "open": "Картада ашу",
   "point": "Нүкте",
   "close": "Жабу",
+  "fit": "Барлығын көрсету",
+  "tiles_offline": "Карта қабаты жүктелмеді — интернетті тексеріңіз (белгілер көрінеді)",
+  "google": "Google Maps",
+  "yandex": "Яндекс",
+  "navigator": "Навигатор",
   "scale_m": "{{value}} м",
-  "scale_km": "{{value}} км"
+  "scale_km": "{{value}} км",
+  "duration_min": "{{minutes}} мин",
+  "duration_h": "{{hours}} сағ {{minutes}} мин",
+  "source_road": "жол бойынша",
+  "source_straight": "шамамен (түзу сызық бойынша)",
+  "route.origin": "Басталуы",
+  "route.google_part": "Google Maps {{part}}/{{total}}",
+  "route.unlocated": "Координата жоқ — маршрутқа кірмеді"
 }

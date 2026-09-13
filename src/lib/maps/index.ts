@@ -1,9 +1,10 @@
 /**
- * Xarita: tashqi xarita API yo'q (kalit, to'lov, tashqi skript talab qilinmaydi).
- *  - ichki ko'rinish: `MapView` — koordinatalar sxemasi (masshtab chizig'i bilan)
- *  - navigatsiya: `mapAppUrl` — telefondagi mavjud xarita ilovasini ochadi (Yandex, Google, Apple va boshqalar)
+ * Xarita: OpenStreetMap + Leaflet (bepul, kalit va to'lov talab qilinmaydi).
+ *  - ichki ko'rinish: `MapView` — do'konlar, agentlar, marshrut chiziqlari, geofence va hududlar
+ *  - navigatsiya: `navigation.ts` — marshrutni Google Maps / Yandex / Android navigatorida ochish
+ *  - `mapAppUrl` — bitta nuqtani telefondagi xarita ilovasida ochish
  */
-export type { LatLng, MapCircle, MapMarker } from "./types.ts";
+export type { LatLng, MapCircle, MapMarker, MapPolygon, MapPolyline, MapTone } from "./types.ts";
 
 /** Toshkent markazi — obyekt bo'lmaganda boshlang'ich nuqta. */
 export const DEFAULT_MAP_CENTER = { latitude: 41.311081, longitude: 69.240562 };
@@ -23,4 +24,14 @@ export function mapAppUrl(latitude: number | string, longitude: number | string,
     return `https://maps.apple.com/?ll=${lat},${lng}&q=${encodeURIComponent(label ?? `${lat},${lng}`)}`;
   }
   return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`;
+}
+
+/** Telefon (Android/iOS) — tashqi ilova; kompyuterda nuqta ilova ichidagi xaritada ko'rsatiladi. */
+export function isMobileDevice(): boolean {
+  return typeof navigator !== "undefined" && /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+}
+
+/** Masofa: 950 m, 12.4 km. */
+export function formatDistance(meters: number): string {
+  return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(meters < 10_000 ? 1 : 0)} km`;
 }

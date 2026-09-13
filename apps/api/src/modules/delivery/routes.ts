@@ -25,6 +25,9 @@
  *   POST /tasks/:taskId/otp                        delivery.manage — OTP berish (kod javobda bir marta)
  *   POST /auto-assign/preview                      delivery.assign — avtomatik biriktirish rejasi (hech narsa yozilmaydi)
  *   POST /auto-assign                              delivery.assign — rejadagi juftliklarni qayta tekshirib biriktirish
+ *   POST /route-plan                               delivery.view (apply — delivery.manage_routes) — agentning kunlik eng qisqa marshruti
+ *   GET  /dispatch                                 delivery.manage — taqsimot: yetkazmasiz buyurtmalar + biriktirilmagan yetkazmalar (hudud, marshrut)
+ *   POST /dispatch/assign                          delivery.assign (+ delivery.manage — buyurtmadan) — hammasini bitta agentga, marshrut tartibi bilan
  * Real-time:
  *   GET  /ws (WebSocket)                           delivery.view yoki bog'langan faol yetkazuvchi; Origin tekshiriladi
  * Yetkazuvchi agent (delivery.accept + bog'langan faol agent; agent, kompaniya va mijoz ID'si so'rovdan olinmaydi):
@@ -43,9 +46,10 @@
  *   GET  /agent/customers (?search=), GET /agent/customers/:customerId
  *   GET  /agent/debts                              delivery.view_debt
  *   GET  /agent/reports (?from=&to=)
+ *   GET  /agent/route (?lat=&lng=)                  bugungi ochiq yetkazmalarning eng qisqa tartibi (tavsiya, yozilmaydi)
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
   AppError,
@@ -61,11 +65,13 @@ import {
   DELIVERY_VEHICLE_TYPES,
   badRequest,
   forbidden,
+  notFound,
   unauthenticated,
   type DeliveryPolicy,
   type Permission,
 } from "@bum/shared";
 import { db } from "../../db/client.js";
+import { deliveryAgents } from "../../db/schema/delivery.js";
 import { companies } from "../../db/schema/platform.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
@@ -77,6 +83,8 @@ import { effectivePermissions, requirePermission, requireTenant, requireTenantFo
 import { recipientCandidates } from "../sales-agent/policy.service.js";
 import { requireDeliveryAgent, type DeliveryAgentContext } from "./agent-context.js";
 import { applyAutoAssign, planAutoAssign } from "./auto-assign.service.js";
+import { DISPATCH_ASSIGN_MAX, assignDispatch, dispatchBoard } from "./dispatch.service.js";
+import { planAgentDay, tasksInOrder } from "./route-plan.service.js";
 import { CLOSE_CODES, DeliveryRealtimeHub, originAllowed, resolveRealtimeAccess, type RealtimeAccess } from "./realtime.js";
 import { localDate } from "./task.repo.js";
 import {
@@ -585,6 +593,104 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
       return applyAutoAssign(tx, tenant, policy, body, requestMeta(req), "manual");
     });
     return { result };
+  });
+
+  // ─── Marshrut va taqsimot ────────────────────────────────────────────────
+
+  const routePlanBody = z.strictObject({
+    deliveryAgentId: z.uuid(),
+    date: isoDate,
+    /** Boshlang'ich joy; berilmasa — bugun uchun yetkazuvchining oxirgi joyi (2 soatdan yangi), bo'lmasa erkin. */
+    origin: z.strictObject({ latitude, longitude }).nullable().optional(),
+    apply: z.boolean().default(false),
+  });
+  const dispatchAssignBody = z.strictObject({
+    orderIds: z.array(z.uuid()).max(DISPATCH_ASSIGN_MAX).default([]),
+    taskIds: z.array(z.uuid()).max(DISPATCH_ASSIGN_MAX).default([]),
+    deliveryAgentId: z.uuid(),
+    scheduledDate: isoDate.optional(),
+    /** Biriktirilgandan keyin agentning shu kundagi yetkazmalari eng qisqa yo'l tartibida (delivery.manage_routes). */
+    optimize: z.boolean().default(true),
+  });
+  const agentRouteQuery = z
+    .object({ lat: z.coerce.number().min(-90).max(90).optional(), lng: z.coerce.number().min(-180).max(180).optional() })
+    .refine((query) => (query.lat === undefined) === (query.lng === undefined), { message: "lat va lng birga beriladi" });
+
+  const assertCompanyAgent = async (companyId: string, deliveryAgentId: string) => {
+    const [agent] = await db
+      .select({ id: deliveryAgents.id })
+      .from(deliveryAgents)
+      .where(and(eq(deliveryAgents.id, deliveryAgentId), eq(deliveryAgents.companyId, companyId)))
+      .limit(1);
+    if (!agent) throw notFound("Yetkazuvchi agent topilmadi");
+  };
+
+  app.post("/route-plan", async (req) => {
+    const body = routePlanBody.parse(req.body);
+    const tenant = await readTenantWith(req, body.apply ? "delivery.manage_routes" : "delivery.view");
+    await assertCompanyAgent(tenant.company.id, body.deliveryAgentId);
+    const plan = await planAgentDay(db, tenant.company.id, body.deliveryAgentId, body.date, {
+      origin: body.origin ?? null,
+      useAgentLocation: body.date === localDate(),
+      dates: "exact",
+    });
+    const applied = body.apply && plan.taskIds.length > 0;
+    if (applied) {
+      await writeTenantWith(req, "delivery.manage_routes", (tx, writer) =>
+        setDeliveryRouteOrder(tx, writer, { deliveryAgentId: body.deliveryAgentId, date: body.date, taskIds: plan.taskIds }, requestMeta(req)),
+      );
+    }
+    return { ...plan, applied, tasks: await tasksInOrder(db, tenant.company.id, plan.taskIds) };
+  });
+
+  app.get("/dispatch", async (req) => {
+    const tenant = await readTenantWith(req, "delivery.manage");
+    return dispatchBoard(db, tenant);
+  });
+
+  app.post("/dispatch/assign", async (req) => {
+    const body = dispatchAssignBody.parse(req.body);
+    const meta = requestMeta(req);
+    let canOrderRoutes = false;
+    const result = await writeTenantWith(req, "delivery.assign", async (tx, tenant) => {
+      const permissions = await effectivePermissions(tx, tenant);
+      if (body.orderIds.length > 0 && !permissions.includes("delivery.manage")) {
+        throw forbidden("Buyurtmadan yetkazma yaratish uchun ruxsat kerak (delivery.manage)");
+      }
+      canOrderRoutes = permissions.includes("delivery.manage_routes");
+      return assignDispatch(tx, tenant, body, meta, { allowReassign: permissions.includes("delivery.reassign") });
+    });
+
+    // Marshrut tartibi — biriktirish saqlangach (tashqi marshrut xizmati tranzaksiyani ushlab turmasin)
+    const routes: { date: string; route: Awaited<ReturnType<typeof planAgentDay>>["route"]; taskIds: string[]; unlocatedTaskIds: string[] }[] = [];
+    let optimizeError: string | null = null;
+    if (body.optimize && canOrderRoutes) {
+      const tenant = await requireTenant(db, authOf(req).user);
+      for (const date of result.dates) {
+        const plan = await planAgentDay(db, tenant.company.id, body.deliveryAgentId, date, { origin: null, useAgentLocation: date === localDate(), dates: "exact" });
+        try {
+          if (plan.taskIds.length > 0) {
+            await writeTenantWith(req, "delivery.manage_routes", (tx, writer) =>
+              setDeliveryRouteOrder(tx, writer, { deliveryAgentId: body.deliveryAgentId, date, taskIds: plan.taskIds }, meta),
+            );
+          }
+          routes.push({ date, route: plan.route, taskIds: plan.taskIds, unlocatedTaskIds: plan.unlocatedTaskIds });
+        } catch (error) {
+          // Biriktirish saqlangan; tartibni keyin qayta hisoblash mumkin
+          if (!(error instanceof AppError)) throw error;
+          optimizeError = error.message;
+        }
+      }
+    }
+    return { ...result, optimized: body.optimize && canOrderRoutes && optimizeError === null, optimizeError, routes };
+  });
+
+  app.get("/agent/route", async (req) => {
+    const query = agentRouteQuery.parse(req.query);
+    const { context } = await readAgent(req);
+    const origin = query.lat !== undefined && query.lng !== undefined ? { latitude: query.lat, longitude: query.lng } : null;
+    const plan = await planAgentDay(db, context.company.id, context.deliveryAgent.id, localDate(), { origin, useAgentLocation: true, dates: "until" });
+    return { ...plan, tasks: await tasksInOrder(db, context.company.id, plan.taskIds) };
   });
 
   // ─── Real-time (WebSocket) ───────────────────────────────────────────────

@@ -1,9 +1,21 @@
 {
-  "schematic": "Схема · без внешнего картографического сервиса",
+  "title": "Карта",
   "empty": "Нет местоположений для отображения",
   "open": "Открыть на карте",
   "point": "Точка",
   "close": "Закрыть",
+  "fit": "Показать всё",
+  "tiles_offline": "Слой карты не загрузился — проверьте интернет (метки видны)",
+  "google": "Google Maps",
+  "yandex": "Яндекс",
+  "navigator": "Навигатор",
   "scale_m": "{{value}} м",
-  "scale_km": "{{value}} км"
+  "scale_km": "{{value}} км",
+  "duration_min": "{{minutes}} мин",
+  "duration_h": "{{hours}} ч {{minutes}} мин",
+  "source_road": "по дорогам",
+  "source_straight": "примерно (по прямой)",
+  "route.origin": "Старт",
+  "route.google_part": "Google Maps {{part}}/{{total}}",
+  "route.unlocated": "Нет координат — не вошло в маршрут"
 }

@@ -483,6 +483,8 @@ export const taskListFields = {
   customerAddress: customers.address,
   customerLatitude: customers.latitude,
   customerLongitude: customers.longitude,
+  customerCity: customers.city,
+  customerDistrict: customers.district,
   assignedAt: deliveryTasks.assignedAt,
   startedAt: deliveryTasks.startedAt,
   arrivedAt: deliveryTasks.arrivedAt,
@@ -772,6 +774,10 @@ export async function readyOrdersForDelivery(conn: DbOrTx, tenant: TenantContext
       customerId: salesOrders.customerId,
       customerName: customers.name,
       customerAddress: customers.address,
+      customerCity: customers.city,
+      customerDistrict: customers.district,
+      customerLatitude: customers.latitude,
+      customerLongitude: customers.longitude,
       hasLocation: sql<boolean>`${customers.latitude} is not null and ${customers.longitude} is not null`,
     })
     .from(salesOrders)

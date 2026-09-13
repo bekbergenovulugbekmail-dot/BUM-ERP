@@ -28,6 +28,8 @@ type CustomerForm = {
   bankMfo: string;
   latitude: string;
   longitude: string;
+  city: string;
+  district: string;
   creditLimit: string;
   paymentTermDays: string;
 };
@@ -35,7 +37,7 @@ type CustomerForm = {
 const emptyForm = (): CustomerForm => ({
   name: "", partyType: "individual", phone: "", email: "", address: "", contactName: "",
   taxId: "", bankAccount: "", bankMfo: "",
-  latitude: "", longitude: "", creditLimit: "", paymentTermDays: "",
+  latitude: "", longitude: "", city: "", district: "", creditLimit: "", paymentTermDays: "",
 });
 
 const formOf = (c: Customer): CustomerForm => ({
@@ -50,6 +52,8 @@ const formOf = (c: Customer): CustomerForm => ({
   bankMfo: c.bankMfo ?? "",
   latitude: c.latitude ?? "",
   longitude: c.longitude ?? "",
+  city: c.city ?? "",
+  district: c.district ?? "",
   creditLimit: num(c.creditLimit) > 0 ? String(num(c.creditLimit)) : "",
   paymentTermDays: c.paymentTermDays > 0 ? String(c.paymentTermDays) : "",
 });
@@ -100,6 +104,8 @@ export default function CustomersSection() {
           // Bo'sh — koordinata o'chiriladi
           latitude: hasLatitude ? Number(form.latitude) : null,
           longitude: hasLongitude ? Number(form.longitude) : null,
+          city: form.city.trim() || null,
+          district: form.district.trim() || null,
           ...(form.creditLimit.trim() ? { creditLimit: form.creditLimit.trim() } : {}),
           ...(form.paymentTermDays.trim() ? { paymentTermDays: Number(form.paymentTermDays) } : {}),
         },
@@ -216,9 +222,10 @@ export default function CustomersSection() {
                       <Mail className="h-3 w-3" />{c.email}
                     </div>
                   )}
-                  {c.address && (
+                  {(c.address || c.city || c.district) && (
                     <div className="flex items-center gap-1.5">
-                      <MapPin className="h-3 w-3" />{c.address}
+                      <MapPin className="h-3 w-3" />
+                      {[[c.city, c.district].filter(Boolean).join(" → "), c.address].filter(Boolean).join(" · ")}
                     </div>
                   )}
                   {c.latitude && c.longitude && (
@@ -289,7 +296,17 @@ export default function CustomersSection() {
               </div>
               <div>
                 <Label>Manzil</Label>
-                <Input value={form.address} onChange={(e) => set({ address: e.target.value })} placeholder="Shahar, ko'cha..." />
+                <Input value={form.address} onChange={(e) => set({ address: e.target.value })} placeholder="Ko'cha, uy, mo'ljal..." />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="customer-city">Shahar / tuman</Label>
+                  <Input id="customer-city" maxLength={100} value={form.city} onChange={(e) => set({ city: e.target.value })} placeholder="Urganch" />
+                </div>
+                <div>
+                  <Label htmlFor="customer-district">Mahalla / hudud</Label>
+                  <Input id="customer-district" maxLength={100} value={form.district} onChange={(e) => set({ district: e.target.value })} placeholder="Luchevoy" />
+                </div>
               </div>
               <div>
                 <div className="flex items-center justify-between">

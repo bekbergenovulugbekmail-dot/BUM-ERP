@@ -53,6 +53,9 @@ export type CustomerInput = {
   /** Do'kon joylashuvi — ikkalasi birga (null — o'chirish). */
   latitude?: number | null;
   longitude?: number | null;
+  /** Hudud: shahar/tuman va mahalla — dostavkani hudud bo'yicha taqsimlash. */
+  city?: string | null;
+  district?: string | null;
 };
 
 /** Koordinata juftligi: ikkalasi ham yoki hech biri; 6 xona (~10 sm). Berilmasa — o'zgarmaydi. */

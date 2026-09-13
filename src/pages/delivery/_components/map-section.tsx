@@ -1,9 +1,16 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { History, Loader2, ShieldAlert } from "lucide-react";
+import { toast } from "sonner";
+import { History, Loader2, Route, Save, ShieldAlert } from "lucide-react";
 import { DEFAULT_DELIVERY_POLICY, type DeliveryPolicy } from "@bum/shared";
 import MapView from "@/components/map-view.tsx";
+import RoutePlanPanel from "@/components/maps/route-plan-panel.tsx";
 import { StatusBadge } from "@/components/delivery/badges.tsx";
+import { usePermissions } from "@/hooks/use-company.ts";
+import { api } from "@/lib/api.ts";
+import type { AgentDayRoute } from "@/lib/maps/route-plan.ts";
+import type { DeliveryTaskRow } from "@/lib/delivery/types.ts";
+import { useApiMutation } from "@/lib/query.ts";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -18,9 +25,109 @@ import { useApiQuery } from "@/lib/query.ts";
 import { cn } from "@/lib/utils.ts";
 import { todayLocal } from "@/pages/sales/_lib/types.ts";
 
+type DayRoute = AgentDayRoute<DeliveryTaskRow> & { applied: boolean };
+
 /**
- * Xarita (sxematik, tashqi xarita API'siz): faol yetkazuvchilarning oxirgi joyi (faqat ish sessiyasida), aniqligi,
- * oxirgi yangilanish, joriy yetkazma va mijoz geofence doirasi; tanlangan agentning kunlik izi — har ko'rish auditga yoziladi.
+ * Kunlik marshrut: dostavshik va kun → shu kundagi ochiq yetkazmalar eng qisqa yo'l tartibida (xarita, masofa, vaqt);
+ * "Tartibni saqlash" — yetkazish tartibi sifatida yoziladi (delivery.manage_routes).
+ */
+function RoutePlannerCard({ agents, onOpenTask }: { agents: { id: string; name: string | null; code: string; phone: string }[]; onOpenTask: (taskId: string) => void }) {
+  const { t } = useTranslation("delivery");
+  const { can } = usePermissions();
+  const [agentId, setAgentId] = useState("");
+  const [date, setDate] = useState(todayLocal);
+  const [result, setResult] = useState<{ agentId: string; date: string; route: DayRoute } | null>(null);
+  const preview = useApiMutation((body: { deliveryAgentId: string; date: string }) => api.post<DayRoute>("/api/delivery/route-plan", body), { invalidate: false });
+  const apply = useApiMutation((body: { deliveryAgentId: string; date: string }) => api.post<DayRoute>("/api/delivery/route-plan", { ...body, apply: true }), {
+    invalidate: ["/api/delivery"],
+  });
+
+  const calculate = async () => {
+    try {
+      setResult({ agentId, date, route: await preview.mutateAsync({ deliveryAgentId: agentId, date }) });
+    } catch (error) {
+      toast.error(deliveryErrorMessage(error, t));
+    }
+  };
+  const save = async () => {
+    if (!result) return;
+    try {
+      const route = await apply.mutateAsync({ deliveryAgentId: result.agentId, date: result.date });
+      setResult({ ...result, route });
+      toast.success(t("plan.applied"));
+    } catch (error) {
+      toast.error(deliveryErrorMessage(error, t));
+    }
+  };
+
+  const byId = new Map((result?.route.tasks ?? []).map((task) => [task.id, task]));
+  const info = (id: string) => {
+    const task = byId.get(id);
+    return { id, title: task?.customerName ?? id, subtitle: task ? [task.number, t(`status.${task.status}`), task.customerAddress].filter(Boolean).join(" · ") : null };
+  };
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <div>
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <Route className="h-4 w-4" /> {t("plan.title")}
+        </p>
+        <p className="text-xs text-muted-foreground">{t("plan.hint")}</p>
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-56 space-y-1">
+          <Label>{t("sv.table.agent")}</Label>
+          <Select value={agentId} onValueChange={setAgentId}>
+            <SelectTrigger>
+              <SelectValue placeholder={t("assign.choose")} />
+            </SelectTrigger>
+            <SelectContent>
+              {agents.map((agent) => (
+                <SelectItem key={agent.id} value={agent.id}>
+                  {agent.name ?? agent.phone} · {agent.code}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="plan-date">{t("sv.table.date")}</Label>
+          <Input id="plan-date" type="date" className="w-44" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
+        </div>
+        <Button disabled={!agentId || preview.isPending} onClick={() => void calculate()}>
+          {preview.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Route className="mr-2 h-4 w-4" />}
+          {t("plan.calculate")}
+        </Button>
+        {result && result.route.taskIds.length > 0 && can("delivery.manage_routes") && (
+          <Button variant="secondary" disabled={apply.isPending} onClick={() => void save()}>
+            {apply.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            {t("plan.apply")}
+          </Button>
+        )}
+      </div>
+      {result &&
+        (result.route.taskIds.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("plan.empty")}</p>
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground">{t(`plan.origin.${result.route.originSource}`)}</p>
+            <RoutePlanPanel
+              plan={result.route.route}
+              stops={result.route.route.stops.map((stop) => info(stop.id))}
+              unlocated={result.route.unlocatedTaskIds.map(info)}
+              onOpen={onOpenTask}
+              mapClassName="h-[420px]"
+              compactList
+            />
+          </>
+        ))}
+    </div>
+  );
+}
+
+/**
+ * Xarita (OpenStreetMap): faol yetkazuvchilarning oxirgi joyi (faqat ish sessiyasida), aniqligi, oxirgi yangilanish,
+ * joriy yetkazma va mijoz geofence doirasi; kunlik marshrut rejasi; tanlangan agentning kunlik izi — har ko'rish auditga yoziladi.
  */
 export default function MapSection({ onOpenTask }: { onOpenTask: (taskId: string) => void }) {
   const { t, i18n } = useTranslation("delivery");
@@ -107,7 +214,12 @@ export default function MapSection({ onOpenTask }: { onOpenTask: (taskId: string
         ) : !live.data ? (
           <Skeleton className="aspect-[5/3] rounded-2xl" />
         ) : (
-          <MapView markers={liveMap.markers} circles={liveMap.circles} className="aspect-[5/3] w-full" />
+          <MapView
+            markers={liveMap.markers}
+            circles={liveMap.circles}
+            className="aspect-[5/3] w-full"
+            onMarkerClick={(id) => id.startsWith("task-") && onOpenTask(id.slice("task-".length))}
+          />
         )}
 
         <div className="space-y-2">
@@ -152,6 +264,8 @@ export default function MapSection({ onOpenTask }: { onOpenTask: (taskId: string
           </ul>
         </div>
       </div>
+
+      <RoutePlannerCard agents={agents} onOpenTask={onOpenTask} />
 
       <div className="space-y-3 rounded-2xl border border-border bg-card p-4">
         <p className="flex items-center gap-2 text-sm font-semibold">
