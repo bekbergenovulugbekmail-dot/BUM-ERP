@@ -4,7 +4,7 @@
  * ERP menyusi ko'rinmaydi. Kirish: `delivery.accept` + bog'langan faol yetkazuvchi (`GET /api/delivery/agent/me`).
  * Lokatsiya faqat faol ish sessiyasida kuzatiladi. Asosiy himoya — serverda.
  */
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -24,6 +24,7 @@ import { formatDateTime } from "@/lib/delivery/format.ts";
 import { RealtimeBadge } from "@/components/delivery/badges.tsx";
 import { DeliveryRealtimeContext, LIVE_FALLBACK_MS, useDeliveryRealtime } from "@/lib/delivery/realtime.ts";
 import { num, type DeliveryMe, type WorkSession } from "@/lib/delivery/types.ts";
+import { prepareNotifications } from "@/lib/native/notifications.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { cn } from "@/lib/utils.ts";
 import { LanguageMenu } from "@/pages/sales-agent/layout.tsx";
@@ -199,6 +200,10 @@ export default function DeliveryAgentLayout() {
   }).data?.session;
   const onDuty = workSession?.status === "active";
   const location = useDeliveryTracking(onDuty, policy.trackingIntervalSeconds, policy.trackingDistanceMeters);
+  // Android ilova: bildirishnoma ruxsati ish boshlanganda (ilova ochiq) so'raladi — birinchi xabar fonda yo'qolmasin
+  useEffect(() => {
+    if (onDuty) prepareNotifications();
+  }, [onDuty]);
   const online = useOnline();
   const onSynced = useCallback(
     (result: SendResult) => {
