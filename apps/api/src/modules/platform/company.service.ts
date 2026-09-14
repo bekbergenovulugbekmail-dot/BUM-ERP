@@ -11,8 +11,9 @@
  *    kompaniyada yozish amallari company/tenant.ts da yopiladi
  */
 import { desc, eq, like, or, sql } from "drizzle-orm";
-import { DEFAULT_ROLES, RESERVED_COMPANY_PATHS, effectiveSubscriptionStatus, notFound } from "@bum/shared";
+import { DEFAULT_ROLES, RESERVED_COMPANY_PATHS, effectiveSubscriptionStatus, notFound, type ModuleKey } from "@bum/shared";
 import { warehouses } from "../../db/schema/inventory.js";
+import { seedCompanyModules } from "../company/modules.service.js";
 import { seedFinanceDefaults } from "../finance/accounts.service.js";
 import { branches, companies, companyMembers, roles, users } from "../../db/schema/platform.js";
 import { subscriptions } from "../../db/schema/subscription.js";
@@ -77,6 +78,8 @@ export type NewCompanyInput = {
   currency?: string;
   language?: string;
   branchName?: string;
+  /** Yoqiladigan modullar (bog'liqliklari avtomatik); berilmasa — hammasi yoqilgan. */
+  modules?: readonly ModuleKey[];
   owner: NewAccount;
 };
 
@@ -170,6 +173,7 @@ export async function createCompanyWithOwner(
     isDefault: true,
   });
   await seedFinanceDefaults(tx, companyId, input.currency ?? "UZS");
+  await seedCompanyModules(tx, companyId, input.modules, auditActor.id, actor ? "platform" : "registration");
 
   await tx.insert(companyMembers).values({
     companyId,

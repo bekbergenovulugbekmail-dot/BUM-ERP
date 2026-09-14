@@ -379,6 +379,50 @@ export const invitations = pgTable(
   ],
 );
 
+// ─── company_modules ─────────────────────────────────────────────────────────
+
+/**
+ * Kompaniyada modul holati (`@bum/shared` MODULE_KEYS). Yozuv yo'q — yoqilgan: modullar joriy etilgunga qadar ochilgan
+ * kompaniyalar to'liq ishlashda davom etadi. O'chirish ma'lumotni o'chirmaydi — faqat kirish yopiladi.
+ */
+export const companyModules = pgTable(
+  "company_modules",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    moduleKey: varchar("module_key", { length: 40 }).notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    enabledAt: timestamp("enabled_at", { withTimezone: true }),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    changedBy: uuid("changed_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [uniqueIndex("company_modules_company_key").on(t.companyId, t.moduleKey)],
+);
+
+/** Modul yoqish/o'chirish tarixi: kim, qachon, qayerdan (ega, platforma admini, ro'yxatdan o'tish). */
+export const companyModuleHistory = pgTable(
+  "company_module_history",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    moduleKey: varchar("module_key", { length: 40 }).notNull(),
+    enabled: boolean("enabled").notNull(),
+    source: varchar("source", { length: 20 }).notNull(),
+    reason: varchar("reason", { length: 500 }),
+    changedBy: uuid("changed_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamps().createdAt,
+  },
+  (t) => [
+    index("company_module_history_company_idx").on(t.companyId, t.createdAt),
+    check("cmh_source_valid", sql`${t.source} in ('owner', 'platform', 'registration')`),
+  ],
+);
+
 // ─── relations ───────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many, one }) => ({

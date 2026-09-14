@@ -1,73 +1,48 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+/**
+ * Kompaniya modullari holati — serverdan (`GET /api/company` → `modules`), boshqa qurilma yoki foydalanuvchida ham bir xil.
+ * Modul o'chiq bo'lsa menyu va sahifa yashiriladi; API baribir MODULE_DISABLED qaytaradi (asosiy himoya — serverda).
+ * Tizim bo'limlari (bosh sahifa, obuna, sozlamalar) modul emas — doim ochiq.
+ */
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
+import type { CompanyModuleStates } from "@bum/shared";
+import { useCurrentUser } from "@/hooks/use-auth.ts";
+import { useActiveCompany } from "@/hooks/use-company.ts";
 import { ERP_MODULES, type ModuleId } from "@/lib/modules.ts";
 
-type ModuleSettings = Record<ModuleId, boolean>;
-
 type ModuleContextType = {
-  modules: ModuleSettings;
+  /** `undefined` — yuklanmoqda yoki kompaniya yo'q. */
+  states: CompanyModuleStates | undefined;
   isEnabled: (id: ModuleId) => boolean;
-  toggleModule: (id: ModuleId) => void;
   enabledModules: ModuleId[];
+  isLoading: boolean;
 };
 
-const defaultModules = ERP_MODULES.reduce((acc, mod) => {
-  acc[mod.id] = mod.defaultEnabled;
-  return acc;
-}, {} as ModuleSettings);
-
-const STORAGE_KEY = "erp_modules_v2";
-/** Eski kalitda "distribution" standart o'chiq saqlangan — endi CRM'dan alohida bo'lim, u qiymat olinmaydi. */
-const LEGACY_STORAGE_KEY = "erp_modules";
-
-function readStoredModules(): ModuleSettings {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored) return { ...defaultModules, ...(JSON.parse(stored) as Partial<ModuleSettings>) };
-  const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
-  if (legacy) {
-    const parsed = JSON.parse(legacy) as Partial<ModuleSettings>;
-    delete parsed.distribution;
-    return { ...defaultModules, ...parsed };
-  }
-  return defaultModules;
-}
-
 const ModuleContext = createContext<ModuleContextType>({
-  modules: defaultModules,
+  states: undefined,
   isEnabled: () => true,
-  toggleModule: () => {},
   enabledModules: [],
+  isLoading: false,
 });
 
 export function ModuleProvider({ children }: { children: ReactNode }) {
-  const [modules, setModules] = useState<ModuleSettings>(() => {
-    try {
-      return readStoredModules();
-    } catch {
-      return defaultModules;
-    }
-  });
+  const user = useCurrentUser();
+  // Kirmagan sahifalarda (login, ro'yxatdan o'tish) kompaniya so'rovi yuborilmaydi
+  const { data, isLoading } = useActiveCompany(Boolean(user?.hasCompany));
+  const states = data?.modules;
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(modules));
-    } catch {
-      // ignore
-    }
-  }, [modules]);
-
-  const isEnabled = (id: ModuleId) => modules[id] ?? true;
-
-  const toggleModule = (id: ModuleId) => {
-    setModules((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  const enabledModules = ERP_MODULES.filter((m) => modules[m.id]).map((m) => m.id);
-
-  return (
-    <ModuleContext.Provider value={{ modules, isEnabled, toggleModule, enabledModules }}>
-      {children}
-    </ModuleContext.Provider>
+  const isEnabled = useCallback(
+    (id: ModuleId) => {
+      const key = ERP_MODULES.find((module) => module.id === id)?.moduleKey;
+      return key ? (states?.[key] ?? true) : true;
+    },
+    [states],
   );
+  const value = useMemo(
+    () => ({ states, isEnabled, enabledModules: ERP_MODULES.filter((module) => isEnabled(module.id)).map((module) => module.id), isLoading }),
+    [states, isEnabled, isLoading],
+  );
+
+  return <ModuleContext.Provider value={value}>{children}</ModuleContext.Provider>;
 }
 
 // Provayder va uning hook'i bir faylda — shadcn/ui provayderlaridagi kabi

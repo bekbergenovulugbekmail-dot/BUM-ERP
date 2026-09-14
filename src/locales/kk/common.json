@@ -1,5 +1,8 @@
 {
   "app.name": "BUM ERP",
+  "module.disabled.title": "Модуль өшірілген",
+  "module.disabled.message": "Бұл бөлім компанияңызда өшірілген. Деректер сақталады — модуль қайта қосылғанда бәрі орнында болады.",
+  "module.disabled.manage": "Қосу: Баптаулар → Модульдер",
   "nav.dashboard": "Басқару тақтасы",
   "nav.subscription": "Жазылым",
   "nav.sales": "Сату",

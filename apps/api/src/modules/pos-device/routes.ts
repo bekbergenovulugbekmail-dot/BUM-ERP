@@ -57,6 +57,7 @@ import { withTransaction } from "../../db/transaction.js";
 import { requestMeta, writeAuditLog } from "../../shared/audit.js";
 import { authenticate } from "../auth/auth.service.js";
 import { authOf, requireAuth } from "../auth/guard.js";
+import { assertModuleEnabled } from "../company/modules.service.js";
 import { assertCompanyWritable, effectivePermissions, requirePermission, requireTenant, requireTenantForWrite } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { listRateHistory } from "../finance/currencies.service.js";
@@ -211,6 +212,8 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
     const registered = await withTransaction(async (tx) => {
       const { tenant } = await setupTenant(tx, auth.user, body.companyId);
       if (!tenant) throw badRequest("Kompaniyani tanlang", { reason: "company_required" });
+      // Sozlash marshruti sessiyasiz (modul guard kompaniyani bilmaydi) — POS moduli shu yerda tekshiriladi
+      await assertModuleEnabled(tx, tenant.company.id, "pos");
       const { device, token } = await registerDevice(tx, tenant, body, meta);
       return {
         token,

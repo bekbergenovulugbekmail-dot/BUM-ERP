@@ -418,6 +418,8 @@ function CompanyDetailDrawer({
 
               <CompanySubscriptionSection companyId={companyId} />
 
+              <CompanyModulesSection companyId={companyId} />
+
               {/* Members */}
               <InfoSection title={`A'zolar (${detail.members.length})`}>
                 {detail.members.length === 0 ? (
@@ -578,6 +580,62 @@ function CompanySubscriptionSection({ companyId }: { companyId: string }) {
           )}
         </div>
       )}
+    </InfoSection>
+  );
+}
+
+type PlatformCompanyModule = { key: string; name: string; description: string; dependsOn: string[]; dependents: string[]; enabled: boolean };
+
+/**
+ * Kompaniya modullari (`GET/PUT /api/platform/companies/:id/modules`). O'chirish ma'lumotni o'chirmaydi — faqat kirishni
+ * yopadi; bog'liqliklar serverda tekshiriladi (masalan, Savdo o'chishi uchun avval Dostavka va Distribyutsiya o'chadi).
+ */
+function CompanyModulesSection({ companyId }: { companyId: string }) {
+  const url = `/api/platform/companies/${companyId}/modules`;
+  const query = useApiQuery<{ modules: PlatformCompanyModule[] }>(url);
+  const save = useApiMutation(
+    ({ key, enabled }: { key: string; enabled: boolean }) => api.put(`${url}/${key}`, { enabled }),
+    { invalidate: ["/api/platform"] },
+  );
+
+  if (query.error) {
+    return (
+      <InfoSection title="Modullar">
+        <p className="text-xs text-white/40">{errorMessage(query.error)}</p>
+      </InfoSection>
+    );
+  }
+  if (!query.data) return <Skeleton className="h-24 bg-white/5" />;
+
+  const rows = query.data.modules;
+  const toggle = async (row: PlatformCompanyModule) => {
+    try {
+      await save.mutateAsync({ key: row.key, enabled: !row.enabled });
+      toast.success(row.enabled ? `${row.name} o'chirildi (ma'lumotlar saqlanadi)` : `${row.name} yoqildi`);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
+  return (
+    <InfoSection title={`Modullar (${rows.filter((row) => row.enabled).length}/${rows.length})`}>
+      <div className="grid grid-cols-2 gap-1.5">
+        {rows.map((row) => (
+          <button
+            key={row.key}
+            type="button"
+            title={row.description}
+            disabled={save.isPending}
+            onClick={() => { void toggle(row); }}
+            className={`flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-[11px] transition-colors cursor-pointer disabled:cursor-wait ${
+              row.enabled ? "bg-primary/15 text-white hover:bg-primary/25" : "bg-white/4 text-white/40 hover:bg-white/10"
+            }`}
+          >
+            <span className="truncate">{row.name}</span>
+            <span className={`shrink-0 font-medium ${row.enabled ? "text-green-400" : "text-white/30"}`}>{row.enabled ? "Yoqilgan" : "O'chiq"}</span>
+          </button>
+        ))}
+      </div>
     </InfoSection>
   );
 }

@@ -12,6 +12,7 @@ import { withTransaction } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
 import { assertNotLimited, recordHit } from "../../shared/rate-limit.js";
 import { setSessionCookie } from "../auth/session.js";
+import { moduleListSchema } from "../company/modules.service.js";
 import { getPlatformSettings } from "../platform/platform.service.js";
 import { registerCompany } from "./registration.service.js";
 
@@ -29,6 +30,8 @@ const registerBody = z.strictObject({
   country: z.string().length(2).optional(),
   currency: z.string().length(3).optional(),
   language: z.string().length(2).optional(),
+  /** "Qaysi modullardan foydalanasiz?" — bog'liqliklari avtomatik yoqiladi; berilmasa hammasi yoqilgan. */
+  modules: moduleListSchema.optional(),
 });
 
 export async function registrationRoutes(app: FastifyInstance): Promise<void> {

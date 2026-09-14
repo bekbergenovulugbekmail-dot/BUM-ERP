@@ -20,6 +20,8 @@
  *   PATCH  /roles/:roleId               rolni tahrirlash                  (roles.manage)
  *   DELETE /roles/:roleId               rolni o'chirish                   (roles.manage)
  *   GET    /audit-logs                  kompaniya audit jurnali           (audit.view)
+ *   GET    /modules                     modullar holati (+ tarix — modules.manage)   (a'zo)
+ *   PUT    /modules/:key                modulni yoqish/o'chirish {enabled, reason?}  (modules.manage; bog'liqliklar tekshiriladi)
  *   GET    /settings                    sozlamalar (?group=)              (settings.view)
  *   PUT    /settings/:key               sozlamani saqlash                 (settings.manage; modules → modules.manage)
  *   GET    /print-settings              chek shabloni (standart bilan)    (a'zo — kassir chek chiqaradi)
@@ -64,6 +66,14 @@ import {
   saveLabelSettings,
   saveReceiptTemplate,
 } from "./print-settings.service.js";
+import {
+  companyModuleStates,
+  listCompanyModules,
+  moduleChangeBodySchema,
+  moduleHistory,
+  moduleParamsSchema,
+  setCompanyModule,
+} from "./modules.service.js";
 import { listCompanySettings, upsertCompanySetting } from "./settings.service.js";
 import {
   effectivePermissions,
@@ -184,6 +194,8 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
         allowedCategoryIds: tenant.membership.allowedCategoryIds,
       },
       permissions: await effectivePermissions(db, tenant),
+      /** Modul holatlari — menyu va sahifalar shunga qarab yashiriladi (API modul guard'i baribir yopadi). */
+      modules: await companyModuleStates(db, tenant.company.id),
     };
   });
 
@@ -350,6 +362,33 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ─── Sozlamalar ──────────────────────────────────────────────────────────
+
+  // ─── Modullar ────────────────────────────────────────────────────────────
+
+  // Holat — har a'zoga (menyu); tarix — modullarni boshqaruvchiga
+  app.get("/modules", async (req) => {
+    const tenant = await requireTenant(db, authOf(req).user, { access: "account" });
+    const canManage = (await effectivePermissions(db, tenant)).includes("modules.manage");
+    return {
+      modules: await listCompanyModules(db, tenant.company.id),
+      history: canManage ? await moduleHistory(db, tenant.company.id) : [],
+    };
+  });
+
+  app.put("/modules/:key", async (req) => {
+    const { key } = moduleParamsSchema.parse(req.params);
+    const { enabled, reason } = moduleChangeBodySchema.parse(req.body);
+    const { user } = authOf(req);
+    return withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, user);
+      await requirePermission(tx, tenant, "modules.manage");
+      return setCompanyModule(
+        tx,
+        { companyId: tenant.company.id, key, enabled, reason, actor: { id: user.id, name: user.name }, source: "owner" },
+        requestMeta(req),
+      );
+    });
+  });
 
   app.get("/settings", async (req) => {
     const { group } = settingsQuery.parse(req.query);

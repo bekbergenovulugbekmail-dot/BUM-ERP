@@ -1,5 +1,8 @@
 {
   "app.name": "BUM ERP",
+  "module.disabled.title": "Модуль отключён",
+  "module.disabled.message": "Этот раздел отключён в вашей компании. Данные сохраняются — после повторного включения всё будет на месте.",
+  "module.disabled.manage": "Включить: Настройки → Модули",
   "nav.dashboard": "Дашборд",
   "nav.subscription": "Подписка",
   "nav.sales": "Продажи",

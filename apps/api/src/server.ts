@@ -19,6 +19,7 @@ import { aiRoutes } from "./modules/ai/routes.js";
 import { analyticsRoutes } from "./modules/analytics/routes.js";
 import { authRoutes } from "./modules/auth/routes.js";
 import { catalogRoutes } from "./modules/catalog/routes.js";
+import { registerModuleGuard } from "./modules/company/module-guard.js";
 import { companyRoutes } from "./modules/company/routes.js";
 import { crmRoutes } from "./modules/crm/routes.js";
 import { deliveryRoutes } from "./modules/delivery/routes.js";
@@ -84,6 +85,9 @@ export async function buildServer() {
 
   /** `requireAuth` to'ldiradi — qarang modules/auth/guard.ts. */
   app.decorateRequest("auth", null);
+
+  // Kompaniyada o'chirilgan modul API'si yopiladi (MODULE_DISABLED) — marshrutlardan oldin
+  registerModuleGuard(app);
 
   // Modul marshrutlari
   await app.register(authRoutes, { prefix: "/api/auth" });

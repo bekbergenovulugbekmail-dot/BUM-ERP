@@ -6,7 +6,7 @@
  */
 import { useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Permission } from "@bum/shared";
+import type { CompanyModuleStates, Permission } from "@bum/shared";
 import { api, type ApiError } from "@/lib/api.ts";
 import { useApiQuery } from "@/lib/query.ts";
 
@@ -53,6 +53,8 @@ export type ActiveCompanyResponse = {
   company: ActiveCompany;
   membership: { companyRole: string; branchId: string | null; allowedWarehouseIds: string[] };
   permissions: Permission[];
+  /** Kompaniya modullari holati (o'chiq — menyu va sahifa yashiriladi, API MODULE_DISABLED). */
+  modules?: CompanyModuleStates;
 };
 
 /** `undefined` — yuklanmoqda. */

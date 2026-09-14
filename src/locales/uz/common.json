@@ -1,5 +1,8 @@
 {
   "app.name": "BUM ERP",
+  "module.disabled.title": "Modul o'chirilgan",
+  "module.disabled.message": "Bu bo'lim kompaniyangizda o'chirilgan. Ma'lumotlar saqlanadi — modul qayta yoqilganda hammasi joyida bo'ladi.",
+  "module.disabled.manage": "Yoqish: Sozlamalar → Modullar",
   "nav.dashboard": "Dashboard",
   "nav.subscription": "Obuna",
   "nav.sales": "Sotuv",

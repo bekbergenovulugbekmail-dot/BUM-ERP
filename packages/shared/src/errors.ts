@@ -11,6 +11,8 @@ export const ERROR_CODES = [
   "RATE_LIMITED",
   /** Sessiya ekrani qulflangan — faqat PIN bilan ochiladi (chiqish va /me ochiq). */
   "LOCKED",
+  /** Kompaniyada modul o'chirilgan — ma'lumot saqlanadi, faqat kirish yopiq (details: { reason: "module_disabled", module }). */
+  "MODULE_DISABLED",
   "INTERNAL",
 ] as const;
 
@@ -24,6 +26,7 @@ export const HTTP_STATUS: Record<ErrorCode, number> = {
   CONFLICT: 409,
   RATE_LIMITED: 429,
   LOCKED: 423,
+  MODULE_DISABLED: 403,
   INTERNAL: 500,
 };
 

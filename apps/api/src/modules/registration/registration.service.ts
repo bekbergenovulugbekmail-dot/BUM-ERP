@@ -8,6 +8,7 @@
  * ochiq qoladi. Ega darhol tizimga kiritiladi.
  */
 import { eq } from "drizzle-orm";
+import type { ModuleKey } from "@bum/shared";
 import { users } from "../../db/schema/platform.js";
 import type { Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
@@ -24,6 +25,7 @@ export type RegistrationInput = {
   country?: string;
   currency?: string;
   language?: string;
+  modules?: ModuleKey[];
 };
 
 export async function registerCompany(tx: Tx, input: RegistrationInput, meta: RequestMeta) {
@@ -37,6 +39,7 @@ export async function registerCompany(tx: Tx, input: RegistrationInput, meta: Re
       country: input.country,
       currency: input.currency,
       language: input.language,
+      modules: input.modules,
       owner: { phone: input.phone, password: input.password, name: input.ownerName ?? null },
     },
     meta,

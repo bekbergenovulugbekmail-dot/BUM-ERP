@@ -23,7 +23,7 @@ import { format } from "date-fns";
 import {
   Building2, MapPin, ArrowRight, ArrowLeft,
   CheckCircle, Layers, Sparkles, Loader2,
-  Settings2, User, Shield, LogOut,
+  Settings2, User, Shield, LogOut, Check, LayoutGrid,
 } from "lucide-react";
 import {
   Select,
@@ -33,7 +33,14 @@ import {
   SelectValue,
 } from "@/components/ui/select.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
-import { companyPathKey } from "@bum/shared";
+import {
+  DEFAULT_MODULE_SELECTION,
+  MODULE_KEYS,
+  MODULE_REGISTRY,
+  companyPathKey,
+  withModuleDependencies,
+  type ModuleKey,
+} from "@bum/shared";
 import { authMeKey, useApiQuery } from "@/lib/query.ts";
 import { useAuth, useCurrentUser, type Me } from "@/hooks/use-auth.ts";
 
@@ -43,6 +50,7 @@ const STEPS = [
   { id: "welcome",  title: "Xush kelibsiz!",            icon: Layers,      subtitle: "BUM ERP — O'zbekiston biznesiga mo'ljallangan SaaS ERP" },
   { id: "company",  title: "Kompaniya va hisob",        icon: Building2,   subtitle: "Kompaniya nomi va kirish ma'lumotlaringiz" },
   { id: "location", title: "Joylashuv va sozlamalar",   icon: MapPin,      subtitle: "Manzil, valyuta va til" },
+  { id: "modules",  title: "Modullar",                  icon: LayoutGrid,  subtitle: "Qaysi modullardan foydalanasiz?" },
   { id: "finish",   title: "Tayyor!",                   icon: CheckCircle, subtitle: "Ma'lumotlarni tekshiring va ERP'ni ishga tushiring" },
 ];
 
@@ -89,6 +97,22 @@ const INITIAL_FORM: FormState = {
   address: "", city: "", country: "UZ",
   currency: "UZS", language: "uz",
 };
+
+/** Modulni olib tashlash — unga (bilvosita ham) bog'liq tanlangan modullar bilan birga. */
+function withoutModule(selected: readonly ModuleKey[], key: ModuleKey): ModuleKey[] {
+  const removed = new Set<ModuleKey>([key]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const candidate of selected) {
+      if (!removed.has(candidate) && MODULE_REGISTRY[candidate].dependsOn.some((dependency) => removed.has(dependency))) {
+        removed.add(candidate);
+        grew = true;
+      }
+    }
+  }
+  return selected.filter((candidate) => !removed.has(candidate));
+}
 
 type RegistrationResult = {
   company: { id: string; name: string; slug: string | null; status: string; trialEndsAt: string | null };
@@ -158,6 +182,10 @@ function RegistrationWizard() {
 
   const [step,    setStep]    = useState(0);
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
+  // Standart tanlov — reyestrdagi `defaultEnabled`; bog'liqliklar avtomatik qo'shiladi
+  const [modules, setModules] = useState<ModuleKey[]>(() => [...DEFAULT_MODULE_SELECTION]);
+  const toggleModule = (key: ModuleKey) =>
+    setModules((current) => (current.includes(key) ? withoutModule(current, key) : withModuleDependencies([...current, key])));
   const register = useApiMutation();
 
   const upd = (key: keyof FormState, value: string) => {
@@ -182,6 +210,7 @@ function RegistrationWizard() {
       );
     }
     if (step === 2) return !!form.country && !!form.currency;
+    if (step === 3) return modules.length > 0;
     return true;
   };
 
@@ -197,6 +226,7 @@ function RegistrationWizard() {
         country:     form.country,
         currency:    form.currency,
         language:    form.language,
+        modules,
       });
       // Sessiya cookie'si serverda o'rnatildi — boshqa keshlar tozalanib, joriy foydalanuvchi yoziladi
       queryClient.removeQueries();
@@ -261,7 +291,7 @@ function RegistrationWizard() {
           </div>
 
           {/* Step body */}
-          <StepContent step={step} form={form} upd={upd} />
+          <StepContent step={step} form={form} upd={upd} modules={modules} toggleModule={toggleModule} />
 
           {/* Navigation */}
           <div className="flex gap-3 mt-7">
@@ -325,11 +355,13 @@ function useApiMutation() {
 // ─── Step Content ─────────────────────────────────────────────────────────────
 
 function StepContent({
-  step, form, upd,
+  step, form, upd, modules, toggleModule,
 }: {
   step: number;
   form: FormState;
   upd: (k: keyof FormState, v: string) => void;
+  modules: ModuleKey[];
+  toggleModule: (key: ModuleKey) => void;
 }) {
 
   // Step 0 — Welcome / features overview
@@ -470,8 +502,43 @@ function StepContent({
     </div>
   );
 
-  // Step 3 — Review & finish
+  // Step 3 — Modullar: tanlanmaganlari keyin Sozlamalar → Modullar'da yoqiladi
   if (step === 3) return (
+    <div className="space-y-3">
+      <p className="text-xs text-white/50">
+        Bog'liq modullar avtomatik belgilanadi (masalan, POS — Mahsulot va Omborga). Keyin Sozlamalar → Modullar bo'limida o'zgartirish mumkin.
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        {MODULE_KEYS.map((key) => {
+          const definition = MODULE_REGISTRY[key];
+          const on = modules.includes(key);
+          return (
+            <button
+              key={key}
+              type="button"
+              role="checkbox"
+              aria-checked={on}
+              onClick={() => toggleModule(key)}
+              className={`flex items-start gap-2 rounded-xl border p-2.5 text-left transition-colors cursor-pointer ${
+                on ? "border-primary/50 bg-primary/15" : "border-white/10 bg-white/[0.04] hover:border-white/25"
+              }`}
+            >
+              <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-primary bg-primary" : "border-white/30"}`}>
+                {on && <Check className="h-3 w-3 text-white" />}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-white">{definition.name}</span>
+                <span className="block text-[11px] leading-snug text-white/45">{definition.description}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  // Step 4 — Review & finish
+  if (step === 4) return (
     <div className="space-y-3">
       <SummarySection title="Kompaniya va hisob" icon={Building2}>
         {[
@@ -488,6 +555,9 @@ function StepContent({
           ["Valyuta", form.currency],
           ["Til",     LANGUAGES.find((l) => l.code === form.language)?.name ?? form.language],
         ]}
+      </SummarySection>
+      <SummarySection title="Modullar" icon={LayoutGrid}>
+        {[["Tanlangan", modules.map((key) => MODULE_REGISTRY[key].name).join(", ")]]}
       </SummarySection>
       <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5">
         <Sparkles className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />

@@ -7,6 +7,8 @@
  *   POST  /companies/:companyId/status   holat (to'xtatish sababi bilan)
  *   GET   /companies/:companyId/subscription   obuna, litsenziyalar, tarix, to'lovlar
  *   PUT   /companies/:companyId/subscription   included litsenziyalar soni {includedLicenses}
+ *   GET   /companies/:companyId/modules  modullar holati va tarixi
+ *   PUT   /companies/:companyId/modules/:key   modulni yoqish/o'chirish {enabled, reason?}
  *   GET   /billing/payments              to'lov so'rovlari (?status=&companyId=&limit=)
  *   POST  /billing/payments/:id/confirm  to'lovni tasdiqlash — obuna/litsenziya faollashadi (idempotent) {reference?}
  *   POST  /billing/payments/:id/cancel   so'rovni bekor qilish
@@ -39,6 +41,15 @@ import { withTransaction } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
 import { listAuditLogs } from "../audit/audit-log.service.js";
 import { authOf, requirePlatformAdmin } from "../auth/guard.js";
+import {
+  assertCompanyExists,
+  listCompanyModules,
+  moduleChangeBodySchema,
+  moduleHistory,
+  moduleListSchema,
+  moduleParamsSchema,
+  setCompanyModule,
+} from "../company/modules.service.js";
 import {
   cancelPayment,
   companySubscriptionDetails,
@@ -99,6 +110,8 @@ const createCompanyBody = z.object({
   currency: z.string().length(3).optional(),
   language: z.string().length(2).optional(),
   branchName: optionalText(200),
+  /** Yoqiladigan modullar (bog'liqliklari bilan); berilmasa — hammasi yoqilgan. */
+  modules: moduleListSchema.optional(),
   owner: z.object({
     phone: z.string().min(1).max(32),
     password: z.string().min(1).max(256),
@@ -215,6 +228,24 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
     const { user } = authOf(req);
     const subscription = await withTransaction((tx) => setIncludedLicenses(tx, user, companyId, includedLicenses, requestMeta(req)));
     return { subscription };
+  });
+
+  // ─── Kompaniya modullari ─────────────────────────────────────────────────
+
+  app.get("/companies/:companyId/modules", async (req) => {
+    const { companyId } = companyParams.parse(req.params);
+    await assertCompanyExists(db, companyId);
+    return { modules: await listCompanyModules(db, companyId), history: await moduleHistory(db, companyId) };
+  });
+
+  app.put("/companies/:companyId/modules/:key", async (req) => {
+    const { companyId } = companyParams.parse(req.params);
+    const { key } = moduleParamsSchema.parse(req.params);
+    const { enabled, reason } = moduleChangeBodySchema.parse(req.body);
+    const { user } = authOf(req);
+    return withTransaction((tx) =>
+      setCompanyModule(tx, { companyId, key, enabled, reason, actor: { id: user.id, name: user.name }, source: "platform" }, requestMeta(req)),
+    );
   });
 
   app.get("/billing/payments", async (req) => ({ payments: await listPayments(db, paymentsQuery.parse(req.query)) }));
