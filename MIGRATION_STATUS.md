@@ -1523,7 +1523,8 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 - **Modullar:** server guard (MODULE_DISABLED), bog'liqliklar, tarix/audit, Sozlamalar va admin paneli, ro'yxatdan o'tishda tanlov (bo'lim yuqorida)
 - **API regressiya (to'lovlar va modullardan keyin):** 96 fayl, 396 test — `--maxWorkers=1` bilan 7 qismda (129 + 39 + 62 + 31 + 49 + 30 + 56), hammasi o'tdi (2026-09-14). Fon rejimidagi birinchi urinish xotira yetmagani uchun tizim tomonidan to'xtatildi (kod xatosi emas) — oldingi rejimda qayta ishga tushirildi
 - **Web:** 14 fayl / 57 test, tsc, lint (o'zgargan fayllar), `vite build` — toza (to'lovlar va modullardan keyin qayta tekshirildi); brauzer E2E (lokal, avvalgi bosqich) — 14/14, yangi to'lov va modul ekranlari brauzerda sinalmadi
-- **Production deploy:** `bum-api` (2026-09-13 20:15 UTC, keyin API kodi o'zgarmagan) va `bum-web` (2026-09-14 03:23 UTC) — SUCCESS; `https://app.bum-erp.uz` 200, `/api/company` 401, `/health` ok
+- **Production deploy (to'lovlar va modullar):** `bum-api` (2026-09-14 05:49 UTC) va `bum-web` (05:50 UTC) — SUCCESS. API ishga tushishida migratsiyalar qo'llandi (0045, 0046 — faqat qo'shimcha), `/health` ok (konteyner ichidan). Sessiyasiz: `/api/finance/terminals`, `/api/company/modules`, `/api/sales/pos/payment-options`, `/api/delivery/agent/payment-options`, platforma modullari — 401 (marshrutlar mavjud), noma'lum yo'l — 404; `/`, `/uz/login` — 200, X-Frame-Options bor. Tizimga kirgan holda production'da sinalmadi (production hisobi ishlatilmaydi)
+- **Desktop kassa testlari:** 9 fayl / 54 test — o'tdi (kassa kodi bu bosqichda o'zgarmagan)
 
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
