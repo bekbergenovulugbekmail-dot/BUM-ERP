@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { agentNoticeOf, agentNoticeText, invalidationPrefixes, parseRealtimeMessage, realtimeUrl, reconnectDelay } from "./realtime.ts";
+import { isSafeAppPath } from "@/lib/native/notifications.ts";
+import { agentNoticeOf, agentNoticeText, agentTasksPath, invalidationPrefixes, parseRealtimeMessage, realtimeUrl, reconnectDelay } from "./realtime.ts";
 
 describe("dostavka real-time mijozi", () => {
   it("xabar turi bo'yicha yangilanadigan so'rovlar", () => {
@@ -40,6 +41,18 @@ describe("dostavka real-time mijozi", () => {
     expect(agentNoticeText({ assigned: 0, changed: 2, cancelled: 1 })?.title).toBe("Yetkazma bekor qilindi");
     expect(agentNoticeText({ assigned: 0, changed: 1, cancelled: 0 })?.title).toBe("Yetkazmalar o'zgardi");
     expect(agentNoticeText({ assigned: 0, changed: 0, cancelled: 0 })).toBeNull();
+  });
+
+  it("bildirishnoma bosilganda: joriy biznes segmentidagi yetkazmalar sahifasi; faqat shu saytdagi nisbiy yo'l", () => {
+    expect(agentTasksPath("/bonnu-market/delivery-agent/dashboard")).toBe("/bonnu-market/delivery-agent/tasks");
+    expect(agentTasksPath("/uz/delivery-agent/tasks/123")).toBe("/uz/delivery-agent/tasks");
+    expect(agentTasksPath("/")).toBe("/");
+    expect(isSafeAppPath("/bonnu-market/delivery-agent/tasks")).toBe(true);
+    expect(isSafeAppPath("//evil.example/x")).toBe(false);
+    expect(isSafeAppPath("https://evil.example")).toBe(false);
+    expect(isSafeAppPath("javascript:alert(1)")).toBe(false);
+    expect(isSafeAppPath("/\\evil.example")).toBe(false);
+    expect(isSafeAppPath(undefined)).toBe(false);
   });
 
   it("buzilgan xabar e'tiborsiz qoladi", () => {

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <application
         android:allowBackup="true"
@@ -45,6 +46,9 @@
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <!-- Yangi yetkazma haqida bildirishnoma (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- local-notifications plagini qo'shadi, lekin ilova aniq vaqtli signal ishlatmaydi (xabar darhol ko'rsatiladi);
+         Google Play bu ruxsat uchun asoslash talab qiladi — olib tashlanadi -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:node="remove" />
     <!-- Yetkazish isboti va do'kon rasmi (web sahifadagi kamera) -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />

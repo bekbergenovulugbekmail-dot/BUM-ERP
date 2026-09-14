@@ -74,6 +74,12 @@ export function agentNoticeText(counts: Record<AgentNotice, number>): { title: s
   return null;
 }
 
+/** Bildirishnoma bosilganda ochiladigan yetkazmalar sahifasi — joriy biznes (yoki til) segmenti saqlanadi. */
+export function agentTasksPath(pathname: string): string {
+  const base = pathname.split("/").filter(Boolean)[0];
+  return base ? `/${encodeURIComponent(decodeURIComponent(base))}/delivery-agent/tasks` : "/";
+}
+
 /** Qayta ulanish kutishi: 1, 2, 4 … 30 s, yarmi tasodifiy (hamma bir vaqtda ulanmasin). */
 export function reconnectDelay(attempt: number, random: () => number = Math.random): number {
   const base = Math.min(30_000, 1000 * 2 ** Math.max(0, attempt));
@@ -118,7 +124,7 @@ export function useDeliveryRealtime(enabled: boolean): RealtimeStatus {
       notices.assigned = 0;
       notices.changed = 0;
       notices.cancelled = 0;
-      if (notice) void notifyInBackground(notice.title, notice.body);
+      if (notice) void notifyInBackground(notice.title, notice.body, { url: agentTasksPath(window.location.pathname) });
       const prefixes = [...pending];
       pending.clear();
       if (prefixes.length === 0) return;

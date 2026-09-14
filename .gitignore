@@ -33,6 +33,14 @@ apps/desktop/release
 .env*
 !.env.example
 
+# Imzo kalitlari va sertifikatlar (Android release, kod imzolash) — egasida saqlanadi, repoga tushmaydi
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+keystore.properties
+
 # Mahalliy AI yordamchi fayllari
 .agents/
 .claude/
