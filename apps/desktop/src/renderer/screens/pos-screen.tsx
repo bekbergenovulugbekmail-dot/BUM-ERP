@@ -338,14 +338,22 @@ export default function PosScreen({
   // Karta — serverdan sinxronlangan terminallar bo'lsa har terminal alohida qism (pul terminal bog'langan bank hisobiga)
   const terminals = context?.terminals ?? [];
   const bankAccounts = context?.bankAccounts ?? [];
-  const activeTerminalId = terminals.find((terminal) => terminal.id === cardTerminal)?.id ?? terminals[0]?.id ?? null;
-  const activeBankId = bankAccounts.find((account) => account.id === bankChoice)?.id ?? bankAccounts[0]?.id ?? null;
-  const payParts = (method: PayKey): PayPart[] =>
-    method === "card" && terminals.length > 0
-      ? terminals.map((terminal) => ({ key: `card:${terminal.id}`, method, terminalId: terminal.id, cashAccountId: null, label: terminalLabel(terminal, terminals) }))
-      : method === "bank" && bankAccounts.length > 0
-        ? bankAccounts.map((account) => ({ key: `bank:${account.id}`, method, terminalId: null, cashAccountId: account.id, label: account.name }))
-        : [{ key: method, method, terminalId: null, cashAccountId: null, label: PAY_METHODS.find((item) => item.key === method)!.label }];
+  // Tanlanmagan bo'lsa — umumiy Karta/Bank (asosiy bank hisobi); karta turi yoki bank hisobi faqat aniq tanlanganda
+  const activeTerminalId = terminals.find((terminal) => terminal.id === cardTerminal)?.id ?? null;
+  const activeBankId = bankAccounts.find((account) => account.id === bankChoice)?.id ?? null;
+  const payParts = (method: PayKey): PayPart[] => {
+    const generic: PayPart = { key: method, method, terminalId: null, cashAccountId: null, label: PAY_METHODS.find((item) => item.key === method)!.label };
+    if (method === "card") {
+      return [
+        generic,
+        ...terminals.map((terminal) => ({ key: `card:${terminal.id}`, method, terminalId: terminal.id, cashAccountId: null, label: terminalLabel(terminal, terminals) })),
+      ];
+    }
+    if (method === "bank") {
+      return [generic, ...bankAccounts.map((account) => ({ key: `bank:${account.id}`, method, terminalId: null, cashAccountId: account.id, label: account.name }))];
+    }
+    return [generic];
+  };
   const partKey = (method: PayKey) =>
     method === "card" && activeTerminalId ? `card:${activeTerminalId}` : method === "bank" && activeBankId ? `bank:${activeBankId}` : method;
   const typedParts = PAY_METHODS.flatMap((method) => payParts(method.key)).filter((part) => (tender[part.key] ?? "").trim() !== "");
@@ -543,8 +551,8 @@ export default function PosScreen({
     const part = PAY_METHODS.flatMap((method) => payParts(method.key)).find((item) => item.key === key);
     if (!part) return;
     setPayMethod(part.method);
-    if (part.terminalId) setCardTerminal(part.terminalId);
-    if (part.cashAccountId) setBankChoice(part.cashAccountId);
+    if (part.method === "card") setCardTerminal(part.terminalId);
+    if (part.method === "bank") setBankChoice(part.cashAccountId);
     const due = calc?.due ?? 0n;
     const others = typedParts
       .filter((item) => item.key !== key)
@@ -1417,6 +1425,9 @@ export default function PosScreen({
                 {enabledMethods.map((method) => {
                   const chosen = payMethod === method.key;
                   const parts = payParts(method.key);
+                  // Bir nechta qism (umumiy + UZCARD, HUMO yoki bank hisoblari) — har biri nomi bilan
+                  const labeled = parts.length > 1;
+                  const methodActiveId = method.key === "card" ? activeTerminalId : method.key === "bank" ? activeBankId : null;
                   return (
                     <div
                       key={method.key}
@@ -1448,21 +1459,21 @@ export default function PosScreen({
                       {parts.map((part) => {
                         // Terminal yoki bank hisobi: tanlangani belgilanadi; summa kiritilmagan tez yakunlashda to'lov shunga
                         const specific = part.terminalId !== null || part.cashAccountId !== null;
-                        const partChosen =
-                          chosen && ((part.terminalId !== null && part.terminalId === activeTerminalId) || (part.cashAccountId !== null && part.cashAccountId === activeBankId));
+                        // Umumiy qism — aniq karta turi/hisob tanlanmagan paytda tanlangan
+                        const partChosen = chosen && (specific ? (part.terminalId ?? part.cashAccountId) === methodActiveId : methodActiveId === null);
                         return (
                           <div key={part.key}>
-                            {specific && (
+                            {labeled && (
                               <div className="mt-1 flex items-center gap-1 px-0.5">
                                 <button
                                   type="button"
                                   aria-pressed={partChosen}
-                                  title={part.terminalId ? "Karta terminali" : "Bank hisobi"}
+                                  title={part.terminalId ? "Karta turi" : part.cashAccountId ? "Bank hisobi" : "Umumiy (asosiy bank hisobi)"}
                                   className={`min-w-0 flex-1 truncate rounded text-left text-[11px] font-bold tracking-wide ${partChosen ? "text-primary" : "text-muted-foreground"}`}
                                   onClick={() => {
                                     setPayMethod(part.method);
-                                    if (part.terminalId) setCardTerminal(part.terminalId);
-                                    if (part.cashAccountId) setBankChoice(part.cashAccountId);
+                                    if (part.method === "card") setCardTerminal(part.terminalId);
+                                    if (part.method === "bank") setBankChoice(part.cashAccountId);
                                   }}
                                 >
                                   {part.label}
@@ -1485,7 +1496,7 @@ export default function PosScreen({
                               className="mt-1 h-(--pos-tap-size) min-w-0 px-2 text-right text-base font-bold tabular-nums"
                               inputMode="decimal"
                               placeholder={
-                                typedParts.length === 0 && chosen && calc && (!specific || partChosen)
+                                typedParts.length === 0 && calc && partChosen
                                   ? trimDecimal(fromMinor(calc.due))
                                   : "0"
                               }
