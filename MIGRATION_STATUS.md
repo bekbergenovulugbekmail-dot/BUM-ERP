@@ -1585,14 +1585,14 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 | Topilma | Og'irlik | Holat | Dalil |
 |---|---|---|---|
 | AUTH-1 SMS kodni parallel so'rov bilan tanlash | HIGH | DONE | urinish solishtirishdan oldin atomar; test: 15 parallel xato kod — urinish ≤ 5, kod yonadi |
-| AUTH-2 / TEN-B-8 `trustProxy: true` — IP soxtalashtirish | HIGH | DONE (lokal) | `TRUST_PROXY_HOPS=1`, nginx realip; test: XFF chap qiymati yozilmaydi. Production — NOT VERIFIED (deploy BLOCKED) |
+| AUTH-2 / TEN-B-8 `trustProxy: true` — IP soxtalashtirish | HIGH | DONE | `TRUST_PROXY_HOPS=1`, nginx rekursiv realip; test: XFF chap qiymati yozilmaydi; production'da soxta XFF bilan tekshirilgan — API haqiqiy mijoz IP'sini ko'radi (`15dc4c2`) |
 | CLI-1 imzosiz yangilanish o'rnatuvchisi | HIGH | BLOCKED — USER ACTION REQUIRED | kod imzolash sertifikati (`CSC_LINK`, `CSC_KEY_PASSWORD`) kerak; 0.4.5 — NotSigned |
 | PAY-1 / TEN-S-1 / AUTH-4 qurilma istalgan kassir nomidan ishlaydi | HIGH | PARTIAL | `pos_device_cashiers` (0048): yuqori huquqli offline amallar (qaytarish, narx, xarid, ta'minotchi to'lovi, hisobdan chiqarish, ko'chirish, sanash, kurs, mijoz/ta'minotchi tahriri) va analitika — faqat shu qurilmada parol bilan kirgan kassir; test bor. Oddiy savdo/smena hali `cashierId` ga ishonadi (offline ish to'xtamasin); pull'da a'zolar ro'yxati (TEN-S-8) — NOT STARTED |
 | TEN-B-1 `hr.manage` egani / to'liq huquqlini bloklaydi | HIGH | DONE | ega, to'liq rol, platforma admini himoyalangan; HR orqali kirishni o'zgartirish `employee.software_access.manage`; test |
 | TEN-S-2 agentlar menejeri istalgan a'zoni bloklaydi | HIGH | DONE | test: egaga bog'langan agentni faolsizlantirish 403 |
 | AUTH-3 login lockout poygasi | MEDIUM | DONE | test: 12 parallel xato — ≤ 5 tasi parol tekshiradi |
 | AUTH-5 raqamni bilgan kishi hisobni bloklab turadi | MEDIUM | PARTIAL | raqam+IP 5, raqam 20, IP 30 (15 daq.); ko'p IP bilan raqamni bloklash hali mumkin |
-| CLI-2 / AUTH-11 CSP yo'q | MEDIUM | DONE (lokal) | nginx CSP `script-src 'self'`, inline skript `theme-init.js` ga; brauzer E2E: kiritilgan inline skript bloklanadi, 10 sahifada CSP buzilishi yo'q. Production — NOT VERIFIED; Android WebView native bridge — PARTIAL |
+| CLI-2 / AUTH-11 CSP yo'q | MEDIUM | DONE (lokal) | nginx CSP `script-src 'self'`, inline skript `theme-init.js` ga; brauzer E2E: kiritilgan inline skript bloklanadi, 10 sahifada CSP buzilishi yo'q. Production: sarlavha bor, `theme-init.js` JS, sahifada inline skript yo'q; tizimga kirgan holda brauzerda — NOT VERIFIED; Android WebView native bridge — PARTIAL |
 | CLI-3 Android backup yoqilgan | MEDIUM | DONE | `allowBackup=false`, `data_extraction_rules.xml`; APK qurildi, merged manifest tekshirildi |
 | CLI-4 logout qurilmada ma'lumot qoldiradi | MEDIUM | DONE (kod) | agent API keshi, qoralamalar, yuborilmagan GPS o'chiriladi; brauzerda alohida — NOT VERIFIED |
 | PAY-2 / TEN-S-3 offline narx, chegirma, kurs | MEDIUM | PARTIAL | faqat nomuvofiqlik yoziladi (offline chek rad etilmaydi — kelishilgan qaror) |
@@ -1636,10 +1636,13 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 - Desktop: typecheck (main + renderer), 9 fayl / 57 test. **Kassa 0.4.5** o'rnatuvchisi qurildi — `apps/desktop/release/BUM-POS-KASSA-Setup-0.4.5.exe`, 111 732 866 bayt, SHA-256 `A6050E36C4CF27A8FF1CBA7415C8F4DA0FAB3A9D09C2465B6948171D50B30E05`, imzosiz (`Get-AuthenticodeSignature`: NotSigned), **e'lon qilinmagan**, ishga tushirilmadi (ishlab turgan kassaga tegmaslik uchun)
 - Android: `assembleDebug` BUILD SUCCESSFUL — `app-debug.apk` 5 787 561 bayt, SHA-256 `FDE69AB6E44DE4E19554B22AEA2A91A1AE0318A7D02E78C75B1AA5219EC9ECE0`; merged manifest: `allowBackup=false`, `fullBackupContent=false`, `dataExtractionRules`. Release imzo — BLOCKED (kalit yo'q); real qurilma — NOT VERIFIED
 
-**Production:**
-- Deploy — **BLOCKED — USER ACTION REQUIRED**: `railway up` (bum-api, bum-web) avtomatik rejim klassifikatori tomonidan rad etildi. Commitlar: `eda2204`, `136ab71`, `aa95acc` va testlar. Avval `bum-api` (migratsiya 0048 — yangi jadval va tarixdan to'ldirish, destructive emas), keyin `bum-web`
-- Hozirgi production (faqat o'qish, 2026-09-14): `Content-Security-Policy` yo'q; X-Frame-Options, nosniff, HSTS, Referrer-Policy, Permissions-Policy bor; `/theme-init.js` — SPA fallback (`text/html`) — web deploydan keyin JS bo'lishi kerak
-- Deploydan keyin tekshirish: `/health`; `app.bum-erp.uz` sarlavhalarida CSP; login sahifasi va mavzu; realtime (WebSocket) CSP ostida; soxta `X-Forwarded-For` bilan so'rov — audit/HTTP logda haqiqiy IP; kassada kassir qayta kirgach qaytarish/narx amallari
+**Production (egasining ruxsati bilan deploy, 2026-09-14):**
+- `bum-api` va `bum-web` — SUCCESS (yakuniy: API `8a3b678b`, web `d172d534`)
+- **Uzilish ~15 daqiqa (17:12–17:26 UTC), sababi — shu deploy:** yangi "oddiy parol" qoidasi `.env` dagi bootstrap admin paroliga ham qo'llandi, API har ishga tushishda yiqildi (Railway deployni SUCCESS ko'rsatdi, eski deploy olib tashlangan edi). Tuzatish `dba183b`: bootstrap faqat uzunlikni tekshiradi va logga ogohlantirish yozadi (parol chiqarilmaydi); regressiya testi `bootstrap.test.ts` (14/14). **Bootstrap admin paroli production'da oddiy parollar ro'yxatiga yoki bir xil belgili qolipga tushadi — egasi Railway o'zgaruvchisida murakkab parolga almashtirishi kerak**
+- **IP regressiyasi va tuzatish `15dc4c2`:** Railway zanjiri `"<mijoz yuborgani>, <mijoz>, <Railway proksi 152.233.x>"` — oxirgi qiymatni olish barcha foydalanuvchilarni proksi IP'lariga birlashtirdi (IP limitlari umumiy). Endi nginx realip rekursiv (ichki tarmoqlar va `152.233.0.0/16` ishonchli). Lokal nginx: 4 zanjir holati — PASS; production: soxtasiz va `X-Forwarded-For: 203.0.113.7` bilan so'rovda API ko'rgan IP = tashqi IP (ipify) — PASS, soxta qiymat yozilmadi
+- Konteyner ichidan `/health` — ok; migratsiyalar 49 ta (0048 qo'llangan); `pos_device_cashiers`: 1 bog'lanish, 1 qurilma (faol qurilma 0, bog'lanishsiz faol qurilma 0) — faqat o'qish so'rovi
+- `app.bum-erp.uz/uz/login` — 200, `Content-Security-Policy` va boshqa sarlavhalar bor, sahifada inline skript yo'q; `/theme-init.js` — `application/javascript`; `/api/auth/me` — 401 (nosniff, SAMEORIGIN); `/api/delivery/ws` upgrade cookiesiz — 401
+- NOT VERIFIED: tizimga kirgan holda brauzerda realtime (WebSocket) CSP ostida, kassada kassir qayta kirishi va yuqori huquqli amallar (production hisobi ishlatilmaydi); Railway proksi oralig'i (`152.233.0.0/16`) — kuzatilgan manzillar asosida, Railway hujjati bilan tasdiqlanmagan
 - Ishdagi kassalar uchun eslatma: 0048 bog'lanishlarni qurilma tarixidan (ro'yxatdan o'tkazgan, sinxron amallar, smenalar, kassir kirishlari) to'ldiradi. Tarixi yo'q xodim nomidan yuqori huquqli offline amal "cashier_not_bound" bilan rad etiladi — xodim kassada parol bilan bir marta kirishi kerak
 
 **Qolgan xavfsizlik ishlari:** AUTH-7 (PIN bruteforce, qulflangan sessiyada WebSocket), AUTH-8/CLI-10 (token muddati, shifrlash), CLI-5/6 (S3 fayl tekshiruvi — S3 sozlanganda), CLI-9 (Electron fuses), CLI-13 (yuklash sessiyasi egasi), PAY-3 (offline xarid kursi), PAY-8 (dostavka naqdini topshirish), PAY-12 (qaytarishda smena kassiri), PAY-14 (tizim hisoblarini qayta yo'naltirish), PAY-15 (keshbek poygasi), PAY-17 (majburiy idempotentlik kaliti), PAY-18 (chegirma chegarasi/tasdiq), TEN-B-7 (AI/dashboard maosh jami), TEN-B-10 (bo'lim ichidagi ruxsat bo'shliqlari), TEN-B-11 (modul guard bo'shliqlari), TEN-B-13 (obuna yozish yo'llari), TEN-S-6/7/8/9 (modul ruxsatlari, ombor cheklovi o'qishda, pull'da a'zolar, GPS soxtalashtirish), TEN-S-11 (public OSRM). Pullik xizmat majburiy emas: kod imzolash sertifikati (Windows, yiliga taxminan 200–500 USD, kassalar keng tarqatilishidan oldin) — yagona tavsiya etilgan xarajat
@@ -1675,7 +1678,7 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 
 ### Qolgan ishlar
 1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
-1a. **Xavfsizlik fixlarini deploy qilish** (avtomatik rejimda rad etildi): avval `bum-api` (migratsiya 0048), keyin `bum-web`; so'ng "Xavfsizlik auditi" bo'limidagi tekshirish ro'yxati. Production'da `WEB_ORIGIN` o'rnatilgan (`https://bum-erp.uz`) — yangi majburiy tekshiruv API'ni to'xtatmaydi
+1a. **Bootstrap admin parolini almashtirish** (egasi, Railway o'zgaruvchisi): hozirgi parol oddiy parollar qoidasiga tushadi. Tizimga kirgan holda production smoke: realtime (dostavka xaritasi) CSP ostida, kassada kassir kirishi va qaytarish
 2. Kassa **0.4.5** ni (Naqd/Karta/Bank + UZCARD, HUMO va bank hisoblari bo'yicha to'lov, xavfsizlik: yangilanish tokeni faqat API'ga, chek oynasi CSP; 0.4.1–0.4.4 o'rniga) API deploydan keyin platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi, terminal cheki) qo'lda sinov
 3a. Yangi APK'ni telefonga o'rnatib, ish kunida Android "Batareya" bo'limida BUM ERP sarfini oldingi versiya bilan solishtirish; bonnu-market'da UZCARD/HUMO terminallarini "Uzcard"/"Humo" bank hisoblariga komissiya bilan qo'shish (egasi)
 3. Production'da tizimga kirgan holda qo'lda smoke (egasi hisobi bilan): kirish, Dostavka → "Hudud bo'yicha" → biriktirish, "Kunlik marshrut", distribyutsiya xaritasi
@@ -1696,7 +1699,7 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 - **DNS:** apex `bum-erp.uz` — webspace.uz panelida egasi o'zgartiradi (Railway tarifida `bum-web` ga yana domen qo'shib bo'lmaydi: `app` va `www` band)
 - **Production'da tizimga kirgan sinov:** egasining test hisobi yoki ishtiroki kerak (production admin paroli ishlatilmaydi)
 - **Kassa 0.4.5 e'loni:** platforma admini kirishi kerak (o'rnatuvchi tayyor, imzosiz); API xavfsizlik deployidan keyin
-- **Xavfsizlik fixlari production'da emas:** `railway up` avtomatik rejim klassifikatori tomonidan rad etildi — egasi deploy qiladi yoki ruxsat beradi; CSP, IP realip va WebSocket production'da — NOT VERIFIED
+- **Bootstrap admin paroli oddiy:** API endi ishga tushishni to'xtatmaydi, faqat ogohlantiradi — almashtirish egasining Railway o'zgaruvchilarida (parol hech qayerga chiqarilmagan)
 - **Kod imzolash sertifikati (CLI-1):** yangilanish o'rnatuvchisi imzosiz — sertifikat kerak (pullik, taxminiy)
 - **Terminal ekvayringi (UZCARD/HUMO API):** bank yoki processing protokoli va kalitlari kerak — hozir terminal to'lovi kassir tomonidan chekka qarab kiritiladi
 - **Payme / Click:** merchant ID va kalitlari kerak — integratsiya boshlanmagan
