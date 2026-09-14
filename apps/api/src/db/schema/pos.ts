@@ -59,6 +59,31 @@ export const posDevices = pgTable(
   ],
 );
 
+/**
+ * Qurilmada parol bilan kirgan (yoki qurilmani ro'yxatdan o'tkazgan) kassirlar. Server kassirni shu bog'lanish orqali
+ * taniydi: qurilma amalidagi `cashierId` bog'lanmagan bo'lsa, yuqori huquqli amallar (narx, kurs, xarid, ombor, qaytarish,
+ * ta'minotchi to'lovi) va kassa analitikasi rad etiladi — token egasi boshqa xodim (masalan, ega) nomidan ish qila olmaydi.
+ * A'zolik o'chirilsa yoki qurilma uzilsa — bekor (`revoked_at`); qayta parol bilan kirilsa — tiklanadi.
+ */
+export const posDeviceCashiers = pgTable(
+  "pos_device_cashiers",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    deviceId: uuid("device_id")
+      .notNull()
+      .references(() => posDevices.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    authenticatedAt: timestamp("authenticated_at", { withTimezone: true }).notNull().default(sql`now()`),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("pdc_device_user_key").on(t.deviceId, t.userId), index("pdc_company_user_idx").on(t.companyId, t.userId)],
+);
+
 export type PosSyncError = { code: string; message: string; details?: unknown };
 
 export const posSyncOperations = pgTable(

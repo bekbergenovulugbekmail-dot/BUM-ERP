@@ -141,7 +141,9 @@ describe("Valyuta kurslari: ruxsatlar, tarix, eski hujjat kursi, kassa sinxroni"
     const conflicts = await db.select().from(posSyncConflicts).where(eq(posSyncConflicts.companyId, company.companyId));
     expect(conflicts).toEqual([expect.objectContaining({ kind: "record_changed", referenceType: "company_currency" })]);
 
-    // Kassadagi tarix: kassir ruxsati bilan; qurilma nomi ko'rinadi
+    // Kassadagi tarix: kassir ruxsati bilan; qurilma nomi ko'rinadi. Kassir shu qurilmada parol bilan kirmagan — 403
+    expect((await device("GET", `/api/pos-device/currencies/history?cashierId=${kassir.id}&code=USD`)).statusCode).toBe(403);
+    expect((await device("POST", "/api/pos-device/cashiers/login", { phone: kassir.phone, password: "xodim-parol-123" })).statusCode).toBe(200);
     const deviceHistory = await device("GET", `/api/pos-device/currencies/history?cashierId=${kassir.id}&code=USD`);
     expect(deviceHistory.statusCode).toBe(200);
     expect(deviceHistory.json().history[0]).toMatchObject({ oldRate: "12500.0000", rate: "12800.0000", deviceName: "Kassa 1" });

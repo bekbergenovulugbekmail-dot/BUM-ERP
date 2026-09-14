@@ -15,8 +15,8 @@
  *    kechikayotgan xarid buyurtmasi "overdue_payment" turida edi — endi "system"
  *  - `unreadCount` 100 tadan ortig'ini sanamasdi
  */
-import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
-import { badRequest, notFound } from "@bum/shared";
+import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lte, notInArray, or, sql } from "drizzle-orm";
+import { badRequest, notFound, type Permission } from "@bum/shared";
 import { batches, products } from "../../db/schema/catalog.js";
 import { expenses } from "../../db/schema/finance.js";
 import { employees, leaves } from "../../db/schema/hr.js";
@@ -29,7 +29,7 @@ import { withTransaction, type DbOrTx, type Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
 import { recordHit } from "../../shared/rate-limit.js";
-import type { TenantContext } from "../company/tenant.js";
+import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { todayIso } from "../finance/cash.service.js";
 import { shiftDate, trimDecimal } from "../analytics/dates.js";
 
@@ -42,10 +42,37 @@ function receiptJoin(tenant: TenantContext) {
   return and(eq(notificationReceipts.notificationId, notifications.id), eq(notificationReceipts.userId, tenant.user.id));
 }
 
-function visibleTo(tenant: TenantContext) {
+/**
+ * Kompaniya bo'ylab aqlli ogohlantirish (manba turi) → ko'rish ruxsati: xarajat summasi, xodim ta'tili, qarzdorlar va
+ * zaxira ma'lumoti shu bo'limga ruxsati yo'q xodimga (masalan, kassirga) ko'rinmaydi.
+ */
+const ALERT_PERMISSIONS: Record<string, Permission> = {
+  expenses: "finance.view",
+  leaves: "hr.view",
+  stock_levels: "warehouse.view",
+  batches: "warehouse.view",
+  purchase_orders: "purchase.view",
+  sales_orders: "sales.view",
+};
+
+async function hiddenAlertTypes(conn: DbOrTx, tenant: TenantContext): Promise<string[]> {
+  const permissions = await effectivePermissions(conn, tenant);
+  return Object.entries(ALERT_PERMISSIONS)
+    .filter(([, permission]) => !permissions.includes(permission))
+    .map(([relatedType]) => relatedType);
+}
+
+function visibleTo(tenant: TenantContext, hiddenTypes: readonly string[]) {
   return and(
     eq(notifications.companyId, tenant.company.id),
-    or(eq(notifications.userId, tenant.user.id), and(eq(notifications.isGlobal, true), isNull(notifications.userId))),
+    or(
+      eq(notifications.userId, tenant.user.id),
+      and(
+        eq(notifications.isGlobal, true),
+        isNull(notifications.userId),
+        hiddenTypes.length > 0 ? or(isNull(notifications.relatedType), notInArray(notifications.relatedType, [...hiddenTypes])) : undefined,
+      ),
+    ),
     isNull(notificationReceipts.dismissedAt),
   );
 }
@@ -67,7 +94,7 @@ export async function listNotifications(conn: DbOrTx, tenant: TenantContext, opt
     })
     .from(notifications)
     .leftJoin(notificationReceipts, receiptJoin(tenant))
-    .where(and(visibleTo(tenant), options.unreadOnly ? sql`not (${readSql})` : undefined))
+    .where(and(visibleTo(tenant, await hiddenAlertTypes(conn, tenant)), options.unreadOnly ? sql`not (${readSql})` : undefined))
     .orderBy(desc(notifications.createdAt), desc(notifications.id))
     .limit(options.limit);
 }
@@ -77,7 +104,7 @@ export async function unreadCount(conn: DbOrTx, tenant: TenantContext) {
     .select({ value: count() })
     .from(notifications)
     .leftJoin(notificationReceipts, receiptJoin(tenant))
-    .where(and(visibleTo(tenant), sql`not (${readSql})`));
+    .where(and(visibleTo(tenant, await hiddenAlertTypes(conn, tenant)), sql`not (${readSql})`));
   return row?.value ?? 0;
 }
 
@@ -86,7 +113,7 @@ async function loadVisible(tx: Tx, tenant: TenantContext, notificationId: string
     .select({ id: notifications.id, isGlobal: notifications.isGlobal })
     .from(notifications)
     .leftJoin(notificationReceipts, receiptJoin(tenant))
-    .where(and(eq(notifications.id, notificationId), visibleTo(tenant)))
+    .where(and(eq(notifications.id, notificationId), visibleTo(tenant, await hiddenAlertTypes(tx, tenant))))
     .limit(1);
   if (!row) throw notFound("Bildirishnoma topilmadi");
   return row;

@@ -337,6 +337,13 @@
       "when": 1789369390115,
       "tag": "0047_bank_commissions",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1789395277356,
+      "tag": "0048_pos_device_cashiers",
+      "breakpoints": true
     }
   ]
 }

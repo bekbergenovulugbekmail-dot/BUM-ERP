@@ -29,6 +29,24 @@ export async function assertNotLimited(
   if (row && row.count >= limit) throw rateLimited();
 }
 
+/**
+ * Urinishni AVVAL hisoblaydi (atomar), keyin chegarani tekshiradi: parallel so'rovlar ham limitdan oshib keta olmaydi
+ * (`assertNotLimited` + keyinroq `recordHit` oralig'ida bir nechta so'rov o'tib ketardi). To'g'ri urinishdan keyin
+ * `releaseAttempt` hisobni qaytaradi.
+ */
+export async function consumeAttempt(bucket: string, limit: number, windowSeconds: number): Promise<void> {
+  const count = await recordHit(bucket, windowSeconds);
+  if (count > limit) throw rateLimited();
+}
+
+/** Muvaffaqiyatli urinish hisobini qaytaradi (joriy oynada, noldan pastga tushmaydi). */
+export async function releaseAttempt(bucket: string, windowSeconds: number): Promise<void> {
+  await db
+    .update(rateLimits)
+    .set({ count: sql`greatest(${rateLimits.count} - 1, 0)` })
+    .where(and(eq(rateLimits.bucket, bucket), eq(rateLimits.windowStart, windowStart(windowSeconds))));
+}
+
 /** Joriy oynadagi hisobni atomar oshiradi va yangi qiymatni qaytaradi. */
 export async function recordHit(bucket: string, windowSeconds: number): Promise<number> {
   const [row] = await db

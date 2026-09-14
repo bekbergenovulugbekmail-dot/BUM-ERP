@@ -21,7 +21,7 @@ import {
   type AllocationMethod,
 } from "@bum/shared";
 import { cashAccounts } from "../../db/schema/finance.js";
-import { customerPayments, payments } from "../../db/schema/sales.js";
+import { customerPayments, payments, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
@@ -253,6 +253,16 @@ export async function recordMixedCustomerPayment(
 ) {
   const companyId = tenant.company.id;
   if (!input.orderId && !input.customerId) throw badRequest("Mijoz yoki buyurtma tanlanishi kerak");
+  // To'lov hujjatidagi mijoz buyurtma mijozi bilan bir xil (boshqa kompaniya mijozi yozilib qolmasin)
+  if (input.orderId && input.customerId) {
+    const [order] = await tx
+      .select({ customerId: salesOrders.customerId })
+      .from(salesOrders)
+      .where(and(eq(salesOrders.id, input.orderId), eq(salesOrders.companyId, companyId)))
+      .limit(1);
+    if (!order) throw notFound("Buyurtma topilmadi");
+    if (order.customerId !== input.customerId) throw badRequest("Buyurtma boshqa mijozniki");
+  }
   if (input.idempotencyKey) {
     const existing = await findPaymentByKey(tx, companyId, input.idempotencyKey);
     if (existing) return { ...existing, created: false };

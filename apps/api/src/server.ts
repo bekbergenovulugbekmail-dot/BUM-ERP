@@ -43,7 +43,9 @@ export async function buildServer() {
     // pino instansiyasi Fastify'ning bazaviy logger tipiga keltiriladi —
     // aks holda butun FastifyInstance tipi pino'ga bog'lanib qoladi.
     loggerInstance: logger as unknown as FastifyBaseLogger,
-    trustProxy: true,
+    // Faqat ma'lum proksi zanjiri (nginx) ga ishoniladi — `true` da mijoz yuborgan X-Forwarded-For IP ni almashtirardi
+    // (proxy-addr: raqam N = socketdan boshlab dastlabki N bosqichga ishonch)
+    trustProxy: (_address: string, hop: number) => hop < env.TRUST_PROXY_HOPS,
     bodyLimit: 2 * 1024 * 1024,
   });
 

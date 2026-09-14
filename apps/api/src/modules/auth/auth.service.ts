@@ -24,13 +24,15 @@ import { companies, companyMembers, users } from "../../db/schema/platform.js";
 import { licenses, subscriptions } from "../../db/schema/subscription.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
-import { assertNotLimited, recordHit } from "../../shared/rate-limit.js";
+import { consumeAttempt, releaseAttempt } from "../../shared/rate-limit.js";
 import { burnPasswordCheck, hashPassword, verifyPassword } from "./password.js";
 import { createSession, type SessionUser } from "./session.js";
 
 const LOGIN_WINDOW_SECONDS = 15 * 60;
-/** Bitta raqamga 15 daqiqada 5 ta xato urinish. */
-const MAX_FAILS_PER_PHONE = 5;
+/** Bitta raqamga bitta IP dan 15 daqiqada 5 ta xato urinish. */
+const MAX_FAILS_PER_PHONE_IP = 5;
+/** Bitta raqamga barcha IP lardan 15 daqiqada 20 ta xato — tarqatilgan tanlashga qarshi (begona IP egani 5 ta xato bilan bloklay olmaydi). */
+const MAX_FAILS_PER_PHONE = 20;
 /** Bitta IP dan 15 daqiqada 30 ta xato — ko'p raqamni ketma-ket sinashga qarshi. */
 const MAX_FAILS_PER_IP = 30;
 
@@ -84,10 +86,14 @@ export async function authenticate(
   const phone = normalizePhone(phoneRaw);
   if (!phone || !isValidPhone(phone)) throw badRequest("Telefon raqam noto'g'ri formatda");
 
-  const phoneBucket = `login:phone:${phone}`;
-  const ipBucket = `login:ip:${meta.ipAddress}`;
-  await assertNotLimited(phoneBucket, MAX_FAILS_PER_PHONE, LOGIN_WINDOW_SECONDS);
-  await assertNotLimited(ipBucket, MAX_FAILS_PER_IP, LOGIN_WINDOW_SECONDS);
+  // Urinish avval atomar hisoblanadi — parallel so'rovlar ham limitdan oshib parol tekshira olmaydi; to'g'ri parolda
+  // hisob qaytariladi
+  const buckets = [
+    { bucket: `login:phone-ip:${phone}:${meta.ipAddress}`, limit: MAX_FAILS_PER_PHONE_IP },
+    { bucket: `login:phone:${phone}`, limit: MAX_FAILS_PER_PHONE },
+    { bucket: `login:ip:${meta.ipAddress}`, limit: MAX_FAILS_PER_IP },
+  ];
+  for (const { bucket, limit } of buckets) await consumeAttempt(bucket, limit, LOGIN_WINDOW_SECONDS);
 
   const [user] = await db.select().from(users).where(eq(users.phone, phone)).limit(1);
 
@@ -99,8 +105,6 @@ export async function authenticate(
   }
 
   if (!user || !valid) {
-    await recordHit(phoneBucket, LOGIN_WINDOW_SECONDS);
-    await recordHit(ipBucket, LOGIN_WINDOW_SECONDS);
     if (user) {
       await writeAuditLog({
         userId: user.id,
@@ -115,6 +119,8 @@ export async function authenticate(
     }
     throw unauthenticated(INVALID_CREDENTIALS);
   }
+
+  for (const { bucket } of buckets) await releaseAttempt(bucket, LOGIN_WINDOW_SECONDS);
 
   // Parol to'g'ri bo'lgandan keyingina — aks holda bloklangan raqamlarni aniqlash mumkin bo'lardi
   if (!user.isActive) throw forbidden("Hisob faol emas. Administratorga murojaat qiling");

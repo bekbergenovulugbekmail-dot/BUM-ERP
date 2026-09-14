@@ -171,6 +171,8 @@ async function assertAtCustomer(conn: DbOrTx, context: AgentContext, store: { la
 
 export async function saveCustomerLocation(tx: Tx, context: AgentContext, customerId: string, input: LocationInput, meta: RequestMeta) {
   await requireWorkSession(tx, context.agent.id);
+  // Avval kirish huquqi (shu kompaniya va agent marshrutidagi mijoz), keyin qulf — begona mijoz qatorini qulflab bo'lmaydi
+  await accessibleStore(tx, context, customerId);
   await tx.select({ id: customers.id }).from(customers).where(eq(customers.id, customerId)).for("update");
   const store = await accessibleStore(tx, context, customerId);
   const distance = await assertAtCustomer(tx, context, store, input);

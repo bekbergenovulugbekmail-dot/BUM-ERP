@@ -1016,6 +1016,14 @@ export async function returnOrder(
   const cashPaid = paid - balancePaid - cashbackPaid - foreignPaid;
   // Asosiy valyutadagi pul: usul ko'rsatilsa — shu usulda; aks holda asl to'lov tarkibi bo'yicha (aralash to'lovli chek:
   // naqd — kassaga, karta va bank — bankdan). Asl sotuv hujjati o'zgarmaydi, har qism — alohida kassa harakati va jurnal
+  // Asl to'lov tarkibidan farqli usul yoki boshqa hisobdan qaytarish (masalan, karta to'lovini naqd) — moliya ruxsati kerak
+  if (refund && cashPaid > 0n && (input.method || input.cashAccountId)) {
+    const original = await basePaymentComposition(tx, orderId, order.currency, cashPaid);
+    const differs = Boolean(input.cashAccountId) || !original.some((part) => part.method === input.method && part.amount > 0n);
+    if (differs && !(await effectivePermissions(tx, tenant)).includes("finance.manage")) {
+      throw forbidden("Pul asl to'lov usulidan boshqacha qaytariladi — moliya ruxsati kerak (usulni tanlamang: asl tarkib bo'yicha qaytadi)");
+    }
+  }
   const baseParts = input.method
     ? [{ method: input.method, amount: cashPaid, cashAccountId: null }]
     : await basePaymentComposition(tx, orderId, order.currency, cashPaid);

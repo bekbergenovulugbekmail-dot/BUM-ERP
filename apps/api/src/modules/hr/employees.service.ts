@@ -507,7 +507,8 @@ export async function updateEmployee(
   const userId = patch.userId !== undefined ? patch.userId : current.userId;
   if (userId && patch.status && patch.status !== current.status && (patch.status === "terminated" || current.status === "terminated")) {
     const active = patch.status !== "terminated";
-    await setMemberAccess(tx, companyId, userId, active);
+    // Login ta'sirlanadi — dastur kirishini boshqarish ruxsati kerak; ega va to'liq huquqli a'zo himoyalangan
+    await setMemberAccess(tx, companyId, userId, active, { requirePermissionOf: tenant });
     if (!active) await endSessionsForUser(tx, companyId, userId);
     await tx
       .update(salesReps)
@@ -545,8 +546,8 @@ export async function deleteEmployee(tx: Tx, tenant: TenantContext, employeeId: 
   if (usage?.used) throw conflict("Xodimning davomat, ta'til yoki maosh tarixi bor — ishdan bo'shating");
 
   // O'chirilgan xodimning hisobi yetim bo'lib qolmasin — login va agent ish joyi bloklanadi
-  if (employee.userId) {
-    await setMemberAccess(tx, tenant.company.id, employee.userId, false);
+  // Ega yoki to'liq huquqli a'zoning HR yozuvi o'chadi, lekin uning kirishiga tegilmaydi
+  if (employee.userId && (await setMemberAccess(tx, tenant.company.id, employee.userId, false, { skipProtected: true }))) {
     await endSessionsForUser(tx, tenant.company.id, employee.userId);
     await tx
       .update(salesReps)

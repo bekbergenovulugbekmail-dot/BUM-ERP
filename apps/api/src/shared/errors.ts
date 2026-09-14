@@ -68,6 +68,14 @@ export function registerErrorHandler(app: FastifyInstance): void {
       });
     }
 
+    // numeric_value_out_of_range — juda katta summa/miqdor (masalan, miqdor × narx ustun chegarasidan oshdi)
+    if (pgCode === "22003") {
+      return reply.status(400).send({
+        code: "BAD_REQUEST",
+        message: "Son qiymati ruxsat etilgan chegaradan katta",
+      });
+    }
+
     // Fastify'ning o'z validatsiya xatosi
     const status = hasStatusCode(err) ? err.statusCode : undefined;
     if (status !== undefined && status >= 400 && status < 500) {

@@ -218,7 +218,9 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
   app.post("/stock/movements", async (req, reply) => {
     const body = movementBody.parse(req.body);
     const permission: Permission = body.type === "receive" ? "warehouse.receive" : "warehouse.manage";
-    const result = await writeInTenant(req, [permission], (tx, tenant) =>
+    // Qarshi buxgalteriya hisobini tanlash (daromad, kassa va h.k.) — moliya amali; omborchi ruxsati yetmaydi
+    const permissions: Permission[] = body.counterAccountId ? [permission, "finance.manage"] : [permission];
+    const result = await writeInTenant(req, permissions, (tx, tenant) =>
       recordManualMovement(tx, tenant, body, requestMeta(req)),
     );
     reply.status(201);

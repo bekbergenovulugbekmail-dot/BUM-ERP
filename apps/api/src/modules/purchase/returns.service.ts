@@ -149,6 +149,10 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
 
   const refund = input.refund ? { amount: toMinor(input.refund.amount), method: input.refund.method } : null;
   if (refund && refund.amount <= 0n) throw badRequest("Qaytgan pul summasi musbat bo'lishi kerak");
+  // Qaytgan pul qaytarilgan tovar qiymatidan oshmaydi — aks holda kassaga yo'q pul va ta'minotchiga soxta qarz yoziladi
+  if (refund && refund.amount > total) {
+    throw badRequest(`Qaytgan pul qaytarilgan tovar qiymatidan (${fromMinor(total)}) oshmasligi kerak`);
+  }
 
   const date = offline ? offline.occurredAt.toISOString().slice(0, 10) : todayIso();
   const returnId = offline?.id ?? randomUUID();

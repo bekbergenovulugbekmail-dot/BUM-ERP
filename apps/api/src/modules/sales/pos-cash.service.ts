@@ -92,6 +92,16 @@ export async function posCashMovement(
   const notes = input.notes?.trim() || null;
   const category = input.kind === "expense" ? input.category?.trim() || "kassa" : null;
 
+  // Kassadan chiqim kutilgan naqddan oshmaydi: aks holda smena "farqsiz" yopiladi, pul esa yo'qoladi. Offline — pul
+  // jismonan berilgan, amal qabul qilinadi va rahbar ko'rishi uchun nomuvofiqlik yoziladi
+  if (type === "out" && !input.reference && (CASH_MOVEMENT_KINDS as readonly string[]).includes(input.kind)) {
+    const expected = toMinor((await getShift(tx, tenant, shift.id)).expectedCash);
+    if (amount > expected) {
+      if (!offline) throw badRequest(`Kassada buncha naqd yo'q (kutilgan ${fromMinor(expected > 0n ? expected : 0n)})`);
+      conflicts.push({ kind: "cash_exceeds_expected", details: { shiftId: shift.id, expectedCash: fromMinor(expected), amount: fromMinor(amount) } });
+    }
+  }
+
   let expenseId: string | null = null;
   if (input.kind === "expense") {
     const permissions = await effectivePermissions(tx, tenant);
@@ -136,6 +146,10 @@ export async function posCashMovement(
 
   if (input.targetAccountId) {
     if (offline || input.kind !== "collection") throw badRequest("Hisobga faqat onlayn inkassatsiya o'tkaziladi");
+    // Asosiy kassadan boshqa hisobga (bank, boshqa kassa) pul o'tkazish — moliya amali, oddiy kassir ruxsati yetmaydi
+    if (!(await effectivePermissions(tx, tenant)).includes("finance.manage")) {
+      throw forbidden("Inkassatsiyani boshqa hisobga o'tkazish uchun ruxsat yo'q: finance.manage");
+    }
     const [source] = await tx
       .select({ id: cashAccounts.id })
       .from(cashAccounts)

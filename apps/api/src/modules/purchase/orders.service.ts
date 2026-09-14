@@ -39,7 +39,7 @@ import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.j
 import { computeLine } from "../../shared/line-amounts.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
 import { unitFactorToBase } from "../catalog/conversions.js";
-import type { TenantContext } from "../company/tenant.js";
+import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { todayIso } from "../finance/cash.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
@@ -581,6 +581,10 @@ export async function receiveGoods(
   options: ReceiveOptions = {},
 ) {
   const companyId = tenant.company.id;
+  // Xarid qatoridagi sotuv narxi mahsulotga faqat qabul qiluvchida `products.edit` bo'lsa yoziladi (xarid ruxsati bilan
+  // chakana narxni o'zgartirib bo'lmaydi); bo'lmasa narx o'zgarmaydi, tovar baribir qabul qilinadi
+  let productsEditable: boolean | null = null;
+  const canEditProducts = async () => (productsEditable ??= (await effectivePermissions(tx, tenant)).includes("products.edit"));
   const order = await lockOrder(tx, tenant, orderId);
   if (order.status !== "confirmed" && order.status !== "partial" && order.status !== "paid") {
     throw badRequest("Faqat tasdiqlangan buyurtma bo'yicha tovar qabul qilinadi");
@@ -724,7 +728,7 @@ export async function receiveGoods(
     });
 
     // Xaridda belgilangan yangi sotuv narxi mahsulotga yoziladi
-    if (orderItem.salesPrice !== null) {
+    if (orderItem.salesPrice !== null && (await canEditProducts())) {
       await tx
         .update(products)
         .set({ salesPrice: orderItem.salesPrice, salesCurrency: orderItem.salesCurrency, updatedAt: new Date() })

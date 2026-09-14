@@ -664,6 +664,11 @@ export async function completeSale(
 
   // Qaytim kassada qoladi va mijoz balansiga yoziladi (faqat naqdda qaytim bo'ladi)
   let changeKept = 0n;
+  // Balansga yoziladigan qaytim chek summasidan oshmaydi: katta "berilgan summa" bilan mijozga yo'q pulni balans qilib
+  // bo'lmaydi (balansni to'ldirish — alohida amal, pul kassaga kirim bo'ladi). Offline chek qurilmada yopilgan — rad etilmaydi
+  if (input.changeToBalance && change > due && !offline) {
+    throw badRequest(`Balansga yoziladigan qaytim (${fromMinor(change)}) chek summasidan oshmasligi kerak — balansni to'ldirish amalidan foydalaning`);
+  }
   if (input.changeToBalance && change > 0n) {
     await depositToBalance(
       tx,

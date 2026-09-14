@@ -65,7 +65,17 @@ import { listConflicts, resolveConflict } from "./conflicts.service.js";
 import { currentRelease, downloadableRelease, parseByteRange, releaseByteRange, releaseChunks } from "../platform/desktop-releases.service.js";
 import { desktopUpdate } from "./app-update.service.js";
 import { deviceAnalytics } from "./device-analytics.service.js";
-import { assertDeviceSubscription, cashierTenant, deviceOf, deviceSubscriptionView, requireDevice } from "./device-auth.js";
+import {
+  assertCashierBound,
+  assertDeviceSubscription,
+  bindCashier,
+  cashierTenant,
+  deviceOf,
+  deviceSubscriptionView,
+  newDeviceToken,
+  requireDevice,
+  revokeDeviceCashiers,
+} from "./device-auth.js";
 import { deviceWarehouses, listDevices, registerDevice, setupTenant, updateDevice } from "./devices.service.js";
 import { deviceProductStock, findDevicePurchase, findDeviceReceipt, listDeviceMovements, listDeviceSales } from "./receipts.service.js";
 import { DEFAULT_PULL_LIMIT, PULL_ENTITIES, pullChanges } from "./sync-pull.service.js";
@@ -215,6 +225,8 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
       // Sozlash marshruti sessiyasiz (modul guard kompaniyani bilmaydi) — POS moduli shu yerda tekshiriladi
       await assertModuleEnabled(tx, tenant.company.id, "pos");
       const { device, token } = await registerDevice(tx, tenant, body, meta);
+      // Qurilmani ro'yxatdan o'tkazgan foydalanuvchi shu yerda parol bilan kirgan — kassir sifatida bog'lanadi
+      await bindCashier(tx, tenant.company.id, device.id, tenant.user.id);
       return {
         token,
         device,
@@ -257,7 +269,12 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
     scoped.post("/unregister", async (req) => {
       const context = deviceOf(req);
       await withTransaction(async (tx) => {
-        await tx.update(posDevices).set({ isActive: false, updatedAt: new Date() }).where(eq(posDevices.id, context.device.id));
+        // Token xeshi almashtiriladi: admin qurilmani qayta yoqsa ham eski token ishlamaydi (qayta ro'yxatdan o'tish kerak)
+        await tx
+          .update(posDevices)
+          .set({ isActive: false, tokenHash: newDeviceToken().tokenHash, updatedAt: new Date() })
+          .where(eq(posDevices.id, context.device.id));
+        await revokeDeviceCashiers(tx, context.device.id);
         await writeAuditLog(
           {
             companyId: context.company.id,
@@ -284,6 +301,8 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
       const context = deviceOf(req);
       const auth = await authenticate(body.phone, body.password, meta);
       const tenant = await cashierTenant(db, context, auth.user.id);
+      // Parol shu qurilmada tekshirildi — server kassirni endi shu qurilmada taniydi (yuqori huquqli amallar uchun)
+      await bindCashier(db, context.company.id, context.device.id, auth.user.id);
       await writeAuditLog({
         userId: auth.user.id,
         userName: auth.user.name,
@@ -361,6 +380,8 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
       const context = deviceOf(req);
       // Kassir qurilmada PIN bilan kirgan; server a'zolik va ruxsatni qayta tekshiradi
       const tenant = await cashierTenant(db, context, cashierId);
+      // Qurilma yuborgan cashierId — faqat shu qurilmada parol bilan kirgan kassir (boshqa xodim nomidan so'rab bo'lmaydi)
+      await assertCashierBound(db, context, cashierId);
       await requirePermission(db, tenant, "analytics.view");
       return deviceAnalytics(db, context, range);
     });
@@ -369,6 +390,7 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
       const { cashierId, code, limit } = currencyHistoryQuery.parse(req.query);
       const context = deviceOf(req);
       const tenant = await cashierTenant(db, context, cashierId);
+      await assertCashierBound(db, context, cashierId);
       await requirePermission(db, tenant, "currency_rates.view");
       return { history: await listRateHistory(db, context.company.id, { code, limit }) };
     });

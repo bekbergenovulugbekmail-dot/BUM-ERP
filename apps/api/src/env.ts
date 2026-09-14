@@ -27,6 +27,12 @@ const schema = z.object({
   /** Frontend manzili — CORS va cookie domeni uchun. */
   WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
 
+  /**
+   * API oldidagi ishonchli proksilar soni (production: nginx → 1). Mijoz IP shu bosqichdan olinadi — mijoz yuborgan
+   * `X-Forwarded-For` qiymatlari bilan IP bo'yicha limitlarni aylanib o'tib bo'lmaydi. 0 — proksi yo'q.
+   */
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(1),
+
   /** Ixtiyoriy integratsiyalar — yo'q bo'lsa tegishli funksiya o'chiq turadi. */
   ESKIZ_EMAIL: z.string().optional(),
   ESKIZ_PASSWORD: z.string().optional(),
@@ -71,6 +77,12 @@ if (!parsed.success) {
     .map((i) => `  ${i.path.join(".")}: ${i.message}`)
     .join("\n");
   console.error("Muhit o'zgaruvchilari noto'g'ri:\n" + issues);
+  process.exit(1);
+}
+
+// Productionda standart localhost CORS/WebSocket manbai ishonchli bo'lib qolmasin
+if (parsed.data.NODE_ENV === "production" && !process.env.WEB_ORIGIN) {
+  console.error("Muhit o'zgaruvchilari noto'g'ri:\n  WEB_ORIGIN: productionda majburiy");
   process.exit(1);
 }
 

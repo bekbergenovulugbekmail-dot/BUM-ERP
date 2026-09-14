@@ -23,5 +23,15 @@ export const logger = pino({
     ],
     censor: "[yashirildi]",
   },
+  serializers: {
+    /** DB so'rov xatosi xabari parametrlarni o'z ichiga oladi (xesh, token, telefon) — logga faqat SQL va sabab tushadi. */
+    err(error: Error) {
+      const serialized = pino.stdSerializers.err(error) as unknown as Record<string, unknown>;
+      delete serialized.params;
+      if (typeof serialized.message === "string") serialized.message = serialized.message.replace(/\nparams:[\s\S]*$/, "\nparams: [yashirildi]");
+      if (typeof serialized.stack === "string") serialized.stack = serialized.stack.replace(/\nparams:[^\n]*/g, "\nparams: [yashirildi]");
+      return serialized;
+    },
+  },
   ...(isProd ? {} : { transport: { target: "pino/file", options: { destination: 1 } } }),
 });

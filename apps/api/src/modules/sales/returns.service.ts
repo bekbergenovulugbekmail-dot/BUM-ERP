@@ -16,7 +16,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { badRequest, notFound } from "@bum/shared";
+import { badRequest, forbidden, notFound } from "@bum/shared";
 import { products } from "../../db/schema/catalog.js";
 import {
   customerCashbackTransactions,
@@ -34,7 +34,7 @@ import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.j
 import { nextDocumentNumber } from "../../shared/numbering.js";
 import { assertProductsInScope } from "../catalog/category-scope.js";
 import { unitFactorToBase } from "../catalog/conversions.js";
-import type { TenantContext } from "../company/tenant.js";
+import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { ledgerAccountFor, recordCashTransaction, resolvePaymentAccount, todayIso } from "../finance/cash.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { moveStock } from "../inventory/stock.service.js";
@@ -224,6 +224,16 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
   const refundMethods = input.refunds?.length ? input.refunds.map((part) => part.method) : [input.refundMethod];
   if (refundMethods.includes("balance") && !order.customerId) throw badRequest("Balansga qaytarish uchun chekda mijoz bo'lishi kerak");
   if (new Set(refundMethods).size !== refundMethods.length) throw badRequest("Qaytarish usuli takrorlangan");
+  // Pul chekda umuman ishlatilmagan usulda qaytarilsa (masalan, karta to'lovini kassadan naqd) — moliya ruxsati kerak:
+  // aks holda qaytarish huquqi bor xodim bankdagi pulni kassadan olib qo'yishi mumkin
+  if (!offline && !input.refunds?.length && input.refundMethod !== "balance") {
+    const available = await refundableByMethod(tx, orderId);
+    const key = refundKey(input.refundMethod);
+    const paidOtherwise = [...available.values()].some((amount) => amount > 0n);
+    if (key && (available.get(key) ?? 0n) <= 0n && paidOtherwise && !(await effectivePermissions(tx, tenant)).includes("finance.manage")) {
+      throw forbidden(`${REFUND_LABELS[input.refundMethod]} bilan qaytarib bo'lmaydi — chek boshqa usulda to'langan (moliya ruxsati kerak)`);
+    }
+  }
 
   const allItems = await tx
     .select({

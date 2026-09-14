@@ -10,15 +10,16 @@
  *  - bootstrap admin (faqat .env orqali) va bloklangan hisoblarga kod yuborilmaydi
  *  - parol almashsa foydalanuvchining barcha sessiyalari bekor qilinadi; avtomatik kirish yo'q
  */
-import { createHash, randomInt, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
+import { and, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { badRequest } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { passwordResetCodes, users } from "../../db/schema/platform.js";
 import { withTransaction } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { logger } from "../../shared/logger.js";
-import { assertNotLimited, recordHit } from "../../shared/rate-limit.js";
+import { env } from "../../env.js";
+import { consumeAttempt } from "../../shared/rate-limit.js";
 import type { SmsClient } from "../../shared/sms.js";
 import { applyNewPassword, assertPasswordPolicy, normalizePhoneOrThrow } from "../users/user-admin.service.js";
 
@@ -27,16 +28,15 @@ export const MAX_CODE_ATTEMPTS = 5;
 const WINDOW_SECONDS = 15 * 60;
 const INVALID_CODE = "Kod noto'g'ri yoki muddati o'tgan";
 
-const hashCode = (userId: string, code: string) => createHash("sha256").update(`${userId}:${code}`).digest("hex");
+/** HMAC server siri bilan — bazani o'qigan kishi 10^6 variantni sanab kodni tiklay olmaydi. */
+const hashCode = (userId: string, code: string) => createHmac("sha256", env.SESSION_SECRET).update(`${userId}:${code}`).digest("hex");
 
 export async function requestPasswordReset(phoneRaw: string, meta: RequestMeta, sms: SmsClient): Promise<void> {
   const phone = normalizePhoneOrThrow(phoneRaw);
   const phoneBucket = `reset-request:phone:${phone}`;
   const ipBucket = `reset-request:ip:${meta.ipAddress}`;
-  await assertNotLimited(phoneBucket, 3, WINDOW_SECONDS);
-  await assertNotLimited(ipBucket, 10, 3600);
-  await recordHit(phoneBucket, WINDOW_SECONDS);
-  await recordHit(ipBucket, 3600);
+  await consumeAttempt(phoneBucket, 3, WINDOW_SECONDS);
+  await consumeAttempt(ipBucket, 10, 3600);
 
   const [user] = await db
     .select({
@@ -92,7 +92,8 @@ export async function confirmPasswordReset(
   const phone = normalizePhoneOrThrow(input.phone);
   assertPasswordPolicy(input.newPassword);
   const bucket = `reset-confirm:phone:${phone}`;
-  await assertNotLimited(bucket, 10, WINDOW_SECONDS);
+  // Har tasdiqlash urinishi avval atomar hisoblanadi — parallel so'rovlar bilan kod tanlab bo'lmaydi
+  await consumeAttempt(bucket, 10, WINDOW_SECONDS);
 
   const [user] = await db.select().from(users).where(eq(users.phone, phone)).limit(1);
   const [record] = user
@@ -110,18 +111,25 @@ export async function confirmPasswordReset(
         .limit(1)
     : [];
   if (!user || !record || !user.isActive || user.isBootstrapAdmin) {
-    await recordHit(bucket, WINDOW_SECONDS);
     throw badRequest(INVALID_CODE);
   }
 
+  // Urinish solishtirishdan OLDIN atomar oshiriladi: eskirgan o'qish bilan parallel so'rovlar kodni yoqmay qolmaydi
+  const [bumped] = await db
+    .update(passwordResetCodes)
+    .set({ attempts: sql`${passwordResetCodes.attempts} + 1` })
+    .where(and(eq(passwordResetCodes.id, record.id), isNull(passwordResetCodes.consumedAt), lt(passwordResetCodes.attempts, MAX_CODE_ATTEMPTS)))
+    .returning({ attempts: passwordResetCodes.attempts });
+  if (!bumped) throw badRequest(INVALID_CODE);
+
   const matches = timingSafeEqual(Buffer.from(record.codeHash, "hex"), Buffer.from(hashCode(user.id, input.code), "hex"));
   if (!matches) {
-    await recordHit(bucket, WINDOW_SECONDS);
-    const attempts = record.attempts + 1;
-    await db
-      .update(passwordResetCodes)
-      .set({ attempts, ...(attempts >= MAX_CODE_ATTEMPTS ? { consumedAt: new Date() } : {}) })
-      .where(eq(passwordResetCodes.id, record.id));
+    if (bumped.attempts >= MAX_CODE_ATTEMPTS) {
+      await db
+        .update(passwordResetCodes)
+        .set({ consumedAt: new Date() })
+        .where(and(eq(passwordResetCodes.id, record.id), isNull(passwordResetCodes.consumedAt)));
+    }
     throw badRequest(INVALID_CODE);
   }
 

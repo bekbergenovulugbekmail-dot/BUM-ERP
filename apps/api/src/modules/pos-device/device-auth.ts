@@ -8,11 +8,11 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { and, eq } from "drizzle-orm";
-import { effectiveSubscriptionStatus, forbidden, unauthenticated } from "@bum/shared";
+import { and, eq, isNull } from "drizzle-orm";
+import { AppError, effectiveSubscriptionStatus, forbidden, unauthenticated } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { companies, companyMembers, users } from "../../db/schema/platform.js";
-import { posDevices } from "../../db/schema/pos.js";
+import { posDeviceCashiers, posDevices } from "../../db/schema/pos.js";
 import { subscriptions } from "../../db/schema/subscription.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import type { DbOrTx } from "../../db/transaction.js";
@@ -111,6 +111,59 @@ export function deviceSubscriptionView(context: DeviceContext) {
 export function deviceOf(req: FastifyRequest): DeviceContext {
   if (!req.posDevice) throw unauthenticated("Kassa qurilmasi tokeni yo'q");
   return req.posDevice;
+}
+
+/**
+ * `pos.use` dan yuqori ruxsat talab qiladigan qurilma amallari: kassir shu qurilmada parol bilan kirgan (bog'langan)
+ * bo'lishi shart. Oddiy kassa amallari (smena, sotuv, kassa harakati, mijoz to'lovi) bog'lanishsiz ham qabul qilinadi —
+ * offline sotuv yo'qolmaydi va ishlab turgan kassalar to'xtamaydi.
+ */
+export const ELEVATED_DEVICE_OPS: ReadonlySet<string> = new Set([
+  "sale.return",
+  "customer.update",
+  "supplier.create",
+  "supplier.update",
+  "currency.rate",
+  "product.prices",
+  "purchase.complete",
+  "purchase.return",
+  "supplier.payment",
+  "stock.writeoff",
+  "stock.transfer",
+  "stock.count",
+]);
+
+/** Kassirni qurilmaga bog'lash (parol bilan kirganda yoki qurilmani ro'yxatdan o'tkazganda); bekor qilingan bo'lsa — tiklanadi. */
+export async function bindCashier(conn: DbOrTx, companyId: string, deviceId: string, userId: string): Promise<void> {
+  await conn
+    .insert(posDeviceCashiers)
+    .values({ companyId, deviceId, userId })
+    .onConflictDoUpdate({
+      target: [posDeviceCashiers.deviceId, posDeviceCashiers.userId],
+      set: { authenticatedAt: new Date(), revokedAt: null },
+    });
+}
+
+/** Kassir shu qurilmada parol bilan kirganmi — aks holda 403 (`cashier_not_bound`). */
+export async function assertCashierBound(conn: DbOrTx, context: DeviceContext, userId: string): Promise<void> {
+  const [row] = await conn
+    .select({ id: posDeviceCashiers.id })
+    .from(posDeviceCashiers)
+    .where(and(eq(posDeviceCashiers.deviceId, context.device.id), eq(posDeviceCashiers.userId, userId), isNull(posDeviceCashiers.revokedAt)))
+    .limit(1);
+  if (!row) {
+    throw new AppError("FORBIDDEN", "Bu kassir shu qurilmada parol bilan kirmagan — kassada telefon raqam va parol bilan qayta kiring", {
+      reason: "cashier_not_bound",
+    });
+  }
+}
+
+/** Qurilma uzilganda uning barcha kassir bog'lanishlari bekor qilinadi. */
+export async function revokeDeviceCashiers(conn: DbOrTx, deviceId: string): Promise<void> {
+  await conn
+    .update(posDeviceCashiers)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(posDeviceCashiers.deviceId, deviceId), isNull(posDeviceCashiers.revokedAt)));
 }
 
 /** Qurilma amali uchun kassir konteksti: faol foydalanuvchi, faol a'zolik, `pos.use`, qurilma omboriga ruxsat. */

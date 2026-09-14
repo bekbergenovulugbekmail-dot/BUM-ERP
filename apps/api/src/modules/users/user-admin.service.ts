@@ -49,9 +49,19 @@ const BOOTSTRAP_PROTECTED = "Bootstrap admin faqat .env orqali boshqariladi";
 
 // ─── Umumiy ──────────────────────────────────────────────────────────────────
 
+/** Eng ko'p tanlanadigan parollar — uzunlik talabiga javob bersa ham rad etiladi. */
+const COMMON_PASSWORDS = new Set([
+  "12345678", "123456789", "1234567890", "87654321", "11111111", "00000000", "12341234", "11223344",
+  "password", "password1", "password123", "qwertyui", "qwerty123", "qwerty12", "1q2w3e4r", "abcd1234",
+  "admin123", "admin1234", "iloveyou", "parol123", "parol1234", "bumerp123", "12345qwert", "asdfghjk",
+]);
+
 export function assertPasswordPolicy(password: string): void {
   if (password.length < MIN_PASSWORD_LENGTH) {
     throw badRequest(`Parol kamida ${MIN_PASSWORD_LENGTH} ta belgidan iborat bo'lishi kerak`);
+  }
+  if (COMMON_PASSWORDS.has(password.toLowerCase()) || /^(.)\1+$/.test(password)) {
+    throw badRequest("Parol juda oddiy — boshqa, taxmin qilish qiyin parol tanlang");
   }
 }
 
@@ -189,6 +199,8 @@ export async function platformChangePhone(
   await assertPhoneFree(tx, phone, target.id);
 
   const [updated] = await tx.update(users).set({ phone }).where(eq(users.id, target.id)).returning();
+  // Login identifikatori almashdi — eski sessiyalar bekor (kompaniya egasi yo'li bilan bir xil)
+  await revokeUserSessions(tx, target.id);
   await auditUserAction(tx, actor, meta, {
     action: "USER_PHONE_CHANGED",
     targetId: target.id,
@@ -510,13 +522,14 @@ export async function verifyCurrentPassword(user: SessionUser, currentPassword: 
   }
 
   const bucket = `password-change:${user.id}`;
-  await assertNotLimited(bucket, MAX_PASSWORD_CHANGE_FAILS, PASSWORD_CHANGE_WINDOW_SECONDS);
+  // Avval atomar hisob, keyin tekshiruv — parallel so'rovlar limitdan oshib parol tanlay olmaydi
+  const attempts = await recordHit(bucket, PASSWORD_CHANGE_WINDOW_SECONDS);
+  if (attempts > MAX_PASSWORD_CHANGE_FAILS) await assertNotLimited(bucket, MAX_PASSWORD_CHANGE_FAILS, PASSWORD_CHANGE_WINDOW_SECONDS);
 
   const valid =
     user.passwordHash !== null &&
     (await verifyPassword(user.passwordHash, user.passwordAlgo, currentPassword));
   if (!valid) {
-    await recordHit(bucket, PASSWORD_CHANGE_WINDOW_SECONDS);
     // 401 emas: frontend 401 ni "sessiya tugadi" deb tushunadi
     throw forbidden("Joriy parol noto'g'ri");
   }

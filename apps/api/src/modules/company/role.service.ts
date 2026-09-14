@@ -150,6 +150,8 @@ export async function updateRole(
   const role = await loadCompanyRole(tx, tenant, roleId);
   // To'liq ruxsat nom bo'yicha beriladi — bu rollarni tahrirlashning ma'nosi yo'q
   if (isFullAccessRole(role.name)) throw forbidden("To'liq huquqli rolni o'zgartirib bo'lmaydi");
+  // O'zidan yuqori huquqli rolning (masalan, Direktor) ruxsatlarini olib tashlash yoki uni o'chirish mumkin emas
+  if (patch.permissions !== undefined || patch.isActive !== undefined) await assertCanGrant(tx, tenant, role.permissions as Permission[]);
 
   const set: Partial<typeof roles.$inferInsert> = {};
   const changes: string[] = [];

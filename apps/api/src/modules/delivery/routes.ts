@@ -549,7 +549,11 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   app.post("/tasks/:taskId/return", async (req) => {
     const { taskId } = taskParams.parse(req.params);
     const body = returnBody.parse(req.body);
-    await writeTenantWith(req, "delivery.return", (tx, tenant) => returnDeliveryGoods(tx, tenant, taskId, body, requestMeta(req)));
+    await writeTenantWith(req, "delivery.return", async (tx, tenant) => {
+      // Balansdan boshqa usulda pul qaytarish — kassa/bank chiqimi: savdo qaytarish ruxsati ham kerak
+      if (body.refundMethod !== "balance") await requirePermission(tx, tenant, "sales.refund");
+      return returnDeliveryGoods(tx, tenant, taskId, body, requestMeta(req));
+    });
     return managerTask(req, taskId);
   });
 

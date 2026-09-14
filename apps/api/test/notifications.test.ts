@@ -138,7 +138,13 @@ describe("Bildirishnomalar", () => {
       .where(and(eq(notifications.companyId, company.companyId), eq(notifications.type, "low_stock")));
     expect(lowStock[0]).toMatchObject({ severity: "warning", link: "/warehouse", isGlobal: true });
     expect(lowStock[0]!.message).toContain("1 (minimal: 5)");
-    expect(await unread(kassir.cookie)).toBe(6);
+    // Ega hammasini ko'radi; kassir faqat ruxsati bor bo'limlar ogohlantirishini (xarid, ta'til, xarajat unga yashirin)
+    expect(await unread(company.ownerCookie)).toBe(6);
+    const kassirTypes = ((await notif("GET", "/", kassir.cookie)).json().notifications as { type: string }[]).map((item) => item.type).sort();
+    expect(kassirTypes).not.toContain("pending_approval");
+    expect(kassirTypes).not.toContain("leave_request");
+    expect(await unread(kassir.cookie)).toBe(kassirTypes.length);
+    expect(kassirTypes.length).toBeLessThan(6);
     expect(await unread(other.ownerCookie)).toBe(0);
   });
 });

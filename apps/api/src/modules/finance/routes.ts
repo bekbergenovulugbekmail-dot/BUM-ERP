@@ -443,7 +443,11 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
 
   app.put("/currencies", async (req) => {
     const body = currenciesBody.parse(req.body);
-    return writeInTenant(req, "settings.manage", (tx, tenant) => saveCurrencySettings(tx, tenant, body, requestMeta(req)));
+    return writeInTenant(req, "settings.manage", async (tx, tenant) => {
+      // Kurslar ham saqlanadi — alohida kurs endpointi kabi kurs ruxsati kerak
+      await requirePermission(tx, tenant, "currency_rates.manage");
+      return saveCurrencySettings(tx, tenant, body, requestMeta(req));
+    });
   });
 
   app.post("/currencies/refresh", async (req) =>

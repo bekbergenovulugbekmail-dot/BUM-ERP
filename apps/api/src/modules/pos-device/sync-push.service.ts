@@ -36,7 +36,7 @@ import { CASH_MOVEMENT_KINDS, posCashMovement } from "../sales/pos-cash.service.
 import { createCustomer } from "../sales/customers.service.js";
 import { REFUND_METHODS, returnSaleItems } from "../sales/returns.service.js";
 import { isAccessDenial } from "../subscription/access.js";
-import { cashierTenant, type DeviceContext } from "./device-auth.js";
+import { ELEVATED_DEVICE_OPS, assertCashierBound, cashierTenant, type DeviceContext } from "./device-auth.js";
 
 export const MAX_OPS_PER_PUSH = 100;
 const MAX_FUTURE_MS = 5 * 60_000;
@@ -366,14 +366,21 @@ function assertClientTime(at: Date) {
   if (at.getTime() < now - MAX_AGE_MS) throw badRequest("Amal 30 kundan eski — sinxron qilinmaydi", { reason: "too_old" });
 }
 
-async function deviceShift(tx: Tx, context: DeviceContext, shiftId: string) {
+/** Smena shu qurilmaniki; amal vaqti berilsa — smena ochilishidan oldin emas (sotuvni orqa sanaga yozib bo'lmaydi). */
+async function deviceShift(tx: Tx, context: DeviceContext, shiftId: string, at?: Date) {
   const [shift] = await tx
-    .select({ deviceId: posShifts.deviceId })
+    .select({ deviceId: posShifts.deviceId, openedAt: posShifts.openedAt })
     .from(posShifts)
     .where(and(eq(posShifts.id, shiftId), eq(posShifts.companyId, context.company.id)))
     .limit(1);
   if (!shift || shift.deviceId !== context.device.id) throw notFound("Smena topilmadi");
+  if (at && at.getTime() < shift.openedAt.getTime() - SHIFT_CLOCK_TOLERANCE_MS) {
+    throw badRequest("Amal vaqti smena ochilishidan oldin — qurilma soatini tekshiring", { reason: "before_shift" });
+  }
 }
+
+/** Bir qurilma soati bo'yicha smena va amal vaqti; kichik farq (soat tuzatilishi) uchun zaxira. */
+const SHIFT_CLOCK_TOLERANCE_MS = 5 * 60_000;
 
 function assertDeviceNumber(context: DeviceContext, number: string) {
   if (!number.startsWith(`${context.device.code}-`)) throw badRequest(`Hujjat raqami qurilma kodi (${context.device.code}) bilan boshlanishi kerak`);
@@ -403,6 +410,8 @@ async function recordConflicts(
 async function applyOperation(tx: Tx, context: DeviceContext, op: SyncOperation, meta: RequestMeta): Promise<Record<string, unknown>> {
   assertClientTime(op.createdAt);
   const tenant = await cashierTenant(tx, context, op.cashierId);
+  // Yuqori huquqli amal — kassir shu qurilmada parol bilan kirgan bo'lishi shart (token egasi ega nomidan ish qila olmaydi)
+  if (ELEVATED_DEVICE_OPS.has(op.type)) await assertCashierBound(tx, context, op.cashierId);
   const result = await executeOperation(tx, context, tenant, op, meta);
   if (op.type === "stock.count") return result;
 
@@ -455,7 +464,7 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
     case "sale.complete": {
       const payload = op.payload;
       assertDeviceNumber(context, payload.number);
-      await deviceShift(tx, context, payload.shiftId);
+      await deviceShift(tx, context, payload.shiftId, op.createdAt);
       const [taken] = await tx
         .select({ id: salesOrders.id })
         .from(salesOrders)
@@ -517,7 +526,7 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
       const payload = op.payload;
       assertDeviceNumber(context, payload.number);
       await requirePermission(tx, tenant, "sales.refund");
-      await deviceShift(tx, context, payload.shiftId);
+      await deviceShift(tx, context, payload.shiftId, op.createdAt);
       const [taken] = await tx
         .select({ id: salesReturns.id })
         .from(salesReturns)
@@ -597,7 +606,7 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
     }
     case "cash.movement": {
       const payload = op.payload;
-      await deviceShift(tx, context, payload.shiftId);
+      await deviceShift(tx, context, payload.shiftId, op.createdAt);
       const [taken] = await tx.select({ id: posCashMovements.id }).from(posCashMovements).where(eq(posCashMovements.id, payload.movementId)).limit(1);
       if (taken) throw conflict("Kassa harakati identifikatori band");
       const result = await posCashMovement(
@@ -625,7 +634,7 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
     }
     case "customer.payment": {
       const payload = op.payload;
-      await deviceShift(tx, context, payload.shiftId);
+      await deviceShift(tx, context, payload.shiftId, op.createdAt);
       const result = await posCustomerPayment(
         tx,
         tenant,
@@ -736,7 +745,7 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
     case "supplier.payment": {
       const payload = op.payload;
       await requirePermission(tx, tenant, "purchase.approve");
-      await deviceShift(tx, context, payload.shiftId);
+      await deviceShift(tx, context, payload.shiftId, op.createdAt);
       const date = op.createdAt.toISOString().slice(0, 10);
       const paid = await recordSupplierPayment(
         tx,
@@ -855,10 +864,16 @@ const errorOf = (error: AppError): PosSyncError => ({
   ...(error.details === undefined ? {} : { details: error.details }),
 });
 
-/** PostgreSQL cheklov buzilishi (23xxx) — amal tarkibi bilan bog'liq, qayta yuborish yordam bermaydi. */
+/**
+ * PostgreSQL cheklov buzilishi (23xxx) yoki son chegarasidan oshish (22003) — amal tarkibi bilan bog'liq, qayta yuborish
+ * yordam bermaydi. Rad etilgan deb saqlanadi: aks holda butun push 500 bo'lib, navbatdagi keyingi amallar ham to'xtardi.
+ */
 function constraintError(error: unknown): PosSyncError | null {
   for (let current: unknown = error, depth = 0; current && depth < 3; depth++) {
     const code = (current as { code?: unknown }).code;
+    if (code === "22003") {
+      return { code: "BAD_REQUEST", message: "Son qiymati ruxsat etilgan chegaradan katta", details: { sqlState: code } };
+    }
     if (typeof code === "string" && /^23\d{3}$/.test(code)) {
       const constraint = (current as { constraint?: unknown }).constraint;
       return {
