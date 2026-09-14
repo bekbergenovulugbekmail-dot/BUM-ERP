@@ -101,6 +101,12 @@ describe("db:seed — bootstrap admin", () => {
     await expect(seed({ phone: other.phone })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
+  it("oddiy (lekin yetarli uzunlikdagi) .env paroli API ishga tushishini to'xtatmaydi", async () => {
+    const result = await seed({ password: "12345678" });
+    expect(result.action).toBe("created");
+    expect((await login(app, ROOT.phone, "12345678")).res.statusCode).toBe(200);
+  });
+
   it("qisqa parol va noto'g'ri raqamni rad etadi", async () => {
     await expect(seed({ password: "1234567" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(seed({ phone: "abc" })).rejects.toMatchObject({ code: "BAD_REQUEST" });

@@ -12,13 +12,20 @@ server {
   listen [::]:${PORT};
   server_tokens off;
 
-  # Mijoz IP: tashqi proksi (Railway edge) qo'shgan OXIRGI X-Forwarded-For qiymati. Mijoz o'zi yuborgan soxta qiymatlar
-  # chapda qoladi va hisobga olinmaydi. nginx'ga faqat edge orqali kiriladi, shuning uchun bevosita manba ishonchli.
-  # API'ga X-Forwarded-For qayta yoziladi ($remote_addr — aniqlangan mijoz IP), API faqat 1 bosqichga ishonadi.
-  set_real_ip_from 0.0.0.0/0;
-  set_real_ip_from ::/0;
+  # Mijoz IP: X-Forwarded-For o'ngdan o'qiladi, ishonchli proksilar (Railway ichki tarmog'i va edge proksisi) tashlab
+  # o'tiladi — birinchi ishonchsiz manzil mijoz. Railway zanjiri: "<mijoz yuborgani>, <mijoz>, <Railway proksi 152.233.x>",
+  # shuning uchun OXIRGI qiymat mijoz emas (2026-09-14 production'da tekshirilgan). Mijoz chapga qo'shgan soxta qiymatlar
+  # hisobga olinmaydi. API'ga X-Forwarded-For qayta yoziladi ($remote_addr — aniqlangan mijoz IP), API 1 bosqichga ishonadi.
+  set_real_ip_from 10.0.0.0/8;
+  set_real_ip_from 172.16.0.0/12;
+  set_real_ip_from 192.168.0.0/16;
+  set_real_ip_from 100.64.0.0/10;
+  set_real_ip_from 127.0.0.0/8;
+  set_real_ip_from fc00::/7;
+  set_real_ip_from ::1;
+  set_real_ip_from 152.233.0.0/16;
   real_ip_header X-Forwarded-For;
-  real_ip_recursive off;
+  real_ip_recursive on;
 
   root /usr/share/nginx/html;
   index index.html;
