@@ -83,6 +83,34 @@ describe("Chek hisobi (serverdagi completeSale bilan bir xil)", () => {
     expect(sale([{ method: "cash", amount: null }, { method: "card", amount: null }]).errors).toContain("Qoldiq faqat bitta to'lov usuliga yoziladi");
   });
 
+  it("karta terminallari: UZCARD va HUMO — alohida qism (terminal saqlanadi); bitta terminal ikki marta, naqdda terminal, ortiqcha karta — xato", () => {
+    const sale = (payments: SaleCalcInput["payments"]) => computeSale(input({ lines: [line("1000000")], payments }));
+    const split = sale([
+      { method: "cash", amount: "200000" },
+      { method: "card", amount: "500000", terminalId: "t-uzcard" },
+      { method: "card", amount: null, terminalId: "t-humo" },
+    ]);
+    expect(split.errors).toEqual([]);
+    expect(split.payments).toEqual([
+      { method: "cash", tendered: 20_000_000n, paid: 20_000_000n },
+      { method: "card", tendered: 50_000_000n, paid: 50_000_000n, terminalId: "t-uzcard" },
+      { method: "card", tendered: 30_000_000n, paid: 30_000_000n, terminalId: "t-humo" },
+    ]);
+    expect(
+      sale([
+        { method: "card", amount: "500000", terminalId: "t-uzcard" },
+        { method: "card", amount: "500000", terminalId: "t-uzcard" },
+      ]).errors,
+    ).toContain("Bitta terminal to'lovi bir marta kiritiladi");
+    expect(sale([{ method: "cash", amount: "1000000", terminalId: "t-uzcard" }]).errors).toContain("Terminal faqat karta to'lovida tanlanadi");
+    expect(
+      sale([
+        { method: "card", amount: "600000", terminalId: "t-uzcard" },
+        { method: "card", amount: "600000", terminalId: "t-humo" },
+      ]).errors,
+    ).toContain("Karta yoki bank to'lovi chek summasidan oshmasligi kerak");
+  });
+
   it("chet valyuta: qator valyutasi, balans avval asosiy qismni, qolgani valyuta qismini yopadi", () => {
     const usd = line("126500", { salesCurrency: "USD" });
     const paid = computeSale(input({ lines: [usd], saleCurrencies: ["UZS", "USD"], currencyPayments: [{ currency: "USD", amount: "20", method: "cash" }] }));

@@ -147,6 +147,8 @@ const MONEY = /^\d{1,16}(\.\d{1,2})?$/;
 const QTY = /^\d{1,14}(\.\d{1,4})?$/;
 const PERCENT = /^\d{1,3}(\.\d{1,2})?$/;
 const PAYMENT_METHODS: PaymentMethod[] = ["cash", "card", "bank", "transfer"];
+/** Bitta chekdagi to'lov qismlari chegarasi — server bilan bir xil (`MAX_PAYMENT_PARTS`). */
+const MAX_PAYMENT_PARTS = 8;
 const REFUND_METHODS: RefundMethod[] = ["cash", "card", "bank", "balance"];
 
 export type TokenVault = { save(token: string): void; load(): string | null; clear(): void };
@@ -826,6 +828,7 @@ export class KassaService {
       labels: config?.labels ?? null,
       company: config?.company ?? null,
       permissions: cashier.permissions,
+      terminals: (config?.terminals ?? []).map(({ id, name, network }) => ({ id, name, network })),
     };
   }
 
@@ -1260,9 +1263,9 @@ export class KassaService {
     const shift = this.requireShift(cashier);
     const device = this.store.getMeta<DeviceInfo>("device");
     if (!device) throw new KassaError("NOT_REGISTERED", "Qurilma ro'yxatdan o'tmagan");
-    // Aralash to'lov: naqd, karta, bank (har usul bir marta, summa null — qoldiq); har usul shu kassada yoqilgan bo'lsin
+    // Aralash to'lov: naqd, karta (terminal bo'yicha), bank (har qism bir marta, summa null — qoldiq); har usul shu kassada yoqilgan bo'lsin
     const mixed = Array.isArray(input.payments) && input.payments.length > 0;
-    if (mixed && input.payments!.length > 3) throw new KassaError("BAD_REQUEST", "To'lov usuli noto'g'ri");
+    if (mixed && input.payments!.length > MAX_PAYMENT_PARTS) throw new KassaError("BAD_REQUEST", "To'lov qismlari juda ko'p");
     const methods = mixed ? input.payments!.map((part) => part.method) : [input.paymentMethod];
     const prefs = this.prefs();
     for (const method of methods) {
@@ -1273,6 +1276,13 @@ export class KassaService {
     }
     if (mixed && input.payments!.some((part) => part.amount !== null && !MONEY.test(String(part.amount)))) {
       throw new KassaError("BAD_REQUEST", "To'lov summasi noto'g'ri");
+    }
+    // Terminal — serverdan sinxronlangan faol ro'yxatda va faqat kartada; pul serverda terminal bog'langan bank hisobiga
+    const terminals = new Map((this.config()?.terminals ?? []).map((terminal) => [terminal.id, terminal]));
+    for (const part of mixed ? input.payments! : []) {
+      if (!part.terminalId) continue;
+      if (part.method !== "card") throw new KassaError("BAD_REQUEST", "Terminal faqat karta to'lovida tanlanadi");
+      if (!terminals.has(String(part.terminalId))) throw new KassaError("BAD_REQUEST", "Terminal topilmadi yoki faol emas — sinxronlashni kuting");
     }
 
     let customer: CustomerRow | null = null;
@@ -1315,7 +1325,15 @@ export class KassaService {
       cashback: config?.cashback ?? null,
       paymentMethod: input.paymentMethod,
       amountPaid: input.amountPaid,
-      ...(mixed ? { payments: input.payments!.map((part) => ({ method: part.method, amount: part.amount === null ? null : String(part.amount) })) } : {}),
+      ...(mixed
+        ? {
+            payments: input.payments!.map((part) => ({
+              method: part.method,
+              amount: part.amount === null ? null : String(part.amount),
+              terminalId: part.terminalId ? String(part.terminalId) : null,
+            })),
+          }
+        : {}),
       cashbackAmount: input.cashbackAmount,
       balanceAmount: input.balanceAmount,
       changeToBalance: !!input.changeToBalance,
@@ -1366,7 +1384,13 @@ export class KassaService {
         paymentMethod: primaryMethod,
         amountPaid: fromMinor(calc.tendered),
         ...(mixed && sentParts.length > 0
-          ? { payments: sentParts.map((part) => ({ method: part.method as "cash" | "card" | "bank", amount: fromMinor(part.tendered) })) }
+          ? {
+              payments: sentParts.map((part) => ({
+                method: part.method as "cash" | "card" | "bank",
+                amount: fromMinor(part.tendered),
+                ...(part.terminalId ? { terminalId: part.terminalId } : {}),
+              })),
+            }
           : {}),
         ...(calc.cashbackUsed > 0n ? { cashbackAmount: fromMinor(calc.cashbackUsed) } : {}),
         ...(calc.balanceUsed > 0n ? { balanceAmount: fromMinor(calc.balanceUsed) } : {}),
@@ -1409,7 +1433,16 @@ export class KassaService {
         discount: fromMinor(calc.discount),
         total: fromMinor(calc.total),
         paymentMethod: primaryMethod,
-        payments: calc.payments.map((part) => ({ method: part.method, tendered: fromMinor(part.tendered), paid: fromMinor(part.paid) })),
+        payments: calc.payments.map((part) => {
+          const terminal = part.terminalId ? terminals.get(part.terminalId) : undefined;
+          return {
+            method: part.method,
+            tendered: fromMinor(part.tendered),
+            paid: fromMinor(part.paid),
+            // Chekda terminal nomi — keyin terminal o'chirilsa ham tarixda qoladi
+            ...(terminal ? { terminal: { id: terminal.id, name: terminal.name, network: terminal.network } } : {}),
+          };
+        }),
         tendered: fromMinor(calc.tendered),
         paid: fromMinor(calc.paid),
         change: fromMinor(calc.change - calc.changeKept),

@@ -4,6 +4,7 @@ import { buildReceiptHtml, sampleReceipt, type ReceiptDocument } from "@/lib/pri
 import type { DevicePrefs, LocalSale, PosContext } from "../../shared/kassa-api.js";
 import { PAYMENT_LABELS, num } from "../format.ts";
 import { call } from "../kassa.ts";
+import { paymentPartLabel } from "./terminals.ts";
 
 export function receiptTemplate(context: PosContext | null, prefs: DevicePrefs): ReceiptTemplate {
   return { ...DEFAULT_RECEIPT_TEMPLATE, ...((context?.receipt ?? {}) as Partial<ReceiptTemplate>), paperWidth: prefs.paperWidth };
@@ -42,7 +43,7 @@ export function saleDocument(sale: LocalSale, context: PosContext | null): Recei
       { label: "Balansdan", amount: num(sale.balanceUsed) },
       // Aralash to'lov — har usul alohida qatorda (berilgan summa, naqdda qaytim bilan)
       ...(sale.payments?.length
-        ? sale.payments.map((part) => ({ label: PAYMENT_LABELS[part.method] ?? part.method, amount: num(part.tendered) }))
+        ? sale.payments.map((part) => ({ label: paymentPartLabel(part), amount: num(part.tendered) }))
         : [{ label: PAYMENT_LABELS[sale.paymentMethod] ?? sale.paymentMethod, amount: num(sale.tendered) }]),
     ],
     change: num(sale.change),

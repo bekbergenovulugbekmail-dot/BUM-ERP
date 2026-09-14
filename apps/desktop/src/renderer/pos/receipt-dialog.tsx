@@ -5,6 +5,7 @@ import type { DevicePrefs, LocalSale, PosContext } from "../../shared/kassa-api.
 import { PAYMENT_LABELS, fmtMoney, num } from "../format.ts";
 import { errorText } from "../kassa.ts";
 import { printSale } from "./receipt.ts";
+import { paymentPartLabel } from "./terminals.ts";
 
 /** Chek yakunlandi: qaytim katta ko'rinadi; Enter — yangi chek. */
 export default function ReceiptDialog({
@@ -70,9 +71,9 @@ export default function ReceiptDialog({
                   <dd className="tabular-nums">{fmtMoney(sale.cashbackUsed, base)}</dd>
                 </div>
               )}
-              {(sale.payments?.length ? sale.payments : [{ method: sale.paymentMethod, tendered: sale.tendered, paid: sale.paid }]).map((part) => (
-                <div key={part.method} className="flex justify-between text-muted-foreground">
-                  <dt>{PAYMENT_LABELS[part.method] ?? part.method}</dt>
+              {(sale.payments?.length ? sale.payments : [{ method: sale.paymentMethod, tendered: sale.tendered, paid: sale.paid }]).map((part, index) => (
+                <div key={`${part.method}-${index}`} className="flex justify-between text-muted-foreground">
+                  <dt>{paymentPartLabel(part)}</dt>
                   <dd className="tabular-nums">{fmtMoney(part.tendered, base)}</dd>
                 </div>
               ))}

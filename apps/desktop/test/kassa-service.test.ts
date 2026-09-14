@@ -545,6 +545,84 @@ describe("Kassa xizmati (main jarayon)", () => {
     expect(kassa.products({ query: "cola" })[0]!.stock).toBe("5.0000");
   });
 
+  it("karta terminallari: config bilan keladi, chekda terminal bo'yicha qismlar, navbatdagi amalda terminalId; noma'lum terminal va naqdda terminal rad", async () => {
+    const api = fakeApi();
+    const kassa = service(api);
+    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
+    store.saveCashier({ ...cashier, permissions: ["pos.use"] });
+    const terminals = [
+      { id: "t-uzcard", name: "UZCARD kassa 1", network: "uzcard" },
+      { id: "t-humo", name: "HUMO kassa 1", network: "humo" },
+    ];
+    store.applyPull({
+      ...pullResponse({
+        units: { rows: [{ id: "unit-d", name: "Dona", shortName: "dona", isBase: true, isActive: true }] },
+        products: { rows: [product("p1", "Cola")] },
+        stockLevels: { rows: [{ id: "s1", productId: "p1", warehouseId: "w1", quantity: "5.0000", reservedQty: "0.0000" }] },
+      }),
+      config: {
+        hash: "cfg-terminals",
+        company: { name: "Bonnu", address: null, phone: null, taxId: null, currency: "UZS" },
+        cashback: { enabled: false, accrualBase: "paid", maxUsagePercent: 0, tiers: [], categoryRates: [] },
+        receipt: {},
+        terminals: terminals.map((terminal) => ({ ...terminal, branchId: null })),
+      },
+    });
+
+    api.state.online = false;
+    expect(kassa.posContext().terminals).toEqual(terminals);
+    kassa.openShift({ openingCash: "0" });
+    const base = {
+      customerId: null,
+      lines: [{ productId: "p1", unitId: "unit-d", quantity: "2" }],
+      saleCurrencies: [],
+      paymentMethod: "card" as const,
+      amountPaid: null,
+      cashbackAmount: null,
+      balanceAmount: null,
+      changeToBalance: false,
+      currencyPayments: [],
+    };
+    expect(() => kassa.completeSale({ ...base, payments: [{ method: "card", amount: null, terminalId: "t-yoq" }] })).toThrow("Terminal topilmadi");
+    expect(() => kassa.completeSale({ ...base, payments: [{ method: "cash", amount: null, terminalId: "t-uzcard" }] })).toThrow("Terminal faqat karta");
+
+    // 2 × 10000 = 20000: naqd 5000 + UZCARD 8000 + HUMO (qoldiq 7000)
+    const sale = kassa.completeSale({
+      ...base,
+      payments: [
+        { method: "cash", amount: "5000" },
+        { method: "card", amount: "8000", terminalId: "t-uzcard" },
+        { method: "card", amount: null, terminalId: "t-humo" },
+      ],
+    });
+    expect(sale.payments).toEqual([
+      { method: "cash", tendered: "5000.00", paid: "5000.00" },
+      { method: "card", tendered: "8000.00", paid: "8000.00", terminal: terminals[0] },
+      { method: "card", tendered: "7000.00", paid: "7000.00", terminal: terminals[1] },
+    ]);
+    const queued = store.pendingOps(50).find((op) => op.type === "sale.complete");
+    expect(queued?.payload).toMatchObject({
+      payments: [
+        { method: "cash", amount: "5000.00" },
+        { method: "card", amount: "8000.00", terminalId: "t-uzcard" },
+        { method: "card", amount: "7000.00", terminalId: "t-humo" },
+      ],
+    });
+    expect((queued!.payload as { payments: object[] }).payments[0]).not.toHaveProperty("terminalId");
+    expect(kassa.status().shift!.totals).toMatchObject({ cash: "5000.00", card: "15000.00" });
+
+    // Qaytariladigan pul usul bo'yicha jamlanadi (ikki terminal — bitta "Karta"; serverda asl bank hisobidan qaytadi)
+    store.saveCashier({ ...cashier, permissions: ["pos.use", "sales.refund"] });
+    expect((await kassa.findReceipt({ number: sale.number })).refundable).toEqual(
+      expect.arrayContaining([
+        { method: "cash", amount: "5000.00" },
+        { method: "card", amount: "15000.00" },
+      ]),
+    );
+  });
+
   it("kassa bo'limi: kirim-chiqim, xarajat ruxsati, mijoz to'lovi (qarzdan ortig'i balansga), X/Z-hisobot, tarix, navbat tartibi", async () => {
     const api = fakeApi();
     const kassa = service(api);

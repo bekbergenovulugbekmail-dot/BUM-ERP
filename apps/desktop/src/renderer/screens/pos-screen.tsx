@@ -67,6 +67,7 @@ import { PosSidebar } from "../pos/pos-sidebar.tsx";
 import { PosStatusBar } from "../pos/pos-status.tsx";
 import PrefsDialog from "../pos/prefs-dialog.tsx";
 import { CategoryChips, ProductCard, ProductDetailDialog, ProductImage, PromoBadges } from "../pos/product-grid.tsx";
+import { terminalLabel } from "../pos/terminals.ts";
 import { DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_LABELS, keyName } from "../../shared/hotkeys.js";
 import ReceiptDialog from "../pos/receipt-dialog.tsx";
 import { printSale } from "../pos/receipt.ts";
@@ -101,7 +102,10 @@ const PAGE = 120;
 const MAX_LIST = 960;
 
 type PayKey = "cash" | "card" | "bank";
-const EMPTY_TENDER: Record<PayKey, string> = { cash: "", card: "", bank: "" };
+/** To'lov qismi: naqd, bank, karta — terminallar sinxronlangan bo'lsa har terminal alohida (`card:<id>`). */
+type PayPart = { key: string; method: PayKey; terminalId: string | null; label: string };
+/** Kiritilgan summa qism kaliti bo'yicha ("cash", "bank", "card" yoki "card:<terminal>"). */
+const EMPTY_TENDER: Record<string, string> = {};
 
 const PAY_METHODS: { key: PayKey; label: string; action: "payCash" | "payCard" | "payBank"; dot: string }[] = [
   { key: "cash", label: "Naqd", action: "payCash", dot: "bg-pos-success" },
@@ -227,7 +231,9 @@ export default function PosScreen({
   const [saleCurrencies, setSaleCurrencies] = useState<string[]>([]);
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
   /** Aralash to'lov: usul bo'yicha kiritilgan summa; hammasi bo'sh — tanlangan usulda aniq summa (tez yakunlash). */
-  const [tender, setTender] = useState<Record<PayKey, string>>(EMPTY_TENDER);
+  const [tender, setTender] = useState<Record<string, string>>(EMPTY_TENDER);
+  /** Tanlangan karta terminali (summa kiritilmagan tez yakunlashda karta shu terminalga). */
+  const [cardTerminal, setCardTerminal] = useState<string | null>(null);
   const [useBalance, setUseBalance] = useState(false);
   const [balanceInput, setBalanceInput] = useState("");
   const [useCashback, setUseCashback] = useState(false);
@@ -327,11 +333,26 @@ export default function PosScreen({
   const foreignInput = activeCurrencies
     .filter((code) => code !== base)
     .map((code) => ({ currency: code, amount: foreignTender[code]?.trim() ? foreignTender[code]! : null, method: foreignMethod[code] ?? ("cash" as const) }));
-  const typedMethods = PAY_METHODS.map((method) => method.key).filter((key) => tender[key].trim() !== "");
-  const paymentsInput: { method: PayKey; amount: string | null }[] =
-    typedMethods.length === 0
-      ? [{ method: payMethod === "transfer" ? "bank" : payMethod, amount: null }]
-      : typedMethods.map((key) => ({ method: key, amount: tender[key].trim() }));
+  // Karta — serverdan sinxronlangan terminallar bo'lsa har terminal alohida qism (pul terminal bog'langan bank hisobiga)
+  const terminals = context?.terminals ?? [];
+  const activeTerminalId = terminals.find((terminal) => terminal.id === cardTerminal)?.id ?? terminals[0]?.id ?? null;
+  const payParts = (method: PayKey): PayPart[] =>
+    method === "card" && terminals.length > 0
+      ? terminals.map((terminal) => ({ key: `card:${terminal.id}`, method, terminalId: terminal.id, label: terminalLabel(terminal, terminals) }))
+      : [{ key: method, method, terminalId: null, label: PAY_METHODS.find((item) => item.key === method)!.label }];
+  const partKey = (method: PayKey) => (method === "card" && activeTerminalId ? `card:${activeTerminalId}` : method);
+  const typedParts = PAY_METHODS.flatMap((method) => payParts(method.key)).filter((part) => (tender[part.key] ?? "").trim() !== "");
+  const typedMethods = [...new Set(typedParts.map((part) => part.method))];
+  const paymentsInput: { method: PayKey; amount: string | null; terminalId?: string }[] =
+    typedParts.length === 0
+      ? [
+          {
+            method: payMethod === "transfer" ? "bank" : payMethod,
+            amount: null,
+            ...(payMethod === "card" && activeTerminalId ? { terminalId: activeTerminalId } : {}),
+          },
+        ]
+      : typedParts.map((part) => ({ method: part.method, amount: tender[part.key]!.trim(), ...(part.terminalId ? { terminalId: part.terminalId } : {}) }));
 
   const linesValid = cart.every((line) => QTY.test(line.quantity) && toMinor(line.quantity, 4) > 0n && (line.priceOverride === null || QTY.test(line.priceOverride)));
   let calc: SaleCalc | null = null;
@@ -503,12 +524,17 @@ export default function PosScreen({
     setForeignMethod({});
   };
 
-  /** Qolgan summani shu usulga yozish (boshqa usullarda kiritilgani ayiriladi) — aralash to'lov. */
-  const fillRest = (method: PayKey) => {
-    setPayMethod(method);
+  /** Qolgan summani shu qismga yozish (boshqa qismlarda kiritilgani ayiriladi) — aralash to'lov; karta — terminal bo'yicha. */
+  const fillRest = (key: string) => {
+    const part = PAY_METHODS.flatMap((method) => payParts(method.key)).find((item) => item.key === key);
+    if (!part) return;
+    setPayMethod(part.method);
+    if (part.terminalId) setCardTerminal(part.terminalId);
     const due = calc?.due ?? 0n;
-    const others = typedMethods.filter((key) => key !== method).reduce((sum, key) => sum + (QTY.test(tender[key]) ? toMinor(tender[key]) : 0n), 0n);
-    setTender((current) => ({ ...current, [method]: trimDecimal(fromMinor(due > others ? due - others : 0n)) }));
+    const others = typedParts
+      .filter((item) => item.key !== key)
+      .reduce((sum, item) => sum + (QTY.test(tender[item.key] ?? "") ? toMinor(tender[item.key]!) : 0n), 0n);
+    setTender((current) => ({ ...current, [key]: trimDecimal(fromMinor(due > others ? due - others : 0n)) }));
   };
 
   const complete = async () => {
@@ -633,7 +659,7 @@ export default function PosScreen({
     const pickMethod = (method: PayKey) => {
       if (!enabledMethods.some((item) => item.key === method)) return;
       // Summa kiritilgan bo'lsa — qolgan summa shu usulga (aralash to'lov); aks holda usul tanlanadi (aniq summa)
-      if (typedMethods.length > 0) fillRest(method);
+      if (typedMethods.length > 0) fillRest(partKey(method));
       else setPayMethod(method);
     };
     const handlers: Record<(typeof HOTKEY_ACTIONS)[number], () => void> = {
@@ -1375,6 +1401,7 @@ export default function PosScreen({
               <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.max(enabledMethods.length, 1)}, minmax(0, 1fr))` }}>
                 {enabledMethods.map((method) => {
                   const chosen = payMethod === method.key;
+                  const parts = payParts(method.key);
                   return (
                     <div
                       key={method.key}
@@ -1386,38 +1413,76 @@ export default function PosScreen({
                           aria-pressed={chosen}
                           title={typedMethods.length > 0 ? "Qolgan summani shu usulga" : undefined}
                           className="flex min-w-0 flex-1 items-center gap-1.5 rounded py-0.5 text-left text-sm font-semibold"
-                          onClick={() => (typedMethods.length > 0 ? fillRest(method.key) : setPayMethod(method.key))}
+                          onClick={() => (typedMethods.length > 0 ? fillRest(partKey(method.key)) : setPayMethod(method.key))}
                         >
                           <span className={`size-2 shrink-0 rounded-full ${method.dot}`} aria-hidden />
                           <span className="truncate">{method.label}</span>
                           <span className="hidden text-[10px] font-medium text-muted-foreground @[8.5rem]:inline">{hotkeys[method.action]}</span>
                         </button>
-                        {calc && calc.due > 0n && (
+                        {calc && calc.due > 0n && parts.length === 1 && (
                           <button
                             type="button"
                             className="shrink-0 rounded px-1 text-[11px] font-semibold text-primary hover:underline"
                             title="Qolgan summani shu usulga"
-                            onClick={() => fillRest(method.key)}
+                            onClick={() => fillRest(parts[0]!.key)}
                           >
                             qoldiq
                           </button>
                         )}
                       </div>
-                      <Input
-                        id={`pay-${method.key}`}
-                        aria-label={method.label}
-                        className="mt-1 h-(--pos-tap-size) min-w-0 px-2 text-right text-base font-bold tabular-nums"
-                        inputMode="decimal"
-                        placeholder={typedMethods.length === 0 && chosen && calc ? trimDecimal(fromMinor(calc.due)) : "0"}
-                        value={tender[method.key]}
-                        onChange={(e) => setTender((current) => ({ ...current, [method.key]: decimalInput(e.target.value) }))}
-                      />
+                      {parts.map((part) => {
+                        // Terminal: tanlangani belgilanadi; summa kiritilmagan tez yakunlashda karta shu terminalga
+                        const terminalChosen = part.terminalId !== null && chosen && part.terminalId === activeTerminalId;
+                        return (
+                          <div key={part.key}>
+                            {part.terminalId !== null && (
+                              <div className="mt-1 flex items-center gap-1 px-0.5">
+                                <button
+                                  type="button"
+                                  aria-pressed={terminalChosen}
+                                  title="Karta terminali"
+                                  className={`min-w-0 flex-1 truncate rounded text-left text-[11px] font-bold tracking-wide ${terminalChosen ? "text-primary" : "text-muted-foreground"}`}
+                                  onClick={() => {
+                                    setPayMethod("card");
+                                    setCardTerminal(part.terminalId);
+                                  }}
+                                >
+                                  {part.label}
+                                </button>
+                                {calc && calc.due > 0n && (
+                                  <button
+                                    type="button"
+                                    className="shrink-0 rounded px-1 text-[11px] font-semibold text-primary hover:underline"
+                                    title="Qolgan summani shu terminalga"
+                                    onClick={() => fillRest(part.key)}
+                                  >
+                                    qoldiq
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                            <Input
+                              id={part.terminalId ? `pay-card-${part.terminalId}` : `pay-${method.key}`}
+                              aria-label={part.terminalId ? `${method.label} ${part.label}` : method.label}
+                              className="mt-1 h-(--pos-tap-size) min-w-0 px-2 text-right text-base font-bold tabular-nums"
+                              inputMode="decimal"
+                              placeholder={
+                                typedParts.length === 0 && chosen && calc && (part.terminalId === null || part.terminalId === activeTerminalId)
+                                  ? trimDecimal(fromMinor(calc.due))
+                                  : "0"
+                              }
+                              value={tender[part.key] ?? ""}
+                              onChange={(e) => setTender((current) => ({ ...current, [part.key]: decimalInput(e.target.value) }))}
+                            />
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })}
               </div>
               {/* Taqsimot va TO'LANADI / TO'LANGAN / QOLDIQ — summa kiritilganda (aniq summada qoldiq doim 0, joy savatga qoladi) */}
-              {calc && paymentEntered && <PaymentProgress calc={calc} base={base} />}
+              {calc && paymentEntered && <PaymentProgress calc={calc} base={base} terminals={terminals} />}
               {calc && paymentEntered && (
                 <dl className="grid grid-cols-3 gap-1.5">
                   <SummaryCell label="To'lanadi" value={fmtMoney(fromMinor(calc.due), base)} />
@@ -1430,7 +1495,7 @@ export default function PosScreen({
                 </dl>
               )}
               {customer && calc && calc.due > 0n && (
-                <Button size="sm" variant="ghost" className="w-full text-pos-warning" onClick={() => setTender({ ...EMPTY_TENDER, cash: "0" })}>
+                <Button size="sm" variant="ghost" className="w-full text-pos-warning" onClick={() => setTender({ cash: "0" })}>
                   Qarzga (mijoz hisobiga)
                 </Button>
               )}

@@ -1490,7 +1490,7 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 | Qarz/buyurtma to'lovi aralash (`POST /api/sales/payments parts[]`), kassada qarzni aralash to'lash (oyna), qarzdan ortig'i rad | DONE | `payment-terminals` testi |
 | Smena yig'indisi: bank/o'tkazma to'lovi `totalBank` ga (avval yozilmasdi) | DONE | test |
 | Desktop kassa: aralash to'lov (naqd/karta/bank) oflayn navbatdan idempotent sinxron (chek ID) | DONE (avvaldan) | `pos-mixed-payment` offline testi |
-| Desktop kassada terminal tanlash | PARTIAL | server `terminalId` ni qabul qiladi; terminallar qurilmaga sinxronlanmaydi — desktop karta to'lovi asosiy bank hisobiga |
+| Desktop kassada terminal tanlash: faol terminallar qurilma config'i bilan sinxronlanadi (terminal qo'shilsa/o'chirilsa xesh o'zgaradi), kassa ekranida karta — har terminal alohida qism (UZCARD + HUMO bir chekda), oflayn chek navbatda `terminalId` bilan, serverda terminal bog'langan bank hisobiga; chek va to'lov taqsimotida terminal nomi | DONE (kod + test) | API `payment-terminals` (5: config sinxroni, xesh, oflayn chek hisoblari, begona terminal rad); desktop `sale-calc`, `kassa-service` testlari; yangi o'rnatuvchi e'lon qilinmaguncha foydalanuvchi kassalarida yo'q |
 | Haqiqiy ekvayring (terminal to'lovni o'zi tasdiqlashi) | BLOCKED | bank/processing protokoli va kalitlari yo'q; soxta "to'lov o'tdi" qilinmadi — kassir terminal chekiga qarab kiritadi; adapter nuqtasi — terminal yozuvi |
 
 ## Modullar boshqaruvi (2026-09-14)

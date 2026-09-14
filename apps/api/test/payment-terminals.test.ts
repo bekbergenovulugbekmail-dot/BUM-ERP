@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
+import { products } from "../src/db/schema/catalog.js";
 import { deliveryPayments } from "../src/db/schema/delivery.js";
 import { accounts, cashAccounts, cashTransactions, paymentTerminals } from "../src/db/schema/finance.js";
 import { customerPayments, customers, payments, salesOrderItems, salesReturns } from "../src/db/schema/sales.js";
@@ -305,5 +306,96 @@ describe("To'lov terminallari va universal aralash to'lov", () => {
     );
     expect(await db.select().from(payments).where(eq(payments.source, "delivery"))).toMatchObject([{ totalAmount: "50000.00", idempotencyKey: `delivery:${key}` }]);
     expect(await ledger(company.companyId, "1021")).toBe("30000.00");
+  });
+
+  it("desktop kassa: terminallar config bilan sinxronlanadi (xesh o'zgaradi); oflayn chek terminal bo'yicha bank hisobiga, begona terminal rad", async () => {
+    const { uzcard, humo } = await twoTerminals();
+    const kassir = await addEmployee(app, company, "Kassir");
+    const registered = await app.inject({
+      method: "POST",
+      url: "/api/pos-device/setup/register",
+      payload: { phone: company.owner.phone, password: company.owner.password, warehouseId: company.warehouseId, name: "Kassa 1" },
+    });
+    expect(registered.statusCode, registered.body).toBe(201);
+    const headers = { authorization: `Bearer ${registered.json().token as string}` };
+    type SyncedConfig = { hash: string; terminals: { id: string; name: string; network: string }[] } | null;
+    const pull = async (configHash?: string) => {
+      const res = await app.inject({ method: "POST", url: "/api/pos-device/pull", headers, payload: { limit: 1, ...(configHash ? { configHash } : {}) } });
+      expect(res.statusCode, res.body).toBe(200);
+      return res.json().config as SyncedConfig;
+    };
+
+    const first = await pull();
+    expect(first!.terminals.map((terminal) => terminal.network).sort()).toEqual(["humo", "uzcard"]);
+    expect(first!.terminals[0]).not.toHaveProperty("cashAccountId");
+    expect(await pull(first!.hash)).toBeNull();
+
+    const op = (type: string, payload: object, minutesAgo: number) => ({
+      opId: randomUUID(),
+      type,
+      cashierId: kassir.id,
+      createdAt: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
+      payload,
+    });
+    const push = async (ops: object[]) => {
+      const res = await app.inject({ method: "POST", url: "/api/pos-device/push", headers, payload: { ops } });
+      expect(res.statusCode, res.body).toBe(200);
+      return res.json().results as { status: string; result?: Record<string, unknown>; error?: { code: string; message: string } }[];
+    };
+    const [product] = await db.select({ baseUnitId: products.baseUnitId }).from(products).where(eq(products.id, company.productId));
+    const saleOp = (number: string, payments: object[], minutesAgo: number) => {
+      const saleId = randomUUID();
+      return {
+        saleId,
+        op: op(
+          "sale.complete",
+          {
+            saleId,
+            shiftId,
+            number,
+            items: [{ id: randomUUID(), productId: company.productId, unitId: product!.baseUnitId, quantity: "4", unitPrice: "5000" }],
+            paymentMethod: "card",
+            amountPaid: "20000",
+            payments,
+          },
+          minutesAgo,
+        ),
+      };
+    };
+    const shiftId = randomUUID();
+    expect((await push([op("shift.open", { shiftId, openingCash: "0" }, 30)]))[0]!.status).toBe("applied");
+
+    // Chek HUMO faol paytida yopilgan; terminal keyin faolsizlantirilsa ham oflayn chek rad etilmaydi
+    const sale = saleOp("K01-000001", [
+      { method: "cash", amount: "5000" },
+      { method: "card", amount: "8000", terminalId: uzcard.id },
+      { method: "card", amount: "7000", terminalId: humo.id },
+    ], 20);
+    expect((await call(owner(), "PATCH", `/api/finance/terminals/${humo.id}`, { isActive: false })).statusCode).toBe(200);
+    const second = await pull(first!.hash);
+    expect(second!.hash).not.toBe(first!.hash);
+    expect(second!.terminals.map((terminal) => terminal.id)).toEqual([uzcard.id]);
+
+    const [sold] = await push([sale.op]);
+    expect(sold, JSON.stringify(sold)).toMatchObject({ status: "applied", result: { paid: "20000.00" } });
+    const rows = await db.select().from(customerPayments).where(eq(customerPayments.orderId, sale.saleId));
+    expect(rows.map((row) => `${row.method}:${row.amount}:${row.terminalId}:${row.cashAccountId}`).sort()).toEqual(
+      [`card:7000.00:${humo.id}:${secondBank}`, `card:8000.00:${uzcard.id}:${mainBank}`, `cash:5000.00:null:${mainCash}`].sort(),
+    );
+    const [header] = await db.select().from(payments).where(eq(payments.orderId, sale.saleId));
+    expect(header).toMatchObject({ source: "pos_device", idempotencyKey: `pos_device:${sale.saleId}`, totalAmount: "20000.00" });
+    expect([await balanceOf(mainBank), await balanceOf(secondBank)]).toEqual(["8000.00", "7000.00"]);
+
+    // Begona kompaniya terminali — amal rad etiladi, pul yozilmaydi
+    const other = await deliveryCompany(app, adminCookie, "Boshqa kompaniya");
+    const foreign = await terminal(other.ownerCookie, {
+      name: "Begona UZCARD",
+      network: "uzcard",
+      cashAccountId: (await db.select().from(cashAccounts).where(and(eq(cashAccounts.companyId, other.companyId), eq(cashAccounts.type, "bank"))))[0]!.id,
+    });
+    const stolen = saleOp("K01-000002", [{ method: "card", amount: "20000", terminalId: foreign.id }], 10);
+    const [rejected] = await push([stolen.op]);
+    expect(rejected).toMatchObject({ status: "rejected" });
+    expect(await db.select().from(customerPayments).where(eq(customerPayments.orderId, stolen.saleId))).toHaveLength(0);
   });
 });

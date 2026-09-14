@@ -362,8 +362,8 @@ export type SalePayload = {
   }[];
   paymentMethod: PaymentMethod;
   amountPaid: string;
-  /** Aralash to'lov (naqd + karta + bank) — berilsa server paymentMethod/amountPaid o'rniga shuni oladi. */
-  payments?: { method: "cash" | "card" | "bank"; amount: string }[];
+  /** Aralash to'lov (naqd + karta + bank) — berilsa server paymentMethod/amountPaid o'rniga shuni oladi. Karta — terminal bilan. */
+  payments?: { method: "cash" | "card" | "bank"; amount: string; terminalId?: string }[];
   cashbackAmount?: string;
   balanceAmount?: string;
   changeToBalance?: boolean;
@@ -462,7 +462,12 @@ export type PosConfig = {
   appearance?: { locked: boolean; theme: string; custom?: unknown };
   /** Tezkor sotuv assortimenti (tartibi bilan); eski server — yo'q. */
   quickSale?: { productIds: string[] };
+  /** Faol karta terminallari (web: Moliya → Karta terminallari); eski server — yo'q. */
+  terminals?: PosTerminal[];
 };
+
+/** Karta terminali (UZCARD, HUMO ...): kassada tanlanadi, pul serverda terminal bog'langan bank hisobiga. */
+export type PosTerminal = { id: string; name: string; network: string; branchId?: string | null };
 
 export type WireOperation = {
   opId: string;

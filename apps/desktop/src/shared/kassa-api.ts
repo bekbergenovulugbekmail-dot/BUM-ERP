@@ -141,6 +141,8 @@ export type PosContext = {
   labels: unknown;
   company: PosConfig["company"] | null;
   permissions: string[];
+  /** Karta terminallari (serverdan sinxronlangan); yo'q — karta to'lovi terminalsiz (asosiy bank hisobi). */
+  terminals?: { id: string; name: string; network: string }[];
 };
 
 export type CartLineInput = { productId: string; unitId: string; quantity: string; unitPrice?: string; discountPercent?: string };
@@ -152,8 +154,11 @@ export type SaleInput = {
   paymentMethod: PaymentMethod;
   /** null — aniq summa. */
   amountPaid: string | null;
-  /** Aralash to'lov: naqd, karta, bank (har usul bir marta); summa null — qoldiq shu usulga. Berilsa paymentMethod/amountPaid o'rniga. */
-  payments?: { method: "cash" | "card" | "bank"; amount: string | null }[];
+  /**
+   * Aralash to'lov: naqd, karta, bank; karta terminal bo'yicha (UZCARD va HUMO alohida qism); summa null — qoldiq shu qismga.
+   * Berilsa paymentMethod/amountPaid o'rniga.
+   */
+  payments?: { method: "cash" | "card" | "bank"; amount: string | null; terminalId?: string | null }[];
   /** null — ishlatilmaydi; "" — mavjudining hammasi (chegarada). */
   cashbackAmount: string | null;
   balanceAmount: string | null;
@@ -196,7 +201,7 @@ export type LocalSale = {
   /** Asosiy usul (aralash to'lovda — eng katta qism). */
   paymentMethod: PaymentMethod;
   /** Usullar bo'yicha: berilgan (naqdda — qaytim bilan) va qabul qilingan. Eski cheklarda yo'q. */
-  payments?: { method: PaymentMethod; tendered: string; paid: string }[];
+  payments?: { method: PaymentMethod; tendered: string; paid: string; terminal?: { id: string; name: string; network: string } }[];
   /** Mijoz bergan summa (asosiy valyutada). */
   tendered: string;
   paid: string;
