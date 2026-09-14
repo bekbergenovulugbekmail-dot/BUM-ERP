@@ -14,7 +14,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { AppError, badRequest, conflict, notFound } from "@bum/shared";
+import { AppError, MAX_PAYMENT_PARTS, badRequest, conflict, notFound } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { inventoryCounts } from "../../db/schema/inventory.js";
 import { posSyncConflicts, posSyncOperations, type PosSyncError } from "../../db/schema/pos.js";
@@ -124,8 +124,12 @@ export const syncOperationSchema = z.discriminatedUnion("type", [
         .refine((items) => new Set(items.map((item) => item.id)).size === items.length, "Chek qatori identifikatori takrorlangan"),
       paymentMethod: z.enum(["cash", "card", "bank", "transfer"]),
       amountPaid: moneySchema,
-      /** Aralash to'lov (naqd + karta + bank) — berilsa paymentMethod/amountPaid o'rniga. */
-      payments: z.array(z.strictObject({ method: z.enum(["cash", "card", "bank"]), amount: moneySchema })).min(1).max(3).optional(),
+      /** Aralash to'lov (naqd + karta terminali + bank) — berilsa paymentMethod/amountPaid o'rniga. */
+      payments: z
+        .array(z.strictObject({ method: z.enum(["cash", "card", "bank"]), amount: moneySchema, terminalId: z.uuid().nullable().optional() }))
+        .min(1)
+        .max(MAX_PAYMENT_PARTS)
+        .optional(),
       cashbackAmount: moneySchema.optional(),
       balanceAmount: moneySchema.optional(),
       changeToBalance: z.boolean().optional(),

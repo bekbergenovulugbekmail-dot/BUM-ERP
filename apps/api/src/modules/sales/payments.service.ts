@@ -30,6 +30,7 @@ import {
 } from "../finance/cash.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
+import { findCompanyTerminal } from "../finance/terminals.service.js";
 import { earnOrderCashback, getCashbackSettings, maxCashbackUsage, redeemCashback } from "./cashback.service.js";
 import { payFromBalance } from "./customer-balance.service.js";
 import { salesAudit } from "./customers.service.js";
@@ -52,11 +53,23 @@ export type CustomerPaymentInput = {
    */
   currency?: string;
   foreignAmount?: string;
+  /** Karta to'lovi terminali: pul terminalga bog'langan bank hisobiga tushadi (faqat `card`). */
+  terminalId?: string | null;
+  /** To'lov hujjati (aralash to'lov qismi) — `payment-allocation.service.ts`. */
+  paymentId?: string | null;
 };
 
 export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input: CustomerPaymentInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
   if (!input.orderId && !input.customerId) throw badRequest("Mijoz yoki buyurtma tanlanishi kerak");
+  let cashAccountId = input.cashAccountId ?? null;
+  if (input.terminalId) {
+    // Faollik taqsimot kirishida (`resolvePaymentParts`) tekshiriladi — bu yerda kompaniyaga tegishliligi va hisobi
+    if (input.method !== "card") throw badRequest("Terminal faqat karta to'lovida tanlanadi");
+    const terminal = await findCompanyTerminal(tx, companyId, input.terminalId);
+    if (cashAccountId && cashAccountId !== terminal.cashAccountId) throw badRequest("Hisob terminalga bog'langan bank hisobiga mos emas");
+    cashAccountId = terminal.cashAccountId;
+  }
 
   if (input.reference) {
     const [existing] = await tx
@@ -135,13 +148,15 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
       method: input.method,
       reference: input.reference ?? null,
       notes: input.notes ?? null,
+      terminalId: input.terminalId ?? null,
+      paymentId: input.paymentId ?? null,
       createdBy: tenant.user.id,
     })
     .returning({ id: customerPayments.id });
 
   const description = order ? `Mijoz to'lovi: ${order.number}` : `Mijoz to'lovi: ${customerName}`;
   const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
-    cashAccountId: await resolvePaymentAccount(tx, companyId, input.method, input.cashAccountId, paymentCurrency),
+    cashAccountId: await resolvePaymentAccount(tx, companyId, input.method, cashAccountId, paymentCurrency),
     type: "in",
     amount: foreign ? input.foreignAmount! : input.amount,
     currency: paymentCurrency,
@@ -157,7 +172,7 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
     referenceType: "customer_payment",
     referenceId: payment!.id,
     lines: [
-      { accountId: await ledgerAccountFor(tx, companyId, account.type), debit: input.amount },
+      { accountId: await ledgerAccountFor(tx, companyId, account), debit: input.amount },
       { accountId: await requireAccountBySubtype(tx, companyId, "receivable", "asset", "Debitorlar"), credit: input.amount },
     ],
   });
@@ -187,7 +202,15 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
     action: "CUSTOMER_PAYMENT_RECORDED",
     resource: "customer_payments",
     resourceId: payment!.id,
-    details: { customerId, orderId: order?.id ?? null, amount: input.amount, method: input.method, cashAccountId: account.id },
+    details: {
+      customerId,
+      orderId: order?.id ?? null,
+      amount: input.amount,
+      method: input.method,
+      cashAccountId: account.id,
+      ...(input.terminalId ? { terminalId: input.terminalId } : {}),
+      ...(input.paymentId ? { paymentId: input.paymentId } : {}),
+    },
   });
   return { payment: updated!, created: true };
 }

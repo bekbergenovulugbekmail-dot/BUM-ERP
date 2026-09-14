@@ -214,6 +214,8 @@ export type DeliveryPolicy = {
   deliveryRequiredByDefault: boolean;
   /** Naqd/karta buyurtmada yetkazishda qoldiq yig'iladi (nasiya — yig'ilmaydi). */
   collectOnDelivery: boolean;
+  /** Dostavshik qabul qila oladigan usullar (aralash to'lovda ham faqat shular). */
+  collectionMethods: DeliveryCollectionMethod[];
   /** Mijoz koordinatasi bo'lmasa "Mijozga yetdim" rad etiladi. */
   requireCustomerLocation: boolean;
   confirmation: DeliveryConfirmation;
@@ -253,6 +255,7 @@ export const DEFAULT_DELIVERY_POLICY: DeliveryPolicy = {
   locationRetentionDays: 90,
   deliveryRequiredByDefault: false,
   collectOnDelivery: true,
+  collectionMethods: ["cash", "card", "bank"],
   requireCustomerLocation: true,
   confirmation: { otp: false, signature: false, photo: true },
   otpTtlMinutes: 120,

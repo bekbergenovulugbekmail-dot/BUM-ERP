@@ -165,6 +165,7 @@ describe("POS: sotuv valyutalari", () => {
       customerId: customer.id,
       items: [{ productId: headphones, quantity: "1" }],
       currencyPayments: [{ currency: "USD", amount: "4" }],
+      onCredit: true,
     });
     expect(credit.statusCode).toBe(201);
     expect(credit.json()).toMatchObject({ debt: "75000.00", customer: { totalDebt: "75000.00" } });

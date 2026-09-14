@@ -10,6 +10,7 @@ import {
   DEFAULT_DELIVERY_POLICY,
   DELIVERY_AUTO_ASSIGN_LIMITS,
   DELIVERY_AUTO_ASSIGN_STRATEGIES,
+  DELIVERY_COLLECTION_METHODS,
   DELIVERY_MISMATCH_POLICIES,
   DELIVERY_POLICY_LIMITS,
   badRequest,
@@ -62,6 +63,11 @@ const policyShape = {
   locationRetentionDays: bounded("locationRetentionDays"),
   deliveryRequiredByDefault: z.boolean(),
   collectOnDelivery: z.boolean(),
+  collectionMethods: z
+    .array(z.enum(DELIVERY_COLLECTION_METHODS))
+    .min(1)
+    .max(DELIVERY_COLLECTION_METHODS.length)
+    .refine((methods) => new Set(methods).size === methods.length, "To'lov usuli takrorlangan"),
   requireCustomerLocation: z.boolean(),
   confirmation: z.strictObject({ otp: z.boolean(), signature: z.boolean(), photo: z.boolean() }),
   otpTtlMinutes: bounded("otpTtlMinutes"),

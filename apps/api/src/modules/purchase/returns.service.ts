@@ -279,7 +279,7 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
       referenceType: "purchase_return_refund",
       referenceId: returnId,
       lines: [
-        { accountId: await ledgerAccountFor(tx, companyId, account.type), debit: amount },
+        { accountId: await ledgerAccountFor(tx, companyId, account), debit: amount },
         { accountId: payable, credit: amount },
       ],
     });

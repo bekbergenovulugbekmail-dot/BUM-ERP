@@ -345,7 +345,7 @@ export async function paySalary(
       referenceType: "salary_payment",
       referenceId: salary.id,
     });
-    lines.push({ accountId: await ledgerAccountFor(tx, companyId, account.type), credit: salary.netSalary });
+    lines.push({ accountId: await ledgerAccountFor(tx, companyId, account), credit: salary.netSalary });
   }
   if (tax > 0n) {
     lines.push({

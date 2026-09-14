@@ -184,7 +184,7 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
 
   const lines: { accountId: string; debit?: string; credit?: string }[] = [
     { accountId: await requireAccountBySubtype(tx, companyId, "payable", "liability", "Kreditorlar"), debit: fromMinor(bookReduction) },
-    { accountId: await ledgerAccountFor(tx, companyId, account.type), credit: fromMinor(baseAmount) },
+    { accountId: await ledgerAccountFor(tx, companyId, account), credit: fromMinor(baseAmount) },
   ];
   if (fx > 0n) lines.push({ accountId: await ensureAccountBySubtype(tx, companyId, "fx_gain"), credit: fromMinor(fx) });
   if (fx < 0n) lines.push({ accountId: await ensureAccountBySubtype(tx, companyId, "fx_loss"), debit: fromMinor(-fx) });

@@ -12,7 +12,9 @@ import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
-import { localIsoDate, toNum, type CashAccount, type CashTransaction } from "../_lib/types.ts";
+import { localIsoDate, toNum, type Account, type CashAccount, type CashTransaction } from "../_lib/types.ts";
+
+const DEFAULT_LEDGER = "default";
 
 const CATEGORIES = ["sotuv", "xarid", "ijara", "maosh", "kommunal", "transport", "boshqa"];
 
@@ -59,6 +61,22 @@ export default function CashAccountsSection() {
 
   const recordTx = useApiMutation((body: CashTransactionBody) => api.post("/api/finance/cash-transactions", body));
   const createAccount = useApiMutation((body: CashAccountBody) => api.post("/api/finance/cash-accounts", body));
+  // Kassaga bog'lanadigan buxgalteriya hisoblari — faol aktivlar
+  const ledgerOptions = useApiQuery<{ accounts: Account[] }>(canManage ? "/api/finance/accounts" : null, { type: "asset" })
+    .data?.accounts.filter((account) => account.isActive);
+  const updateAccount = useApiMutation(
+    ({ id, ledgerAccountId }: { id: string; ledgerAccountId: string | null }) => api.patch(`/api/finance/cash-accounts/${id}`, { ledgerAccountId }),
+    { invalidate: ["/api/finance/cash-accounts"] },
+  );
+  const linkLedger = async (ledgerAccountId: string | null) => {
+    if (!selectedAccount) return;
+    try {
+      await updateAccount.mutateAsync({ id: selectedAccount.id, ledgerAccountId });
+      toast.success("Buxgalteriya hisobi bog'landi");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
 
   const [txAmount, setTxAmount] = useState("");
   const [txDesc, setTxDesc] = useState("");
@@ -160,6 +178,29 @@ export default function CashAccountsSection() {
               <p className="text-xl font-bold">{formatMoney(acct.balance, acct.currency)}</p>
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Buxgalteriya hisobi: bir nechta bank hisobi hisoblar rejasida alohida ko'rinsin (bo'lmasa 1010 / 1020) */}
+      {selectedAccount && canManage && ledgerOptions && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Label htmlFor="cash-account-ledger" className="text-xs text-muted-foreground">Buxgalteriya hisobi</Label>
+          <Select
+            value={selectedAccount.ledgerAccountId ?? DEFAULT_LEDGER}
+            onValueChange={(value) => void linkLedger(value === DEFAULT_LEDGER ? null : value)}
+          >
+            <SelectTrigger id="cash-account-ledger" className="h-8 w-72 max-w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={DEFAULT_LEDGER}>{selectedAccount.type === "cash" ? "Umumiy: 1010 Naqd kassa" : "Umumiy: 1020 Bank hisobi"}</SelectItem>
+              {ledgerOptions.map((account) => (
+                <SelectItem key={account.id} value={account.id}>
+                  {account.code} {account.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       )}
 

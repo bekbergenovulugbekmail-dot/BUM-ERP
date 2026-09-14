@@ -239,7 +239,7 @@ export async function postExpensePayment(
     referenceId: expense.id,
     lines: [
       { accountId: debitAccount, debit: expense.amount, description: expense.category },
-      { accountId: await ledgerAccountFor(tx, companyId, account.type), credit: expense.amount },
+      { accountId: await ledgerAccountFor(tx, companyId, account), credit: expense.amount },
     ],
   });
   return { cashTransactionId: transaction.id, journalEntryId: entry.id };

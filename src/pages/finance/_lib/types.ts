@@ -2,6 +2,7 @@
  * Moliya API javoblari (`/api/finance/*`). Summalar — aniq o'nlik satr ("12500.00"),
  * `Number()` faqat ko'rsatish uchun.
  */
+import type { TerminalNetwork } from "@bum/shared";
 
 export type AccountType = "asset" | "liability" | "equity" | "income" | "expense";
 
@@ -28,10 +29,27 @@ export type CashAccount = {
   bankName: string | null;
   accountNumber: string | null;
   balance: string;
+  /** Alohida buxgalteriya hisobi (bo'lmasa 1010 naqd / 1020 bank). */
+  ledgerAccountId: string | null;
   isDefault: boolean;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type PaymentTerminal = {
+  id: string;
+  name: string;
+  network: TerminalNetwork;
+  provider: string | null;
+  cashAccountId: string;
+  cashAccountName: string;
+  bankName: string | null;
+  accountNumber: string | null;
+  branchId: string | null;
+  branchName: string | null;
+  terminalIdentifier: string | null;
+  isActive: boolean;
 };
 
 export type CashTransaction = {

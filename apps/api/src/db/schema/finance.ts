@@ -23,7 +23,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
-import { companies, users } from "./platform.js";
+import { branches, companies, users } from "./platform.js";
 import { legacyId, money, pk, price, timestamps } from "./_shared.js";
 
 export const accountType = pgEnum("account_type", [
@@ -162,6 +162,11 @@ export const cashAccounts = pgTable(
     bankName: varchar("bank_name", { length: 200 }),
     accountNumber: varchar("account_number", { length: 64 }),
     balance: money("balance").notNull().default("0"),
+    /**
+     * Hisoblar rejasidagi alohida hisob (masalan, 1021 "X bank UZS") — bir nechta bank hisobi buxgalteriyada ajralsin.
+     * Bo'lmasa turi bo'yicha umumiy: 1010 naqd / 1020 bank.
+     */
+    ledgerAccountId: uuid("ledger_account_id").references(() => accounts.id, { onDelete: "set null" }),
     isDefault: boolean("is_default").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps(),
@@ -207,6 +212,46 @@ export const cashTransactions = pgTable(
     index("ct_company_account_date_idx").on(t.companyId, t.cashAccountId, t.txDate),
     index("ct_reference_idx").on(t.referenceType, t.referenceId),
     check("ct_amount_positive", sql`${t.amount} > 0`),
+  ],
+);
+
+// ─── payment_terminals ───────────────────────────────────────────────────────
+
+/**
+ * Karta to'lov terminali (UZCARD, HUMO, VISA ...): karta tushumi qaysi bank hisobiga tushishini belgilaydi.
+ * Haqiqiy ekvayring API'si ulanmagan — to'lov kassir yoki dostavshik tomonidan terminal chekiga qarab kiritiladi;
+ * ekvayring adapteri keyin shu yozuvga ulanadi. O'chirilmaydi — faolsizlantiriladi (eski to'lovlar bog'lanishi saqlanadi).
+ */
+export const paymentTerminals = pgTable(
+  "payment_terminals",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+
+    name: varchar("name", { length: 100 }).notNull(),
+    /** uzcard | humo | visa | mastercard | unionpay | other (@bum/shared TERMINAL_NETWORKS). */
+    network: varchar("network", { length: 20 }).notNull(),
+    /** Ekvayer bank yoki provayder nomi. */
+    provider: varchar("provider", { length: 100 }),
+    /** Tushum tushadigan bank hisobi (faqat `bank` turidagi, asosiy valyutada). */
+    cashAccountId: uuid("cash_account_id")
+      .notNull()
+      .references(() => cashAccounts.id, { onDelete: "restrict" }),
+    branchId: uuid("branch_id").references(() => branches.id, { onDelete: "set null" }),
+    /** Bank bergan terminal ID (TID). */
+    terminalIdentifier: varchar("terminal_identifier", { length: 64 }),
+    isActive: boolean("is_active").notNull().default(true),
+    ...timestamps(),
+  },
+  (t) => [
+    index("pt_company_active_idx").on(t.companyId, t.isActive),
+    uniqueIndex("pt_company_name_key").on(t.companyId, t.name),
+    uniqueIndex("pt_company_identifier_key")
+      .on(t.companyId, t.terminalIdentifier)
+      .where(sql`${t.terminalIdentifier} IS NOT NULL`),
+    check("pt_network_valid", sql`${t.network} in ('uzcard', 'humo', 'visa', 'mastercard', 'unionpay', 'other')`),
   ],
 );
 

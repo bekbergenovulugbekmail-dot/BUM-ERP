@@ -12,7 +12,8 @@
  * (`occurredAt`) siyosatdagi muddat ichida bo'lishi va o'sha paytda ish sessiyasi ochiq bo'lgani tekshiriladi; GPS yangiligi
  * amal vaqtiga nisbatan, geofence, to'lov qoldig'i va holat o'tishi — qayta serverda.
  */
-import { and, count, eq, isNull, or, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, asc, count, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   AppError,
   DELIVERY_FAILURE_LABELS,
@@ -38,7 +39,7 @@ import { recordHit } from "../../shared/rate-limit.js";
 import { smsProvider } from "../../shared/sms.js";
 import type { TenantContext } from "../company/tenant.js";
 import { shipOrder } from "../sales/orders.service.js";
-import { recordCustomerPayment } from "../sales/payments.service.js";
+import { createPaymentHeader, recordAllocations, resolvePaymentParts, settlePaymentParts } from "../sales/payment-allocation.service.js";
 import { returnSaleItems, type RefundMethod } from "../sales/returns.service.js";
 import { checkLocationQuality, type LocationInput } from "../sales-agent/location.service.js";
 import { DIRECT_PHOTO_MAX_BYTES, sniffImage } from "../sales-agent/visits.service.js";
@@ -451,79 +452,121 @@ export async function addDeliveryProof(
   return { result: proof! };
 }
 
+export type DeliveryPaymentPart = { method: DeliveryCollectionMethod; amount: string; terminalId?: string | null };
+
+/** Qism so'rov kaliti: birinchisi — so'rov kalitining o'zi (eski yozuvlar bilan mos), keyingilari undan hosil qilingan UUID. */
+function partRequestId(clientRequestId: string, index: number) {
+  if (index === 0) return clientRequestId;
+  const hex = createHash("sha256").update(`${clientRequestId}:${index}`).digest("hex");
+  const variant = ((parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
 /**
- * To'lov qabul qilish: mavjud mijoz to'lovi (`recordCustomerPayment` — kassa/bank kirimi, DR kassa / CR debitorlar,
- * buyurtmaning to'langan summasi, mijoz qarzi) — `reference` = so'rov kaliti, takroriy so'rov yangi to'lov yaratmaydi.
+ * To'lov qabul qilish — universal taqsimot (`payment-allocation.service.ts`): bitta yoki aralash (naqd + karta terminali +
+ * bank), faqat siyosatda ruxsat etilgan usullar; jami buyurtma qoldig'idan oshmaydi. Har qism — mijoz to'lovi (kassa/bank
+ * kirimi, DR hisob / CR debitorlar, buyurtmaning to'langan summasi, mijoz qarzi) va `delivery_payments` qatori.
+ * Takroriy so'rov (qayta bosish, oflayn navbat) — shu so'rov kaliti bo'yicha yangi to'lov yaratmaydi.
  */
 export async function collectDeliveryPayment(
   tx: Tx,
   context: DeliveryAgentContext,
   taskId: string,
-  input: ActionInput & { method: DeliveryCollectionMethod; amount: string },
+  input: ActionInput & { parts: DeliveryPaymentPart[] },
   meta: RequestMeta,
 ) {
+  const companyId = context.company.id;
   const task = await lockAgentTask(tx, context, taskId);
-  const [existing] = await tx
+  const requestIds = input.parts.map((_, index) => partRequestId(input.clientRequestId, index));
+  const existing = await tx
     .select()
     .from(deliveryPayments)
-    .where(and(eq(deliveryPayments.companyId, context.company.id), eq(deliveryPayments.clientRequestId, input.clientRequestId)))
-    .limit(1);
-  if (existing) {
-    if (existing.taskId !== task.id) throw conflict("So'rov kaliti boshqa yetkazmada ishlatilgan");
-    return { payment: existing, created: false };
+    .where(and(eq(deliveryPayments.companyId, companyId), inArray(deliveryPayments.clientRequestId, requestIds)))
+    .orderBy(asc(deliveryPayments.createdAt), asc(deliveryPayments.id));
+  const first = existing.find((row) => row.clientRequestId === input.clientRequestId);
+  if (first) {
+    if (first.taskId !== task.id) throw conflict("So'rov kaliti boshqa yetkazmada ishlatilgan");
+    return { payment: first, payments: existing.filter((row) => row.taskId === task.id), created: false };
   }
   if (task.status !== "arrived" && task.status !== "delivering") {
     throw new AppError("CONFLICT", "To'lov mijoz oldida qabul qilinadi (yetib kelgandan keyin)", { reason: "invalid_transition", from: task.status });
   }
-  const policy = await getDeliveryPolicy(tx, context.company.id);
+  const policy = await getDeliveryPolicy(tx, companyId);
   const { at, offline } = resolveOccurredAt(policy, input.occurredAt);
   await requireSessionAt(tx, context.deliveryAgent.id, at, offline);
 
-  const { payment } = await recordCustomerPayment(
+  const parts = await resolvePaymentParts(tx, companyId, input.parts, { allowedMethods: policy.collectionMethods, offline });
+  if (parts.length === 0) throw badRequest("To'lov summasi kiritilmagan");
+  const [order] = await tx
+    .select({ id: salesOrders.id, totalAmount: salesOrders.totalAmount, paidAmount: salesOrders.paidAmount })
+    .from(salesOrders)
+    .where(and(eq(salesOrders.id, task.orderId), eq(salesOrders.companyId, companyId)))
+    .limit(1)
+    .for("update");
+  if (!order) throw notFound("Buyurtma topilmadi");
+  // Qoldiqdan ortiq yig'ilmaydi (dostavshik aniq summani kiritadi); kami — qisman yig'ish, tasdiqlashda siyosat bo'yicha
+  settlePaymentParts(parts, await orderOutstanding(tx, order), { allowCashChange: false, allowShortfall: true });
+
+  const total = parts.reduce((sum, part) => sum + part.amount, 0n);
+  const header = await createPaymentHeader(tx, context, {
+    source: "delivery",
+    idempotencyKey: `delivery:${input.clientRequestId}`,
+    customerId: task.customerId,
+    orderId: task.orderId,
+    total,
+  });
+  const allocations = await recordAllocations(
     tx,
     context,
-    {
-      orderId: task.orderId,
-      amount: input.amount,
-      method: input.method,
-      reference: `delivery:${input.clientRequestId}`,
-      paymentDate: localDate(at),
-      notes: `Yetkazma ${task.number}`,
-    },
+    header,
+    parts,
+    { orderId: task.orderId, paymentDate: localDate(at), notes: `Yetkazma ${task.number}`, firstReference: `delivery:${input.clientRequestId}` },
     meta,
   );
-  const [row] = await tx
-    .insert(deliveryPayments)
-    .values({
-      companyId: context.company.id,
-      taskId: task.id,
-      customerPaymentId: payment.id,
-      method: input.method,
-      amount: input.amount,
-      collectedBy: context.user.id,
-      collectedAt: at,
-      clientRequestId: input.clientRequestId,
-      offline,
-    })
-    .returning();
-  const collected = toMinor(task.collectedAmount) + toMinor(input.amount);
+  const rows = [];
+  for (const [index, part] of parts.entries()) {
+    const [row] = await tx
+      .insert(deliveryPayments)
+      .values({
+        companyId,
+        taskId: task.id,
+        customerPaymentId: allocations[index]!.id,
+        // Usul siyosatdagi ro'yxatdan (`allowedMethods`) — dostavka usullari ichida
+        method: part.method as DeliveryCollectionMethod,
+        amount: fromMinor(part.amount),
+        collectedBy: context.user.id,
+        collectedAt: at,
+        clientRequestId: partRequestId(input.clientRequestId, index),
+        offline,
+      })
+      .returning();
+    rows.push(row!);
+  }
+  const collected = toMinor(task.collectedAmount) + total;
   await tx.update(deliveryTasks).set({ collectedAmount: fromMinor(collected), updatedAt: new Date() }).where(eq(deliveryTasks.id, task.id));
+  const partDetails = parts.map((part, index) => ({
+    method: part.method,
+    amount: fromMinor(part.amount),
+    customerPaymentId: allocations[index]!.id,
+    ...(part.terminalId ? { terminalId: part.terminalId } : {}),
+  }));
+  // Bitta qism — avvalgi ko'rinish (method, amount, customerPaymentId); aralash — `mixed` va qismlar
+  const details = partDetails.length === 1 ? partDetails[0]! : { method: "mixed", amount: fromMinor(total), parts: partDetails };
   await insertDeliveryEvent(tx, task, {
     action: "PAYMENT",
     actorUserId: context.user.id,
     occurredAt: at,
-    details: { method: input.method, amount: input.amount, customerPaymentId: payment.id },
+    details: { ...details, paymentId: header.id },
     clientRequestId: input.clientRequestId,
     offline,
   });
   await deliveryAudit(tx, context, meta, "DELIVERY_PAYMENT_COLLECTED", task.id, {
     number: task.number,
-    method: input.method,
-    amount: input.amount,
-    customerPaymentId: payment.id,
+    ...details,
+    paymentId: header.id,
     offline,
   });
-  return { payment: row!, created: true };
+  return { payment: rows[0]!, payments: rows, created: true };
 }
 
 export type ConfirmSummary = {

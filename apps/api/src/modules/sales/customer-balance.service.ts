@@ -134,7 +134,7 @@ export async function depositToBalance(
     referenceType: "customer_balance",
     referenceId: id,
     lines: [
-      { accountId: await ledgerAccountFor(tx, companyId, account.type), debit: input.amount },
+      { accountId: await ledgerAccountFor(tx, companyId, account), debit: input.amount },
       { accountId: await customerAdvanceAccount(tx, companyId), credit: input.amount },
     ],
   });

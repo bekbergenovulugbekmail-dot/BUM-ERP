@@ -17,15 +17,31 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
+import {
+  SplitPaymentPanel,
+  hasDuplicateParts,
+  newSplitRow,
+  splitPaidMinor,
+  splitParts,
+  type PaymentTerminalOption,
+  type SplitPart,
+  type SplitRow,
+} from "@/components/payments/split-payment-panel.tsx";
 import { num, type DeliveryTaskDetail } from "@/lib/delivery/types.ts";
+import { useApiQuery } from "@/lib/query.ts";
 import { cn } from "@/lib/utils.ts";
 
-const MONEY_RE = /^\d{1,13}(\.\d{1,2})?$/;
 const QTY_RE = /^\d{1,11}(\.\d{1,4})?$/;
 const round2 = (value: number) => Math.round(value * 100) / 100;
 
 type Money = (value: string | number) => string;
 
+type PaymentOptions = { methods: DeliveryCollectionMethod[]; terminals: PaymentTerminalOption[] };
+
+/**
+ * To'lov qabul qilish: bitta yoki bir nechta usulda (naqd + karta terminali + bank) — faqat siyosatda ruxsat etilganlar.
+ * Oflayn ro'yxat kelmasa — hamma usullar, terminalsiz; server siyosat va summani baribir tekshiradi.
+ */
 export function PaymentDialog({
   remaining,
   money,
@@ -37,61 +53,53 @@ export function PaymentDialog({
   money: Money;
   busy: boolean;
   onClose: () => void;
-  onSubmit: (method: DeliveryCollectionMethod, amount: string) => void;
+  onSubmit: (parts: SplitPart[]) => void;
 }) {
   const { t } = useTranslation("delivery");
-  const [method, setMethod] = useState<DeliveryCollectionMethod>("cash");
-  const [amount, setAmount] = useState(remaining > 0 ? String(remaining) : "");
-  const normalized = amount.replace(/\s/g, "").replace(",", ".");
-  const valid = MONEY_RE.test(normalized) && Number(normalized) > 0;
-  const over = valid && remaining > 0 && Number(normalized) > remaining;
+  const options = useApiQuery<PaymentOptions>("/api/delivery/agent/payment-options", undefined, { staleTime: 5 * 60_000 }).data;
+  const methods = options?.methods ?? DELIVERY_COLLECTION_METHODS;
+  const remainingMinor = BigInt(Math.round(Math.max(0, remaining) * 100));
+  const [storedRows, setRows] = useState<SplitRow[]>(() => [newSplitRow("cash", null, remaining > 0 ? String(round2(remaining)) : "")]);
+  // Siyosatda ruxsat etilmagan usul (masalan, naqd yo'q) — ruxsat etilgan birinchi usul ko'rsatiladi va yuboriladi
+  const rows = storedRows.map((row) => (methods.includes(row.method) ? row : { ...row, method: methods[0] ?? row.method, terminalId: null }));
+  const paid = splitPaidMinor(rows);
+  const over = remainingMinor > 0n && paid > remainingMinor;
+  const valid = paid > 0n && !over && !hasDuplicateParts(rows);
 
   return (
     <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-h-[92vh] max-w-md overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{t("payment.title")}</DialogTitle>
           <DialogDescription>{t("payment.remaining", { amount: money(remaining) })}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-2">
-            {DELIVERY_COLLECTION_METHODS.map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setMethod(item)}
-                className={cn(
-                  "h-12 rounded-xl border text-sm font-medium transition-colors",
-                  method === item ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card",
-                )}
-              >
-                {t(`method.${item}`)}
-              </button>
-            ))}
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="payment-amount">{t("payment.amount")}</Label>
-            <Input
-              id="payment-amount"
-              inputMode="decimal"
-              autoComplete="off"
-              className="h-14 text-2xl font-semibold tabular-nums"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-            {remaining > 0 && (
-              <Button type="button" variant="link" className="h-auto px-0 text-xs" onClick={() => setAmount(String(remaining))}>
-                {t("payment.fill_remaining")}
-              </Button>
-            )}
-            {over && <p className="text-xs text-amber-700 dark:text-amber-400">{t("payment.over")}</p>}
-          </div>
-        </div>
+        <SplitPaymentPanel
+          dueMinor={remainingMinor}
+          rows={rows}
+          onChange={setRows}
+          terminals={options?.terminals ?? []}
+          methods={methods}
+          format={(minor) => money(Number(minor) / 100)}
+          idPrefix="delivery-payment"
+          labels={{
+            total: t("payment.total"),
+            paid: t("payment.paid"),
+            remaining: t("payment.left"),
+            overpaid: t("payment.overpaid"),
+            add: t("payment.add"),
+            fill: t("payment.fill"),
+            duplicate: t("payment.duplicate"),
+            cash: t("method.cash"),
+            card: t("method.card"),
+            bank: t("method.bank"),
+          }}
+        />
+        <p className="text-xs text-muted-foreground">{rows.some((row) => row.terminalId) ? t("payment.not_confirmed") : t("payment.split_hint")}</p>
         <DialogFooter className="gap-2">
           <Button variant="secondary" className="h-12" disabled={busy} onClick={onClose}>
             {t("common.cancel")}
           </Button>
-          <Button className="h-12" disabled={!valid || busy} onClick={() => onSubmit(method, normalized)}>
+          <Button className="h-12" disabled={!valid || busy} onClick={() => onSubmit(splitParts(rows))}>
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {t("payment.submit")}
           </Button>

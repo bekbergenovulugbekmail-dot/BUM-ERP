@@ -9,6 +9,7 @@ export * from "./cashback.ts";
 export * from "./currency.ts";
 export * from "./sales-agent.ts";
 export * from "./delivery.ts";
+export * from "./payments.ts";
 export * from "./sha256.ts";
 export * from "./pos-appearance.ts";
 export * from "./pos-quick-sale.ts";

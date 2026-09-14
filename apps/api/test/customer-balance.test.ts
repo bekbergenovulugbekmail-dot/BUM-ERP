@@ -166,6 +166,7 @@ describe("POS mijozlari", () => {
       items: [{ productId, quantity: "1" }],
       paymentMethod: "cash",
       amountPaid: "0",
+      onCredit: true,
     });
     expect(credit.statusCode).toBe(201);
     expect(credit.json()).toMatchObject({ paid: "0.00", debt: "5000.00", customer: { totalDebt: "5000.00" } });

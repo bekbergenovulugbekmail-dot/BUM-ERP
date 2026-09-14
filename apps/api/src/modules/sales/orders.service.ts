@@ -859,10 +859,20 @@ export async function shipOrder(tx: Tx, tenant: TenantContext, orderId: string, 
  * Chekning asosiy valyutadagi naqd/karta/bank/o'tkazma to'lovlari tarkibi, `total` ga moslangan (farq bo'lsa — ulush
  * bo'yicha, qoldig'i oxirgisiga). To'lov yozuvi yo'q bo'lsa — hammasi naqd.
  */
-async function basePaymentComposition(tx: Tx, orderId: string, currency: string, total: bigint): Promise<{ method: PaymentMethod; amount: bigint }[]> {
+async function basePaymentComposition(
+  tx: Tx,
+  orderId: string,
+  currency: string,
+  total: bigint,
+): Promise<{ method: PaymentMethod; amount: bigint; cashAccountId: string | null }[]> {
   if (total <= 0n) return [];
+  // Usul va asl hisob bo'yicha (masalan, UZCARD — A bank, HUMO — B bank): pul qaysi hisobga tushgan bo'lsa, o'sha hisobdan qaytadi
   const rows = await tx
-    .select({ method: customerPayments.method, amount: sql<string>`coalesce(sum(${customerPayments.amount}), 0)::numeric(18,2)` })
+    .select({
+      method: customerPayments.method,
+      cashAccountId: customerPayments.cashAccountId,
+      amount: sql<string>`coalesce(sum(${customerPayments.amount}), 0)::numeric(18,2)`,
+    })
     .from(customerPayments)
     .where(
       and(
@@ -871,18 +881,20 @@ async function basePaymentComposition(tx: Tx, orderId: string, currency: string,
         inArray(customerPayments.method, ["cash", "card", "bank", "transfer"]),
       ),
     )
-    .groupBy(customerPayments.method)
-    .orderBy(customerPayments.method);
+    .groupBy(customerPayments.method, customerPayments.cashAccountId)
+    .orderBy(customerPayments.method, customerPayments.cashAccountId);
   // So'rov faqat naqd/karta/bank/o'tkazmani oladi (inArray) — tip shunga toraytiriladi
-  const parts = rows.map((row) => ({ method: row.method as PaymentMethod, amount: toMinor(row.amount) })).filter((part) => part.amount > 0n);
-  if (parts.length === 0) return [{ method: "cash", amount: total }];
+  const parts = rows
+    .map((row) => ({ method: row.method as PaymentMethod, amount: toMinor(row.amount), cashAccountId: row.cashAccountId }))
+    .filter((part) => part.amount > 0n);
+  if (parts.length === 0) return [{ method: "cash", amount: total, cashAccountId: null }];
   const sum = parts.reduce((acc, part) => acc + part.amount, 0n);
   if (sum === total) return parts;
   let left = total;
   return parts.map((part, index) => {
     const amount = index === parts.length - 1 ? left : (total * part.amount) / sum;
     left -= amount;
-    return { method: part.method, amount };
+    return { ...part, amount };
   });
 }
 
@@ -1004,18 +1016,25 @@ export async function returnOrder(
   const cashPaid = paid - balancePaid - cashbackPaid - foreignPaid;
   // Asosiy valyutadagi pul: usul ko'rsatilsa — shu usulda; aks holda asl to'lov tarkibi bo'yicha (aralash to'lovli chek:
   // naqd — kassaga, karta va bank — bankdan). Asl sotuv hujjati o'zgarmaydi, har qism — alohida kassa harakati va jurnal
-  const baseParts = input.method ? [{ method: input.method, amount: cashPaid }] : await basePaymentComposition(tx, orderId, order.currency, cashPaid);
+  const baseParts = input.method
+    ? [{ method: input.method, amount: cashPaid, cashAccountId: null }]
+    : await basePaymentComposition(tx, orderId, order.currency, cashPaid);
 
   let cashRefunded = 0n;
   let refundAccountId: string | null = null;
   const refundedByMethod = new Map<string, bigint>();
+  const methodPieces = new Map<string, number>();
   if (refund) {
     for (const part of baseParts) {
       if (part.amount <= 0n) continue;
       const amount = fromMinor(part.amount);
-      const suffix = baseParts.length > 1 ? `_${part.method}` : "";
+      const nth = methodPieces.get(part.method) ?? 0;
+      methodPieces.set(part.method, nth + 1);
+      const suffix = baseParts.length > 1 ? `_${part.method}${nth > 0 ? `_${nth + 1}` : ""}` : "";
       const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
-        cashAccountId: await resolvePaymentAccount(tx, companyId, part.method, input.method ? input.cashAccountId : null),
+        cashAccountId: input.method
+          ? await resolvePaymentAccount(tx, companyId, part.method, input.cashAccountId)
+          : (part.cashAccountId ?? (await resolvePaymentAccount(tx, companyId, part.method))),
         type: "out",
         amount,
         txDate: today,
@@ -1031,7 +1050,7 @@ export async function returnOrder(
         referenceId: order.id,
         lines: [
           { accountId: await requireAccountBySubtype(tx, companyId, "receivable", "asset", "Debitorlar"), debit: amount },
-          { accountId: await ledgerAccountFor(tx, companyId, account.type), credit: amount },
+          { accountId: await ledgerAccountFor(tx, companyId, account), credit: amount },
         ],
       });
       if (order.customerId) {
@@ -1084,7 +1103,7 @@ export async function returnOrder(
         referenceId: payment.id,
         lines: [
           { accountId: await requireAccountBySubtype(tx, companyId, "receivable", "asset", "Debitorlar"), debit: payment.amount },
-          { accountId: await ledgerAccountFor(tx, companyId, account.type), credit: payment.amount },
+          { accountId: await ledgerAccountFor(tx, companyId, account), credit: payment.amount },
         ],
       });
       if (order.customerId) {

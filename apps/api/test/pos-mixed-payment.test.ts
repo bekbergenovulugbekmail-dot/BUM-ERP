@@ -85,17 +85,26 @@ describe("POS: aralash to'lov (naqd + karta + bank)", () => {
     expect((await sell({})).statusCode).toBe(400);
     expect(await db.select().from(salesOrders).where(eq(salesOrders.companyId, company.companyId))).toHaveLength(0);
 
+    // Aralash to'lovda ortiqcha to'lov (22000 > 20000) rad — qaytim faqat bitta naqd to'lovda; hech narsa yozilmaydi
     const clientRequestId = randomUUID();
-    const payments = [
-      { method: "cash", amount: "12000" },
-      { method: "card", amount: "7000" },
-      { method: "bank", amount: "3000" },
-    ];
+    const overpaid = await sell({
+      clientRequestId,
+      payments: [
+        { method: "cash", amount: "12000" },
+        { method: "card", amount: "7000" },
+        { method: "bank", amount: "3000" },
+      ],
+    });
+    expect(overpaid.statusCode).toBe(400);
+    expect(overpaid.json()).toMatchObject({ details: { reason: "overpayment", total: "20000.00", paid: "22000.00" } });
+    expect(await db.select().from(salesOrders).where(eq(salesOrders.companyId, company.companyId))).toHaveLength(0);
+
+    const payments = MIXED;
     const mixed = await sell({ clientRequestId, payments });
     expect(mixed.statusCode).toBe(201);
     expect(mixed.json()).toMatchObject({
       paid: "20000.00",
-      change: "2000.00",
+      change: "0.00",
       debt: "0.00",
       payments: [
         { method: "cash", amount: "10000.00" },
@@ -263,9 +272,10 @@ describe("POS: aralash to'lov (naqd + karta + bank)", () => {
     ]);
     expect(returned).toMatchObject({ status: "applied", result: { refundMethod: "mixed", refundAmount: "10000.00" } });
     const [row] = await db.select({ refunds: salesReturns.refunds }).from(salesReturns).where(eq(salesReturns.orderId, saleId));
+    // Hujjatda qaysi hisobdan qaytgani: naqd — kassadan, karta — sotuvda tushgan bank hisobidan
     expect(row!.refunds).toEqual([
-      { method: "cash", amount: "5000.00" },
-      { method: "card", amount: "5000.00" },
+      { method: "cash", amount: "5000.00", cashAccountId: mainCash },
+      { method: "card", amount: "5000.00", cashAccountId: mainBank },
     ]);
   });
 });

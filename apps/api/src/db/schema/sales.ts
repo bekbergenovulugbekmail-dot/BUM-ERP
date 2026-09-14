@@ -29,7 +29,7 @@ import { companies, users } from "./platform.js";
 import { products, units } from "./catalog.js";
 import { warehouses } from "./inventory.js";
 import { posDevices } from "./pos.js";
-import { cashAccounts, expenses, journalEntries } from "./finance.js";
+import { cashAccounts, expenses, journalEntries, paymentTerminals } from "./finance.js";
 import { paymentMethod } from "./purchase.js";
 import { legacyId, money, percent, pk, price, qty, timestamps } from "./_shared.js";
 
@@ -273,6 +273,41 @@ export const salesOrderItems = pgTable(
 
 // ─── customer_payments ───────────────────────────────────────────────────────
 
+/**
+ * To'lov hujjati (sarlavha) — mijozdan pul qabul qilishning bitta amali: POS cheki (web yoki desktop), yetkazishda
+ * yig'ilgan pul, qarz yoki buyurtma to'lovi. Tarkibi — usul bo'yicha `customer_payments` qatorlari (taqsimot: usul,
+ * summa, kassa/bank hisobi, terminal). `idempotency_key` — takroriy yuborish (ikki marta bosish, tarmoq qayta urinishi,
+ * oflayn sinxron) ikkinchi to'lov yaratmaydi.
+ */
+export const payments = pgTable(
+  "payments",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    /** pos | pos_device | delivery | sales_payment | pos_customer_payment */
+    source: varchar("source", { length: 24 }).notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 120 }),
+    customerId: uuid("customer_id").references(() => customers.id, { onDelete: "restrict" }),
+    orderId: uuid("order_id").references(() => salesOrders.id, { onDelete: "set null" }),
+    /** Qismlar yig'indisi (asosiy valyutada). */
+    totalAmount: money("total_amount").notNull(),
+    currency: varchar("currency", { length: 3 }).notNull().default("UZS"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamps().createdAt,
+  },
+  (t) => [
+    uniqueIndex("pay_company_idempotency_key")
+      .on(t.companyId, t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} IS NOT NULL`),
+    index("pay_company_order_idx").on(t.companyId, t.orderId),
+    index("pay_company_customer_idx").on(t.companyId, t.customerId),
+    check("pay_total_positive", sql`${t.totalAmount} > 0`),
+    check("pay_source_valid", sql`${t.source} in ('pos', 'pos_device', 'delivery', 'sales_payment', 'pos_customer_payment')`),
+  ],
+);
+
 export const customerPayments = pgTable(
   "customer_payments",
   {
@@ -297,11 +332,16 @@ export const customerPayments = pgTable(
     notes: text("notes"),
     cashAccountId: uuid("cash_account_id").references(() => cashAccounts.id, { onDelete: "set null" }),
     journalEntryId: uuid("journal_entry_id").references(() => journalEntries.id, { onDelete: "set null" }),
+    /** To'lov hujjati — aralash to'lovning qismlari bitta hujjatda. Eski yozuvlarda null. */
+    paymentId: uuid("payment_id").references(() => payments.id, { onDelete: "set null" }),
+    /** Karta to'lovi qaysi terminal orqali (hisob — terminalga bog'langan bank hisobi). */
+    terminalId: uuid("terminal_id").references(() => paymentTerminals.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     ...timestamps(),
   },
   (t) => [
     index("cp_company_customer_idx").on(t.companyId, t.customerId),
+    index("cp_payment_idx").on(t.paymentId),
     index("cp_company_date_idx").on(t.companyId, t.paymentDate),
     index("cp_order_idx").on(t.orderId),
     /** Takroriy yuborish ikkinchi to'lov yaratmasin (Convex ham kompaniya bo'yicha tekshirardi). */
@@ -407,7 +447,7 @@ export const salesReturns = pgTable(
     refundMethod: varchar("refund_method", { length: 16 }).notNull(),
     refundAmount: money("refund_amount").notNull().default("0"),
     /** Qaytgan pul usullar bo'yicha: `[{ method, amount }]` (aralash to'lovli chek). Eski yozuvlarda null. */
-    refunds: jsonb("refunds").$type<{ method: string; amount: string }[]>(),
+    refunds: jsonb("refunds").$type<{ method: string; amount: string; cashAccountId?: string | null }[]>(),
     balanceRestored: money("balance_restored").notNull().default("0"),
     cashbackRestored: money("cashback_restored").notNull().default("0"),
     cashbackReversed: money("cashback_reversed").notNull().default("0"),

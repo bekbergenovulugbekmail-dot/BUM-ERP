@@ -21,6 +21,8 @@ type Props = {
   paid: string;
   change: string;
   payMethod: PaymentMethod;
+  /** Aralash yoki terminal to'lovi: usul (terminal) bo'yicha qatorlar — berilsa bitta usul o'rniga. */
+  paymentLines?: { label: string; amount: number }[];
   /** Mijoz balansidan yechilgan summa. */
   balanceUsed?: string;
   /** Mijozga berilmay balansiga yozilgan qaytim. */
@@ -39,7 +41,7 @@ type Props = {
 };
 
 export default function POSReceipt({
-  order, paid, change, payMethod, balanceUsed, changeToBalance, debt, cashbackUsed, cashbackEarned, currencyTotals,
+  order, paid, change, payMethod, paymentLines, balanceUsed, changeToBalance, debt, cashbackUsed, cashbackEarned, currencyTotals,
   customer, onClose, cashierName,
 }: Props) {
   const { base } = useCurrencies();
@@ -82,8 +84,10 @@ export default function POSReceipt({
     payments: [
       { label: "Keshbekdan", amount: num(cashbackUsed) },
       { label: "Balansdan", amount: num(balanceUsed) },
-      // Mijoz bergan summa: chekka yozilgan to'lov + qaytim (balansga o'tgani ham)
-      { label: PAYMENT_LABELS[payMethod] ?? payMethod, amount: num(paid) + changeAmount + num(changeToBalance) },
+      // Mijoz bergan summa: chekka yozilgan to'lov + qaytim (balansga o'tgani ham); aralash — qism bo'yicha
+      ...(paymentLines?.length
+        ? paymentLines
+        : [{ label: PAYMENT_LABELS[payMethod] ?? payMethod, amount: num(paid) + changeAmount + num(changeToBalance) }]),
     ],
     change: changeAmount,
     changeToBalance: num(changeToBalance),
@@ -135,6 +139,7 @@ export default function POSReceipt({
       extraPayments: [
         { label: "Keshbekdan", amount: num(cashbackUsed) },
         { label: "Balansdan", amount: num(balanceUsed) },
+        ...(paymentLines ?? []),
       ],
       currencyTotals: byCurrency.map((part) => ({
         currency: part.currency,
@@ -209,10 +214,19 @@ export default function POSReceipt({
               <span className="text-primary">{fmt(total)} so'm</span>
             </div>
           )}
-          <div className="flex justify-between text-muted-foreground">
-            <span>To'lov usuli</span>
-            <span>{PAYMENT_LABELS[payMethod] ?? payMethod}</span>
-          </div>
+          {paymentLines?.length ? (
+            paymentLines.map((line, index) => (
+              <div key={`${line.label}-${index}`} className="flex justify-between text-muted-foreground">
+                <span>{line.label}</span>
+                <span className="tabular-nums">{fmt(line.amount)} so'm</span>
+              </div>
+            ))
+          ) : (
+            <div className="flex justify-between text-muted-foreground">
+              <span>To'lov usuli</span>
+              <span>{PAYMENT_LABELS[payMethod] ?? payMethod}</span>
+            </div>
+          )}
           {num(cashbackUsed) > 0 && (
             <div className="flex justify-between text-muted-foreground">
               <span>Keshbekdan to'landi</span>

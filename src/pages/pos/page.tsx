@@ -6,13 +6,13 @@ import {
   Smartphone, X, Power, Package, Calculator, ScanLine,
   UserPlus, UserRound, Wallet, HandCoins, Gift,
 } from "lucide-react";
-import type { CashbackSettings } from "@bum/shared";
+import { TERMINAL_NETWORK_LABELS, type CashbackSettings } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { cn } from "@/lib/utils.ts";
-import { api, errorMessage } from "@/lib/api.ts";
+import { ApiError, api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
@@ -24,9 +24,18 @@ import CustomerPicker from "./_components/customer-picker.tsx";
 import CustomerPaymentDialog from "./_components/customer-payment-dialog.tsx";
 import BarcodeScanner from "@/components/barcode-scanner.tsx";
 import { useHIDScanner } from "@/hooks/use-hid-scanner.ts";
+import {
+  SplitPaymentPanel,
+  hasDuplicateParts,
+  newSplitRow,
+  splitPaidMinor,
+  splitParts,
+  type PaymentTerminalOption,
+  type SplitRow,
+} from "@/components/payments/split-payment-panel.tsx";
 import { computeLine, fromMinor, minorToNumber } from "@/pages/sales/_lib/line-amounts.ts";
 import {
-  num,
+  num, PAYMENT_LABELS,
   type Customer, type PaymentMethod, type PosCustomerSummary, type PosShift, type ProductOption,
   type SalesOrderDetail, type WarehouseOption,
 } from "@/pages/sales/_lib/types.ts";
@@ -59,12 +68,14 @@ type SaleResult = {
   cashbackEarned: string;
   /** Shu chekdan qarzga yozilgan summa. */
   debt: string;
+  /** Asosiy valyutadagi to'lov qismlari (karta — terminal bilan). */
+  payments: { method: PaymentMethod; amount: string; terminalId?: string }[];
   /** Chet valyuta qatnashgan chekda: valyuta bo'yicha jami, to'langan va qaytim. */
   /** `covered` — shu valyuta qismidan balans va keshbek yopgan summa (valyutada). */
   currencyTotals: { currency: string; total: string; covered: string; paid: string; change: string }[];
   customer: PosCustomerSummary | null;
 };
-type LastReceipt = SaleResult & { payMethod: PaymentMethod };
+type LastReceipt = SaleResult & { payMethod: PaymentMethod; paymentLines?: { label: string; amount: number }[] };
 
 const PAY_METHODS: { key: PaymentMethod; label: string; icon: React.ElementType; color: string }[] = [
   { key: "cash", label: "Naqd", icon: Banknote, color: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30" },
@@ -119,6 +130,14 @@ export default function POSPage() {
   const [lastReceipt, setLastReceipt] = useState<LastReceipt | null>(null);
   const [showScanner, setShowScanner] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Karta terminallari (UZCARD, HUMO ...) va aralash to'lov: naqd + terminal + bank qismlari
+  const terminals = useApiQuery<{ terminals: PaymentTerminalOption[] }>("/api/sales/pos/payment-options", undefined, { staleTime: 60_000 }).data?.terminals ?? [];
+  const [splitMode, setSplitMode] = useState(false);
+  const [splitRows, setSplitRows] = useState<SplitRow[]>(() => [newSplitRow()]);
+  const [cardTerminalId, setCardTerminalId] = useState<string | null>(null);
+  /** So'rov kaliti: ikki marta bosish yoki tarmoq qayta urinishida server ikkinchi chek yozmaydi; muvaffaqiyatdan keyin yangilanadi. */
+  const requestIdRef = useRef<string | null>(null);
 
   // Sotuv valyutalari: bittasi — hamma narx shu valyutada; bir nechtasi — mahsulot o'z narx valyutasida
   const [saleCurrencies, setSaleCurrencies] = useState<string[] | null>(null);
@@ -226,9 +245,18 @@ export default function POSPage() {
   const baseCoveredMinor = minBigInt(cashbackMinor + balanceMinor, baseBucketMinor);
   const dueMinor = baseBucketMinor - baseCoveredMinor;
   const due = minorToNumber(dueMinor);
-  // Naqdda bo'sh maydon — aniq summa; karta/bankda to'lov doim to'lanadigan summaga teng
-  const paid = payMethod === "cash" && amountPaid.trim() !== "" ? num(amountPaid) : due;
-  const change = Math.max(0, paid - due);
+  // Naqdda bo'sh maydon — aniq summa; karta/bankda to'lov doim to'lanadigan summaga teng; aralashda — qismlar yig'indisi
+  // (qaytimsiz: ortiqcha to'lov rad etiladi)
+  const splitActive = splitMode && showBasePayment;
+  const splitPaid = splitPaidMinor(splitRows);
+  const splitOverpaid = splitActive && splitPaid > dueMinor;
+  const splitDuplicate = splitActive && hasDuplicateParts(splitRows);
+  const paid = splitActive ? minorToNumber(splitPaid) : payMethod === "cash" && amountPaid.trim() !== "" ? num(amountPaid) : due;
+  const change = splitActive ? 0 : Math.max(0, paid - due);
+  // Bitta karta to'lovi — tanlangan (yoki birinchi) terminal orqali, pul uning bank hisobiga
+  const activeTerminal = !splitActive && payMethod === "card" && terminals.length > 0
+    ? terminals.find((terminal) => terminal.id === cardTerminalId) ?? terminals[0]!
+    : null;
 
   // Chet valyutadagi qismlar: bo'sh maydon — aniq summa; naqdda ortig'i — o'sha valyutada qaytim
   const foreignBuckets: {
@@ -351,16 +379,29 @@ export default function POSPage() {
     if (!shift) { toast.error("Avval smena oching"); return; }
     if (!cart.length) { toast.error("Savatcha bo'sh"); return; }
     if (onCredit && !customer) { toast.error("To'lov yetarli emas — qarzga sotish uchun mijoz tanlang"); return; }
+    if (splitOverpaid) { toast.error("To'lov jami summadan oshib ketdi — qismlarni tekshiring"); return; }
+    if (splitDuplicate) { toast.error("Bir xil to'lov usuli ikki marta kiritilgan"); return; }
 
-    const keepChange = !!customer && payMethod === "cash" && changeToBalance && change > 0;
+    const keepChange = !splitActive && !!customer && payMethod === "cash" && changeToBalance && change > 0;
+    requestIdRef.current ??= crypto.randomUUID();
+    const splitBody = splitParts(splitRows);
     try {
       // Narx, soliq va ombor yuborilmaydi — server prays-list, mahsulot soliqi va smena omboridan oladi
       const result = await completeSale.mutateAsync({
         shiftId: shift.id,
         customerId: customer?.id ?? null,
         items: cart.map((i) => ({ productId: i.productId, unitId: i.unitId, quantity: i.qty })),
-        paymentMethod: payMethod,
-        amountPaid: payMethod === "cash" && amountPaid.trim() !== "" ? amountPaid.trim() : fromMinor(dueMinor),
+        clientRequestId: requestIdRef.current,
+        ...(splitActive
+          ? { payments: splitBody.length > 0 ? splitBody : [{ method: "cash", amount: "0" }] }
+          : activeTerminal && showBasePayment
+            ? { payments: [{ method: "card", amount: fromMinor(dueMinor), terminalId: activeTerminal.id }] }
+            : {
+                paymentMethod: payMethod,
+                amountPaid: payMethod === "cash" && amountPaid.trim() !== "" ? amountPaid.trim() : fromMinor(dueMinor),
+              }),
+        // Nasiya aniq belgilanadi — server kam to'lovni belgisiz rad etadi
+        ...(onCredit && customer ? { onCredit: true } : {}),
         ...(cashbackMinor > 0n ? { cashbackAmount: fromMinor(cashbackMinor) } : {}),
         ...(balanceMinor > 0n ? { balanceAmount: fromMinor(balanceMinor) } : {}),
         ...(keepChange ? { changeToBalance: true } : {}),
@@ -375,9 +416,27 @@ export default function POSPage() {
             }
           : {}),
       });
-      setLastReceipt({ ...result, payMethod });
+      requestIdRef.current = null;
+      const terminalLabel = (id?: string) => {
+        const found = id ? terminals.find((terminal) => terminal.id === id) : undefined;
+        return found ? `Karta · ${TERMINAL_NETWORK_LABELS[found.network]}` : null;
+      };
+      const detailed = result.payments.length > 1 || result.payments.some((part) => part.terminalId);
+      setLastReceipt({
+        ...result,
+        payMethod,
+        ...(detailed
+          ? {
+              paymentLines: result.payments.map((part) => ({
+                label: terminalLabel(part.terminalId) ?? PAYMENT_LABELS[part.method] ?? part.method,
+                amount: num(part.amount),
+              })),
+            }
+          : {}),
+      });
       setCart([]);
       setAmountPaid("");
+      setSplitRows([newSplitRow()]);
       setForeignTendered({});
       setForeignMethod({});
       clearCustomer();
@@ -389,6 +448,16 @@ export default function POSPage() {
       ].filter(Boolean);
       toast.success(["Sotuv amalga oshirildi", ...details].join(" · "));
     } catch (err) {
+      // Oldingi urinish serverda yozilgan (javob yo'qolgan) — ikkinchi chek yo'q, savat tozalanadi
+      if (err instanceof ApiError && err.code === "CONFLICT" && (err.details as { duplicate?: boolean } | undefined)?.duplicate) {
+        requestIdRef.current = null;
+        setCart([]);
+        setAmountPaid("");
+        setSplitRows([newSplitRow()]);
+        clearCustomer();
+        toast.info(err.message);
+        return;
+      }
       toast.error(errorMessage(err));
     }
   };
@@ -404,7 +473,7 @@ export default function POSPage() {
       if (e.key === "F2") { e.preventDefault(); searchRef.current?.focus(); }
       if (e.key === "F4") { e.preventDefault(); setShowCustomerPicker(true); }
       if (e.key === "F12" && cart.length > 0) { e.preventDefault(); void checkoutRef.current(); }
-      if (e.key === "Escape") { setCart([]); setAmountPaid(""); }
+      if (e.key === "Escape") { setCart([]); setAmountPaid(""); requestIdRef.current = null; }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -847,7 +916,34 @@ export default function POSPage() {
             </div>
           )}
 
-          {/* Payment method */}
+          {/* To'lov: bitta usul yoki aralash (naqd + karta terminali + bank) */}
+          {showBasePayment && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground">To'lov usuli</span>
+              <button
+                type="button"
+                className="text-xs font-semibold text-primary hover:underline cursor-pointer"
+                onClick={() => {
+                  setSplitRows([newSplitRow("cash", null, fromMinor(dueMinor))]);
+                  setSplitMode((value) => !value);
+                }}
+              >
+                {splitMode ? "Bitta usulda" : "Aralash to'lov"}
+              </button>
+            </div>
+          )}
+          {splitActive ? (
+            <SplitPaymentPanel
+              dueMinor={dueMinor}
+              rows={splitRows}
+              onChange={setSplitRows}
+              terminals={terminals}
+              format={(minor) => `${fmt(minorToNumber(minor))} so'm`}
+              shortfallLabel={customer ? "Qarzga" : "Qoldiq"}
+              idPrefix="pos-split"
+            />
+          ) : (
+          <>
           {showBasePayment && <div className="grid grid-cols-3 gap-2">
             {PAY_METHODS.map((m) => (
               <button
@@ -865,6 +961,31 @@ export default function POSPage() {
               </button>
             ))}
           </div>}
+
+          {/* Karta terminali: pul shu terminal bog'langan bank hisobiga; to'lov terminal chekiga qarab tasdiqlanadi */}
+          {activeTerminal && showBasePayment && (
+            <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Karta terminali">
+              {terminals.map((terminal) => (
+                <button
+                  key={terminal.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={activeTerminal.id === terminal.id}
+                  title={terminal.name}
+                  onClick={() => setCardTerminalId(terminal.id)}
+                  className={cn(
+                    "h-8 rounded-lg border px-3 text-xs font-bold tracking-wide cursor-pointer",
+                    activeTerminal.id === terminal.id
+                      ? "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                      : "border-border bg-muted/30 text-muted-foreground hover:bg-accent",
+                  )}
+                >
+                  {TERMINAL_NETWORK_LABELS[terminal.network]}
+                  {terminals.filter((item) => item.network === terminal.network).length > 1 ? ` · ${terminal.name}` : ""}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Amount paid — faqat naqdda (karta/bank to'lovi chek summasidan oshmaydi) */}
           {payMethod === "cash" && showBasePayment && (
@@ -905,6 +1026,8 @@ export default function POSPage() {
                 </div>
               )}
             </div>
+          )}
+          </>
           )}
 
           {/* Chet valyutadagi qismlar — naqd yoki karta, shu valyutadagi kassa/bankka */}
@@ -974,7 +1097,7 @@ export default function POSPage() {
           <Button
             className="w-full h-12 text-base font-bold"
             onClick={() => { void handleCheckout(); }}
-            disabled={completeSale.isPending || !cart.length || !shift || (onCredit && !customer)}
+            disabled={completeSale.isPending || !cart.length || !shift || (onCredit && !customer) || splitOverpaid || splitDuplicate}
           >
             {completeSale.isPending ? "Qayta ishlanmoqda..." : (
               <span className="flex items-center gap-2">
@@ -1022,6 +1145,7 @@ export default function POSPage() {
           currencyTotals={lastReceipt.currencyTotals}
           customer={lastReceipt.customer}
           payMethod={lastReceipt.payMethod}
+          paymentLines={lastReceipt.paymentLines}
           cashierName={currentUser?.name ?? undefined}
           onClose={() => setLastReceipt(null)}
         />

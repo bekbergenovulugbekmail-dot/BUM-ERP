@@ -40,7 +40,8 @@
  *   POST /agent/tasks/:taskId/delivering           delivery.confirm
  *   POST /agent/tasks/:taskId/proofs, GET .../proofs/:proofId   delivery.confirm — rasm (kamera) / imzo
  *   POST /agent/tasks/:taskId/otp/resend           delivery.confirm — SMS sozlangan bo'lsa
- *   POST /agent/tasks/:taskId/payments             delivery.collect_payment
+ *   POST /agent/tasks/:taskId/payments             delivery.collect_payment — bitta usul yoki aralash (`parts`)
+ *   GET  /agent/payment-options                    ruxsat etilgan usullar va faol karta terminallari
  *   POST /agent/tasks/:taskId/confirm              delivery.confirm — to'liq yoki qisman, OTP, geofence
  *   POST /agent/tasks/:taskId/fail                 delivery.fail — sabab ("Boshqa" — izoh majburiy)
  *   GET  /agent/customers (?search=), GET /agent/customers/:customerId
@@ -55,6 +56,7 @@ import {
   AppError,
   DELIVERY_AUTO_ASSIGN_STRATEGIES,
   DELIVERY_COLLECTION_METHODS,
+  MAX_PAYMENT_PARTS,
   DELIVERY_FAILURE_REASONS,
   DELIVERY_LOCATION_BATCH_MAX,
   DELIVERY_PAYMENT_TYPES,
@@ -103,6 +105,7 @@ import {
   startDelivery,
   type Outcome,
 } from "./lifecycle.service.js";
+import { paymentTerminalOptions } from "../finance/terminals.service.js";
 import { deliveryPolicySchema, getDeliveryPolicy, saveDeliveryPolicy } from "./policy.service.js";
 import { agentCustomer, agentCustomers, agentDashboard, agentDebts, agentReport, agentTaskList, supervisorDashboard, supervisorReport } from "./reports.service.js";
 import {
@@ -274,7 +277,17 @@ const proofBody = z
     signerName: optionalText(200),
   })
   .refine(pairedPlace, pairMessage);
-const paymentBody = z.strictObject({ ...actionFields, method: z.enum(DELIVERY_COLLECTION_METHODS), amount: positiveMoney });
+const deliveryPaymentPart = z.strictObject({
+  method: z.enum(DELIVERY_COLLECTION_METHODS),
+  amount: positiveMoney,
+  /** Karta terminali (UZCARD, HUMO ...) — pul uning bank hisobiga. */
+  terminalId: z.uuid().nullable().optional(),
+});
+/** Bitta usul yoki aralash (`parts`: naqd + karta + bank) — faqat siyosatda ruxsat etilgan usullar. */
+const paymentBody = z.union([
+  deliveryPaymentPart.extend(actionFields),
+  z.strictObject({ ...actionFields, parts: z.array(deliveryPaymentPart).min(1).max(MAX_PAYMENT_PARTS) }),
+]);
 const confirmBody = z.strictObject({
   ...actionFields,
   ...placeFields,
@@ -865,9 +878,11 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   app.post("/agent/tasks/:taskId/payments", async (req, reply) => {
     const { taskId } = taskParams.parse(req.params);
     const body = paymentBody.parse(req.body);
-    const result = await writeAgent(req, "delivery.collect_payment", (tx, context) => collectDeliveryPayment(tx, context, taskId, body, requestMeta(req)));
+    const parts = "parts" in body ? body.parts : [{ method: body.method, amount: body.amount, terminalId: body.terminalId }];
+    const input = { clientRequestId: body.clientRequestId, occurredAt: body.occurredAt, parts };
+    const result = await writeAgent(req, "delivery.collect_payment", (tx, context) => collectDeliveryPayment(tx, context, taskId, input, requestMeta(req)));
     reply.status(result.created ? 201 : 200);
-    return { payment: result.payment, task: await agentTaskResponse(req, taskId) };
+    return { payment: result.payment, payments: result.payments, task: await agentTaskResponse(req, taskId) };
   });
 
   app.post("/agent/tasks/:taskId/confirm", async (req) => {
@@ -922,6 +937,13 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
     const { customerId } = customerParams.parse(req.params);
     const { context, permissions } = await readAgent(req);
     return agentCustomer(db, context, customerId, permissions.includes("delivery.view_debt"));
+  });
+
+  // Dostavshik to'lov oynasi: siyosatda ruxsat etilgan usullar va faol karta terminallari (bank hisobi ma'lumotisiz)
+  app.get("/agent/payment-options", async (req) => {
+    const { context } = await readAgent(req);
+    const policy = await getDeliveryPolicy(db, context.company.id);
+    return { methods: policy.collectionMethods, terminals: await paymentTerminalOptions(db, context.company.id), maxParts: MAX_PAYMENT_PARTS };
   });
 
   app.get("/agent/debts", async (req) => {

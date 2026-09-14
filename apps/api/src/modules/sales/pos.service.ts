@@ -41,6 +41,15 @@ import {
   type SalesItemInput,
   type SalesItemRow,
 } from "./orders.service.js";
+import {
+  createPaymentHeader,
+  findPaymentByKey,
+  recordAllocations,
+  recordMixedCustomerPayment,
+  resolvePaymentParts,
+  settlePaymentParts,
+  type PaymentPartInput,
+} from "./payment-allocation.service.js";
 import { recordCustomerPayment } from "./payments.service.js";
 import { addCurrencyAmounts } from "./shift-totals.js";
 
@@ -292,21 +301,14 @@ export type SaleConflict = { kind: string; details: Record<string, unknown> };
 const minBigInt = (...values: bigint[]) => values.reduce((a, b) => (b < a ? b : a));
 
 type BasePaymentMethod = "cash" | "card" | "bank" | "transfer";
-const BASE_METHOD_LABELS: Record<string, string> = { cash: "Naqd", card: "Karta", bank: "Bank", transfer: "O'tkazma" };
+
+/** Kassadagi aralash to'lov qismi: karta — terminal bilan (pul terminalning bank hisobiga), yoki aniq kassa/bank hisobi. */
+export type PosPaymentPart = { method: "cash" | "card" | "bank"; amount: string; terminalId?: string | null; cashAccountId?: string | null };
 
 /** Asosiy valyutadagi to'lov qismlari: aralash (`payments`) yoki bitta usul (`paymentMethod` + `amountPaid`). */
-function basePaymentParts(input: { payments?: { method: "cash" | "card" | "bank"; amount: string }[]; paymentMethod: PaymentMethod; amountPaid?: string }) {
-  if (!input.payments || input.payments.length === 0) {
-    return [{ method: input.paymentMethod as BasePaymentMethod, tendered: toMinor(input.amountPaid ?? "0") }];
-  }
-  const seen = new Set<string>();
-  return input.payments.map((payment) => {
-    if (seen.has(payment.method)) throw badRequest(`${BASE_METHOD_LABELS[payment.method] ?? payment.method} to'lovi bir marta kiritiladi`);
-    seen.add(payment.method);
-    const tendered = toMinor(payment.amount);
-    if (tendered < 0n) throw badRequest("To'lov summasi manfiy bo'lmasin");
-    return { method: payment.method as BasePaymentMethod, tendered };
-  });
+function posPaymentParts(input: { payments?: PosPaymentPart[]; paymentMethod: PaymentMethod; amountPaid?: string }): PaymentPartInput[] {
+  if (!input.payments || input.payments.length === 0) return [{ method: input.paymentMethod, amount: input.amountPaid ?? "0" }];
+  return input.payments;
 }
 
 export async function completeSale(
@@ -320,10 +322,12 @@ export async function completeSale(
     /** Bitta usulda berilgan summa (`payments` bo'lmasa). */
     amountPaid?: string;
     /**
-     * Aralash to'lov (asosiy valyutada): naqd, karta, bank — har usul bir marta; berilsa `paymentMethod`/`amountPaid`
-     * e'tiborsiz. Karta va bank qoldiqdan oshmaydi, ortig'i faqat naqddan — qaytim.
+     * Aralash to'lov (asosiy valyutada): naqd, karta (terminal bo'yicha — masalan UZCARD va HUMO alohida), bank; berilsa
+     * `paymentMethod`/`amountPaid` e'tiborsiz. Jami chek summasidan oshmaydi — qaytim faqat bitta naqd to'lovda.
      */
-    payments?: { method: "cash" | "card" | "bank"; amount: string }[];
+    payments?: PosPaymentPart[];
+    /** Nasiya: to'lanmagan qoldiq mijoz qarziga yoziladi (mijoz tanlangan bo'lishi shart). Belgilanmasa kam to'lov rad. */
+    onCredit?: boolean;
     /** Web kassa so'rov kaliti: takroriy yuborishda ikkinchi chek, to'lov va jurnal yozilmaydi (409, chek raqami bilan). */
     clientRequestId?: string | null;
     /** Mijoz keshbekidan yechiladigan qism — sozlamadagi chek ulushi chegarasida. */
@@ -475,24 +479,26 @@ export async function completeSale(
   const baseCovered = nonCash < baseTotal ? nonCash : baseTotal;
   let uncovered = nonCash - baseCovered;
 
-  // Keshbek va balansdan keyin qolgani naqd/karta/bank bilan (aralash ham) to'lanadi; yetmagani mijoz qarziga yoziladi.
-  // Karta va bank qoldiqdan oshmaydi, ortig'i faqat naqddan — qaytim
+  // Keshbek va balansdan keyin qolgani naqd/karta/bank bilan (aralash ham) — universal taqsimot qoidalari
+  // (`payment-allocation.service.ts`): terminal va hisob shu kompaniyaniki; karta/bank qoldiqdan oshmaydi; ortiqcha to'lov
+  // rad, qaytim faqat bitta naqd to'lovda; kam to'lov — faqat mijoz tanlanib nasiya (`onCredit`) belgilanganda.
+  // Offline chek qurilmada yopilgan (pul va qaytim berilgan) — qaytim va qarz rad etilmaydi
   const due = baseTotal - baseCovered;
-  const parts = basePaymentParts(input);
-  const tendered = parts.reduce((sum, part) => sum + part.tendered, 0n);
+  const requestedParts = await resolvePaymentParts(tx, companyId, posPaymentParts(input), { offline: offline !== undefined });
+  const tendered = requestedParts.reduce((sum, part) => sum + part.amount, 0n);
   if (!buckets.has(baseCurrency) && tendered > 0n) {
     throw badRequest(`Chekda ${baseCurrency} dagi mahsulot yo'q — to'lov valyuta bo'yicha kiritiladi`);
   }
-  const nonCashPaid = parts.reduce((sum, part) => sum + (part.method === "cash" ? 0n : part.tendered), 0n);
-  if (nonCashPaid > due) throw badRequest("Karta yoki bank to'lovi chek summasidan oshmasligi kerak");
-  const cashTendered = parts.find((part) => part.method === "cash")?.tendered ?? 0n;
-  const cashPaid = minBigInt(cashTendered, due - nonCashPaid);
-  const change = cashTendered - cashPaid;
-  const paid = nonCashPaid + cashPaid;
-  const allocations = parts
-    .map((part) => ({ method: part.method, amount: part.method === "cash" ? cashPaid : part.tendered }))
-    .filter((part) => part.amount > 0n);
-  if (!input.customerId && paid < due) throw badRequest("Mijozsiz sotuvda chek to'liq to'lanishi kerak");
+  const singleCash = requestedParts.length === 1 && requestedParts[0]!.method === "cash";
+  const creditAllowed = !!input.customerId && (offline !== undefined || input.onCredit === true);
+  const { allocations, change, paid } = settlePaymentParts(requestedParts, due, {
+    allowCashChange: offline !== undefined || singleCash,
+    allowShortfall: creditAllowed,
+    shortfallMessage: input.customerId
+      ? (remaining) => `To'lov to'liq emas: qoldiq ${remaining} — qarzga yozish uchun nasiya belgilanadi`
+      : "Mijozsiz sotuvda chek to'liq to'lanishi kerak",
+  });
+  const cashPaid = allocations.reduce((sum, part) => sum + (part.method === "cash" ? part.amount : 0n), 0n);
 
   // Chet valyutadagi qismlar: naqd (ortig'i — o'sha valyutada qaytim) yoki karta; shu valyutadagi kassa/bankka
   const tenderedByCurrency = new Map<string, { amount: bigint; method: "cash" | "card" }>();
@@ -542,6 +548,9 @@ export async function completeSale(
   for (const part of foreignParts) {
     if (!input.customerId && part.paid < part.due) {
       throw badRequest(`Mijozsiz sotuvda ${part.currency} qismi to'liq to'lanishi kerak`);
+    }
+    if (!creditAllowed && part.paid < part.due) {
+      throw badRequest(`${part.currency} qismi to'liq to'lanmagan — qarzga yozish uchun nasiya belgilanadi`, { reason: "underpayment" });
     }
   }
   const foreignPaidBase = foreignParts.reduce((sum, part) => sum + part.paidBase, 0n);
@@ -621,15 +630,20 @@ export async function completeSale(
     );
   }
   const paidText = fromMinor(paid);
-  // Har usul — alohida to'lov: o'z kassa/bank hisobi, kassa harakati va jurnal yozuvi bilan
-  for (const part of allocations) {
-    await recordCustomerPayment(
-      tx,
-      tenant,
-      { orderId: order!.id, amount: fromMinor(part.amount), method: part.method, paymentDate: today },
-      meta,
-    );
-  }
+  // To'lov hujjati va qismlari: har qism — o'z kassa/bank hisobi (karta terminali — uning bank hisobi), kassa harakati
+  // va jurnal yozuvi bilan. Hujjat kaliti — web so'rov kaliti yoki desktop chek ID'si (takroriy yuborishda ikkinchisi yo'q)
+  const paymentTotal = paid + foreignParts.reduce((sum, part) => sum + (part.paid > 0n ? part.paidBase : 0n), 0n);
+  const paymentHeader =
+    paymentTotal > 0n
+      ? await createPaymentHeader(tx, tenant, {
+          source: offline ? "pos_device" : "pos",
+          idempotencyKey: offline ? `pos_device:${offline.id}` : input.clientRequestId ? `pos:${input.clientRequestId}` : null,
+          customerId: input.customerId ?? null,
+          orderId: order!.id,
+          total: paymentTotal,
+        })
+      : null;
+  if (paymentHeader) await recordAllocations(tx, tenant, paymentHeader, allocations, { orderId: order!.id, paymentDate: today }, meta);
   for (const part of foreignParts) {
     if (part.paid <= 0n) continue;
     await recordCustomerPayment(
@@ -642,6 +656,7 @@ export async function completeSale(
         foreignAmount: fromMinor(part.paid),
         method: part.method,
         paymentDate: today,
+        paymentId: paymentHeader?.id ?? null,
       },
       meta,
     );
@@ -707,6 +722,11 @@ export async function completeSale(
     .where(eq(posShifts.id, shift.id));
 
   const debt = due - paid + foreignParts.reduce((sum, part) => sum + (part.dueBase - part.paidBase), 0n);
+  const paymentSummary = allocations.map((part) => ({
+    method: part.method,
+    amount: fromMinor(part.amount),
+    ...(part.terminalId ? { terminalId: part.terminalId } : {}),
+  }));
   // Valyuta bo'yicha natija — faqat chet valyuta qatnashgan chekda; `covered` — balans va keshbek yopgani (valyutada)
   const currencyTotals =
     buckets.size > 1 || !buckets.has(baseCurrency)
@@ -738,7 +758,7 @@ export async function completeSale(
       shiftId: shift.id,
       total: totals.totalAmount,
       paid: paidText,
-      payments: allocations.map((part) => ({ method: part.method, amount: fromMinor(part.amount) })),
+      payments: paymentSummary,
       change: fromMinor(change),
       balanceUsed: fromMinor(fromBalance),
       changeToBalance: fromMinor(changeKept),
@@ -755,7 +775,7 @@ export async function completeSale(
     order: await getOrder(tx, tenant, order!.id),
     paid: paidText,
     /** Asosiy valyutadagi to'lov usullari bo'yicha qabul qilingan summa (qaytimsiz). */
-    payments: allocations.map((part) => ({ method: part.method, amount: fromMinor(part.amount) })),
+    payments: paymentSummary,
     /** Mijozga qo'lda qaytariladigan qaytim (balansga o'tgani ayirilgan). */
     change: fromMinor(change - changeKept),
     balanceUsed: fromMinor(fromBalance),
@@ -801,9 +821,14 @@ export type PosCustomerPaymentInput = {
   customerId: string;
   /** deposit — balansni to'ldirish; debt — qarzni to'lash. */
   purpose: "deposit" | "debt";
-  amount: string;
+  /** Bitta usuldagi summa (`parts` bo'lmasa majburiy). */
+  amount?: string;
   /** `balance` — qarzni mijoz balansidan yopish (kassaga pul tushmaydi). */
   method: PaymentMethod | "balance";
+  /** Qarzni aralash to'lash (naqd + karta terminali + bank); jami qarzdan oshmaydi. Faqat `debt`, web kassada. */
+  parts?: PaymentPartInput[];
+  /** Takroriy yuborishdan himoya kaliti (aralash to'lovda). */
+  clientRequestId?: string | null;
   notes?: string | null;
   /**
    * Desktop kassa sinxroni: pul qurilmada qabul qilingan. Qarz boshqa kassada to'langan bo'lsa — qarzdan ortig'i
@@ -827,18 +852,79 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
   const date = offline ? offline.occurredAt.toISOString().slice(0, 10) : undefined;
 
   const notes = input.notes ?? null;
+  if (input.parts?.length) {
+    if (input.purpose !== "debt" || offline) throw badRequest("Aralash to'lov faqat kassada qarzni to'lashda");
+    const idempotencyKey = input.clientRequestId ? `pos_customer_payment:${input.clientRequestId}` : null;
+    // Takroriy yuborish (qarz allaqachon yopilgan) — ortiqcha to'lov deb rad etilmaydi, birinchi natija qaytadi
+    const previous = idempotencyKey ? await findPaymentByKey(tx, tenant.company.id, idempotencyKey) : null;
+    if (previous) {
+      if (previous.payment.customerId !== input.customerId) throw conflict("So'rov kaliti boshqa mijoz to'lovida ishlatilgan");
+      return {
+        customer: await customerSummary(tx, tenant.company.id, input.customerId),
+        shift: await getShift(tx, tenant, shift.id),
+        payment: previous.payment,
+        conflicts,
+      };
+    }
+    const [row] = await tx
+      .select({ totalDebt: customers.totalDebt })
+      .from(customers)
+      .where(and(eq(customers.id, input.customerId), eq(customers.companyId, tenant.company.id)))
+      .limit(1)
+      .for("update");
+    if (!row) throw notFound("Mijoz topilmadi");
+    const debt = toMinor(row.totalDebt) > 0n ? toMinor(row.totalDebt) : 0n;
+    const resolved = await resolvePaymentParts(tx, tenant.company.id, input.parts);
+    // Qarzdan ortiq to'lov rad (ortig'i balansga — alohida "balansni to'ldirish" amali)
+    const { allocations } = settlePaymentParts(resolved, debt, { allowCashChange: false, allowShortfall: true });
+    if (allocations.length === 0) throw badRequest("To'lov summasi kiritilmagan");
+    const result = await recordMixedCustomerPayment(
+      tx,
+      tenant,
+      {
+        source: "pos_customer_payment",
+        customerId: input.customerId,
+        parts: allocations.map((part) => ({ ...part, amount: fromMinor(part.amount) })),
+        idempotencyKey,
+        notes,
+      },
+      meta,
+    );
+    if (result.created) {
+      const sumOf = (...methods: string[]) =>
+        result.allocations.reduce((sum, row) => sum + (methods.includes(row.method) ? toMinor(row.amount) : 0n), 0n);
+      const [cashIn, cardIn, bankIn] = [sumOf("cash"), sumOf("card"), sumOf("bank", "transfer")];
+      await tx
+        .update(posShifts)
+        .set({
+          ...(cashIn > 0n ? { totalCash: sql`${posShifts.totalCash} + ${fromMinor(cashIn)}::numeric` } : {}),
+          ...(cardIn > 0n ? { totalCard: sql`${posShifts.totalCard} + ${fromMinor(cardIn)}::numeric` } : {}),
+          ...(bankIn > 0n ? { totalBank: sql`${posShifts.totalBank} + ${fromMinor(bankIn)}::numeric` } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(posShifts.id, shift.id));
+    }
+    return {
+      customer: await customerSummary(tx, tenant.company.id, input.customerId),
+      shift: await getShift(tx, tenant, shift.id),
+      payment: result.payment,
+      conflicts,
+    };
+  }
+  if (!input.amount) throw badRequest("To'lov summasi kiritilmagan");
+  const amount = input.amount;
   if (input.method === "balance") {
     if (input.purpose !== "debt") throw badRequest("Balansni balansning o'zidan to'ldirib bo'lmaydi");
-    await payFromBalance(tx, tenant, { customerId: input.customerId, amount: input.amount, posShiftId: shift.id, notes }, meta);
+    await payFromBalance(tx, tenant, { customerId: input.customerId, amount, posShiftId: shift.id, notes }, meta);
   } else if (input.purpose === "deposit") {
     await depositToBalance(
       tx,
       tenant,
-      { customerId: input.customerId, type: "deposit", amount: input.amount, method: input.method, posShiftId: shift.id, notes, date, allowInactive: offline !== undefined },
+      { customerId: input.customerId, type: "deposit", amount, method: input.method, posShiftId: shift.id, notes, date, allowInactive: offline !== undefined },
       meta,
     );
   } else {
-    let payAmount = toMinor(input.amount);
+    let payAmount = toMinor(amount);
     if (offline) {
       const [row] = await tx
         .select({ totalDebt: customers.totalDebt })
@@ -852,7 +938,7 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
         const excess = payAmount - debt;
         conflicts.push({
           kind: "debt_overpaid",
-          details: { customerId: input.customerId, requested: input.amount, applied: fromMinor(debt), deposited: fromMinor(excess) },
+          details: { customerId: input.customerId, requested: amount, applied: fromMinor(debt), deposited: fromMinor(excess) },
         });
         await depositToBalance(
           tx,
@@ -873,15 +959,13 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
     }
   }
 
-  if (input.method === "cash" || input.method === "card") {
+  // Smena tushumi usul bo'yicha: naqd — kassa sanog'i, karta, bank/o'tkazma — alohida (balansdan yopish — tushum emas)
+  if (input.method !== "balance") {
+    const column = input.method === "cash" ? posShifts.totalCash : input.method === "card" ? posShifts.totalCard : posShifts.totalBank;
+    const key = input.method === "cash" ? "totalCash" : input.method === "card" ? "totalCard" : "totalBank";
     await tx
       .update(posShifts)
-      .set({
-        ...(input.method === "cash"
-          ? { totalCash: sql`${posShifts.totalCash} + ${input.amount}::numeric` }
-          : { totalCard: sql`${posShifts.totalCard} + ${input.amount}::numeric` }),
-        updatedAt: new Date(),
-      })
+      .set({ [key]: sql`${column} + ${amount}::numeric`, updatedAt: new Date() })
       .where(eq(posShifts.id, shift.id));
   }
   return {

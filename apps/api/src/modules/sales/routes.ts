@@ -15,7 +15,8 @@
  *   POST   /payments                                      finance.manage (201 yangi / 200 takroriy reference)
  *   GET    /pos/shifts (?warehouseId=&status=&limit=), /pos/shifts/open?warehouseId=, /pos/shifts/:shiftId   pos.use
  *   POST   /pos/shifts, /pos/shifts/:shiftId/close        pos.use (yopish — kassirning o'zi yoki sales.approve)
- *   POST   /pos/sales                                     pos.use (balansdan to'lash, qaytim balansga, qarzga)
+ *   GET    /pos/payment-options                           pos.use (faol karta terminallari)
+ *   POST   /pos/sales                                     pos.use (aralash to'lov, balansdan, qaytim balansga, nasiya)
  *   POST   /pos/customers                                 pos.use (kassada mijoz qo'shish)
  *   POST   /pos/customers/:customerId/payments            pos.use (balansni to'ldirish / qarzni to'lash)
  *   GET    /customers/:customerId/balance (?limit=)       sales.view (balans tarixi)
@@ -25,7 +26,7 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { Permission } from "@bum/shared";
+import { ALLOCATION_METHODS, MAX_PAYMENT_PARTS, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
@@ -46,6 +47,8 @@ import {
   updateOrder,
 } from "./orders.service.js";
 import { listCustomerPayments, recordSalesPayment } from "./payments.service.js";
+import { recordMixedCustomerPayment } from "./payment-allocation.service.js";
+import { paymentTerminalOptions } from "../finance/terminals.service.js";
 import {
   cashbackSettingsSchema,
   getCashbackSettings,
@@ -174,6 +177,24 @@ const paymentBody = z.strictObject({
   reference: nullableText(100),
   notes: nullableText(2000),
 });
+const paymentPart = z.strictObject({
+  method: z.enum(ALLOCATION_METHODS),
+  amount: moneySchema,
+  /** Karta terminali — pul uning bank hisobiga. */
+  terminalId: z.uuid().nullable().optional(),
+  cashAccountId: z.uuid().nullable().optional(),
+});
+const posPaymentPart = paymentPart.extend({ method: z.enum(["cash", "card", "bank"]) });
+/** Aralash mijoz/buyurtma to'lovi: qismlar yig'indisi qarz yoki buyurtma qoldig'idan oshmaydi. */
+const mixedPaymentBody = z.strictObject({
+  customerId: z.uuid().nullable().optional(),
+  orderId: z.uuid().nullable().optional(),
+  parts: z.array(paymentPart).min(1).max(MAX_PAYMENT_PARTS),
+  paymentDate: isoDate.optional(),
+  /** Takroriy yuborishdan himoya kaliti. */
+  reference: nullableText(100),
+  notes: nullableText(2000),
+});
 const paymentsQuery = z.object({
   customerId: z.uuid().optional(),
   orderId: z.uuid().optional(),
@@ -207,8 +228,13 @@ const posSaleBody = z.strictObject({
   items: z.array(salesItem).min(1).max(500),
   paymentMethod: paymentMethod.default("cash"),
   amountPaid: moneySchema.optional(),
-  /** Aralash to'lov: naqd + karta + bank (asosiy valyutada, har usul bir marta) — berilsa paymentMethod/amountPaid o'rniga. */
-  payments: z.array(z.strictObject({ method: z.enum(["cash", "card", "bank"]), amount: moneySchema })).min(1).max(3).optional(),
+  /**
+   * Aralash to'lov (asosiy valyutada): naqd + karta (terminal bo'yicha) + bank — berilsa paymentMethod/amountPaid o'rniga.
+   * Jami chek summasidan oshmaydi (qaytim faqat bitta naqd to'lovda).
+   */
+  payments: z.array(posPaymentPart).min(1).max(MAX_PAYMENT_PARTS).optional(),
+  /** Nasiya: to'lanmagan qoldiq mijoz qarziga (mijoz shart). Belgilanmasa kam to'lov rad etiladi. */
+  onCredit: z.boolean().optional(),
   /** So'rov kaliti — takroriy yuborishda ikkinchi chek yozilmaydi. */
   clientRequestId: z.uuid().optional(),
   cashbackAmount: moneySchema.optional(),
@@ -236,13 +262,18 @@ const posCustomerBody = z.strictObject({
   phone: nullableText(20),
   notes: nullableText(2000),
 });
-const posCustomerPaymentBody = z.strictObject({
-  shiftId: z.uuid(),
-  purpose: z.enum(["deposit", "debt"]),
-  amount: positiveMoney,
-  method: z.enum(["cash", "bank", "card", "transfer", "balance"]).default("cash"),
-  notes: nullableText(1000),
-});
+const posCustomerPaymentBody = z
+  .strictObject({
+    shiftId: z.uuid(),
+    purpose: z.enum(["deposit", "debt"]),
+    amount: positiveMoney.optional(),
+    method: z.enum(["cash", "bank", "card", "transfer", "balance"]).default("cash"),
+    /** Qarzni aralash to'lash: naqd + karta (terminal) + bank; jami qarzdan oshmaydi. */
+    parts: z.array(paymentPart).min(1).max(MAX_PAYMENT_PARTS).optional(),
+    clientRequestId: z.uuid().optional(),
+    notes: nullableText(1000),
+  })
+  .refine((body) => body.amount !== undefined || body.parts !== undefined, "To'lov summasi (amount) yoki qismlari (parts) kiritilsin");
 const balanceQuery = z.object({ limit: limitQuery });
 
 const customerParams = z.object({ customerId: z.uuid() });
@@ -413,6 +444,28 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/payments", async (req, reply) => {
+    // Aralash to'lov (`parts`) — universal taqsimot; aks holda bitta usul (valyuta, balans, keshbek bilan)
+    if (req.body && typeof req.body === "object" && "parts" in req.body) {
+      const body = mixedPaymentBody.parse(req.body);
+      const result = await writeInTenant(req, "finance.manage", (tx, tenant) =>
+        recordMixedCustomerPayment(
+          tx,
+          tenant,
+          {
+            source: "sales_payment",
+            customerId: body.customerId,
+            orderId: body.orderId,
+            parts: body.parts,
+            idempotencyKey: body.reference ? `sales_payment:${body.reference}` : null,
+            ...(body.paymentDate ? { paymentDate: body.paymentDate } : {}),
+            notes: body.notes,
+          },
+          requestMeta(req),
+        ),
+      );
+      reply.status(result.created ? 201 : 200);
+      return result;
+    }
     const body = paymentBody.parse(req.body);
     const result = await writeInTenant(req, "finance.manage", (tx, tenant) =>
       recordSalesPayment(tx, tenant, body, requestMeta(req)),
@@ -426,6 +479,12 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   app.get("/pos/shifts", async (req) => {
     const query = shiftsQuery.parse(req.query);
     return { shifts: await listShifts(db, await readTenant(req, "pos.use"), query) };
+  });
+
+  // Kassa ekrani: faol karta terminallari (UZCARD, HUMO ...) — bank hisobi ma'lumotisiz
+  app.get("/pos/payment-options", async (req) => {
+    const tenant = await readTenant(req, "pos.use");
+    return { terminals: await paymentTerminalOptions(db, tenant.company.id), maxParts: MAX_PAYMENT_PARTS };
   });
 
   app.get("/pos/shifts/open", async (req) => {

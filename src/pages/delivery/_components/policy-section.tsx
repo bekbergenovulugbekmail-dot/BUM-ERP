@@ -5,6 +5,7 @@ import { Save } from "lucide-react";
 import {
   DELIVERY_AUTO_ASSIGN_LIMITS,
   DELIVERY_AUTO_ASSIGN_STRATEGIES,
+  DELIVERY_COLLECTION_METHODS,
   DELIVERY_MISMATCH_POLICIES,
   DELIVERY_POLICY_LIMITS,
   GEOFENCE_RADIUS_PRESETS,
@@ -193,6 +194,34 @@ function PolicyForm({ initial }: { initial: DeliveryPolicy }) {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {switchRow("deliveryRequiredByDefault")}
           {switchRow("collectOnDelivery")}
+        </div>
+        <div className="space-y-2">
+          <Label>{t("policy.collectionMethods")}</Label>
+          <div className="flex flex-wrap gap-3">
+            {DELIVERY_COLLECTION_METHODS.map((method) => {
+              const checked = options.collectionMethods.includes(method);
+              return (
+                <label key={method} className="flex cursor-pointer items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm">
+                  <Checkbox
+                    id={`delivery-policy-method-${method}`}
+                    checked={checked}
+                    // Kamida bitta usul qoladi
+                    disabled={checked && options.collectionMethods.length === 1}
+                    onCheckedChange={(value) =>
+                      setOptions((current) => ({
+                        ...current,
+                        collectionMethods:
+                          value === true
+                            ? DELIVERY_COLLECTION_METHODS.filter((item) => item === method || current.collectionMethods.includes(item))
+                            : current.collectionMethods.filter((item) => item !== method),
+                      }))
+                    }
+                  />
+                  {t(`method.${method}`)}
+                </label>
+              );
+            })}
+          </div>
         </div>
         <div className="max-w-sm space-y-1">
           <Label>{t("policy.mismatchPolicy")}</Label>

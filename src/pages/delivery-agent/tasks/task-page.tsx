@@ -13,7 +13,8 @@ import {
   ArrowLeft, Camera, CheckCircle2, ChevronDown, Circle, CircleAlert, Hand, Loader2, MapPin, MapPinOff, Navigation, PackageCheck,
   PenLine, Phone, RefreshCw, Truck, Wallet, XCircle, type LucideIcon,
 } from "lucide-react";
-import { canDeliveryTransition, isOpenDeliveryStatus, type DeliveryCollectionMethod, type DeliveryFailureReason, type DeliveryStatus } from "@bum/shared";
+import { canDeliveryTransition, isOpenDeliveryStatus, type DeliveryFailureReason, type DeliveryStatus } from "@bum/shared";
+import type { SplitPart } from "@/components/payments/split-payment-panel.tsx";
 import { LateBadge, PriorityBadge, QueuedBadge, StatusBadge } from "@/components/delivery/badges.tsx";
 import SignatureDialog from "@/components/delivery/signature-dialog.tsx";
 import { Button } from "@/components/ui/button.tsx";
@@ -277,11 +278,12 @@ function TaskView({ taskId }: { taskId: string }) {
       "signature.saved",
     );
 
-  const collect = (method: DeliveryCollectionMethod, amount: string) =>
+  // Bitta qism — avvalgi ko'rinish (method, amount, terminalId); aralash — `parts`. Oflayn navbatda ham shu tana va kalit
+  const collect = (parts: SplitPart[]) =>
     void run(
       "payment",
       async () => {
-        const outcome = await performAction(taskId, "payments", newRequestBody({ method, amount }), options);
+        const outcome = await performAction(taskId, "payments", newRequestBody(parts.length === 1 ? { ...parts[0]! } : { parts }), options);
         setDialog(null);
         return outcome;
       },

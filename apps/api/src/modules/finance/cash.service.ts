@@ -58,9 +58,38 @@ export function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** Kassa turi → hisoblar rejasidagi hisob (1010 naqd / 1020 bank). */
-export function ledgerAccountFor(conn: DbOrTx, companyId: string, type: CashAccountType) {
+/**
+ * Kassa/bank hisobi → hisoblar rejasidagi hisob: hisobga alohida buxgalteriya hisobi bog'langan bo'lsa (masalan, 1021
+ * "X bank UZS") — o'sha, aks holda turi bo'yicha umumiy 1010 naqd / 1020 bank. Kirim va chiqim bir xil qoidada —
+ * bog'langan hisobning qoldig'i buxgalteriyada alohida ko'rinadi.
+ */
+export async function ledgerAccountFor(
+  conn: DbOrTx,
+  companyId: string,
+  account: CashAccountType | { type: CashAccountType; ledgerAccountId?: string | null },
+): Promise<string> {
+  const type = typeof account === "string" ? account : account.type;
+  const linked = typeof account === "string" ? null : (account.ledgerAccountId ?? null);
+  if (linked) {
+    const [row] = await conn
+      .select({ id: accounts.id })
+      .from(accounts)
+      .where(and(eq(accounts.id, linked), eq(accounts.companyId, companyId), eq(accounts.type, "asset"), eq(accounts.isActive, true)))
+      .limit(1);
+    if (row) return row.id;
+  }
   return requireAccountBySubtype(conn, companyId, type, "asset", type === "cash" ? "Naqd kassa" : "Bank hisobi");
+}
+
+/** Kassaga bog'lanadigan buxgalteriya hisobi: shu kompaniyaning faol aktiv hisobi. */
+export async function assertLedgerAccount(conn: DbOrTx, companyId: string, ledgerAccountId: string) {
+  const [row] = await conn
+    .select({ id: accounts.id, type: accounts.type, isActive: accounts.isActive })
+    .from(accounts)
+    .where(and(eq(accounts.id, ledgerAccountId), eq(accounts.companyId, companyId)))
+    .limit(1);
+  if (!row) throw notFound("Buxgalteriya hisobi topilmadi");
+  if (row.type !== "asset" || !row.isActive) throw badRequest("Kassaga faqat faol aktiv (asset) hisob bog'lanadi");
 }
 
 export type PaymentMethod = "cash" | "bank" | "card" | "transfer";
@@ -238,11 +267,14 @@ export type CashAccountInput = {
   openingBalance?: string;
   /** Standart — asosiy valyuta; boshqasi kompaniyada yoqilgan bo'lishi kerak. */
   currency?: string;
+  /** Alohida buxgalteriya hisobi (bo'lmasa 1010 / 1020). */
+  ledgerAccountId?: string | null;
 };
 
 export async function createCashAccount(tx: Tx, tenant: TenantContext, input: CashAccountInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
   const { openingBalance, currency: requestedCurrency, ...fields } = input;
+  if (input.ledgerAccountId) await assertLedgerAccount(tx, companyId, input.ledgerAccountId);
   const baseCurrency = await companyCurrency(tx, companyId);
   const currency = requestedCurrency ?? baseCurrency;
   const rate = await accountRate(tx, companyId, currency);
@@ -277,7 +309,7 @@ export async function createCashAccount(tx: Tx, tenant: TenantContext, input: Ca
       referenceType: "cash_opening_balance",
       referenceId: account!.id,
       lines: [
-        { accountId: await ledgerAccountFor(tx, companyId, account!.type), debit: baseAmount },
+        { accountId: await ledgerAccountFor(tx, companyId, account!), debit: baseAmount },
         {
           accountId: await requireAccountBySubtype(tx, companyId, "capital", "equity", "Ustav kapitali"),
           credit: baseAmount,
@@ -301,10 +333,11 @@ export async function updateCashAccount(
   tx: Tx,
   tenant: TenantContext,
   cashAccountId: string,
-  patch: { name?: string; bankName?: string | null; accountNumber?: string | null; isDefault?: boolean; isActive?: boolean },
+  patch: { name?: string; bankName?: string | null; accountNumber?: string | null; isDefault?: boolean; isActive?: boolean; ledgerAccountId?: string | null },
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
+  if (patch.ledgerAccountId) await assertLedgerAccount(tx, companyId, patch.ledgerAccountId);
   const [current] = await tx
     .select(cashAccountFields)
     .from(cashAccounts)
@@ -432,7 +465,7 @@ export async function recordManualCashTransaction(
       .where(and(eq(accounts.id, input.counterAccountId), eq(accounts.companyId, companyId)))
       .limit(1);
     if (!counter) throw badRequest("Qarshi hisob topilmadi");
-    const ledger = await ledgerAccountFor(tx, companyId, account.type);
+    const ledger = await ledgerAccountFor(tx, companyId, account);
     if (ledger === counter.id) throw badRequest("Qarshi hisob kassaning o'z hisobi bo'lishi mumkin emas");
 
     // Jurnal asosiy valyutada — valyutali kassa joriy kurs bilan
@@ -497,9 +530,11 @@ export async function transferCash(
   const out = await recordCashTransaction(tx, companyId, tenant.user.id, { ...common, cashAccountId: source.id, type: "out" });
   const into = await recordCashTransaction(tx, companyId, tenant.user.id, { ...common, cashAccountId: target.id, type: "in" });
 
-  // Kassa ↔ bank — hisoblar rejasida ham pul ko'chadi; kassa ↔ kassa bitta hisob ichida
+  // Hisoblar rejasidagi hisob farq qilsa (kassa ↔ bank yoki alohida bog'langan bank hisoblari) — jurnalda ham pul ko'chadi
   let journalEntryId: string | null = null;
-  if (source.type !== target.type) {
+  const targetLedger = await ledgerAccountFor(tx, companyId, target);
+  const sourceLedger = await ledgerAccountFor(tx, companyId, source);
+  if (targetLedger !== sourceLedger) {
     const baseAmount = toBaseAmount(input.amount, await accountRate(tx, companyId, source.currency));
     const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
       entryDate: txDate,
@@ -507,8 +542,8 @@ export async function transferCash(
       referenceType: "cash_transfer",
       referenceId,
       lines: [
-        { accountId: await ledgerAccountFor(tx, companyId, target.type), debit: baseAmount },
-        { accountId: await ledgerAccountFor(tx, companyId, source.type), credit: baseAmount },
+        { accountId: targetLedger, debit: baseAmount },
+        { accountId: sourceLedger, credit: baseAmount },
       ],
     });
     journalEntryId = entry.id;

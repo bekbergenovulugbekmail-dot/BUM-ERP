@@ -94,6 +94,75 @@ export async function refundableByMethod(conn: DbOrTx, orderId: string) {
   return available;
 }
 
+type AccountPool = Map<Exclude<RefundMethod, "balance">, { cashAccountId: string | null; available: bigint }[]>;
+
+/**
+ * Asl to'lov qismlarining hisoblari: usul bo'yicha qaysi kassa/bank hisobiga qancha tushgani − oldingi qaytarishlarda shu
+ * hisobdan qaytgani. Pul asl hisobidan qaytadi (masalan, UZCARD terminali — A bank, HUMO — B bank), standart hisobdan emas.
+ */
+async function refundAccountPool(conn: DbOrTx, orderId: string, currency: string): Promise<AccountPool> {
+  const pool: AccountPool = new Map();
+  const rows = await conn
+    .select({ method: customerPayments.method, cashAccountId: customerPayments.cashAccountId, amount: sumMoney(customerPayments.amount) })
+    .from(customerPayments)
+    .where(and(eq(customerPayments.orderId, orderId), eq(customerPayments.currency, currency)))
+    .groupBy(customerPayments.method, customerPayments.cashAccountId)
+    .orderBy(customerPayments.method, customerPayments.cashAccountId);
+  for (const row of rows) {
+    const key = refundKey(row.method);
+    if (!key) continue;
+    const list = pool.get(key) ?? [];
+    const found = list.find((entry) => entry.cashAccountId === row.cashAccountId);
+    if (found) found.available += toMinor(row.amount);
+    else list.push({ cashAccountId: row.cashAccountId, available: toMinor(row.amount) });
+    pool.set(key, list);
+  }
+  const previous = await conn
+    .select({ method: salesReturns.refundMethod, amount: salesReturns.refundAmount, refunds: salesReturns.refunds })
+    .from(salesReturns)
+    .where(eq(salesReturns.orderId, orderId));
+  for (const row of previous) {
+    const refunds: { method: string; amount: string; cashAccountId?: string | null }[] = row.refunds ?? [{ method: row.method, amount: row.amount }];
+    for (const part of refunds) {
+      const key = refundKey(part.method);
+      if (!key) continue;
+      const list = pool.get(key) ?? [];
+      // Hisobi yozilgan qaytarish — avval o'sha hisobdan; eski yozuv — tartib bo'yicha
+      const ordered = part.cashAccountId
+        ? [...list.filter((entry) => entry.cashAccountId === part.cashAccountId), ...list.filter((entry) => entry.cashAccountId !== part.cashAccountId)]
+        : list;
+      let left = toMinor(part.amount);
+      for (const entry of ordered) {
+        const take = minBig(entry.available, left);
+        if (take <= 0n) continue;
+        entry.available -= take;
+        left -= take;
+      }
+    }
+  }
+  return pool;
+}
+
+/** Usul summasini asl hisoblarga taqsimlaydi; yetmasa (offline, eski yozuv) qoldig'i birinchi hisobdan. */
+function splitByAccounts(pool: AccountPool, method: Exclude<RefundMethod, "balance">, amount: bigint) {
+  const list = pool.get(method) ?? [];
+  const pieces: { cashAccountId: string | null; amount: bigint }[] = [];
+  let left = amount;
+  for (const entry of list) {
+    if (left === 0n) break;
+    const take = minBig(entry.available, left);
+    if (take <= 0n) continue;
+    entry.available -= take;
+    left -= take;
+    pieces.push({ cashAccountId: entry.cashAccountId, amount: take });
+  }
+  if (left > 0n) {
+    if (pieces[0]) pieces[0].amount += left;
+    else pieces.push({ cashAccountId: list[0]?.cashAccountId ?? null, amount: left });
+  }
+  return pieces;
+}
+
 /** Qaytadigan pul usullar bo'yicha: bitta usul (eski) yoki taqsimot — yig'indi aynan qaytadigan pulga teng. */
 async function refundParts(tx: Tx, orderId: string, input: ReturnItemsInput, money: bigint, offline: boolean): Promise<RefundPart[]> {
   if (money <= 0n) return [];
@@ -139,6 +208,7 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
       warehouseId: salesOrders.warehouseId,
       totalAmount: salesOrders.totalAmount,
       paidAmount: salesOrders.paidAmount,
+      currency: salesOrders.currency,
     })
     .from(salesOrders)
     .where(and(eq(salesOrders.id, orderId), eq(salesOrders.companyId, companyId)))
@@ -278,6 +348,27 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
   const parts = await refundParts(tx, orderId, input, money, offline !== undefined);
   const refundMethodValue = parts.length > 1 ? "mixed" : (parts[0]?.method ?? input.refundMethod);
   const refundsValue = parts.map((part) => ({ method: part.method, amount: fromMinor(part.amount) }));
+  // Har usul asl to'lov hisoblariga bo'linadi (bir usul ikki bankka tushgan bo'lsa — ikki qism); hujjatda hisobi bilan
+  const pool = await refundAccountPool(tx, orderId, order.currency);
+  const pieces: { method: RefundMethod; amount: bigint; cashAccountId: string | null }[] = [];
+  for (const part of parts) {
+    if (part.method === "balance") {
+      pieces.push({ ...part, cashAccountId: null });
+      continue;
+    }
+    for (const piece of splitByAccounts(pool, part.method, part.amount)) {
+      pieces.push({
+        method: part.method,
+        amount: piece.amount,
+        cashAccountId: piece.cashAccountId ?? (await resolvePaymentAccount(tx, companyId, part.method)),
+      });
+    }
+  }
+  const storedRefunds = pieces.map((piece) => ({
+    method: piece.method,
+    amount: fromMinor(piece.amount),
+    ...(piece.cashAccountId ? { cashAccountId: piece.cashAccountId } : {}),
+  }));
 
   // Shu chekdan berilgan keshbekning ulushi (oxirgi qaytarishda — qolgani)
   let reverse = 0n;
@@ -300,7 +391,7 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
     totalAmount: fromMinor(totalValue),
     cogs: fromMinor(totalCogs),
     refundMethod: refundMethodValue,
-    refunds: parts.length > 0 ? refundsValue : null,
+    refunds: pieces.length > 0 ? storedRefunds : null,
     reason: input.reason ?? null,
     createdBy: tenant.user.id,
     ...(offline ? { createdAt: offline.returnedAt } : {}),
@@ -368,17 +459,20 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
       .where(eq(customers.id, order.customerId));
   }
 
-  // Pul qaytishi usullar bo'yicha (bitta yoki taqsimot); balans va keshbek ulushi o'z hisobiga.
+  // Pul qaytishi usullar bo'yicha (bitta yoki taqsimot), asl to'lov hisobidan; balans va keshbek ulushi o'z hisobiga.
   // Bir nechta qism — har biriga alohida havola (kassa harakati va jurnal takrorlanishdan himoyasi havola bo'yicha)
-  for (const part of parts) {
+  const methodPieces = new Map<string, number>();
+  for (const part of pieces) {
     const amount = fromMinor(part.amount);
     if (part.method === "balance") {
       await refundToBalance(tx, tenant, { customerId: order.customerId!, orderId, orderNumber: number, amount, posShiftId: shift?.id ?? null, date }, meta);
       continue;
     }
-    const suffix = parts.length > 1 ? `_${part.method}` : "";
+    const nth = methodPieces.get(part.method) ?? 0;
+    methodPieces.set(part.method, nth + 1);
+    const suffix = pieces.length > 1 ? `_${part.method}${nth > 0 ? `_${nth + 1}` : ""}` : "";
     const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
-      cashAccountId: await resolvePaymentAccount(tx, companyId, part.method),
+      cashAccountId: part.cashAccountId,
       type: "out",
       amount,
       txDate: date,
@@ -396,7 +490,7 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
       referenceId: returnId,
       lines: [
         { accountId: await requireAccountBySubtype(tx, companyId, "receivable", "asset", "Debitorlar"), debit: amount },
-        { accountId: await ledgerAccountFor(tx, companyId, account.type), credit: amount },
+        { accountId: await ledgerAccountFor(tx, companyId, account), credit: amount },
       ],
     });
     if (order.customerId) {

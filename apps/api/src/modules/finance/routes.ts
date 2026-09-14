@@ -13,6 +13,8 @@
  *   GET    /cash-accounts/:cashAccountId/transactions (?dateFrom=&dateTo=&limit=&cursor=)   finance.view
  *   POST   /cash-accounts, PATCH /cash-accounts/:cashAccountId finance.manage
  *   POST   /cash-transactions, /cash-transfers                 finance.manage
+ *   GET    /terminals (?includeInactive=), /terminals/:terminalId   finance.view (karta terminallari → bank hisobi)
+ *   POST   /terminals, PATCH /terminals/:terminalId            finance.manage
  *   GET    /expenses (?status=&category=&dateFrom=&dateTo=&limit=&cursor=), /expenses/stats   finance.view
  *   POST   /expenses, PATCH / DELETE /expenses/:expenseId      finance.manage
  *   POST   /expenses/:expenseId/status                         finance.approve (paid — kassa chiqimi + jurnal)
@@ -24,7 +26,7 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { MAX_COMPANY_CURRENCIES, type Permission } from "@bum/shared";
+import { MAX_COMPANY_CURRENCIES, TERMINAL_NETWORKS, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
@@ -67,6 +69,7 @@ import {
   setCurrencyRate,
 } from "./currencies.service.js";
 import { createManualEntry, getJournalEntry, listJournal, voidManualEntry } from "./journal.service.js";
+import { createTerminal, getTerminal, listTerminals, updateTerminal } from "./terminals.service.js";
 
 const nullableText = (max: number) =>
   z
@@ -136,6 +139,8 @@ const cashAccountBody = z.strictObject({
   openingBalance: moneySchema.optional(),
   /** Standart — asosiy valyuta; valyutali kassa asosiy bo'la olmaydi. */
   currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Valyuta kodi 3 harf (ISO 4217)").optional(),
+  /** Alohida buxgalteriya hisobi (aktiv); bo'lmasa 1010 naqd / 1020 bank. */
+  ledgerAccountId: z.uuid().nullable().optional(),
 });
 const cashAccountPatch = z.strictObject({
   name: z.string().trim().min(1).max(200).optional(),
@@ -143,7 +148,18 @@ const cashAccountPatch = z.strictObject({
   accountNumber: nullableText(64),
   isDefault: z.boolean().optional(),
   isActive: z.boolean().optional(),
+  ledgerAccountId: z.uuid().nullable().optional(),
 });
+const terminalBody = z.strictObject({
+  name: z.string().trim().min(1).max(100),
+  network: z.enum(TERMINAL_NETWORKS),
+  provider: nullableText(100),
+  cashAccountId: z.uuid(),
+  branchId: z.uuid().nullable().optional(),
+  terminalIdentifier: nullableText(64),
+  isActive: z.boolean().optional(),
+});
+const terminalParams = z.object({ terminalId: z.uuid() });
 const cashTransactionsQuery = z.object({
   dateFrom: isoDate.optional(),
   dateTo: isoDate.optional(),
@@ -359,6 +375,36 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
     );
     reply.status(201);
     return result;
+  });
+
+  // ─── Karta terminallari ──────────────────────────────────────────────────
+
+  app.get("/terminals", async (req) => {
+    const { includeInactive } = includeInactiveQuery.parse(req.query);
+    const tenant = await readTenant(req, "finance.view");
+    return { terminals: await listTerminals(db, tenant.company.id, { includeInactive: includeInactive ?? false }) };
+  });
+
+  app.get("/terminals/:terminalId", async (req) => {
+    const { terminalId } = terminalParams.parse(req.params);
+    const tenant = await readTenant(req, "finance.view");
+    return { terminal: await getTerminal(db, tenant.company.id, terminalId) };
+  });
+
+  app.post("/terminals", async (req, reply) => {
+    const body = terminalBody.parse(req.body);
+    const terminal = await writeInTenant(req, "finance.manage", (tx, tenant) => createTerminal(tx, tenant, body, requestMeta(req)));
+    reply.status(201);
+    return { terminal };
+  });
+
+  app.patch("/terminals/:terminalId", async (req) => {
+    const { terminalId } = terminalParams.parse(req.params);
+    const patch = terminalBody.partial().parse(req.body);
+    const terminal = await writeInTenant(req, "finance.manage", (tx, tenant) =>
+      updateTerminal(tx, tenant, terminalId, patch, requestMeta(req)),
+    );
+    return { terminal };
   });
 
   // ─── Valyutalar va kurslar ───────────────────────────────────────────────
