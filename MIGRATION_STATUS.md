@@ -1576,6 +1576,74 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 
 **Foydalanuvchi uchun (bonnu-market):** Moliya → Kassa & Bank → "Uzcard" bank hisobini tanlash → "Karta turi qo'shish": To'lov tizimi UZCARD, komissiya (masalan 0.25) → Saqlash; "Humo" hisobida — HUMO. Kassada UZCARD va HUMO tugmalari chiqadi, to'lov shu hisobga komissiyasi ushlanib tushadi. Pul chiqarish komissiyasi — shu hisobning "Pul chiqarish komissiyasi, %" maydoni. Hisobot — Hisobotlar (Analitika) → "Bank komissiyasi". Mavjud ma'lumot avtomatik o'zgartirilmadi
 
+## Xavfsizlik auditi va mustahkamlash (2026-09-14)
+
+**Talab:** zero-cost security hardening — AUDIT → FIX → TEST → RETEST; majburiy pullik xizmat yo'q; production ma'lumotiga destructive amal yo'q; tekshirilmagan narsa PASS deb yozilmaydi.
+
+**Audit:** 5 yo'nalish (AUTH — kirish/sessiya, PAY — pul/to'lov, TEN-B — tenant/RBAC backend, TEN-S — savdo/kassa/agent, CLI — web/desktop/Android/infra) — **69 topilma: CRITICAL 0, HIGH 7, MEDIUM 19, LOW 43** (yo'nalishlar orasida takrorlar bor: TEN-B-8 = AUTH-2, TEN-B-4 = PAY-6, TEN-S-1 ≈ PAY-1 ≈ AUTH-4, TEN-S-3 = PAY-2, TEN-S-4 = PAY-16, TEN-S-5 = PAY-4, AUTH-11 = CLI-2). Commit qilingan o'zgarishlarda haqiqiy sir topilmadi (git diff va yangi fayllar skaneri: faqat test bazasi uchun sinov parollari; `.env`, `.jks`, `.keystore`, `.pem` fayllari yo'q). Production muhit o'zgaruvchilari ochilmadi
+
+| Topilma | Og'irlik | Holat | Dalil |
+|---|---|---|---|
+| AUTH-1 SMS kodni parallel so'rov bilan tanlash | HIGH | DONE | urinish solishtirishdan oldin atomar; test: 15 parallel xato kod — urinish ≤ 5, kod yonadi |
+| AUTH-2 / TEN-B-8 `trustProxy: true` — IP soxtalashtirish | HIGH | DONE (lokal) | `TRUST_PROXY_HOPS=1`, nginx realip; test: XFF chap qiymati yozilmaydi. Production — NOT VERIFIED (deploy BLOCKED) |
+| CLI-1 imzosiz yangilanish o'rnatuvchisi | HIGH | BLOCKED — USER ACTION REQUIRED | kod imzolash sertifikati (`CSC_LINK`, `CSC_KEY_PASSWORD`) kerak; 0.4.5 — NotSigned |
+| PAY-1 / TEN-S-1 / AUTH-4 qurilma istalgan kassir nomidan ishlaydi | HIGH | PARTIAL | `pos_device_cashiers` (0048): yuqori huquqli offline amallar (qaytarish, narx, xarid, ta'minotchi to'lovi, hisobdan chiqarish, ko'chirish, sanash, kurs, mijoz/ta'minotchi tahriri) va analitika — faqat shu qurilmada parol bilan kirgan kassir; test bor. Oddiy savdo/smena hali `cashierId` ga ishonadi (offline ish to'xtamasin); pull'da a'zolar ro'yxati (TEN-S-8) — NOT STARTED |
+| TEN-B-1 `hr.manage` egani / to'liq huquqlini bloklaydi | HIGH | DONE | ega, to'liq rol, platforma admini himoyalangan; HR orqali kirishni o'zgartirish `employee.software_access.manage`; test |
+| TEN-S-2 agentlar menejeri istalgan a'zoni bloklaydi | HIGH | DONE | test: egaga bog'langan agentni faolsizlantirish 403 |
+| AUTH-3 login lockout poygasi | MEDIUM | DONE | test: 12 parallel xato — ≤ 5 tasi parol tekshiradi |
+| AUTH-5 raqamni bilgan kishi hisobni bloklab turadi | MEDIUM | PARTIAL | raqam+IP 5, raqam 20, IP 30 (15 daq.); ko'p IP bilan raqamni bloklash hali mumkin |
+| CLI-2 / AUTH-11 CSP yo'q | MEDIUM | DONE (lokal) | nginx CSP `script-src 'self'`, inline skript `theme-init.js` ga; brauzer E2E: kiritilgan inline skript bloklanadi, 10 sahifada CSP buzilishi yo'q. Production — NOT VERIFIED; Android WebView native bridge — PARTIAL |
+| CLI-3 Android backup yoqilgan | MEDIUM | DONE | `allowBackup=false`, `data_extraction_rules.xml`; APK qurildi, merged manifest tekshirildi |
+| CLI-4 logout qurilmada ma'lumot qoldiradi | MEDIUM | DONE (kod) | agent API keshi, qoralamalar, yuborilmagan GPS o'chiriladi; brauzerda alohida — NOT VERIFIED |
+| PAY-2 / TEN-S-3 offline narx, chegirma, kurs | MEDIUM | PARTIAL | faqat nomuvofiqlik yoziladi (offline chek rad etilmaydi — kelishilgan qaror) |
+| PAY-4 / TEN-S-5 kassir kutilgan naqdni kamaytiradi, pulni boshqa hisobga o'tkazadi | MEDIUM | DONE | chiqim ≤ kutilgan naqd (offline — `cash_exceeds_expected`), boshqa hisobga `finance.manage`; test |
+| PAY-5 qaytarish usuli asl to'lovga mos emas | MEDIUM | DONE | `return-items` — test; `orders/:id/return` — kod, alohida test yo'q |
+| PAY-6 / TEN-B-4 xarid qaytarishida pul chegarasiz | MEDIUM | DONE | test: 5000 > 3000 — 400 |
+| PAY-7 / TEN-B-3 omborchi istalgan hisobga jurnal | MEDIUM | PARTIAL | qarshi hisob `finance.manage` (test); tannarx chegarasi — NOT STARTED |
+| PAY-8 dostavka naqdi to'g'ridan-to'g'ri asosiy kassaga | MEDIUM | NOT STARTED | topshirish bosqichi kerak (dizayn qarori) |
+| PAY-9 kassir balans yaratadi | MEDIUM | PARTIAL | balansga qaytim ≤ chek summasi (test); offline va tasdiqlash — NOT STARTED |
+| PAY-10 son chegarasi 500 va sinxron navbatini to'xtatadi | MEDIUM | DONE | 22003 → 400 (test), offline amal rad qilinadi (kod) |
+| TEN-B-2 qayta ishga olish platforma blokini ochadi | MEDIUM | DONE | test |
+| TEN-B-5 aqlli ogohlantirishlar hammaga ko'rinadi | MEDIUM | DONE | bo'lim ruxsati bo'yicha; testlar (security, notifications) |
+| AUTH-9 tiklash kodi xeshida server siri yo'q | LOW | DONE | HMAC(SESSION_SECRET); tiklash testlari o'tdi |
+| AUTH-10 parol siyosati faqat uzunlik | LOW | DONE | keng tarqalgan va bir xil belgili parollar rad; test |
+| AUTH-12 DB xato parametrlari logda | LOW | DONE (kod) | pino `err` serializer; test yo'q |
+| AUTH-13 mayda nomuvofiqliklar | LOW | PARTIAL | platforma telefon almashtirishda sessiyalar bekor, parol almashtirish limiti atomar |
+| CLI-7 yangilanishda token `startsWith` bilan | LOW | DONE | faqat API origin'iga; desktop typecheck, 57 test |
+| CLI-8 chek oynasida JS va navigatsiya | LOW | DONE (typecheck) | CSP + navigatsiya taqiqi; Electron'da ishga tushirilmadi |
+| CLI-11 rendererdan istalgan https havola | LOW | DONE (typecheck) | domenlar ro'yxati |
+| CLI-12 FileProvider keng yo'llar | LOW | DONE (build) | faqat `cache/shared/`; qurilmada ulashish — NOT VERIFIED |
+| PAY-11 dostavka qaytarishi `sales.refund` siz | LOW | DONE | test |
+| PAY-13 xarid sotuv narxi `products.edit` siz | LOW | DONE | test |
+| PAY-16 / TEN-S-4 aralash to'lovda mijoz tekshirilmaydi | LOW | DONE | test |
+| TEN-B-6 kuchliroq rolni zaiflashtirish | LOW | DONE | test |
+| TEN-B-9 moliya ruxsati bo'shliqlari | LOW | PARTIAL | `PUT /currencies` kurs ruxsati (test); qolgani NOT STARTED |
+| TEN-B-12 umumiy sozlama yo'li `pos.*` | LOW | DONE | test |
+| TEN-S-10 qulf tenant tekshiruvidan oldin | LOW | DONE (kod) | regressiya o'tdi, alohida test yo'q |
+| AUTH-8 / CLI-10 qurilma tokeni muddatsiz, plaintext fallback | LOW | PARTIAL | uzishda token xeshi almashtiriladi; muddat/rotatsiya, shifrlash — NOT STARTED |
+| AUTH-6 ro'yxatdan o'tgan raqamni aniqlash | LOW/MEDIUM | NOT VERIFIED | parol tiklash javobi bir xil; ro'yxatdan o'tish oqimi tekshirilmadi |
+| AUTH-7, CLI-5, CLI-6, CLI-9, CLI-13, PAY-3, PAY-12, PAY-14, PAY-15, PAY-17, PAY-18, PAY-19, TEN-B-7, TEN-B-10, TEN-B-11, TEN-B-13, TEN-S-6, TEN-S-7, TEN-S-8, TEN-S-9, TEN-S-11 | LOW | NOT STARTED | ro'yxat quyidagi "Qolgan xavfsizlik ishlari"da |
+
+**Infratuzilma:**
+- Paketlar: drizzle-orm 0.45.2 (HIGH advisory yopildi), drizzle-kit 0.31.10, vitest 4.1.11 — `pnpm audit`: critical 0, high 0, moderate 1 (faqat dev: drizzle-kit ichidagi esbuild) — DONE
+- Zaxira: `deploy/backup` — pg_dump (custom), SHA-256, arxivni o'qib tekshirish, saqlash muddati; tiklash sinovi faqat nomida `restore`/`test` bo'lgan bazaga — lokal PASS (14 jadval soni manba bilan mos). Production cron xizmati — BLOCKED — USER ACTION REQUIRED (Railway'da alohida xizmat va volume, bepul tarif limiti ichida)
+- nginx: `nginx -t` PASS (lokal); realip oxirgi X-Forwarded-For; API'ga `X-Forwarded-For $remote_addr`
+
+**Testlar (xavfsizlik fixlaridan keyin):**
+- API: 98 fayl / 408 test — `--maxWorkers=1`, 9 qismda (79 + 49 + 39 + 64 + 29 + 48 + 33 + 55 + 12), hammasi o'tdi; keyin `security-hardening.test.ts` ga 10 ta maqsadli test qo'shildi — 20/20 o'tdi (jami 418 test); API `tsc` (src + test) — 0 xato
+- Web: 16 fayl / 62 test, tsc, lint (o'zgargan fayllar), `vite build` — toza; `dist` da inline skript yo'q
+- Brauzer E2E (lokal, production nginx shabloni + dist): CSP 30/31, to'lovlar 14/14, xarita/dostavka 13/14. Yiqilgan 2 tekshiruv — ikkalasi WebSocket 403: lokal 8080 portda `Origin` host (`127.0.0.1:8080`) ≠ `Host` (nginx `$host` portni olib tashlaydi) — lokal muhit artefakti, CSP emas (brauzer ulanishga urindi); production'da — NOT VERIFIED
+- Desktop: typecheck (main + renderer), 9 fayl / 57 test. **Kassa 0.4.5** o'rnatuvchisi qurildi — `apps/desktop/release/BUM-POS-KASSA-Setup-0.4.5.exe`, 111 732 866 bayt, SHA-256 `A6050E36C4CF27A8FF1CBA7415C8F4DA0FAB3A9D09C2465B6948171D50B30E05`, imzosiz (`Get-AuthenticodeSignature`: NotSigned), **e'lon qilinmagan**, ishga tushirilmadi (ishlab turgan kassaga tegmaslik uchun)
+- Android: `assembleDebug` BUILD SUCCESSFUL — `app-debug.apk` 5 787 561 bayt, SHA-256 `FDE69AB6E44DE4E19554B22AEA2A91A1AE0318A7D02E78C75B1AA5219EC9ECE0`; merged manifest: `allowBackup=false`, `fullBackupContent=false`, `dataExtractionRules`. Release imzo — BLOCKED (kalit yo'q); real qurilma — NOT VERIFIED
+
+**Production:**
+- Deploy — **BLOCKED — USER ACTION REQUIRED**: `railway up` (bum-api, bum-web) avtomatik rejim klassifikatori tomonidan rad etildi. Commitlar: `eda2204`, `136ab71`, `aa95acc` va testlar. Avval `bum-api` (migratsiya 0048 — yangi jadval va tarixdan to'ldirish, destructive emas), keyin `bum-web`
+- Hozirgi production (faqat o'qish, 2026-09-14): `Content-Security-Policy` yo'q; X-Frame-Options, nosniff, HSTS, Referrer-Policy, Permissions-Policy bor; `/theme-init.js` — SPA fallback (`text/html`) — web deploydan keyin JS bo'lishi kerak
+- Deploydan keyin tekshirish: `/health`; `app.bum-erp.uz` sarlavhalarida CSP; login sahifasi va mavzu; realtime (WebSocket) CSP ostida; soxta `X-Forwarded-For` bilan so'rov — audit/HTTP logda haqiqiy IP; kassada kassir qayta kirgach qaytarish/narx amallari
+- Ishdagi kassalar uchun eslatma: 0048 bog'lanishlarni qurilma tarixidan (ro'yxatdan o'tkazgan, sinxron amallar, smenalar, kassir kirishlari) to'ldiradi. Tarixi yo'q xodim nomidan yuqori huquqli offline amal "cashier_not_bound" bilan rad etiladi — xodim kassada parol bilan bir marta kirishi kerak
+
+**Qolgan xavfsizlik ishlari:** AUTH-7 (PIN bruteforce, qulflangan sessiyada WebSocket), AUTH-8/CLI-10 (token muddati, shifrlash), CLI-5/6 (S3 fayl tekshiruvi — S3 sozlanganda), CLI-9 (Electron fuses), CLI-13 (yuklash sessiyasi egasi), PAY-3 (offline xarid kursi), PAY-8 (dostavka naqdini topshirish), PAY-12 (qaytarishda smena kassiri), PAY-14 (tizim hisoblarini qayta yo'naltirish), PAY-15 (keshbek poygasi), PAY-17 (majburiy idempotentlik kaliti), PAY-18 (chegirma chegarasi/tasdiq), TEN-B-7 (AI/dashboard maosh jami), TEN-B-10 (bo'lim ichidagi ruxsat bo'shliqlari), TEN-B-11 (modul guard bo'shliqlari), TEN-B-13 (obuna yozish yo'llari), TEN-S-6/7/8/9 (modul ruxsatlari, ombor cheklovi o'qishda, pull'da a'zolar, GPS soxtalashtirish), TEN-S-11 (public OSRM). Pullik xizmat majburiy emas: kod imzolash sertifikati (Windows, yiliga taxminan 200–500 USD, kassalar keng tarqatilishidan oldin) — yagona tavsiya etilgan xarajat
+
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 
 ### Bajarilgan (tekshirilgan)
@@ -1607,11 +1675,12 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 
 ### Qolgan ishlar
 1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
-2. Kassa **0.4.4** ni (Naqd/Karta/Bank + UZCARD, HUMO va bank hisoblari bo'yicha to'lov bilan; 0.4.1–0.4.3 o'rniga) platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi, terminal cheki) qo'lda sinov
+1a. **Xavfsizlik fixlarini deploy qilish** (avtomatik rejimda rad etildi): avval `bum-api` (migratsiya 0048), keyin `bum-web`; so'ng "Xavfsizlik auditi" bo'limidagi tekshirish ro'yxati. Production'da `WEB_ORIGIN` o'rnatilgan (`https://bum-erp.uz`) — yangi majburiy tekshiruv API'ni to'xtatmaydi
+2. Kassa **0.4.5** ni (Naqd/Karta/Bank + UZCARD, HUMO va bank hisoblari bo'yicha to'lov, xavfsizlik: yangilanish tokeni faqat API'ga, chek oynasi CSP; 0.4.1–0.4.4 o'rniga) API deploydan keyin platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi, terminal cheki) qo'lda sinov
 3a. Yangi APK'ni telefonga o'rnatib, ish kunida Android "Batareya" bo'limida BUM ERP sarfini oldingi versiya bilan solishtirish; bonnu-market'da UZCARD/HUMO terminallarini "Uzcard"/"Humo" bank hisoblariga komissiya bilan qo'shish (egasi)
 3. Production'da tizimga kirgan holda qo'lda smoke (egasi hisobi bilan): kirish, Dostavka → "Hudud bo'yicha" → biriktirish, "Kunlik marshrut", distribyutsiya xaritasi
 4. Mavjud mijozlarga shahar/mahalla kiritish (avtomatik to'ldirilmaydi)
-5. Apex `bum-erp.uz` ni ishlaydigan manzilga yo'naltirish; ixtiyoriy — `WEB_ORIGIN=https://app.bum-erp.uz`
+5. Apex `bum-erp.uz` ni ishlaydigan manzilga yo'naltirish; ixtiyoriy — `WEB_ORIGIN=https://app.bum-erp.uz` (o'zgaruvchi endi productionda majburiy, hozir `https://bum-erp.uz`)
 6. Production'da fayl saqlash (S3), SMS (Eskiz — OTP) va AI kalitlari sozlanmagan — tegishli funksiyalar o'chiq
 7. ~~Buxgalteriya: ombordagi qo'lda kirim jurnal yozuvi yaratmaydi~~ — **eskirgan, hal qilingan**: qo'lda kirim DR 1200 / CR 3000 (yoki tanlangan qarshi hisob) yozadi, `inventory-journal.test.ts` bilan tasdiqlangan (2026-09-14 audit)
 8. Desktop: kod imzolash sertifikati (`CSC_LINK`, `CSC_KEY_PASSWORD`); Shtrix-M, YES POS, Rongta tarozilari uchun ishlab chiqaruvchining almashinuv protokoli hujjati
@@ -1626,7 +1695,9 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 - **Build/test xotirasi:** 8 GB mashinada Docker va Gradle birga ishlasa tizim fon vazifalarini to'xtatadi — APK Docker to'xtatilib qurildi
 - **DNS:** apex `bum-erp.uz` — webspace.uz panelida egasi o'zgartiradi (Railway tarifida `bum-web` ga yana domen qo'shib bo'lmaydi: `app` va `www` band)
 - **Production'da tizimga kirgan sinov:** egasining test hisobi yoki ishtiroki kerak (production admin paroli ishlatilmaydi)
-- **Kassa 0.4.4 e'loni:** platforma admini kirishi kerak (o'rnatuvchi tayyor, imzosiz)
+- **Kassa 0.4.5 e'loni:** platforma admini kirishi kerak (o'rnatuvchi tayyor, imzosiz); API xavfsizlik deployidan keyin
+- **Xavfsizlik fixlari production'da emas:** `railway up` avtomatik rejim klassifikatori tomonidan rad etildi — egasi deploy qiladi yoki ruxsat beradi; CSP, IP realip va WebSocket production'da — NOT VERIFIED
+- **Kod imzolash sertifikati (CLI-1):** yangilanish o'rnatuvchisi imzosiz — sertifikat kerak (pullik, taxminiy)
 - **Terminal ekvayringi (UZCARD/HUMO API):** bank yoki processing protokoli va kalitlari kerak — hozir terminal to'lovi kassir tomonidan chekka qarab kiritiladi
 - **Payme / Click:** merchant ID va kalitlari kerak — integratsiya boshlanmagan
 - **GitHub push / PR:** avtomatik rejimda `git push` rad etildi — egasi `git push -u origin feat/postgres-migration` va PR ochadi
