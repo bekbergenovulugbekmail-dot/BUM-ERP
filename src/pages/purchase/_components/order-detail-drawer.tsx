@@ -9,6 +9,7 @@ import LabelPrintDialog from "@/components/label-print-dialog.tsx";
 import { toLabelProduct, type LabelItem } from "@/lib/print/label-html.ts";
 import type { ProductListItem } from "@/pages/products/_lib/types.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
+import { BankCommissionHint } from "@/components/payments/bank-commission-hint.tsx";
 import { generatePurchaseOrderPDF } from "@/lib/pdf/purchase-order-pdf.ts";
 import { Button } from "@/components/ui/button.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
@@ -31,6 +32,26 @@ type Props = {
 };
 
 type ReceiveLine = { qty: number; batchNumber: string; expiryDate: string };
+
+type PayAccountOption = {
+  id: string;
+  name: string;
+  type: "cash" | "bank";
+  currency: string;
+  balance: string;
+  isDefault: boolean;
+  outgoingCommissionPercent: string;
+};
+
+const AUTO_ACCOUNT = "auto";
+
+/** To'lov usuli va valyutasiga mos hisoblar — server tartibida (asosiy birinchi, keyin nomi bo'yicha). */
+function payAccountChoices(accounts: PayAccountOption[] | undefined, currency: string, method: PaymentMethod) {
+  const type = method === "cash" ? "cash" : "bank";
+  return (accounts ?? [])
+    .filter((account) => account.currency === currency && account.type === type)
+    .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name));
+}
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-muted text-muted-foreground",
@@ -70,6 +91,10 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
   const [payCurrency, setPayCurrency] = useState<string | null>(null);
   const [payNote, setPayNote] = useState("");
+  const [payAccount, setPayAccount] = useState(AUTO_ACCOUNT);
+  // Hisoblar ro'yxati moliya ruxsati bilan; bo'lmasa server usul bo'yicha tanlaydi (naqd — asosiy kassa, boshqasi — bank)
+  const payAccounts = useApiQuery<{ cashAccounts: PayAccountOption[] }>(showPayment && can("finance.view") ? "/api/finance/cash-accounts" : null).data
+    ?.cashAccounts;
   // Bitta to'lov formasi — bitta reference (ikki marta bosilsa server takrorlamaydi)
   const [payReference, setPayReference] = useState(() => newReference("SP"));
   const [loading, setLoading] = useState(false);
@@ -157,6 +182,8 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
         method: payMethod,
         reference: payReference,
         notes: payNote.trim() || null,
+        // Tanlangan hisob (bank hisobi — komissiyasi bilan); "Avtomatik" — server usul bo'yicha
+        ...(payAccount !== AUTO_ACCOUNT ? { cashAccountId: payAccount } : {}),
         // cashAccountId yuborilmaydi → naqdda asosiy kassa, karta/bank/o'tkazmada bank hisobi
       });
       if (result.created) toast.success("To'lov qayd etildi va kassadan chiqim amalga oshdi");
@@ -414,7 +441,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                       </div>
                       <div>
                         <Label className="text-xs">Usul</Label>
-                        <Select value={payMethod} onValueChange={(v) => setPayMethod(v as PaymentMethod)}>
+                        <Select value={payMethod} onValueChange={(v) => { setPayMethod(v as PaymentMethod); setPayAccount(AUTO_ACCOUNT); }}>
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="cash">Naqd</SelectItem>
@@ -425,6 +452,33 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                         </Select>
                       </div>
                     </div>
+                    {payAccounts && (() => {
+                      const choices = payAccountChoices(payAccounts, activePayCurrency, payMethod);
+                      // "Avtomatik": asosiy valyutada naqd — asosiy kassa; boshqasi — server tanlaydigan birinchi hisob
+                      const autoAccount = payMethod === "cash" && activePayCurrency === currencies.base ? null : (choices[0] ?? null);
+                      const selected = payAccount === AUTO_ACCOUNT ? autoAccount : (choices.find((account) => account.id === payAccount) ?? null);
+                      return (
+                        <>
+                          <div>
+                            <Label htmlFor="supplier-pay-account" className="text-xs">Qaysi hisobdan</Label>
+                            <Select value={payAccount} onValueChange={setPayAccount}>
+                              <SelectTrigger id="supplier-pay-account"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={AUTO_ACCOUNT}>
+                                  Avtomatik — {autoAccount ? autoAccount.name : "asosiy kassa"}
+                                </SelectItem>
+                                {choices.map((account) => (
+                                  <SelectItem key={account.id} value={account.id}>
+                                    {account.name} ({formatMoney(account.balance, account.currency)})
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <BankCommissionHint account={selected} amount={payAmount || payRemaining} />
+                        </>
+                      );
+                    })()}
                     <div>
                       <Label className="text-xs">Izoh</Label>
                       <Input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Chek raqami..." />

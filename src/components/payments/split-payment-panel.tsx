@@ -58,13 +58,13 @@ function choicesFor(
   const list: Choice[] = [];
   if (methods.includes("cash")) list.push({ method: "cash", terminalId: null, cashAccountId: null, label: labels.cash, title: labels.cash });
   if (methods.includes("card")) {
-    if (terminals.length === 0) list.push({ method: "card", terminalId: null, cashAccountId: null, label: labels.card, title: labels.card });
+    list.push({ method: "card", terminalId: null, cashAccountId: null, label: labels.card, title: labels.card });
     for (const terminal of terminals) {
       list.push({ method: "card", terminalId: terminal.id, cashAccountId: null, label: terminalOptionLabel(terminal, terminals), title: terminal.name });
     }
   }
   if (methods.includes("bank")) {
-    if (bankAccounts.length === 0) list.push({ method: "bank", terminalId: null, cashAccountId: null, label: labels.bank, title: labels.bank });
+    list.push({ method: "bank", terminalId: null, cashAccountId: null, label: labels.bank, title: labels.bank });
     for (const account of bankAccounts) {
       list.push({ method: "bank", terminalId: null, cashAccountId: account.id, label: account.name, title: account.bankName ?? account.name });
     }

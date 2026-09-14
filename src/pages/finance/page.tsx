@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   DollarSign, TrendingUp, TrendingDown, Wallet,
   BarChart3, BookOpen,
-  Receipt, Building2, ShieldAlert, Sparkles, CreditCard,
+  Receipt, Building2, ShieldAlert, Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -16,13 +16,11 @@ import CashAccountsSection from "./_components/cash-accounts-section.tsx";
 import ExpensesSection from "./_components/expenses-section.tsx";
 import ProfitLossSection from "./_components/profit-loss-section.tsx";
 import AccountsSection from "./_components/accounts-section.tsx";
-import TerminalsSection from "./_components/terminals-section.tsx";
 import { fmt, toNum, type Account, type Expense, type ExpenseStats, type FinanceDashboard } from "./_lib/types.ts";
 
 const TABS = [
   { key: "overview", label: "Umumiy ko'rinish", icon: BarChart3 },
   { key: "cash", label: "Kassa & Bank", icon: Wallet },
-  { key: "terminals", label: "Karta terminallari", icon: CreditCard },
   { key: "expenses", label: "Xarajatlar", icon: Receipt },
   { key: "pnl", label: "Daromad & Zarar", icon: TrendingUp },
   { key: "accounts", label: "Hisoblar rejasi", icon: BookOpen },
@@ -180,7 +178,6 @@ export default function FinancePage() {
       {/* Tab content */}
       {tab === "overview" && <OverviewTab stats={stats} expStats={expStats} />}
       {tab === "cash" && <CashAccountsSection />}
-      {tab === "terminals" && <TerminalsSection />}
       {tab === "expenses" && <ExpensesSection />}
       {tab === "pnl" && <ProfitLossSection />}
       {tab === "accounts" && <AccountsSection />}

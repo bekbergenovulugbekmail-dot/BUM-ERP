@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
+import { BankCommissionHint } from "@/components/payments/bank-commission-hint.tsx";
 import {
   fmt, localIsoDate, toNum,
   type CashAccount, type Expense, type ExpenseStats, type ExpenseStatus,
@@ -313,6 +314,7 @@ export default function ExpensesSection() {
                   </SelectContent>
                 </Select>
               </div>
+              <BankCommissionHint account={cashAccounts?.find((a) => a.id === payCashAccount)} amount={payExpense.amount} />
               <div>
                 <Label>To'lov sanasi</Label>
                 <Input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />

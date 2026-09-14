@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { BarChart2, Package, TrendingUp, Sparkles, ShieldAlert } from "lucide-react";
+import { BarChart2, Package, TrendingUp, Sparkles, ShieldAlert, Landmark } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { useTranslation } from "react-i18next";
@@ -10,16 +10,19 @@ import OverviewSection from "./_components/overview-section.tsx";
 import StockAnalysisSection from "./_components/stock-analysis-section.tsx";
 import SalesReportSection from "./_components/sales-report-section.tsx";
 import AIAssistantSection from "./_components/ai-assistant-section.tsx";
+import BankFeesSection from "./_components/bank-fees-section.tsx";
 
 const DAY_OPTIONS = [7, 14, 30, 60, 90];
 
 export default function AnalyticsPage() {
   const { t } = useTranslation("modules");
-  const [tab, setTab] = useState<"overview" | "sales" | "stock" | "ai">("overview");
+  const [tab, setTab] = useState<"overview" | "sales" | "stock" | "bankFees" | "ai">("overview");
   const [days, setDays] = useState(30);
 
   const { can, isLoading: permissionsLoading } = usePermissions();
   const canView = can("analytics.view");
+  // Bank komissiyasi hisoboti — moliya ma'lumoti
+  const canViewFinance = can("finance.view");
   // AI kaliti sozlanmagan bo'lsa bo'lim ko'rsatilmaydi
   const aiEnabled = useApiQuery<{ enabled: boolean }>("/api/ai/status").data?.enabled ?? false;
 
@@ -27,10 +30,11 @@ export default function AnalyticsPage() {
     { key: "overview" as const, label: t("analytics.tab.overview"), icon: BarChart2 },
     { key: "sales" as const, label: t("analytics.tab.sales"), icon: TrendingUp },
     { key: "stock" as const, label: t("analytics.tab.stock"), icon: Package },
+    { key: "bankFees" as const, label: t("analytics.tab.bankFees"), icon: Landmark },
     { key: "ai" as const, label: t("analytics.tab.ai"), icon: Sparkles },
-  ].filter((item) => item.key !== "ai" || aiEnabled);
+  ].filter((item) => (item.key !== "ai" || aiEnabled) && (item.key !== "bankFees" || canViewFinance));
 
-  const activeTab = tab === "ai" && !aiEnabled ? "overview" : tab;
+  const activeTab = (tab === "ai" && !aiEnabled) || (tab === "bankFees" && !canViewFinance) ? "overview" : tab;
 
   const periodLabel = (d: number) => {
     const key = `analytics.period.${d}` as const;
@@ -109,6 +113,7 @@ export default function AnalyticsPage() {
             {activeTab === "overview" && <OverviewSection days={days} />}
             {activeTab === "sales" && <SalesReportSection days={days} />}
             {activeTab === "stock" && <StockAnalysisSection days={days} />}
+            {activeTab === "bankFees" && <BankFeesSection days={days} />}
             {activeTab === "ai" && <AIAssistantSection />}
           </motion.div>
         </>

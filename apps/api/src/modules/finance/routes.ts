@@ -5,6 +5,7 @@
  *   GET    /accounts (?type=&includeInactive=)                 finance.view
  *   POST   /accounts, PATCH /accounts/:accountId               finance.manage
  *   GET    /reports/trial-balance, /reports/profit-loss (?dateFrom=&dateTo=)   finance.view
+ *   GET    /reports/bank-commissions (?dateFrom=&dateTo=&cashAccountId=)   finance.view (karta va pul chiqarish komissiyasi)
  *   GET    /journal (?dateFrom=&dateTo=&status=&referenceType=&limit=&cursor=), /journal/:entryId   finance.view
  *   POST   /journal                                            finance.manage (qo'lda yozuv)
  *   POST   /journal/:entryId/void                              finance.approve (faqat qo'lda yozuv)
@@ -59,6 +60,7 @@ import {
   setExpenseStatus,
   updateExpense,
 } from "./expenses.service.js";
+import { bankCommissionReport } from "./bank-commission-report.service.js";
 import {
   getCbuRates,
   getCurrencySettings,
@@ -103,6 +105,7 @@ const accountPatch = z.strictObject({
 });
 const accountsQuery = z.object({ type: z.enum(accountTypes).optional(), includeInactive: boolQuery });
 const rangeQuery = z.object({ dateFrom: isoDate.optional(), dateTo: isoDate.optional() });
+const bankCommissionQuery = z.object({ dateFrom: isoDate.optional(), dateTo: isoDate.optional(), cashAccountId: z.uuid().optional() });
 
 const journalBody = z.strictObject({
   entryDate: isoDate,
@@ -304,6 +307,11 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
   app.get("/reports/profit-loss", async (req) => {
     const range = rangeQuery.parse(req.query);
     return profitAndLoss(db, await readTenant(req, "finance.view"), range);
+  });
+
+  app.get("/reports/bank-commissions", async (req) => {
+    const query = bankCommissionQuery.parse(req.query);
+    return bankCommissionReport(db, await readTenant(req, "finance.view"), query);
   });
 
   // ─── Jurnal ──────────────────────────────────────────────────────────────

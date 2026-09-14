@@ -116,7 +116,38 @@ export type ExpenseStats = {
   byCategory: { category: string; total: string }[];
 };
 
-export type ProfitLossLine = { accountId: string; code: string; name: string; amount: string };
+/** `GET /api/finance/reports/bank-commissions` — ekvayring (karta) va pul chiqarish komissiyasi. */
+export type BankCommissionReport = {
+  dateFrom: string | null;
+  dateTo: string | null;
+  totals: { acquiring: string; outgoing: string; total: string; cardTurnover: string };
+  byAccount: { cashAccountId: string; name: string; acquiring: string; outgoing: string; total: string; cardTurnover: string }[];
+  byTerminal: {
+    terminalId: string;
+    name: string;
+    network: TerminalNetwork;
+    cashAccountName: string;
+    commissionPercent: string;
+    turnover: string;
+    commission: string;
+    net: string;
+  }[];
+  rows: {
+    id: string;
+    number: string;
+    date: string;
+    kind: "acquiring" | "outgoing";
+    sourceType: string;
+    cashAccountId: string | null;
+    cashAccountName: string | null;
+    terminalName: string | null;
+    sourceAmount: string | null;
+    amount: string;
+    description: string;
+  }[];
+};
+
+export type ProfitLossLine ={ accountId: string; code: string; name: string; amount: string };
 
 export type ProfitLoss = {
   income: ProfitLossLine[];
@@ -131,7 +162,13 @@ export const toNum = (value: string | number | null | undefined) => Number(value
 export const fmt = (value: string | number | null | undefined) =>
   new Intl.NumberFormat("uz-UZ").format(Math.round(toNum(value)));
 
-/** Mahalliy sana (UTC emas) — "YYYY-MM-DD". */
+/** "YYYY-MM-DD" ga kun qo'shish/ayirish (sof funksiya — render ichida xavfsiz). */
+export function shiftIsoDate(iso: string, days: number) {
+  const [year, month, day] = iso.split("-").map(Number);
+  return localIsoDate(new Date(year!, month! - 1, day! + days));
+}
+
+/** Mahalliy sana (UTC emas)— "YYYY-MM-DD". */
 export function localIsoDate(date = new Date()) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");

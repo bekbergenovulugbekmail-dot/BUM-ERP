@@ -14,6 +14,7 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { generatePayslipPDF } from "@/lib/pdf/payslip-pdf.ts";
 import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
+import { BankCommissionHint } from "@/components/payments/bank-commission-hint.tsx";
 import { fmt, localIsoDate, toNum, trimQty, type SalaryPayment, type SalarySummary } from "../_lib/types.ts";
 
 const STATUS_MAP = {
@@ -26,7 +27,7 @@ type PaymentMethod = "cash" | "bank" | "card" | "transfer";
 const METHOD_LABELS: Record<PaymentMethod, string> = { cash: "Naqd", bank: "Bank", card: "Karta", transfer: "O'tkazma" };
 const AUTO_ACCOUNT = "auto";
 
-type CashAccountOption = { id: string; name: string; type: "cash" | "bank"; balance: string };
+type CashAccountOption = { id: string; name: string; type: "cash" | "bank"; balance: string; currency: string; outgoingCommissionPercent: string };
 type SalaryPatch = { id: string; bonus: string; deductions: string; notes: string | null };
 type PayBody = { id: string; method: PaymentMethod; cashAccountId: string | null; paidDate: string };
 
@@ -326,6 +327,9 @@ export default function SalarySection() {
                     </SelectContent>
                   </Select>
                 </div>
+              )}
+              {payAccount !== AUTO_ACCOUNT && (
+                <BankCommissionHint account={cashAccounts?.find((a) => a.id === payAccount)} amount={payDialog.netSalary} />
               )}
             </div>
             <DialogFooter>

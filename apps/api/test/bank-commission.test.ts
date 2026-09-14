@@ -129,6 +129,32 @@ describe("Bank komissiyasi", () => {
     // Xarajatlar bo'limida ko'rinadi
     const list = (await call(owner(), "GET", "/api/finance/expenses?category=bank%20komissiyasi")).json().expenses as { amount: string }[];
     expect(list.map((row) => row.amount)).toEqual(["250.00"]);
+
+    // Bank hisobi tarixida: karta turi nomi bilan kirim va alohida komissiya chiqimi
+    const history = (await call(owner(), "GET", `/api/finance/cash-accounts/${mainBank}/transactions`)).json().transactions as {
+      type: string;
+      description: string;
+      category: string | null;
+      amount: string;
+    }[];
+    expect(history.some((tx) => tx.type === "in" && tx.amount === "100000.00" && tx.description.endsWith("· UZCARD"))).toBe(true);
+    expect(history.some((tx) => tx.type === "out" && tx.amount === "250.00" && tx.category === "bank komissiyasi")).toBe(true);
+
+    // Hisobot: kartadan tushum (brutto), komissiya va sof — karta turi va bank hisobi bo'yicha
+    const report = (await call(owner(), "GET", "/api/finance/reports/bank-commissions")).json();
+    expect(report.totals).toEqual({ acquiring: "250.00", outgoing: "0.00", total: "250.00", cardTurnover: "200000.00" });
+    expect(report.byTerminal).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ terminalId: uzcard.id, network: "uzcard", turnover: "100000.00", commission: "250.00", net: "99750.00", commissionPercent: "0.25" }),
+        expect.objectContaining({ terminalId: humo.id, turnover: "100000.00", commission: "0.00", net: "100000.00" }),
+      ]),
+    );
+    expect(report.byAccount).toEqual([expect.objectContaining({ cashAccountId: mainBank, acquiring: "250.00", outgoing: "0.00", cardTurnover: "200000.00" })]);
+    expect(report.rows).toMatchObject([
+      { kind: "acquiring", sourceType: "customer_payment", amount: "250.00", sourceAmount: "100000.00", terminalName: "UZCARD", cashAccountId: mainBank },
+    ]);
+    // Kassir moliya hisobotini ko'rmaydi
+    expect((await call(kassir.cookie, "GET", "/api/finance/reports/bank-commissions")).statusCode).toBe(403);
   });
 
   it("pul chiqarish 1%: ta'minotchiga 1 000 000 — hisobdan 1 010 000, ta'minotchiga 1 000 000, 10 000 xarajat; xarajat, o'tkazma, qo'lda chiqim; mablag' yetmasa hech narsa; kassadan — komissiyasiz", async () => {
@@ -172,5 +198,16 @@ describe("Bank komissiyasi", () => {
     expect((await call(owner(), "POST", "/api/purchase/payments", { supplierId: third.supplierId, orderId: third.orderId, amount: "50000", method: "cash" })).statusCode).toBe(201);
     expect(await balanceOf(mainCash)).toBe("50000.00");
     expect(await bankFees()).toHaveLength(4);
+
+    // Hisobot: pul chiqarish komissiyasi manbalar bo'yicha; hisob va davr filtri
+    const report = (await call(owner(), "GET", `/api/finance/reports/bank-commissions?cashAccountId=${mainBank}`)).json();
+    expect(report.totals).toEqual({ acquiring: "0.00", outgoing: "12500.00", total: "12500.00", cardTurnover: "0.00" });
+    expect((report.rows as { sourceType: string; kind: string }[]).map((row) => `${row.kind}:${row.sourceType}`).sort()).toEqual(
+      ["outgoing:cash_transaction", "outgoing:cash_transfer", "outgoing:expense", "outgoing:supplier_payment"].sort(),
+    );
+    expect(report.byAccount).toEqual([expect.objectContaining({ cashAccountId: mainBank, outgoing: "12500.00", total: "12500.00" })]);
+    expect((await call(owner(), "GET", `/api/finance/reports/bank-commissions?cashAccountId=${mainCash}`)).json().totals.total).toBe("0.00");
+    expect((await call(owner(), "GET", "/api/finance/reports/bank-commissions?dateFrom=2999-01-01")).json().totals.total).toBe("0.00");
+    expect((await call(owner(), "GET", "/api/finance/reports/bank-commissions?dateFrom=bad")).statusCode).toBe(400);
   });
 });

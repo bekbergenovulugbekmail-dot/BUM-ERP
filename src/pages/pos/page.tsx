@@ -265,20 +265,20 @@ export default function POSPage() {
   const paid = splitActive ? minorToNumber(splitPaid) : payMethod === "cash" && amountPaid.trim() !== "" ? num(amountPaid) : due;
   const change = splitActive ? 0 : Math.max(0, paid - due);
   // To'lov tugmalari: Naqd | terminallar (yo'q bo'lsa — Karta) | bank hisoblari (yo'q bo'lsa — Bank)
+  // Naqd, Karta, Bank doim; yonida karta turlari (UZCARD, HUMO — bog'langan bank hisobiga, komissiya bilan) va
+  // Moliya bo'limida kassada ko'rsatilgan bank hisoblari
   const payOptions: PayOption[] = [
     { key: "cash", method: "cash", terminalId: null, cashAccountId: null, label: "Naqd" },
-    ...(terminals.length > 0
-      ? terminals.map((terminal): PayOption => ({
-          key: `t:${terminal.id}`,
-          method: "card",
-          terminalId: terminal.id,
-          cashAccountId: null,
-          label: terminalOptionLabel(terminal, terminals),
-        }))
-      : [{ key: "card", method: "card", terminalId: null, cashAccountId: null, label: "Karta" } satisfies PayOption]),
-    ...(bankAccounts.length > 0
-      ? bankAccounts.map((account): PayOption => ({ key: `a:${account.id}`, method: "bank", terminalId: null, cashAccountId: account.id, label: account.name }))
-      : [{ key: "bank", method: "bank", terminalId: null, cashAccountId: null, label: "Bank" } satisfies PayOption]),
+    { key: "card", method: "card", terminalId: null, cashAccountId: null, label: "Karta" },
+    { key: "bank", method: "bank", terminalId: null, cashAccountId: null, label: "Bank" },
+    ...terminals.map((terminal): PayOption => ({
+      key: `t:${terminal.id}`,
+      method: "card",
+      terminalId: terminal.id,
+      cashAccountId: null,
+      label: terminalOptionLabel(terminal, terminals),
+    })),
+    ...bankAccounts.map((account): PayOption => ({ key: `a:${account.id}`, method: "bank", terminalId: null, cashAccountId: account.id, label: account.name })),
   ];
   const selectedPay = payOptions.find((option) => option.key === payKey) ?? payOptions.find((option) => option.method === payMethod) ?? payOptions[0]!;
   // Bitta usulda terminal yoki aniq bank hisobi — pul o'sha hisobga (terminal komissiyasi serverda ushlanadi)

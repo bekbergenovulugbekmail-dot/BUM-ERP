@@ -13,6 +13,8 @@ import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
+import { BankCommissionHint } from "@/components/payments/bank-commission-hint.tsx";
+import AccountCardPayments, { AccountCommissionSummary } from "./account-card-payments.tsx";
 import { localIsoDate, toNum, type Account, type CashAccount, type CashTransaction } from "../_lib/types.ts";
 
 const DEFAULT_LEDGER = "default";
@@ -35,7 +37,7 @@ function BankAccountSettings({ account, busy, onSave }: { account: CashAccount; 
           disabled={busy}
           onCheckedChange={(showInPos) => onSave({ showInPos }, showInPos ? "Hisob kassada to'lov usuli sifatida ko'rinadi" : "Hisob kassada yashirildi")}
         />
-        <span>Kassada ko'rsatish</span>
+        <span>Kassada «{account.name}» tugmasi (bank o'tkazmasi)</span>
       </label>
       <div className="space-y-1">
         <Label htmlFor="bank-outgoing-commission" className="text-xs text-muted-foreground">Pul chiqarish komissiyasi, %</Label>
@@ -67,6 +69,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   transfer: "o'tkazma",
   opening_balance: "boshlang'ich qoldiq",
   salary: "maosh",
+  sales: "sotuv",
 };
 
 type CashTransactionBody = {
@@ -270,6 +273,10 @@ export default function CashAccountsSection() {
         />
       )}
 
+      {/* Bank hisobi: bu oygi karta tushumi va komissiyalar, shu hisobga tushadigan karta turlari (UZCARD, HUMO) */}
+      {selectedAccount && selectedAccount.type === "bank" && <AccountCommissionSummary key={`sum-${selectedAccount.id}`} account={selectedAccount} />}
+      {selectedAccount && selectedAccount.type === "bank" && <AccountCardPayments key={`cards-${selectedAccount.id}`} account={selectedAccount} />}
+
       {/* Transaction actions */}
       {selectedAccount && canManage && (
         <div className="flex gap-2">
@@ -307,7 +314,14 @@ export default function CashAccountsSection() {
                   <tr key={tx.id} className="hover:bg-muted/20">
                     <td className="px-4 py-2.5 text-muted-foreground">{tx.txDate}</td>
                     <td className="px-4 py-2.5">
-                      <p>{tx.description}</p>
+                      <p>
+                        {tx.description}
+                        {tx.category === "bank komissiyasi" && (
+                          <span className="ml-1.5 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                            komissiya
+                          </span>
+                        )}
+                      </p>
                       {tx.category && (
                         <p className="text-xs text-muted-foreground capitalize">{CATEGORY_LABELS[tx.category] ?? tx.category}</p>
                       )}
@@ -341,6 +355,7 @@ export default function CashAccountsSection() {
                 <Label>Summa ({selectedAccount?.currency ?? currencies.base})</Label>
                 <Input type="number" min="0" step="0.01" value={txAmount} onChange={(e) => setTxAmount(e.target.value)} placeholder="0" />
               </div>
+              {txDialog === "out" && <BankCommissionHint account={selectedAccount} amount={txAmount} />}
               <div>
                 <Label>Tavsif</Label>
                 <Input value={txDesc} onChange={(e) => setTxDesc(e.target.value)} placeholder="Nima uchun?" />
@@ -412,7 +427,7 @@ export default function CashAccountsSection() {
                     <p className="mt-1 text-[11px] text-muted-foreground">Ta'minotchi, xarajat, maosh va o'tkazmada avtomatik yechiladi</p>
                   </div>
                   <label className="flex cursor-pointer items-center justify-between rounded-xl border border-border px-3 py-2 text-sm">
-                    <span>Kassada ko'rsatish</span>
+                    <span>Kassada bank o'tkazmasi tugmasi</span>
                     <Switch checked={acctShowInPos} onCheckedChange={setAcctShowInPos} />
                   </label>
                 </>

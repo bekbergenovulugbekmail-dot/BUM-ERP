@@ -163,7 +163,8 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
     amount: foreign ? input.foreignAmount! : input.amount,
     currency: paymentCurrency,
     txDate: paymentDate,
-    description,
+    // Bank hisobi tarixida qaysi karta turidan tushgani ko'rinsin ("Mijoz to'lovi: SO-2026-0001 · UZCARD")
+    description: terminal ? `${description} · ${terminal.name}` : description,
     category: "sales",
     referenceType: "customer_payment",
     referenceId: payment!.id,
