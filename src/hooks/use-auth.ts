@@ -124,6 +124,16 @@ export function useAuth() {
   const signout = useCallback(() => {
     // Agent ish joyining oflayn keshi (do'konlar, katalog, buyurtmalar) keyingi foydalanuvchiga qolmasin
     if (typeof navigator !== "undefined") navigator.serviceWorker?.controller?.postMessage({ type: "clear-agent-cache" });
+    // Sahifa service worker nazoratida bo'lmasa ham (qattiq qayta yuklash) — kesh sahifaning o'zidan o'chiriladi
+    if (typeof caches !== "undefined") void caches.delete("agent-api-v2").catch(() => undefined);
+    // Yuborilmagan GPS nuqtalari keyingi foydalanuvchi nomidan yuborilmasin; buyurtma qoralamalari qurilmada qolmasin
+    try {
+      for (const key of Object.keys(localStorage)) {
+        if (key === "bum:delivery-locations" || key.startsWith("bum:agent-order:") || /^bum:.*draft/i.test(key)) localStorage.removeItem(key);
+      }
+    } catch {
+      // localStorage yopiq (xususiy rejim) — tozalanadigan narsa yo'q
+    }
     void api
       .post("/api/auth/logout")
       .catch(() => undefined)

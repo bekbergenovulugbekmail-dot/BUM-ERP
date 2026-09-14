@@ -3675,9 +3675,11 @@ export class KassaService {
     if (!remote.available || !remote.url || !remote.sha256 || !remote.latest) throw new KassaError("CONFLICT", "Yangi versiya yo'q");
     const apiUrl = this.store.getMeta<string>("apiUrl");
     const token = this.vault.load();
-    const sameOrigin = remote.url.startsWith("/");
+    // "//host/..." ham "/" bilan boshlanadi, lekin boshqa hostga ketadi — token faqat aynan API origin'iga yuboriladi
+    const sameOrigin = remote.url.startsWith("/") && !remote.url.startsWith("//");
     if (sameOrigin ? !apiUrl : !remote.url.startsWith("https://")) throw new KassaError("BAD_REQUEST", "Yangilanish manzili xavfsiz emas");
     const target = sameOrigin ? new URL(remote.url, apiUrl!) : new URL(remote.url);
+    if (sameOrigin && target.origin !== new URL(apiUrl!).origin) throw new KassaError("BAD_REQUEST", "Yangilanish manzili xavfsiz emas");
     const info = await this.toUpdateInfo(remote);
     if (info.downloaded) return info;
 

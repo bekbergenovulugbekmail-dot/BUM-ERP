@@ -67,6 +67,33 @@ function tokenVault(store: LocalStore): TokenVault {
   };
 }
 
+/** Chek HTML'i uchun CSP: tashqi resurs va sahifa skripti yuklanmaydi (balandlikni main jarayon o'lchaydi — CSP ta'sir qilmaydi). */
+const PRINT_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:">`;
+
+function withPrintCsp(html: string): string {
+  return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (tag) => `${tag}${PRINT_CSP}`) : `${PRINT_CSP}${html}`;
+}
+
+const EXTERNAL_HOSTS = ["bum-erp.uz", "up.railway.app", "google.com", "yandex.uz", "yandex.ru", "openstreetmap.org"];
+
+/** Tashqi havola: faqat https va ro'yxatdagi domen (yoki uning subdomeni). */
+export function isAllowedExternalUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:" || url.username || url.password) return false;
+  return EXTERNAL_HOSTS.some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`));
+}
+
+/** Yashirin chop etish oynasi hech qayerga o'tmaydi va yangi oyna ochmaydi. */
+function lockPrintWindow(win: BrowserWindow): void {
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event) => event.preventDefault());
+}
+
 const receiptPrinter: ReceiptPrinter = {
   async list() {
     const printers = (await mainWindow?.webContents.getPrintersAsync()) ?? [];
@@ -74,8 +101,9 @@ const receiptPrinter: ReceiptPrinter = {
   },
   async print(html, prefs) {
     const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    lockPrintWindow(win);
     try {
-      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(withPrintCsp(html))}`);
       const heightPx = Number(await win.webContents.executeJavaScript("document.documentElement.scrollHeight", true)) || 600;
       // px → mikron (96 dpi); pastda qirqish uchun zaxira
       const heightMicrons = Math.max(Math.ceil(((heightPx * 25.4) / 96) * 1000) + 8000, 30_000);
@@ -103,6 +131,7 @@ const receiptPrinter: ReceiptPrinter = {
     // Ko'p etiketka (shtrix-kod SVG) data: URL chegarasidan katta bo'lishi mumkin — vaqtinchalik fayl orqali
     const file = path.join(app.getPath("temp"), `bum-labels-${randomUUID()}.html`);
     const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false } });
+    lockPrintWindow(win);
     try {
       await writeFile(file, html, "utf8");
       await win.loadFile(file);
@@ -155,7 +184,8 @@ function createWindow() {
     },
   });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("https://")) void shell.openExternal(url);
+    // Tizim brauzerida faqat ma'lum saytlar ochiladi (BUM ERP, xarita navigatorlari) — ixtiyoriy havola emas
+    if (isAllowedExternalUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());

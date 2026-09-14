@@ -33,18 +33,8 @@
     />
 
     <!-- Detect dark mode preference and set the class before next-themes loads. This avoids a flash of unstyled content (FOUC) when the page loads. -->
-    <script>
-      try {
-        let theme = localStorage.getItem("theme");
-        if (theme === "system" || !theme) {
-          let prefersDark = window.matchMedia(
-            "(prefers-color-scheme: dark)",
-          ).matches;
-          theme = prefersDark ? "dark" : "light";
-        }
-        document.documentElement.classList.add(theme);
-      } catch (e) {}
-    </script>
+    <!-- Alohida fayl: Content-Security-Policy inline skriptni taqiqlaydi -->
+    <script src="/theme-init.js"></script>
 
     <link href="/src/index.css" rel="stylesheet" />
 
