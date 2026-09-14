@@ -1,13 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
-import type { FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
+import { products, units } from "../src/db/schema/catalog.js";
+import { accounts, cashAccounts } from "../src/db/schema/finance.js";
 import { warehouses } from "../src/db/schema/inventory.js";
-import { auditLogs, companyMembers, passwordResetCodes, users } from "../src/db/schema/platform.js";
+import { auditLogs, companyMembers, passwordResetCodes, roles, users } from "../src/db/schema/platform.js";
 import { posDeviceCashiers } from "../src/db/schema/pos.js";
+import { salesOrderItems } from "../src/db/schema/sales.js";
+import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
 import { buildServer } from "../src/server.js";
 import { writeAuditLog } from "../src/shared/audit.js";
+import { registerErrorHandler } from "../src/shared/errors.js";
 import { smsProvider } from "../src/shared/sms.js";
 import { addEmployee, createCompany, createUser, login, me, resetDatabase, signedIn } from "./helpers.js";
 
@@ -37,7 +42,7 @@ beforeEach(async () => {
   ownerId = (await db.select({ id: users.id }).from(users).where(eq(users.phone, company.owner.phone)))[0]!.id;
 });
 
-const call = (cookie: string, method: "GET" | "POST" | "PATCH" | "DELETE", url: string, payload?: object, headers: Record<string, string> = {}) =>
+const call = (cookie: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", url: string, payload?: object, headers: Record<string, string> = {}) =>
   app.inject({ method, url, headers: { cookie, ...headers }, ...(payload ? { payload } : {}) });
 
 const memberActive = async (userId: string) =>
@@ -260,5 +265,247 @@ describe("Xavfsizlik: mijoz IP soxtalashtirilmaydi", () => {
       .from(auditLogs)
       .where(and(eq(auditLogs.userId, user.id), eq(auditLogs.action, "login_failed")));
     expect(row!.ipAddress).toBe("198.51.100.9");
+  });
+});
+
+describe("Xavfsizlik: pul va ruxsat chegaralari", () => {
+  let piece: string;
+  let mainWh: string;
+  let mainCash: string;
+  let mainBank: string;
+  let productId: string;
+  const owner = () => company.ownerCookie;
+  const balanceOf = async (id: string) => (await db.select({ balance: cashAccounts.balance }).from(cashAccounts).where(eq(cashAccounts.id, id)))[0]!.balance;
+  const capitalAccount = async () =>
+    (await db.select({ id: accounts.id }).from(accounts).where(and(eq(accounts.companyId, company.companyId), eq(accounts.code, "3000"))))[0]!.id;
+  const openShift = async (cookie: string, openingCash = "0") => {
+    const res = await call(cookie, "POST", "/api/sales/pos/shifts", { warehouseId: mainWh, openingCash });
+    expect(res.statusCode, res.body).toBe(201);
+    return res.json().shift.id as string;
+  };
+
+  beforeEach(async () => {
+    await db.delete(units);
+    await seedDefaultUnits(db);
+    piece = (await db.select().from(units).where(eq(units.shortName, "d")))[0]!.id;
+    mainWh = (await db.select().from(warehouses).where(eq(warehouses.companyId, company.companyId)))[0]!.id;
+    const cash = await db.select().from(cashAccounts).where(eq(cashAccounts.companyId, company.companyId));
+    mainCash = cash.find((row) => row.type === "cash")!.id;
+    mainBank = cash.find((row) => row.type === "bank")!.id;
+    const product = await call(owner(), "POST", "/api/catalog/products", { name: "Choy", sku: "CHOY", baseUnitId: piece, salesPrice: "5000", taxRate: "0" });
+    expect(product.statusCode, product.body).toBe(201);
+    productId = product.json().product.id as string;
+    const stock = await call(owner(), "POST", "/api/inventory/stock/movements", { type: "receive", productId, warehouseId: mainWh, quantity: "40", costPrice: "3000" });
+    expect(stock.statusCode, stock.body).toBe(201);
+  });
+
+  it("kassa: kutilgan naqddan ortiq chiqim va boshqa hisobga inkassatsiya kassirga rad; moliya ruxsati bilan inkassatsiya ishlaydi", async () => {
+    const kassir = await addEmployee(app, company, "Kassir");
+    const shiftId = await openShift(kassir.cookie, "100000");
+    const move = (cookie: string, body: object) => call(cookie, "POST", `/api/sales/pos/shifts/${shiftId}/cash-movements`, body);
+
+    expect((await move(kassir.cookie, { kind: "other_out", amount: "150000" })).statusCode).toBe(400);
+    const toBank = await move(kassir.cookie, { kind: "collection", amount: "50000", targetAccountId: mainBank });
+    expect(toBank.statusCode, toBank.body).toBe(403);
+    expect(await balanceOf(mainBank)).toBe("0.00");
+
+    const within = await move(kassir.cookie, { kind: "other_out", amount: "40000" });
+    expect(within.statusCode, within.body).toBeLessThan(300);
+    // Kutilgan naqd endi 60 000 — undan 1 so'm ortig'i ham rad
+    expect((await move(kassir.cookie, { kind: "collection", amount: "60001" })).statusCode).toBe(400);
+
+    const fund = await call(owner(), "POST", "/api/finance/cash-transactions", { cashAccountId: mainCash, type: "in", amount: "100000", description: "Kirim", counterAccountId: await capitalAccount() });
+    expect(fund.statusCode, fund.body).toBe(201);
+    const byOwner = await move(owner(), { kind: "collection", amount: "20000", targetAccountId: mainBank });
+    expect(byOwner.statusCode, byOwner.body).toBeLessThan(300);
+    expect(await balanceOf(mainBank)).toBe("20000.00");
+  });
+
+  it("POS: balansga yoziladigan qaytim chek summasidan oshmaydi", async () => {
+    const kassir = await addEmployee(app, company, "Kassir");
+    const shiftId = await openShift(kassir.cookie);
+    const customer = await call(kassir.cookie, "POST", "/api/sales/pos/customers", { name: "Balansli mijoz" });
+    expect(customer.statusCode, customer.body).toBe(201);
+    const sell = (amountPaid: string) =>
+      call(kassir.cookie, "POST", "/api/sales/pos/sales", {
+        shiftId,
+        customerId: customer.json().customer.id,
+        items: [{ productId, quantity: "1" }],
+        paymentMethod: "cash",
+        amountPaid,
+        changeToBalance: true,
+      });
+
+    const inflated = await sell("1000000");
+    expect(inflated.statusCode, inflated.body).toBe(400);
+    const normal = await sell("9000");
+    expect(normal.statusCode, normal.body).toBe(201);
+    expect(normal.json()).toMatchObject({ change: "0.00", changeToBalance: "4000.00" });
+  });
+
+  it("savdo qaytarish: karta bilan to'langan chekni naqd qaytarish moliya ruxsatisiz rad; asl usulda qaytadi", async () => {
+    const kassir = await addEmployee(app, company, "Kassir");
+    const shiftId = await openShift(kassir.cookie, "100000");
+    const sale = await call(kassir.cookie, "POST", "/api/sales/pos/sales", { shiftId, items: [{ productId, quantity: "2" }], paymentMethod: "card", amountPaid: "10000" });
+    expect(sale.statusCode, sale.body).toBe(201);
+    const orderId = sale.json().order.id as string;
+    const [line] = await db.select().from(salesOrderItems).where(eq(salesOrderItems.orderId, orderId));
+
+    const manager = await addEmployee(app, company, "Savdo menejeri");
+    const giveBack = (refundMethod: string) =>
+      call(manager.cookie, "POST", `/api/sales/orders/${orderId}/return-items`, { items: [{ orderItemId: line!.id, quantity: "1" }], refundMethod });
+    const asCash = await giveBack("cash");
+    expect(asCash.statusCode, asCash.body).toBe(403);
+    const asCard = await giveBack("card");
+    expect(asCard.statusCode, asCard.body).toBe(201);
+  });
+
+  it("xarid: qaytgan pul qaytarilgan tovar qiymatidan oshmaydi; sotuv narxini faqat products.edit bor qabul qiluvchi o'zgartiradi", async () => {
+    const supplier = await call(owner(), "POST", "/api/purchase/suppliers", { name: "Ta'minotchi", code: "S-1" });
+    expect(supplier.statusCode, supplier.body).toBe(201);
+    const supplierId = supplier.json().supplier.id as string;
+    const receivedOrder = async (receiverCookie: string, salesPrice: string | null) => {
+      const created = await call(owner(), "POST", "/api/purchase/orders", {
+        supplierId,
+        warehouseId: mainWh,
+        orderDate: today,
+        items: [{ productId, unitId: piece, orderedQty: "2", unitPrice: "3000", salesPrice }],
+      });
+      expect(created.statusCode, created.body).toBe(201);
+      const order = (await call(owner(), "POST", `/api/purchase/orders/${created.json().order.id}/confirm`)).json().order;
+      const received = await call(receiverCookie, "POST", `/api/purchase/orders/${order.id}/receipts`, { items: [{ orderItemId: order.items[0].id, receivedQty: "2" }] });
+      expect(received.statusCode, received.body).toBe(201);
+      return order as { id: string; items: { id: string }[] };
+    };
+    const salesPrice = async () => Number((await db.select({ salesPrice: products.salesPrice }).from(products).where(eq(products.id, productId)))[0]!.salesPrice);
+
+    const omborchi = await addEmployee(app, company, "Omborchi");
+    await receivedOrder(omborchi.cookie, "9999");
+    expect(await salesPrice()).toBe(5000);
+    const order = await receivedOrder(owner(), "7777");
+    expect(await salesPrice()).toBe(7777);
+
+    const giveBack = (amount: string) =>
+      call(owner(), "POST", `/api/purchase/orders/${order.id}/returns`, { items: [{ orderItemId: order.items[0]!.id, quantity: "1" }], refund: { amount, method: "cash" } });
+    const inflated = await giveBack("5000");
+    expect(inflated.statusCode, inflated.body).toBe(400);
+    const exact = await giveBack("3000");
+    expect(exact.statusCode, exact.body).toBeLessThan(300);
+  });
+
+  it("ombor: qo'lda kirimda qarshi buxgalteriya hisobini omborchi tanlay olmaydi", async () => {
+    const omborchi = await addEmployee(app, company, "Omborchi");
+    const counterAccountId = await capitalAccount();
+    const receive = (cookie: string, extra: object) =>
+      call(cookie, "POST", "/api/inventory/stock/movements", { type: "receive", productId, warehouseId: mainWh, quantity: "1", costPrice: "3000", ...extra });
+    expect((await receive(omborchi.cookie, { counterAccountId })).statusCode).toBe(403);
+    expect((await receive(omborchi.cookie, {})).statusCode).toBe(201);
+    expect((await receive(owner(), { counterAccountId })).statusCode).toBe(201);
+  });
+
+  it("aralash to'lov: to'lov hujjatidagi mijoz buyurtma mijozidan farq qilsa rad", async () => {
+    const kassir = await addEmployee(app, company, "Kassir");
+    const shiftId = await openShift(kassir.cookie);
+    const customer = async (name: string) => (await call(owner(), "POST", "/api/sales/customers", { name })).json().customer.id as string;
+    const buyer = await customer("Xaridor");
+    const stranger = await customer("Begona mijoz");
+    const sale = await call(kassir.cookie, "POST", "/api/sales/pos/sales", { shiftId, customerId: buyer, items: [{ productId, quantity: "2" }], paymentMethod: "cash", amountPaid: "0", onCredit: true });
+    expect(sale.statusCode, sale.body).toBe(201);
+    const orderId = sale.json().order.id as string;
+
+    const pay = (customerId: string) => call(owner(), "POST", "/api/sales/payments", { orderId, customerId, parts: [{ method: "cash", amount: "1000" }] });
+    const wrong = await pay(stranger);
+    expect(wrong.statusCode, wrong.body).toBe(400);
+    const right = await pay(buyer);
+    expect(right.statusCode, right.body).toBeLessThan(300);
+  });
+
+  it("sozlamalar va rollar: pos.* umumiy yo'l bilan yozilmaydi; kurslar kurs ruxsatisiz saqlanmaydi; o'zidan kuchli rolni zaiflashtirib bo'lmaydi", async () => {
+    expect((await call(owner(), "PUT", "/api/company/settings/pos.appearance", { value: "{}" })).statusCode).toBe(400);
+
+    const createRole = async (name: string, permissions: string[]) => {
+      const res = await call(owner(), "POST", "/api/company/roles", { name, permissions });
+      expect(res.statusCode, res.body).toBe(201);
+      return res.json().role.id as string;
+    };
+    await createRole("Sozlamachi", ["settings.view", "settings.manage"]);
+    await createRole("Rollar admini", ["settings.view", "roles.manage"]);
+    const financeRole = await createRole("Moliya boshlig'i", ["finance.view", "finance.manage"]);
+
+    const settingsUser = await addEmployee(app, company, "Sozlamachi");
+    const currencies = { cbuEnabled: false, currencies: [{ code: "USD", rate: "12500", source: "manual", isActive: true }] };
+    expect((await call(settingsUser.cookie, "PUT", "/api/finance/currencies", currencies)).statusCode).toBe(403);
+    expect((await call(owner(), "PUT", "/api/finance/currencies", currencies)).statusCode).toBe(200);
+
+    const rolesAdmin = await addEmployee(app, company, "Rollar admini");
+    const patchRole = (body: object) => call(rolesAdmin.cookie, "PATCH", `/api/company/roles/${financeRole}`, body);
+    expect((await patchRole({ isActive: false })).statusCode).toBe(403);
+    expect((await patchRole({ permissions: ["finance.view"] })).statusCode).toBe(403);
+    expect((await patchRole({ description: "Moliya bo'limi" })).statusCode).toBe(200);
+    const [stored] = await db.select({ isActive: roles.isActive, permissions: roles.permissions }).from(roles).where(eq(roles.id, financeRole));
+    expect(stored).toMatchObject({ isActive: true });
+    expect(stored!.permissions).toContain("finance.manage");
+  });
+
+  it("parol siyosati: keng tarqalgan va bir xil belgili parollar rad, murakkab parol qabul", async () => {
+    const kassir = await addEmployee(app, company, "Kassir");
+    const change = (newPassword: string) => call(kassir.cookie, "POST", "/api/auth/password", { currentPassword: "xodim-parol-123", newPassword });
+    for (const weak of ["12345678", "Password123", "aaaaaaaaaa"]) {
+      const res = await change(weak);
+      expect(res.statusCode, `${weak}: ${res.body}`).toBe(400);
+    }
+    const strong = await change("Tog-Olma-2026");
+    expect(strong.statusCode, strong.body).toBeLessThan(300);
+  });
+
+  it("dostavka qaytarishi: pulni kassa yoki bankdan qaytarish sales.refund talab qiladi", async () => {
+    const manager = await addEmployee(app, company, "Ombor menejeri");
+    const giveBack = (refundMethod: string) => call(manager.cookie, "POST", `/api/delivery/tasks/${randomUUID()}/return`, { refundMethod });
+    const asCash = await giveBack("cash");
+    expect(asCash.statusCode, asCash.body).toBe(403);
+    // Balansga qaytarish ruxsat tekshiruvidan o'tadi (yetkazma yo'q — 404)
+    const toBalance = await giveBack("balance");
+    expect(toBalance.statusCode, toBalance.body).toBe(404);
+  });
+
+  it("offline kassa: smena ochilishidan oldingi vaqtli amal rad; kutilgandan ortiq naqd chiqim qabul qilinib nomuvofiqlik yoziladi", async () => {
+    const registered = await app.inject({
+      method: "POST",
+      url: "/api/pos-device/setup/register",
+      payload: { phone: company.owner.phone, password: company.owner.password, warehouseId: mainWh, name: "Kassa Y" },
+    });
+    expect(registered.statusCode, registered.body).toBe(201);
+    const auth = { authorization: `Bearer ${registered.json().token as string}` };
+    const push = async (type: string, payload: object, createdAt = new Date()) => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/pos-device/push",
+        headers: auth,
+        payload: { ops: [{ opId: randomUUID(), type, cashierId: ownerId, createdAt: createdAt.toISOString(), payload }] },
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      return res.json().results[0] as { status: string; error?: { details?: { reason?: string } } };
+    };
+
+    const shiftId = randomUUID();
+    expect(await push("shift.open", { shiftId, openingCash: "0" })).toMatchObject({ status: "applied" });
+    const early = await push("cash.movement", { movementId: randomUUID(), shiftId, kind: "other_out", amount: "1000" }, new Date(Date.now() - 60 * 60_000));
+    expect(early).toMatchObject({ status: "rejected", error: { details: { reason: "before_shift" } } });
+
+    const over = await push("cash.movement", { movementId: randomUUID(), shiftId, kind: "other_out", amount: "50000" });
+    expect(over.status).toBe("applied");
+    expect(JSON.stringify(over)).toContain("cash_exceeds_expected");
+  });
+
+  it("son chegarasidan oshish (PostgreSQL 22003) 500 emas, 400 qaytaradi", async () => {
+    const mini = Fastify();
+    registerErrorHandler(mini);
+    mini.get("/overflow", async () => {
+      throw Object.assign(new Error("numeric field overflow"), { code: "22003" });
+    });
+    const res = await mini.inject({ method: "GET", url: "/overflow" });
+    await mini.close();
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: "BAD_REQUEST" });
   });
 });
