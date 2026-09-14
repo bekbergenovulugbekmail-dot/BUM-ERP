@@ -1545,7 +1545,36 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 
 **Production deploy (2026-09-14, commit `3407c66`):** `bum-api` va `bum-web` — SUCCESS (13:15, Toshkent vaqti). API ichidan `/health` — ok; migratsiyalar qo'llandi — bazada 0047 tekshirildi (6 ta yangi ustun va `expenses_company_reference_key` indeksi bor, jami 48 migratsiya yozuvi; faqat o'qish so'rovi, qiymatlar chiqarilmadi). Dockerfile'lar `patches` bilan qurildi. Sessiyasiz: `/api/sales/pos/payment-options`, `/api/finance/terminals`, `/api/finance/cash-accounts`, `POST /api/delivery/agent/locations` — 401; `/`, `/uz/login` — 200; noma'lum yo'l — 404. Tizimga kirgan holda production'da sinalmadi (production hisobi ishlatilmaydi)
 
-**Foydalanuvchi uchun (bonnu-market):** Moliya → Karta terminallari → "Terminal qo'shish": UZCARD → bank hisobi "Uzcard", komissiya (masalan 0.25); HUMO → "Humo". Bank hisobini kassada alohida tugma qilish — Kassa & Bank → hisobni tanlash → "Kassada ko'rsatish"; pul chiqarish komissiyasi — shu yerda. Mavjud ma'lumot avtomatik o'zgartirilmadi
+**Foydalanuvchi uchun (bonnu-market):** *(yangilangan — keyingi bo'limga qarang: "Karta terminallari" menyusi olib tashlandi)* Moliya → Kassa & Bank → bank hisobini tanlash → "Karta turi qo'shish": UZCARD → "Uzcard" hisobi, komissiya (masalan 0.25); HUMO → "Humo". Bank hisobini kassada alohida tugma qilish — Kassa & Bank → hisobni tanlash → "Kassada ko'rsatish"; pul chiqarish komissiyasi — shu yerda. Mavjud ma'lumot avtomatik o'zgartirilmadi
+
+## Karta turlari bank hisobi ichida, komissiya hisoboti (2026-09-14)
+
+**Talab (foydalanuvchi):** "Karta terminallari" menyusi kerak emas; kassada Naqd, Karta, Bank kabi UZCARD, HUMO ham chiqsin; UZCARD/HUMO bog'langan bank hisobiga komissiyasi ushlanib tushsin va bank hisobida ko'rinsin; komissiyaga ketgan summa hisobotda ko'rinsin; bank hisobidan firmaga/ijaraga to'lovda komissiya (1%, 2%) avtomatik — 1 000 000 da hisobdan 1 010 000, firmaga 1 000 000.
+
+**O'zgarishlar (migratsiya yo'q — ma'lumot modeli o'sha: `payment_terminals` → bank hisobi):**
+- Moliya: "Karta terminallari" tabi olib tashlandi. Karta turlari (UZCARD, HUMO, VISA ...) — **Kassa & Bank → bank hisobi → "Karta to'lovlari shu hisobga" → "Karta turi qo'shish"** (to'lov tizimi, kassadagi nomi, komissiya %, kassada ko'rsatish, faol). Hisob tanlanmaydi — ochilgan bank hisobiga bog'lanadi. Avval qo'shilgan terminallar o'z hisobi ostida ko'rinadi
+- Kassa (web va desktop): **Naqd, Karta, Bank doim**, yonida karta turlari (UZCARD, HUMO) va "kassada" belgilangan bank hisoblari. Umumiy "Karta" — asosiy bank hisobiga, komissiyasiz (karta turi tanlanmasa). Aralash to'lov panelida ham xuddi shunday
+- Bank hisobi: harakatlar tarixida karta kirimi karta turi nomi bilan ("Mijoz to'lovi: SO-… · UZCARD") va komissiya chiqimi "komissiya" belgisi bilan; hisob ustida bu oygi xulosa — kartadan tushum, karta komissiyasi, hisobga sof tushgan, pul chiqarish komissiyasi. Bank hisobining "Kassada ko'rsatish" belgisi endi aniq nomlangan: "Kassada «hisob nomi» tugmasi (bank o'tkazmasi)"
+- **Hisobotlar → Bank komissiyasi** (`finance.view`, davr tanlovi): kartadan tushum, karta komissiyasi, bank hisobiga sof, pul chiqarish komissiyasi, jami; karta turlari bo'yicha (tushum / komissiya / sof), bank hisoblari bo'yicha, komissiyalar ro'yxati (sana, turi, hisob, to'lov summasi, komissiya). API: `GET /api/finance/reports/bank-commissions?dateFrom=&dateTo=&cashAccountId=`
+- Pul chiqarishda komissiya oldindan ko'rinadi ("Bank komissiyasi 1%: 10 000 so'm — hisobdan jami 1 010 000 so'm chiqadi"): Kassa & Bank → Chiqim, xarajatni to'lash, maoshni to'lash, ta'minotchiga to'lov. Ta'minotchiga to'lov formasiga **"Qaysi hisobdan"** tanlovi qo'shildi (avval hisob tanlab bo'lmasdi — server usul bo'yicha tanlardi); "Avtomatik" da ham server qaysi hisobni olishi ko'rsatiladi
+
+| Band | Holat | Dalil |
+|---|---|---|
+| Hisobot API: jami, karta turi va hisob bo'yicha, qatorlar; hisob va sana filtri; noto'g'ri sana 400; kassir 403 | DONE | `bank-commission.test.ts` (2 test, hisobot tekshiruvlari qo'shildi) |
+| Bank harakatida karta turi nomi va komissiya qatori | DONE | `bank-commission.test.ts` |
+| Komissiya ko'rsatkichi hisobi (1% — 10 000 / 1 010 000, 0.25%, yaxlitlash, noto'g'ri summa) | DONE | `src/components/payments/bank-commission.test.ts` (2) |
+| Web UI (Moliya, kassa, hisobot, to'lov oynalari) | DONE | brauzer E2E 14/14 (quyida); web tsc, lint |
+| Desktop kassa: Karta va Bank ustunida umumiy qism + karta turlari / bank hisoblari | DONE (typecheck) | desktop renderer tsc; kassa ekrani brauzerda sinalmaydi (Electron), yangi o'rnatuvchi e'lon qilinmaguncha kassalarda yo'q |
+
+**Brauzer E2E (lokal, Chromium) — 14/14:** "Karta terminallari" tabi yo'q; bank hisobi ichida "Karta turi qo'shish" — UZCARD 0.25% ("100,000 so'm to'lovda 250 so'm komissiya ushlanadi — «hisob» hisobiga 99,750"), ro'yxatda "komissiya 0.25% · kassada", API'da shu hisobga bog'langan; bank o'tkazmasi tugmasi va chiqim 1%; Chiqim oynasida 1 000 000 → "10,000 so'm — hisobdan jami 1,010,000 so'm"; kassa tugmalari tartibi Naqd | Karta | Bank | HUMO … | UZCARD … | bank hisoblari; UZCARD bilan 12 000 — bankka 11 970, komissiya 30; umumiy "Karta" — tanlangan bank hisobiga tushmaydi, komissiya yo'q; aralash to'lov panelida Karta, Bank, UZCARD, HUMO; bank tarixida "· E2E UZCARD …" va "komissiya" belgisi, oy xulosasi (tushum 12 000, komissiya 30, sof 11 970); Hisobotlar → Bank komissiyasi — karta turi qatori 0.25% / 12 000 / 30 / 11 970 (API bilan mos); 400 px enida gorizontal siljish yo'q; konsolda xato yo'q
+
+**Testlar (shu bosqichdan keyin):** API regressiya — 97 fayl / 399 test, `--maxWorkers=1` bilan 8 qismda, hammasi o'tdi; web — 16 fayl / 62 test, tsc, lint (o'zgargan fayllar), `vite build` toza; desktop — typecheck (main + renderer), 9 fayl / 57 test
+
+**Kassa 0.4.4 (Karta va Bank ustunida umumiy qism + karta turlari / bank hisoblari):** o'rnatuvchi qurilgan — `apps/desktop/release/BUM-POS-KASSA-Setup-0.4.4.exe`, 111 732 262 bayt, SHA-256 `FF163E21258C682681CFD04ADFC7ED5C6C1300FF4A15FAA00465CEE9D66BEBB1`, imzosiz (`Get-AuthenticodeSignature`: NotSigned), **e'lon qilinmagan**; paketlangan ilova ishga tushirilmadi (ishlab turgan kassaga tegmaslik uchun)
+
+**Production deploy (commit `a0e8cad`):** `bum-api` va `bum-web` — SUCCESS (16:29, Toshkent vaqti); migratsiya yo'q. API ichidan `/health` — ok. Sessiyasiz: `/api/finance/reports/bank-commissions`, `/api/finance/terminals`, `/api/sales/pos/payment-options` — 401 (marshrutlar mavjud); `/`, `/uz/login` — 200; noma'lum yo'l — 404. Tizimga kirgan holda production'da sinalmadi (production hisobi ishlatilmaydi)
+
+**Foydalanuvchi uchun (bonnu-market):** Moliya → Kassa & Bank → "Uzcard" bank hisobini tanlash → "Karta turi qo'shish": To'lov tizimi UZCARD, komissiya (masalan 0.25) → Saqlash; "Humo" hisobida — HUMO. Kassada UZCARD va HUMO tugmalari chiqadi, to'lov shu hisobga komissiyasi ushlanib tushadi. Pul chiqarish komissiyasi — shu hisobning "Pul chiqarish komissiyasi, %" maydoni. Hisobot — Hisobotlar (Analitika) → "Bank komissiyasi". Mavjud ma'lumot avtomatik o'zgartirilmadi
 
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 
@@ -1578,7 +1607,7 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 
 ### Qolgan ishlar
 1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
-2. Kassa **0.4.3** ni (terminal va bank hisobi bo'yicha to'lov bilan; 0.4.1/0.4.2 o'rniga) platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi, terminal cheki) qo'lda sinov
+2. Kassa **0.4.4** ni (Naqd/Karta/Bank + UZCARD, HUMO va bank hisoblari bo'yicha to'lov bilan; 0.4.1–0.4.3 o'rniga) platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi, terminal cheki) qo'lda sinov
 3a. Yangi APK'ni telefonga o'rnatib, ish kunida Android "Batareya" bo'limida BUM ERP sarfini oldingi versiya bilan solishtirish; bonnu-market'da UZCARD/HUMO terminallarini "Uzcard"/"Humo" bank hisoblariga komissiya bilan qo'shish (egasi)
 3. Production'da tizimga kirgan holda qo'lda smoke (egasi hisobi bilan): kirish, Dostavka → "Hudud bo'yicha" → biriktirish, "Kunlik marshrut", distribyutsiya xaritasi
 4. Mavjud mijozlarga shahar/mahalla kiritish (avtomatik to'ldirilmaydi)
@@ -1597,7 +1626,7 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 - **Build/test xotirasi:** 8 GB mashinada Docker va Gradle birga ishlasa tizim fon vazifalarini to'xtatadi — APK Docker to'xtatilib qurildi
 - **DNS:** apex `bum-erp.uz` — webspace.uz panelida egasi o'zgartiradi (Railway tarifida `bum-web` ga yana domen qo'shib bo'lmaydi: `app` va `www` band)
 - **Production'da tizimga kirgan sinov:** egasining test hisobi yoki ishtiroki kerak (production admin paroli ishlatilmaydi)
-- **Kassa 0.4.3 e'loni:** platforma admini kirishi kerak (o'rnatuvchi tayyor, imzosiz)
+- **Kassa 0.4.4 e'loni:** platforma admini kirishi kerak (o'rnatuvchi tayyor, imzosiz)
 - **Terminal ekvayringi (UZCARD/HUMO API):** bank yoki processing protokoli va kalitlari kerak — hozir terminal to'lovi kassir tomonidan chekka qarab kiritiladi
 - **Payme / Click:** merchant ID va kalitlari kerak — integratsiya boshlanmagan
 - **GitHub push / PR:** avtomatik rejimda `git push` rad etildi — egasi `git push -u origin feat/postgres-migration` va PR ochadi
