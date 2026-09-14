@@ -1,0 +1,2 @@
+# Konteynerda ishlaydigan shell skriptlar Windows'da ham LF bo'lib qolsin (CRLF bilan `sh` xato beradi)
+*.sh text eol=lf
