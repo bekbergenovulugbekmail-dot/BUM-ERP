@@ -330,6 +330,13 @@
       "when": 1789363155438,
       "tag": "0046_company_modules",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1789369390115,
+      "tag": "0047_bank_commissions",
+      "breakpoints": true
     }
   ]
 }

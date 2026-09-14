@@ -1,18 +1,25 @@
 /**
- * Aralash to'lov paneli: usul bo'yicha qismlar — naqd, karta terminali (UZCARD, HUMO ...), bank. Jami, to'langan va qoldiq
- * ko'rinib turadi; ortiqcha to'lov va takror qism yakunlashni to'xtatadi. Terminal to'lovi avtomatik tasdiqlanmaydi —
- * kassir (dostavshik) terminal chekiga qarab summani kiritadi. Aniq hisob-kitob va tekshiruv — serverda (universal taqsimot).
+ * Aralash to'lov paneli: usul bo'yicha qismlar — naqd, karta terminali (UZCARD, HUMO ...), bank hisobi. Jami, to'langan va
+ * qoldiq ko'rinib turadi; ortiqcha to'lov va takror qism yakunlashni to'xtatadi. Terminal to'lovi avtomatik tasdiqlanmaydi —
+ * kassir (dostavshik) terminal chekiga qarab summani kiritadi. Qism hisob funksiyalari — `split-payment.ts`.
  */
 import { Plus, X } from "lucide-react";
-import { TERMINAL_NETWORK_LABELS, type TerminalNetwork } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { cn } from "@/lib/utils.ts";
-
-export type PaymentTerminalOption = { id: string; name: string; network: TerminalNetwork; branchId?: string | null };
-export type SplitMethod = "cash" | "card" | "bank";
-export type SplitRow = { key: string; method: SplitMethod; terminalId: string | null; amount: string };
-export type SplitPart = { method: SplitMethod; amount: string; terminalId?: string };
+import {
+  hasDuplicateParts,
+  minorText,
+  newSplitRow,
+  partKey,
+  rowMinor,
+  splitPaidMinor,
+  terminalOptionLabel,
+  type PaymentBankAccountOption,
+  type PaymentTerminalOption,
+  type SplitMethod,
+  type SplitRow,
+} from "./split-payment.ts";
 
 export type SplitPanelLabels = {
   total: string;
@@ -34,64 +41,34 @@ const DEFAULT_LABELS: SplitPanelLabels = {
   overpaid: "Ortiqcha to'lov",
   add: "To'lov qo'shish",
   fill: "+Qoldiq",
-  duplicate: "Bir xil usul (terminal) ikki marta kiritilgan — birlashtiring",
+  duplicate: "Bir xil usul (terminal, hisob) ikki marta kiritilgan — birlashtiring",
   cash: "Naqd",
   card: "Karta",
   bank: "Bank",
 };
 
-const MONEY_RE = /^\d{1,13}(\.\d{1,2})?$/;
-const normalize = (value: string) => value.replace(/\s/g, "").replace(",", ".");
+type Choice = { method: SplitMethod; terminalId: string | null; cashAccountId: string | null; label: string; title: string };
 
-/** Qism summasi tiyinda; noto'g'ri kiritilgan — 0. */
-export function rowMinor(row: SplitRow): bigint {
-  const value = normalize(row.amount);
-  if (!MONEY_RE.test(value)) return 0n;
-  const [whole, fraction = ""] = value.split(".");
-  return BigInt(whole!) * 100n + BigInt(fraction.padEnd(2, "0"));
-}
-
-export const splitPaidMinor = (rows: SplitRow[]) => rows.reduce((sum, row) => sum + rowMinor(row), 0n);
-
-const minorText = (minor: bigint) => `${minor / 100n}.${String(minor % 100n).padStart(2, "0")}`;
-
-export function newSplitRow(method: SplitMethod = "cash", terminalId: string | null = null, amount = ""): SplitRow {
-  return { key: crypto.randomUUID(), method, terminalId, amount };
-}
-
-/** Takrorlangan qism (bir xil usul va terminal) — server rad etadi, oldindan ko'rsatiladi. */
-export function hasDuplicateParts(rows: SplitRow[]) {
-  const keys = rows.filter((row) => rowMinor(row) > 0n).map((row) => `${row.method}|${row.terminalId ?? ""}`);
-  return new Set(keys).size !== keys.length;
-}
-
-/** API tanasi uchun qismlar (nol summalilarsiz). */
-export function splitParts(rows: SplitRow[]): SplitPart[] {
-  return rows
-    .filter((row) => rowMinor(row) > 0n)
-    .map((row) => ({ method: row.method, amount: minorText(rowMinor(row)), ...(row.terminalId ? { terminalId: row.terminalId } : {}) }));
-}
-
-type Choice = { method: SplitMethod; terminalId: string | null; label: string; title: string };
-
-function choicesFor(terminals: PaymentTerminalOption[], methods: readonly SplitMethod[], labels: SplitPanelLabels): Choice[] {
-  const networkCount = new Map<string, number>();
-  for (const terminal of terminals) networkCount.set(terminal.network, (networkCount.get(terminal.network) ?? 0) + 1);
+function choicesFor(
+  terminals: PaymentTerminalOption[],
+  bankAccounts: PaymentBankAccountOption[],
+  methods: readonly SplitMethod[],
+  labels: SplitPanelLabels,
+): Choice[] {
   const list: Choice[] = [];
-  if (methods.includes("cash")) list.push({ method: "cash", terminalId: null, label: labels.cash, title: labels.cash });
+  if (methods.includes("cash")) list.push({ method: "cash", terminalId: null, cashAccountId: null, label: labels.cash, title: labels.cash });
   if (methods.includes("card")) {
-    if (terminals.length === 0) list.push({ method: "card", terminalId: null, label: labels.card, title: labels.card });
+    if (terminals.length === 0) list.push({ method: "card", terminalId: null, cashAccountId: null, label: labels.card, title: labels.card });
     for (const terminal of terminals) {
-      const network = TERMINAL_NETWORK_LABELS[terminal.network] ?? terminal.name;
-      list.push({
-        method: "card",
-        terminalId: terminal.id,
-        label: (networkCount.get(terminal.network) ?? 0) > 1 ? `${network} · ${terminal.name}` : network,
-        title: terminal.name,
-      });
+      list.push({ method: "card", terminalId: terminal.id, cashAccountId: null, label: terminalOptionLabel(terminal, terminals), title: terminal.name });
     }
   }
-  if (methods.includes("bank")) list.push({ method: "bank", terminalId: null, label: labels.bank, title: labels.bank });
+  if (methods.includes("bank")) {
+    if (bankAccounts.length === 0) list.push({ method: "bank", terminalId: null, cashAccountId: null, label: labels.bank, title: labels.bank });
+    for (const account of bankAccounts) {
+      list.push({ method: "bank", terminalId: null, cashAccountId: account.id, label: account.name, title: account.bankName ?? account.name });
+    }
+  }
   return list;
 }
 
@@ -100,6 +77,7 @@ export function SplitPaymentPanel({
   rows,
   onChange,
   terminals,
+  bankAccounts = [],
   format,
   methods = ["cash", "card", "bank"],
   maxParts = 8,
@@ -111,6 +89,7 @@ export function SplitPaymentPanel({
   rows: SplitRow[];
   onChange: (rows: SplitRow[]) => void;
   terminals: PaymentTerminalOption[];
+  bankAccounts?: PaymentBankAccountOption[];
   format: (minor: bigint) => string;
   methods?: readonly SplitMethod[];
   maxParts?: number;
@@ -120,7 +99,7 @@ export function SplitPaymentPanel({
   idPrefix?: string;
 }) {
   const labels = { ...DEFAULT_LABELS, ...labelOverrides };
-  const choices = choicesFor(terminals, methods, labels);
+  const choices = choicesFor(terminals, bankAccounts, methods, labels);
   const paid = splitPaidMinor(rows);
   const remaining = dueMinor - paid;
   const duplicate = hasDuplicateParts(rows);
@@ -129,10 +108,10 @@ export function SplitPaymentPanel({
   const remove = (key: string) => onChange(rows.filter((row) => row.key !== key));
   const add = () => {
     // Keyingi qism — hali ishlatilmagan birinchi usul, qoldiq summasi bilan
-    const used = new Set(rows.map((row) => `${row.method}|${row.terminalId ?? ""}`));
-    const next = choices.find((choice) => !used.has(`${choice.method}|${choice.terminalId ?? ""}`)) ?? choices[0];
+    const used = new Set(rows.map(partKey));
+    const next = choices.find((choice) => !used.has(partKey(choice))) ?? choices[0];
     if (!next) return;
-    onChange([...rows, newSplitRow(next.method, next.terminalId, remaining > 0n ? minorText(remaining) : "")]);
+    onChange([...rows, newSplitRow(next.method, next.terminalId, remaining > 0n ? minorText(remaining) : "", next.cashAccountId)]);
   };
 
   return (
@@ -147,15 +126,15 @@ export function SplitPaymentPanel({
           <li key={row.key} className="space-y-1.5 rounded-xl border border-border p-2">
             <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={`${index + 1}`}>
               {choices.map((choice) => {
-                const active = row.method === choice.method && row.terminalId === choice.terminalId;
+                const active = partKey(row) === partKey(choice);
                 return (
                   <button
-                    key={`${choice.method}|${choice.terminalId ?? ""}`}
+                    key={partKey(choice)}
                     type="button"
                     role="radio"
                     aria-checked={active}
                     title={choice.title}
-                    onClick={() => update(row.key, { method: choice.method, terminalId: choice.terminalId })}
+                    onClick={() => update(row.key, { method: choice.method, terminalId: choice.terminalId, cashAccountId: choice.cashAccountId })}
                     className={cn(
                       "h-8 rounded-md border px-2.5 text-xs font-semibold transition-colors cursor-pointer",
                       active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-muted/30 text-muted-foreground hover:bg-accent",

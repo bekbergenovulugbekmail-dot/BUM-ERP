@@ -44,6 +44,7 @@ import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency, financeAudit } from "./accounts.service.js";
 import { currencyRate } from "./currencies.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "./journal.service.js";
+import { applyOutgoingBankCommission } from "./bank-commission.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...cashAccountFields } = getTableColumns(cashAccounts);
 const { legacyId: _l2, companyId: _c2, ...transactionFields } = getTableColumns(cashTransactions);
@@ -269,6 +270,10 @@ export type CashAccountInput = {
   currency?: string;
   /** Alohida buxgalteriya hisobi (bo'lmasa 1010 / 1020). */
   ledgerAccountId?: string | null;
+  /** Bank hisobi kassada to'lov usuli sifatida ko'rinadi. */
+  showInPos?: boolean;
+  /** Bank hisobidan pul chiqarish komissiyasi, %. */
+  outgoingCommissionPercent?: string;
 };
 
 export async function createCashAccount(tx: Tx, tenant: TenantContext, input: CashAccountInput, meta: RequestMeta) {
@@ -333,7 +338,16 @@ export async function updateCashAccount(
   tx: Tx,
   tenant: TenantContext,
   cashAccountId: string,
-  patch: { name?: string; bankName?: string | null; accountNumber?: string | null; isDefault?: boolean; isActive?: boolean; ledgerAccountId?: string | null },
+  patch: {
+    name?: string;
+    bankName?: string | null;
+    accountNumber?: string | null;
+    isDefault?: boolean;
+    isActive?: boolean;
+    ledgerAccountId?: string | null;
+    showInPos?: boolean;
+    outgoingCommissionPercent?: string;
+  },
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
@@ -484,6 +498,18 @@ export async function recordManualCashTransaction(
     journalEntryId = entry.id;
   }
 
+  // Bank hisobidan qo'lda chiqim — hisob komissiyasi alohida "Bank komissiyasi" xarajati
+  if (input.type === "out") {
+    await applyOutgoingBankCommission(tx, tenant, {
+      cashAccountId: account.id,
+      amount: input.amount,
+      date: txDate,
+      description: input.description,
+      sourceType: "cash_transaction",
+      sourceId: transaction.id,
+    });
+  }
+
   await financeAudit(tx, tenant, meta, {
     action: "CASH_TRANSACTION_RECORDED",
     resource: "cash_transactions",
@@ -548,6 +574,16 @@ export async function transferCash(
     });
     journalEntryId = entry.id;
   }
+
+  // Bank hisobidan o'tkazma (masalan, bankdan kassaga naqdlash) — manba hisob komissiyasi
+  await applyOutgoingBankCommission(tx, tenant, {
+    cashAccountId: source.id,
+    amount: input.amount,
+    date: txDate,
+    description,
+    sourceType: "cash_transfer",
+    sourceId: referenceId,
+  });
 
   await financeAudit(tx, tenant, meta, {
     action: "CASH_TRANSFERRED",

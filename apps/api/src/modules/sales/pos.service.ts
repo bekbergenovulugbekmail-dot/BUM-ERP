@@ -726,6 +726,8 @@ export async function completeSale(
     method: part.method,
     amount: fromMinor(part.amount),
     ...(part.terminalId ? { terminalId: part.terminalId } : {}),
+    // Kassada tanlangan aniq bank hisobi (terminal hisobi — terminal orqali ma'lum)
+    ...(part.cashAccountId && !part.terminalId && part.method !== "cash" ? { cashAccountId: part.cashAccountId } : {}),
   }));
   // Valyuta bo'yicha natija — faqat chet valyuta qatnashgan chekda; `covered` — balans va keshbek yopgani (valyutada)
   const currencyTotals =

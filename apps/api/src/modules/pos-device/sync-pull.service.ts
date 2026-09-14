@@ -23,7 +23,7 @@ import { customers } from "../../db/schema/sales.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { LABELS_SETTING_KEY, RECEIPT_SETTING_KEY, parseLabelSettings, parseReceiptTemplate } from "../company/print-settings.service.js";
 import { permissionsFromRoles } from "../company/tenant.js";
-import { paymentTerminalOptions } from "../finance/terminals.service.js";
+import { paymentTerminalOptions, posBankAccountOptions } from "../finance/terminals.service.js";
 import { getCashbackSettings } from "../sales/cashback.service.js";
 import type { DeviceContext } from "./device-auth.js";
 
@@ -90,7 +90,9 @@ export async function posConfig(conn: DbOrTx, companyId: string, accessDigest = 
      * Faol karta terminallari (UZCARD, HUMO ...; bank hisobi ma'lumotisiz): kassada karta to'lovi terminal bo'yicha,
      * pul serverda terminal bog'langan bank hisobiga. Terminal qo'shilsa yoki o'chirilsa xesh o'zgaradi — qurilma yangisini oladi.
      */
-    terminals: await paymentTerminalOptions(conn, companyId),
+    terminals: await paymentTerminalOptions(conn, companyId, { posOnly: true }),
+    /** Kassada ko'rsatiladigan bank hisoblari ("Bank: Kapitalbank") — to'lov shu hisobga yoziladi. */
+    bankAccounts: await posBankAccountOptions(conn, companyId),
   };
   return { hash: createHash("sha256").update(JSON.stringify(body)).update(accessDigest).digest("hex").slice(0, 32), ...body };
 }

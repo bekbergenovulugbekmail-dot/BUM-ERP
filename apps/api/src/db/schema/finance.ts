@@ -24,6 +24,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { branches, companies, users } from "./platform.js";
+import { percent } from "./_shared.js";
 import { legacyId, money, pk, price, timestamps } from "./_shared.js";
 
 export const accountType = pgEnum("account_type", [
@@ -167,6 +168,10 @@ export const cashAccounts = pgTable(
      * Bo'lmasa turi bo'yicha umumiy: 1010 naqd / 1020 bank.
      */
     ledgerAccountId: uuid("ledger_account_id").references(() => accounts.id, { onDelete: "set null" }),
+    /** Kassada (web va desktop) to'lov usuli sifatida ko'rinadi — bank hisobi uchun ("Bank: Kapitalbank"). */
+    showInPos: boolean("show_in_pos").notNull().default(false),
+    /** Bank hisobidan pul chiqarishda bank komissiyasi, % (ta'minotchiga, xarajat, maosh, o'tkazma) — avtomatik yechiladi. */
+    outgoingCommissionPercent: percent("outgoing_commission_percent").notNull().default("0"),
     isDefault: boolean("is_default").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps(),
@@ -242,6 +247,10 @@ export const paymentTerminals = pgTable(
     branchId: uuid("branch_id").references(() => branches.id, { onDelete: "set null" }),
     /** Bank bergan terminal ID (TID). */
     terminalIdentifier: varchar("terminal_identifier", { length: 64 }),
+    /** Ekvayring komissiyasi, %: 100 000 so'm to'lovda 0.25% — bank hisobiga 99 750, 250 so'm bank komissiyasi xarajati. */
+    commissionPercent: percent("commission_percent").notNull().default("0"),
+    /** Kassada (web va desktop) to'lov usuli sifatida ko'rinadi. */
+    showInPos: boolean("show_in_pos").notNull().default(true),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps(),
   },
@@ -279,11 +288,20 @@ export const expenses = pgTable(
 
     status: expenseStatus("status").notNull().default("pending"),
     notes: text("notes"),
+    /**
+     * Avtomatik xarajat manbai (masalan, bank komissiyasi: `customer_payment`, `supplier_payment` + ID). Qo'lda
+     * kiritilganda null. Bitta manbadan bitta xarajat — takroriy so'rovda ikkinchi komissiya yozilmaydi.
+     */
+    referenceType: varchar("reference_type", { length: 50 }),
+    referenceId: uuid("reference_id"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     ...timestamps(),
   },
   (t) => [
     uniqueIndex("expenses_company_number_key").on(t.companyId, t.number),
+    uniqueIndex("expenses_company_reference_key")
+      .on(t.companyId, t.referenceType, t.referenceId)
+      .where(sql`${t.referenceType} IS NOT NULL`),
     index("expenses_company_status_idx").on(t.companyId, t.status),
     index("expenses_company_date_idx").on(t.companyId, t.expenseDate),
     check("expenses_amount_positive", sql`${t.amount} > 0`),

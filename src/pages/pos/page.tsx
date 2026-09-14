@@ -6,7 +6,7 @@ import {
   Smartphone, X, Power, Package, Calculator, ScanLine,
   UserPlus, UserRound, Wallet, HandCoins, Gift,
 } from "lucide-react";
-import { TERMINAL_NETWORK_LABELS, type CashbackSettings } from "@bum/shared";
+import type { CashbackSettings } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -24,15 +24,17 @@ import CustomerPicker from "./_components/customer-picker.tsx";
 import CustomerPaymentDialog from "./_components/customer-payment-dialog.tsx";
 import BarcodeScanner from "@/components/barcode-scanner.tsx";
 import { useHIDScanner } from "@/hooks/use-hid-scanner.ts";
+import { SplitPaymentPanel } from "@/components/payments/split-payment-panel.tsx";
 import {
-  SplitPaymentPanel,
   hasDuplicateParts,
   newSplitRow,
   splitPaidMinor,
   splitParts,
+  terminalOptionLabel,
+  type PaymentBankAccountOption,
   type PaymentTerminalOption,
   type SplitRow,
-} from "@/components/payments/split-payment-panel.tsx";
+} from "@/components/payments/split-payment.ts";
 import { computeLine, fromMinor, minorToNumber } from "@/pages/sales/_lib/line-amounts.ts";
 import {
   num, PAYMENT_LABELS,
@@ -69,13 +71,15 @@ type SaleResult = {
   /** Shu chekdan qarzga yozilgan summa. */
   debt: string;
   /** Asosiy valyutadagi to'lov qismlari (karta — terminal bilan). */
-  payments: { method: PaymentMethod; amount: string; terminalId?: string }[];
+  payments: { method: PaymentMethod; amount: string; terminalId?: string; cashAccountId?: string }[];
   /** Chet valyuta qatnashgan chekda: valyuta bo'yicha jami, to'langan va qaytim. */
   /** `covered` — shu valyuta qismidan balans va keshbek yopgan summa (valyutada). */
   currencyTotals: { currency: string; total: string; covered: string; paid: string; change: string }[];
   customer: PosCustomerSummary | null;
 };
 type LastReceipt = SaleResult & { payMethod: PaymentMethod; paymentLines?: { label: string; amount: number }[] };
+/** Kassadagi to'lov tugmasi: usul va (ixtiyoriy) terminal yoki bank hisobi. */
+type PayOption = { key: string; method: PaymentMethod; terminalId: string | null; cashAccountId: string | null; label: string };
 
 const PAY_METHODS: { key: PaymentMethod; label: string; icon: React.ElementType; color: string }[] = [
   { key: "cash", label: "Naqd", icon: Banknote, color: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30" },
@@ -131,11 +135,18 @@ export default function POSPage() {
   const [showScanner, setShowScanner] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // Karta terminallari (UZCARD, HUMO ...) va aralash to'lov: naqd + terminal + bank qismlari
-  const terminals = useApiQuery<{ terminals: PaymentTerminalOption[] }>("/api/sales/pos/payment-options", undefined, { staleTime: 60_000 }).data?.terminals ?? [];
+  // To'lov usullari Moliya bo'limidan: "Kassada ko'rsatish" belgilangan terminallar (UZCARD, HUMO ...) va bank hisoblari
+  const paymentOptions = useApiQuery<{ terminals: PaymentTerminalOption[]; bankAccounts?: PaymentBankAccountOption[] }>(
+    "/api/sales/pos/payment-options",
+    undefined,
+    { staleTime: 60_000 },
+  ).data;
+  const terminals = paymentOptions?.terminals ?? [];
+  const bankAccounts = paymentOptions?.bankAccounts ?? [];
   const [splitMode, setSplitMode] = useState(false);
   const [splitRows, setSplitRows] = useState<SplitRow[]>(() => [newSplitRow()]);
-  const [cardTerminalId, setCardTerminalId] = useState<string | null>(null);
+  /** Tanlangan to'lov tugmasi: "cash", "card", "bank", "t:<terminal>" yoki "a:<bank hisobi>". */
+  const [payKey, setPayKey] = useState("cash");
   /** So'rov kaliti: ikki marta bosish yoki tarmoq qayta urinishida server ikkinchi chek yozmaydi; muvaffaqiyatdan keyin yangilanadi. */
   const requestIdRef = useRef<string | null>(null);
 
@@ -253,10 +264,25 @@ export default function POSPage() {
   const splitDuplicate = splitActive && hasDuplicateParts(splitRows);
   const paid = splitActive ? minorToNumber(splitPaid) : payMethod === "cash" && amountPaid.trim() !== "" ? num(amountPaid) : due;
   const change = splitActive ? 0 : Math.max(0, paid - due);
-  // Bitta karta to'lovi — tanlangan (yoki birinchi) terminal orqali, pul uning bank hisobiga
-  const activeTerminal = !splitActive && payMethod === "card" && terminals.length > 0
-    ? terminals.find((terminal) => terminal.id === cardTerminalId) ?? terminals[0]!
-    : null;
+  // To'lov tugmalari: Naqd | terminallar (yo'q bo'lsa — Karta) | bank hisoblari (yo'q bo'lsa — Bank)
+  const payOptions: PayOption[] = [
+    { key: "cash", method: "cash", terminalId: null, cashAccountId: null, label: "Naqd" },
+    ...(terminals.length > 0
+      ? terminals.map((terminal): PayOption => ({
+          key: `t:${terminal.id}`,
+          method: "card",
+          terminalId: terminal.id,
+          cashAccountId: null,
+          label: terminalOptionLabel(terminal, terminals),
+        }))
+      : [{ key: "card", method: "card", terminalId: null, cashAccountId: null, label: "Karta" } satisfies PayOption]),
+    ...(bankAccounts.length > 0
+      ? bankAccounts.map((account): PayOption => ({ key: `a:${account.id}`, method: "bank", terminalId: null, cashAccountId: account.id, label: account.name }))
+      : [{ key: "bank", method: "bank", terminalId: null, cashAccountId: null, label: "Bank" } satisfies PayOption]),
+  ];
+  const selectedPay = payOptions.find((option) => option.key === payKey) ?? payOptions.find((option) => option.method === payMethod) ?? payOptions[0]!;
+  // Bitta usulda terminal yoki aniq bank hisobi — pul o'sha hisobga (terminal komissiyasi serverda ushlanadi)
+  const activeTarget = !splitActive && (selectedPay.terminalId || selectedPay.cashAccountId) ? selectedPay : null;
 
   // Chet valyutadagi qismlar: bo'sh maydon — aniq summa; naqdda ortig'i — o'sha valyutada qaytim
   const foreignBuckets: {
@@ -394,8 +420,17 @@ export default function POSPage() {
         clientRequestId: requestIdRef.current,
         ...(splitActive
           ? { payments: splitBody.length > 0 ? splitBody : [{ method: "cash", amount: "0" }] }
-          : activeTerminal && showBasePayment
-            ? { payments: [{ method: "card", amount: fromMinor(dueMinor), terminalId: activeTerminal.id }] }
+          : activeTarget && showBasePayment
+            ? {
+                payments: [
+                  {
+                    method: activeTarget.method,
+                    amount: fromMinor(dueMinor),
+                    ...(activeTarget.terminalId ? { terminalId: activeTarget.terminalId } : {}),
+                    ...(activeTarget.cashAccountId ? { cashAccountId: activeTarget.cashAccountId } : {}),
+                  },
+                ],
+              }
             : {
                 paymentMethod: payMethod,
                 amountPaid: payMethod === "cash" && amountPaid.trim() !== "" ? amountPaid.trim() : fromMinor(dueMinor),
@@ -417,18 +452,22 @@ export default function POSPage() {
           : {}),
       });
       requestIdRef.current = null;
-      const terminalLabel = (id?: string) => {
-        const found = id ? terminals.find((terminal) => terminal.id === id) : undefined;
-        return found ? `Karta · ${TERMINAL_NETWORK_LABELS[found.network]}` : null;
+      // Chekda usul nomi: terminal ("Karta · UZCARD") yoki bank hisobi ("Bank · Kapitalbank")
+      const partLabel = (part: SaleResult["payments"][number]) => {
+        const terminal = part.terminalId ? terminals.find((item) => item.id === part.terminalId) : undefined;
+        if (terminal) return `Karta · ${terminalOptionLabel(terminal, terminals)}`;
+        const account = part.cashAccountId ? bankAccounts.find((item) => item.id === part.cashAccountId) : undefined;
+        if (account) return `Bank · ${account.name}`;
+        return PAYMENT_LABELS[part.method] ?? part.method;
       };
-      const detailed = result.payments.length > 1 || result.payments.some((part) => part.terminalId);
+      const detailed = result.payments.length > 1 || result.payments.some((part) => part.terminalId || part.cashAccountId);
       setLastReceipt({
         ...result,
         payMethod,
         ...(detailed
           ? {
               paymentLines: result.payments.map((part) => ({
-                label: terminalLabel(part.terminalId) ?? PAYMENT_LABELS[part.method] ?? part.method,
+                label: partLabel(part),
                 amount: num(part.amount),
               })),
             }
@@ -938,54 +977,39 @@ export default function POSPage() {
               rows={splitRows}
               onChange={setSplitRows}
               terminals={terminals}
+              bankAccounts={bankAccounts}
               format={(minor) => `${fmt(minorToNumber(minor))} so'm`}
               shortfallLabel={customer ? "Qarzga" : "Qoldiq"}
               idPrefix="pos-split"
             />
           ) : (
           <>
-          {showBasePayment && <div className="grid grid-cols-3 gap-2">
-            {PAY_METHODS.map((m) => (
-              <button
-                key={m.key}
-                onClick={() => setPayMethod(m.key)}
-                className={cn(
-                  "flex flex-col items-center gap-1 py-2 px-1 rounded-xl border text-xs font-medium transition-all cursor-pointer",
-                  payMethod === m.key
-                    ? m.color + " border-current"
-                    : "bg-muted/30 text-muted-foreground border-border hover:bg-accent"
-                )}
-              >
-                <m.icon className="h-4 w-4" />
-                {m.label}
-              </button>
-            ))}
-          </div>}
-
-          {/* Karta terminali: pul shu terminal bog'langan bank hisobiga; to'lov terminal chekiga qarab tasdiqlanadi */}
-          {activeTerminal && showBasePayment && (
-            <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Karta terminali">
-              {terminals.map((terminal) => (
+          {/* To'lov usullari: Naqd, terminallar (UZCARD, HUMO), bank hisoblari — Moliya bo'limida "Kassada ko'rsatish" */}
+          {showBasePayment && <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="To'lov usuli">
+            {payOptions.map((option) => {
+              const style = PAY_METHODS.find((m) => m.key === option.method) ?? PAY_METHODS[0]!;
+              const active = selectedPay.key === option.key;
+              return (
                 <button
-                  key={terminal.id}
+                  key={option.key}
                   type="button"
                   role="radio"
-                  aria-checked={activeTerminal.id === terminal.id}
-                  title={terminal.name}
-                  onClick={() => setCardTerminalId(terminal.id)}
+                  aria-checked={active}
+                  title={option.label}
+                  onClick={() => { setPayKey(option.key); setPayMethod(option.method); }}
                   className={cn(
-                    "h-8 rounded-lg border px-3 text-xs font-bold tracking-wide cursor-pointer",
-                    activeTerminal.id === terminal.id
-                      ? "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300"
-                      : "border-border bg-muted/30 text-muted-foreground hover:bg-accent",
+                    "flex flex-col items-center gap-1 py-2 px-1 rounded-xl border text-xs font-medium transition-all cursor-pointer min-w-0",
+                    active
+                      ? style.color + " border-current"
+                      : "bg-muted/30 text-muted-foreground border-border hover:bg-accent"
                   )}
                 >
-                  {TERMINAL_NETWORK_LABELS[terminal.network]}
-                  {terminals.filter((item) => item.network === terminal.network).length > 1 ? ` · ${terminal.name}` : ""}
+                  <style.icon className="h-4 w-4" />
+                  <span className="max-w-full truncate">{option.label}</span>
                 </button>
-              ))}
-            </div>
-          )}
+              );
+            })}
+          </div>}
 
           {/* Amount paid — faqat naqdda (karta/bank to'lovi chek summasidan oshmaydi) */}
           {payMethod === "cash" && showBasePayment && (

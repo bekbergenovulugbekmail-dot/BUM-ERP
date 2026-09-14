@@ -31,6 +31,7 @@ import {
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
 import { findCompanyTerminal } from "../finance/terminals.service.js";
+import { commissionMinor, recordBankCommission } from "../finance/bank-commission.service.js";
 import { earnOrderCashback, getCashbackSettings, maxCashbackUsage, redeemCashback } from "./cashback.service.js";
 import { payFromBalance } from "./customer-balance.service.js";
 import { salesAudit } from "./customers.service.js";
@@ -63,10 +64,11 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
   const companyId = tenant.company.id;
   if (!input.orderId && !input.customerId) throw badRequest("Mijoz yoki buyurtma tanlanishi kerak");
   let cashAccountId = input.cashAccountId ?? null;
+  let terminal: Awaited<ReturnType<typeof findCompanyTerminal>> | null = null;
   if (input.terminalId) {
     // Faollik taqsimot kirishida (`resolvePaymentParts`) tekshiriladi — bu yerda kompaniyaga tegishliligi va hisobi
     if (input.method !== "card") throw badRequest("Terminal faqat karta to'lovida tanlanadi");
-    const terminal = await findCompanyTerminal(tx, companyId, input.terminalId);
+    terminal = await findCompanyTerminal(tx, companyId, input.terminalId);
     if (cashAccountId && cashAccountId !== terminal.cashAccountId) throw badRequest("Hisob terminalga bog'langan bank hisobiga mos emas");
     cashAccountId = terminal.cashAccountId;
   }
@@ -176,6 +178,18 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
       { accountId: await requireAccountBySubtype(tx, companyId, "receivable", "asset", "Debitorlar"), credit: input.amount },
     ],
   });
+  // Ekvayring komissiyasi: bank to'lovdan foizni ushlaydi — mijoz qarzi to'liq yopiladi, bank hisobiga qoldiq
+  const acquiringFee = terminal && !foreign ? commissionMinor(toMinor(input.amount), terminal.commissionPercent) : 0n;
+  if (terminal && acquiringFee > 0n) {
+    await recordBankCommission(tx, tenant, {
+      cashAccountId: account.id,
+      amount: acquiringFee,
+      sourceType: "customer_payment",
+      sourceId: payment!.id,
+      date: paymentDate,
+      description: `Ekvayring komissiyasi ${Number(terminal.commissionPercent)}% — ${terminal.name}: ${description}`,
+    });
+  }
 
   const [updated] = await tx
     .update(customerPayments)

@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
+import { Switch } from "@/components/ui/switch.tsx";
 import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
@@ -15,6 +16,50 @@ import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import { localIsoDate, toNum, type Account, type CashAccount, type CashTransaction } from "../_lib/types.ts";
 
 const DEFAULT_LEDGER = "default";
+const PERCENT_RE = /^\d{1,3}(\.\d{1,2})?$/;
+
+type AccountPatch = Partial<Pick<CashAccount, "ledgerAccountId" | "showInPos" | "outgoingCommissionPercent">>;
+
+/** Bank hisobi sozlamalari: kassada ko'rsatish (darhol saqlanadi) va pul chiqarish komissiyasi. */
+function BankAccountSettings({ account, busy, onSave }: { account: CashAccount; busy: boolean; onSave: (patch: AccountPatch, message: string) => void }) {
+  const [commission, setCommission] = useState(String(Number(account.outgoingCommissionPercent)));
+  const text = commission.trim().replace(",", ".") || "0";
+  const valid = PERCENT_RE.test(text) && Number(text) <= 100;
+  const changed = valid && Number(text) !== Number(account.outgoingCommissionPercent);
+  const example = valid ? Math.round(1_000_000 * Number(text)) / 100 : 0;
+  return (
+    <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-3 text-sm">
+      <label className="flex cursor-pointer items-center gap-2">
+        <Switch
+          checked={account.showInPos}
+          disabled={busy}
+          onCheckedChange={(showInPos) => onSave({ showInPos }, showInPos ? "Hisob kassada to'lov usuli sifatida ko'rinadi" : "Hisob kassada yashirildi")}
+        />
+        <span>Kassada ko'rsatish</span>
+      </label>
+      <div className="space-y-1">
+        <Label htmlFor="bank-outgoing-commission" className="text-xs text-muted-foreground">Pul chiqarish komissiyasi, %</Label>
+        <div className="flex gap-2">
+          <Input
+            id="bank-outgoing-commission"
+            inputMode="decimal"
+            className={cn("h-8 w-24", !valid && "border-destructive")}
+            value={commission}
+            onChange={(e) => setCommission(e.target.value)}
+          />
+          <Button size="sm" variant="secondary" disabled={!changed || busy} onClick={() => onSave({ outgoingCommissionPercent: text }, "Komissiya saqlandi")}>
+            Saqlash
+          </Button>
+        </div>
+      </div>
+      <p className="basis-full text-[11px] text-muted-foreground">
+        {valid && example > 0
+          ? `Masalan: ta'minotchiga ${formatMoney(1_000_000, account.currency)} — hisobdan ${formatMoney(1_000_000 + example, account.currency)} chiqadi, ${formatMoney(example, account.currency)} "Bank komissiyasi" xarajati`
+          : "Komissiya 0 — pul chiqarishda qo'shimcha yechilmaydi"}
+      </p>
+    </div>
+  );
+}
 
 const CATEGORIES = ["sotuv", "xarid", "ijara", "maosh", "kommunal", "transport", "boshqa"];
 
@@ -65,18 +110,20 @@ export default function CashAccountsSection() {
   const ledgerOptions = useApiQuery<{ accounts: Account[] }>(canManage ? "/api/finance/accounts" : null, { type: "asset" })
     .data?.accounts.filter((account) => account.isActive);
   const updateAccount = useApiMutation(
-    ({ id, ledgerAccountId }: { id: string; ledgerAccountId: string | null }) => api.patch(`/api/finance/cash-accounts/${id}`, { ledgerAccountId }),
+    ({ id, patch }: { id: string; patch: Partial<Pick<CashAccount, "ledgerAccountId" | "showInPos" | "outgoingCommissionPercent">> }) =>
+      api.patch(`/api/finance/cash-accounts/${id}`, patch),
     { invalidate: ["/api/finance/cash-accounts"] },
   );
-  const linkLedger = async (ledgerAccountId: string | null) => {
+  const saveAccount = async (patch: Partial<Pick<CashAccount, "ledgerAccountId" | "showInPos" | "outgoingCommissionPercent">>, message: string) => {
     if (!selectedAccount) return;
     try {
-      await updateAccount.mutateAsync({ id: selectedAccount.id, ledgerAccountId });
-      toast.success("Buxgalteriya hisobi bog'landi");
+      await updateAccount.mutateAsync({ id: selectedAccount.id, patch });
+      toast.success(message);
     } catch (err) {
       toast.error(errorMessage(err));
     }
   };
+  const linkLedger = (ledgerAccountId: string | null) => saveAccount({ ledgerAccountId }, "Buxgalteriya hisobi bog'landi");
 
   const [txAmount, setTxAmount] = useState("");
   const [txDesc, setTxDesc] = useState("");
@@ -88,6 +135,8 @@ export default function CashAccountsSection() {
   const [acctNumber, setAcctNumber] = useState("");
   const [acctOpening, setAcctOpening] = useState("");
   const [acctCurrency, setAcctCurrency] = useState("");
+  const [acctCommission, setAcctCommission] = useState("");
+  const [acctShowInPos, setAcctShowInPos] = useState(false);
 
   const handleTx = async () => {
     if (!selectedAccount || !txDialog) return;
@@ -118,10 +167,13 @@ export default function CashAccountsSection() {
         accountNumber: acctType === "bank" ? acctNumber.trim() || null : null,
         openingBalance: toNum(acctOpening) > 0 ? acctOpening : undefined,
         ...(acctCurrency && acctCurrency !== currencies.base ? { currency: acctCurrency } : {}),
+        ...(acctType === "bank"
+          ? { showInPos: acctShowInPos, ...(acctCommission.trim() ? { outgoingCommissionPercent: acctCommission.trim().replace(",", ".") } : {}) }
+          : {}),
       });
       toast.success("Kassa/bank hisobi qo'shildi");
       setCreateAccountOpen(false);
-      setAcctName(""); setAcctBank(""); setAcctNumber(""); setAcctOpening(""); setAcctCurrency("");
+      setAcctName(""); setAcctBank(""); setAcctNumber(""); setAcctOpening(""); setAcctCurrency(""); setAcctCommission(""); setAcctShowInPos(false);
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -172,7 +224,11 @@ export default function CashAccountsSection() {
                     {acct.name}
                     {acct.isDefault && <span className="ml-1.5 text-[10px] text-primary">asosiy</span>}
                   </p>
-                  <p className="text-xs text-muted-foreground">{acct.type === "cash" ? "Naqd" : acct.bankName ?? "Bank"}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {acct.type === "cash" ? "Naqd" : acct.bankName ?? "Bank"}
+                    {acct.type === "bank" && acct.showInPos ? " · kassada" : ""}
+                    {acct.type === "bank" && Number(acct.outgoingCommissionPercent) > 0 ? ` · chiqim ${Number(acct.outgoingCommissionPercent)}%` : ""}
+                  </p>
                 </div>
               </div>
               <p className="text-xl font-bold">{formatMoney(acct.balance, acct.currency)}</p>
@@ -202,6 +258,16 @@ export default function CashAccountsSection() {
             </SelectContent>
           </Select>
         </div>
+      )}
+
+      {/* Bank hisobi: kassada to'lov usuli sifatida ko'rsatish va pul chiqarish komissiyasi */}
+      {selectedAccount && canManage && selectedAccount.type === "bank" && (
+        <BankAccountSettings
+          key={selectedAccount.id}
+          account={selectedAccount}
+          busy={updateAccount.isPending}
+          onSave={(patch, message) => void saveAccount(patch, message)}
+        />
       )}
 
       {/* Transaction actions */}
@@ -340,6 +406,15 @@ export default function CashAccountsSection() {
                     <Label>Hisob raqami</Label>
                     <Input value={acctNumber} onChange={(e) => setAcctNumber(e.target.value)} placeholder="2020..." />
                   </div>
+                  <div>
+                    <Label>Pul chiqarish komissiyasi, %</Label>
+                    <Input inputMode="decimal" value={acctCommission} onChange={(e) => setAcctCommission(e.target.value)} placeholder="1" />
+                    <p className="mt-1 text-[11px] text-muted-foreground">Ta'minotchi, xarajat, maosh va o'tkazmada avtomatik yechiladi</p>
+                  </div>
+                  <label className="flex cursor-pointer items-center justify-between rounded-xl border border-border px-3 py-2 text-sm">
+                    <span>Kassada ko'rsatish</span>
+                    <Switch checked={acctShowInPos} onCheckedChange={setAcctShowInPos} />
+                  </label>
                 </>
               )}
               <div>

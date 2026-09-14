@@ -31,6 +31,10 @@ export type CashAccount = {
   balance: string;
   /** Alohida buxgalteriya hisobi (bo'lmasa 1010 naqd / 1020 bank). */
   ledgerAccountId: string | null;
+  /** Bank hisobi kassada to'lov usuli sifatida ko'rinadi. */
+  showInPos: boolean;
+  /** Bank hisobidan pul chiqarish komissiyasi, % ("1.00"). */
+  outgoingCommissionPercent: string;
   isDefault: boolean;
   isActive: boolean;
   createdAt: string;
@@ -49,6 +53,9 @@ export type PaymentTerminal = {
   branchId: string | null;
   branchName: string | null;
   terminalIdentifier: string | null;
+  /** Ekvayring komissiyasi, % ("0.25"). */
+  commissionPercent: string;
+  showInPos: boolean;
   isActive: boolean;
 };
 

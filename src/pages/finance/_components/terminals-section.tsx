@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
 import { usePermissions } from "@/hooks/use-company.ts";
-import { useCurrencies } from "@/hooks/use-currencies.ts";
+import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { cn } from "@/lib/utils.ts";
@@ -29,10 +29,13 @@ type TerminalBody = {
   cashAccountId: string;
   branchId: string | null;
   terminalIdentifier: string | null;
+  commissionPercent: string;
+  showInPos: boolean;
   isActive: boolean;
 };
 
 const NO_BRANCH = "none";
+const PERCENT_RE = /^\d{1,3}(\.\d{1,2})?$/;
 
 export default function TerminalsSection() {
   const { can } = usePermissions();
@@ -101,6 +104,7 @@ export default function TerminalsSection() {
               <tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
                 <th className="px-4 py-2.5 text-left font-medium">Terminal</th>
                 <th className="px-4 py-2.5 text-left font-medium">Bank hisobi</th>
+                <th className="px-4 py-2.5 text-right font-medium">Komissiya</th>
                 <th className="px-4 py-2.5 text-left font-medium">Filial</th>
                 <th className="px-4 py-2.5 text-center font-medium">Holat</th>
                 {canManage && <th className="px-4 py-2.5" />}
@@ -126,6 +130,7 @@ export default function TerminalsSection() {
                     <p>{terminal.cashAccountName}</p>
                     <p className="text-xs text-muted-foreground">{[terminal.bankName, terminal.accountNumber].filter(Boolean).join(" · ") || "—"}</p>
                   </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{Number(terminal.commissionPercent) > 0 ? `${Number(terminal.commissionPercent)}%` : "—"}</td>
                   <td className="px-4 py-2.5 text-muted-foreground">{terminal.branchName ?? "Hamma filial"}</td>
                   <td className="px-4 py-2.5 text-center">
                     <span
@@ -138,6 +143,7 @@ export default function TerminalsSection() {
                     >
                       {terminal.isActive ? "Faol" : "Faol emas"}
                     </span>
+                    {terminal.isActive && !terminal.showInPos && <p className="mt-0.5 text-[11px] text-muted-foreground">kassada yashirin</p>}
                   </td>
                   {canManage && (
                     <td className="px-4 py-2.5">
@@ -202,11 +208,18 @@ function TerminalDialog({
   const [branchId, setBranchId] = useState(terminal?.branchId ?? NO_BRANCH);
   const [identifier, setIdentifier] = useState(terminal?.terminalIdentifier ?? "");
   const [isActive, setIsActive] = useState(terminal?.isActive ?? true);
-  const valid = name.trim().length > 0 && cashAccountId !== "";
+  const [commission, setCommission] = useState(terminal ? String(Number(terminal.commissionPercent)) : "0");
+  const [showInPos, setShowInPos] = useState(terminal?.showInPos ?? true);
+  const commissionText = commission.trim().replace(",", ".") || "0";
+  const commissionValid = PERCENT_RE.test(commissionText) && Number(commissionText) <= 100;
+  const valid = name.trim().length > 0 && cashAccountId !== "" && commissionValid;
+  // Misol: 100 000 so'm to'lovda ushlanadigan komissiya
+  const example = commissionValid ? Math.round(100_000 * Number(commissionText)) / 100 : 0;
   // Tahrirda faolsizlantirilgan hisob ham ro'yxatda ko'rinsin
   const accountOptions = terminal && !bankAccounts.some((account) => account.id === terminal.cashAccountId)
     ? [...bankAccounts, { id: terminal.cashAccountId, name: terminal.cashAccountName } as CashAccount]
     : bankAccounts;
+  const currency = accountOptions.find((account) => account.id === cashAccountId)?.currency ?? bankAccounts[0]?.currency ?? "UZS";
 
   return (
     <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
@@ -283,8 +296,28 @@ function TerminalDialog({
               </Select>
             </div>
           )}
+          <div className="space-y-1">
+            <Label htmlFor="terminal-commission">Bank komissiyasi (ekvayring), %</Label>
+            <Input
+              id="terminal-commission"
+              inputMode="decimal"
+              value={commission}
+              onChange={(e) => setCommission(e.target.value)}
+              placeholder="0.25"
+              className={cn(!commissionValid && "border-destructive")}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {commissionValid && example > 0
+                ? `${formatMoney(100_000, currency)} to'lovda ${formatMoney(example, currency)} komissiya ushlanadi — bank hisobiga ${formatMoney(100_000 - example, currency)} tushadi, komissiya "Bank komissiyasi" xarajati bo'ladi`
+                : "Komissiya yo'q bo'lsa 0 qoldiring"}
+            </p>
+          </div>
           <label className="flex cursor-pointer items-center justify-between rounded-xl border border-border px-3 py-2.5 text-sm">
-            <span>Faol (kassada ko'rinadi)</span>
+            <span>Kassada ko'rsatish (to'lov tugmasi)</span>
+            <Switch checked={showInPos} onCheckedChange={setShowInPos} />
+          </label>
+          <label className="flex cursor-pointer items-center justify-between rounded-xl border border-border px-3 py-2.5 text-sm">
+            <span>Faol</span>
             <Switch checked={isActive} onCheckedChange={setIsActive} />
           </label>
         </div>
@@ -302,6 +335,8 @@ function TerminalDialog({
                 cashAccountId,
                 branchId: branchId === NO_BRANCH ? null : branchId,
                 terminalIdentifier: identifier.trim() || null,
+                commissionPercent: commissionText,
+                showInPos,
                 isActive,
               })
             }

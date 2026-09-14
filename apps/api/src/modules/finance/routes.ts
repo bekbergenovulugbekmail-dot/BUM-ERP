@@ -30,7 +30,7 @@ import { MAX_COMPANY_CURRENCIES, TERMINAL_NETWORKS, type Permission } from "@bum
 import { db } from "../../db/client.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
-import { decimalSchema, moneySchema } from "../../shared/decimal.js";
+import { decimalSchema, moneySchema, percentSchema } from "../../shared/decimal.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 import { requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import {
@@ -141,6 +141,10 @@ const cashAccountBody = z.strictObject({
   currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Valyuta kodi 3 harf (ISO 4217)").optional(),
   /** Alohida buxgalteriya hisobi (aktiv); bo'lmasa 1010 naqd / 1020 bank. */
   ledgerAccountId: z.uuid().nullable().optional(),
+  /** Bank hisobi kassada to'lov usuli sifatida ko'rinadi. */
+  showInPos: z.boolean().optional(),
+  /** Bank hisobidan pul chiqarish komissiyasi, % (0–100). */
+  outgoingCommissionPercent: percentSchema.optional(),
 });
 const cashAccountPatch = z.strictObject({
   name: z.string().trim().min(1).max(200).optional(),
@@ -149,6 +153,8 @@ const cashAccountPatch = z.strictObject({
   isDefault: z.boolean().optional(),
   isActive: z.boolean().optional(),
   ledgerAccountId: z.uuid().nullable().optional(),
+  showInPos: z.boolean().optional(),
+  outgoingCommissionPercent: percentSchema.optional(),
 });
 const terminalBody = z.strictObject({
   name: z.string().trim().min(1).max(100),
@@ -157,6 +163,9 @@ const terminalBody = z.strictObject({
   cashAccountId: z.uuid(),
   branchId: z.uuid().nullable().optional(),
   terminalIdentifier: nullableText(64),
+  /** Ekvayring komissiyasi, % (0–100): to'lovdan ushlanadi, bank komissiyasi xarajati. */
+  commissionPercent: percentSchema.optional(),
+  showInPos: z.boolean().optional(),
   isActive: z.boolean().optional(),
 });
 const terminalParams = z.object({ terminalId: z.uuid() });

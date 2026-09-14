@@ -17,8 +17,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
+import { SplitPaymentPanel } from "@/components/payments/split-payment-panel.tsx";
 import {
-  SplitPaymentPanel,
   hasDuplicateParts,
   newSplitRow,
   splitPaidMinor,
@@ -26,7 +26,7 @@ import {
   type PaymentTerminalOption,
   type SplitPart,
   type SplitRow,
-} from "@/components/payments/split-payment-panel.tsx";
+} from "@/components/payments/split-payment.ts";
 import { num, type DeliveryTaskDetail } from "@/lib/delivery/types.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { cn } from "@/lib/utils.ts";

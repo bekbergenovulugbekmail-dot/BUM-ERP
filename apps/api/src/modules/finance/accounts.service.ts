@@ -43,6 +43,7 @@ export const DEFAULT_ACCOUNTS: { code: string; name: string; type: AccountType; 
   { code: "5500", name: "Boshqa xarajatlar", type: "expense", subtype: "other" },
   { code: "5600", name: "Keshbek xarajatlari", type: "expense", subtype: "cashback_expense" },
   { code: "5700", name: "Kurs farqi xarajati", type: "expense", subtype: "fx_loss" },
+  { code: "5800", name: "Bank komissiyasi xarajatlari", type: "expense", subtype: "bank_fees" },
 ];
 
 const { legacyId: _legacyId, companyId: _companyId, ...accountFields } = getTableColumns(accounts);

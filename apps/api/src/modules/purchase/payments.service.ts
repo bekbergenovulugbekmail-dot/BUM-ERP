@@ -28,6 +28,7 @@ import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
+import { applyOutgoingBankCommission } from "../finance/bank-commission.service.js";
 import { ledgerAccountFor, recordCashTransaction, resolvePaymentAccount, todayIso } from "../finance/cash.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
 import { ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
@@ -194,6 +195,17 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
     referenceType: "supplier_payment",
     referenceId: payment!.id,
     lines,
+  });
+
+  // Bank hisobidan to'lov — hisob komissiyasi alohida chiqim va "Bank komissiyasi" xarajati (ta'minotchi balansiga to'liq summa)
+  await applyOutgoingBankCommission(tx, tenant, {
+    cashAccountId: account.id,
+    amount: fromMinor(amount),
+    date: paymentDate,
+    description,
+    sourceType: "supplier_payment",
+    sourceId: payment!.id,
+    allowOverdraft: input.offline,
   });
 
   const [updated] = await tx

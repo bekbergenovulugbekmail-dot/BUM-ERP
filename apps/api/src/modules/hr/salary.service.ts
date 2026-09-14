@@ -41,6 +41,7 @@ import {
   type PaymentMethod,
 } from "../finance/cash.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { applyOutgoingBankCommission } from "../finance/bank-commission.service.js";
 import { monthRange } from "./attendance.service.js";
 import { hrAudit } from "./org.service.js";
 
@@ -334,6 +335,7 @@ export async function paySalary(
   const expense = toMinor(salary.grossSalary) - toMinor(salary.deductions);
 
   const lines: { accountId: string; debit?: string; credit?: string }[] = [];
+  let paidAccountId: string | null = null;
   if (net > 0n) {
     const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
       cashAccountId: await resolvePaymentAccount(tx, companyId, input.method ?? "cash", input.cashAccountId),
@@ -346,6 +348,7 @@ export async function paySalary(
       referenceId: salary.id,
     });
     lines.push({ accountId: await ledgerAccountFor(tx, companyId, account), credit: salary.netSalary });
+    paidAccountId = account.id;
   }
   if (tax > 0n) {
     lines.push({
@@ -364,6 +367,18 @@ export async function paySalary(
       referenceType: "salary_payment",
       referenceId: salary.id,
       lines,
+    });
+  }
+
+  // Bankdan o'tkazilgan maosh — hisob komissiyasi alohida "Bank komissiyasi" xarajati
+  if (paidAccountId) {
+    await applyOutgoingBankCommission(tx, tenant, {
+      cashAccountId: paidAccountId,
+      amount: salary.netSalary,
+      date: paidDate,
+      description,
+      sourceType: "salary_payment",
+      sourceId: salary.id,
     });
   }
 

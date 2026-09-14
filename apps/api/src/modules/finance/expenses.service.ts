@@ -23,6 +23,7 @@ import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency, financeAudit } from "./accounts.service.js";
 import { ledgerAccountFor, recordCashTransaction, todayIso } from "./cash.service.js";
 import { findAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "./journal.service.js";
+import { applyOutgoingBankCommission } from "./bank-commission.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...expenseFields } = getTableColumns(expenses);
 
@@ -241,6 +242,16 @@ export async function postExpensePayment(
       { accountId: debitAccount, debit: expense.amount, description: expense.category },
       { accountId: await ledgerAccountFor(tx, companyId, account), credit: expense.amount },
     ],
+  });
+  // Bank hisobidan to'langan xarajat — hisob komissiyasi alohida "Bank komissiyasi" xarajati
+  await applyOutgoingBankCommission(tx, tenant, {
+    cashAccountId: account.id,
+    amount: expense.amount,
+    date: input.paidDate,
+    description: `${expense.number}: ${expense.description}`,
+    sourceType: "expense",
+    sourceId: expense.id,
+    allowOverdraft: input.allowOverdraft,
   });
   return { cashTransactionId: transaction.id, journalEntryId: entry.id };
 }

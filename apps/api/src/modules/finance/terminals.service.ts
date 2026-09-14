@@ -22,6 +22,10 @@ export type TerminalInput = {
   cashAccountId: string;
   branchId?: string | null;
   terminalIdentifier?: string | null;
+  /** Ekvayring komissiyasi, % (0 — komissiyasiz). */
+  commissionPercent?: string;
+  /** Kassada to'lov usuli sifatida ko'rinadi. */
+  showInPos?: boolean;
   isActive?: boolean;
 };
 
@@ -37,6 +41,8 @@ const terminalFields = {
   branchId: paymentTerminals.branchId,
   branchName: branches.name,
   terminalIdentifier: paymentTerminals.terminalIdentifier,
+  commissionPercent: paymentTerminals.commissionPercent,
+  showInPos: paymentTerminals.showInPos,
   isActive: paymentTerminals.isActive,
   createdAt: paymentTerminals.createdAt,
   updatedAt: paymentTerminals.updatedAt,
@@ -126,6 +132,8 @@ export async function createTerminal(tx: Tx, tenant: TenantContext, input: Termi
       cashAccountId: input.cashAccountId,
       branchId: input.branchId ?? null,
       terminalIdentifier: input.terminalIdentifier ?? null,
+      commissionPercent: input.commissionPercent ?? "0",
+      showInPos: input.showInPos ?? true,
       isActive: input.isActive ?? true,
     })
     .returning({ id: paymentTerminals.id });
@@ -133,7 +141,13 @@ export async function createTerminal(tx: Tx, tenant: TenantContext, input: Termi
     action: "PAYMENT_TERMINAL_CREATED",
     resource: "payment_terminals",
     resourceId: row!.id,
-    details: { name: input.name, network: input.network, cashAccountId: input.cashAccountId, branchId: input.branchId ?? null },
+    details: {
+      name: input.name,
+      network: input.network,
+      cashAccountId: input.cashAccountId,
+      branchId: input.branchId ?? null,
+      commissionPercent: input.commissionPercent ?? "0",
+    },
   });
   return getTerminal(tx, companyId, row!.id);
 }
@@ -158,7 +172,11 @@ export async function updateTerminal(tx: Tx, tenant: TenantContext, terminalId: 
     action: "PAYMENT_TERMINAL_UPDATED",
     resource: "payment_terminals",
     resourceId: terminalId,
-    details: { changes: Object.keys(patch), ...(patch.cashAccountId ? { cashAccountId: patch.cashAccountId } : {}) },
+    details: {
+      changes: Object.keys(patch),
+      ...(patch.cashAccountId ? { cashAccountId: patch.cashAccountId } : {}),
+      ...(patch.commissionPercent !== undefined ? { commissionPercent: patch.commissionPercent } : {}),
+    },
   });
   return getTerminal(tx, companyId, terminalId);
 }
@@ -166,7 +184,14 @@ export async function updateTerminal(tx: Tx, tenant: TenantContext, terminalId: 
 /** Shu kompaniyaning terminali (faolligidan qat'i nazar); boshqa kompaniyaniki — topilmadi. */
 export async function findCompanyTerminal(conn: DbOrTx, companyId: string, terminalId: string) {
   const [terminal] = await conn
-    .select({ id: paymentTerminals.id, name: paymentTerminals.name, network: paymentTerminals.network, cashAccountId: paymentTerminals.cashAccountId, isActive: paymentTerminals.isActive })
+    .select({
+      id: paymentTerminals.id,
+      name: paymentTerminals.name,
+      network: paymentTerminals.network,
+      cashAccountId: paymentTerminals.cashAccountId,
+      commissionPercent: paymentTerminals.commissionPercent,
+      isActive: paymentTerminals.isActive,
+    })
     .from(paymentTerminals)
     .where(and(eq(paymentTerminals.id, terminalId), eq(paymentTerminals.companyId, companyId)))
     .limit(1);
@@ -181,12 +206,40 @@ export async function requireActiveTerminal(conn: DbOrTx, companyId: string, ter
   return terminal;
 }
 
-/** Kassa ekrani va dostavshik uchun: faol terminallar (bank hisobi ma'lumotisiz). */
-export async function paymentTerminalOptions(conn: DbOrTx, companyId: string) {
+/**
+ * Kassa ekrani va dostavshik uchun: faol terminallar (bank hisobi va komissiya ma'lumotisiz).
+ * `posOnly` — faqat "Kassada ko'rsatish" belgilanganlari (web va desktop kassa).
+ */
+export async function paymentTerminalOptions(conn: DbOrTx, companyId: string, options: { posOnly?: boolean } = {}) {
   return conn
     .select({ id: paymentTerminals.id, name: paymentTerminals.name, network: paymentTerminals.network, branchId: paymentTerminals.branchId })
     .from(paymentTerminals)
     .innerJoin(cashAccounts, eq(cashAccounts.id, paymentTerminals.cashAccountId))
-    .where(and(eq(paymentTerminals.companyId, companyId), eq(paymentTerminals.isActive, true), eq(cashAccounts.isActive, true)))
+    .where(
+      and(
+        eq(paymentTerminals.companyId, companyId),
+        eq(paymentTerminals.isActive, true),
+        eq(cashAccounts.isActive, true),
+        options.posOnly ? eq(paymentTerminals.showInPos, true) : undefined,
+      ),
+    )
     .orderBy(asc(paymentTerminals.name));
+}
+
+/** Kassada to'lov usuli sifatida ko'rsatiladigan bank hisoblari: faol, asosiy valyutada, "Kassada ko'rsatish" belgilangan. */
+export async function posBankAccountOptions(conn: DbOrTx, companyId: string) {
+  const currency = await companyCurrency(conn, companyId);
+  return conn
+    .select({ id: cashAccounts.id, name: cashAccounts.name, bankName: cashAccounts.bankName })
+    .from(cashAccounts)
+    .where(
+      and(
+        eq(cashAccounts.companyId, companyId),
+        eq(cashAccounts.type, "bank"),
+        eq(cashAccounts.isActive, true),
+        eq(cashAccounts.showInPos, true),
+        eq(cashAccounts.currency, currency),
+      ),
+    )
+    .orderBy(asc(cashAccounts.name));
 }

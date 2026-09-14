@@ -13,15 +13,15 @@ import {
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
+import { SplitPaymentPanel } from "@/components/payments/split-payment-panel.tsx";
 import {
-  SplitPaymentPanel,
   hasDuplicateParts,
   newSplitRow,
   splitPaidMinor,
   splitParts,
   type PaymentTerminalOption,
   type SplitRow,
-} from "@/components/payments/split-payment-panel.tsx";
+} from "@/components/payments/split-payment.ts";
 import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";

@@ -46,7 +46,8 @@ async function account(company: Company, code: string) {
 describe("Hisoblar rejasi", () => {
   it("kompaniya yaratilganda standart hisoblar va kassalar ochiladi; setup idempotent", async () => {
     const list = (await api(companyA.ownerCookie, "GET", "/accounts")).json().accounts;
-    expect(list).toHaveLength(21);
+    // 21 asosiy + 5800 "Bank komissiyasi xarajatlari"
+    expect(list).toHaveLength(22);
     expect(list[0]).toMatchObject({ code: "1010", type: "asset", subtype: "cash", balance: "0.00" });
 
     const cash = await db.select().from(cashAccounts).where(eq(cashAccounts.companyId, companyA.companyId));
@@ -56,7 +57,7 @@ describe("Hisoblar rejasi", () => {
 
     // Hisoblar rejasi yo'q eski kompaniya
     await db.delete(accounts).where(eq(accounts.companyId, companyB.companyId));
-    expect((await api(companyB.ownerCookie, "POST", "/setup")).json()).toEqual({ accountsCreated: 21, cashAccountsCreated: 0 });
+    expect((await api(companyB.ownerCookie, "POST", "/setup")).json()).toEqual({ accountsCreated: 22, cashAccountsCreated: 0 });
   });
 
   it("yaratish va tahrirlash: kod noyob, ota hisob turi va sikli, ruxsatlar", async () => {

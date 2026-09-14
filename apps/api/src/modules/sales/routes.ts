@@ -48,7 +48,7 @@ import {
 } from "./orders.service.js";
 import { listCustomerPayments, recordSalesPayment } from "./payments.service.js";
 import { recordMixedCustomerPayment } from "./payment-allocation.service.js";
-import { paymentTerminalOptions } from "../finance/terminals.service.js";
+import { paymentTerminalOptions, posBankAccountOptions } from "../finance/terminals.service.js";
 import {
   cashbackSettingsSchema,
   getCashbackSettings,
@@ -481,10 +481,14 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     return { shifts: await listShifts(db, await readTenant(req, "pos.use"), query) };
   });
 
-  // Kassa ekrani: faol karta terminallari (UZCARD, HUMO ...) — bank hisobi ma'lumotisiz
+  // Kassa ekrani: "Kassada ko'rsatish" belgilangan terminallar (UZCARD, HUMO ...) va bank hisoblari — komissiya ma'lumotisiz
   app.get("/pos/payment-options", async (req) => {
     const tenant = await readTenant(req, "pos.use");
-    return { terminals: await paymentTerminalOptions(db, tenant.company.id), maxParts: MAX_PAYMENT_PARTS };
+    return {
+      terminals: await paymentTerminalOptions(db, tenant.company.id, { posOnly: true }),
+      bankAccounts: await posBankAccountOptions(db, tenant.company.id),
+      maxParts: MAX_PAYMENT_PARTS,
+    };
   });
 
   app.get("/pos/shifts/open", async (req) => {

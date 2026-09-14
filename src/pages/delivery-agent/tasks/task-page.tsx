@@ -14,7 +14,7 @@ import {
   PenLine, Phone, RefreshCw, Truck, Wallet, XCircle, type LucideIcon,
 } from "lucide-react";
 import { canDeliveryTransition, isOpenDeliveryStatus, type DeliveryFailureReason, type DeliveryStatus } from "@bum/shared";
-import type { SplitPart } from "@/components/payments/split-payment-panel.tsx";
+import type { SplitPart } from "@/components/payments/split-payment.ts";
 import { LateBadge, PriorityBadge, QueuedBadge, StatusBadge } from "@/components/delivery/badges.tsx";
 import SignatureDialog from "@/components/delivery/signature-dialog.tsx";
 import { Button } from "@/components/ui/button.tsx";
