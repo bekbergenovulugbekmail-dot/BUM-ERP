@@ -155,6 +155,8 @@ Xatolar doim `{ code, message }`. Unique buzilishi 409, FK 409, CHECK 400. Yozis
 | GET / POST / PATCH / DELETE | `/roles`, `/roles/:roleId` | a'zo / `roles.manage` | `admin.*Role` |
 | GET | `/audit-logs` | `audit.view` | `admin.listAuditLogs` |
 | GET / PUT | `/settings`, `/settings/:key` | `settings.view` / `settings.manage` (`modules` — `modules.manage`) | `admin.getSettings`, `upsertSetting` |
+| GET | `/modules` (holat; tarix — `modules.manage`) | a'zo | yangi |
+| PUT | `/modules/:key` `{enabled, reason?}` — bog'liqliklar tekshiriladi, tarix va audit | `modules.manage` | yangi (avval faqat localStorage) |
 
 ### Katalog (`/api/catalog`)
 
@@ -203,6 +205,7 @@ Har amalda a'zoning `allowedWarehouseIds` ruxsati tekshiriladi (bo'sh — barcha
 | GET / POST / PATCH | `/cash-accounts` (`?includeInactive=`), `/cash-accounts/:cashAccountId` | `finance.view` / `finance.manage` | `cashAccounts.list`, `createAccount` |
 | GET | `/cash-accounts/:cashAccountId/transactions` (`?dateFrom=&dateTo=&limit=&cursor=`) | `finance.view` | `getTransactions` |
 | POST | `/cash-transactions` (in/out, ixtiyoriy `counterAccountId`), `/cash-transfers` | `finance.manage` | `recordTransaction` |
+| GET / POST / PATCH | `/terminals` (`?includeInactive=`), `/terminals/:terminalId` — karta terminali → bank hisobi | `finance.view` / `finance.manage` | yangi |
 | GET | `/expenses` (`?status=&category=&dateFrom=&dateTo=&limit=&cursor=`), `/expenses/stats` | `finance.view` | `expenses.list`, `getStats` |
 | POST / PATCH / DELETE | `/expenses`, `/expenses/:expenseId` | `finance.manage` | `create`, `remove` |
 | POST | `/expenses/:expenseId/status` (`paid` — kassa chiqimi + jurnal) | `finance.approve` | `updateStatus` |
@@ -229,10 +232,11 @@ Har amalda a'zoning `allowedWarehouseIds` ruxsati tekshiriladi (bo'sh — barcha
 | POST / PATCH | `/orders`, `/orders/:orderId` (faqat qoralama) | `sales.create` / `sales.edit` (narx/chegirma o'zgartirish — `sales.edit`) | `create` |
 | POST | `/orders/:orderId/confirm`, `/orders/:orderId/ship` | `sales.approve` + ombor ruxsati | `confirm`, `ship` |
 | POST | `/orders/:orderId/cancel` / `/orders/:orderId/return` | `sales.cancel` / `sales.refund` | `cancel` / yangi |
-| GET / POST | `/payments` (`?customerId=&orderId=`) | `sales.view` / `finance.manage` | `recordPayment` |
+| GET / POST | `/payments` (`?customerId=&orderId=`; POST aralash — `parts[]` + `reference` kaliti) | `sales.view` / `finance.manage` | `recordPayment` |
 | GET | `/pos/shifts` (`?warehouseId=&status=`), `/pos/shifts/open?warehouseId=`, `/pos/shifts/:shiftId` | `pos.use` | `getShifts`, `getOpenShift` |
 | POST | `/pos/shifts`, `/pos/shifts/:shiftId/close` (kassirning o'zi yoki `sales.approve`) | `pos.use` | `openShift`, `closeShift` |
-| POST | `/pos/sales` | `pos.use` | `completePOSSale` |
+| GET | `/pos/payment-options` (faol terminallar, bank hisobi ma'lumotisiz) | `pos.use` | yangi |
+| POST | `/pos/sales` (aralash `payments[]` terminal bilan, `onCredit` — nasiya, `clientRequestId`) | `pos.use` | `completePOSSale` |
 
 ### CRM (`/api/crm`)
 
@@ -1466,6 +1470,45 @@ Faqat haqiqatda bajarilgan tekshiruvlar. Production'da tizimga kirgan holda sino
 
 **Mijoz hududlari:** migratsiya 0044 — faqat `ADD COLUMN` va `CREATE INDEX`, `UPDATE` yo'q; mavjud mijozlarning hududi bo'sh qoladi va avtomatik taxmin qilib to'ldirilmaydi; E2E da ular "Hudud ko'rsatilmagan" guruhida to'g'ri ko'rindi.
 
+## To'lov terminallari va universal aralash to'lov (2026-09-14)
+
+Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** — foydalanuvchi harakati/kalit kerak.
+
+**Arxitektura (migratsiya 0045 — faqat qo'shimcha: 2 jadval, nullable ustunlar, UPDATE yo'q):**
+- `payment_terminals` — id, company_id, name, network (uzcard/humo/visa/mastercard/unionpay/other), provider, cash_account_id (bank hisobi, asosiy valyuta), branch_id, terminal_identifier (TID, kompaniyada unikal), is_active, vaqt. O'chirilmaydi — faolsizlantiriladi
+- `cash_accounts.ledger_account_id` — bank hisobi buxgalteriyada alohida (masalan 1021); yo'q bo'lsa 1010/1020. Kirim, chiqim, qaytarish va kassa↔bank o'tkazmasi shu qoidada
+- `payments` — to'lov hujjati (source: pos / pos_device / delivery / sales_payment / pos_customer_payment, `idempotency_key` kompaniyada unikal, jami); `customer_payments.payment_id` / `terminal_id` — qismlar (usul, summa, hisob, terminal, havola, vaqt). Alohida `PaymentAllocation` modeli qo'shilmadi — mavjud `customer_payments` qatorlari taqsimot vazifasini bajaradi (takror model yo'q)
+- `sales/payment-allocation.service.ts` — POS (web va desktop sinxroni), dostavka, qarz/buyurtma to'lovi va kassada qarz to'lash uchun bitta qoidalar: terminal va hisob shu kompaniyaniki va faol, terminal faqat karta, hisob turi usulga mos, takror qism rad; karta/bank jami summadan oshmaydi; **ortiqcha to'lov rad** (qaytim faqat bitta naqd to'lovda — oddiy kassa qaytimi); **kam to'lov rad**, faqat mijoz tanlanib `onCredit` (nasiya) belgilansa qarzga. Har qism o'z hisobiga kassa harakati va jurnal (DR hisob / CR 1100)
+
+| Band | Holat | Dalil |
+|---|---|---|
+| Terminallar API va UI (Moliya → Karta terminallari), kassaga buxgalteriya hisobini bog'lash | DONE | `payment-terminals.test.ts`; web tsc/lint |
+| POS web: aralash to'lov paneli (Jami, qism qatorlari, To'langan, Qoldiq, "To'lov qo'shish"), [UZCARD]/[HUMO] tugmalari, nasiya belgisi, `clientRequestId` (ikki marta bosish / qayta urinish — 409, ikkinchi chek yo'q) | DONE (API test) | `payment-terminals`, `pos-mixed-payment` testlari; brauzerda qo'lda sinalmadi |
+| Chekda qismlar ro'yxati (terminal nomi bilan) | DONE | web tsc |
+| Qaytarish asl hisobdan (UZCARD — A bank, HUMO — B bank; qisman va to'liq) | DONE | `payment-terminals` testi (`sales_return_card`, `sales_return_card_2`) |
+| Dostavka: `parts[]`, siyosatda ruxsat etilgan usullar (`collectionMethods`), `/agent/payment-options`, dostavshik oynasida bir nechta qism, takroriy so'rov | DONE (API test) | `payment-terminals` testi; mobil UI brauzerda sinalmadi |
+| Qarz/buyurtma to'lovi aralash (`POST /api/sales/payments parts[]`), kassada qarzni aralash to'lash (oyna), qarzdan ortig'i rad | DONE | `payment-terminals` testi |
+| Smena yig'indisi: bank/o'tkazma to'lovi `totalBank` ga (avval yozilmasdi) | DONE | test |
+| Desktop kassa: aralash to'lov (naqd/karta/bank) oflayn navbatdan idempotent sinxron (chek ID) | DONE (avvaldan) | `pos-mixed-payment` offline testi |
+| Desktop kassada terminal tanlash | PARTIAL | server `terminalId` ni qabul qiladi; terminallar qurilmaga sinxronlanmaydi — desktop karta to'lovi asosiy bank hisobiga |
+| Haqiqiy ekvayring (terminal to'lovni o'zi tasdiqlashi) | BLOCKED | bank/processing protokoli va kalitlari yo'q; soxta "to'lov o'tdi" qilinmadi — kassir terminal chekiga qarab kiritadi; adapter nuqtasi — terminal yozuvi |
+
+## Modullar boshqaruvi (2026-09-14)
+
+**Arxitektura (migratsiya 0046 — faqat qo'shimcha):**
+- `@bum/shared` `MODULE_REGISTRY` — 12 real modul: products, warehouse, sales, pos, purchase, manufacturing, crm, distribution, delivery, finance, hr, reports. Bog'liqliklar: warehouse → products; sales, pos, purchase, manufacturing → products + warehouse; distribution, delivery → sales. Tizim qismlari (auth, kompaniya, obuna, bosh sahifa, profil, xavfsizlik, sozlamalar) modul emas — o'chirilmaydi
+- `company_modules` (company_id, module_key, enabled, enabled_at, disabled_at, changed_by, vaqt) va `company_module_history` (source: owner / platform / registration, sabab). Yozuv yo'q — yoqilgan: mavjud kompaniyalarda hech narsa o'zgarmaydi. Eski `settings` dagi `module.*` qatorlari (faqat UI edi) ko'chirilmadi
+- Server guard (`company/module-guard.ts`, `onRoute`): Auth → Company → Subscription/License → **Module** → Permission. O'chiq modul API'si — 403 `MODULE_DISABLED` (`details.module`); obuna tugagan/a'zolik yo'q bo'lsa avval o'sha xato. Umumiy API: `/api/sales/customers` (savdo, POS, CRM, dostavka, distribyutsiya — bittasi yoqilgan bo'lsa), `/api/sales/*` (savdo yoki POS). Yopilmaydi: auth, registration, public, platform, company, subscription, notifications, files, valyuta kurslari, `/api/analytics/dashboard`, omborlar ro'yxati, kassa qurilmasining session/app-update/unregister/releases
+- Kassa qurilmasi: POS o'chsa sinxron (pull/push) 403 — desktop navbatdagi amallarni o'chirmaydi (sync-engine xatoni holatga yozadi), yangi qurilma ro'yxatdan o'tmaydi
+
+| Band | Holat | Dalil |
+|---|---|---|
+| Server guard, bog'liqliklar, tarix + audit (MODULE_ENABLED/DISABLED), ma'lumot o'chirilmaydi | DONE | `modules.test.ts` (4) |
+| Kompaniyalar izolyatsiyasi (A o'chirsa B ochiq), qayta yoqish, RBAC (modul + ruxsat ikkalasi shart), obuna ustunligi, platforma admini | DONE | `modules.test.ts` |
+| Web: menyu va sahifa server holatidan, "Modul o'chirilgan" ekrani, Sozlamalar → Modullar (karta, holat, ON/OFF, bog'liqlik ogohlantirishi, tarix), admin paneli → kompaniya modullari | DONE (tsc/lint) | brauzerda qo'lda sinalmadi |
+| Ro'yxatdan o'tish: "Qaysi modullardan foydalanasiz?" qadami (standart: ishlab chiqarishsiz), bog'liqliklar avtomatik | DONE | `modules.test.ts` (API); UI tsc |
+| Sotuv agenti / dostavshik ilovalari va desktop kassada maxsus "modul o'chirilgan" ekrani | PARTIAL | API xabari umumiy xato sifatida ko'rinadi |
+
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 
 ### Bajarilgan (tekshirilgan)
@@ -1476,8 +1519,10 @@ Faqat haqiqatda bajarilgan tekshiruvlar. Production'da tizimga kirgan holda sino
 - **Distribyutsiya:** xarita, marshrut, "Optimal tartib", ruxsat va kompaniya izolyatsiyasi
 - **Multi-business:** `/{biznes}/{bo'lim}`, tab konteksti, begona biznes — 403
 - **Xavfsizlik:** web xavfsizlik sarlavhalari (production'da tasdiqlangan), IDOR testi, git sirlar auditi, imzo kalitlari `.gitignore` da
-- **API regressiya:** 94 fayl, 388 test — 4 qismda `--maxWorkers=1` (129 + 95 + 84 + 80), hammasi birinchi urinishda o'tdi (2026-09-14, yangi `tenant-isolation` testi bilan)
-- **Web:** 14 fayl / 57 test, tsc, lint, `vite build` — toza; brauzer E2E (lokal) — 14/14
+- **To'lovlar:** karta terminallari (bank hisobiga bog'lanish), universal aralash to'lov taqsimoti — POS, dostavka, qarz; ortiqcha/kam to'lov qoidalari, idempotentlik, asl hisobdan qaytarish (bo'lim yuqorida)
+- **Modullar:** server guard (MODULE_DISABLED), bog'liqliklar, tarix/audit, Sozlamalar va admin paneli, ro'yxatdan o'tishda tanlov (bo'lim yuqorida)
+- **API regressiya (to'lovlar va modullardan keyin):** 96 fayl, 396 test — `--maxWorkers=1` bilan 7 qismda (129 + 39 + 62 + 31 + 49 + 30 + 56), hammasi o'tdi (2026-09-14). Fon rejimidagi birinchi urinish xotira yetmagani uchun tizim tomonidan to'xtatildi (kod xatosi emas) — oldingi rejimda qayta ishga tushirildi
+- **Web:** 14 fayl / 57 test, tsc, lint (o'zgargan fayllar), `vite build` — toza (to'lovlar va modullardan keyin qayta tekshirildi); brauzer E2E (lokal, avvalgi bosqich) — 14/14, yangi to'lov va modul ekranlari brauzerda sinalmadi
 - **Production deploy:** `bum-api` (2026-09-13 20:15 UTC, keyin API kodi o'zgarmagan) va `bum-web` (2026-09-14 03:23 UTC) — SUCCESS; `https://app.bum-erp.uz` 200, `/api/company` 401, `/health` ok
 
 ### Android
@@ -1494,7 +1539,7 @@ Faqat haqiqatda bajarilgan tekshiruvlar. Production'da tizimga kirgan holda sino
 4. Mavjud mijozlarga shahar/mahalla kiritish (avtomatik to'ldirilmaydi)
 5. Apex `bum-erp.uz` ni ishlaydigan manzilga yo'naltirish; ixtiyoriy — `WEB_ORIGIN=https://app.bum-erp.uz`
 6. Production'da fayl saqlash (S3), SMS (Eskiz — OTP) va AI kalitlari sozlanmagan — tegishli funksiyalar o'chiq
-7. Buxgalteriya: ombordagi qo'lda kirim (`POST /api/inventory/stock/movements`, `receive`) jurnal yozuvi yaratmaydi (2026-09-11 da topilgan, hal qilinmagan)
+7. ~~Buxgalteriya: ombordagi qo'lda kirim jurnal yozuvi yaratmaydi~~ — **eskirgan, hal qilingan**: qo'lda kirim DR 1200 / CR 3000 (yoki tanlangan qarshi hisob) yozadi, `inventory-journal.test.ts` bilan tasdiqlangan (2026-09-14 audit)
 8. Desktop: kod imzolash sertifikati (`CSC_LINK`, `CSC_KEY_PASSWORD`); Shtrix-M, YES POS, Rongta tarozilari uchun ishlab chiqaruvchining almashinuv protokoli hujjati
 9. Obuna: to'lov shlyuzi (Payme / Click) — hozir admin qo'lda tasdiqlaydi; qo'shimcha litsenziya tugashi ogohlantirishi
 10. Dostavka: SMS OTP, qisman qoldiqni qayta yetkazish, hudud poligonlari ma'lumotnomasi
@@ -1508,6 +1553,9 @@ Faqat haqiqatda bajarilgan tekshiruvlar. Production'da tizimga kirgan holda sino
 - **DNS:** apex `bum-erp.uz` — webspace.uz panelida egasi o'zgartiradi (Railway tarifida `bum-web` ga yana domen qo'shib bo'lmaydi: `app` va `www` band)
 - **Production'da tizimga kirgan sinov:** egasining test hisobi yoki ishtiroki kerak (production admin paroli ishlatilmaydi)
 - **Kassa 0.4.1 e'loni:** platforma admini kirishi kerak
+- **Terminal ekvayringi (UZCARD/HUMO API):** bank yoki processing protokoli va kalitlari kerak — hozir terminal to'lovi kassir tomonidan chekka qarab kiritiladi
+- **Payme / Click:** merchant ID va kalitlari kerak — integratsiya boshlanmagan
+- **GitHub push / PR:** avtomatik rejimda `git push` rad etildi — egasi `git push -u origin feat/postgres-migration` va PR ochadi
 - **OSRM:** Public OSRM cheklovi bor; foydalanuvchilar soni oshsa self-hosted OSRM kerak. Taxminiy talab (tekshirilmagan): O'zbekiston xaritasi uchun ~2 vCPU, 4 GB RAM, 10 GB disk; ulash — `ROUTING_OSRM_URL`, egasining tasdig'i bilan
 
 ### Eng muhim keyingi qadam
