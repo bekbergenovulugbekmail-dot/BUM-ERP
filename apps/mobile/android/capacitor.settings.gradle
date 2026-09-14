@@ -3,7 +3,7 @@ include ':capacitor-android'
 project(':capacitor-android').projectDir = new File('../../../node_modules/.pnpm/@capacitor+android@8.4.3_@capacitor+core@8.4.3/node_modules/@capacitor/android/capacitor')
 
 include ':capacitor-community-background-geolocation'
-project(':capacitor-community-background-geolocation').projectDir = new File('../../../node_modules/.pnpm/@capacitor-community+backgr_6269f2926558921c14f8c810d27b1d17/node_modules/@capacitor-community/background-geolocation/android')
+project(':capacitor-community-background-geolocation').projectDir = new File('../../../node_modules/.pnpm/@capacitor-community+backgr_2b39f5c2610df2688643d0c6d7d889fb/node_modules/@capacitor-community/background-geolocation/android')
 
 include ':capacitor-local-notifications'
 project(':capacitor-local-notifications').projectDir = new File('../../../node_modules/.pnpm/@capacitor+local-notifications@8.3.1_@capacitor+core@8.4.3/node_modules/@capacitor/local-notifications/android')

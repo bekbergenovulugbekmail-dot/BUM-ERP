@@ -20,3 +20,5 @@ allowBuilds:
   electron: true
   # electron-builder'ning Squirrel o'rnatuvchisi — ishlatilmaydi (NSIS)
   electron-winstaller: false
+patchedDependencies:
+  '@capacitor-community/background-geolocation@1.2.26': patches/@capacitor-community__background-geolocation@1.2.26.patch

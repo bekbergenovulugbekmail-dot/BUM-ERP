@@ -1,0 +1,77 @@
+diff --git a/android/src/main/java/com/equimaps/capacitor_background_geolocation/BackgroundGeolocation.java b/android/src/main/java/com/equimaps/capacitor_background_geolocation/BackgroundGeolocation.java
+index a92fcf9bad0139d203964afb1550ea5ba03ce99b..9fdf793f9b1cf68f9051cbe32a2fdc893ac8b741 100644
+--- a/android/src/main/java/com/equimaps/capacitor_background_geolocation/BackgroundGeolocation.java	
++++ b/android/src/main/java/com/equimaps/capacitor_background_geolocation/BackgroundGeolocation.java
+@@ -83,6 +83,8 @@ public class BackgroundGeolocation extends Plugin {
+                 requestPermissionForAlias("location", call, "locationPermissionsCallback");
+             } else {
+                 call.reject("Permission denied.", "NOT_AUTHORIZED");
++                // BUM ERP patch: ruxsatsiz kuzatuvchi qo'shilmaydi
++                return;
+             }
+         } else if (!isLocationEnabled(getContext())) {
+             call.reject("Location services disabled.", "NOT_AUTHORIZED");
+@@ -159,7 +161,11 @@ public class BackgroundGeolocation extends Plugin {
+         service.addWatcher(
+                 call.getCallbackId(),
+                 backgroundNotification,
+-                call.getFloat("distanceFilter", 0f)
++                call.getFloat("distanceFilter", 0f),
++                // BUM ERP patch: sozlanadigan oraliq (ms); berilmasa — asl 1 s
++                call.getInt("interval", 1000).longValue(),
++                call.getInt("fastestInterval", 1000).longValue(),
++                call.getInt("maxWaitTime", 1000).longValue()
+         );
+     }
+ 
+diff --git a/android/src/main/java/com/equimaps/capacitor_background_geolocation/BackgroundGeolocationService.java b/android/src/main/java/com/equimaps/capacitor_background_geolocation/BackgroundGeolocationService.java
+index fafbb8694160595444073a8c6cec111b60b3fce0..f03ccebd755ef601788311544e8d73cd61712bf0 100644
+--- a/android/src/main/java/com/equimaps/capacitor_background_geolocation/BackgroundGeolocationService.java	
++++ b/android/src/main/java/com/equimaps/capacitor_background_geolocation/BackgroundGeolocationService.java
+@@ -75,27 +75,36 @@ public class BackgroundGeolocationService extends Service {
+         void addWatcher(
+                 final String id,
+                 Notification backgroundNotification,
+-                float distanceFilter
++                float distanceFilter,
++                long interval,
++                long fastestInterval,
++                long maxWaitTime
+         ) {
+             FusedLocationProviderClient client = LocationServices.getFusedLocationProviderClient(
+                     BackgroundGeolocationService.this
+             );
++            // BUM ERP patch: GPS oralig'i JS'dan (standart — avvalgidek 1 s). Uzunroq oraliq va paketli yetkazish
++            // (maxWaitTime) — GPS va protsessor har soniya uyg'onmaydi, zaryad kam sarflanadi.
++            long safeInterval = Math.max(1000L, interval);
+             LocationRequest locationRequest = new LocationRequest();
+-            locationRequest.setMaxWaitTime(1000);
+-            locationRequest.setInterval(1000);
++            locationRequest.setInterval(safeInterval);
++            locationRequest.setFastestInterval(Math.max(1000L, Math.min(fastestInterval, safeInterval)));
++            locationRequest.setMaxWaitTime(Math.max(safeInterval, maxWaitTime));
+             locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+             locationRequest.setSmallestDisplacement(distanceFilter);
+ 
+             LocationCallback callback = new LocationCallback(){
+                 @Override
+                 public void onLocationResult(LocationResult locationResult) {
+-                    Location location = locationResult.getLastLocation();
+-                    Intent intent = new Intent(ACTION_BROADCAST);
+-                    intent.putExtra("location", location);
+-                    intent.putExtra("id", id);
+-                    LocalBroadcastManager.getInstance(
+-                            getApplicationContext()
+-                    ).sendBroadcast(intent);
++                    // Paketdagi har bir o'lchov alohida yetkaziladi (yo'l nuqtalari yo'qolmaydi)
++                    for (Location location : locationResult.getLocations()) {
++                        Intent intent = new Intent(ACTION_BROADCAST);
++                        intent.putExtra("location", location);
++                        intent.putExtra("id", id);
++                        LocalBroadcastManager.getInstance(
++                                getApplicationContext()
++                        ).sendBroadcast(intent);
++                    }
+                 }
+                 @Override
+                 public void onLocationAvailability(LocationAvailability availability) {

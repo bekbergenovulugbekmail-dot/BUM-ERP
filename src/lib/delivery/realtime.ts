@@ -7,7 +7,7 @@
  * yo'q (4403) bo'lsa qayta urinmaydi. Jonli ulanishda davriy so'rovlar 5 daqiqagacha siyraklashadi, uzilganda odatiy
  * oraliq qaytadi.
  */
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { DeliveryRealtimeMessage } from "@bum/shared";
 import { apiUrl } from "@/lib/api.ts";
@@ -17,7 +17,10 @@ export type RealtimeStatus = "connecting" | "live" | "offline";
 
 const BATCH_MS = 1000;
 const LOCATION_BATCH_MS = 5000;
-const PING_MS = 25_000;
+/** Server o'zi har 30 s da WebSocket ping yuboradi; mijoz pingi siyrak — mobil radio ortiqcha uyg'onmasin. */
+const PING_MS = 55_000;
+/** Ilova fonda va ish vaqti emas — shuncha kutib ulanish yopiladi (qaytganda darhol qayta ulanadi). */
+const HIDDEN_GRACE_MS = 60_000;
 /** Jonli ulanishda ham shu oraliqda bir marta yangilanadi (xabar yo'qolgan holat uchun). */
 export const LIVE_FALLBACK_MS = 300_000;
 const NO_RETRY_CODES = new Set([4401, 4403]);
@@ -101,14 +104,26 @@ export function parseRealtimeMessage(data: unknown): DeliveryRealtimeMessage | n
   }
 }
 
-export function useDeliveryRealtime(enabled: boolean): RealtimeStatus {
+/**
+ * `keepAliveHidden` — ilova fonda bo'lsa ham ulanish saqlansinmi (ish vaqtida: yangi yetkazma bildirishnomasi). Aks holda
+ * fonda 1 daqiqadan keyin ulanish yopiladi va ilova ochilganda qayta ulanadi — zaryad tejaladi.
+ */
+export function useDeliveryRealtime(enabled: boolean, keepAliveHidden = false): RealtimeStatus {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<RealtimeStatus>("offline");
+  const keepHidden = useRef(keepAliveHidden);
+
+  useEffect(() => {
+    keepHidden.current = keepAliveHidden;
+  }, [keepAliveHidden]);
 
   useEffect(() => {
     if (!enabled || typeof WebSocket === "undefined") return;
     let socket: WebSocket | null = null;
     let stopped = false;
+    /** Fonda yopilgan — qayta ulanish faqat ilova ochilganda. */
+    let suspended = false;
+    let hiddenTimer: number | undefined;
     let attempt = 0;
     let retryTimer: number | undefined;
     let batchTimer: number | undefined;
@@ -141,7 +156,7 @@ export function useDeliveryRealtime(enabled: boolean): RealtimeStatus {
     };
 
     const connect = () => {
-      if (stopped || socket) return;
+      if (stopped || suspended || socket) return;
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
         setStatus("offline");
         return;
@@ -173,7 +188,7 @@ export function useDeliveryRealtime(enabled: boolean): RealtimeStatus {
       current.onclose = (event) => {
         if (socket === current) socket = null;
         setStatus("offline");
-        if (stopped || NO_RETRY_CODES.has(event.code)) return;
+        if (stopped || suspended || NO_RETRY_CODES.has(event.code)) return;
         retryTimer = window.setTimeout(connect, reconnectDelay(attempt));
         attempt += 1;
       };
@@ -186,8 +201,26 @@ export function useDeliveryRealtime(enabled: boolean): RealtimeStatus {
       connect();
     };
     const onOffline = () => socket?.close();
+    const onVisibility = () => {
+      window.clearTimeout(hiddenTimer);
+      if (document.hidden) {
+        hiddenTimer = window.setTimeout(() => {
+          if (!document.hidden || keepHidden.current) return;
+          suspended = true;
+          window.clearTimeout(retryTimer);
+          socket?.close();
+        }, HIDDEN_GRACE_MS);
+        return;
+      }
+      if (suspended) {
+        suspended = false;
+        attempt = 0;
+        connect();
+      }
+    };
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
+    document.addEventListener("visibilitychange", onVisibility);
     const ping = window.setInterval(() => {
       if (socket?.readyState === WebSocket.OPEN) socket.send("ping");
     }, PING_MS);
@@ -197,6 +230,8 @@ export function useDeliveryRealtime(enabled: boolean): RealtimeStatus {
       stopped = true;
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.clearTimeout(hiddenTimer);
       window.clearInterval(ping);
       window.clearTimeout(retryTimer);
       window.clearTimeout(batchTimer);

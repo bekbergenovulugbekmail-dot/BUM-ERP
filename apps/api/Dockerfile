@@ -12,6 +12,8 @@ FROM node:22.23-alpine AS base
 RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+# pnpm patchedDependencies (lockfile patch xeshini tekshiradi)
+COPY patches patches
 COPY apps/api/package.json apps/api/
 COPY packages/shared/package.json packages/shared/
 

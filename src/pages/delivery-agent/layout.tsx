@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -194,12 +195,19 @@ export default function DeliveryAgentLayout() {
   const allowed = can("delivery.accept");
   const meQuery = useApiQuery<DeliveryMe>(allowed ? "/api/delivery/agent/me" : null);
   const policy = useApiQuery<{ policy: DeliveryPolicy }>(meQuery.data ? "/api/delivery/policy" : null).data?.policy ?? DEFAULT_DELIVERY_POLICY;
-  const realtime = useDeliveryRealtime(Boolean(meQuery.data));
-  const workSession = useApiQuery<{ session: WorkSession | null }>(meQuery.data ? "/api/delivery/agent/work-session" : null, undefined, {
-    refetchInterval: realtime === "live" ? LIVE_FALLBACK_MS : 60_000,
-  }).data?.session;
+  const sessionPath = meQuery.data ? "/api/delivery/agent/work-session" : null;
+  const workSession = useApiQuery<{ session: WorkSession | null }>(sessionPath).data?.session;
   const onDuty = workSession?.status === "active";
-  const location = useDeliveryTracking(onDuty, policy.trackingIntervalSeconds, policy.trackingDistanceMeters);
+  // Ish vaqtida fonda ham jonli (yangi yetkazma bildirishnomasi); ish vaqti tashqarisida fonda ulanish yopiladi
+  const realtime = useDeliveryRealtime(Boolean(meQuery.data), onDuty);
+  // Shu so'rovning davriy yangilanishi (bir xil kalit — ma'lumot va so'rov umumiy): jonli ulanishda siyrak
+  useApiQuery<{ session: WorkSession | null }>(sessionPath, undefined, { refetchInterval: realtime === "live" ? LIVE_FALLBACK_MS : 60_000 });
+  const queryClient = useQueryClient();
+  const onSessionEnded = useCallback(() => void queryClient.invalidateQueries({ queryKey: ["/api/delivery/agent/work-session"] }), [queryClient]);
+  const location = useDeliveryTracking(onDuty, policy.trackingIntervalSeconds, policy.trackingDistanceMeters, {
+    maxAccuracyMeters: policy.maxAccuracyMeters,
+    onSessionEnded,
+  });
   // Android ilova: bildirishnoma ruxsati ish boshlanganda (ilova ochiq) so'raladi — birinchi xabar fonda yo'qolmasin
   useEffect(() => {
     if (onDuty) prepareNotifications();

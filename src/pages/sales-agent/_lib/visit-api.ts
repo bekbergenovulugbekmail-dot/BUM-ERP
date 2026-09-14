@@ -4,12 +4,23 @@
  */
 import type { TFunction } from "i18next";
 import { api, ApiError, errorMessage } from "@/lib/api.ts";
+import { recentFix } from "@/lib/native/geolocation.ts";
 import type { AgentVisit, PhotoKind } from "./types.ts";
 
 export type LocationPayload = { latitude: number; longitude: number; accuracy: number; recordedAt: string };
 
 /** Hozirgi joy — 15 soniyadan eski bo'lmagan o'lchov. */
 export function freshPosition(): Promise<LocationPayload> {
+  // Ish vaqtidagi kuzatuvning 15 soniyalik aniq o'lchovi bor bo'lsa — GPS alohida yoqilmaydi (zaryad)
+  const tracked = recentFix(15_000, 50);
+  if (tracked) {
+    return Promise.resolve({
+      latitude: tracked.latitude,
+      longitude: tracked.longitude,
+      accuracy: tracked.accuracy,
+      recordedAt: new Date(tracked.timestamp).toISOString(),
+    });
+  }
   return new Promise((resolve, reject) => {
     if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
       reject(new ApiError(0, "LOCATION_UNAVAILABLE", ""));

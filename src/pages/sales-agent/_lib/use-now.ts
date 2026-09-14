@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 export function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    // Ilova fonda (ekran o'chgan) — taymer qayta chizmaydi; qaytganda keyingi tikda yangilanadi
+    const timer = setInterval(() => {
+      if (typeof document === "undefined" || !document.hidden) setNow(Date.now());
+    }, intervalMs);
     return () => clearInterval(timer);
   }, [intervalMs]);
   return now;

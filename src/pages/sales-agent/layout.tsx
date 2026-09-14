@@ -4,7 +4,9 @@
  * (bo'lmasa — "biriktirilmagan" ekrani). Lokatsiya kuzatuvi shu yerda bitta; ruxsat berilmasa ish joyi bloklanadi.
  * Asosiy himoya — serverda.
  */
+import { useCallback } from "react";
 import { NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard, ShoppingCart, Users, BadgePercent, BarChart3, LogOut, Globe, UserX, RefreshCw, MapPin, MapPinOff, WifiOff,
@@ -133,9 +135,12 @@ export default function SalesAgentLayout() {
     refetchInterval: 60_000,
   }).data?.session;
   const onDuty = workSession?.status === "active";
+  const queryClient = useQueryClient();
+  const onSessionEnded = useCallback(() => void queryClient.invalidateQueries({ queryKey: ["/api/sales-agent/work-session"] }), [queryClient]);
   const location = useLocationTracking(
     onDuty,
     policy?.trackingIntervalSeconds ?? DEFAULT_SALES_AGENT_POLICY.trackingIntervalSeconds,
+    onSessionEnded,
   );
   const online = useOnline();
 
