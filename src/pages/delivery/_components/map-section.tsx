@@ -214,12 +214,7 @@ export default function MapSection({ onOpenTask }: { onOpenTask: (taskId: string
         ) : !live.data ? (
           <Skeleton className="aspect-[5/3] rounded-2xl" />
         ) : (
-          <MapView
-            markers={liveMap.markers}
-            circles={liveMap.circles}
-            className="aspect-[5/3] w-full"
-            onMarkerClick={(id) => id.startsWith("task-") && onOpenTask(id.slice("task-".length))}
-          />
+          <MapView markers={liveMap.markers} circles={liveMap.circles} className="aspect-[5/3] w-full" />
         )}
 
         <div className="space-y-2">

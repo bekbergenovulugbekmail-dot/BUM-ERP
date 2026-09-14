@@ -83,12 +83,9 @@ export default function RoutePlanPanel({ plan, stops, unlocated = [], color, onO
         )}
       </div>
 
-      <MapView
-        markers={markers}
-        polylines={polylines}
-        className={cn("h-[360px] w-full", mapClassName)}
-        onMarkerClick={(id) => id !== "__origin" && onOpen?.(id)}
-      />
+      {/* Belgi bosilganda — ma'lumot va navigator havolalari (popup); yetkazmani ochish — ro'yxat qatoridan
+          (belgi oynani yopib, popup'dagi havolalarni to'sib qo'ymasin) */}
+      <MapView markers={markers} polylines={polylines} className={cn("h-[360px] w-full", mapClassName)} />
 
       {(plan.stops.length > 0 || unlocated.length > 0) && (
         <ol className={cn("divide-y divide-border overflow-hidden rounded-xl border border-border bg-card", compactList && "max-h-80 overflow-y-auto")}>
