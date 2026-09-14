@@ -1417,54 +1417,98 @@ Talab: agent nazorati xaritasi (bosilganda ochilmas yoki boshqa saytga o'tar edi
 - versiyalar `minimumReleaseAge` (3 kun) qoidasiga mos tanlandi (8.5.2 hali yetilmagan — Railway web build'i shu sabab bir marta yiqilgan)
 - build: Gradle 8.14.3, AGP 8.13.0, **JDK 21** (Capacitor 8 talabi; mashinada Android Studio JBR 21 — `%USERPROFILE%\.jdks\jbr-21.0.11`), `gradle.properties` — 900 MB heap, bitta worker
 
-**APK QURILMADI — blocker:** bu kompyuterda Gradle build ikki marta tizim tomonidan xotira yetishmagani uchun to'xtatildi (8 GB dan 1,4–1,5 GB bo'sh — Docker, boshqa ilovalar; build ~2,5 GB talab qiladi). Loyiha tayyor, qurish:
-- Android Studio: Open → `apps/mobile/android` → Settings → Gradle JDK = 21 → Build → Build APK(s)
-- yoki buyruq bilan (og'ir ilovalar yopilgach yoki boshqa kompyuterda): `pnpm install`, `JAVA_HOME` = JDK 21, `ANDROID_HOME` = Android SDK, `cd apps/mobile` → `pnpm apk:debug` → `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk`
-- release: imzo kaliti (`keytool -genkey …`, egasida saqlanadi, repoga tushmaydi — `.gitignore`), `signingConfigs` va `pnpm apk:release`; Google Play'ga joylash — Play Console hisobi (bir martalik pullik ro'yxatdan o'tish — egasining qarori) yoki APK'ni to'g'ridan-to'g'ri tarqatish
+**APK qurildi (2026-09-14):** 2026-09-14 kechasi Gradle ikki marta xotira yetishmagani uchun to'xtatilgan edi (1,4 GB bo'sh). Xotira bo'shagan paytda (Docker to'xtatilib) qayta qurildi:
+- debug: `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk` — 5.1 MB, SHA-256 `1323380DF32FB4549C9840485D2295FD99E54BF3C794EF052FA99E47E65E2294`, Android Debug sertifikati bilan imzolangan (`apksigner verify`)
+- release: `apps/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk` — 3.9 MB, SHA-256 `58FCB3F5D8108524857BBEA1896426B6E7CDF8AFEED147F16BB8697F921E8F96`, **imzosiz** (imzo kaliti yo'q — o'rnatib bo'lmaydi va Play'ga yuklanmaydi)
+- APK fayllari repoga kiritilmaydi (`.gitignore`); qayta qurish: `JAVA_HOME` = JDK 21, `ANDROID_HOME` = Android SDK, `apps/mobile/android` → `gradlew.bat assembleDebug` / `assembleRelease` (yoki Android Studio → Gradle JDK 21)
 
-**Tekshirilmagan:** APK qurilmagan va telefonda sinalmagan (fondagi GPS, bildirishnoma, kamera, navigator intentlari, oflayn sahifa); iOS yo'q
+**Statik audit (qurilgan APK, `aapt dump`):** paket `uz.bumerp.app`, versionCode 1 / versionName 1.0, minSdk 24, target 36, nomi "BUM ERP"; ruxsatlar — INTERNET, ACCESS_FINE/COARSE_LOCATION, POST_NOTIFICATIONS, CAMERA, FOREGROUND_SERVICE, FOREGROUND_SERVICE_LOCATION (GPS xizmati `foregroundServiceType=location`), RECEIVE_BOOT_COMPLETED, WAKE_LOCK; `ACCESS_BACKGROUND_LOCATION` yo'q; faqat HTTPS (`cleartext: false`)
+- tuzatildi: plagin qo'shgan `SCHEDULE_EXACT_ALARM` olib tashlandi (aniq vaqtli signal ishlatilmaydi; Google Play asoslash talab qiladi)
+- ikonka: adaptive — BUM logotipi niqobning xavfsiz zonasi ichida, fon oq, kesilmaydi (ko'z bilan tekshirildi); splash: 11 o'lcham, oq fonda markazda BUM logotipi (standart Capacitor rasmi almashtirildi)
+- bildirishnoma bosilganda — dostavshikning "Yetkazmalar" sahifasi (joriy biznes manzili bilan); faqat shu saytdagi nisbiy yo'l qabul qilinadi (web testi)
+- release imzosi: `app/build.gradle` `android/keystore.properties` bo'lsa imzolaydi (fayl va `*.jks`/`*.keystore` — `.gitignore`); kalit yaratilmagan — egasi yaratadi va xavfsiz saqlaydi (yo'qolsa ilovani yangilab bo'lmaydi)
 
-## Keyingi qadam
+**Tekshirilmagan (real qurilma yo'q — `adb devices` bo'sh, emulyator uchun xotira yetmaydi):** telefonda o'rnatish, kirish/chiqish, GPS (ochiq, fonda, ekran qulflanganda), bildirishnoma va uni bosish, kamera va rasm yuborish, Google Maps / Yandex / navigator intentlari, oflayn sahifa. Web qismi (kirish, xarita, marshrut, navigator havolalari, mobil ko'rinish) lokal brauzer E2E da o'tgan. iOS yo'q
 
-1. **Brauzerda sinov (lokal)** — boshlandi 2026-09-11:
-   - tayyor: dev baza migratsiya qilingan, `db:seed` bajarilgan (bootstrap admin `+998900000001`, 14 rol, 9 birlik); `.env` da `BOOTSTRAP_ADMIN_*` va lokal MinIO sozlamalari
-   - sinov kompaniyasi "Sinov do'kon", egasi `+998900000002` — parollar faqat `.env` da (`BOOTSTRAP_ADMIN_PASSWORD`, `LOCAL_TEST_OWNER_PASSWORD`)
-   - Vite proxy orqali avtomatik smoke test — 21/21: SPA, admin kirishi, kompaniya + ega, mahsulot, kirim, mijoz, buyurtma → tasdiqlash → jo'natish → to'lov, qoldiq 47, dashboard, ogohlantirishlar, chiqish
-   - buxgalteriya: aylanma balansi teng (96 000 / 96 000), foyda 12 000, kassa 36 000
-   - **topilgan kamchilik:** ombordagi qo'lda kirim (`POST /api/inventory/stock/movements`, `receive`) buxgalteriya yozuvi yaratmaydi — sotuvdan keyin 1200 "Tovar zaxirasi" −24 000 bo'ladi. Qarshi hisob tanlanishi kerak (masalan 3000 kapital — boshlang'ich qoldiq); xarid qabuli esa to'g'ri yozadi
-   - qolgan: brauzerda qo'lda — `pnpm --filter @bum/api dev` va `pnpm dev`, `http://localhost:5173` (POS, fayl yuklash, sozlamalar, admin panel)
-2. **Production — Railway'ga deploy qilindi (2026-09-11):**
-   - Qarorlar: darhol bum-erp.uz ga; Convex ma'lumotlari ko'chirilmaydi (noldan boshlanadi); logto o'chiriladi (Railway panelida foydalanuvchi)
-   - Railway loyihasi `bum-erp`, muhit `production`:
-     - `bum-api` — `apps/api/Dockerfile` (`RAILWAY_DOCKERFILE_PATH`), `PORT=3000`, ichki manzil `bum-api.railway.internal`, ommaviy domeni yo'q. Konteyner ishga tushishda migratsiya → bootstrap admin seed → server
-     - `bum-web` — `Dockerfile.web`, `PORT=8080`, `API_UPSTREAM=http://bum-api.railway.internal:3000`; domenlar: `bum-web-production.up.railway.app`, `bum-erp.uz`, `www.bum-erp.uz`
-     - `Postgres--bSX` — ilova bazasi (`bum-api` `DATABASE_URL` shunga havola). Eski `Postgres` — logto'niki
-     - eski `BUM-ERP` (bo'sh, build xatosi) va `logto` — o'chirish uchun
-   - Deploy usuli: repo ildizidan `railway up --project <id> --environment production --service bum-api|bum-web` (GitHub ulanmagan)
-   - Tekshirildi: sahifalar 200, `/api` proksi, bootstrap admin (+998999635353) HTTPS orqali kirdi, cookie `Secure` + `HttpOnly`. Admin paroli foydalanuvchi kompyuterida `Documents\BUM-ERP-production-admin.txt`
-   - Tuzatildi: nginx API manzilini har so'rovda DNS orqali aniqlaydi (web API'dan oldin ishga tushganda yiqilardi)
-   - **Qolgan:**
-     - DNS (foydalanuvchi): `@` → CNAME `lfc59hrl.up.railway.app` (A 95.46.96.77 o'chiriladi), `www` → CNAME `br5m6hjv.up.railway.app`, TXT `_railway-verify` va `_railway-verify.www` (tokenlar `railway domain status <domen> --service bum-web --json` da)
-     - Railway tarifida bir xizmatga 2 ta shaxsiy domen — `admin.bum-erp.uz` qo'shilmadi; admin panel `https://bum-erp.uz/uz/admin`. Kirish sahifasidagi "admin.bum-erp.uz" havolasi yangilanishi kerak
-     - logto o'chirilgach `auth.bum-erp.uz` va `logto-admin.bum-erp.uz` CNAME yozuvlarini ham o'chirish (osilib qolgan CNAME — subdomen egallash xavfi)
-     - fayl saqlash (S3) sozlanmagan — mahsulot rasmi bazaga yoziladi (K5, `product_images`); xarajat cheki va xodim surati yuklash 503; SMS (Eskiz) va AI kalitlari yo'q — tegishli funksiyalar o'chiq
-     - xarita: kalit kerak emas (V2 — sxematik xarita va qurilmaning xarita ilovasi)
-     - Convex RBAC tuzatishi (`main` `3f958f1`) — Convex ishlatilmasa kerak emas
-3. **PR:** `feat/postgres-migration` → `main` — production'ga o'tish kuni kelishilgach
-4. **Desktop POS (K1–K6) — qolgan:**
-   - o'rnatuvchi 0.4.0 (`apps/desktop/release/BUM-POS-KASSA-Setup-0.4.0.exe`, 106.6 MB, SHA-256 `6F329722522E5CCF6354871B33F0ABBF55B66FD5BEA968FB560791AEF1898580`, imzosiz; 0.4.0 — K7: 12 mavzu, maxsus mavzu, kassa ekrani yangi UI) — platforma admini Admin → "Desktop kassa" orqali yuklab e'lon qiladi (bo'laklab, davom ettiriladigan); o'rnatilgan kassalar Sozlamalar → Ilova versiyasi'dan yangilanadi
-   - tarozilar: real uskunada sinov — Umumiy ASCII (LAN va COM), COM transporti (PowerShell SerialPort); Shtrix-M, YES POS, Rongta uchun ishlab chiqaruvchidan almashinuv protokoli hujjati kerak (K6 bo'limida ro'yxat) — hujjat kelgach adapter shu interfeysga yoziladi va real tarozida tekshiriladi
-   - kod imzolash sertifikati (`CSC_LINK`, `CSC_KEY_PASSWORD`); `bum-erp.uz` apex DNS (2-band)
-   - brauzer va kassada qo'lda sinov: aralash to'lov, qaytarish tarkibi, tezkor sotuv (rasm yuklash → kassada ko'rinish), mavzular, kurs tahriri, tarozi simulyatori
-5. **Dostavka moduli — qolgan:**
-   - brauzerda va Android telefonda qo'lda sinov: HR'da dostavka agenti qo'shish → telefon bilan kirish → ish sessiyasi → buyurtma ("Yetkazib berish kerak") → supervayzer biriktiradi → qabul → yo'lga chiqish → 200 m geofence → rasm, imzo, OTP (supervayzer kodi) → to'lov farqi → qisman yetkazish → omborga qaytarish; oflayn navbat (samolyot rejimi)
-   - real-time va avtomatik biriktirishni brauzerda sinash: ikki oynada (supervayzer va yetkazuvchi) "Jonli" belgisi, biriktirish/holat o'zgarishi darhol ko'rinishi; Sozlamalarda avtomatik biriktirishni yoqish → reja → qo'llash; "yaratilganda darhol" bilan buyurtma tasdiqlash
-   - ~~marshrut optimallashtirish (TSP)~~ — 2026-09-14 da qilindi; brauzerda qo'lda: Dostavka → Buyurtmalar → "Hudud bo'yicha" → "Barchasini dostavshikka biriktirish", Xarita → "Kunlik marshrut", dostavshik telefonida "Optimal marshrut" → Google Maps/Yandex
-   - native Android ilova (ekran qulflanganda fondagi lokatsiya); SMS provayder (OTP SMS); qisman qoldiqni qayta yetkazish; filial/hudud ma'lumotnomasi
-6. **Obuna va litsenziya — qolgan:**
-   - deploydan keyin production'da: kompaniyalar obunasi (Admin → Kompaniyalar → Obuna ustuni) mavjud holatga mosligini ko'rish — trial sanalari, muddatsiz active, litsenziyalar soni
-   - brauzerda qo'lda: egasi — Obuna sahifasi → tarif tanlash; admin — To'lovlar → tasdiqlash; HR → xodim qo'shish BEPUL/dasturdan foydalanadi, 4-foydalanuvchida qo'shimcha tarif; "Ekranni bloklash" → PIN; trial tugaganda menyu va Bosh sahifa xabari
-   - to'lov shlyuzi (Payme / Click) — hozir admin qo'lda tasdiqlaydi; qo'shimcha litsenziya tugashiga yaqin ogohlantirish; agent ish joylarida qulf ekrani; desktop kassada obuna holati ekrani
-7. **Kassa (chiqish va uzish) — qolgan:** qurilgan o'rnatuvchi 0.4.1 ni (`apps/desktop/release/BUM-POS-KASSA-Setup-0.4.1.exe`) platforma admini orqali e'lon qilish; haqiqiy kassada: kirish → ish → "Qurilmani uzish" → boshqa kompaniya bilan qayta ulash → "Dasturni yopish" (Diskpetcherda jarayon qolmasligi)
-8. **Multi-business — qolgan:** brauzerda ikki tabda qo'lda (masalan `/bonnu-market/purchase` va `/hadicha-market/distribution`), kompaniya almashtirgichdagi "yangi tabda ochish"
-9. **Xarita va marshrut — qolgan:** mijozlarga shahar/mahalla kiritish (mavjud mijozlarda bo'sh); production'da tizimga kirib "Kunlik marshrut" — manba "yo'l bo'yicha" chiqishini ko'rish (OSRM ommaviy serveri Railway'dan javob beradimi); ko'p dostavshikda o'z OSRM serveri; to'liq API regressiyasi
+## Release tayyorgarligi tekshiruvi (2026-09-14)
+
+Faqat haqiqatda bajarilgan tekshiruvlar. Production'da tizimga kirgan holda sinov qilinmadi: test hisobi yo'q, production admin paroli ishlatilmaydi va production bazada sinov kompaniyasi yaratilmadi — autentifikatsiyali oqimlar lokal dev bazada haqiqiy brauzerda sinaldi (pastda).
+
+**Production (real):**
+- API `/health` (konteyner ichidan, `railway ssh`): `ok`, `production`; SMS, AI, fayl saqlash — o'chiq
+- `app.bum-erp.uz` → `bum-web`, sertifikat amal qiladi: `/` 200, `/bonnu-market/purchase` 200, `/api/company` 401; `www.bum-erp.uz` ham shunday
+- sessiyasiz: `/api/auth/me`, `/api/company`, `/api/company/mine`, `/api/delivery/dispatch`, `/api/delivery/tasks`, `/api/distribution/map`, `/api/sales/customers`, `/api/platform/stats`, `/api/subscription` — hammasi 401; begona biznes sarlavhasi bilan ham 401; noto'g'ri login (mavjud bo'lmagan raqam) — 401, umumiy xabar (raqam mavjudligi oshkor bo'lmaydi)
+- CORS: begona Origin preflight'ida `access-control-allow-origin` faqat `WEB_ORIGIN` — begona sayt ruxsat olmaydi
+- OSRM: production API konteyneridan ommaviy OSRM javob beradi (sinov yo'li 2541 m) — marshrutlar "yo'l bo'yicha" hisoblanadi; `ROUTING_OSRM_URL` o'rnatilmagan (standart ommaviy server)
+
+**Domen (`bum-erp.uz`):**
+- NS — `dns1–4.webspace.uz`. `app` → CNAME `vdhio0zu.up.railway.app` (Railway'da tasdiqlangan, sertifikat VALID), `www` → CNAME `br5m6hjv.up.railway.app` (tasdiqlangan, VALID). Eski `auth`, `logto-admin` yozuvlari o'chirilgan (osilib qolgan CNAME yo'q)
+- apex `bum-erp.uz` → A `95.46.96.77` (eski hosting): HTTPS javob bermaydi, Railway'da ulanmagan. Railway tarifida bir xizmatga 2 ta shaxsiy domen — `app` va `www` band
+- `WEB_ORIGIN` production'da `https://bum-erp.uz`. Ilova bitta domenda ishlaydi (nginx `/api` proksi): CORS talab qilinmaydi, sessiya cookie'si host-only (`domain` yo'q) — hozir ta'siri yo'q, o'zgartirilmadi; tartib uchun `https://app.bum-erp.uz` qilish tavsiya etiladi (API qayta ishga tushadi)
+
+**Xavfsizlik auditi:**
+- git: kuzatiladigan maxfiy fayl yo'q (faqat `.env.example`); tarixda `.env`, kalit yoki sertifikat fayli qo'shilmagan; sir naqshlari (private key, AWS, Anthropic, GitHub token, parolli Postgres URL) bo'yicha yagona moslik — `apps/api/test/files.test.ts` dagi AWS hujjatlarining ommaviy S3 imzo test vektori (`…EXAMPLE`), haqiqiy kalit emas
+- ildiz `.gitignore`: `*.jks`, `*.keystore`, `*.p12`, `*.pfx`, `*.pem`, `keystore.properties` qo'shildi
+- sessiya cookie: `httpOnly`, production'da `Secure`, `SameSite=Lax`; API javoblarida helmet sarlavhalari (HSTS, nosniff, X-Frame-Options)
+- SQL: `sql.raw` faqat koddagi konstantalar bilan; web: `dangerouslySetInnerHTML` faqat shadcn chart stilida (koddagi qiymat), xarita popup matni — DOM `textContent`
+- **topildi va tuzatildi:** web sahifalarida (nginx) xavfsizlik sarlavhalari yo'q edi — clickjacking xavfi. Endi SPA sahifalarida X-Frame-Options `SAMEORIGIN`, nosniff, Referrer-Policy, HSTS, Permissions-Policy (GPS va kamera — faqat shu sayt); lokal `nginx:1.29-alpine` konteynerida `nginx -t` va `curl` bilan tekshirildi; web deploy (2026-09-14 03:12 UTC) dan keyin production `app.bum-erp.uz` `/` va `/bonnu-market/delivery` da hammasi bor, `/api` javobida X-Frame-Options bitta (takrorlanmaydi)
+- IDOR: yangi `tenant-isolation` testi (2) — B kompaniyasi A ning mijoz, buyurtma, mahsulot, ombor, ta'minotchi, xodim, xarajat, lead, yetkazma va marshrutini ID bilan o'qiy, o'zgartira yoki o'chira olmaydi (403/404), A ma'lumoti o'zgarmaydi; o'z buyurtmasiga A mijozi, ombori yoki mahsulotini bog'lay olmaydi; `x-bum-company` orqali A ga o'tish — 403. Birinchi urinishda o'tdi — zaiflik topilmadi
+
+**Brauzer E2E (lokal, haqiqiy Chromium va UI, lokal dev baza va lokal API; Playwright 1.63): 14/14 o'tdi**
+- kirish: noto'g'ri parol — xato xabari; to'g'ri parol — `/sinov-dokon/dashboard`
+- Dostavka → Buyurtmalar: "Hudud bo'yicha" — "Urganch → Luchevoy" (3 do'kon), "Hudud ko'rsatilmagan", "Zakaz bor"; "Marshrut bo'yicha"
+- "Barchasini dostavshikka biriktirish" → "Marshrut tayyor": OpenStreetMap xaritasida 3 ta raqamli belgi, yo'l chizig'i, "2.1 km · 5 daq · yo'l bo'yicha", Google Maps / Yandex tugmalari
+- belgi popup'i: Google Maps va Yandex havolalari; Xarita → "Kunlik marshrut"; yetkazma tafsilotida "Xaritada" — ilova ichidagi oyna, yangi sahifa ochilmaydi
+- Distribyutsiya → Xarita (raqamli belgilar) → "Optimal tartib"
+- boshqa biznes sarlavhasi — 403, begona ID — 404; dostavshik (mobil 400 px): "Optimal marshrut" va navigator havolalari; chiqish — `/api/auth/me` 401 va kirish sahifasi; brauzer konsolida kutilmagan xato yo'q
+- **topildi va tuzatildi:** marshrut oynasida xarita belgisi bosilsa oyna yopilib yetkazma tafsiloti ochilardi — popup'dagi navigator havolalariga yetib bo'lmasdi. Endi belgi — navigator havolalari, yetkazmani ochish — ro'yxat qatoridan (dostavka jonli xaritasida ham)
+- Kassa bu bosqichda qayta sinalmadi: 2026-09-13 dagi Electron smoke va desktop testlari o'z kuchida; paketlangan 0.4.1 foydalanuvchining ishlab turgan kassasiga (ma'lumot papkasi, bitta-nusxa qulfi) tegmaslik uchun ishga tushirilmadi
+
+**Mijoz hududlari:** migratsiya 0044 — faqat `ADD COLUMN` va `CREATE INDEX`, `UPDATE` yo'q; mavjud mijozlarning hududi bo'sh qoladi va avtomatik taxmin qilib to'ldirilmaydi; E2E da ular "Hudud ko'rsatilmagan" guruhida to'g'ri ko'rindi.
+
+## Yakuniy holat va keyingi qadam (2026-09-14)
+
+### Bajarilgan (tekshirilgan)
+- **Kassa:** dasturdan to'liq chiqish va qurilmani uzish (desktop testlari, Electron smoke); o'rnatuvchi 0.4.1 qurilgan — `apps/desktop/release/BUM-POS-KASSA-Setup-0.4.1.exe`, 106.6 MB, SHA-256 `785264989CF5C992348037FE2F9FBB58A5336C817E2AE5362E088EC58686B346`, imzosiz; holati — **e'lon qilinmagan**
+- **Xarita:** OpenStreetMap + Leaflet; belgi — navigator havolalari (Google Maps, Yandex, Android `geo:`); kompyuterda ilova ichidagi oyna
+- **Marshrut:** 12 nuqtagacha aniq, ko'prog'ida taxminiy yaxshilangan tartib; yo'l masofasi — OSRM (production konteyneridan javob tasdiqlangan), javob bo'lmasa to'g'ri chiziq bo'yicha
+- **Dostavka:** "Hudud bo'yicha" / "Marshrut bo'yicha", "Zakaz bor", "Barchasini dostavshikka biriktirish", kunlik marshrut, dostavshikda "Optimal marshrut"
+- **Distribyutsiya:** xarita, marshrut, "Optimal tartib", ruxsat va kompaniya izolyatsiyasi
+- **Multi-business:** `/{biznes}/{bo'lim}`, tab konteksti, begona biznes — 403
+- **Xavfsizlik:** web xavfsizlik sarlavhalari (production'da tasdiqlangan), IDOR testi, git sirlar auditi, imzo kalitlari `.gitignore` da
+- **API regressiya:** 94 fayl, 388 test — 4 qismda `--maxWorkers=1` (129 + 95 + 84 + 80), hammasi birinchi urinishda o'tdi (2026-09-14, yangi `tenant-isolation` testi bilan)
+- **Web:** 14 fayl / 57 test, tsc, lint, `vite build` — toza; brauzer E2E (lokal) — 14/14
+- **Production deploy:** `bum-api` (2026-09-13 20:15 UTC, keyin API kodi o'zgarmagan) va `bum-web` (2026-09-14 03:23 UTC) — SUCCESS; `https://app.bum-erp.uz` 200, `/api/company` 401, `/health` ok
+
+### Android
+- loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
+- ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
+- ruxsatlar: joylashuv, fondagi GPS xizmati (`FOREGROUND_SERVICE_LOCATION`), bildirishnoma, kamera; `ACCESS_BACKGROUND_LOCATION` va `SCHEDULE_EXACT_ALARM` yo'q
+- APK: debug 5.1 MB (debug imzo) va release 3.9 MB (imzosiz) — **qurildi**; release imzosi — **tayyor emas** (kalit yo'q)
+- real qurilmada test — **qilinmagan**
+
+### Qolgan ishlar
+1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
+2. Kassa 0.4.1 ni platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi) qo'lda sinov
+3. Production'da tizimga kirgan holda qo'lda smoke (egasi hisobi bilan): kirish, Dostavka → "Hudud bo'yicha" → biriktirish, "Kunlik marshrut", distribyutsiya xaritasi
+4. Mavjud mijozlarga shahar/mahalla kiritish (avtomatik to'ldirilmaydi)
+5. Apex `bum-erp.uz` ni ishlaydigan manzilga yo'naltirish; ixtiyoriy — `WEB_ORIGIN=https://app.bum-erp.uz`
+6. Production'da fayl saqlash (S3), SMS (Eskiz — OTP) va AI kalitlari sozlanmagan — tegishli funksiyalar o'chiq
+7. Buxgalteriya: ombordagi qo'lda kirim (`POST /api/inventory/stock/movements`, `receive`) jurnal yozuvi yaratmaydi (2026-09-11 da topilgan, hal qilinmagan)
+8. Desktop: kod imzolash sertifikati (`CSC_LINK`, `CSC_KEY_PASSWORD`); Shtrix-M, YES POS, Rongta tarozilari uchun ishlab chiqaruvchining almashinuv protokoli hujjati
+9. Obuna: to'lov shlyuzi (Payme / Click) — hozir admin qo'lda tasdiqlaydi; qo'shimcha litsenziya tugashi ogohlantirishi
+10. Dostavka: SMS OTP, qisman qoldiqni qayta yetkazish, hudud poligonlari ma'lumotnomasi
+11. PR `feat/postgres-migration` → `main` — o'tish kuni kelishilgach
+12. Railway'dagi eski xizmatlar (`BUM-ERP`, `logto`, logto'ning Postgres'i) hali bo'lsa — egasi o'chiradi (tasdiqsiz o'chirilmaydi)
+
+### Blockerlar
+- **Android real qurilma:** `adb devices` bo'sh, emulyator uchun xotira yetmaydi — telefon ulash kerak
+- **Release imzo kaliti:** egasi yaratadi va xavfsiz joyda saqlaydi (yo'qolsa ilovani yangilab bo'lmaydi); `android/keystore.properties` ga yo'li va parollar
+- **Build/test xotirasi:** 8 GB mashinada Docker va Gradle birga ishlasa tizim fon vazifalarini to'xtatadi — APK Docker to'xtatilib qurildi
+- **DNS:** apex `bum-erp.uz` — webspace.uz panelida egasi o'zgartiradi (Railway tarifida `bum-web` ga yana domen qo'shib bo'lmaydi: `app` va `www` band)
+- **Production'da tizimga kirgan sinov:** egasining test hisobi yoki ishtiroki kerak (production admin paroli ishlatilmaydi)
+- **Kassa 0.4.1 e'loni:** platforma admini kirishi kerak
+- **OSRM:** Public OSRM cheklovi bor; foydalanuvchilar soni oshsa self-hosted OSRM kerak. Taxminiy talab (tekshirilmagan): O'zbekiston xaritasi uchun ~2 vCPU, 4 GB RAM, 10 GB disk; ulash — `ROUTING_OSRM_URL`, egasining tasdig'i bilan
+
+### Eng muhim keyingi qadam
+Release imzo kalitini yaratib, imzolangan APK'ni haqiqiy Android telefonda sinash: dostavshik kirishi → ish sessiyasi → GPS (fonda, ekran qulflanganda) → yangi yetkazma bildirishnomasi → "Optimal marshrut" → Google Maps / Yandex.
