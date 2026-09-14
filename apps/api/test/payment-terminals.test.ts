@@ -318,7 +318,11 @@ describe("To'lov terminallari va universal aralash to'lov", () => {
     });
     expect(registered.statusCode, registered.body).toBe(201);
     const headers = { authorization: `Bearer ${registered.json().token as string}` };
-    type SyncedConfig = { hash: string; terminals: { id: string; name: string; network: string }[] } | null;
+    type SyncedConfig = {
+      hash: string;
+      terminals: { id: string; name: string; network: string }[];
+      bankAccounts: { id: string; name: string; bankName: string | null }[];
+    } | null;
     const pull = async (configHash?: string) => {
       const res = await app.inject({ method: "POST", url: "/api/pos-device/pull", headers, payload: { limit: 1, ...(configHash ? { configHash } : {}) } });
       expect(res.statusCode, res.body).toBe(200);
@@ -397,5 +401,28 @@ describe("To'lov terminallari va universal aralash to'lov", () => {
     const [rejected] = await push([stolen.op]);
     expect(rejected).toMatchObject({ status: "rejected" });
     expect(await db.select().from(customerPayments).where(eq(customerPayments.orderId, stolen.saleId))).toHaveLength(0);
+
+    // Bank hisobi "Kassada ko'rsatish" — config bilan keladi (xesh o'zgaradi); oflayn chek tanlangan bank hisobiga yoziladi
+    expect((await call(owner(), "PATCH", `/api/finance/cash-accounts/${secondBank}`, { showInPos: true })).statusCode).toBe(200);
+    const third = await pull(second!.hash);
+    expect(third!.hash).not.toBe(second!.hash);
+    expect(third!.bankAccounts.map((account) => account.id)).toEqual([secondBank]);
+    const bankSale = saleOp("K01-000003", [
+      { method: "cash", amount: "5000" },
+      { method: "bank", amount: "15000", cashAccountId: secondBank },
+    ], 5);
+    const [bankSold] = await push([bankSale.op]);
+    expect(bankSold, JSON.stringify(bankSold)).toMatchObject({ status: "applied", result: { paid: "20000.00" } });
+    const bankRows = await db.select().from(customerPayments).where(eq(customerPayments.orderId, bankSale.saleId));
+    expect(bankRows.map((row) => `${row.method}:${row.amount}:${row.cashAccountId}`).sort()).toEqual(
+      [`bank:15000.00:${secondBank}`, `cash:5000.00:${mainCash}`].sort(),
+    );
+    expect(await balanceOf(secondBank)).toBe("22000.00");
+
+    // Begona kompaniya bank hisobi — rad, pul yozilmaydi
+    const [otherBank] = await db.select().from(cashAccounts).where(and(eq(cashAccounts.companyId, other.companyId), eq(cashAccounts.type, "bank")));
+    const stolenBank = saleOp("K01-000004", [{ method: "bank", amount: "20000", cashAccountId: otherBank!.id }], 4);
+    expect((await push([stolenBank.op]))[0]).toMatchObject({ status: "rejected" });
+    expect(await db.select().from(customerPayments).where(eq(customerPayments.orderId, stolenBank.saleId))).toHaveLength(0);
   });
 });

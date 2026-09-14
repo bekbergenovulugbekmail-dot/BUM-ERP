@@ -1,4 +1,4 @@
-/** Karta terminali yorliqlari: kassa ekrani, to'lov taqsimoti va chek uchun bir xil. */
+/** Karta terminali va bank hisobi yorliqlari: kassa ekrani, to'lov taqsimoti va chek uchun bir xil. */
 import { TERMINAL_NETWORK_LABELS, type TerminalNetwork } from "@bum/shared";
 import { PAYMENT_LABELS } from "../format.ts";
 
@@ -11,7 +11,9 @@ export function terminalLabel(terminal: TerminalView, all: readonly TerminalView
   return sameNetwork ? `${network} · ${terminal.name}` : network;
 }
 
-/** To'lov qismi nomi: terminal bilan — "Karta · UZCARD", aks holda usul nomi. */
-export function paymentPartLabel(part: { method: string; terminal?: TerminalView | null }): string {
-  return part.terminal ? `${PAYMENT_LABELS.card} · ${terminalLabel(part.terminal)}` : (PAYMENT_LABELS[part.method] ?? part.method);
+/** To'lov qismi nomi: terminal — "Karta · UZCARD", bank hisobi — "Bank · Kapitalbank", aks holda usul nomi. */
+export function paymentPartLabel(part: { method: string; terminal?: TerminalView | null; account?: { name: string } | null }): string {
+  if (part.terminal) return `${PAYMENT_LABELS.card} · ${terminalLabel(part.terminal)}`;
+  if (part.account) return `${PAYMENT_LABELS.bank} · ${part.account.name}`;
+  return PAYMENT_LABELS[part.method] ?? part.method;
 }

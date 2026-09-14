@@ -623,6 +623,83 @@ describe("Kassa xizmati (main jarayon)", () => {
     );
   });
 
+  it("bank hisoblari: config bilan keladi, bank qismi tanlangan hisobga, chekda hisob nomi; kassada yo'q hisob va naqdda hisob rad", async () => {
+    const api = fakeApi();
+    const kassa = service(api);
+    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    store.saveCashier({ id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true, permissions: ["pos.use"] });
+    const bankAccounts = [
+      { id: "b-kapital", name: "Kapitalbank", bankName: "Kapitalbank" },
+      { id: "b-humo", name: "Humo hisobi", bankName: null },
+    ];
+    store.applyPull({
+      ...pullResponse({
+        units: { rows: [{ id: "unit-d", name: "Dona", shortName: "dona", isBase: true, isActive: true }] },
+        products: { rows: [product("p1", "Cola")] },
+        stockLevels: { rows: [{ id: "s1", productId: "p1", warehouseId: "w1", quantity: "5.0000", reservedQty: "0.0000" }] },
+      }),
+      config: {
+        hash: "cfg-banks",
+        company: { name: "Bonnu", address: null, phone: null, taxId: null, currency: "UZS" },
+        cashback: { enabled: false, accrualBase: "paid", maxUsagePercent: 0, tiers: [], categoryRates: [] },
+        receipt: {},
+        terminals: [],
+        bankAccounts,
+      },
+    });
+
+    api.state.online = false;
+    expect(kassa.posContext().bankAccounts).toEqual(bankAccounts);
+    kassa.openShift({ openingCash: "0" });
+    const base = {
+      customerId: null,
+      lines: [{ productId: "p1", unitId: "unit-d", quantity: "2" }],
+      saleCurrencies: [],
+      paymentMethod: "bank" as const,
+      amountPaid: null,
+      cashbackAmount: null,
+      balanceAmount: null,
+      changeToBalance: false,
+      currencyPayments: [],
+    };
+    expect(() => kassa.completeSale({ ...base, payments: [{ method: "bank", amount: null, cashAccountId: "b-yoq" }] })).toThrow("Bank hisobi kassada yo'q");
+    expect(() => kassa.completeSale({ ...base, payments: [{ method: "cash", amount: null, cashAccountId: "b-kapital" }] })).toThrow("Bank hisobi faqat bank");
+    expect(() =>
+      kassa.completeSale({
+        ...base,
+        payments: [
+          { method: "bank", amount: "5000", cashAccountId: "b-kapital" },
+          { method: "bank", amount: "5000", cashAccountId: "b-kapital" },
+        ],
+      }),
+    ).toThrow("bir marta");
+
+    // 2 × 10000 = 20000: naqd 5000 + Kapitalbank 8000 + Humo hisobi (qoldiq 7000)
+    const sale = kassa.completeSale({
+      ...base,
+      payments: [
+        { method: "cash", amount: "5000" },
+        { method: "bank", amount: "8000", cashAccountId: "b-kapital" },
+        { method: "bank", amount: null, cashAccountId: "b-humo" },
+      ],
+    });
+    expect(sale.payments).toEqual([
+      { method: "cash", tendered: "5000.00", paid: "5000.00" },
+      { method: "bank", tendered: "8000.00", paid: "8000.00", account: { id: "b-kapital", name: "Kapitalbank" } },
+      { method: "bank", tendered: "7000.00", paid: "7000.00", account: { id: "b-humo", name: "Humo hisobi" } },
+    ]);
+    const queued = store.pendingOps(50).find((op) => op.type === "sale.complete");
+    expect(queued?.payload).toMatchObject({
+      payments: [
+        { method: "cash", amount: "5000.00" },
+        { method: "bank", amount: "8000.00", cashAccountId: "b-kapital" },
+        { method: "bank", amount: "7000.00", cashAccountId: "b-humo" },
+      ],
+    });
+    expect((queued!.payload as { payments: object[] }).payments[0]).not.toHaveProperty("cashAccountId");
+  });
+
   it("kassa bo'limi: kirim-chiqim, xarajat ruxsati, mijoz to'lovi (qarzdan ortig'i balansga), X/Z-hisobot, tarix, navbat tartibi", async () => {
     const api = fakeApi();
     const kassa = service(api);

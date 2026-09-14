@@ -84,7 +84,7 @@ export type SaleCalcInput = {
    * Aralash to'lov (asosiy valyutada): naqd, karta, bank — har qism bir marta (karta terminal bo'yicha: UZCARD va HUMO
    * alohida); summa null — shu qismga qolgan qoldiq (faqat bitta qismda). Berilsa `paymentMethod`/`amountPaid` e'tiborsiz.
    */
-  payments?: { method: "cash" | "card" | "bank"; amount: string | null; terminalId?: string | null }[];
+  payments?: { method: "cash" | "card" | "bank"; amount: string | null; terminalId?: string | null; cashAccountId?: string | null }[];
   /** null — ishlatilmaydi; "" yoki son — so'ralgan summa (chegaraga qisqartiriladi). */
   cashbackAmount: string | null;
   balanceAmount: string | null;
@@ -123,7 +123,7 @@ export type SaleCalc = {
   tendered: bigint;
   paid: bigint;
   /** Asosiy valyutadagi to'lov qismlari: berilgan (naqdda — qaytim bilan) va qabul qilingan; karta — terminal bilan. */
-  payments: { method: PaymentMethod; tendered: bigint; paid: bigint; terminalId?: string }[];
+  payments: { method: PaymentMethod; tendered: bigint; paid: bigint; terminalId?: string; cashAccountId?: string }[];
   cashPaid: bigint;
   change: bigint;
   changeKept: bigint;
@@ -146,23 +146,34 @@ const safeMinor = (text: string | null, scale = 2) => {
 const METHOD_NAMES: Record<string, string> = { cash: "Naqd", card: "Karta", bank: "Bank", transfer: "O'tkazma" };
 
 /** Asosiy valyutadagi to'lov qismlari: aralash (`payments`, null — qoldiq) yoki bitta usul (`amountPaid`, null — aniq). */
-function paymentParts(input: SaleCalcInput, due: bigint, errors: string[]): { method: PaymentMethod; tendered: bigint; terminalId?: string }[] {
+function paymentParts(
+  input: SaleCalcInput,
+  due: bigint,
+  errors: string[],
+): { method: PaymentMethod; tendered: bigint; terminalId?: string; cashAccountId?: string }[] {
   if (!input.payments || input.payments.length === 0) {
     const tendered = input.amountPaid === null ? due : (safeMinor(input.amountPaid) ?? 0n);
     if (tendered < 0n) errors.push("To'lov summasi manfiy bo'lmasin");
     return [{ method: input.paymentMethod, tendered }];
   }
-  // Server bilan bir xil: qism kaliti — usul + terminal (UZCARD va HUMO — ikki qism, bitta terminal ikki marta — xato)
+  // Server bilan bir xil: qism kaliti — usul + terminal + bank hisobi (UZCARD va HUMO — ikki qism, bitta terminal ikki marta — xato)
   const seen = new Set<string>();
   let known = 0n;
   let openParts = 0;
   for (const part of input.payments) {
-    const key = `${part.method}|${part.terminalId ?? ""}`;
+    const key = `${part.method}|${part.terminalId ?? ""}|${part.cashAccountId ?? ""}`;
     if (seen.has(key)) {
-      errors.push(part.terminalId ? "Bitta terminal to'lovi bir marta kiritiladi" : `${METHOD_NAMES[part.method] ?? part.method} to'lovi bir marta kiritiladi`);
+      errors.push(
+        part.terminalId
+          ? "Bitta terminal to'lovi bir marta kiritiladi"
+          : part.cashAccountId
+            ? "Bitta bank hisobiga to'lov bir marta kiritiladi"
+            : `${METHOD_NAMES[part.method] ?? part.method} to'lovi bir marta kiritiladi`,
+      );
     }
     seen.add(key);
     if (part.terminalId && part.method !== "card") errors.push("Terminal faqat karta to'lovida tanlanadi");
+    if (part.cashAccountId && part.method !== "bank") errors.push("Bank hisobi faqat bank to'lovida tanlanadi");
     if (part.amount === null) {
       openParts += 1;
       continue;
@@ -175,7 +186,7 @@ function paymentParts(input: SaleCalcInput, due: bigint, errors: string[]): { me
   const rest = due > known ? due - known : 0n;
   let restGiven = false;
   return input.payments.map((part) => {
-    const terminal = part.terminalId ? { terminalId: part.terminalId } : {};
+    const terminal = { ...(part.terminalId ? { terminalId: part.terminalId } : {}), ...(part.cashAccountId ? { cashAccountId: part.cashAccountId } : {}) };
     if (part.amount !== null) return { method: part.method, tendered: safeMinor(part.amount) ?? 0n, ...terminal };
     const tendered = restGiven ? 0n : rest;
     restGiven = true;
@@ -250,6 +261,7 @@ export function computeSale(input: SaleCalcInput): SaleCalc {
     tendered: part.tendered,
     paid: part.method === "cash" ? cashPaid : part.tendered,
     ...(part.terminalId ? { terminalId: part.terminalId } : {}),
+    ...(part.cashAccountId ? { cashAccountId: part.cashAccountId } : {}),
   }));
   if (!input.customer && paid < due) errors.push("Mijozsiz sotuvda chek to'liq to'lanishi kerak");
 

@@ -11,16 +11,28 @@ const METHOD_LABEL: Record<PaymentMethod, string> = { cash: "Naqd", card: "Karta
  * Aralash to'lov taqsimoti: har qism ulushi chiziqda va "Naqd 300 000 + UZCARD 400 000 = 700 000" ko'rinishida
  * (hisob — `computeSale`); karta terminal bo'yicha alohida.
  */
-export function PaymentProgress({ calc, base, terminals = [] }: { calc: SaleCalc; base: string; terminals?: readonly TerminalView[] }) {
+export function PaymentProgress({
+  calc,
+  base,
+  terminals = [],
+  bankAccounts = [],
+}: {
+  calc: SaleCalc;
+  base: string;
+  terminals?: readonly TerminalView[];
+  bankAccounts?: readonly { id: string; name: string }[];
+}) {
   if (calc.due <= 0n) return null;
   const parts = calc.payments.filter((part) => part.paid > 0n);
   const width = (value: bigint) => `${Math.min(100, Number((value * 10000n) / calc.due) / 100)}%`;
   const done = calc.paid >= calc.due;
   const labelOf = (part: SaleCalc["payments"][number]) => {
     const terminal = part.terminalId ? terminals.find((item) => item.id === part.terminalId) : undefined;
-    return terminal ? terminalLabel(terminal, terminals) : METHOD_LABEL[part.method];
+    if (terminal) return terminalLabel(terminal, terminals);
+    const account = part.cashAccountId ? bankAccounts.find((item) => item.id === part.cashAccountId) : undefined;
+    return account ? account.name : METHOD_LABEL[part.method];
   };
-  const keyOf = (part: SaleCalc["payments"][number]) => `${part.method}:${part.terminalId ?? ""}`;
+  const keyOf = (part: SaleCalc["payments"][number]) => `${part.method}:${part.terminalId ?? ""}:${part.cashAccountId ?? ""}`;
   return (
     <div className="space-y-1.5">
       <div className="flex h-2.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="To'lov" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(Number((calc.paid * 100n) / calc.due))}>

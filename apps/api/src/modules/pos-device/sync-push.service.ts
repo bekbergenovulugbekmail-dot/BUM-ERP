@@ -126,7 +126,15 @@ export const syncOperationSchema = z.discriminatedUnion("type", [
       amountPaid: moneySchema,
       /** Aralash to'lov (naqd + karta terminali + bank) — berilsa paymentMethod/amountPaid o'rniga. */
       payments: z
-        .array(z.strictObject({ method: z.enum(["cash", "card", "bank"]), amount: moneySchema, terminalId: z.uuid().nullable().optional() }))
+        .array(
+          z.strictObject({
+            method: z.enum(["cash", "card", "bank"]),
+            amount: moneySchema,
+            terminalId: z.uuid().nullable().optional(),
+            /** Kassada tanlangan bank hisobi ("Bank: Kapitalbank"). */
+            cashAccountId: z.uuid().nullable().optional(),
+          }),
+        )
         .min(1)
         .max(MAX_PAYMENT_PARTS)
         .optional(),

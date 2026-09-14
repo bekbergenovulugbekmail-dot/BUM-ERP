@@ -829,6 +829,7 @@ export class KassaService {
       company: config?.company ?? null,
       permissions: cashier.permissions,
       terminals: (config?.terminals ?? []).map(({ id, name, network }) => ({ id, name, network })),
+      bankAccounts: (config?.bankAccounts ?? []).map(({ id, name, bankName }) => ({ id, name, bankName })),
     };
   }
 
@@ -1279,10 +1280,16 @@ export class KassaService {
     }
     // Terminal — serverdan sinxronlangan faol ro'yxatda va faqat kartada; pul serverda terminal bog'langan bank hisobiga
     const terminals = new Map((this.config()?.terminals ?? []).map((terminal) => [terminal.id, terminal]));
+    const bankAccounts = new Map((this.config()?.bankAccounts ?? []).map((account) => [account.id, account]));
     for (const part of mixed ? input.payments! : []) {
-      if (!part.terminalId) continue;
-      if (part.method !== "card") throw new KassaError("BAD_REQUEST", "Terminal faqat karta to'lovida tanlanadi");
-      if (!terminals.has(String(part.terminalId))) throw new KassaError("BAD_REQUEST", "Terminal topilmadi yoki faol emas — sinxronlashni kuting");
+      if (part.terminalId) {
+        if (part.method !== "card") throw new KassaError("BAD_REQUEST", "Terminal faqat karta to'lovida tanlanadi");
+        if (!terminals.has(String(part.terminalId))) throw new KassaError("BAD_REQUEST", "Terminal topilmadi yoki faol emas — sinxronlashni kuting");
+      }
+      if (part.cashAccountId) {
+        if (part.method !== "bank") throw new KassaError("BAD_REQUEST", "Bank hisobi faqat bank to'lovida tanlanadi");
+        if (!bankAccounts.has(String(part.cashAccountId))) throw new KassaError("BAD_REQUEST", "Bank hisobi kassada yo'q — sinxronlashni kuting");
+      }
     }
 
     let customer: CustomerRow | null = null;
@@ -1331,6 +1338,7 @@ export class KassaService {
               method: part.method,
               amount: part.amount === null ? null : String(part.amount),
               terminalId: part.terminalId ? String(part.terminalId) : null,
+              cashAccountId: part.cashAccountId ? String(part.cashAccountId) : null,
             })),
           }
         : {}),
@@ -1389,6 +1397,7 @@ export class KassaService {
                 method: part.method as "cash" | "card" | "bank",
                 amount: fromMinor(part.tendered),
                 ...(part.terminalId ? { terminalId: part.terminalId } : {}),
+                ...(part.cashAccountId ? { cashAccountId: part.cashAccountId } : {}),
               })),
             }
           : {}),
@@ -1435,12 +1444,14 @@ export class KassaService {
         paymentMethod: primaryMethod,
         payments: calc.payments.map((part) => {
           const terminal = part.terminalId ? terminals.get(part.terminalId) : undefined;
+          const account = part.cashAccountId ? bankAccounts.get(part.cashAccountId) : undefined;
           return {
             method: part.method,
             tendered: fromMinor(part.tendered),
             paid: fromMinor(part.paid),
-            // Chekda terminal nomi — keyin terminal o'chirilsa ham tarixda qoladi
+            // Chekda terminal va bank hisobi nomi — keyin o'zgartirilsa ham tarixda qoladi
             ...(terminal ? { terminal: { id: terminal.id, name: terminal.name, network: terminal.network } } : {}),
+            ...(account ? { account: { id: account.id, name: account.name } } : {}),
           };
         }),
         tendered: fromMinor(calc.tendered),

@@ -363,7 +363,7 @@ export type SalePayload = {
   paymentMethod: PaymentMethod;
   amountPaid: string;
   /** Aralash to'lov (naqd + karta + bank) — berilsa server paymentMethod/amountPaid o'rniga shuni oladi. Karta — terminal bilan. */
-  payments?: { method: "cash" | "card" | "bank"; amount: string; terminalId?: string }[];
+  payments?: { method: "cash" | "card" | "bank"; amount: string; terminalId?: string; cashAccountId?: string }[];
   cashbackAmount?: string;
   balanceAmount?: string;
   changeToBalance?: boolean;
@@ -464,7 +464,12 @@ export type PosConfig = {
   quickSale?: { productIds: string[] };
   /** Faol karta terminallari (web: Moliya → Karta terminallari); eski server — yo'q. */
   terminals?: PosTerminal[];
+  /** Kassada ko'rsatiladigan bank hisoblari (web: Moliya → Kassa & Bank → "Kassada ko'rsatish"); eski server — yo'q. */
+  bankAccounts?: PosBankAccount[];
 };
+
+/** Kassada to'lov usuli sifatida ko'rsatiladigan bank hisobi — to'lov shu hisobga yoziladi. */
+export type PosBankAccount = { id: string; name: string; bankName: string | null };
 
 /** Karta terminali (UZCARD, HUMO ...): kassada tanlanadi, pul serverda terminal bog'langan bank hisobiga. */
 export type PosTerminal = { id: string; name: string; network: string; branchId?: string | null };
