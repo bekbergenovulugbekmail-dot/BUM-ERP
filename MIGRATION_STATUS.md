@@ -1509,6 +1509,44 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 | Ro'yxatdan o'tish: "Qaysi modullardan foydalanasiz?" qadami (standart: ishlab chiqarishsiz), bog'liqliklar avtomatik | DONE | `modules.test.ts` (API); UI tsc |
 | Sotuv agenti / dostavshik ilovalari va desktop kassada maxsus "modul o'chirilgan" ekrani | PARTIAL | API xabari umumiy xato sifatida ko'rinadi |
 
+## Bank komissiyasi, kassada to'lov usullari va GPS zaryadi (2026-09-14)
+
+**Arxitektura (migratsiya 0047 — faqat qo'shimcha: ustunlar + unikal indeks, mavjud ma'lumot o'zgarmaydi):**
+- `payment_terminals.commission_percent` (ekvayring, %) va `show_in_pos`; `cash_accounts.show_in_pos` va `outgoing_commission_percent` (pul chiqarish, %); `expenses.reference_type/reference_id` (kompaniyada unikal — takroriy so'rovda komissiya ikki marta yozilmaydi)
+- `finance/bank-commission.service.ts`: komissiya — bank hisobidan alohida chiqim + jurnal DR 5800 "Bank komissiyasi xarajatlari" / CR bank hisobi + "bank komissiyasi" toifali to'langan xarajat (Xarajatlarda ko'rinadi). 5800 hisobi yangi kompaniyalarda standart, eskilarida birinchi komissiyada ochiladi
+- Ekvayring: karta terminali to'lovida (POS web/desktop, qarz to'lovi, dostavka) — 100 000 da 0.25% → bankka 99 750, xarajat 250. Qaytarishda komissiya qaytmaydi (bank ham qaytarmaydi)
+- Pul chiqarish: faqat bank turi va asosiy valyuta — ta'minotchi to'lovi, xarajat, maosh, kassalar orasida o'tkazma, qo'lda chiqim: 1 000 000 da 1% → hisobdan 1 010 000, ta'minotchi balansiga 1 000 000, xarajat 10 000. Mablag' yetmasa (summa + komissiya) — 400, hech narsa yozilmaydi. Mijozga qaytarishda komissiya olinmaydi
+- Kassada ko'rsatish: `/api/sales/pos/payment-options` va qurilma config'i faqat `show_in_pos` terminallar va bank hisoblarini beradi. Kassa tugmalari: Naqd, UZCARD, HUMO (bir tizimda bir nechta terminal — "UZCARD · nomi"), bank hisobi nomi; terminal bo'lmasa — umumiy "Karta", hisob belgilanmasa — umumiy "Bank"
+
+| Band | Holat | Dalil |
+|---|---|---|
+| Ekvayring komissiyasi (0.25%, 0% da yozuv yo'q, takroriy `clientRequestId` — ikkinchi komissiya yo'q, 5800/1020/1100/4000 jurnallari) | DONE | `bank-commission.test.ts` (1) |
+| Pul chiqarish komissiyasi (ta'minotchi, xarajat, o'tkazma, qo'lda chiqim, mablag' yetmasa rad, naqd kassada yo'q, 101% rad) | DONE | `bank-commission.test.ts` (2) |
+| Moliya UI: terminalda komissiya va "Kassada ko'rsatish", bank hisobida "Kassada ko'rsatish" (darhol saqlanadi) va chiqim komissiyasi, misol matni | DONE | brauzer E2E (lokal) |
+| Web kassa: to'lov usuli tugmalari terminal va bank hisobi bo'yicha, aralash to'lov panelida ham; yashirilgan terminal ko'rinmaydi | DONE | brauzer E2E (lokal) |
+| Desktop kassa: bank hisoblari config bilan, bank qismi har hisob bo'yicha, oflayn chek `cashAccountId` bilan shu hisobga, begona hisob rad | DONE (kod + test) | API `payment-terminals` (5), desktop `kassa-service` testi; yangi o'rnatuvchi e'lon qilinmaguncha kassalarda yo'q |
+| Haqiqiy terminal ekvayringi (to'lovni bank tasdiqlashi) | BLOCKED | bank/processing protokoli yo'q — kassir terminal chekiga qarab kiritadi |
+
+**Brauzer E2E (lokal, Chromium, 2026-09-14) — 12/12:** egasi kirishi; Moliya → Karta terminallari: UZCARD 0.25% qo'shildi ("100,000 so'm to'lovda 250 so'm komissiya ... 99,750 so'm"), jadvalda 0.25%; Kassa & Bank: "Kassada ko'rsatish" va chiqim 1% ("1,010,000 so'm chiqadi, 10,000 so'm"); Kassa: tugmalar Naqd | HUMO · ... | UZCARD · ... | bank hisobi nomi (umumiy "Karta"/"Bank" yo'q); UZCARD bilan 12 000 so'mlik sotuv — bankka 11 970, komissiya 30 (xarajat, "To'langan"); bank hisobi tanlab 12 000 — hisobga to'liq 12 000, komissiya yo'q; aralash to'lov panelida UZCARD, HUMO, bank hisobi; terminal kassada yashirilganda tugmasi yo'qoladi; Xarajatlar ro'yxatida "Ekvayring komissiyasi 0.25% — ..." (toifa "Bank komissiyasi"); 400 px enida gorizontal siljish yo'q; konsolda xato yo'q. Topilgan va tuzatilgan: misol matnida raqam formati aralash edi ("1 000 000" va "1,010,000") — `formatMoney` bilan bir xil qilindi
+
+**GPS zaryad sarfi (Android ogohlantirishi):**
+- Sabab: fondagi GPS plagini (`@capacitor-community/background-geolocation` 1.2.26) ish vaqti davomida **har soniya** yuqori aniqlikda o'lchardi (`setInterval(1000)`, `setMaxWaitTime(1000)`); dostavshik serverga har buferlangan nuqtada so'rov yuborardi (mashinada ~har 4 soniya); WebSocket pingi 25 s va ish vaqti tashqarisida ham fonda ochiq edi
+- Tuzatish: `patches/@capacitor-community__background-geolocation@1.2.26.patch` (pnpm `patchedDependencies`) — oraliq, eng tez oraliq va paketli yetkazish JS'dan; paketdagi har o'lchov yetkaziladi; ruxsatsiz kuzatuvchi qo'shilmaydi. Eski APK yangi parametrlarni e'tiborsiz qoldiradi (avvalgidek ishlaydi)
+- JS: GPS oralig'i siyosat oralig'ining uchdan biri, 10–30 s (standart 60 s siyosatda — 20 s, paket 40 s); dostavka nuqtalari serverga 30–120 s da bir paket (bufer 20 ga yetsa darhol); siyosatdagi aniqlikdan yomon nuqta yuborilmaydi; savdo agenti — siljishda ham 15 s dan tez emas; ish sessiyasi yopilgan (409) — kuzatuv to'xtaydi; ekrandagi nuqta 5 m dan kam siljisa qayta chizilmaydi; tashrif/buyurtma amalida 15 s ichidagi aniq (≤ 50 m) kuzatuv o'lchovi qayta ishlatiladi (GPS alohida yoqilmaydi); WebSocket pingi 55 s (server o'zi 30 s da ping yuboradi), ish vaqti tashqarisida fonda 1 daqiqadan keyin ulanish yopiladi va ilova ochilganda qayta ulanadi; taymerlar fonda qayta chizmaydi
+- Dockerfile'lar: `COPY patches patches` (lockfile patch xeshini tekshiradi)
+
+| Band | Holat | Dalil |
+|---|---|---|
+| Plagin patch'i, JS kuzatuv siyosati, realtime | DONE (kod + test) | `tracking-throttle.test.ts` (3), `use-delivery-tracking`, `realtime` testlari; web tsc/lint |
+| Patch'langan plagin bilan APK qurilishi | DONE | `cap sync android` (plagin yo'li patch'langan paketga), `gradlew assembleDebug` — BUILD SUCCESSFUL; kompilyatsiya qilingan `BackgroundGeolocation*.class` da yangi kod bor. Debug APK: 5 359 204 bayt, SHA-256 `619988448EB912A40405DCFD273B1722398B2EFEF1CEA62F98A0B90C1BDDC5DA` (debug imzo); release imzosi — kalit yo'q |
+| Real telefonda zaryad sarfini o'lchash | Qilinmagan | telefon ulanmagan; yangi APK o'rnatilgach Android "Batareya" bo'limida solishtirish kerak |
+
+**Testlar (2026-09-14, shu bosqichdan keyin):** API regressiya 97 fayl — `--maxWorkers=1` bilan 8 qismda hammasi o'tdi (2 test standart hisoblar sonini 21 kutardi — 5800 qo'shilgani uchun 22 ga yangilandi); web 15 fayl / 60 test, tsc, lint (o'zgargan fayllar), `vite build` — toza; desktop typecheck (main + renderer), 9 fayl / 57 test
+
+**Production deploy (2026-09-14, commit `3407c66`):** `bum-api` va `bum-web` — SUCCESS (13:15, Toshkent vaqti). API ichidan `/health` — ok; migratsiyalar qo'llandi — bazada 0047 tekshirildi (6 ta yangi ustun va `expenses_company_reference_key` indeksi bor, jami 48 migratsiya yozuvi; faqat o'qish so'rovi, qiymatlar chiqarilmadi). Dockerfile'lar `patches` bilan qurildi. Sessiyasiz: `/api/sales/pos/payment-options`, `/api/finance/terminals`, `/api/finance/cash-accounts`, `POST /api/delivery/agent/locations` — 401; `/`, `/uz/login` — 200; noma'lum yo'l — 404. Tizimga kirgan holda production'da sinalmadi (production hisobi ishlatilmaydi)
+
+**Foydalanuvchi uchun (bonnu-market):** Moliya → Karta terminallari → "Terminal qo'shish": UZCARD → bank hisobi "Uzcard", komissiya (masalan 0.25); HUMO → "Humo". Bank hisobini kassada alohida tugma qilish — Kassa & Bank → hisobni tanlash → "Kassada ko'rsatish"; pul chiqarish komissiyasi — shu yerda. Mavjud ma'lumot avtomatik o'zgartirilmadi
+
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 
 ### Bajarilgan (tekshirilgan)
@@ -1526,6 +1564,10 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 - **Web:** 14 fayl / 57 test, tsc, lint (o'zgargan fayllar), `vite build` — toza (to'lovlar va modullardan keyin qayta tekshirildi); brauzer E2E (lokal, avvalgi bosqich) — 14/14, yangi to'lov va modul ekranlari brauzerda sinalmadi
 - **Production deploy (to'lovlar va modullar):** `bum-api` (2026-09-14 05:49 UTC) va `bum-web` (05:50 UTC) — SUCCESS. API ishga tushishida migratsiyalar qo'llandi (0045, 0046 — faqat qo'shimcha), `/health` ok (konteyner ichidan). Sessiyasiz: `/api/finance/terminals`, `/api/company/modules`, `/api/sales/pos/payment-options`, `/api/delivery/agent/payment-options`, platforma modullari — 401 (marshrutlar mavjud), noma'lum yo'l — 404; `/`, `/uz/login` — 200, X-Frame-Options bor. Tizimga kirgan holda production'da sinalmadi (production hisobi ishlatilmaydi)
 - **Desktop kassa testlari:** 9 fayl / 54 test — o'tdi (kassa kodi bu bosqichda o'zgarmagan)
+- **Bank komissiyasi va kassada to'lov usullari (keyingi bosqich):** ekvayring va pul chiqarish komissiyasi avtomatik ("Bank komissiyasi" xarajati), terminal va bank hisobi uchun "Kassada ko'rsatish", web va desktop kassada UZCARD / HUMO / bank hisobi nomi bilan tugmalar — API regressiya 97 fayl (hammasi o'tdi), web 15 fayl / 60 test + build, desktop 9 fayl / 57 test, brauzer E2E 12/12 (bo'lim yuqorida)
+- **Kassa 0.4.3 (bank hisoblari to'lov usuli sifatida):** o'rnatuvchi qurilgan — `apps/desktop/release/BUM-POS-KASSA-Setup-0.4.3.exe`, 111 731 940 bayt, SHA-256 `5897036982319CFDED25DFE1E4594C51B37845EA9D0579F7316939DA7477C6E8`, imzosiz (`Get-AuthenticodeSignature`: NotSigned), **e'lon qilinmagan**; paketlangan ilova ishga tushirilmadi (ishlab turgan kassaga tegmaslik uchun)
+- **GPS zaryadi:** plagin patch'i (har soniya o'lchash o'rniga 10–30 s va paketli yetkazish), serverga paketli yuborish, fonda realtime yopilishi; debug APK qayta qurildi (bo'lim yuqorida); real telefonda o'lchanmagan
+- **Production deploy (komissiya va GPS):** `bum-api`, `bum-web` — SUCCESS, migratsiya 0047 bazada tasdiqlangan
 
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
@@ -1536,7 +1578,8 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 
 ### Qolgan ishlar
 1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
-2. Kassa **0.4.2** ni (terminal bo'yicha karta to'lovi bilan; 0.4.1 o'rniga) platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi, terminal cheki) qo'lda sinov
+2. Kassa **0.4.3** ni (terminal va bank hisobi bo'yicha to'lov bilan; 0.4.1/0.4.2 o'rniga) platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi, terminal cheki) qo'lda sinov
+3a. Yangi APK'ni telefonga o'rnatib, ish kunida Android "Batareya" bo'limida BUM ERP sarfini oldingi versiya bilan solishtirish; bonnu-market'da UZCARD/HUMO terminallarini "Uzcard"/"Humo" bank hisoblariga komissiya bilan qo'shish (egasi)
 3. Production'da tizimga kirgan holda qo'lda smoke (egasi hisobi bilan): kirish, Dostavka → "Hudud bo'yicha" → biriktirish, "Kunlik marshrut", distribyutsiya xaritasi
 4. Mavjud mijozlarga shahar/mahalla kiritish (avtomatik to'ldirilmaydi)
 5. Apex `bum-erp.uz` ni ishlaydigan manzilga yo'naltirish; ixtiyoriy — `WEB_ORIGIN=https://app.bum-erp.uz`
@@ -1554,7 +1597,7 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 - **Build/test xotirasi:** 8 GB mashinada Docker va Gradle birga ishlasa tizim fon vazifalarini to'xtatadi — APK Docker to'xtatilib qurildi
 - **DNS:** apex `bum-erp.uz` — webspace.uz panelida egasi o'zgartiradi (Railway tarifida `bum-web` ga yana domen qo'shib bo'lmaydi: `app` va `www` band)
 - **Production'da tizimga kirgan sinov:** egasining test hisobi yoki ishtiroki kerak (production admin paroli ishlatilmaydi)
-- **Kassa 0.4.2 e'loni:** platforma admini kirishi kerak (o'rnatuvchi tayyor, imzosiz)
+- **Kassa 0.4.3 e'loni:** platforma admini kirishi kerak (o'rnatuvchi tayyor, imzosiz)
 - **Terminal ekvayringi (UZCARD/HUMO API):** bank yoki processing protokoli va kalitlari kerak — hozir terminal to'lovi kassir tomonidan chekka qarab kiritiladi
 - **Payme / Click:** merchant ID va kalitlari kerak — integratsiya boshlanmagan
 - **GitHub push / PR:** avtomatik rejimda `git push` rad etildi — egasi `git push -u origin feat/postgres-migration` va PR ochadi

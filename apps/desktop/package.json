@@ -2,7 +2,7 @@
   "name": "@bum/desktop",
   "productName": "BUM POS KASSA",
   "description": "BUM ERP offline kassa — Windows desktop",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "private": true,
   "type": "module",
   "main": "out/main/index.js",
