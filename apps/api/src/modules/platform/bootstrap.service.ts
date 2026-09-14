@@ -19,9 +19,10 @@ import { DEFAULT_ROLES, conflict } from "@bum/shared";
 import { roles, users } from "../../db/schema/platform.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
+import { logger } from "../../shared/logger.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { revokeUserSessions, type SessionUser } from "../auth/session.js";
-import { assertPasswordPolicy, normalizePhoneOrThrow } from "../users/user-admin.service.js";
+import { assertPasswordLength, isCommonPassword, normalizePhoneOrThrow } from "../users/user-admin.service.js";
 
 export type SeedAction = "created" | "promoted" | "updated" | "unchanged";
 
@@ -69,7 +70,10 @@ export async function seedBootstrapAdmin(
   meta: RequestMeta,
 ): Promise<SeedResult> {
   const phone = normalizePhoneOrThrow(input.phone);
-  assertPasswordPolicy(input.password);
+  assertPasswordLength(input.password);
+  if (isCommonPassword(input.password)) {
+    logger.warn("Bootstrap admin paroli juda oddiy — muhit o'zgaruvchisida murakkab parolga almashtiring");
+  }
   const name = input.name?.trim() || null;
 
   // Bir vaqtda ikki seed (masalan, parallel deploy) bir-birini buzmasligi uchun

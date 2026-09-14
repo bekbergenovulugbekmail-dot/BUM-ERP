@@ -56,11 +56,20 @@ const COMMON_PASSWORDS = new Set([
   "admin123", "admin1234", "iloveyou", "parol123", "parol1234", "bumerp123", "12345qwert", "asdfghjk",
 ]);
 
-export function assertPasswordPolicy(password: string): void {
+export function isCommonPassword(password: string): boolean {
+  return COMMON_PASSWORDS.has(password.toLowerCase()) || /^(.)\1+$/.test(password);
+}
+
+/** Faqat uzunlik — `.env` dagi bootstrap admin paroli uchun: oddiy parol API ishga tushishini to'xtatmasin. */
+export function assertPasswordLength(password: string): void {
   if (password.length < MIN_PASSWORD_LENGTH) {
     throw badRequest(`Parol kamida ${MIN_PASSWORD_LENGTH} ta belgidan iborat bo'lishi kerak`);
   }
-  if (COMMON_PASSWORDS.has(password.toLowerCase()) || /^(.)\1+$/.test(password)) {
+}
+
+export function assertPasswordPolicy(password: string): void {
+  assertPasswordLength(password);
+  if (isCommonPassword(password)) {
     throw badRequest("Parol juda oddiy — boshqa, taxmin qilish qiyin parol tanlang");
   }
 }
