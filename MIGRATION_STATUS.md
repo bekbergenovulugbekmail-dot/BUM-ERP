@@ -1513,6 +1513,7 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 
 ### Bajarilgan (tekshirilgan)
 - **Kassa:** dasturdan to'liq chiqish va qurilmani uzish (desktop testlari, Electron smoke); o'rnatuvchi 0.4.1 qurilgan — `apps/desktop/release/BUM-POS-KASSA-Setup-0.4.1.exe`, 106.6 MB, SHA-256 `785264989CF5C992348037FE2F9FBB58A5336C817E2AE5362E088EC58686B346`, imzosiz; holati — **e'lon qilinmagan**
+- **Kassa 0.4.2 (terminallar):** o'rnatuvchi qurilgan — `apps/desktop/release/BUM-POS-KASSA-Setup-0.4.2.exe`, 106.6 MB, SHA-256 `09D9B340B410A685DFECB607AED0767F9A97AE31FFF39C4693CC599BE5FBA2CE`, imzosiz, **e'lon qilinmagan**; desktop typecheck (main + renderer) toza, desktop testlari 9 fayl / 56 test; server config'da terminallar — API deploy (2026-09-14) SUCCESS. Paketlangan ilova ishga tushirilmadi (foydalanuvchining ishlab turgan kassasiga tegmaslik uchun), real terminal bilan sinalmadi
 - **Xarita:** OpenStreetMap + Leaflet; belgi — navigator havolalari (Google Maps, Yandex, Android `geo:`); kompyuterda ilova ichidagi oyna
 - **Marshrut:** 12 nuqtagacha aniq, ko'prog'ida taxminiy yaxshilangan tartib; yo'l masofasi — OSRM (production konteyneridan javob tasdiqlangan), javob bo'lmasa to'g'ri chiziq bo'yicha
 - **Dostavka:** "Hudud bo'yicha" / "Marshrut bo'yicha", "Zakaz bor", "Barchasini dostavshikka biriktirish", kunlik marshrut, dostavshikda "Optimal marshrut"
@@ -1535,7 +1536,7 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 
 ### Qolgan ishlar
 1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
-2. Kassa 0.4.1 ni platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi) qo'lda sinov
+2. Kassa **0.4.2** ni (terminal bo'yicha karta to'lovi bilan; 0.4.1 o'rniga) platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi, terminal cheki) qo'lda sinov
 3. Production'da tizimga kirgan holda qo'lda smoke (egasi hisobi bilan): kirish, Dostavka → "Hudud bo'yicha" → biriktirish, "Kunlik marshrut", distribyutsiya xaritasi
 4. Mavjud mijozlarga shahar/mahalla kiritish (avtomatik to'ldirilmaydi)
 5. Apex `bum-erp.uz` ni ishlaydigan manzilga yo'naltirish; ixtiyoriy — `WEB_ORIGIN=https://app.bum-erp.uz`
@@ -1553,7 +1554,7 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 - **Build/test xotirasi:** 8 GB mashinada Docker va Gradle birga ishlasa tizim fon vazifalarini to'xtatadi — APK Docker to'xtatilib qurildi
 - **DNS:** apex `bum-erp.uz` — webspace.uz panelida egasi o'zgartiradi (Railway tarifida `bum-web` ga yana domen qo'shib bo'lmaydi: `app` va `www` band)
 - **Production'da tizimga kirgan sinov:** egasining test hisobi yoki ishtiroki kerak (production admin paroli ishlatilmaydi)
-- **Kassa 0.4.1 e'loni:** platforma admini kirishi kerak
+- **Kassa 0.4.2 e'loni:** platforma admini kirishi kerak (o'rnatuvchi tayyor, imzosiz)
 - **Terminal ekvayringi (UZCARD/HUMO API):** bank yoki processing protokoli va kalitlari kerak — hozir terminal to'lovi kassir tomonidan chekka qarab kiritiladi
 - **Payme / Click:** merchant ID va kalitlari kerak — integratsiya boshlanmagan
 - **GitHub push / PR:** avtomatik rejimda `git push` rad etildi — egasi `git push -u origin feat/postgres-migration` va PR ochadi
