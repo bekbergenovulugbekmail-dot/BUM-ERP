@@ -84,22 +84,35 @@ server {
     return 200 "ok";
   }
 
+  # Web sahifalar uchun xavfsizlik sarlavhalari. nginx'da location ichidagi add_header server darajasidagini meros
+  # olmaydi, shuning uchun har statik location'da takrorlanadi. /api javoblariga qo'shilmaydi — API (helmet) o'zi beradi,
+  # ikki marta kelgan X-Frame-Options brauzerlarda bekor hisoblanadi.
+
   # Vite hash'li fayllar — o'zgarmaydi
   location /assets/ {
     try_files $uri =404;
     expires 1y;
     add_header Cache-Control "public, immutable";
+    add_header X-Content-Type-Options "nosniff" always;
   }
 
   # Service worker va manifest — har doim yangisi
   location ~ ^/(sw\.js|manifest\.webmanifest|manifest\.json)$ {
     try_files $uri =404;
     add_header Cache-Control "no-cache";
+    add_header X-Content-Type-Options "nosniff" always;
   }
 
   # SPA: /uz/sales kabi yo'llar index.html ga
   location / {
     try_files $uri $uri/ /index.html;
     add_header Cache-Control "no-cache";
+    # Clickjacking: sahifa boshqa saytning iframe'ida ochilmaydi
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # GPS (dostavshik, agent) va kamera (isbot rasmi) — faqat shu sayt; mikrofon, to'lov API'si — yo'q
+    add_header Permissions-Policy "geolocation=(self), camera=(self), microphone=(), payment=()" always;
   }
 }
