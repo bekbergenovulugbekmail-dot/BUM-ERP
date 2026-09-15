@@ -83,8 +83,12 @@ describe("Kassa va bank", () => {
     expect(await cashBalance(mainCash)).toBe("300000.00");
     expect(await db.select().from(cashTransactions).where(eq(cashTransactions.cashAccountId, mainCash))).toHaveLength(1);
 
+    // Qarshi hisob tanlanmagan chiqim — "Boshqa xarajatlar" (5500): kassa va buxgalteriya sinxron qoladi
     const plain = await record({ cashAccountId: mainCash, type: "out", amount: "100000.25" });
-    expect(plain.json()).toMatchObject({ journalEntryId: null, transaction: { balanceAfter: "199999.75" } });
+    expect(plain.json()).toMatchObject({ transaction: { balanceAfter: "199999.75" } });
+    expect(plain.json().journalEntryId).not.toBeNull();
+    expect((await ledger("1010")).balance).toBe("199999.75");
+    expect((await ledger("5500")).balance).toBe("100000.25");
 
     const cashLedger = await ledger("1010");
     const self = await record({ cashAccountId: mainCash, type: "in", amount: "1", counterAccountId: cashLedger.id });

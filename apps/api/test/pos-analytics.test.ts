@@ -46,6 +46,9 @@ describe("Desktop kassa: analitika (serverdan)", () => {
       payload: { phone: company.owner.phone, password: company.owner.password, warehouseId: mainWarehouseId, name: "Kassa 1" },
     });
     const token = (registered.json() as { token: string }).token;
+    // Ega kassada parol bilan kiradi (qurilma amallari bog'langan kassir nomidan)
+    const login = await app.inject({ method: "POST", url: "/api/pos-device/cashiers/login", headers: { authorization: `Bearer ${token}` }, payload: { phone: company.owner.phone, password: company.owner.password } });
+    expect(login.statusCode, login.body).toBe(200);
     const device = (url: string) => app.inject({ method: "GET", url, headers: { authorization: `Bearer ${token}` } });
     const owner = company.owner.id;
 

@@ -36,7 +36,7 @@ import { CASH_MOVEMENT_KINDS, posCashMovement } from "../sales/pos-cash.service.
 import { createCustomer } from "../sales/customers.service.js";
 import { REFUND_METHODS, returnSaleItems } from "../sales/returns.service.js";
 import { isAccessDenial } from "../subscription/access.js";
-import { ELEVATED_DEVICE_OPS, assertCashierBound, cashierTenant, type DeviceContext } from "./device-auth.js";
+import { assertCashierBound, cashierTenant, type DeviceContext } from "./device-auth.js";
 
 export const MAX_OPS_PER_PUSH = 100;
 const MAX_FUTURE_MS = 5 * 60_000;
@@ -410,8 +410,10 @@ async function recordConflicts(
 async function applyOperation(tx: Tx, context: DeviceContext, op: SyncOperation, meta: RequestMeta): Promise<Record<string, unknown>> {
   assertClientTime(op.createdAt);
   const tenant = await cashierTenant(tx, context, op.cashierId);
-  // Yuqori huquqli amal — kassir shu qurilmada parol bilan kirgan bo'lishi shart (token egasi ega nomidan ish qila olmaydi)
-  if (ELEVATED_DEVICE_OPS.has(op.type)) await assertCashierBound(tx, context, op.cashierId);
+  // Har amal: kassir shu qurilmada parol bilan kirgan va amal vaqtida bog'lanish faol bo'lgan — qurilma tokeni bilan
+  // boshqa xodim (masalan, ega) nomidan chek, kassa chiqimi yoki smena yuborib bo'lmaydi. Keyin ishdan bo'shatilgan
+  // kassirning bo'shatilishdan oldingi cheklari qabul qilinadi
+  await assertCashierBound(tx, context, op.cashierId, op.createdAt);
   const result = await executeOperation(tx, context, tenant, op, meta);
   if (op.type === "stock.count") return result;
 

@@ -111,7 +111,8 @@ export async function saveCashbackSettings(tx: Tx, tenant: TenantContext, input:
 // ─── Hisoblash ───────────────────────────────────────────────────────────────
 
 /** 1% = 100 bazis punkt; hisob butun sonlarda. */
-const basisPoints = (percent: number) => BigInt(Math.round(percent * 100));
+// Float ko'paytmasiz: 2.675 * 100 = 267.49999… → 267 bo'lardi; o'nlik satr orqali half-up → 268
+const basisPoints = (percent: number) => (toMinor(percent.toFixed(4), 4) + 50n) / 100n;
 
 /** Chekni keshbek bilan to'lash chegarasi (tiyinda). */
 export function maxCashbackUsage(cashback: CashbackSettings, totalMinor: bigint) {

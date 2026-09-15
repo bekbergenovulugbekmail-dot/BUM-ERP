@@ -214,6 +214,12 @@ describe("POS: aralash to'lov (naqd + karta + bank)", () => {
       payload: { phone: company.owner.phone, password: company.owner.password, warehouseId: mainWh, name: "Kassa 1" },
     });
     const token = (registered.json() as { token: string }).token;
+    // Kassir kassada parol bilan kiradi (qurilma amallari bog'langan kassir nomidan)
+    const login = await app.inject({ method: "POST", url: "/api/pos-device/cashiers/login", headers: { authorization: `Bearer ${token}` }, payload: { phone: kassir.phone, password: "xodim-parol-123" } });
+    expect(login.statusCode, login.body).toBe(200);
+    // Qaytarishni ega qiladi — u ham shu kassada parol bilan kirgan bo'lishi kerak
+    const ownerLogin = await app.inject({ method: "POST", url: "/api/pos-device/cashiers/login", headers: { authorization: `Bearer ${token}` }, payload: { phone: company.owner.phone, password: company.owner.password } });
+    expect(ownerLogin.statusCode, ownerLogin.body).toBe(200);
     const push = async (ops: object[]) => {
       const res = await app.inject({ method: "POST", url: "/api/pos-device/push", headers: { authorization: `Bearer ${token}` }, payload: { ops } });
       expect(res.statusCode).toBe(200);

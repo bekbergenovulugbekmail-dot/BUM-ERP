@@ -46,7 +46,9 @@ const schema = z.object({
    * Marshrut (yo'l bo'yicha masofa va chiziq) — bepul ochiq manbali OSRM. Standart — OSRM loyihasining ommaviy serveri
    * (kichik hajm uchun); ko'p foydalanishda o'z OSRM serveringiz manzili. "off" — faqat to'g'ri chiziq bo'yicha taxmin.
    */
-  ROUTING_OSRM_URL: z.union([z.literal("off"), z.string().url()]).default("https://router.project-osrm.org"),
+  // Standart — o'chiq: mijoz koordinatalari begona (ommaviy) serverga yuborilmaydi. O'z OSRM serveringiz yoki ommaviy
+  // server faqat shu o'zgaruvchi aniq berilganda ishlatiladi
+  ROUTING_OSRM_URL: z.union([z.literal("off"), z.string().url()]).default("off"),
 
   ANTHROPIC_API_KEY: z.string().optional(),
   /** AI yordamchi modeli — standart: eng so'nggi Sonnet. */

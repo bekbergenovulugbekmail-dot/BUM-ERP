@@ -8,7 +8,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, or } from "drizzle-orm";
 import { AppError, effectiveSubscriptionStatus, forbidden, unauthenticated } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { companies, companyMembers, users } from "../../db/schema/platform.js";
@@ -144,12 +144,21 @@ export async function bindCashier(conn: DbOrTx, companyId: string, deviceId: str
     });
 }
 
-/** Kassir shu qurilmada parol bilan kirganmi — aks holda 403 (`cashier_not_bound`). */
-export async function assertCashierBound(conn: DbOrTx, context: DeviceContext, userId: string): Promise<void> {
+/**
+ * Kassir shu qurilmada parol bilan kirganmi — aks holda 403 (`cashier_not_bound`). `at` berilsa (offline amal vaqti):
+ * bog'lanish o'sha paytda faol bo'lgani yetadi (keyin bekor qilingan bo'lsa ham — bo'shatilishdan oldingi cheklar qabul qilinadi).
+ */
+export async function assertCashierBound(conn: DbOrTx, context: DeviceContext, userId: string, at?: Date): Promise<void> {
   const [row] = await conn
     .select({ id: posDeviceCashiers.id })
     .from(posDeviceCashiers)
-    .where(and(eq(posDeviceCashiers.deviceId, context.device.id), eq(posDeviceCashiers.userId, userId), isNull(posDeviceCashiers.revokedAt)))
+    .where(
+      and(
+        eq(posDeviceCashiers.deviceId, context.device.id),
+        eq(posDeviceCashiers.userId, userId),
+        at ? or(isNull(posDeviceCashiers.revokedAt), gt(posDeviceCashiers.revokedAt, at)) : isNull(posDeviceCashiers.revokedAt),
+      ),
+    )
     .limit(1);
   if (!row) {
     throw new AppError("FORBIDDEN", "Bu kassir shu qurilmada parol bilan kirmagan — kassada telefon raqam va parol bilan qayta kiring", {

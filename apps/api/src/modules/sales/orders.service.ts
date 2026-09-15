@@ -195,8 +195,12 @@ export async function prepareSalesItems(
     const discountPercent = item.discountPercent ?? customerDiscount;
     const changed =
       toMinor(unitPrice, 4) !== toMinor(listPrice, 4) || toMinor(discountPercent, 2) !== toMinor(customerDiscount, 2);
-    if (changed && !canOverride) {
-      if (!options.trustedPricing) throw forbidden("Narx yoki chegirmani o'zgartirish uchun ruxsat yo'q: sales.edit");
+    if (changed && !canOverride && !options.trustedPricing) {
+      throw forbidden("Narx yoki chegirmani o'zgartirish uchun ruxsat yo'q: sales.edit");
+    }
+    // Qurilma (offline kassa) narxi prays-listdan farq qilsa — kassirda sales.edit bo'lsa ham rahbar ko'radigan nomuvofiqlik:
+    // qurilma kassir nomini o'zi yuboradi, ruxsatga tayanib jim qabul qilinmaydi
+    if (changed && options.trustedPricing) {
       priceChanges.push({ productId: product.id, name: product.name, unitPrice, listPrice, discountPercent, customerDiscount });
     }
 
@@ -1025,7 +1029,8 @@ export async function returnOrder(
   // Asl to'lov tarkibidan farqli usul yoki boshqa hisobdan qaytarish (masalan, karta to'lovini naqd) — moliya ruxsati kerak
   if (refund && cashPaid > 0n && (input.method || input.cashAccountId)) {
     const original = await basePaymentComposition(tx, orderId, order.currency, cashPaid);
-    const differs = Boolean(input.cashAccountId) || !original.some((part) => part.method === input.method && part.amount > 0n);
+    // Chekda tanlangan usuldan boshqa usuldagi to'lov bor bo'lsa (masalan, 50% karta + 50% naqd, hammasi naqd) — farqli qaytarish
+    const differs = Boolean(input.cashAccountId) || original.some((part) => part.amount > 0n && part.method !== input.method);
     if (differs && !(await effectivePermissions(tx, tenant)).includes("finance.manage")) {
       throw forbidden("Pul asl to'lov usulidan boshqacha qaytariladi — moliya ruxsati kerak (usulni tanlamang: asl tarkib bo'yicha qaytadi)");
     }

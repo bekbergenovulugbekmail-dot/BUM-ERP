@@ -52,7 +52,11 @@ async function register() {
     payload: { phone: company.owner.phone, password: company.owner.password, warehouseId: mainWarehouseId, name: "Kassa 1" },
   });
   expect(res.statusCode).toBe(201);
-  return (res.json() as { token: string }).token;
+  const token = (res.json() as { token: string }).token;
+  // Ega kassada parol bilan kiradi — qurilma amallari faqat shu qurilmaga bog'langan kassir nomidan qabul qilinadi
+  const login = await app.inject({ method: "POST", url: "/api/pos-device/cashiers/login", headers: { authorization: `Bearer ${token}` }, payload: { phone: company.owner.phone, password: company.owner.password } });
+  expect(login.statusCode, login.body).toBe(200);
+  return token;
 }
 
 async function push(token: string, ops: object[]) {

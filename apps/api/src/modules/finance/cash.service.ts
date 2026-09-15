@@ -471,12 +471,23 @@ export async function recordManualCashTransaction(
     category: input.category ?? null,
   });
 
+  // Qarshi hisob tanlanmasa — kirim "Boshqa daromadlar", chiqim "Boshqa xarajatlar": kassa qoldig'i va buxgalteriya
+  // (1010/1020) har doim sinxron. Egasining puli bo'lsa formada "Ustav kapitali" tanlanadi
+  const counterAccountId =
+    input.counterAccountId ??
+    (await requireAccountBySubtype(
+      tx,
+      companyId,
+      "other",
+      input.type === "in" ? "income" : "expense",
+      input.type === "in" ? "Boshqa daromadlar" : "Boshqa xarajatlar",
+    ));
   let journalEntryId: string | null = null;
-  if (input.counterAccountId) {
+  {
     const [counter] = await tx
       .select({ id: accounts.id })
       .from(accounts)
-      .where(and(eq(accounts.id, input.counterAccountId), eq(accounts.companyId, companyId)))
+      .where(and(eq(accounts.id, counterAccountId), eq(accounts.companyId, companyId)))
       .limit(1);
     if (!counter) throw badRequest("Qarshi hisob topilmadi");
     const ledger = await ledgerAccountFor(tx, companyId, account);

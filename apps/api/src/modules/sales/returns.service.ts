@@ -165,10 +165,33 @@ function splitByAccounts(pool: AccountPool, method: Exclude<RefundMethod, "balan
 }
 
 /** Qaytadigan pul usullar bo'yicha: bitta usul (eski) yoki taqsimot — yig'indi aynan qaytadigan pulga teng. */
-async function refundParts(tx: Tx, orderId: string, input: ReturnItemsInput, money: bigint, offline: boolean): Promise<RefundPart[]> {
+async function refundParts(
+  tx: Tx,
+  orderId: string,
+  input: ReturnItemsInput,
+  money: bigint,
+  offline: boolean,
+  /** `finance.manage`: pulni chekdagi to'lov usulidan boshqacha qaytarish mumkin. */
+  canCrossMethods: boolean,
+): Promise<RefundPart[]> {
   if (money <= 0n) return [];
   const requested = (input.refunds ?? []).map((part) => ({ method: part.method, amount: toMinor(part.amount) })).filter((part) => part.amount > 0n);
-  if (requested.length === 0) return [{ method: input.refundMethod, amount: money }];
+  if (requested.length === 0) {
+    // Bitta usul: shu usulda to'langanidan ortig'i boshqa usuldagi pul (masalan, karta/bankka tushgan pulni kassadan naqd
+    // berish) — moliya ruxsatisiz rad, usullar bo'yicha taqsimlash kerak
+    const key = refundKey(input.refundMethod);
+    if (key && !offline && !canCrossMethods) {
+      const available = await refundableByMethod(tx, orderId);
+      const own = available.get(key) ?? 0n;
+      const paidOtherwise = [...available.entries()].some(([method, amount]) => method !== key && amount > 0n);
+      if (money > own && paidOtherwise) {
+        throw forbidden(
+          `${REFUND_LABELS[input.refundMethod]} bilan ko'pi bilan ${fromMinor(own > 0n ? own : 0n)} qaytariladi — qolgani chekda boshqa usulda to'langan: usullar bo'yicha taqsimlang (yoki moliya ruxsati kerak)`,
+        );
+      }
+    }
+    return [{ method: input.refundMethod, amount: money }];
+  }
   const sum = requested.reduce((total, part) => total + part.amount, 0n);
   if (sum !== money) {
     // Offline: pul kassada allaqachon berilgan, serverdagi hisob (masalan, avval qarz yopiladi) farq qilishi mumkin — ulush bo'yicha
@@ -225,16 +248,6 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
   const refundMethods = input.refunds?.length ? input.refunds.map((part) => part.method) : [input.refundMethod];
   if (refundMethods.includes("balance") && !order.customerId) throw badRequest("Balansga qaytarish uchun chekda mijoz bo'lishi kerak");
   if (new Set(refundMethods).size !== refundMethods.length) throw badRequest("Qaytarish usuli takrorlangan");
-  // Pul chekda umuman ishlatilmagan usulda qaytarilsa (masalan, karta to'lovini kassadan naqd) — moliya ruxsati kerak:
-  // aks holda qaytarish huquqi bor xodim bankdagi pulni kassadan olib qo'yishi mumkin
-  if (!offline && !input.refunds?.length && input.refundMethod !== "balance") {
-    const available = await refundableByMethod(tx, orderId);
-    const key = refundKey(input.refundMethod);
-    const paidOtherwise = [...available.values()].some((amount) => amount > 0n);
-    if (key && (available.get(key) ?? 0n) <= 0n && paidOtherwise && !(await effectivePermissions(tx, tenant)).includes("finance.manage")) {
-      throw forbidden(`${REFUND_LABELS[input.refundMethod]} bilan qaytarib bo'lmaydi — chek boshqa usulda to'langan (moliya ruxsati kerak)`);
-    }
-  }
 
   const allItems = await tx
     .select({
@@ -358,7 +371,7 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
   const balanceBack = paid > 0n ? minBig(balanceLeft, mulDivRound(balanceLeft, refund, paid)) : 0n;
   const cashbackBack = paid > 0n ? minBig(cashbackLeft, mulDivRound(cashbackLeft, refund, paid)) : 0n;
   const money = refund - balanceBack - cashbackBack;
-  const parts = await refundParts(tx, orderId, input, money, offline !== undefined);
+  const parts = await refundParts(tx, orderId, input, money, offline !== undefined, (await effectivePermissions(tx, tenant)).includes("finance.manage"));
   const refundMethodValue = parts.length > 1 ? "mixed" : (parts[0]?.method ?? input.refundMethod);
   const refundsValue = parts.map((part) => ({ method: part.method, amount: fromMinor(part.amount) }));
   // Har usul asl to'lov hisoblariga bo'linadi (bir usul ikki bankka tushgan bo'lsa — ikki qism); hujjatda hisobi bilan

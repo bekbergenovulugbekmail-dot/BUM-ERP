@@ -29,7 +29,7 @@ import {
   type DeliveryProofKind,
   type DeliveryStatus,
 } from "@bum/shared";
-import { deliveryPayments, deliveryProofs, deliveryTaskItems, deliveryTasks, deliveryWorkSessions } from "../../db/schema/delivery.js";
+import { deliveryAgents, deliveryPayments, deliveryProofs, deliveryTaskItems, deliveryTasks, deliveryWorkSessions } from "../../db/schema/delivery.js";
 import { customers, salesOrderItems, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
@@ -939,6 +939,13 @@ export async function issueDeliveryOtp(tx: Tx, tenant: TenantContext, taskId: st
   const task = await lockTask(tx, tenant.company.id, taskId);
   if (task.status !== "out_for_delivery" && task.status !== "arrived" && task.status !== "delivering") {
     throw new AppError("CONFLICT", "OTP faqat yo'ldagi yetkazmaga beriladi", { reason: "invalid_transition", from: task.status });
+  }
+  // OTP mijoz tasdig'i: yetkazmani o'zi olib borayotgan dostavshik (menejer ruxsati bo'lsa ham) kodni o'ziga ololmaydi
+  if (task.deliveryAgentId) {
+    const [agent] = await tx.select({ userId: deliveryAgents.userId }).from(deliveryAgents).where(eq(deliveryAgents.id, task.deliveryAgentId)).limit(1);
+    if (agent?.userId === tenant.user.id) {
+      throw new AppError("FORBIDDEN", "O'zingizga biriktirilgan yetkazma uchun OTP bera olmaysiz — boshqa menejer beradi", { reason: "otp_self_issue" });
+    }
   }
   const policy = await getDeliveryPolicy(tx, tenant.company.id);
   const otp = await issueOtp(tx, task, policy, new Date());

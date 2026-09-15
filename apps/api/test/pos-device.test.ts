@@ -176,6 +176,8 @@ describe("Desktop kassa qurilmasi", () => {
     expect(login.json().cashier).toMatchObject({ id: kassir.id, role: "Kassir" });
     expect(login.json().cashier.permissions).toContain("pos.use");
     expect((await device(one.token, "POST", "/api/pos-device/cashiers/login", { phone: kassir.phone, password: "xato" })).statusCode).toBe(401);
+    // Ikkinchi kassada ega parol bilan kiradi (qurilma amallari faqat shu qurilmaga bog'langan kassir nomidan)
+    expect((await device(two.token, "POST", "/api/pos-device/cashiers/login", { phone: company.owner.phone, password: company.owner.password })).statusCode).toBe(200);
 
     const push = async (token: string, ops: object[]) => {
       const res = await device(token, "POST", "/api/pos-device/push", { ops });

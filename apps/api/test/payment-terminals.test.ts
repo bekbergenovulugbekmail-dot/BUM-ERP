@@ -318,6 +318,9 @@ describe("To'lov terminallari va universal aralash to'lov", () => {
     });
     expect(registered.statusCode, registered.body).toBe(201);
     const headers = { authorization: `Bearer ${registered.json().token as string}` };
+    // Kassir kassada parol bilan kiradi (qurilma amallari bog'langan kassir nomidan)
+    const cashierLogin = await app.inject({ method: "POST", url: "/api/pos-device/cashiers/login", headers, payload: { phone: kassir.phone, password: "xodim-parol-123" } });
+    expect(cashierLogin.statusCode, cashierLogin.body).toBe(200);
     type SyncedConfig = {
       hash: string;
       terminals: { id: string; name: string; network: string }[];

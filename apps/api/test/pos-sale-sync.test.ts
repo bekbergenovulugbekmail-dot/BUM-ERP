@@ -58,7 +58,11 @@ async function register(name: string) {
     payload: { phone: company.owner.phone, password: company.owner.password, warehouseId: mainWarehouseId, name },
   });
   expect(res.statusCode).toBe(201);
-  return res.json() as { token: string; device: { id: string; code: string } };
+  const body = res.json() as { token: string; device: { id: string; code: string } };
+  // Ega kassada parol bilan kiradi — qurilma amallari faqat shu qurilmaga bog'langan kassir nomidan qabul qilinadi
+  const login = await app.inject({ method: "POST", url: "/api/pos-device/cashiers/login", headers: { authorization: `Bearer ${body.token}` }, payload: { phone: company.owner.phone, password: company.owner.password } });
+  expect(login.statusCode, login.body).toBe(200);
+  return body;
 }
 
 async function product(name: string, sku: string, salesPrice: string) {
@@ -107,6 +111,8 @@ describe("Desktop kassa: offline chek va qaytarish sinxroni", () => {
   it("sale.complete: qurilma ID, raqam va vaqti; zaxira yetmasa manfiy qoldiq, eski narx — nomuvofiqlik; takror bitta chek", async () => {
     const kassir = await addEmployee(app, company, "Kassir");
     const { token, device: kassa } = await register("Kassa 1");
+    // Kassir shu kassada parol bilan kiradi (qurilma amallari bog'langan kassir nomidan)
+    expect((await device(token, "POST", "/api/pos-device/cashiers/login", { phone: kassir.phone, password: "xodim-parol-123" })).statusCode).toBe(200);
     const cola = await product("Coca Cola", "COLA", "10000");
     const pepsi = await product("Pepsi", "PEPSI", "8000");
     await receive(cola, "2");

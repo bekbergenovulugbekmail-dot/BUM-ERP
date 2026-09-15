@@ -64,7 +64,8 @@ export function computeLine(item: LineInput) {
     net = total - tax;
   } else {
     net = rescale(afterDiscount, 8, 2);
-    tax = rescale(rescale(afterDiscount * rate, 12, 8), 8, 2);
+    // Bir marta yaxlitlanadi (server `line-amounts.ts` bilan bir xil)
+    tax = rescale(afterDiscount * rate, 12, 2);
   }
   return { net, tax, discount: rescale(discount, 8, 2), lineTotal: net + tax };
 }

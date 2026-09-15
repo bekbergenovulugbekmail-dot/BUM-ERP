@@ -849,12 +849,14 @@ async function lockPending(tx: Tx, tenant: TenantContext, orderId: string) {
       number: salesOrders.number,
       warehouseId: salesOrders.warehouseId,
       lines: agentOrders.lines,
+      agentUserId: salesReps.userId,
     })
     .from(agentOrders)
     .innerJoin(salesOrders, eq(salesOrders.id, agentOrders.orderId))
+    .leftJoin(salesReps, eq(salesReps.id, agentOrders.salesRepId))
     .where(and(eq(agentOrders.orderId, orderId), eq(agentOrders.companyId, tenant.company.id)))
     .limit(1)
-    .for("update");
+    .for("update", { of: agentOrders });
   if (!row) throw notFound("Buyurtma topilmadi");
   if (row.approvalStatus !== "pending" || row.status !== "draft") throw conflict("Buyurtma tasdiq kutmayapti");
   return row;
@@ -862,6 +864,10 @@ async function lockPending(tx: Tx, tenant: TenantContext, orderId: string) {
 
 export async function approveAgentOrder(tx: Tx, tenant: TenantContext, orderId: string, meta: RequestMeta) {
   const row = await lockPending(tx, tenant, orderId);
+  // Vazifalar ajratimi: kredit limitidan oshgan buyurtmani uni yuborgan agentning o'zi (supervayzer ruxsati bo'lsa ham) tasdiqlamaydi
+  if (row.agentUserId && row.agentUserId === tenant.user.id && tenant.company.ownerId !== tenant.user.id) {
+    throw new AppError("FORBIDDEN", "O'zingiz yuborgan buyurtmani tasdiqlay olmaysiz — boshqa supervayzer tasdiqlaydi", { reason: "self_approval" });
+  }
   // Yuborilgandagi qatorlar (aksiya bepul miqdori bilan) — qayta narxlanmaydi
   const items = await tx
     .select({ productId: salesOrderItems.productId, unitId: salesOrderItems.unitId, quantity: salesOrderItems.quantity })

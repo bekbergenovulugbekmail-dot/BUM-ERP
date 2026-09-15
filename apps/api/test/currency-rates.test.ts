@@ -114,6 +114,8 @@ describe("Valyuta kurslari: ruxsatlar, tarix, eski hujjat kursi, kassa sinxroni"
     const token = (registered.json() as { token: string }).token;
     const device = (method: "GET" | "POST", url: string, payload?: object) =>
       app.inject({ method, url, headers: { authorization: `Bearer ${token}` }, ...(payload ? { payload } : {}) });
+    // Ega kassada parol bilan kiradi (qurilma amallari bog'langan kassir nomidan)
+    expect((await device("POST", "/api/pos-device/cashiers/login", { phone: company.owner.phone, password: company.owner.password })).statusCode).toBe(200);
 
     const pulled = await device("POST", "/api/pos-device/pull", {});
     expect(pulled.json().entities.currencies.rows).toEqual([

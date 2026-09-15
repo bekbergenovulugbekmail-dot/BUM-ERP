@@ -47,6 +47,9 @@ beforeEach(async () => {
     payload: { phone: company.owner.phone, password: company.owner.password, warehouseId: mainWh, name: "Kassa 1" },
   });
   token = (registered.json() as { token: string }).token;
+  // Ega kassada parol bilan kiradi (qurilma amallari bog'langan kassir nomidan)
+  const login = await app.inject({ method: "POST", url: "/api/pos-device/cashiers/login", headers: { authorization: `Bearer ${token}` }, payload: { phone: company.owner.phone, password: company.owner.password } });
+  expect(login.statusCode, login.body).toBe(200);
 });
 
 function call(cookie: string, method: "GET" | "POST" | "PUT", url: string, payload?: object) {
@@ -163,6 +166,13 @@ describe("Aksiya narxi — server hisoblaydi", () => {
     // Offline chek aksiyasiz narxda — yoziladi, `price_changed` nomuvofiqligi (ro'yxat narxi — aksiya). Ikkinchi kassir
     // (`sales.edit` yo'q — narx farqi nomuvofiqlik bo'ladi; birinchisining onlayn smenasi ochiq)
     const offlineKassir = await addEmployee(app, company, "Kassir");
+    const offlineLogin = await app.inject({
+      method: "POST",
+      url: "/api/pos-device/cashiers/login",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { phone: offlineKassir.phone, password: "xodim-parol-123" },
+    });
+    expect(offlineLogin.statusCode, offlineLogin.body).toBe(200);
     const op = (type: string, payload: object, minutesAgo: number) => ({
       opId: randomUUID(),
       type,

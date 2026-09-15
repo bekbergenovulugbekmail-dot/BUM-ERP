@@ -172,9 +172,8 @@ describe("Xavfsizlik: kassa qurilmasi boshqa xodim nomidan ish qila olmaydi", ()
     const binding = async (userId: string) =>
       (await db.select().from(posDeviceCashiers).where(and(eq(posDeviceCashiers.deviceId, deviceId), eq(posDeviceCashiers.userId, userId))))[0];
 
-    // Ro'yxatdan o'tkazgan ega bog'langan; "hech qachon kirmagan" holatini sinash uchun bekor qilinadi
-    expect((await binding(ownerId))?.revokedAt).toBeNull();
-    await db.update(posDeviceCashiers).set({ revokedAt: new Date() }).where(eq(posDeviceCashiers.deviceId, deviceId));
+    // Ro'yxatdan o'tkazish kassirni bog'lamaydi: qurilma tokeni bilan ega nomidan ish qilib bo'lmaydi
+    expect(await binding(ownerId)).toBeUndefined();
 
     const push = async (type: string, payload: object, cashierId = ownerId) => {
       const res = await app.inject({
@@ -200,8 +199,9 @@ describe("Xavfsizlik: kassa qurilmasi boshqa xodim nomidan ish qila olmaydi", ()
 
     const elevated = await push("customer.update", rename);
     expect(elevated).toMatchObject({ status: "rejected", error: { code: "FORBIDDEN", details: { reason: "cashier_not_bound" } } });
-    // Oddiy kassa amali (smena) bog'lanishsiz ham qabul qilinadi — offline ish to'xtamaydi
-    expect(await push("shift.open", { shiftId: randomUUID(), openingCash: "0" })).toMatchObject({ status: "applied" });
+    // Oddiy kassa amali (smena, chek, kassa chiqimi) ham bog'lanishsiz rad — token egasi boshqa xodim nomidan ishlay olmaydi
+    const shiftId = randomUUID();
+    expect(await push("shift.open", { shiftId, openingCash: "0" })).toMatchObject({ status: "rejected", error: { details: { reason: "cashier_not_bound" } } });
 
     const login = await app.inject({
       method: "POST",
@@ -213,6 +213,7 @@ describe("Xavfsizlik: kassa qurilmasi boshqa xodim nomidan ish qila olmaydi", ()
     expect((await binding(ownerId))?.revokedAt).toBeNull();
     expect((await analytics()).statusCode).toBe(200);
     expect(await push("customer.update", rename)).toMatchObject({ status: "applied" });
+    expect(await push("shift.open", { shiftId, openingCash: "0" })).toMatchObject({ status: "applied" });
 
     // Kassir qurilmada kirdi, keyin ishdan bo'shatildi — bog'lanish bekor
     const kassir = await addEmployee(app, company, "Kassir");
@@ -481,6 +482,8 @@ describe("Xavfsizlik: pul va ruxsat chegaralari", () => {
     });
     expect(registered.statusCode, registered.body).toBe(201);
     const auth = { authorization: `Bearer ${registered.json().token as string}` };
+    const ownerLogin = await app.inject({ method: "POST", url: "/api/pos-device/cashiers/login", headers: auth, payload: { phone: company.owner.phone, password: company.owner.password } });
+    expect(ownerLogin.statusCode, ownerLogin.body).toBe(200);
     const push = async (type: string, payload: object, createdAt = new Date()) => {
       const res = await app.inject({
         method: "POST",
@@ -611,6 +614,8 @@ describe("Xavfsizlik: PIN, qulflangan sessiya, qurilma tokeni va ochiq yo'llar",
     });
     expect(registered.statusCode, registered.body).toBe(201);
     const auth = { authorization: `Bearer ${registered.json().token as string}` };
+    const ownerLogin = await app.inject({ method: "POST", url: "/api/pos-device/cashiers/login", headers: auth, payload: { phone: company.owner.phone, password: company.owner.password } });
+    expect(ownerLogin.statusCode, ownerLogin.body).toBe(200);
     const deviceId = registered.json().device.id as string;
     const deviceSession = () => app.inject({ method: "GET", url: "/api/pos-device/session", headers: auth });
     expect((await deviceSession()).statusCode).toBe(200);

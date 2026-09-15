@@ -224,9 +224,9 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
       if (!tenant) throw badRequest("Kompaniyani tanlang", { reason: "company_required" });
       // Sozlash marshruti sessiyasiz (modul guard kompaniyani bilmaydi) — POS moduli shu yerda tekshiriladi
       await assertModuleEnabled(tx, tenant.company.id, "pos");
+      // Ro'yxatdan o'tkazgan foydalanuvchi kassir sifatida BOG'LANMAYDI: desktop ro'yxatdan keyin kassirni alohida
+      // (telefon + parol) kiritadi. Aks holda qurilma tokeni egasi o'z nomidan (ega huquqlari bilan) ish qila olardi
       const { device, token } = await registerDevice(tx, tenant, body, meta);
-      // Qurilmani ro'yxatdan o'tkazgan foydalanuvchi shu yerda parol bilan kirgan — kassir sifatida bog'lanadi
-      await bindCashier(tx, tenant.company.id, device.id, tenant.user.id);
       return {
         token,
         device,
