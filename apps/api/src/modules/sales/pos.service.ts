@@ -60,6 +60,12 @@ const expectedCashSql = sql<string>`(${posShifts.openingCash} + ${posShifts.tota
 
 export type ShiftStatus = (typeof posShifts.status.enumValues)[number];
 
+/** Kassir faqat o'z smenasini (tushum, kassa farqi) ko'radi; boshqalarnikini — `sales.approve` yoki `finance.view`. */
+async function seesAllShifts(conn: DbOrTx, tenant: TenantContext) {
+  const permissions = await effectivePermissions(conn, tenant);
+  return permissions.includes("sales.approve") || permissions.includes("finance.view");
+}
+
 export async function getShift(conn: DbOrTx, tenant: TenantContext, shiftId: string) {
   const [shift] = await conn
     .select({ ...shiftFields, warehouseName: warehouses.name, expectedCash: expectedCashSql })
@@ -70,6 +76,7 @@ export async function getShift(conn: DbOrTx, tenant: TenantContext, shiftId: str
   if (!shift) throw notFound("Smena topilmadi");
   // Ruxsat berilmagan ombor smenasi (kassa summalari) ko'rinmaydi
   assertWarehouseAccess(tenant, shift.warehouseId);
+  if (shift.cashierId !== tenant.user.id && !(await seesAllShifts(conn, tenant))) throw notFound("Smena topilmadi");
   return shift;
 }
 
@@ -98,8 +105,9 @@ export async function listShifts(
   options: { warehouseId?: string; status?: ShiftStatus; limit: number },
 ) {
   if (options.warehouseId) assertWarehouseAccess(tenant, options.warehouseId);
-  // Ombor tanlanmasa ham faqat ruxsat berilgan omborlar smenalari
+  // Ombor tanlanmasa ham faqat ruxsat berilgan omborlar smenalari; kassir — faqat o'ziniki
   const allowed = allowedWarehouses(tenant);
+  const ownOnly = !(await seesAllShifts(conn, tenant));
   return conn
     .select({ ...shiftFields, warehouseName: warehouses.name, expectedCash: expectedCashSql })
     .from(posShifts)
@@ -110,6 +118,7 @@ export async function listShifts(
         options.warehouseId ? eq(posShifts.warehouseId, options.warehouseId) : undefined,
         !options.warehouseId && allowed ? inArray(posShifts.warehouseId, allowed) : undefined,
         options.status ? eq(posShifts.status, options.status) : undefined,
+        ownOnly ? eq(posShifts.cashierId, tenant.user.id) : undefined,
       ),
     )
     .orderBy(desc(posShifts.openedAt))

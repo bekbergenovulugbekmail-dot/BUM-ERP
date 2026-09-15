@@ -289,6 +289,8 @@ export async function hrRoutes(app: FastifyInstance): Promise<void> {
     const { softwareAccess, ...body } = employeeBody.parse(req.body);
     const employee = await writeInTenant(req, "hr.manage", async (tx, t) => {
       if (softwareAccess) await requirePermission(tx, t, "employee.software_access.manage");
+      // Maosh belgilash — tahrirlashdagi kabi `hr.salary` (kartochka ochish ruxsati yetmaydi)
+      if (Number(body.baseSalary) > 0) await requirePermission(tx, t, "hr.salary");
       return createEmployee(tx, t, body, requestMeta(req), softwareAccess ?? null);
     });
     reply.status(201);

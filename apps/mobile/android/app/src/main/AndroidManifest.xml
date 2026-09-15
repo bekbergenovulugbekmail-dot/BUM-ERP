@@ -36,6 +36,13 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Fondagi GPS xizmatini faqat ilovaning o'zi ishga tushiradi: plagin manifesti exported="true" qo'yadi —
+             boshqa ilova uni chaqirib joylashuv kuzatuvini boshqara olmasin -->
+        <service
+            android:name="com.equimaps.capacitor_background_geolocation.BackgroundGeolocationService"
+            android:exported="false"
+            tools:replace="android:exported" />
     </application>
 
     <!-- Permissions -->

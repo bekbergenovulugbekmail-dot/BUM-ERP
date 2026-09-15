@@ -185,3 +185,32 @@ describe("Qaytarish (refund) ruxsati", () => {
     expect([400, 409]).toContain(again.statusCode);
   });
 });
+
+describe("Ruxsat va kiritish chegaralari (LOW topilmalar)", () => {
+  it("kassir boshqa kassirning smenasini (tushum, kassa farqi) ko'rmaydi; rahbar ko'radi", async () => {
+    const first = await addEmployee(app, a, "Kassir");
+    const second = await addEmployee(app, a, "Kassir");
+    const opened = await call(first.cookie, "POST", "/api/sales/pos/shifts", { warehouseId: a.warehouseId, openingCash: "150000" });
+    expect(opened.statusCode, opened.body).toBe(201);
+    const shiftId = opened.json().shift.id as string;
+    expect((await call(first.cookie, "GET", `/api/sales/pos/shifts/${shiftId}`)).statusCode).toBe(200);
+    expect((await call(second.cookie, "GET", `/api/sales/pos/shifts/${shiftId}`)).statusCode).toBe(404);
+    expect(((await call(second.cookie, "GET", "/api/sales/pos/shifts")).json().shifts as { id: string }[]).map((row) => row.id)).not.toContain(shiftId);
+    expect(((await call(a.ownerCookie, "GET", "/api/sales/pos/shifts")).json().shifts as { id: string }[]).map((row) => row.id)).toContain(shiftId);
+  });
+
+  it("maoshni faqat hr.salary bilan belgilash; keshbek pog'onasida tiyindan mayda summa 400 (500 emas)", async () => {
+    const role = await call(a.ownerCookie, "POST", "/api/company/roles", { name: "Kadrlar", permissions: ["hr.view", "hr.manage"] });
+    expect(role.statusCode, role.body).toBe(201);
+    const hr = await addEmployee(app, a, "Kadrlar");
+    const body = { name: "Yangi xodim", hireDate: "2026-01-01", salaryType: "monthly" };
+    expect((await call(hr.cookie, "POST", "/api/hr/employees", { ...body, baseSalary: "5000000" })).statusCode).toBe(403);
+    expect((await call(hr.cookie, "POST", "/api/hr/employees", { ...body, baseSalary: "0" })).statusCode).toBe(201);
+
+    const settings = { enabled: true, accrualBase: "paid", maxUsagePercent: 50, categoryRates: [] };
+    for (const minAmount of [0.001, 1e-7]) {
+      expect((await call(a.ownerCookie, "PUT", "/api/sales/cashback/settings", { ...settings, tiers: [{ minAmount, percent: 1 }] })).statusCode).toBe(400);
+    }
+    expect((await call(a.ownerCookie, "PUT", "/api/sales/cashback/settings", { ...settings, tiers: [{ minAmount: 100000.5, percent: 1 }] })).statusCode).toBe(200);
+  });
+});

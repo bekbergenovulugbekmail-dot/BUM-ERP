@@ -82,7 +82,9 @@ function tokenVault(store: LocalStore): TokenVault {
 const PRINT_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:">`;
 
 function withPrintCsp(html: string): string {
-  return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (tag) => `${tag}${PRINT_CSP}`) : `${PRINT_CSP}${html}`;
+  // `<header>` teg `<head>` deb olinmasin — aks holda CSP undan oldingi kontentdan keyin tushardi
+  const head = /<head(?:\s[^>]*)?>/i;
+  return head.test(html) ? html.replace(head, (tag) => `${tag}${PRINT_CSP}`) : `${PRINT_CSP}${html}`;
 }
 
 // Railway umumiy domeni (*.up.railway.app) emas — faqat BUM xizmatlari (boshqa loyihaning sahifasi ochilmasin)

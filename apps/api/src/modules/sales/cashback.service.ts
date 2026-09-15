@@ -52,7 +52,17 @@ const cashbackShape = {
   accrualBase: z.enum(["paid", "total"]),
   maxUsagePercent: percentSchema,
   tiers: z
-    .array(z.strictObject({ minAmount: z.number().min(0).max(CASHBACK_LIMITS.maxMinAmount), percent: percentSchema }))
+    .array(
+      z.strictObject({
+        // Tiyindan mayda summa (0.001, 1e-7) keyin pulga o'tkazishda 500 bermasin — 2 xonagacha
+        minAmount: z
+          .number()
+          .min(0)
+          .max(CASHBACK_LIMITS.maxMinAmount)
+          .refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-6, "Summa ko'pi bilan 2 xonali kasr bo'lishi kerak"),
+        percent: percentSchema,
+      }),
+    )
     .max(CASHBACK_LIMITS.maxTiers),
   categoryRates: z
     .array(z.strictObject({ categoryId: z.uuid(), percent: percentSchema }))
