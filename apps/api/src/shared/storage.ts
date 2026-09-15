@@ -78,6 +78,8 @@ export type StorageClient = {
   /** Brauzer uchun imzolangan URL; PUT da `contentType` imzoga kiradi. */
   signedUrl(method: "GET" | "PUT", key: string, expiresSeconds: number, contentType?: string): string;
   head(key: string): Promise<StoredObject | null>;
+  /** Faylning birinchi `bytes` bayti (fayl imzosini tekshirish uchun); fayl yo'q — null. */
+  readHead?(key: string, bytes: number): Promise<Buffer | null>;
   remove(key: string): Promise<void>;
 };
 
@@ -119,6 +121,15 @@ export function s3Client(config: S3Config): StorageClient {
         size: Number(response.headers.get("content-length") ?? 0),
         contentType: response.headers.get("content-type"),
       };
+    },
+    async readHead(key, bytes) {
+      const response = await fetch(urlFor(config.endpoint, "GET", key, 60), {
+        headers: { range: `bytes=0-${bytes - 1}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error(`Saqlash xizmati javobi: ${response.status}`);
+      return Buffer.from(await response.arrayBuffer()).subarray(0, bytes);
     },
     async remove(key) {
       const response = await fetch(urlFor(config.endpoint, "DELETE", key, 60), { method: "DELETE", signal: AbortSignal.timeout(10_000) });

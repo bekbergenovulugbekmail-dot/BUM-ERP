@@ -22,7 +22,7 @@ import { requestMeta } from "../../shared/audit.js";
 import { logger } from "../../shared/logger.js";
 import { storageProvider, type StorageClient } from "../../shared/storage.js";
 import { authOf, requireAuth } from "../auth/guard.js";
-import { requirePermission, requireTenant, requireTenantForWrite } from "../company/tenant.js";
+import { requireTenant, requireTenantForWrite } from "../company/tenant.js";
 import {
   FILE_KINDS,
   IMAGE_TYPES,
@@ -32,6 +32,7 @@ import {
   fileUrl,
   isDatabaseKey,
   loadProductImage,
+  requireFileAccess,
   saveProductImageContent,
 } from "./files.service.js";
 
@@ -79,7 +80,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     if (!client) return unavailable(reply);
 
     const tenant = await requireTenantForWrite(db, authOf(req).user);
-    await requirePermission(db, tenant, FILE_KINDS[body.kind].manage);
+    await requireFileAccess(db, tenant, body.kind, "manage");
     reply.status(201);
     return createUpload(tenant, body, client);
   });
@@ -91,7 +92,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
 
     const result = await withTransaction(async (tx) => {
       const tenant = await requireTenantForWrite(tx, authOf(req).user);
-      await requirePermission(tx, tenant, FILE_KINDS[body.kind].manage);
+      await requireFileAccess(tx, tenant, body.kind, "manage");
       return attachFile(tx, tenant, body, client, requestMeta(req));
     });
     removeQuietly(client, result.previous);
@@ -102,7 +103,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const body = targetBody.parse(req.body);
     const result = await withTransaction(async (tx) => {
       const tenant = await requireTenantForWrite(tx, authOf(req).user);
-      await requirePermission(tx, tenant, FILE_KINDS[body.kind].manage);
+      await requireFileAccess(tx, tenant, body.kind, "manage");
       return detachFile(tx, tenant, body, requestMeta(req));
     });
     removeQuietly(storageProvider.client, result.previous);
@@ -112,7 +113,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   app.get("/url", async (req, reply) => {
     const query = urlQuery.parse(req.query);
     const tenant = await requireTenant(db, authOf(req).user);
-    await requirePermission(db, tenant, FILE_KINDS[query.kind].view);
+    await requireFileAccess(db, tenant, query.kind, "view");
     return (await fileUrl(db, tenant, query, storageProvider.client)) ?? unavailable(reply);
   });
 
@@ -122,7 +123,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const data = req.body;
     const result = await withTransaction(async (tx) => {
       const tenant = await requireTenantForWrite(tx, authOf(req).user);
-      await requirePermission(tx, tenant, FILE_KINDS["product-image"].manage);
+      await requireFileAccess(tx, tenant, "product-image", "manage");
       return saveProductImageContent(tx, tenant, { productId, contentType: req.headers["content-type"] ?? "", data }, requestMeta(req));
     });
     removeQuietly(storageProvider.client, result.previous);
@@ -132,7 +133,7 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
   app.get("/product-image/:productId/content", async (req, reply) => {
     const { productId } = productParams.parse(req.params);
     const tenant = await requireTenant(db, authOf(req).user);
-    await requirePermission(db, tenant, FILE_KINDS["product-image"].view);
+    await requireFileAccess(db, tenant, "product-image", "view");
     const image = await loadProductImage(db, tenant.company.id, productId);
     if (image.kind !== "database") throw notFound("Rasm topilmadi");
     return sendStoredImage(reply, image);

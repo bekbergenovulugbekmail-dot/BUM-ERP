@@ -12,25 +12,36 @@
  */
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
-import { badRequest, notFound, type Permission } from "@bum/shared";
+import { badRequest, notFound, type ModuleKey, type Permission } from "@bum/shared";
 import { productImages, products } from "../../db/schema/catalog.js";
 import { expenses } from "../../db/schema/finance.js";
 import { employees } from "../../db/schema/hr.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
+import { stripImageMetadata } from "../../shared/image-metadata.js";
 import type { StorageClient } from "../../shared/storage.js";
-import type { TenantContext } from "../company/tenant.js";
+import { assertModuleEnabled } from "../company/modules.service.js";
+import { requirePermission, type TenantContext } from "../company/tenant.js";
 
 export const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 export const MB = 1024 * 1024;
 
 export const FILE_KINDS = {
-  "product-image": { maxBytes: 5 * MB, types: IMAGE_TYPES, manage: "products.edit", view: "products.view" },
-  "expense-receipt": { maxBytes: 10 * MB, types: [...IMAGE_TYPES, "application/pdf"], manage: "finance.manage", view: "finance.view" },
-  "employee-photo": { maxBytes: 5 * MB, types: IMAGE_TYPES, manage: "hr.manage", view: "hr.view" },
-} as const satisfies Record<string, { maxBytes: number; types: readonly string[]; manage: Permission; view: Permission }>;
+  "product-image": { maxBytes: 5 * MB, types: IMAGE_TYPES, manage: "products.edit", view: "products.view", module: "products" },
+  "expense-receipt": { maxBytes: 10 * MB, types: [...IMAGE_TYPES, "application/pdf"], manage: "finance.manage", view: "finance.view", module: "finance" },
+  "employee-photo": { maxBytes: 5 * MB, types: IMAGE_TYPES, manage: "hr.manage", view: "hr.view", module: "hr" },
+} as const satisfies Record<string, { maxBytes: number; types: readonly string[]; manage: Permission; view: Permission; module: ModuleKey }>;
 
 export type FileKind = keyof typeof FILE_KINDS;
+
+/**
+ * Fayl turi bo'yicha kirish: ruxsat va shu tur tegishli modul (fayl marshrutlari umumiy — modul guard ularni yopmaydi,
+ * shuning uchun moliya yoki HR moduli o'chirilganda xarajat cheki va xodim surati shu yerda yopiladi).
+ */
+export async function requireFileAccess(conn: DbOrTx, tenant: TenantContext, kind: FileKind, access: "manage" | "view") {
+  await requirePermission(conn, tenant, FILE_KINDS[kind][access]);
+  await assertModuleEnabled(conn, tenant.company.id, FILE_KINDS[kind].module);
+}
 
 const EXTENSIONS: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -73,14 +84,25 @@ export function assertUploadKey(prefix: string, key: string) {
   }
 }
 
-/** Fayl haqiqatan yuklangan, hajmi va turi qoidaga mos. */
+/** Fayl haqiqatan yuklangan, hajmi, turi va (saqlash qo'llasa) fayl boshidagi imzo qoidaga mos. */
 export async function headUpload(client: StorageClient, rules: UploadRules, key: string) {
   const stored = await client.head(key);
   if (!stored) throw badRequest("Fayl yuklanmagan yoki yuklash muddati o'tgan");
   if (stored.size > rules.maxBytes) throw badRequest(`Fayl hajmi ${rules.maxBytes / MB} MB dan oshmasligi kerak`);
-  const storedType = stored.contentType?.split(";")[0]?.trim();
-  if (storedType && !rules.types.includes(storedType)) throw badRequest("Fayl turi ruxsat etilmagan");
+  const storedType = stored.contentType?.split(";")[0]?.trim().toLowerCase();
+  // Tur imzolangan PUT URL ga kiradi — saqlashda turi yo'q fayl bizning yuklash havolamiz orqali kelmagan
+  if (!storedType || !rules.types.includes(storedType)) throw badRequest("Fayl turi ruxsat etilmagan");
+  // Rasm yoki PDF nomi ostida HTML/JS saqlanmasin: faylning birinchi baytlari e'lon qilingan turga mos
+  if (client.readHead) {
+    const head = await client.readHead(key, 16);
+    if (!head || !matchesFileSignature(head, storedType)) throw badRequest("Fayl mazmuni e'lon qilingan turga mos emas");
+  }
   return stored;
+}
+
+function matchesFileSignature(data: Buffer, contentType: string): boolean {
+  if (contentType === "application/pdf") return data.subarray(0, 5).toString("latin1") === "%PDF-";
+  return matchesImageSignature(data, contentType);
 }
 
 const targets = {
@@ -214,10 +236,12 @@ export async function saveProductImageContent(
   if (input.data.length === 0) throw badRequest("Fayl bo'sh");
   if (input.data.length > rules.maxBytes) throw badRequest(`Fayl hajmi ${rules.maxBytes / MB} MB dan oshmasligi kerak`);
   if (!matchesImageSignature(input.data, contentType)) throw badRequest("Fayl mazmuni tanlangan rasm turiga mos emas");
+  // EXIF (GPS koordinata, qurilma), XMP va izohlar saqlanmaydi — rasm qayta kodlanmaydi, ko'rinishi o'zgarmaydi
+  const content = stripImageMetadata(input.data, contentType);
 
   const previous = await loadTarget(tx, tenant, "product-image", input.productId, true);
   const key = `${DATABASE_KEY_PREFIX}product-image/${randomUUID()}.${EXTENSIONS[contentType]}`;
-  const image = { key, content: input.data, contentType, sizeBytes: input.data.length };
+  const image = { key, content, contentType, sizeBytes: content.length };
   await tx
     .insert(productImages)
     .values({ productId: input.productId, companyId: tenant.company.id, ...image })

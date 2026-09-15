@@ -10,7 +10,7 @@
  *    tashrifga bog'lash, tasdiqlash. Geofence buzilishi hodisa, audit va supervayzer bildirishnomasi bilan saqlanadi.
  *    Qayta yuborish natijani o'zgartirmaydi. Zaxira chiqimi va qarz — mavjud jo'natish qoidasi bo'yicha (ombor).
  */
-import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { AppError, FULL_ACCESS_ROLES, badRequest, conflict, notFound, type SalesAgentPolicy } from "@bum/shared";
 import { brands, categories, products, unitConversions, units } from "../../db/schema/catalog.js";
 import { routeCustomers, salesReps } from "../../db/schema/crm.js";
@@ -18,7 +18,7 @@ import { stockLevels, warehouses } from "../../db/schema/inventory.js";
 import { notifications } from "../../db/schema/notifications.js";
 import { companyMembers, roles } from "../../db/schema/platform.js";
 import { customers, salesOrderItems, salesOrders } from "../../db/schema/sales.js";
-import { agentOrders, agentVisits, orderPromotions, type AgentOrderLine } from "../../db/schema/sales-agent.js";
+import { agentLocationEvents, agentOrders, agentVisits, orderPromotions, type AgentOrderLine } from "../../db/schema/sales-agent.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type AuditEntry, type RequestMeta } from "../../shared/audit.js";
 import { fromMinor, rescale, toMinor } from "../../shared/decimal.js";
@@ -38,6 +38,9 @@ import { activePromotions, applyPromotions, saveOrderPromotions } from "./promot
 import { accessibleStore, todayRoutes } from "./stores.service.js";
 import { assertVisitReady, finishVisitWithOrder, openStoreVisit } from "./visits.service.js";
 import { requireWorkSession } from "./work-session.repo.js";
+
+/** Shu vaqt ichida qurilma soxta joylashuv (mock GPS) bildirgan bo'lsa — buyurtma geofence'dan o'tmaydi. */
+const MOCK_LOCATION_WINDOW_MS = 15 * 60_000;
 
 export type PaymentType = (typeof agentOrders.paymentType.enumValues)[number];
 export type ApprovalStatus = (typeof agentOrders.approvalStatus.enumValues)[number];
@@ -598,6 +601,30 @@ export async function submitAgentOrder(
   if (rejection) {
     await insertLocationEvent(tx, context, rejection.reason, input, { action: "order_submit", orderId });
     return { blocked: badRequest(rejection.message, { reason: rejection.reason }) };
+  }
+  // Qurilma yaqinda soxta joylashuv (mock GPS) bildirgan — geofence natijasiga ishonib bo'lmaydi: buyurtma yuborilmaydi,
+  // hodisa va audit supervayzerga ko'rinadi
+  const [mockedRecently] = await tx
+    .select({ id: agentLocationEvents.id })
+    .from(agentLocationEvents)
+    .where(
+      and(
+        eq(agentLocationEvents.companyId, companyId),
+        eq(agentLocationEvents.salesRepId, context.agent.id),
+        eq(agentLocationEvents.type, "mock"),
+        gt(agentLocationEvents.occurredAt, new Date(Date.now() - MOCK_LOCATION_WINDOW_MS)),
+      ),
+    )
+    .limit(1);
+  if (mockedRecently) {
+    const details = { action: "order_submit", orderId, number: row.number, customerId: store.id, reason: "mock_location" };
+    await insertLocationEvent(tx, context, "geofence_block", input, details);
+    await audit(tx, context, meta, { action: "GEOFENCE_ORDER_ATTEMPT", resource: "sales_orders", resourceId: orderId, severity: "warning", details });
+    return {
+      blocked: new AppError("FORBIDDEN", "Qurilmada soxta joylashuv (mock GPS) aniqlangan — buyurtma yuborilmaydi. Soxta GPS ilovasini o'chiring", {
+        reason: "mock_location",
+      }),
+    };
   }
   const storePoint = pointOf(store.latitude, store.longitude);
   if (!storePoint) {

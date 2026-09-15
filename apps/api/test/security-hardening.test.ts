@@ -1,6 +1,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { assistantProvider, type AssistantRequest } from "../src/modules/ai/assistant.service.js";
+import { FILE_KINDS, headUpload } from "../src/modules/files/files.service.js";
+import type { StorageClient } from "../src/shared/storage.js";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
@@ -807,5 +809,56 @@ describe("Xavfsizlik: ombor, moliya ma'lumoti, HR va modul chegaralari", () => {
     expect((await single({ "x-sha256": "0".repeat(64) })).statusCode).toBe(400);
     const ok = await single({ "x-sha256": sha(file) });
     expect(ok.statusCode, ok.body).toBe(201);
+  });
+});
+
+describe("Xavfsizlik: fayllar", () => {
+  it("saqlashga yuklangan fayl: turi yo'q yoki mazmuni e'lon qilingan turga mos emas bo'lsa biriktirilmaydi", async () => {
+    const pngHead = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+    const client = (contentType: string | null, head: Buffer): StorageClient => ({
+      signedUrl: () => "http://storage.test/object",
+      head: async () => ({ size: 100, contentType }),
+      readHead: async () => head,
+      remove: async () => undefined,
+    });
+    const rules = FILE_KINDS["product-image"];
+    await expect(headUpload(client(null, pngHead), rules, "k")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(headUpload(client("image/png", Buffer.from("<html><script>alert(1)</script>")), rules, "k")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(headUpload(client("image/png", pngHead), rules, "k")).resolves.toMatchObject({ size: 100 });
+  });
+
+  it("HR moduli o'chirilsa xodim surati fayl yo'llari yopiladi", async () => {
+    const photoUrl = () => call(company.ownerCookie, "GET", `/api/files/url?kind=employee-photo&targetId=${randomUUID()}`);
+    expect((await photoUrl()).statusCode).toBe(404);
+    const off = await call(company.ownerCookie, "PUT", "/api/company/modules/hr", { enabled: false });
+    expect(off.statusCode, off.body).toBeLessThan(300);
+    const closed = await photoUrl();
+    expect(closed.statusCode, closed.body).toBe(403);
+    expect(closed.json().code).toBe("MODULE_DISABLED");
+  });
+
+  it("bazaga saqlangan mahsulot rasmida EXIF (GPS) qolmaydi", async () => {
+    await db.delete(units);
+    await seedDefaultUnits(db);
+    const piece = (await db.select().from(units).where(eq(units.shortName, "d")))[0]!.id;
+    const product = await call(company.ownerCookie, "POST", "/api/catalog/products", { name: "Rasmli", sku: "IMG-1", baseUnitId: piece, salesPrice: "1000", taxRate: "0" });
+    expect(product.statusCode, product.body).toBe(201);
+    const productId = product.json().product.id as string;
+    const secret = "GPS-41.5512-60.6317";
+    const exifPayload = Buffer.from(`Exif\0\0${secret}`, "latin1");
+    const app1 = Buffer.concat([Buffer.from([0xff, 0xe1, 0x00, exifPayload.length + 2]), exifPayload]);
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8]), app1, Buffer.from([0xff, 0xda, 0x00, 0x04, 1, 2, 9, 9, 0xff, 0xd9])]);
+
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/api/files/product-image/${productId}/content`,
+      headers: { cookie: company.ownerCookie, "content-type": "image/jpeg" },
+      payload: jpeg,
+    });
+    expect(saved.statusCode, saved.body).toBe(200);
+    const served = await app.inject({ method: "GET", url: `/api/files/product-image/${productId}/content`, headers: { cookie: company.ownerCookie } });
+    expect(served.statusCode).toBe(200);
+    expect(served.rawPayload.toString("latin1")).not.toContain(secret);
+    expect(served.rawPayload.subarray(0, 2).equals(Buffer.from([0xff, 0xd8]))).toBe(true);
   });
 });
