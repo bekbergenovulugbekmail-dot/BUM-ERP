@@ -1720,6 +1720,26 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 
 **Production (2026-09-15):** `bum-api` `1ba3ec03` va `bum-web` `6d63cfe1` — SUCCESS. API logida bitta ishga tushish, migratsiyalar 0049 va 0050 (faqat qo'shimcha ustun va indeks) — bazada 51 ta migratsiya va yangi ustunlar faqat o'qish tranzaksiyasi bilan tasdiqlandi; `/health` ok, `/api/auth/me` 401; soxta `X-Forwarded-For` — API haqiqiy IP'ni yozdi; web sarlavhalari (CSP, HSTS, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy) bor; CORS begona originga ruxsat bermaydi (faqat `WEB_ORIGIN`); noto'g'ri JSON — 400 umumiy xabar; Postgres xizmatida ochiq TCP proksi o'zgaruvchisi yo'q. Tizimga kirgan holda sinov — NOT VERIFIED (production paroli ishlatilmaydi)
 
+### Ikkinchi aylanma (2026-09-15, "davom et toxtama")
+
+| Topilma | Holat | Dalil |
+|---|---|---|
+| PAY F4 offline qaytarish | DONE | boshqa kassa/web cheki, boshqa kassir smenasi, chekdagidan boshqa usulda pul — rad etilmaydi (pul berilgan), `pos_sync_conflicts` ga yoziladi — pos-sale-sync |
+| PAY F3 offline qaytim | DONE | chek summasidan katta qaytim balansga — `change_over_total` (offline qarz — onlayn bilan bir xil qoida, kredit limiti nomuvofiqligi avvaldan bor) |
+| PAY F5 yopilgan davr | DONE | `GET/PUT /api/finance/lock-date` (`finance.approve`); shu sanagacha qo'lda jurnal, uni bekor qilish, kassa amali, xarajat — 400 `period_locked`; hujjatlar (savdo, xarid, offline kassa) cheklanmaydi — finance testi |
+| F-08 kassir boshqa smenalarni ko'rishi | DONE | faqat o'z smenasi; boshqalari — `sales.approve` yoki `finance.view` — security-verification |
+| F-04 yangi xodimga maosh | DONE | `hr.salary` talab — security-verification |
+| F11 keshbek summasi | DONE | tiyindan mayda summa 400 — security-verification |
+| F6 kassada to'lov takrori | DONE | depozit, qarz to'lovi, balansdan to'lov so'rov kaliti bilan bir marta; boshqa mijozga shu kalit — 409 — owner-decisions |
+| AUTH-13 sessiyalar | DONE | `GET /api/auth/sessions`, `DELETE /api/auth/sessions/:id`, `POST /api/auth/sessions/revoke-others`; Sozlamalar > Xavfsizlik — security-verification |
+| A-2 Android GPS xizmati | DONE | `exported="false"` (birlashtirilgan manifestda tasdiqlandi), APK qayta qurildi |
+| D-4 chek CSP | DONE | `<header>` teg `<head>` deb olinmaydi |
+| Qabul qilingan (o'zgartirilmadi) | — | bootstrap admin paroli har ishga tushishda muhitdan (ataylab: muhit — manba); qurilma pull'ida xarid narxi va qarzlar (offline ish uchun); pul endpointlarida alohida limit yo'q (kassirni bloklash xavfi); RLS yo'q; asar fuse'lari (paketlangan ilovani ishga tushirish kerak) |
+
+**Testlar (ikkinchi aylanma):** API 101 fayl / 453 test (8 qismda: 87 + 47 + 46 + 64 + 34 + 54 + 27 + 94) — hammasi o'tdi, `tsc` toza; web 16 fayl / 63 test, tsc, lint, build; desktop 9 fayl / 57 test. Android debug APK — 5 787 561 bayt, SHA-256 `CB50601389A1A53171403201098C9E3F272A7553E8359423AB8C61C4FA1C9AB6`
+
+**Production (ikkinchi aylanma):** `bum-api` `a82602ae` va `bum-web` `4559bfb4` — SUCCESS; yangi migratsiya yo'q; API logida bitta ishga tushish, `/health` ok; sessiyasiz `/api/auth/sessions`, `/api/finance/lock-date`, `/api/sales/policy`, `/api/sales/pos/shift-reviews` — 401; begona Origin bilan soxta cookie'li `DELETE /api/auth/sessions/:id` — 403 `csrf_origin` (hech narsa o'zgarmadi); login sahifasi 200. Tizimga kirgan holda sinov — NOT VERIFIED
+
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 
 ### Bajarilgan (tekshirilgan)
