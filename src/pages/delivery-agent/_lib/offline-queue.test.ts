@@ -8,13 +8,34 @@ import {
   projectedStatus,
   readQueue,
   retryAction,
+  setQueueOwner,
 } from "./offline-queue.ts";
 
 const network = () => ({ network: true, error: { status: 0, code: "NETWORK", message: "", reason: null } });
 const rejected = (reason: string) => () => ({ network: false, error: { status: 403, code: "FORBIDDEN", message: reason, reason } });
 
 describe("yetkazuvchi oflayn navbati", () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    setQueueOwner(null);
+    localStorage.clear();
+  });
+
+  it("navbat foydalanuvchiga bog'langan: boshqa foydalanuvchi oldingisining amallarini ko'rmaydi, egasi qaytganda joyida", () => {
+    enqueue("eski", "accept", newRequestBody({}));
+    setQueueOwner("agent-a");
+    expect(readQueue().map((item) => item.taskId)).toEqual(["eski"]);
+    expect(localStorage.getItem(QUEUE_STORAGE_KEY)).toBeNull();
+    enqueue("t1", "payments", newRequestBody({ method: "cash", amount: "50000" }));
+
+    setQueueOwner("agent-b");
+    expect(readQueue()).toEqual([]);
+    enqueue("t9", "accept", newRequestBody({}));
+
+    setQueueOwner("agent-a");
+    expect(readQueue().map((item) => item.taskId)).toEqual(["eski", "t1"]);
+    setQueueOwner("agent-b");
+    expect(readQueue().map((item) => item.taskId)).toEqual(["t9"]);
+  });
 
   it("amal so'rov kaliti va amal vaqti bilan qurilmada saqlanadi", () => {
     const body = newRequestBody({ reason: "no_answer" }, new Date("2026-09-13T08:00:00Z"));

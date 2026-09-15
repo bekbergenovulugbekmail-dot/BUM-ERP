@@ -28,6 +28,11 @@ export type MemberAccessOptions = {
   requirePermissionOf?: TenantContext;
   /** Himoyalangan a'zo (ega, to'liq huquq, platforma admini) — xato o'rniga o'zgarishsiz `false` qaytadi. */
   skipProtected?: boolean;
+  /**
+   * Agent boshqaruvi (sotuv agenti / yetkazuvchi): a'zo shu roldagi agent bo'lmasa, kirishni o'zgartirish uchun
+   * `employee.software_access.manage` kerak — agent profilini boshqa xodim loginiga bog'lab uni bloklab bo'lmasin.
+   */
+  agentRole?: { role: string; tenant: TenantContext };
 };
 
 /** A'zo kirishini xodim/agent boshqaruvi orqali o'zgartirib bo'lmasa — sababi, aks holda null. */
@@ -77,6 +82,15 @@ export async function setMemberAccess(
     throw forbidden(reason);
   }
   if (options.requirePermissionOf) await requirePermission(tx, options.requirePermissionOf, "employee.software_access.manage");
+  if (options.agentRole) {
+    // Agent profili boshqa roldagi a'zoga (omborchi, buxgalter) bog'langan — agent boshqaruvi uning loginini o'zgartira olmaydi
+    const [member] = await tx
+      .select({ companyRole: companyMembers.companyRole })
+      .from(companyMembers)
+      .where(and(eq(companyMembers.companyId, companyId), eq(companyMembers.userId, userId)))
+      .limit(1);
+    if (member?.companyRole !== options.agentRole.role) await requirePermission(tx, options.agentRole.tenant, "employee.software_access.manage");
+  }
 
   const [user] = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1).for("update");
   if (!user) return false;

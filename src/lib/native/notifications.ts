@@ -23,7 +23,9 @@ let sequence = Math.floor(Date.now() / 1000) % 1_000_000;
 
 /** Bildirishnomadagi manzil xavfsizmi: shu saytdagi nisbiy yo'l (`/...`), boshqa sayt yoki sxema emas. */
 export function isSafeAppPath(url: string | null | undefined): url is string {
-  return typeof url === "string" && url.startsWith("/") && !url.startsWith("//") && !url.includes("\\");
+  // Brauzer URL'dan tab va yangi qatorni olib tashlaydi ("/\t/evil" → "//evil") — boshqaruv belgilari va bo'shliq rad
+  // eslint-disable-next-line no-control-regex -- boshqaruv belgilari ataylab qidiriladi
+  return typeof url === "string" && url.startsWith("/") && !url.startsWith("//") && !/[\\\s\u0000-\u001f\u007f]/.test(url);
 }
 
 function listenTaps() {

@@ -85,7 +85,16 @@ function withPrintCsp(html: string): string {
   return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (tag) => `${tag}${PRINT_CSP}`) : `${PRINT_CSP}${html}`;
 }
 
-const EXTERNAL_HOSTS = ["bum-erp.uz", "up.railway.app", "google.com", "yandex.uz", "yandex.ru", "openstreetmap.org"];
+// Railway umumiy domeni (*.up.railway.app) emas — faqat BUM xizmatlari (boshqa loyihaning sahifasi ochilmasin)
+const EXTERNAL_HOSTS = [
+  "bum-erp.uz",
+  "bum-web-production.up.railway.app",
+  "bum-api-production.up.railway.app",
+  "google.com",
+  "yandex.uz",
+  "yandex.ru",
+  "openstreetmap.org",
+];
 
 /** Tashqi havola: faqat https va ro'yxatdagi domen (yoki uning subdomeni). */
 export function isAllowedExternalUrl(raw: string): boolean {

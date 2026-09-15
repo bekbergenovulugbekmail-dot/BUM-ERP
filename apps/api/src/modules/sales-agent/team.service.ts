@@ -232,7 +232,7 @@ export async function updateTeamMember(tx: Tx, tenant: TenantContext, salesRepId
         .set({ status: isActive ? "active" : "terminated", updatedAt: new Date() })
         .where(eq(employees.id, rep.employeeId));
     }
-    if (rep.userId) await setMemberAccess(tx, companyId, rep.userId, isActive);
+    if (rep.userId) await setMemberAccess(tx, companyId, rep.userId, isActive, { agentRole: { role: SALES_AGENT_ROLE, tenant } });
     if (!isActive) await endActiveSessions(tx, [rep.id], "deactivated");
   }
   await audit(tx, tenant, meta, isActive === false ? "SALES_AGENT_DEACTIVATED" : isActive === true ? "SALES_AGENT_ACTIVATED" : "SALES_AGENT_UPDATED", rep.id, {

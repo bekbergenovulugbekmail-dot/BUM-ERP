@@ -95,7 +95,9 @@ describe("Hisoblar rejasi", () => {
 
 describe("Buxgalteriya jurnali", () => {
   it("qo'lda yozuv balanslarni yangilaydi; hisobotlar; bekor qilish balansni qaytaradi", async () => {
-    const cash = await account(companyA, "1010");
+    // Kassa (1010) nazorat hisobi — qo'lda yozuv rad (pastdagi test); aktiv sifatida subtype'siz asosiy vositalar
+    expect((await api(companyA.ownerCookie, "POST", "/accounts", { code: "1500", name: "Asosiy vositalar", type: "asset" })).statusCode).toBe(201);
+    const cash = await account(companyA, "1500");
     const capital = await account(companyA, "3000");
     const rent = await account(companyA, "5200");
 
@@ -120,7 +122,7 @@ describe("Buxgalteriya jurnali", () => {
       ],
     });
     expect(second.json().entry.number).toBe(`JE-${year}-00002`);
-    expect((await account(companyA, "1010")).balance).toBe("749999.50");
+    expect((await account(companyA, "1500")).balance).toBe("749999.50");
     expect((await account(companyA, "3000")).balance).toBe("1000000.00");
     expect((await account(companyA, "5200")).balance).toBe("250000.50");
 
@@ -134,7 +136,7 @@ describe("Buxgalteriya jurnali", () => {
     const voided = await api(companyA.ownerCookie, "POST", `/journal/${second.json().entry.id}/void`);
     expect(voided.statusCode).toBe(200);
     expect(voided.json().entry.status).toBe("voided");
-    expect((await account(companyA, "1010")).balance).toBe("1000000.00");
+    expect((await account(companyA, "1500")).balance).toBe("1000000.00");
     expect((await account(companyA, "5200")).balance).toBe("0.00");
     expect((await api(companyA.ownerCookie, "POST", `/journal/${second.json().entry.id}/void`)).statusCode).toBe(400);
 
@@ -146,11 +148,18 @@ describe("Buxgalteriya jurnali", () => {
   });
 
   it("balanslanmagan, noto'g'ri qatorlar va begona hisob rad etiladi; hech narsa yozilmaydi", async () => {
-    const cash = await account(companyA, "1010");
+    const kassa = await account(companyA, "1010");
+    expect((await api(companyA.ownerCookie, "POST", "/accounts", { code: "1500", name: "Asosiy vositalar", type: "asset" })).statusCode).toBe(201);
+    const cash = await account(companyA, "1500");
     const capital = await account(companyA, "3000");
     const foreign = await account(companyB, "3000");
     const post = (lines: object[]) =>
       api(companyA.ownerCookie, "POST", "/journal", { entryDate: today, description: "Sinov", lines });
+
+    // Kassa, bank, debitor, zaxira va boshqa nazorat hisoblariga qo'lda yozuv rad — ular o'z hujjatlari bilan yuritiladi
+    const control = await post([{ accountId: kassa.id, debit: "100" }, { accountId: capital.id, credit: "100" }]);
+    expect(control.statusCode).toBe(400);
+    expect(control.json().details).toMatchObject({ reason: "control_account" });
 
     const unbalanced = await post([{ accountId: cash.id, debit: "100" }, { accountId: capital.id, credit: "90" }]);
     expect(unbalanced.statusCode).toBe(400);

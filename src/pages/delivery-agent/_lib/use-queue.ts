@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api.ts";
 import { useOnline } from "@/pages/sales-agent/_lib/use-online.ts";
 import { actionPath, classifyQueueError, invalidateDelivery } from "./actions.ts";
-import { QUEUE_EVENT, QUEUE_STORAGE_KEY, flushQueue, type QueuedAction, type SendResult } from "./offline-queue.ts";
+import { QUEUE_EVENT, flushQueue, queueStorageKey, type QueuedAction, type SendResult } from "./offline-queue.ts";
 
 const RETRY_MS = 30_000;
 
@@ -22,7 +22,7 @@ function subscribe(callback: () => void) {
 
 function snapshot() {
   try {
-    return localStorage.getItem(QUEUE_STORAGE_KEY) ?? "[]";
+    return localStorage.getItem(queueStorageKey()) ?? "[]";
   } catch {
     return "[]";
   }

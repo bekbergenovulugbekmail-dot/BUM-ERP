@@ -52,6 +52,9 @@ describe("dostavka real-time mijozi", () => {
     expect(isSafeAppPath("https://evil.example")).toBe(false);
     expect(isSafeAppPath("javascript:alert(1)")).toBe(false);
     expect(isSafeAppPath("/\\evil.example")).toBe(false);
+    expect(isSafeAppPath("/\t/evil.example")).toBe(false);
+    expect(isSafeAppPath("/\n/evil.example")).toBe(false);
+    expect(isSafeAppPath("/%09/evil.example")).toBe(true);
     expect(isSafeAppPath(undefined)).toBe(false);
   });
 

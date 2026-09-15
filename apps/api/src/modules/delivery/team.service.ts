@@ -283,7 +283,7 @@ export async function updateDeliveryAgent(tx: Tx, tenant: TenantContext, deliver
         .set({ status: isActive ? "active" : "terminated", updatedAt: new Date() })
         .where(eq(employees.id, agent.employeeId));
     }
-    await setMemberAccess(tx, companyId, agent.userId, isActive);
+    await setMemberAccess(tx, companyId, agent.userId, isActive, { agentRole: { role: DELIVERY_AGENT_ROLE, tenant } });
     if (!isActive) await endDeliverySessions(tx, [agent.id], "deactivated");
   }
   await audit(

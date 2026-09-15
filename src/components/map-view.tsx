@@ -58,6 +58,13 @@ function numberIcon(order: number, color: string) {
   });
 }
 
+/** Tooltip matni — DOM tugun (Leaflet satrni HTML sifatida qo'yadi; nomlar foydalanuvchi kiritgan). */
+function textNode(value: string): HTMLElement {
+  const node = document.createElement("span");
+  node.textContent = value;
+  return node;
+}
+
 /** Belgi ma'lumoti — DOM orqali (matn HTML sifatida talqin qilinmaydi). */
 function popupContent(marker: MapMarker, t: TFunction<"map">): HTMLElement {
   const root = document.createElement("div");
@@ -153,7 +160,8 @@ export default function MapView({ markers = [], polyline = [], polylines = [], c
       if (polygon.points.length < 3) continue;
       const color = safeColor(polygon.color) ?? TONE_COLORS.primary;
       const shape = L.polygon(polygon.points.map(toLatLng), { color, weight: 2, dashArray: "6 4", fillOpacity: 0.08 }).addTo(layer);
-      if (polygon.label) shape.bindTooltip(polygon.label, { sticky: true });
+      // Leaflet satrni innerHTML qiladi — nom (mijoz, do'kon, hudud) matn tugun sifatida beriladi
+      if (polygon.label) shape.bindTooltip(textNode(polygon.label), { sticky: true });
       polygon.points.forEach(extend);
     }
     for (const circle of circles) {
@@ -179,7 +187,7 @@ export default function MapView({ markers = [], polyline = [], polylines = [], c
         marker.order !== undefined
           ? L.marker(toLatLng(marker), { icon: numberIcon(marker.order, color), title: marker.label ?? "", riseOnHover: true })
           : L.circleMarker(toLatLng(marker), { radius: 8, color: "#ffffff", weight: 2, fillColor: color, fillOpacity: 1 });
-      if (marker.label) item.bindTooltip(marker.label, { permanent, direction: "right", offset: [marker.order !== undefined ? 4 : 10, 0], opacity: 0.9 });
+      if (marker.label) item.bindTooltip(textNode(marker.label), { permanent, direction: "right", offset: [marker.order !== undefined ? 4 : 10, 0], opacity: 0.9 });
       item.bindPopup(() => popupContent(marker, t));
       item.on("click", () => clickRef.current?.(marker.id));
       item.addTo(layer);

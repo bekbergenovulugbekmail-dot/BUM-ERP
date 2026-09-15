@@ -21,3 +21,14 @@ apps/mobile/android
 # Convex eksportlari va import hisobotlari
 convex-export*
 convex-import-report-*.json
+.convex
+snapshot_*.zip
+*.tar.gz
+
+# Imzo kalitlari, kassa o'rnatuvchilari va lokal bazalar image'ga tushmasin
+*.pem
+*.jks
+*.keystore
+apps/desktop/release
+**/*.sqlite
+**/*.sqlite3

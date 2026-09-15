@@ -1,11 +1,13 @@
 # BUM ERP — kunlik PostgreSQL zaxirasi uchun cron xizmati (Railway cron yoki istalgan server; bepul — pg_dump).
 #
 #   docker build -f deploy/backup/Dockerfile -t bum-erp-backup .
-#   docker run --rm -e DATABASE_URL=... -v bum-backups:/backups bum-erp-backup
+#   docker run --rm -e DATABASE_URL=... -e BACKUP_PASSPHRASE=... -v bum-backups:/backups bum-erp-backup
 #
 # Railway: alohida xizmat, "Cron Schedule" (masalan `0 21 * * *` — Toshkent 02:00), volume `/backups` ga ulanadi,
-# DATABASE_URL — ${{Postgres.DATABASE_URL}} (ichki tarmoq; bazani internetga ochish shart emas).
+# DATABASE_URL — ${{Postgres.DATABASE_URL}} (ichki tarmoq; bazani internetga ochish shart emas),
+# BACKUP_PASSPHRASE — nusxani shifrlash paroli (Railway o'zgaruvchisi; alohida xavfsiz joyda ham saqlang).
 FROM postgres:18-alpine
+RUN apk add --no-cache openssl
 COPY deploy/backup/pg-backup.sh deploy/backup/pg-restore-test.sh /usr/local/bin/
 RUN chmod 0755 /usr/local/bin/pg-backup.sh /usr/local/bin/pg-restore-test.sh
 USER postgres

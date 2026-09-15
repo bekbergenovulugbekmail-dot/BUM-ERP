@@ -31,7 +31,7 @@ import { cn } from "@/lib/utils.ts";
 import { LanguageMenu } from "@/pages/sales-agent/layout.tsx";
 import { useOnline } from "@/pages/sales-agent/_lib/use-online.ts";
 import type { DeliveryAgentOutlet } from "./_lib/context.ts";
-import { discardAction, retryAction, type SendResult } from "./_lib/offline-queue.ts";
+import { discardAction, retryAction, setQueueOwner, type SendResult } from "./_lib/offline-queue.ts";
 import { useDeliveryTracking, type DeliveryLocation } from "./_lib/use-delivery-tracking.ts";
 import { useDeliveryQueue, type DeliveryQueue } from "./_lib/use-queue.ts";
 
@@ -220,7 +220,10 @@ export default function DeliveryAgentLayout() {
     },
     [t],
   );
-  const queue = useDeliveryQueue(Boolean(meQuery.data), onSynced);
+  // Oflayn navbat shu foydalanuvchiniki: boshqa agent shu qurilmada kirsa oldingisining amallari ko'rinmaydi va yuborilmaydi
+  const queueOwner = currentUser?.id ?? null;
+  useEffect(() => setQueueOwner(queueOwner), [queueOwner]);
+  const queue = useDeliveryQueue(Boolean(meQuery.data) && queueOwner !== null, onSynced);
   const currency = meQuery.data?.company.currency ?? "UZS";
   const money = useCallback((value: string | number) => formatMoney(num(value), currency), [currency]);
 

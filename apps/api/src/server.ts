@@ -9,7 +9,10 @@ import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import websocket from "@fastify/websocket";
+import { AppError } from "@bum/shared";
 import { env, features, isProd } from "./env.js";
+import { SESSION_COOKIE } from "./modules/auth/session.js";
+import { originAllowed } from "./modules/delivery/realtime.js";
 import { logger } from "./shared/logger.js";
 import { registerErrorHandler } from "./shared/errors.js";
 import { startMaintenance } from "./shared/maintenance.js";
@@ -74,6 +77,17 @@ export async function buildServer() {
   await app.register(websocket, { options: { maxPayload: 1024 } });
 
   registerErrorHandler(app);
+
+  // CSRF — SameSite=Lax ustiga qo'shimcha qatlam: sessiya cookie'si bilan kelgan o'zgartiruvchi so'rov boshqa saytdan
+  // (Origin ilova manzili yoki shu host emas, yoki brauzer `cross-site` deb belgilagan) bo'lsa rad. Kassa qurilmasi va
+  // boshqa Bearer token so'rovlari cookie'siz — tekshirilmaydi
+  app.addHook("onRequest", async (req) => {
+    if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return;
+    if (!req.headers.cookie?.includes(`${SESSION_COOKIE}=`)) return;
+    if (!originAllowed(req.headers.origin, req.headers.host) || req.headers["sec-fetch-site"] === "cross-site") {
+      throw new AppError("FORBIDDEN", "So'rov boshqa saytdan yuborilgan", { reason: "csrf_origin" });
+    }
+  });
 
   app.get("/health", async () => {
     await pool.query("select 1");

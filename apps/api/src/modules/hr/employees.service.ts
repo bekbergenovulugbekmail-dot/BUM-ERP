@@ -553,7 +553,9 @@ export async function deleteEmployee(tx: Tx, tenant: TenantContext, employeeId: 
 
   // O'chirilgan xodimning hisobi yetim bo'lib qolmasin — login va agent ish joyi bloklanadi
   // Ega yoki to'liq huquqli a'zoning HR yozuvi o'chadi, lekin uning kirishiga tegilmaydi
-  if (employee.userId && (await setMemberAccess(tx, tenant.company.id, employee.userId, false, { skipProtected: true }))) {
+  // Login bloklanadi — HR yozuvini boshqa a'zoga bog'lab o'chirish orqali uni chiqarib yuborilmasin: dastur kirishini
+  // boshqarish ruxsati kerak
+  if (employee.userId && (await setMemberAccess(tx, tenant.company.id, employee.userId, false, { skipProtected: true, requirePermissionOf: tenant }))) {
     await endSessionsForUser(tx, tenant.company.id, employee.userId);
     await tx
       .update(salesReps)

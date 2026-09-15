@@ -11,7 +11,8 @@ services:
       POSTGRES_PASSWORD: bumerp
       POSTGRES_DB: bumerp
     ports:
-      - "5432:5432"
+      # Faqat shu kompyuterdan (lokal tarmoqdagi boshqa qurilmalar parol bilan ulana olmasin)
+      - "127.0.0.1:5432:5432"
     volumes:
       # PG18 image'i ma'lumotni /var/lib/postgresql/18/docker ga yozadi,
       # shuning uchun volume eski .../data ga emas, ota papkaga ulanadi.

@@ -15,7 +15,7 @@
  */
 import { and, asc, desc, eq, getTableColumns, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { badRequest, notFound } from "@bum/shared";
-import { accounts, journalEntries, journalLines } from "../../db/schema/finance.js";
+import { accounts, cashAccounts, journalEntries, journalLines } from "../../db/schema/finance.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
@@ -305,12 +305,40 @@ export async function listJournal(
   };
 }
 
+/**
+ * Qo'lda jurnal yozuvi tushmaydigan nazorat hisoblari: ular o'z hujjatlari bilan yuritiladi va qo'lda yozuv jurnalni
+ * kassa/bank qoldig'i, mijoz va ta'minotchi qarzi, zaxira, avans va keshbek ro'yxatlaridan ajratib qo'yardi.
+ */
+const MANUAL_BLOCKED_SUBTYPES = new Set(["cash", "bank", "receivable", "inventory", "payable", "customer_advance", "cashback_liability", "sales", "cogs"]);
+
 export async function createManualEntry(
   tx: Tx,
   tenant: TenantContext,
   input: Omit<JournalEntryInput, "referenceType" | "referenceId">,
   meta: RequestMeta,
 ) {
+  const accountIds = [...new Set(input.lines.map((line) => line.accountId))];
+  const lineAccounts = accountIds.length
+    ? await tx
+        .select({ id: accounts.id, code: accounts.code, name: accounts.name, subtype: accounts.subtype })
+        .from(accounts)
+        .where(and(eq(accounts.companyId, tenant.company.id), inArray(accounts.id, accountIds)))
+    : [];
+  const linkedToCash = accountIds.length
+    ? await tx
+        .select({ ledgerAccountId: cashAccounts.ledgerAccountId })
+        .from(cashAccounts)
+        .where(and(eq(cashAccounts.companyId, tenant.company.id), inArray(cashAccounts.ledgerAccountId, accountIds)))
+    : [];
+  const cashLedgers = new Set(linkedToCash.map((row) => row.ledgerAccountId));
+  const blocked = lineAccounts.find((account) => (account.subtype !== null && MANUAL_BLOCKED_SUBTYPES.has(account.subtype)) || cashLedgers.has(account.id));
+  if (blocked) {
+    throw badRequest(`${blocked.code} ${blocked.name}: bu hisob o'z hujjatlari (kassa harakati, sotuv, xarid, zaxira) bilan yuritiladi — qo'lda yozuv rad etildi`, {
+      reason: "control_account",
+      accountId: blocked.id,
+    });
+  }
+
   const { entry } = await postJournalEntry(tx, tenant.company.id, tenant.user.id, {
     ...input,
     referenceType: null,
