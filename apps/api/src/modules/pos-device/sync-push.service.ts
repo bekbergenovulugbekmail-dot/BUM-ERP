@@ -551,7 +551,14 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
         },
         meta,
       );
-      return { ...result.return, returnId: result.return.id, orderId: payload.orderId, orderStatus: result.order.status };
+      await recordConflicts(tx, context, op, { type: "sales_return", id: payload.returnId }, result.conflicts);
+      return {
+        ...result.return,
+        returnId: result.return.id,
+        orderId: payload.orderId,
+        orderStatus: result.order.status,
+        conflicts: result.conflicts.map((item) => item.kind),
+      };
     }
     case "customer.create": {
       const payload = op.payload;

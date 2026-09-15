@@ -187,6 +187,20 @@ describe("Desktop kassa: offline chek va qaytarish sinxroni", () => {
     expect((await db.select().from(salesOrderItems).where(eq(salesOrderItems.id, line.id)))[0]!.returnedQty).toBe("3.0000");
     expect((await db.select().from(posShifts).where(eq(posShifts.id, shiftId)))[0]).toMatchObject({ totalReturns: "30000.00", totalCash: "0.00" });
     expect((await stockOf(tea))!.quantity).toBe("10.0000");
+    expect(first!.result!.conflicts).toEqual([]);
+
+    // Web kassa cheki kassa qurilmasida qaytarildi — pul qurilmada berilgan, rad etilmaydi, nomuvofiqlik yoziladi
+    const webShift = await web(company.ownerCookie, "POST", "/api/sales/pos/shifts", { warehouseId: mainWarehouseId, openingCash: "0" });
+    expect(webShift.statusCode, webShift.body).toBe(201);
+    const webSale = await web(company.ownerCookie, "POST", "/api/sales/pos/sales", { shiftId: webShift.json().shift.id, items: [{ productId: tea, quantity: "1" }], paymentMethod: "cash", amountPaid: "10000" });
+    expect(webSale.statusCode, webSale.body).toBe(201);
+    const webOrder = webSale.json().order as { id: string; items: { id: string }[] };
+    const [foreign] = await push(token, [
+      op("sale.return", owner, { returnId: randomUUID(), orderId: webOrder.id, shiftId, number: "K01-Q000009", items: [{ orderItemId: webOrder.items[0]!.id, quantity: "1" }], refundMethod: "cash" }, 1),
+    ]);
+    expect(foreign).toMatchObject({ status: "applied", result: { conflicts: ["return_foreign_order"] } });
+    const foreignConflicts = await db.select().from(posSyncConflicts).where(eq(posSyncConflicts.kind, "return_foreign_order"));
+    expect(foreignConflicts).toHaveLength(1);
 
     // Kassirda sales.refund yo'q
     const kassir = await addEmployee(app, company, "Kassir");

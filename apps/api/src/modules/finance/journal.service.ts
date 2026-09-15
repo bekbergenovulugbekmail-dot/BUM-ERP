@@ -16,11 +16,13 @@
 import { and, asc, desc, eq, getTableColumns, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { badRequest, notFound } from "@bum/shared";
 import { accounts, cashAccounts, journalEntries, journalLines } from "../../db/schema/finance.js";
+import { settings } from "../../db/schema/platform.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
+import { upsertCompanySetting } from "../company/settings.service.js";
 import type { TenantContext } from "../company/tenant.js";
 import { DEFAULT_ACCOUNTS, companyCurrency, financeAudit, type AccountType } from "./accounts.service.js";
 
@@ -305,6 +307,33 @@ export async function listJournal(
   };
 }
 
+// ─── Yopilgan davr ───────────────────────────────────────────────────────────
+
+/** Shu sanagacha (shu kun ham) qo'lda buxgalteriya hujjati kiritilmaydi va bekor qilinmaydi (hisobot topshirilgan davr). */
+export const LOCK_DATE_KEY = "finance.lock_date";
+
+export async function getLockDate(conn: DbOrTx, companyId: string): Promise<string | null> {
+  const [row] = await conn
+    .select({ value: settings.value })
+    .from(settings)
+    .where(and(eq(settings.companyId, companyId), eq(settings.key, LOCK_DATE_KEY)))
+    .limit(1);
+  return row && /^\d{4}-\d{2}-\d{2}$/.test(row.value) ? row.value : null;
+}
+
+export async function assertPeriodOpen(conn: DbOrTx, companyId: string, date: string) {
+  const lockDate = await getLockDate(conn, companyId);
+  if (lockDate && date <= lockDate) {
+    throw badRequest(`${lockDate} gacha bo'lgan davr yopilgan — ${date} sanali hujjat kiritilmaydi va o'zgartirilmaydi`, { reason: "period_locked", lockDate });
+  }
+}
+
+export async function setLockDate(tx: Tx, tenant: TenantContext, lockDate: string | null, meta: RequestMeta) {
+  if (lockDate && lockDate > new Date().toISOString().slice(0, 10)) throw badRequest("Kelajakdagi sanani yopib bo'lmaydi");
+  await upsertCompanySetting(tx, tenant, { key: LOCK_DATE_KEY, value: lockDate ?? "", group: "finance", description: "Yopilgan davr" }, meta);
+  return lockDate;
+}
+
 /**
  * Qo'lda jurnal yozuvi tushmaydigan nazorat hisoblari: ular o'z hujjatlari bilan yuritiladi va qo'lda yozuv jurnalni
  * kassa/bank qoldig'i, mijoz va ta'minotchi qarzi, zaxira, avans va keshbek ro'yxatlaridan ajratib qo'yardi.
@@ -317,6 +346,7 @@ export async function createManualEntry(
   input: Omit<JournalEntryInput, "referenceType" | "referenceId">,
   meta: RequestMeta,
 ) {
+  await assertPeriodOpen(tx, tenant.company.id, input.entryDate);
   const accountIds = [...new Set(input.lines.map((line) => line.accountId))];
   const lineAccounts = accountIds.length
     ? await tx
@@ -356,12 +386,13 @@ export async function createManualEntry(
 /** Qo'lda kiritilgan yozuvni bekor qilish; hujjat yozuvlari hujjatning o'zi orqali bekor qilinadi. */
 export async function voidManualEntry(tx: Tx, tenant: TenantContext, entryId: string, meta: RequestMeta) {
   const [entry] = await tx
-    .select({ referenceType: journalEntries.referenceType })
+    .select({ referenceType: journalEntries.referenceType, entryDate: journalEntries.entryDate })
     .from(journalEntries)
     .where(and(eq(journalEntries.id, entryId), eq(journalEntries.companyId, tenant.company.id)))
     .limit(1);
   if (!entry) throw notFound("Buxgalteriya yozuvi topilmadi");
   if (entry.referenceType) throw badRequest("Hujjatga bog'langan yozuvni hujjatning o'zi orqali bekor qiling");
+  await assertPeriodOpen(tx, tenant.company.id, entry.entryDate);
 
   const voided = await voidJournalEntry(tx, tenant.company.id, entryId, tenant.user.id);
   await financeAudit(tx, tenant, meta, {

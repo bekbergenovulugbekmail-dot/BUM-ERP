@@ -70,7 +70,7 @@ import {
   saveCurrencySettings,
   setCurrencyRate,
 } from "./currencies.service.js";
-import { createManualEntry, getJournalEntry, listJournal, voidManualEntry } from "./journal.service.js";
+import { createManualEntry, getJournalEntry, getLockDate, listJournal, setLockDate, voidManualEntry } from "./journal.service.js";
 import { createTerminal, getTerminal, listTerminals, updateTerminal } from "./terminals.service.js";
 
 const nullableText = (max: number) =>
@@ -235,6 +235,7 @@ const currenciesBody = z.strictObject({
 
 const accountParams = z.object({ accountId: z.uuid() });
 const entryParams = z.object({ entryId: z.uuid() });
+const lockDateBody = z.strictObject({ lockDate: z.iso.date().nullable() });
 const cashAccountParams = z.object({ cashAccountId: z.uuid() });
 const expenseParams = z.object({ expenseId: z.uuid() });
 const includeInactiveQuery = z.object({ includeInactive: boolQuery });
@@ -324,6 +325,17 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
   app.get("/journal/:entryId", async (req) => {
     const { entryId } = entryParams.parse(req.params);
     return { entry: await getJournalEntry(db, await readTenant(req, "finance.view"), entryId) };
+  });
+
+  // Yopilgan davr: shu sanagacha qo'lda hujjat (jurnal yozuvi va uni bekor qilish, kassa amali, xarajat) kiritilmaydi
+  app.get("/lock-date", async (req) => {
+    const tenant = await readTenant(req, "finance.view");
+    return { lockDate: await getLockDate(db, tenant.company.id) };
+  });
+
+  app.put("/lock-date", async (req) => {
+    const { lockDate } = lockDateBody.parse(req.body);
+    return { lockDate: await writeInTenant(req, "finance.approve", (tx, tenant) => setLockDate(tx, tenant, lockDate, requestMeta(req))) };
   });
 
   app.post("/journal", async (req, reply) => {

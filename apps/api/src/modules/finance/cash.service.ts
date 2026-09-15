@@ -43,7 +43,7 @@ import { fromMinor, rescale, toMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency, financeAudit } from "./accounts.service.js";
 import { currencyRate } from "./currencies.service.js";
-import { postJournalEntry, requireAccountBySubtype } from "./journal.service.js";
+import { assertPeriodOpen, postJournalEntry, requireAccountBySubtype } from "./journal.service.js";
 import { applyOutgoingBankCommission } from "./bank-commission.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...cashAccountFields } = getTableColumns(cashAccounts);
@@ -454,6 +454,7 @@ export async function recordManualCashTransaction(
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
+  await assertPeriodOpen(tx, companyId, input.txDate ?? todayIso());
   const txDate = input.txDate ?? todayIso();
   const [target] = await tx
     .select({ currency: cashAccounts.currency })

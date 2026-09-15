@@ -408,7 +408,8 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
       key.startsWith("sales_agent.") ||
       key.startsWith("delivery.") ||
       key.startsWith("pos.") ||
-      key.startsWith("sales.")
+      key.startsWith("sales.") ||
+      key.startsWith("finance.")
     ) {
       throw badRequest("Bu sozlama o'z bo'limi orqali saqlanadi (chek/etiketka, keshbek, valyutalar, agent, dostavka, kassa yoki savdo siyosati)");
     }

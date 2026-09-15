@@ -22,7 +22,7 @@ import { nextDocumentNumber } from "../../shared/numbering.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency, financeAudit } from "./accounts.service.js";
 import { ledgerAccountFor, recordCashTransaction, todayIso } from "./cash.service.js";
-import { findAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "./journal.service.js";
+import { assertPeriodOpen, findAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "./journal.service.js";
 import { applyOutgoingBankCommission } from "./bank-commission.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...expenseFields } = getTableColumns(expenses);
@@ -146,6 +146,7 @@ export async function expenseStats(conn: DbOrTx, tenant: TenantContext) {
 
 export async function createExpense(tx: Tx, tenant: TenantContext, input: ExpenseInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
+  await assertPeriodOpen(tx, companyId, input.expenseDate);
   if (input.accountId) await assertExpenseAccount(tx, companyId, input.accountId);
 
   const number = await nextDocumentNumber(tx, {
@@ -187,6 +188,7 @@ export async function updateExpense(
   const expense = await lockExpense(tx, tenant, expenseId);
   if (expense.status !== "pending") throw badRequest("Faqat kutilayotgan xarajatni tahrirlash mumkin");
   if (patch.accountId) await assertExpenseAccount(tx, tenant.company.id, patch.accountId);
+  if (patch.expenseDate) await assertPeriodOpen(tx, tenant.company.id, patch.expenseDate);
 
   const [updated] = await tx
     .update(expenses)

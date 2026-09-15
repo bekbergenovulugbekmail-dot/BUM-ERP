@@ -43,7 +43,7 @@ import { reverseCashback } from "./cashback.service.js";
 import { refundToBalance } from "./customer-balance.service.js";
 import { salesAudit } from "./customers.service.js";
 import { getOrder } from "./orders.service.js";
-import { assertShiftOperator } from "./pos.service.js";
+import { assertShiftOperator, type SaleConflict } from "./pos.service.js";
 
 export const REFUND_METHODS = ["cash", "card", "bank", "balance"] as const;
 export type RefundMethod = (typeof REFUND_METHODS)[number];
@@ -173,6 +173,8 @@ async function refundParts(
   offline: boolean,
   /** `finance.manage`: pulni chekdagi to'lov usulidan boshqacha qaytarish mumkin. */
   canCrossMethods: boolean,
+  /** Offline qaytarish: rad etish o'rniga yoziladigan nomuvofiqliklar (pul qurilmada berilgan). */
+  conflicts: SaleConflict[],
 ): Promise<RefundPart[]> {
   if (money <= 0n) return [];
   const requested = (input.refunds ?? []).map((part) => ({ method: part.method, amount: toMinor(part.amount) })).filter((part) => part.amount > 0n);
@@ -180,11 +182,13 @@ async function refundParts(
     // Bitta usul: shu usulda to'langanidan ortig'i boshqa usuldagi pul (masalan, karta/bankka tushgan pulni kassadan naqd
     // berish) — moliya ruxsatisiz rad, usullar bo'yicha taqsimlash kerak
     const key = refundKey(input.refundMethod);
-    if (key && !offline && !canCrossMethods) {
+    if (key && !canCrossMethods) {
       const available = await refundableByMethod(tx, orderId);
       const own = available.get(key) ?? 0n;
       const paidOtherwise = [...available.entries()].some(([method, amount]) => method !== key && amount > 0n);
-      if (money > own && paidOtherwise) {
+      if (money > own && paidOtherwise && offline) {
+        conflicts.push({ kind: "refund_method_mismatch", details: { orderId, method: input.refundMethod, amount: fromMinor(money), available: fromMinor(own > 0n ? own : 0n) } });
+      } else if (money > own && paidOtherwise) {
         throw forbidden(
           `${REFUND_LABELS[input.refundMethod]} bilan ko'pi bilan ${fromMinor(own > 0n ? own : 0n)} qaytariladi — qolgani chekda boshqa usulda to'langan: usullar bo'yicha taqsimlang (yoki moliya ruxsati kerak)`,
         );
@@ -205,13 +209,15 @@ async function refundParts(
       })
       .filter((part) => part.amount > 0n);
   }
-  if (!offline) {
+  {
     const available = await refundableByMethod(tx, orderId);
     for (const part of requested) {
       const key = refundKey(part.method);
       if (!key) continue;
       const left = available.get(key) ?? 0n;
-      if (part.amount > left) {
+      if (part.amount > left && offline) {
+        conflicts.push({ kind: "refund_method_mismatch", details: { orderId, method: part.method, amount: fromMinor(part.amount), available: fromMinor(left > 0n ? left : 0n) } });
+      } else if (part.amount > left) {
         throw badRequest(`${REFUND_LABELS[part.method]}: ko'pi bilan ${fromMinor(left > 0n ? left : 0n)} qaytariladi (chekda shu usulda to'langan)`);
       }
     }
@@ -233,6 +239,8 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
       totalAmount: salesOrders.totalAmount,
       paidAmount: salesOrders.paidAmount,
       currency: salesOrders.currency,
+      isPos: salesOrders.isPos,
+      posShiftId: salesOrders.posShiftId,
     })
     .from(salesOrders)
     .where(and(eq(salesOrders.id, orderId), eq(salesOrders.companyId, companyId)))
@@ -241,6 +249,14 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
   if (!order) throw notFound("Chek topilmadi");
   if (order.status !== "shipped" && order.status !== "delivered") throw badRequest("Faqat yakunlangan chekdagi mahsulot qaytariladi");
   assertWarehouseAccess(tenant, order.warehouseId);
+  const conflicts: SaleConflict[] = [];
+  if (offline) {
+    // Qurilma boshqa kassa yoki web savdosini qaytardi — pul berilgan, rad etilmaydi, rahbar ko'radi
+    const [sold] = order.posShiftId ? await tx.select({ deviceId: posShifts.deviceId }).from(posShifts).where(eq(posShifts.id, order.posShiftId)).limit(1) : [];
+    if (!order.isPos || (sold?.deviceId ?? null) !== offline.deviceId) {
+      conflicts.push({ kind: "return_foreign_order", details: { orderId, number: order.number } });
+    }
+  }
 
   const ids = input.items.map((item) => item.orderItemId);
   if (ids.length === 0) throw badRequest("Qaytariladigan mahsulotni tanlang");
@@ -286,6 +302,9 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
     if (row.status !== "open" && !offline) throw badRequest("Smena yopilgan");
     // Boshqa kassirning smenasi yig'indilarini faqat smena egasi yoki `sales.approve` menejer kamaytiradi
     if (!offline) await assertShiftOperator(tx, tenant, row.cashierId);
+    else if (row.cashierId !== tenant.user.id && !(await effectivePermissions(tx, tenant)).includes("sales.approve")) {
+      conflicts.push({ kind: "return_other_shift", details: { shiftId: row.id, cashierId: row.cashierId } });
+    }
     shift = row;
   }
 
@@ -371,7 +390,7 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
   const balanceBack = paid > 0n ? minBig(balanceLeft, mulDivRound(balanceLeft, refund, paid)) : 0n;
   const cashbackBack = paid > 0n ? minBig(cashbackLeft, mulDivRound(cashbackLeft, refund, paid)) : 0n;
   const money = refund - balanceBack - cashbackBack;
-  const parts = await refundParts(tx, orderId, input, money, offline !== undefined, (await effectivePermissions(tx, tenant)).includes("finance.manage"));
+  const parts = await refundParts(tx, orderId, input, money, offline !== undefined, (await effectivePermissions(tx, tenant)).includes("finance.manage"), conflicts);
   const refundMethodValue = parts.length > 1 ? "mixed" : (parts[0]?.method ?? input.refundMethod);
   const refundsValue = parts.map((part) => ({ method: part.method, amount: fromMinor(part.amount) }));
   // Har usul asl to'lov hisoblariga bo'linadi (bir usul ikki bankka tushgan bo'lsa — ikki qism); hujjatda hisobi bilan
@@ -600,5 +619,5 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
       ...(offline ? { deviceId: offline.deviceId, returnedAt: offline.returnedAt.toISOString() } : {}),
     },
   });
-  return { return: summary, order: await getOrder(tx, tenant, orderId) };
+  return { return: summary, order: await getOrder(tx, tenant, orderId), conflicts };
 }

@@ -208,3 +208,38 @@ describe("Buxgalteriya jurnali", () => {
     await expect(insert("100", "JE-X-2")).resolves.toBeUndefined();
   });
 });
+
+describe("Yopilgan davr (lock date)", () => {
+  it("yopilgan sanagacha qo'lda jurnal, uni bekor qilish va xarajat rad; faqat finance.approve; umumiy sozlama yo'li bilan yozilmaydi", async () => {
+    const put = (cookie: string, url: string, payload: object) => app.inject({ method: "PUT", url, headers: { cookie }, payload });
+    const owner = companyA.ownerCookie;
+    expect((await api(owner, "POST", "/accounts", { code: "1500", name: "Asosiy vositalar", type: "asset" })).statusCode).toBe(201);
+    const asset = await account(companyA, "1500");
+    const capital = await account(companyA, "3000");
+    const entry = (entryDate: string) =>
+      api(owner, "POST", "/journal", { entryDate, description: "Davr", lines: [{ accountId: asset.id, debit: "100" }, { accountId: capital.id, credit: "100" }] });
+    const old = await entry("2026-01-10");
+    expect(old.statusCode, old.body).toBe(201);
+
+    const sales = await addEmployee(app, companyA, "Savdo menejeri");
+    expect((await put(sales.cookie, "/api/finance/lock-date", { lockDate: "2026-01-31" })).statusCode).toBe(403);
+    expect((await put(owner, "/api/finance/lock-date", { lockDate: "2999-01-01" })).statusCode).toBe(400);
+    expect((await put(owner, "/api/company/settings/finance.lock_date", { value: "2026-12-31", group: "finance" })).statusCode).toBe(400);
+    const locked = await put(owner, "/api/finance/lock-date", { lockDate: "2026-01-31" });
+    expect(locked.statusCode, locked.body).toBe(200);
+    expect((await api(owner, "GET", "/lock-date")).json()).toEqual({ lockDate: "2026-01-31" });
+    // B kompaniyasi ta'sirlanmaydi
+    expect((await api(companyB.ownerCookie, "GET", "/lock-date")).json()).toEqual({ lockDate: null });
+
+    const inLocked = await entry("2026-01-31");
+    expect(inLocked.statusCode).toBe(400);
+    expect(inLocked.json().details).toMatchObject({ reason: "period_locked", lockDate: "2026-01-31" });
+    expect((await entry("2026-02-01")).statusCode).toBe(201);
+    expect((await api(owner, "POST", `/journal/${old.json().entry.id}/void`)).json().details).toMatchObject({ reason: "period_locked" });
+    const expense = await api(owner, "POST", "/expenses", { category: "boshqa", description: "Eski xarajat", amount: "1000", expenseDate: "2026-01-20" });
+    expect(expense.json().details).toMatchObject({ reason: "period_locked" });
+
+    expect((await put(owner, "/api/finance/lock-date", { lockDate: null })).json()).toEqual({ lockDate: null });
+    expect((await entry("2026-01-15")).statusCode).toBe(201);
+  });
+});

@@ -755,8 +755,12 @@ export async function completeSale(
   let changeKept = 0n;
   // Balansga yoziladigan qaytim chek summasidan oshmaydi: katta "berilgan summa" bilan mijozga yo'q pulni balans qilib
   // bo'lmaydi (balansni to'ldirish — alohida amal, pul kassaga kirim bo'ladi). Offline chek qurilmada yopilgan — rad etilmaydi
-  if (input.changeToBalance && change > due && !offline) {
-    throw badRequest(`Balansga yoziladigan qaytim (${fromMinor(change)}) chek summasidan oshmasligi kerak — balansni to'ldirish amalidan foydalaning`);
+  if (input.changeToBalance && change > due) {
+    if (!offline) {
+      throw badRequest(`Balansga yoziladigan qaytim (${fromMinor(change)}) chek summasidan oshmasligi kerak — balansni to'ldirish amalidan foydalaning`);
+    }
+    // Offline kassa: qurilmada yopilgan chek rad etilmaydi — lekin katta "qaytim" bilan balans yaratish rahbarga ko'rinadi
+    conflicts.push({ kind: "change_over_total", details: { customerId: input.customerId, change: fromMinor(change), total: fromMinor(due) } });
   }
   // Savdo siyosati: balansga yoziladigan katta qaytim ham depozit chegarasida (offline — nomuvofiqlik)
   const { cashierDepositLimit } = input.changeToBalance && change > 0n ? await getSalesPolicy(tx, companyId) : { cashierDepositLimit: null };
