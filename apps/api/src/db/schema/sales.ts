@@ -158,6 +158,12 @@ export const posShifts = pgTable(
     foreignCash: jsonb("foreign_cash").$type<Record<string, string>>().notNull().default({}),
     foreignCard: jsonb("foreign_card").$type<Record<string, string>>().notNull().default({}),
     closingForeignCash: jsonb("closing_foreign_cash").$type<Record<string, string>>(),
+    /** Yopilishdagi kassa farqi (sanalgan − kutilgan); savdo siyosatidagi chegaradan oshsa rahbar ko'rib chiqadi. */
+    cashDifference: money("cash_difference"),
+    differenceReview: varchar("difference_review", { length: 16 }).$type<"pending" | "approved" | "rejected">(),
+    differenceReviewedBy: uuid("difference_reviewed_by").references(() => users.id, { onDelete: "set null" }),
+    differenceReviewedAt: timestamp("difference_reviewed_at", { withTimezone: true }),
+    differenceReviewNote: text("difference_review_note"),
 
     notes: text("notes"),
     ...timestamps(),

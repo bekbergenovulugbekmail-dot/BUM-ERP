@@ -22,6 +22,8 @@ export const CONFLICT_KINDS = {
   shift_closed: "Yopilgan smenaga chek",
   customer_duplicate_phone: "Shu telefonli mijoz bor edi",
   debt_overpaid: "Mijoz qarzidan ortiq to'landi (farqi balansga)",
+  discount_over_limit: "Chegirma savdo siyosatidagi chegaradan oshdi",
+  deposit_over_limit: "Balansga yozilgan summa kassir chegarasidan oshdi",
   supplier_overpaid: "Ta'minotchi qarzidan ortiq to'landi (avans)",
   count_late_document: "Inventarizatsiyadan oldingi hujjat kech keldi (qoldiq sanoq bo'yicha tuzatildi)",
   record_changed: "Kassadagi tahrir serverdagi yangi o'zgarish bilan to'qnashdi (server qiymati saqlandi)",

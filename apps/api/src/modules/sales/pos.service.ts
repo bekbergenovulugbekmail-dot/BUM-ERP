@@ -51,6 +51,7 @@ import {
   type PaymentPartInput,
 } from "./payment-allocation.service.js";
 import { recordCustomerPayment } from "./payments.service.js";
+import { getSalesPolicy, notifyMembersWithPermission } from "./sales-policy.service.js";
 import { addCurrencyAmounts } from "./shift-totals.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...shiftFields } = getTableColumns(posShifts);
@@ -280,6 +281,11 @@ export async function closeShift(
     };
   });
 
+  // Savdo siyosati: farq chegaradan oshsa (yoki chet valyutada farq bo'lsa) — rahbar ko'rib chiqadi
+  const { shiftDifferenceTolerance } = await getSalesPolicy(tx, tenant.company.id);
+  const absolute = difference < 0n ? -difference : difference;
+  const needsReview = absolute > toMinor(shiftDifferenceTolerance) || foreignCash.some((row) => toMinor(row.difference) !== 0n);
+
   await tx
     .update(posShifts)
     .set({
@@ -287,6 +293,8 @@ export async function closeShift(
       closedAt: input.closedAt ?? new Date(),
       closingCash: input.closingCash,
       closingForeignCash: foreignCash.length > 0 ? Object.fromEntries(foreignCash.map((row) => [row.currency, row.counted])) : null,
+      cashDifference: fromMinor(difference),
+      differenceReview: needsReview ? "pending" : null,
       notes: input.notes ?? shift.notes,
       updatedAt: new Date(),
     })
@@ -301,15 +309,79 @@ export async function closeShift(
       closingCash: input.closingCash,
       difference: fromMinor(difference),
       ...(foreignCash.length > 0 ? { foreignCash } : {}),
+      ...(needsReview ? { review: "pending" } : {}),
     },
   });
+  if (needsReview) {
+    await notifyMembersWithPermission(tx, tenant.company.id, "sales.approve", {
+      title: "Smena kassa farqini ko'rib chiqing",
+      message: `${shift.cashierName ?? "Kassir"}: farq ${fromMinor(difference)} (kutilgan ${fromMinor(expected)}, sanalgan ${fromMinor(toMinor(input.closingCash))})${
+        foreignCash.some((row) => toMinor(row.difference) !== 0n) ? ", valyutada ham farq bor" : ""
+      }`,
+      relatedType: "pos_shifts",
+      relatedId: shiftId,
+      link: "/settings",
+      excludeUserId: shift.cashierId,
+    });
+  }
   return {
     shift: await getShift(tx, tenant, shiftId),
     expectedCash: fromMinor(expected),
     difference: fromMinor(difference),
     /** Valyuta bo'yicha kutilgan, sanalgan va farq. */
     foreignCash,
+    /** `pending` — farq chegaradan oshdi, rahbar ko'rib chiqadi. */
+    review: needsReview ? ("pending" as const) : null,
   };
+}
+
+/** Ko'rib chiqilishi kerak bo'lgan (yoki ko'rib chiqilgan) kassa farqli smenalar — `sales.approve`. */
+export async function listShiftReviews(conn: DbOrTx, tenant: TenantContext, options: { status: "pending" | "approved" | "rejected"; limit: number }) {
+  const allowed = allowedWarehouses(tenant);
+  return conn
+    .select({ ...shiftFields, warehouseName: warehouses.name, expectedCash: expectedCashSql })
+    .from(posShifts)
+    .innerJoin(warehouses, eq(warehouses.id, posShifts.warehouseId))
+    .where(
+      and(
+        eq(posShifts.companyId, tenant.company.id),
+        eq(posShifts.differenceReview, options.status),
+        allowed ? inArray(posShifts.warehouseId, allowed) : undefined,
+      ),
+    )
+    .orderBy(desc(posShifts.closedAt))
+    .limit(options.limit);
+}
+
+/** Kassa farqini ko'rib chiqish: tasdiqlash yoki rad (izoh bilan). O'z smenasini — faqat kompaniya egasi. */
+export async function reviewShiftDifference(
+  tx: Tx,
+  tenant: TenantContext,
+  shiftId: string,
+  input: { decision: "approved" | "rejected"; note?: string | null },
+  meta: RequestMeta,
+) {
+  const shift = await lockShift(tx, tenant, shiftId);
+  assertWarehouseAccess(tenant, shift.warehouseId);
+  if (shift.differenceReview !== "pending") {
+    throw new AppError("CONFLICT", "Bu smena farqi ko'rib chiqishni kutmayapti", { reason: "review_not_pending", review: shift.differenceReview });
+  }
+  if (shift.cashierId === tenant.user.id && tenant.membership.companyRole !== "owner") {
+    throw new AppError("FORBIDDEN", "O'z smenangiz farqini boshqa rahbar ko'rib chiqadi", { reason: "self_review" });
+  }
+  const note = input.note?.trim() || null;
+  if (input.decision === "rejected" && !note) throw badRequest("Rad etish sababini yozing");
+  await tx
+    .update(posShifts)
+    .set({ differenceReview: input.decision, differenceReviewedBy: tenant.user.id, differenceReviewedAt: new Date(), differenceReviewNote: note, updatedAt: new Date() })
+    .where(eq(posShifts.id, shiftId));
+  await salesAudit(tx, tenant, meta, {
+    action: "POS_SHIFT_DIFFERENCE_REVIEWED",
+    resource: "pos_shifts",
+    resourceId: shiftId,
+    details: { decision: input.decision, difference: shift.cashDifference, note },
+  });
+  return getShift(tx, tenant, shiftId);
 }
 
 /** Desktop kassaning offline cheki: qurilmadagi ID, raqam (`K01-000123`), yopilgan vaqt, qator ID'lari va kurslar. */
@@ -430,7 +502,7 @@ export async function completeSale(
 
   if (offline && offline.itemIds.length !== input.items.length) throw badRequest("Chek qatorlari identifikatori noto'g'ri");
   // Offline chek: narx va chegirma qurilmadagi shartda (prays-listdan farqi — nomuvofiqlik), kurs — sotuv lahzasidagi
-  const { items, totals, priceChanges } = await prepareSalesItems(
+  const { items, totals, priceChanges, discountOverLimit } = await prepareSalesItems(
     tx,
     tenant,
     input.items,
@@ -440,6 +512,7 @@ export async function completeSale(
       : { promoDate: todayIso() },
   );
   if (priceChanges.length > 0) conflicts.push({ kind: "price_changed", details: { items: priceChanges } });
+  if (discountOverLimit.length > 0) conflicts.push({ kind: "discount_over_limit", details: { items: discountOverLimit } });
   const total = toMinor(totals.totalAmount);
   const cashbackSettings = input.customerId ? await getCashbackSettings(tx, companyId) : null;
 
@@ -684,6 +757,15 @@ export async function completeSale(
   // bo'lmaydi (balansni to'ldirish — alohida amal, pul kassaga kirim bo'ladi). Offline chek qurilmada yopilgan — rad etilmaydi
   if (input.changeToBalance && change > due && !offline) {
     throw badRequest(`Balansga yoziladigan qaytim (${fromMinor(change)}) chek summasidan oshmasligi kerak — balansni to'ldirish amalidan foydalaning`);
+  }
+  // Savdo siyosati: balansga yoziladigan katta qaytim ham depozit chegarasida (offline — nomuvofiqlik)
+  const { cashierDepositLimit } = input.changeToBalance && change > 0n ? await getSalesPolicy(tx, companyId) : { cashierDepositLimit: null };
+  if (cashierDepositLimit !== null && change > toMinor(cashierDepositLimit)) {
+    if (offline) {
+      conflicts.push({ kind: "deposit_over_limit", details: { customerId: input.customerId, amount: fromMinor(change), limit: cashierDepositLimit, source: "change" } });
+    } else if (!(await effectivePermissions(tx, tenant)).includes("sales.approve")) {
+      throw new AppError("FORBIDDEN", `Balansga ${cashierDepositLimit} dan ortiq qaytimni rahbar (sales.approve) yozadi`, { reason: "deposit_limit", limit: cashierDepositLimit });
+    }
   }
   if (input.changeToBalance && change > 0n) {
     await depositToBalance(
@@ -940,6 +1022,14 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
     if (input.purpose !== "debt") throw badRequest("Balansni balansning o'zidan to'ldirib bo'lmaydi");
     await payFromBalance(tx, tenant, { customerId: input.customerId, amount, posShiftId: shift.id, notes }, meta);
   } else if (input.purpose === "deposit") {
+    // Savdo siyosati: katta summani balansga yozish — rahbar (sales.approve); offline qurilmada pul olingan — nomuvofiqlik
+    const { cashierDepositLimit } = await getSalesPolicy(tx, tenant.company.id);
+    if (cashierDepositLimit !== null && toMinor(amount) > toMinor(cashierDepositLimit)) {
+      if (offline) conflicts.push({ kind: "deposit_over_limit", details: { customerId: input.customerId, amount, limit: cashierDepositLimit } });
+      else if (!(await effectivePermissions(tx, tenant)).includes("sales.approve")) {
+        throw new AppError("FORBIDDEN", `Balansga ${cashierDepositLimit} dan ortiq summani rahbar (sales.approve) yozadi`, { reason: "deposit_limit", limit: cashierDepositLimit });
+      }
+    }
     await depositToBalance(
       tx,
       tenant,

@@ -407,9 +407,10 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
       key.startsWith("currency.") ||
       key.startsWith("sales_agent.") ||
       key.startsWith("delivery.") ||
-      key.startsWith("pos.")
+      key.startsWith("pos.") ||
+      key.startsWith("sales.")
     ) {
-      throw badRequest("Bu sozlama o'z bo'limi orqali saqlanadi (chek/etiketka, keshbek, valyutalar, agent, dostavka yoki kassa sozlamalari)");
+      throw badRequest("Bu sozlama o'z bo'limi orqali saqlanadi (chek/etiketka, keshbek, valyutalar, agent, dostavka, kassa yoki savdo siyosati)");
     }
     const { user } = authOf(req);
     const setting = await withTransaction(async (tx) => {

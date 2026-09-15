@@ -9,6 +9,8 @@
  *   POST /agents, PATCH /agents/:agentId           delivery.manage — xodim + login + rol + profil; faolsizlantirish
  *   GET  /agents/live                              delivery.view_location — joriy joy, ish sessiyasi, joriy yetkazma
  *   GET  /agents/:agentId/track (?date=)           delivery.view_location — kunlik iz (audit)
+ *   GET  /agents/:agentId/cash                     delivery.view — yetkazuvchidagi (kassaga topshirilmagan) naqd
+ *   POST /agents/:agentId/cash-handover            delivery.manage (boshqa kassaga — finance.manage) — naqdni kassaga topshirish
  *   GET  /dashboard (?date=)                       delivery.view
  *   GET  /reports (?from=&to=&agentId=)            delivery.view_reports
  *   GET  /ready-orders (?search=&limit=)           delivery.manage — yetkazma yaratiladigan buyurtmalar
@@ -83,6 +85,7 @@ import { SESSION_COOKIE } from "../auth/session.js";
 import { COMPANY_CONTEXT_QUERY, companyKeyFrom } from "../company/company-context.js";
 import { effectivePermissions, requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import { recipientCandidates } from "../sales-agent/policy.service.js";
+import { agentCashSummary, handoverAgentCash } from "./agent-cash.service.js";
 import { requireDeliveryAgent, type DeliveryAgentContext } from "./agent-context.js";
 import { applyAutoAssign, planAutoAssign } from "./auto-assign.service.js";
 import { DISPATCH_ASSIGN_MAX, assignDispatch, dispatchBoard } from "./dispatch.service.js";
@@ -162,6 +165,12 @@ const pairMessage = { message: "latitude, longitude va accuracy birga beriladi" 
 const taskParams = z.object({ taskId: z.uuid() });
 const proofParams = z.object({ taskId: z.uuid(), proofId: z.uuid() });
 const agentParams = z.object({ agentId: z.uuid() });
+const cashHandoverBody = z.strictObject({
+  amount: moneySchema,
+  /** Standart — asosiy naqd kassa; boshqa kassa — finance.manage. */
+  toCashAccountId: z.uuid().nullable().optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
+});
 const customerParams = z.object({ customerId: z.uuid() });
 
 const schedule = z.strictObject({ days: z.array(z.number().int().min(0).max(6)).min(1).max(7), start: timeOfDay, end: timeOfDay }).refine((value) => value.start < value.end, {
@@ -431,6 +440,21 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
     const { date } = dateQuery.parse(req.query);
     const tenant = await readTenantWith(req, "delivery.view_location");
     return deliveryAgentTrack(tenant, agentId, date ?? localDate(), requestMeta(req));
+  });
+
+  // Yetkazuvchidagi naqd (dostavkada yig'ilgan, kassaga topshirilmagan) va kassaga topshirish
+  app.get("/agents/:agentId/cash", async (req) => {
+    const { agentId } = agentParams.parse(req.params);
+    const tenant = await readTenantWith(req, "delivery.view");
+    return { cash: await agentCashSummary(db, tenant.company.id, agentId) };
+  });
+
+  app.post("/agents/:agentId/cash-handover", async (req, reply) => {
+    const { agentId } = agentParams.parse(req.params);
+    const body = cashHandoverBody.parse(req.body);
+    const handover = await writeTenantWith(req, "delivery.manage", (tx, tenant) => handoverAgentCash(tx, tenant, agentId, body, requestMeta(req)));
+    reply.status(201);
+    return { handover };
   });
 
   // ─── Boshqaruv paneli va hisobotlar ──────────────────────────────────────

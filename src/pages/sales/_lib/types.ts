@@ -152,6 +152,11 @@ export type PosShift = {
   foreignCash: Record<string, string>;
   foreignCard: Record<string, string>;
   closingForeignCash: Record<string, string> | null;
+  /** Yopilishdagi kassa farqi; `pending` — savdo siyosatidagi chegaradan oshdi, rahbar ko'rib chiqadi. */
+  cashDifference?: string | null;
+  differenceReview?: "pending" | "approved" | "rejected" | null;
+  differenceReviewNote?: string | null;
+  differenceReviewedAt?: string | null;
 };
 
 /** `/api/inventory/warehouses` — tanlash uchun kerakli maydonlar. */

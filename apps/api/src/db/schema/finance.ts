@@ -172,12 +172,20 @@ export const cashAccounts = pgTable(
     showInPos: boolean("show_in_pos").notNull().default(false),
     /** Bank hisobidan pul chiqarishda bank komissiyasi, % (ta'minotchiga, xarajat, maosh, o'tkazma) — avtomatik yechiladi. */
     outgoingCommissionPercent: percent("outgoing_commission_percent").notNull().default("0"),
+    /**
+     * Yetkazuvchining "yo'ldagi naqd" hisobi: dostavkada yig'ilgan naqd kassaga topshirilguncha shu yerda.
+     * FK yo'q (sales → finance importi aylanma bo'lmasin) — agent kodda tekshiriladi.
+     */
+    deliveryAgentId: uuid("delivery_agent_id"),
     isDefault: boolean("is_default").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps(),
   },
   (t) => [
     index("ca_company_type_idx").on(t.companyId, t.type),
+    uniqueIndex("ca_delivery_agent_key")
+      .on(t.companyId, t.deliveryAgentId)
+      .where(sql`${t.deliveryAgentId} is not null`),
     index("ca_company_default_idx").on(t.companyId, t.isDefault),
     /** Har kompaniyada bitta asosiy kassa — to'lovlar shunga tushadi. */
     uniqueIndex("ca_one_default_per_company_key")

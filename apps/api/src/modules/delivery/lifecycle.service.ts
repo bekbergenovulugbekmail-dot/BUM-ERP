@@ -40,6 +40,7 @@ import { smsProvider } from "../../shared/sms.js";
 import type { TenantContext } from "../company/tenant.js";
 import { shipOrder } from "../sales/orders.service.js";
 import { createPaymentHeader, recordAllocations, resolvePaymentParts, settlePaymentParts } from "../sales/payment-allocation.service.js";
+import { agentCashAccount } from "./agent-cash.service.js";
 import { returnSaleItems, type RefundMethod } from "../sales/returns.service.js";
 import { checkLocationQuality, type LocationInput } from "../sales-agent/location.service.js";
 import { DIRECT_PHOTO_MAX_BYTES, sniffImage } from "../sales-agent/visits.service.js";
@@ -495,7 +496,14 @@ export async function collectDeliveryPayment(
   const { at, offline } = resolveOccurredAt(policy, input.occurredAt);
   await requireSessionAt(tx, context.deliveryAgent.id, at, offline);
 
-  const parts = await resolvePaymentParts(tx, companyId, input.parts, { allowedMethods: policy.collectionMethods, offline });
+  // Naqd — yetkazuvchining "yo'ldagi naqd" hisobiga (kassaga topshirilguncha), karta/bank — terminal yoki bank hisobiga
+  const agentAccountId = input.parts.some((part) => part.method === "cash") ? await agentCashAccount(tx, companyId, context.deliveryAgent) : null;
+  const parts = await resolvePaymentParts(
+    tx,
+    companyId,
+    input.parts.map((part) => (part.method === "cash" ? { ...part, cashAccountId: agentAccountId } : part)),
+    { allowedMethods: policy.collectionMethods, offline },
+  );
   if (parts.length === 0) throw badRequest("To'lov summasi kiritilmagan");
   const [order] = await tx
     .select({ id: salesOrders.id, totalAmount: salesOrders.totalAmount, paidAmount: salesOrders.paidAmount })

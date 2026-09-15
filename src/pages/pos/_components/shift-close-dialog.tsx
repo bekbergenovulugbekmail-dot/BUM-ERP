@@ -19,7 +19,7 @@ type Props = {
 };
 
 type ForeignCount = { currency: string; expected: string; counted: string; difference: string };
-type CloseResult = { shift: PosShift; expectedCash: string; difference: string; foreignCash: ForeignCount[] };
+type CloseResult = { shift: PosShift; expectedCash: string; difference: string; foreignCash: ForeignCount[]; review?: "pending" | null };
 
 function DifferenceBadge({ difference, format }: { difference: number; format: (n: number) => string }) {
   return (
@@ -123,6 +123,11 @@ export default function ShiftCloseDialog({ shift, onClose }: Props) {
           </div>
 
           {difference !== null && <DifferenceBadge difference={difference} format={(n) => `${fmt(n)} so'm`} />}
+          {result?.review === "pending" && (
+            <p className="rounded-xl bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-400">
+              Farq ruxsat etilgan chegaradan oshdi — rahbarga ko'rib chiqish uchun yuborildi
+            </p>
+          )}
           {result?.foreignCash.map((row) => (
             <div key={row.currency} className="space-y-1">
               <p className="text-xs text-muted-foreground">{row.currency}</p>

@@ -351,6 +351,13 @@
       "when": 1789456101044,
       "tag": "0049_desktop_release_signature",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1789457333149,
+      "tag": "0050_owner_decisions_shift_review_agent_cash",
+      "breakpoints": true
     }
   ]
 }

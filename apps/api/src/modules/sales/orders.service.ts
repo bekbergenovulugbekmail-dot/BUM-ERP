@@ -26,7 +26,7 @@
  *    statistika oxirgi 500 ta buyurtmadan
  */
 import { and, asc, desc, eq, getTableColumns, gte, ilike, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
-import { activePromoPrice, badRequest, forbidden, notFound } from "@bum/shared";
+import { AppError, activePromoPrice, badRequest, forbidden, notFound } from "@bum/shared";
 import { products, units } from "../../db/schema/catalog.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import {
@@ -63,6 +63,7 @@ import { addCurrencyAmounts } from "./shift-totals.js";
 import { allowedWarehouses, assertWarehouseAccess } from "../inventory/warehouses.service.js";
 import { assertProductsInScope, categoryScope, documentHasScopedItem } from "../catalog/category-scope.js";
 import { salesAudit } from "./customers.service.js";
+import { getSalesPolicy } from "./sales-policy.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...orderFields } = getTableColumns(salesOrders);
 const { legacyId: _l2, companyId: _c2, ...itemFields } = getTableColumns(salesOrderItems);
@@ -155,7 +156,13 @@ export async function prepareSalesItems(
     .from(products)
     .where(and(eq(products.companyId, companyId), inArray(products.id, [...new Set(items.map((i) => i.productId))])));
   const byId = new Map(rows.map((p) => [p.id, p]));
-  const canOverride = (await effectivePermissions(tx, tenant)).includes("sales.edit");
+  const permissions = await effectivePermissions(tx, tenant);
+  const canOverride = permissions.includes("sales.edit");
+  // Savdo siyosati: qo'lda berilgan chegirma chegaradan oshsa — rahbar (sales.approve); mijozning o'z chegirmasi cheklanmaydi
+  const { maxDiscountPercent } = await getSalesPolicy(tx, companyId);
+  const discountCeiling = maxDiscountPercent === null ? null : toMinor(maxDiscountPercent, 2);
+  const canExceedDiscount = permissions.includes("sales.approve");
+  const discountOverLimit: { productId: string; name: string; discountPercent: string; maxDiscountPercent: string }[] = [];
 
   // Narxi boshqa valyutada belgilangan mahsulot — joriy kurs bilan asosiy valyutada sotiladi
   const rates = new Map<string, string>();
@@ -203,6 +210,17 @@ export async function prepareSalesItems(
     if (changed && options.trustedPricing) {
       priceChanges.push({ productId: product.id, name: product.name, unitPrice, listPrice, discountPercent, customerDiscount });
     }
+    const discount = toMinor(discountPercent, 2);
+    if (discountCeiling !== null && discount > discountCeiling && discount !== toMinor(customerDiscount, 2)) {
+      // Offline kassa cheki qurilmada yopilgan — rad etilmaydi, rahbar ko'radigan nomuvofiqlik
+      if (options.trustedPricing) discountOverLimit.push({ productId: product.id, name: product.name, discountPercent, maxDiscountPercent: maxDiscountPercent! });
+      else if (!canExceedDiscount) {
+        throw new AppError("FORBIDDEN", `Chegirma ${maxDiscountPercent}% dan oshmasin — kattaroq chegirmani rahbar (sales.approve) beradi`, {
+          reason: "discount_limit",
+          maxDiscountPercent,
+        });
+      }
+    }
 
     const amounts = computeLine({
       quantity: item.quantity,
@@ -235,6 +253,8 @@ export async function prepareSalesItems(
       totalAmount: fromMinor(subtotal + taxAmount),
     },
     priceChanges,
+    /** Ishonchli narxlashda (offline kassa) chegaradan oshgan chegirmalar — chaqiruvchi nomuvofiqlik sifatida yozadi. */
+    discountOverLimit,
   };
 }
 

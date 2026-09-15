@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ArrowDown, ArrowUp, ListOrdered, Loader2, Pencil, Plus, Power } from "lucide-react";
+import { ArrowDown, ArrowUp, ListOrdered, Loader2, Pencil, Plus, Power, Wallet } from "lucide-react";
 import { isOpenDeliveryStatus } from "@bum/shared";
 import DeliveryAgentDialog from "@/components/delivery/delivery-agent-dialog.tsx";
 import { StatusBadge } from "@/components/delivery/badges.tsx";
@@ -162,6 +162,99 @@ function RouteOrderDialog({ agent, onClose }: { agent: DeliveryAgentRow; onClose
   );
 }
 
+type AgentCash = {
+  balance: string;
+  currency: string;
+  cashAccountId: string | null;
+  handovers: { id: string; amount: string; txDate: string; description: string | null }[];
+};
+
+/** Yetkazuvchidagi (dostavkada yig'ilgan, kassaga topshirilmagan) naqd va kassaga topshirish. */
+function CashDialog({ agent, onClose }: { agent: DeliveryAgentRow; onClose: () => void }) {
+  const { t } = useTranslation("delivery");
+  const { can } = usePermissions();
+  const cash = useApiQuery<{ cash: AgentCash }>(`/api/delivery/agents/${agent.id}/cash`).data?.cash;
+  const [amount, setAmount] = useState("");
+  const [notes, setNotes] = useState("");
+  const handover = useApiMutation(
+    (body: { amount: string; notes: string | null }) => api.post(`/api/delivery/agents/${agent.id}/cash-handover`, body),
+    { invalidate: ["/api/delivery", "/api/finance"] },
+  );
+  const balance = Number(cash?.balance ?? 0);
+  const money = (value: number) => `${new Intl.NumberFormat("uz-UZ", { maximumFractionDigits: 2 }).format(value)} ${cash?.currency ?? ""}`;
+  const canHandover = can("delivery.manage") && balance > 0;
+
+  const submit = async () => {
+    try {
+      await handover.mutateAsync({ amount: amount.trim() || String(balance), notes: notes.trim() || null });
+      toast.success(t("agents.cash_handed"));
+      setAmount("");
+      setNotes("");
+    } catch (error) {
+      toast.error(deliveryErrorMessage(error, t));
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && !handover.isPending && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t("agents.cash_title", { name: agent.name ?? agent.code })}</DialogTitle>
+          <DialogDescription>{t("agents.cash_hint")}</DialogDescription>
+        </DialogHeader>
+        {!cash ? (
+          <Skeleton className="h-32 rounded-xl" />
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-baseline justify-between rounded-xl bg-muted/40 px-4 py-3">
+              <span className="text-sm text-muted-foreground">{t("agents.cash_balance")}</span>
+              <span className="text-lg font-bold tabular-nums">{money(balance)}</span>
+            </div>
+            {canHandover ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="cash-handover-amount">{t("agents.cash_amount")}</Label>
+                  <Input id="cash-handover-amount" type="number" min={0} step="any" placeholder={String(balance)} value={amount} onChange={(e) => setAmount(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="cash-handover-notes">{t("agents.cash_notes")}</Label>
+                  <Input id="cash-handover-notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
+                </div>
+              </div>
+            ) : (
+              balance <= 0 && <p className="text-sm text-muted-foreground">{t("agents.cash_empty")}</p>
+            )}
+            {cash.handovers.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">{t("agents.cash_history")}</p>
+                <ul className="max-h-40 space-y-1 overflow-y-auto text-sm">
+                  {cash.handovers.map((row) => (
+                    <li key={row.id} className="flex justify-between gap-2">
+                      <span className="truncate text-muted-foreground">{row.txDate}</span>
+                      <span className="tabular-nums">{money(Number(row.amount))}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+        <DialogFooter className="gap-2">
+          <Button variant="secondary" disabled={handover.isPending} onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          {canHandover && (
+            <Button disabled={handover.isPending} onClick={() => void submit()}>
+              {handover.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {t("agents.cash_handover")}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** Yetkazuvchilar: profil (filial, hudud, zona, transport, yuk, jadval, supervayzer), faollik va kunlik yetkazish tartibi. */
 export default function AgentsSection() {
   const { t } = useTranslation("delivery");
@@ -171,6 +264,7 @@ export default function AgentsSection() {
   const [editing, setEditing] = useState<DeliveryAgentRow | "new" | null>(null);
   const [toggling, setToggling] = useState<DeliveryAgentRow | null>(null);
   const [routing, setRouting] = useState<DeliveryAgentRow | null>(null);
+  const [cashFor, setCashFor] = useState<DeliveryAgentRow | null>(null);
 
   return (
     <div className="space-y-4">
@@ -244,6 +338,9 @@ export default function AgentsSection() {
                     </td>
                     <td className="px-4 py-2">
                       <div className="flex justify-end gap-1">
+                        <Button size="icon" variant="ghost" className="h-8 w-8" title={t("agents.cash")} onClick={() => setCashFor(agent)}>
+                          <Wallet className="h-4 w-4" />
+                        </Button>
                         {can("delivery.manage_routes") && agent.isActive && (
                           <Button size="icon" variant="ghost" className="h-8 w-8" title={t("agents.route")} onClick={() => setRouting(agent)}>
                             <ListOrdered className="h-4 w-4" />
@@ -278,6 +375,7 @@ export default function AgentsSection() {
       {editing && <DeliveryAgentDialog agent={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} />}
       {toggling && <ToggleDialog agent={toggling} onClose={() => setToggling(null)} />}
       {routing && <RouteOrderDialog agent={routing} onClose={() => setRouting(null)} />}
+      {cashFor && <CashDialog agent={cashFor} onClose={() => setCashFor(null)} />}
     </div>
   );
 }

@@ -301,8 +301,12 @@ describe("To'lov terminallari va universal aralash to'lov", () => {
     expect((await collect({ clientRequestId: key, parts })).statusCode).toBe(200);
     expect(await db.select().from(deliveryPayments).where(eq(deliveryPayments.taskId, taskId))).toHaveLength(2);
     const rows = await db.select().from(customerPayments).where(eq(customerPayments.orderId, orderId));
+    // Naqd qism asosiy kassaga emas — yetkazuvchining "yo'ldagi naqd" hisobiga (kassaga topshirilguncha)
+    const [agentCash] = await db.select().from(cashAccounts).where(eq(cashAccounts.deliveryAgentId, agent.id));
+    expect(agentCash).toMatchObject({ type: "cash", balance: "20000.00" });
+    expect(agentCash!.id).not.toBe(mainCash);
     expect(rows.map((row) => `${row.method}:${row.amount}:${row.cashAccountId}:${row.terminalId}`).sort()).toEqual(
-      [`card:30000.00:${mainBank}:${uzcard.id}`, `cash:20000.00:${mainCash}:null`].sort(),
+      [`card:30000.00:${mainBank}:${uzcard.id}`, `cash:20000.00:${agentCash!.id}:null`].sort(),
     );
     expect(await db.select().from(payments).where(eq(payments.source, "delivery"))).toMatchObject([{ totalAmount: "50000.00", idempotencyKey: `delivery:${key}` }]);
     expect(await ledger(company.companyId, "1021")).toBe("30000.00");

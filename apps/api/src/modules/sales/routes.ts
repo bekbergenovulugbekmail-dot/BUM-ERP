@@ -15,6 +15,9 @@
  *   POST   /payments                                      finance.manage (201 yangi / 200 takroriy reference)
  *   GET    /pos/shifts (?warehouseId=&status=&limit=), /pos/shifts/open?warehouseId=, /pos/shifts/:shiftId   pos.use
  *   POST   /pos/shifts, /pos/shifts/:shiftId/close        pos.use (yopish — kassirning o'zi yoki sales.approve)
+ *   GET    /pos/shift-reviews (?status=&limit=)            sales.approve (kassa farqi chegaradan oshgan smenalar)
+ *   POST   /pos/shifts/:shiftId/review                    sales.approve (tasdiqlash/rad; o'z smenasi — faqat ega)
+ *   GET    /policy, PUT /policy                            settings.view / settings.manage (savdo siyosati)
  *   GET    /pos/payment-options                           pos.use (faol karta terminallari)
  *   POST   /pos/sales                                     pos.use (aralash to'lov, balansdan, qaytim balansga, nasiya)
  *   POST   /pos/customers                                 pos.use (kassada mijoz qo'shish)
@@ -63,9 +66,12 @@ import {
   getOpenShift,
   getShift,
   listShifts,
+  listShiftReviews,
   openShift,
   posCustomerPayment,
+  reviewShiftDifference,
 } from "./pos.service.js";
+import { getSalesPolicy, salesPolicySchema, saveSalesPolicy } from "./sales-policy.service.js";
 import { CASH_MOVEMENT_KINDS, listCashMovements, posCashMovement } from "./pos-cash.service.js";
 import { REFUND_METHODS, returnSaleItems } from "./returns.service.js";
 
@@ -279,6 +285,11 @@ const balanceQuery = z.object({ limit: limitQuery });
 const customerParams = z.object({ customerId: z.uuid() });
 const orderParams = z.object({ orderId: z.uuid() });
 const shiftParams = z.object({ shiftId: z.uuid() });
+const shiftReviewsQuery = z.object({
+  status: z.enum(["pending", "approved", "rejected"]).default("pending"),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+const shiftReviewBody = z.strictObject({ decision: z.enum(["approved", "rejected"]), note: nullableText(1000) });
 
 async function readTenant(req: FastifyRequest, permission: Permission): Promise<TenantContext> {
   const tenant = await requireTenant(db, authOf(req).user);
@@ -512,6 +523,31 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     const { shiftId } = shiftParams.parse(req.params);
     const body = closeShiftBody.parse(req.body);
     return writeInTenant(req, "pos.use", (tx, tenant) => closeShift(tx, tenant, shiftId, body, requestMeta(req)));
+  });
+
+  // Savdo siyosati: chegirma chegarasi, kassir depozit chegarasi, smena farqi chegarasi
+  app.get("/policy", async (req) => {
+    const tenant = await readTenant(req, "settings.view");
+    return { policy: await getSalesPolicy(db, tenant.company.id) };
+  });
+
+  app.put("/policy", async (req) => {
+    const body = salesPolicySchema.parse(req.body);
+    const policy = await writeInTenant(req, "settings.manage", (tx, tenant) => saveSalesPolicy(tx, tenant, body, requestMeta(req)));
+    return { policy };
+  });
+
+  // Kassa farqi chegaradan oshgan smenalar — rahbar ko'rib chiqadi
+  app.get("/pos/shift-reviews", async (req) => {
+    const query = shiftReviewsQuery.parse(req.query);
+    return { shifts: await listShiftReviews(db, await readTenant(req, "sales.approve"), query) };
+  });
+
+  app.post("/pos/shifts/:shiftId/review", async (req) => {
+    const { shiftId } = shiftParams.parse(req.params);
+    const body = shiftReviewBody.parse(req.body);
+    const shift = await writeInTenant(req, "sales.approve", (tx, tenant) => reviewShiftDifference(tx, tenant, shiftId, body, requestMeta(req)));
+    return { shift };
   });
 
   app.get("/pos/shifts/:shiftId/cash-movements", async (req) => {
