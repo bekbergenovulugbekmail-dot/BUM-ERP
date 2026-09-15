@@ -105,7 +105,7 @@ export default function CustomerPaymentDialog({ shiftId, customer, purpose: init
       ? { shiftId, purpose, parts: splitParts(rows), clientRequestId: requestId.current }
       : activeTerminal
         ? { shiftId, purpose, parts: [{ method: "card", amount: amount.trim(), terminalId: activeTerminal.id }], clientRequestId: requestId.current }
-        : { shiftId, purpose, amount: amount.trim(), method: activeMethod };
+        : { shiftId, purpose, amount: amount.trim(), method: activeMethod, clientRequestId: requestId.current };
     try {
       const result = await pay.mutateAsync(body);
       toast.success(

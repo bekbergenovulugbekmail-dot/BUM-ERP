@@ -107,6 +107,8 @@ export async function depositToBalance(
     date?: string;
     /** Offline kassa cheki qaytimi — mijoz sinxrongacha faolsizlantirilgan bo'lsa ham yoziladi. */
     allowInactive?: boolean;
+    /** Takroriy yuborishdan himoya: so'rov kaliti yozuv ID'si bo'ladi. */
+    id?: string;
   },
   meta: RequestMeta,
 ) {
@@ -115,7 +117,7 @@ export async function depositToBalance(
   const customer = await lockCustomer(tx, companyId, input.customerId);
   if (!customer.isActive && !input.allowInactive) throw badRequest("Mijoz faol emas");
 
-  const id = randomUUID();
+  const id = input.id ?? randomUUID();
   const date = input.date ?? todayIso();
   const description = input.type === "change" ? `Qaytim balansga: ${customer.name}` : `Balansni to'ldirish: ${customer.name}`;
   const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
@@ -181,6 +183,8 @@ export async function payFromBalance(
     posShiftId?: string | null;
     notes?: string | null;
     date?: string;
+    /** Takroriy yuborishdan himoya kaliti (to'lov `reference`). */
+    reference?: string | null;
   },
   meta: RequestMeta,
 ) {
@@ -232,6 +236,7 @@ export async function payFromBalance(
       currency: await companyCurrency(tx, companyId),
       paymentDate: date,
       method: "balance",
+      reference: input.reference ?? null,
       notes: input.notes ?? null,
       createdBy: tenant.user.id,
     })

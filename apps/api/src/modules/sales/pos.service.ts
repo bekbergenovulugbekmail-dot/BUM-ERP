@@ -18,7 +18,7 @@
 import { and, desc, eq, getTableColumns, inArray, isNull, sql } from "drizzle-orm";
 import { AppError, badRequest, conflict, forbidden, notFound } from "@bum/shared";
 import { warehouses } from "../../db/schema/inventory.js";
-import { customers, posShifts, salesOrders } from "../../db/schema/sales.js";
+import { customerBalanceTransactions, customerPayments, customers, posShifts, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { fromMinor, mulDivRound, toMinor } from "../../shared/decimal.js";
@@ -1031,9 +1031,30 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
   }
   if (!input.amount) throw badRequest("To'lov summasi kiritilmagan");
   const amount = input.amount;
+  // Takroriy yuborish (qayta bosish, tarmoq uzilishi): shu kalit bilan yozilgan to'lov yoki depozit qayta bajarilmaydi.
+  // Smena qulfi ostida — bir xil kalitli parallel so'rovlar ketma-ket, ikkinchisi birinchisining yozuvini ko'radi
+  const requestKey = input.clientRequestId && !offline ? input.clientRequestId : null;
+  const reference = requestKey ? `pos_customer_payment:${requestKey}` : null;
+  if (requestKey && reference) {
+    const [paid] = await tx
+      .select({ customerId: customerPayments.customerId })
+      .from(customerPayments)
+      .where(and(eq(customerPayments.companyId, tenant.company.id), eq(customerPayments.reference, reference)))
+      .limit(1);
+    const [deposited] = await tx
+      .select({ customerId: customerBalanceTransactions.customerId })
+      .from(customerBalanceTransactions)
+      .where(and(eq(customerBalanceTransactions.companyId, tenant.company.id), eq(customerBalanceTransactions.id, requestKey)))
+      .limit(1);
+    const done = paid ?? deposited;
+    if (done) {
+      if (done.customerId !== input.customerId) throw conflict("So'rov kaliti boshqa mijoz to'lovida ishlatilgan");
+      return { customer: await customerSummary(tx, tenant.company.id, input.customerId), shift: await getShift(tx, tenant, shift.id), conflicts, duplicate: true };
+    }
+  }
   if (input.method === "balance") {
     if (input.purpose !== "debt") throw badRequest("Balansni balansning o'zidan to'ldirib bo'lmaydi");
-    await payFromBalance(tx, tenant, { customerId: input.customerId, amount, posShiftId: shift.id, notes }, meta);
+    await payFromBalance(tx, tenant, { customerId: input.customerId, amount, posShiftId: shift.id, notes, reference }, meta);
   } else if (input.purpose === "deposit") {
     // Savdo siyosati: katta summani balansga yozish — rahbar (sales.approve); offline qurilmada pul olingan — nomuvofiqlik
     const { cashierDepositLimit } = await getSalesPolicy(tx, tenant.company.id);
@@ -1046,7 +1067,7 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
     await depositToBalance(
       tx,
       tenant,
-      { customerId: input.customerId, type: "deposit", amount, method: input.method, posShiftId: shift.id, notes, date, allowInactive: offline !== undefined },
+      { customerId: input.customerId, type: "deposit", amount, method: input.method, posShiftId: shift.id, notes, date, allowInactive: offline !== undefined, ...(requestKey ? { id: requestKey } : {}) },
       meta,
     );
   } else {
@@ -1079,7 +1100,7 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
       await recordCustomerPayment(
         tx,
         tenant,
-        { customerId: input.customerId, amount: fromMinor(payAmount), method: input.method, notes, ...(date ? { paymentDate: date } : {}) },
+        { customerId: input.customerId, amount: fromMinor(payAmount), method: input.method, notes, reference, ...(date ? { paymentDate: date } : {}) },
         meta,
       );
     }

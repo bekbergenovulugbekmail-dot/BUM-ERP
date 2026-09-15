@@ -94,6 +94,16 @@ describe("Kompaniya egasining qarorlari: savdo siyosati", () => {
     const close = (cookie: string, shiftId: string, closingCash: number) => call(cookie, "POST", `/api/sales/pos/shifts/${shiftId}/close`, { closingCash: String(closingCash) });
 
     const first = await openShift(kassir.cookie);
+    // Takroriy yuborish: bir xil kalit — bitta depozit va smena tushumi; boshqa mijozga shu kalit — 409
+    const clientRequestId = crypto.randomUUID();
+    const once = () => call(kassir.cookie, "POST", `/api/sales/pos/customers/${company.customerId}/payments`, { shiftId: first.id, purpose: "deposit", amount: "5000", method: "cash", clientRequestId });
+    expect((await once()).statusCode).toBeLessThan(300);
+    const repeated = await once();
+    expect(repeated.statusCode, repeated.body).toBeLessThan(300);
+    expect(repeated.json().customer.balance).toBe("5000.00");
+    expect(repeated.json().shift.totalCash).toBe("5000.00");
+    const other = await call(owner(), "POST", "/api/sales/customers", { name: "Boshqa mijoz" });
+    expect((await call(kassir.cookie, "POST", `/api/sales/pos/customers/${other.json().customer.id}/payments`, { shiftId: first.id, purpose: "deposit", amount: "5000", method: "cash", clientRequestId })).statusCode).toBe(409);
     const big = await deposit(kassir.cookie, first.id, "150000");
     expect(big.statusCode, big.body).toBe(403);
     expect(big.json().details).toMatchObject({ reason: "deposit_limit" });
