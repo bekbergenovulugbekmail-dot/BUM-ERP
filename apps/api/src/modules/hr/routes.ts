@@ -317,7 +317,13 @@ export async function hrRoutes(app: FastifyInstance): Promise<void> {
   app.patch("/employees/:employeeId", async (req) => {
     const id = param(req, "employeeId");
     const patch = employeePatch.parse(req.body);
-    return { employee: await writeInTenant(req, "hr.manage", (tx, t) => updateEmployee(tx, t, id, patch, requestMeta(req))) };
+    return {
+      employee: await writeInTenant(req, "hr.manage", async (tx, t) => {
+        // Maoshni o'zgartirish — maosh ruxsati (`hr.salary`), xodim kartochkasini tahrirlash ruxsati yetmaydi
+        if (patch.baseSalary !== undefined) await requirePermission(tx, t, "hr.salary");
+        return updateEmployee(tx, t, id, patch, requestMeta(req));
+      }),
+    };
   });
 
   app.delete("/employees/:employeeId", async (req, reply) => {

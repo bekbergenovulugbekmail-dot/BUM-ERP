@@ -43,6 +43,7 @@ import { reverseCashback } from "./cashback.service.js";
 import { refundToBalance } from "./customer-balance.service.js";
 import { salesAudit } from "./customers.service.js";
 import { getOrder } from "./orders.service.js";
+import { assertShiftOperator } from "./pos.service.js";
 
 export const REFUND_METHODS = ["cash", "card", "bank", "balance"] as const;
 export type RefundMethod = (typeof REFUND_METHODS)[number];
@@ -262,7 +263,7 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
   let shift: { id: string } | null = null;
   if (input.shiftId) {
     const [row] = await tx
-      .select({ id: posShifts.id, status: posShifts.status, deviceId: posShifts.deviceId })
+      .select({ id: posShifts.id, status: posShifts.status, deviceId: posShifts.deviceId, cashierId: posShifts.cashierId })
       .from(posShifts)
       .where(and(eq(posShifts.id, input.shiftId), eq(posShifts.companyId, companyId)))
       .limit(1)
@@ -270,6 +271,8 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
     if (!row || (row.deviceId ?? null) !== (offline?.deviceId ?? null)) throw notFound("Smena topilmadi");
     // Offline qaytarish smena yopilishidan oldin qurilmada bo'lgan
     if (row.status !== "open" && !offline) throw badRequest("Smena yopilgan");
+    // Boshqa kassirning smenasi yig'indilarini faqat smena egasi yoki `sales.approve` menejer kamaytiradi
+    if (!offline) await assertShiftOperator(tx, tenant, row.cashierId);
     shift = row;
   }
 

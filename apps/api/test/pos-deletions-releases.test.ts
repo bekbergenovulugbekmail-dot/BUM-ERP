@@ -95,7 +95,7 @@ describe("Desktop kassa relizlari (platforma admini → qurilma)", () => {
     app.inject({
       method: "POST",
       url: `/api/platform/desktop-releases?version=${encodeURIComponent(version)}&fileName=${encodeURIComponent(fileName)}`,
-      headers: { cookie, "content-type": "application/octet-stream" },
+      headers: { cookie, "content-type": "application/octet-stream", "x-sha256": createHash("sha256").update(payload).digest("hex") },
       payload,
     });
   const check = (version: string) =>

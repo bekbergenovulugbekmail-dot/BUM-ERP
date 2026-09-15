@@ -24,14 +24,16 @@ type DashboardKpi = {
   todaySalesTotal: string;
   todayReceipts: string;
   monthRevenue: string;
-  cogs: string;
-  grossProfit: string;
+  /** Moliya ruxsati yo'q yoki moliya moduli o'chiq bo'lsa — null (server yubormaydi). */
+  cogs: string | null;
+  grossProfit: string | null;
   stockValue: string;
   lowStockCount: number;
-  supplierDebt: string;
-  customerDebt: string;
-  cashBalance: string;
-  bankBalance: string;
+  supplierDebt: string | null;
+  customerDebt: string | null;
+  cashBalance: string | null;
+  bankBalance: string | null;
+  financeHidden?: boolean;
   recentSales: {
     id: string; number: string; customerName: string | null; amount: string;
     paidAmount: string; status: string; orderDate: string; isPos: boolean;
@@ -203,22 +205,29 @@ export default function DashboardPage() {
           <StatCard index={1} title="Bu oy tushum" value={fmt(kpi.monthRevenue) + " so'm"}
             icon={<DollarSign className="h-5 w-5 text-green-600" />}
             color="bg-green-50 dark:bg-green-900/30" />
-          <StatCard index={2} title="Yalpi foyda" value={fmt(kpi.grossProfit) + " so'm"}
-            sub={num(kpi.monthRevenue) > 0 ? `${((num(kpi.grossProfit) / num(kpi.monthRevenue)) * 100).toFixed(1)}%` : "—"}
-            icon={<TrendingUp className="h-5 w-5 text-violet-600" />}
-            color="bg-violet-50 dark:bg-violet-900/30" />
+          {/* Moliya kartalari — faqat moliya ruxsati bo'lsa (server boshqa holatda null yuboradi) */}
+          {kpi.grossProfit !== null && (
+            <StatCard index={2} title="Yalpi foyda" value={fmt(kpi.grossProfit) + " so'm"}
+              sub={num(kpi.monthRevenue) > 0 ? `${((num(kpi.grossProfit) / num(kpi.monthRevenue)) * 100).toFixed(1)}%` : "—"}
+              icon={<TrendingUp className="h-5 w-5 text-violet-600" />}
+              color="bg-violet-50 dark:bg-violet-900/30" />
+          )}
           <StatCard index={3} title="Stok qiymati" value={fmt(kpi.stockValue) + " so'm"}
             sub={kpi.lowStockCount > 0 ? `${kpi.lowStockCount} ta kam` : "Normal"}
             icon={<Package className="h-5 w-5 text-amber-600" />}
             color={cn("bg-amber-50 dark:bg-amber-900/30", kpi.lowStockCount > 0 && "ring-1 ring-amber-400/50")} />
-          <StatCard index={4} title="Naqd kassa" value={fmt(kpi.cashBalance) + " so'm"}
-            sub={`Bank: ${fmt(kpi.bankBalance)}`}
-            icon={<Wallet className="h-5 w-5 text-cyan-600" />}
-            color="bg-cyan-50 dark:bg-cyan-900/30" />
-          <StatCard index={5} title="Yetkazuvchi qarzi" value={fmt(kpi.supplierDebt) + " so'm"}
-            sub={num(kpi.customerDebt) > 0 ? `Mijoz: ${fmt(kpi.customerDebt)}` : "Mijoz qarzi yo'q"}
-            icon={<Building2 className="h-5 w-5 text-rose-600" />}
-            color={cn("bg-rose-50 dark:bg-rose-900/30", num(kpi.supplierDebt) > 0 && "ring-1 ring-rose-400/50")} />
+          {kpi.cashBalance !== null && kpi.bankBalance !== null && (
+            <StatCard index={4} title="Naqd kassa" value={fmt(kpi.cashBalance) + " so'm"}
+              sub={`Bank: ${fmt(kpi.bankBalance)}`}
+              icon={<Wallet className="h-5 w-5 text-cyan-600" />}
+              color="bg-cyan-50 dark:bg-cyan-900/30" />
+          )}
+          {kpi.supplierDebt !== null && (
+            <StatCard index={5} title="Yetkazuvchi qarzi" value={fmt(kpi.supplierDebt) + " so'm"}
+              sub={num(kpi.customerDebt) > 0 ? `Mijoz: ${fmt(kpi.customerDebt ?? 0)}` : "Mijoz qarzi yo'q"}
+              icon={<Building2 className="h-5 w-5 text-rose-600" />}
+              color={cn("bg-rose-50 dark:bg-rose-900/30", num(kpi.supplierDebt) > 0 && "ring-1 ring-rose-400/50")} />
+          )}
         </div>
       )}
 
@@ -300,6 +309,8 @@ export default function DashboardPage() {
                 <p className="text-xs font-semibold text-muted-foreground">Moliyaviy holat</p>
                 {loading ? (
                   <Skeleton className="h-10 w-full" />
+                ) : kpi.cashBalance === null || kpi.bankBalance === null ? (
+                  <p className="text-xs text-muted-foreground">Kassa va bank qoldig'i moliya ruxsati bilan ko'rinadi</p>
                 ) : (
                   <div className="space-y-1.5 text-xs">
                     <div className="flex justify-between">
@@ -393,8 +404,8 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* COGS summary */}
-              {!loading && (
+              {/* COGS summary — moliya ruxsati bo'lmasa server tannarx va foydani yubormaydi */}
+              {!loading && kpi.cogs !== null && kpi.grossProfit !== null && (
                 <div className="mt-4 pt-3 border-t space-y-1.5 text-xs">
                   <p className="font-semibold text-muted-foreground">Bu oy P&L</p>
                   <div className="flex justify-between">

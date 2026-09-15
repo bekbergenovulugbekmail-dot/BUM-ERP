@@ -15,7 +15,7 @@
  *    ombor ruxsati tekshirilmasdi; `cashierName` mijozdan kelardi, `cashierId` yozilmasdi
  *  - `getShifts` / `getOpenShift` ruxsat tekshirmasdi — `pos.use`
  */
-import { and, desc, eq, getTableColumns, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, isNull, sql } from "drizzle-orm";
 import { AppError, badRequest, conflict, forbidden, notFound } from "@bum/shared";
 import { warehouses } from "../../db/schema/inventory.js";
 import { customers, posShifts, salesOrders } from "../../db/schema/sales.js";
@@ -27,7 +27,7 @@ import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
 import { todayIso, type PaymentMethod } from "../finance/cash.service.js";
-import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
+import { allowedWarehouses, assertWarehouseAccess } from "../inventory/warehouses.service.js";
 import { computeCashback, earnCashback, getCashbackSettings, maxCashbackUsage, redeemCashback } from "./cashback.service.js";
 import { customerSummary, depositToBalance, payFromBalance } from "./customer-balance.service.js";
 import { createCustomer, salesAudit, type CustomerInput } from "./customers.service.js";
@@ -67,6 +67,8 @@ export async function getShift(conn: DbOrTx, tenant: TenantContext, shiftId: str
     .where(and(eq(posShifts.id, shiftId), eq(posShifts.companyId, tenant.company.id)))
     .limit(1);
   if (!shift) throw notFound("Smena topilmadi");
+  // Ruxsat berilmagan ombor smenasi (kassa summalari) ko'rinmaydi
+  assertWarehouseAccess(tenant, shift.warehouseId);
   return shift;
 }
 
@@ -95,6 +97,8 @@ export async function listShifts(
   options: { warehouseId?: string; status?: ShiftStatus; limit: number },
 ) {
   if (options.warehouseId) assertWarehouseAccess(tenant, options.warehouseId);
+  // Ombor tanlanmasa ham faqat ruxsat berilgan omborlar smenalari
+  const allowed = allowedWarehouses(tenant);
   return conn
     .select({ ...shiftFields, warehouseName: warehouses.name, expectedCash: expectedCashSql })
     .from(posShifts)
@@ -103,6 +107,7 @@ export async function listShifts(
       and(
         eq(posShifts.companyId, tenant.company.id),
         options.warehouseId ? eq(posShifts.warehouseId, options.warehouseId) : undefined,
+        !options.warehouseId && allowed ? inArray(posShifts.warehouseId, allowed) : undefined,
         options.status ? eq(posShifts.status, options.status) : undefined,
       ),
     )
@@ -203,6 +208,28 @@ export async function assertShiftOperator(conn: DbOrTx, tenant: TenantContext, c
   if (!(await effectivePermissions(conn, tenant)).includes("sales.approve")) {
     throw forbidden("Bu smena boshqa kassirga tegishli");
   }
+}
+
+/** Offline hujjatdagi qurilma kurslari server kursidan farq qilsa — `rate_changed` nomuvofiqligi (hujjat rad etilmaydi). */
+export async function offlineRateConflicts(
+  conn: DbOrTx,
+  companyId: string,
+  rates: Record<string, string> | undefined,
+): Promise<SaleConflict[]> {
+  if (!rates) return [];
+  const baseCurrency = await companyCurrency(conn, companyId);
+  const conflicts: SaleConflict[] = [];
+  for (const [code, deviceRate] of Object.entries(rates)) {
+    if (code === baseCurrency) continue;
+    const serverRate = await currencyRate(conn, companyId, code).catch((error: unknown) => {
+      if (error instanceof AppError) return null;
+      throw error;
+    });
+    if (serverRate === null || toMinor(serverRate, 4) !== toMinor(deviceRate, 4)) {
+      conflicts.push({ kind: "rate_changed", details: { currency: code, deviceRate, serverRate } });
+    }
+  }
+  return conflicts;
 }
 
 export async function closeShift(
@@ -419,18 +446,7 @@ export async function completeSale(
   // Chek valyutalari; buxgalteriya asosiy valyutada, to'lov har valyuta bo'yicha
   const baseCurrency = await companyCurrency(tx, companyId);
   const saleCurrencies = [...new Set(input.saleCurrencies?.length ? input.saleCurrencies : [baseCurrency])];
-  if (offline?.rates) {
-    for (const [code, deviceRate] of Object.entries(offline.rates)) {
-      if (code === baseCurrency) continue;
-      const serverRate = await currencyRate(tx, companyId, code).catch((error: unknown) => {
-        if (error instanceof AppError) return null;
-        throw error;
-      });
-      if (serverRate === null || toMinor(serverRate, 4) !== toMinor(deviceRate, 4)) {
-        conflicts.push({ kind: "rate_changed", details: { currency: code, deviceRate, serverRate } });
-      }
-    }
-  }
+  conflicts.push(...(await offlineRateConflicts(tx, companyId, offline?.rates)));
   const saleItems: SalesItemRow[] = offline ? items.map((item, index) => ({ ...item, id: offline.itemIds[index]! })) : items;
   const buckets = await assignSaleCurrencies(tx, companyId, baseCurrency, saleCurrencies, saleItems, offline?.rates);
   const baseTotal = buckets.get(baseCurrency)?.base ?? 0n;

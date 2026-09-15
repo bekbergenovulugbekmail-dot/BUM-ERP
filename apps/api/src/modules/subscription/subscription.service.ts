@@ -404,7 +404,12 @@ export async function requestLicensePurchase(
 /** `companyId` berilsa — faqat o'sha kompaniya to'lovi (egasi); `null` — platforma admini. */
 export async function cancelPayment(
   tx: Tx,
-  scope: { companyId: string | null; actor: Actor },
+  scope: {
+    companyId: string | null;
+    actor: Actor;
+    /** Kompaniya yo'li: to'lov turiga qarab ruxsat (litsenziya — `license.manage`, tarif — `subscription.manage`). */
+    authorizeKind?: (kind: PaymentRow["kind"]) => Promise<void>;
+  },
   paymentId: string,
   meta: RequestMeta,
   now = new Date(),
@@ -416,6 +421,7 @@ export async function cancelPayment(
     .limit(1)
     .for("update");
   if (!payment) throw notFound("To'lov so'rovi topilmadi");
+  if (scope.authorizeKind) await scope.authorizeKind(payment.kind);
   if (payment.status === "paid") throw conflict("Tasdiqlangan to'lovni bekor qilib bo'lmaydi");
   if (payment.status === "cancelled") return payment;
 

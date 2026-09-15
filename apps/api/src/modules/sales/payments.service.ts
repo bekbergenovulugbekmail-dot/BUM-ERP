@@ -12,7 +12,8 @@
  *  - takroriy `reference` jimgina hech narsa qaytarmasdi — endi mavjud to'lov qaytariladi (bazada unique)
  *  - buyurtmasiz (mijoz qarzi bo'yicha) to'lov yo'q edi
  */
-import { and, desc, eq, getTableColumns, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, lt, or, sql } from "drizzle-orm";
+import { allowedWarehouses } from "../inventory/warehouses.service.js";
 import { badRequest, notFound } from "@bum/shared";
 import { customerPayments, customers, salesOrderItems, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -306,11 +307,13 @@ export async function recordSalesPayment(tx: Tx, tenant: TenantContext, input: S
     let customerId = input.customerId ?? null;
     let orderTotal = 0n;
     if (input.orderId) {
+      // Buyurtma qulflanadi: parallel keshbek to'lovlari ishlatilgan keshbekni bir vaqtda o'qib limitdan oshmasin
       const [order] = await tx
         .select({ customerId: salesOrders.customerId, totalAmount: salesOrders.totalAmount })
         .from(salesOrders)
         .where(and(eq(salesOrders.id, input.orderId), eq(salesOrders.companyId, companyId)))
-        .limit(1);
+        .limit(1)
+        .for("update");
       if (!order) throw notFound("Buyurtma topilmadi");
       if (customerId && order.customerId !== customerId) throw badRequest("Buyurtma boshqa mijozniki");
       customerId = order.customerId;
@@ -383,6 +386,8 @@ export async function listCustomerPayments(
     after = { date, id };
   }
 
+  // Ombor cheklovi bor a'zo: buyurtmasiz (mijoz) to'lovlar va faqat ruxsat berilgan omborlar buyurtmalariga to'lovlar
+  const allowed = allowedWarehouses(tenant);
   const rows = await conn
     .select({ ...paymentFields, customerName: customers.name })
     .from(customerPayments)
@@ -390,6 +395,9 @@ export async function listCustomerPayments(
     .where(
       and(
         eq(customerPayments.companyId, tenant.company.id),
+        allowed
+          ? sql`(${customerPayments.orderId} is null or exists (select 1 from ${salesOrders} where ${salesOrders.id} = ${customerPayments.orderId} and ${inArray(salesOrders.warehouseId, allowed)}))`
+          : undefined,
         options.customerId ? eq(customerPayments.customerId, options.customerId) : undefined,
         options.orderId ? eq(customerPayments.orderId, options.orderId) : undefined,
         after

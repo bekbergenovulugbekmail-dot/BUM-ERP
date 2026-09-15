@@ -16,7 +16,7 @@
  *  - `unreadCount` 100 tadan ortig'ini sanamasdi
  */
 import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lte, notInArray, or, sql } from "drizzle-orm";
-import { badRequest, notFound, type Permission } from "@bum/shared";
+import { badRequest, notFound, type ModuleKey, type Permission } from "@bum/shared";
 import { batches, products } from "../../db/schema/catalog.js";
 import { expenses } from "../../db/schema/finance.js";
 import { employees, leaves } from "../../db/schema/hr.js";
@@ -29,6 +29,7 @@ import { withTransaction, type DbOrTx, type Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
 import { recordHit } from "../../shared/rate-limit.js";
+import { companyModuleStates } from "../company/modules.service.js";
 import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { todayIso } from "../finance/cash.service.js";
 import { shiftDate, trimDecimal } from "../analytics/dates.js";
@@ -55,10 +56,20 @@ const ALERT_PERMISSIONS: Record<string, Permission> = {
   sales_orders: "sales.view",
 };
 
+/** Ogohlantirish turi → modul: modul o'chiq bo'lsa, ruxsat bo'lsa ham ko'rinmaydi. */
+const ALERT_MODULES: Record<string, ModuleKey> = {
+  expenses: "finance",
+  leaves: "hr",
+  stock_levels: "warehouse",
+  batches: "warehouse",
+  purchase_orders: "purchase",
+  sales_orders: "sales",
+};
+
 async function hiddenAlertTypes(conn: DbOrTx, tenant: TenantContext): Promise<string[]> {
-  const permissions = await effectivePermissions(conn, tenant);
+  const [permissions, modules] = await Promise.all([effectivePermissions(conn, tenant), companyModuleStates(conn, tenant.company.id)]);
   return Object.entries(ALERT_PERMISSIONS)
-    .filter(([, permission]) => !permissions.includes(permission))
+    .filter(([relatedType, permission]) => !permissions.includes(permission) || modules[ALERT_MODULES[relatedType]!] === false)
     .map(([relatedType]) => relatedType);
 }
 

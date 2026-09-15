@@ -50,6 +50,8 @@ async function lockOrder(tx: Tx, tenant: TenantContext, orderId: string) {
     .limit(1)
     .for("update");
   if (!order) throw notFound("Ishlab chiqarish buyurtmasi topilmadi");
+  // Boshlash, bekor qilish, vaqt qatorlari, yakunlash — faqat ruxsat berilgan ombor buyurtmasi
+  assertWarehouseAccess(tenant, order.warehouseId);
   return order;
 }
 

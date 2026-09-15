@@ -47,6 +47,7 @@ const releaseFields = {
   chunkSize: desktopReleases.chunkSize,
   expectedSize: desktopReleases.expectedSize,
   expectedSha256: desktopReleases.expectedSha256,
+  uploadedBy: desktopReleases.uploadedBy,
   error: desktopReleases.error,
   publishedAt: desktopReleases.publishedAt,
   createdAt: desktopReleases.createdAt,
@@ -77,11 +78,18 @@ const isIncomplete = (status: string) => status === "uploading" || status === "f
 /** Bitta oqim bilan yuklash — bitta tranzaksiyada (xato bo'lsa bo'laklar ham qolmaydi). */
 export async function uploadRelease(
   tx: Tx,
-  input: { version: string; fileName: string; stream: AsyncIterable<Buffer | Uint8Array | string> },
+  input: {
+    version: string;
+    fileName: string;
+    stream: AsyncIterable<Buffer | Uint8Array | string>;
+    /** Mijoz yuborgan fayl xeshi (`x-sha256`): mos kelmasa hech narsa saqlanmaydi (tranzaksiya bekor). */
+    expectedSha256: string;
+  },
   actor: Actor,
   meta: RequestMeta,
 ) {
   if (!RELEASE_VERSION.test(input.version)) throw badRequest("Versiya formati: 1.2.3");
+  if (!/^[a-f0-9]{64}$/.test(input.expectedSha256)) throw badRequest("Fayl SHA-256 xeshi noto'g'ri");
   const [taken] = await tx.select({ id: desktopReleases.id }).from(desktopReleases).where(eq(desktopReleases.version, input.version)).limit(1);
   if (taken) throw conflict(`${input.version} versiyasi allaqachon yuklangan`);
 
@@ -123,6 +131,9 @@ export async function uploadRelease(
   if (pendingBytes > 0) await flush(pendingBytes);
 
   const sha256 = hash.digest("hex");
+  if (sha256 !== input.expectedSha256) {
+    throw badRequest("Fayl SHA-256 xeshi e'lon qilinganiga mos emas — fayl yo'lda buzilgan yoki almashtirilgan", { reason: "checksum_mismatch", sha256 });
+  }
   const [release] = await tx.update(desktopReleases).set({ size, sha256, updatedAt: new Date() }).where(eq(desktopReleases.id, releaseId)).returning(releaseFields);
   await audit(tx, actor, meta, "DESKTOP_RELEASE_UPLOADED", releaseId, { version: input.version, size, sha256, chunks: seq });
   return release!;
@@ -199,9 +210,10 @@ export async function readChunkBody(stream: Readable, limit = MAX_UPLOAD_CHUNK_B
  * Takroriy yuborish ustiga yozadi — bayt ikki marta sanalmaydi. Sessiya qatori `FOR SHARE` bilan: yakunlash (FOR UPDATE)
  * bilan bir vaqtda bo'lak yozilmaydi, bo'laklar esa parallel kelishi mumkin.
  */
-export async function putChunk(tx: Tx, id: string, index: number, data: Buffer, chunkSha256: string | undefined) {
+export async function putChunk(tx: Tx, id: string, index: number, data: Buffer, chunkSha256: string | undefined, actor: Actor) {
   const [release] = await tx.select(releaseFields).from(desktopReleases).where(eq(desktopReleases.id, id)).limit(1).for("share");
   if (!release) throw notFound("Yuklash sessiyasi topilmadi");
+  assertUploadOwner(release, actor);
   if (release.status !== "uploading" || !release.expectedSize) throw conflict("Bu reliz yuklanish holatida emas");
   const totalChunks = Math.ceil(release.expectedSize / release.chunkSize);
   if (index >= totalChunks) throw badRequest(`Bo'lak raqami noto'g'ri: ${index} (jami ${totalChunks})`);
@@ -232,8 +244,16 @@ export async function putChunk(tx: Tx, id: string, index: number, data: Buffer, 
  * `failed` (bo'laklar o'chiriladi, e'lon qilib bo'lmaydi) va `verified: false` — holat tranzaksiyada saqlanadi.
  * Tayyor relizni qayta yakunlash — o'zgarishsiz qaytadi.
  */
+/** Bo'laklab yuklash sessiyasini faqat uni boshlagan platforma admini davom ettiradi, yakunlaydi yoki bekor qiladi. */
+function assertUploadOwner(release: { uploadedBy: string | null; status: string }, actor: Actor) {
+  if (release.uploadedBy && release.uploadedBy !== actor.id && isIncomplete(release.status)) {
+    throw new AppError("FORBIDDEN", "Bu yuklash sessiyasini boshqa administrator boshlagan");
+  }
+}
+
 export async function completeUpload(tx: Tx, id: string, actor: Actor, meta: RequestMeta) {
   const release = await lockRelease(tx, id);
+  assertUploadOwner(release, actor);
   if (release.status !== "uploading") {
     if (!isIncomplete(release.status) && release.expectedSha256 && release.sha256 === release.expectedSha256) return { verified: true as const, release };
     throw conflict("Bu reliz yuklanish holatida emas");
@@ -270,6 +290,7 @@ export async function completeUpload(tx: Tx, id: string, actor: Actor, meta: Req
 /** Tugallanmagan yoki SHA-256 dan o'tmagan yuklashni bekor qilish (bo'laklar va sessiya o'chiriladi). */
 export async function abortUpload(tx: Tx, id: string, actor: Actor, meta: RequestMeta) {
   const release = await lockRelease(tx, id);
+  assertUploadOwner(release, actor);
   if (!isIncomplete(release.status)) throw conflict("Tayyor yoki e'lon qilingan relizni bekor qilib bo'lmaydi — arxivlang");
   const state = await uploadState(tx, id);
   await tx.delete(desktopReleaseChunks).where(eq(desktopReleaseChunks.releaseId, id));

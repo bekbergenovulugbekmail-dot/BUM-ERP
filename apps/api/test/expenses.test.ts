@@ -142,7 +142,7 @@ describe("Xarajatlar", () => {
     expect(new Set(ids).size).toBe(5);
   });
 
-  it("ruxsatlar: Savdo menejeri ko'radi, yarata olmaydi; Moliya menejeri yaratadi va tasdiqlaydi; begona xarajat 404", async () => {
+  it("ruxsatlar: Savdo menejeri ko'radi, yarata olmaydi; Moliya menejeri yaratadi, boshqa mas'ul tasdiqlaydi; begona xarajat 404", async () => {
     const sales = await addEmployee(app, company, "Savdo menejeri");
     const finance = await addEmployee(app, company, "Moliya menejeri");
 
@@ -151,7 +151,10 @@ describe("Xarajatlar", () => {
 
     const created = await create({}, finance.cookie);
     expect(created.statusCode).toBe(201);
-    expect((await setStatus(created.json().expense.id, { status: "approved" }, finance.cookie)).statusCode).toBe(200);
+    // Vazifalar ajratimi: kiritgan xodim o'zi tasdiqlamaydi
+    expect((await setStatus(created.json().expense.id, { status: "approved" }, finance.cookie)).statusCode).toBe(403);
+    const approver = await addEmployee(app, company, "Moliya menejeri");
+    expect((await setStatus(created.json().expense.id, { status: "approved" }, approver.cookie)).statusCode).toBe(200);
     expect((await setStatus(created.json().expense.id, { status: "pending" }, sales.cookie)).statusCode).toBe(403);
 
     expect((await setStatus(created.json().expense.id, { status: "pending" }, other.ownerCookie)).statusCode).toBe(404);

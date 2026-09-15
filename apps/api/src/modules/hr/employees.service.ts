@@ -66,13 +66,19 @@ export type SoftwareAccessInput = {
   additionalLicensePlanId?: string | null;
 };
 
-/** Maxfiy maydonlar faqat `hr.manage` bilan ko'rinadi. */
+/** Maxfiy maydonlar faqat `hr.manage` bilan, maosh — faqat `hr.salary` bilan ko'rinadi. */
 async function redactor(conn: DbOrTx, tenant: TenantContext) {
-  const canSee = (await effectivePermissions(conn, tenant)).includes("hr.manage");
-  return <T extends { passportNumber: string | null; inn: string | null; bankAccount: string | null }>(row: T) => {
-    if (canSee) return row;
-    const { passportNumber: _p, inn: _i, bankAccount: _b, ...rest } = row;
-    return rest;
+  const permissions = await effectivePermissions(conn, tenant);
+  const canSee = permissions.includes("hr.manage");
+  const canSeeSalary = permissions.includes("hr.salary");
+  return <T extends { passportNumber: string | null; inn: string | null; bankAccount: string | null; baseSalary: string }>(row: T) => {
+    if (canSee && canSeeSalary) return row;
+    const { passportNumber, inn, bankAccount, baseSalary, ...rest } = row;
+    return {
+      ...rest,
+      ...(canSee ? { passportNumber, inn, bankAccount } : {}),
+      ...(canSeeSalary ? { baseSalary } : {}),
+    };
   };
 }
 

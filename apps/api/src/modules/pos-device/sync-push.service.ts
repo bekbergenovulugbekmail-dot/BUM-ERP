@@ -31,7 +31,7 @@ import { withTransaction, type Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { decimalSchema, moneySchema, percentSchema, priceSchema, qtySchema } from "../../shared/decimal.js";
 import { requirePermission, type TenantContext } from "../company/tenant.js";
-import { closeShift, completeSale, openShift, posCustomerPayment, type SaleConflict } from "../sales/pos.service.js";
+import { closeShift, completeSale, offlineRateConflicts, openShift, posCustomerPayment, type SaleConflict } from "../sales/pos.service.js";
 import { CASH_MOVEMENT_KINDS, posCashMovement } from "../sales/pos-cash.service.js";
 import { createCustomer } from "../sales/customers.service.js";
 import { REFUND_METHODS, returnSaleItems } from "../sales/returns.service.js";
@@ -697,7 +697,10 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
         },
         meta,
       );
-      return { ...result, conflicts: [] };
+      // Qurilma kursi tannarx va ta'minotchi qarziga ta'sir qiladi — server kursidan farq rahbarga nomuvofiqlik sifatida
+      const conflicts = await offlineRateConflicts(tx, context.company.id, payload.rates);
+      await recordConflicts(tx, context, op, { type: "purchase_order", id: result.orderId }, conflicts);
+      return { ...result, conflicts: conflicts.map((item) => item.kind) };
     }
     case "purchase.return": {
       const payload = op.payload;

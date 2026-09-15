@@ -32,6 +32,7 @@ import { attendances, departments, employees, leaves, positions, salaryPayments 
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
+import { assertModuleEnabled } from "../company/modules.service.js";
 import { isFullAccessRole, type TenantContext } from "../company/tenant.js";
 import {
   ledgerAccountFor,
@@ -324,6 +325,8 @@ export async function paySalary(
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
+  // To'lov kassa harakati va jurnal yozadi — moliya moduli o'chiq bo'lsa amalga oshmaydi
+  await assertModuleEnabled(tx, companyId, "finance");
   const salary = await lockSalary(tx, tenant, salaryId);
   if (salary.status !== "approved") throw badRequest("Faqat tasdiqlangan maosh to'lanadi");
 

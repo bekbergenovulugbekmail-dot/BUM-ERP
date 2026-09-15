@@ -10,7 +10,7 @@
  *  - ishdan bo'shatilgan xodimga ta'til yozilardi; o'qish ruxsatsiz edi
  */
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
-import { badRequest, conflict, notFound } from "@bum/shared";
+import { badRequest, conflict, forbidden, notFound } from "@bum/shared";
 import { employees, leaves } from "../../db/schema/hr.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
@@ -141,6 +141,10 @@ export async function decideLeave(
     .from(employees)
     .where(and(eq(employees.companyId, companyId), eq(employees.userId, tenant.user.id)))
     .limit(1);
+  // Vazifalar ajratimi: o'z ta'tilini o'zi tasdiqlamaydi (kompaniya egasidan tashqari)
+  if (input.status === "approved" && approver?.id === leave.employeeId && tenant.company.ownerId !== tenant.user.id) {
+    throw forbidden("O'z ta'tilingizni tasdiqlay olmaysiz — boshqa mas'ul tasdiqlaydi");
+  }
 
   const [updated] = await tx
     .update(leaves)

@@ -60,7 +60,7 @@ import { moveStock } from "../inventory/stock.service.js";
 import { earnOrderCashback, reverseOrderCashback } from "./cashback.service.js";
 import { refundToBalance } from "./customer-balance.service.js";
 import { addCurrencyAmounts } from "./shift-totals.js";
-import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
+import { allowedWarehouses, assertWarehouseAccess } from "../inventory/warehouses.service.js";
 import { assertProductsInScope, categoryScope, documentHasScopedItem } from "../catalog/category-scope.js";
 import { salesAudit } from "./customers.service.js";
 
@@ -416,6 +416,8 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
     .where(and(eq(salesOrders.id, orderId), eq(salesOrders.companyId, tenant.company.id)))
     .limit(1);
   if (!order) throw notFound("Buyurtma topilmadi");
+  // A'zo faqat ruxsat berilgan omborlar buyurtmalarini ko'radi
+  assertWarehouseAccess(tenant, order.warehouseId);
 
   const items = await conn
     .select({
@@ -499,6 +501,9 @@ export async function listOrders(
   }
   const pattern = options.search ? `%${options.search.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
   const scope = await categoryScope(conn, tenant);
+  // Ombor cheklovi bor a'zo faqat ruxsat berilgan omborlar buyurtmalarini ko'radi
+  if (options.warehouseId) assertWarehouseAccess(tenant, options.warehouseId);
+  const allowed = allowedWarehouses(tenant);
 
   const rows = await conn
     .select({
@@ -514,6 +519,7 @@ export async function listOrders(
     .where(
       and(
         eq(salesOrders.companyId, tenant.company.id),
+        allowed ? inArray(salesOrders.warehouseId, allowed) : undefined,
         options.status ? eq(salesOrders.status, options.status) : undefined,
         options.customerId ? eq(salesOrders.customerId, options.customerId) : undefined,
         options.warehouseId ? eq(salesOrders.warehouseId, options.warehouseId) : undefined,

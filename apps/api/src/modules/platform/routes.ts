@@ -335,7 +335,7 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
     const data = await readChunkBody(req.body);
     const header = req.headers["x-chunk-sha256"];
     const chunkSha256 = typeof header === "string" && /^[a-f0-9]{64}$/.test(header) ? header : undefined;
-    return withTransaction((tx) => putChunk(tx, uploadId, index, data, chunkSha256));
+    return withTransaction((tx) => putChunk(tx, uploadId, index, data, chunkSha256, authOf(req).user));
   });
 
   app.post("/desktop-releases/uploads/:uploadId/complete", async (req, reply) => {
@@ -360,9 +360,13 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
   app.post("/desktop-releases", { bodyLimit: MAX_STREAM_RELEASE_BYTES }, async (req, reply) => {
     const { version, fileName } = releaseUploadQuery.parse(req.query);
     if (!(req.body instanceof Readable)) throw badRequest("Fayl application/octet-stream sifatida yuborilsin");
+    // Yo'lda buzilgan yoki almashtirilgan fayl serverda aniqlansin: mijoz faylning SHA-256 xeshini oldindan yuboradi
+    const shaHeader = req.headers["x-sha256"];
+    if (typeof shaHeader !== "string" || !/^[a-fA-F0-9]{64}$/.test(shaHeader)) throw badRequest("x-sha256 sarlavhasi (faylning SHA-256 xeshi) majburiy");
+    const expectedSha256 = shaHeader.toLowerCase();
     const stream = req.body;
     const { user } = authOf(req);
-    const release = await withTransaction((tx) => uploadRelease(tx, { version, fileName, stream }, user, requestMeta(req)));
+    const release = await withTransaction((tx) => uploadRelease(tx, { version, fileName, stream, expectedSha256 }, user, requestMeta(req)));
     reply.status(201);
     return { release };
   });

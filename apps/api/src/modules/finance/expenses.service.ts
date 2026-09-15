@@ -13,7 +13,7 @@
  *    emas, barcha yozuvlardan
  */
 import { and, desc, eq, getTableColumns, gte, lt, lte, or, sql } from "drizzle-orm";
-import { badRequest, notFound } from "@bum/shared";
+import { badRequest, forbidden, notFound } from "@bum/shared";
 import { accounts, expenses } from "../../db/schema/finance.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
@@ -268,6 +268,10 @@ export async function setExpenseStatus(
   if (!TRANSITIONS[expense.status].includes(input.status)) {
     throw badRequest(`Holatni o'zgartirib bo'lmaydi: ${expense.status} → ${input.status}`);
   }
+  // Vazifalar ajratimi: xarajatni kiritgan xodim uni o'zi tasdiqlamaydi (kompaniya egasidan tashqari)
+  if (input.status === "approved" && expense.createdBy === tenant.user.id && tenant.company.ownerId !== tenant.user.id) {
+    throw forbidden("O'zingiz kiritgan xarajatni tasdiqlay olmaysiz — boshqa mas'ul tasdiqlaydi");
+  }
 
   let payment: { cashTransactionId: string; journalEntryId: string } | null = null;
   if (input.status === "paid") {
@@ -292,6 +296,8 @@ export async function setExpenseStatus(
 export async function deleteExpense(tx: Tx, tenant: TenantContext, expenseId: string, meta: RequestMeta) {
   const expense = await lockExpense(tx, tenant, expenseId);
   if (expense.status === "paid") throw badRequest("To'langan xarajat o'chirilmaydi");
+  // Tasdiqlangan xarajat — boshqa mas'ul qarori; uni izsiz o'chirib bo'lmaydi (avval "kutilmoqda" ga qaytariladi)
+  if (expense.status !== "pending") throw badRequest("Faqat kutilayotgan xarajat o'chiriladi — tasdiqni avval bekor qiling");
 
   await tx.delete(expenses).where(eq(expenses.id, expenseId));
   await financeAudit(tx, tenant, meta, {

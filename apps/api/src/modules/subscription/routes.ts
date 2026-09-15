@@ -119,9 +119,24 @@ export async function subscriptionRoutes(app: FastifyInstance): Promise<void> {
   app.post("/payments/:paymentId/cancel", async (req) => {
     const { paymentId } = paymentParams.parse(req.params);
     const { user } = authOf(req);
-    const payment = await writeInTenant(req, "subscription.manage", (tx, tenant) =>
-      cancelPayment(tx, { companyId: tenant.company.id, actor: user }, paymentId, requestMeta(req)),
-    );
+    // Tarif so'rovini `subscription.manage`, litsenziya so'rovini `license.manage` bekor qiladi (bir-birinikini emas)
+    const payment = await withTransaction(async (tx) => {
+      const tenant = await requireTenant(tx, user, { access: "account" });
+      const permissions = await effectivePermissions(tx, tenant);
+      if (!permissions.includes("subscription.manage") && !permissions.includes("license.manage")) {
+        throw forbidden("Bu amal uchun ruxsat yo'q: subscription.manage");
+      }
+      return cancelPayment(
+        tx,
+        {
+          companyId: tenant.company.id,
+          actor: user,
+          authorizeKind: (kind) => requirePermission(tx, tenant, kind === "license" ? "license.manage" : "subscription.manage"),
+        },
+        paymentId,
+        requestMeta(req),
+      );
+    });
     return { payment };
   });
 }

@@ -11,7 +11,8 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { db } from "../../db/client.js";
 import { authOf, requireAuth } from "../auth/guard.js";
-import { requirePermission, requireTenant, type TenantContext } from "../company/tenant.js";
+import { companyModuleStates } from "../company/modules.service.js";
+import { effectivePermissions, requirePermission, requireTenant, type TenantContext } from "../company/tenant.js";
 import type { TenantAccess } from "../subscription/access.js";
 import { getDashboard } from "./dashboard.service.js";
 import {
@@ -37,7 +38,17 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", requireAuth);
 
   // Obuna tugaganda ham ochiq (Bosh sahifa + Obuna); hisobotlar — yopiq
-  app.get("/dashboard", async (req) => getDashboard(db, await readTenant(req, "dashboard")));
+  app.get("/dashboard", async (req) => {
+    const tenant = await readTenant(req, "dashboard");
+    const [dashboard, permissions, modules] = await Promise.all([
+      getDashboard(db, tenant),
+      effectivePermissions(db, tenant),
+      companyModuleStates(db, tenant.company.id),
+    ]);
+    // Kassa/bank qoldig'i, qarzlar va foyda — moliya ma'lumoti: `analytics.view` o'zi yetmaydi (moliya ruxsati va moduli)
+    if (permissions.includes("finance.view") && modules.finance) return { ...dashboard, financeHidden: false };
+    return { ...dashboard, cashBalance: null, bankBalance: null, supplierDebt: null, customerDebt: null, cogs: null, grossProfit: null, financeHidden: true };
+  });
 
   app.get("/reports/sales", async (req) => {
     const { days } = daysQuery.parse(req.query);

@@ -19,7 +19,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, lt, or, sql } from "drizzle-orm";
-import { badRequest, notFound } from "@bum/shared";
+import { badRequest, forbidden, notFound } from "@bum/shared";
 import { batches, products, units } from "../../db/schema/catalog.js";
 import { accounts } from "../../db/schema/finance.js";
 import {
@@ -36,7 +36,7 @@ import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
 import { unitFactorToBase } from "../catalog/conversions.js";
 import { assertProductsInScope, categoryScope, productScopeCondition } from "../catalog/category-scope.js";
-import type { TenantContext } from "../company/tenant.js";
+import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { todayIso } from "../finance/cash.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { allowedWarehouses, assertWarehouseAccess } from "./warehouses.service.js";
@@ -362,6 +362,43 @@ export async function listMovements(
 // ─── Qo'lda harakat va o'tkazma ──────────────────────────────────────────────
 
 export const MANUAL_MOVEMENT_TYPES = ["receive", "issue", "adjust", "writeoff", "return_in", "return_out"] as const;
+
+/** Qo'lda zaxira harakatida qarshi hisob bo'la olmaydigan tizim nazorat hisoblari (aktivlardan tashqari). */
+const STOCK_COUNTER_BLOCKED_SUBTYPES = new Set(["sales", "cogs", "customer_advance", "cashback_liability", "payroll_tax"]);
+
+/** Qo'lda kirim tannarxi joriy o'rtacha tannarxdan shuncha marta farq qilsa — moliya ruxsati kerak (xato yoki soxta tannarx). */
+const MANUAL_COST_DEVIATION_FACTOR = 10n;
+
+/**
+ * Qo'lda kirim tannarxi AVCO ni va keyingi sotuvlar tannarxini buzmasin: omborda qoldiq bor va o'rtacha tannarx ma'lum
+ * bo'lsa, undan 10 martadan ko'p yuqori yoki past tannarx faqat `finance.manage` bilan qabul qilinadi.
+ */
+async function assertManualCostPlausible(
+  tx: Tx,
+  tenant: TenantContext,
+  input: { type: ManualMovementType; productId: string; warehouseId: string },
+  costPrice: string | null | undefined,
+) {
+  if (costPrice == null || (input.type !== "receive" && input.type !== "return_in" && input.type !== "adjust")) return;
+  const [level] = await tx
+    .select({ quantity: stockLevels.quantity, avgCostPrice: stockLevels.avgCostPrice })
+    .from(stockLevels)
+    .where(
+      and(
+        eq(stockLevels.companyId, tenant.company.id),
+        eq(stockLevels.productId, input.productId),
+        eq(stockLevels.warehouseId, input.warehouseId),
+      ),
+    )
+    .limit(1);
+  if (!level || signedQtyMinor(level.quantity) <= 0n) return;
+  const average = toMinor(level.avgCostPrice, 4);
+  const cost = toMinor(costPrice, 4);
+  if (average <= 0n) return;
+  if (cost <= average * MANUAL_COST_DEVIATION_FACTOR && cost * MANUAL_COST_DEVIATION_FACTOR >= average) return;
+  if ((await effectivePermissions(tx, tenant)).includes("finance.manage")) return;
+  throw forbidden(`Tannarx o'rtacha tannarxdan (${level.avgCostPrice}) 10 martadan ko'p farq qiladi — moliya ruxsati kerak`);
+}
 export type ManualMovementType = (typeof MANUAL_MOVEMENT_TYPES)[number];
 
 const MOVEMENT_LABELS: Record<ManualMovementType, string> = {
@@ -406,12 +443,17 @@ export async function postStockJournal(
   let counter: string | null = null;
   if (input.counterAccountId) {
     const [account] = await tx
-      .select({ id: accounts.id, isActive: accounts.isActive })
+      .select({ id: accounts.id, isActive: accounts.isActive, type: accounts.type, subtype: accounts.subtype })
       .from(accounts)
       .where(and(eq(accounts.id, input.counterAccountId), eq(accounts.companyId, companyId)))
       .limit(1);
     if (!account || !account.isActive) throw badRequest("Qarshi hisob topilmadi");
     if (account.id === inventory) throw badRequest("Qarshi hisob tovar zaxirasi hisobi bo'lmasligi kerak");
+    // Aktivlar (kassa, bank, debitorlar) va tizim nazorat hisoblari (sotuv daromadi, tannarx, avans, keshbek, soliq)
+    // qo'lda zaxira harakati bilan o'zgarmasin — ular o'z hujjatlari (kassa harakati, sotuv) bilan sinxron turadi
+    if (account.type === "asset" || (account.subtype !== null && STOCK_COUNTER_BLOCKED_SUBTYPES.has(account.subtype))) {
+      throw badRequest("Bu hisob qo'lda zaxira harakati uchun qarshi hisob bo'la olmaydi (kapital, kreditor, boshqa daromad yoki xarajat tanlang)");
+    }
     counter = account.id;
   }
 
@@ -484,6 +526,7 @@ export async function recordManualMovement(
   await assertProductsInScope(tx, tenant, [input.productId]);
   const { unitId, counterAccountId, ...move } = input;
   const base = await toBaseUnit(tx, tenant.company.id, input);
+  await assertManualCostPlausible(tx, tenant, input, base.costPrice);
   const result = await moveStock(tx, tenant.company.id, tenant.user.id, {
     ...move,
     quantity: base.quantity,

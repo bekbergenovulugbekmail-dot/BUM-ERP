@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
+import { assistantProvider, type AssistantRequest } from "../src/modules/ai/assistant.service.js";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
@@ -499,6 +500,62 @@ describe("Xavfsizlik: pul va ruxsat chegaralari", () => {
     expect(JSON.stringify(over)).toContain("cash_exceeds_expected");
   });
 
+  it("savdo qaytarish: boshqa kassirning smenasi yig'indilarini sales.approve siz kamaytirib bo'lmaydi", async () => {
+    const kassir = await addEmployee(app, company, "Kassir");
+    const shiftId = await openShift(kassir.cookie, "100000");
+    const sale = await call(kassir.cookie, "POST", "/api/sales/pos/sales", { shiftId, items: [{ productId, quantity: "2" }], paymentMethod: "cash", amountPaid: "10000" });
+    expect(sale.statusCode, sale.body).toBe(201);
+    const orderId = sale.json().order.id as string;
+    const [line] = await db.select().from(salesOrderItems).where(eq(salesOrderItems.orderId, orderId));
+
+    const roleRes = await call(owner(), "POST", "/api/company/roles", { name: "Qaytaruvchi", permissions: ["products.view", "sales.view", "sales.refund", "pos.use"] });
+    expect(roleRes.statusCode, roleRes.body).toBe(201);
+    const refunder = await addEmployee(app, company, "Qaytaruvchi");
+    const giveBack = (extra: object) =>
+      call(refunder.cookie, "POST", `/api/sales/orders/${orderId}/return-items`, { items: [{ orderItemId: line!.id, quantity: "1" }], refundMethod: "cash", ...extra });
+    const onForeignShift = await giveBack({ shiftId });
+    expect(onForeignShift.statusCode, onForeignShift.body).toBe(403);
+    const withoutShift = await giveBack({});
+    expect(withoutShift.statusCode, withoutShift.body).toBe(201);
+  });
+
+  it("ombor: aktiv hisob qarshi hisob bo'lmaydi; o'rtacha tannarxdan 10 martadan ko'p farqli kirim moliya ruxsatisiz rad", async () => {
+    const cashLedger = (await db.select({ id: accounts.id }).from(accounts).where(and(eq(accounts.companyId, company.companyId), eq(accounts.code, "1010"))))[0]!.id;
+    const receive = (cookie: string, extra: object) =>
+      call(cookie, "POST", "/api/inventory/stock/movements", { type: "receive", productId, warehouseId: mainWh, quantity: "1", costPrice: "3000", ...extra });
+    const asset = await receive(owner(), { counterAccountId: cashLedger });
+    expect(asset.statusCode, asset.body).toBe(400);
+
+    const omborchi = await addEmployee(app, company, "Omborchi");
+    expect((await receive(omborchi.cookie, { costPrice: "3500" })).statusCode).toBe(201);
+    const inflated = await receive(omborchi.cookie, { costPrice: "40000" });
+    expect(inflated.statusCode, inflated.body).toBe(403);
+    expect((await receive(omborchi.cookie, { costPrice: "200" })).statusCode).toBe(403);
+    expect((await receive(owner(), { costPrice: "40000" })).statusCode).toBe(201);
+  });
+
+  it("moliya: tizim hisobini kichik kodli hisob bilan tortib olib bo'lmaydi; o'z xarajatini tasdiqlash va tasdiqlanganini o'chirish rad", async () => {
+    const account = (body: object) => call(owner(), "POST", "/api/finance/accounts", { name: "Yashirin kassa", type: "asset", ...body });
+    const hijack = await account({ code: "0001", subtype: "cash" });
+    expect(hijack.statusCode, hijack.body).toBe(400);
+    const extra = await account({ code: "1015", subtype: "cash" });
+    expect(extra.statusCode, extra.body).toBe(201);
+    const plain = await account({ code: "0002" });
+    expect(plain.statusCode, plain.body).toBe(201);
+    const retype = await call(owner(), "PATCH", `/api/finance/accounts/${plain.json().account.id}`, { subtype: "cash" });
+    expect(retype.statusCode, retype.body).toBe(400);
+
+    const buxgalter = await addEmployee(app, company, "Buxgalter");
+    const created = await call(buxgalter.cookie, "POST", "/api/finance/expenses", { category: "boshqa", description: "O'z xarajati", amount: "1000", expenseDate: today });
+    expect(created.statusCode, created.body).toBe(201);
+    const expenseId = created.json().expense.id as string;
+    const selfApprove = await call(buxgalter.cookie, "POST", `/api/finance/expenses/${expenseId}/status`, { status: "approved" });
+    expect(selfApprove.statusCode, selfApprove.body).toBe(403);
+    expect((await call(owner(), "POST", `/api/finance/expenses/${expenseId}/status`, { status: "approved" })).statusCode).toBe(200);
+    const deleteApproved = await call(buxgalter.cookie, "DELETE", `/api/finance/expenses/${expenseId}`);
+    expect(deleteApproved.statusCode, deleteApproved.body).toBe(400);
+  });
+
   it("son chegarasidan oshish (PostgreSQL 22003) 500 emas, 400 qaytaradi", async () => {
     const mini = Fastify();
     registerErrorHandler(mini);
@@ -584,5 +641,171 @@ describe("Xavfsizlik: PIN, qulflangan sessiya, qurilma tokeni va ochiq yo'llar",
     for (let i = 0; i < 61; i++) codes.push((await app.inject({ method: "GET", url: `/api/public/companies/${company.slug}` })).statusCode);
     expect(codes.slice(0, 60).every((code) => code === 200)).toBe(true);
     expect(codes[60]).toBe(429);
+  });
+});
+
+describe("Xavfsizlik: ombor, moliya ma'lumoti, HR va modul chegaralari", () => {
+  const owner = () => company.ownerCookie;
+
+  it("ombor cheklovi: boshqa ombor savdo va xarid buyurtmalari, smenasi ko'rinmaydi va tasdiqlanmaydi", async () => {
+    await db.delete(units);
+    await seedDefaultUnits(db);
+    const piece = (await db.select().from(units).where(eq(units.shortName, "d")))[0]!.id;
+    const [mainWh] = await db.select({ id: warehouses.id }).from(warehouses).where(eq(warehouses.companyId, company.companyId));
+    const filialRes = await call(owner(), "POST", "/api/inventory/warehouses", { name: "Filial", code: "FIL" });
+    expect(filialRes.statusCode, filialRes.body).toBe(201);
+    const filial = filialRes.json().warehouse.id as string;
+    const product = await call(owner(), "POST", "/api/catalog/products", { name: "Choy", sku: "CHOY", baseUnitId: piece, salesPrice: "5000", taxRate: "0" });
+    const productId = product.json().product.id as string;
+    expect((await call(owner(), "POST", "/api/inventory/stock/movements", { type: "receive", productId, warehouseId: filial, quantity: "10", costPrice: "3000" })).statusCode).toBe(201);
+
+    const shift = await call(owner(), "POST", "/api/sales/pos/shifts", { warehouseId: filial, openingCash: "0" });
+    expect(shift.statusCode, shift.body).toBe(201);
+    const shiftId = shift.json().shift.id as string;
+    const sale = await call(owner(), "POST", "/api/sales/pos/sales", { shiftId, items: [{ productId, quantity: "1" }], paymentMethod: "cash", amountPaid: "5000" });
+    expect(sale.statusCode, sale.body).toBe(201);
+    const orderId = sale.json().order.id as string;
+    const supplier = await call(owner(), "POST", "/api/purchase/suppliers", { name: "Filial ta'minotchisi", code: "S-9" });
+    const purchase = await call(owner(), "POST", "/api/purchase/orders", {
+      supplierId: supplier.json().supplier.id,
+      warehouseId: filial,
+      orderDate: today,
+      items: [{ productId, unitId: piece, orderedQty: "1", unitPrice: "3000" }],
+    });
+    expect(purchase.statusCode, purchase.body).toBe(201);
+    const purchaseId = purchase.json().order.id as string;
+
+    // Direktor (to'liq huquqli emas) faqat asosiy omborga biriktirilgan
+    const manager = await addEmployee(app, company, "Direktor");
+    await db
+      .update(companyMembers)
+      .set({ allowedWarehouseIds: [mainWh!.id] })
+      .where(and(eq(companyMembers.companyId, company.companyId), eq(companyMembers.userId, manager.id)));
+    const get = (url: string) => call(manager.cookie, "GET", url);
+    expect((await get(`/api/sales/orders/${orderId}`)).statusCode).toBe(403);
+    expect((await get("/api/sales/orders")).body).not.toContain(orderId);
+    expect((await get(`/api/sales/pos/shifts/${shiftId}`)).statusCode).toBe(403);
+    expect((await get("/api/sales/pos/shifts")).body).not.toContain(shiftId);
+    expect((await get(`/api/purchase/orders/${purchaseId}`)).statusCode).toBe(403);
+    expect((await get("/api/purchase/orders")).body).not.toContain(purchaseId);
+    expect((await call(manager.cookie, "POST", `/api/purchase/orders/${purchaseId}/confirm`)).statusCode).toBe(403);
+    expect((await call(owner(), "GET", `/api/sales/orders/${orderId}`)).statusCode).toBe(200);
+  });
+
+  it("AI yordamchi va bosh sahifa: kassa, qarz, foyda va maosh faqat moliya/HR ruxsati bilan", async () => {
+    const captured: AssistantRequest[] = [];
+    const original = assistantProvider.client;
+    assistantProvider.client = async (request) => {
+      captured.push(request);
+      return "ok";
+    };
+    try {
+      await call(owner(), "POST", "/api/hr/employees", { name: "Xodim", hireDate: "2020-01-01", baseSalary: "3000000", salaryType: "monthly" });
+      // Ombor menejeri: analytics.view bor, finance.view va hr.view yo'q
+      const salesManager = await addEmployee(app, company, "Ombor menejeri");
+      expect((await call(salesManager.cookie, "POST", "/api/ai/assistant", { question: "Holat qanday?" })).statusCode).toBe(200);
+      expect((await call(owner(), "POST", "/api/ai/assistant", { question: "Holat qanday?" })).statusCode).toBe(200);
+      const [forSales, forOwner] = captured;
+      expect(forSales!.system).not.toContain("Kassa:");
+      expect(forSales!.system).not.toContain("oylik fondi");
+      expect(forOwner!.system).toContain("Kassa:");
+      expect(forOwner!.system).toContain("oylik fondi: 3000000.00");
+
+      const salesDashboard = await call(salesManager.cookie, "GET", "/api/analytics/dashboard");
+      expect(salesDashboard.statusCode, salesDashboard.body).toBe(200);
+      expect(salesDashboard.json()).toMatchObject({ cashBalance: null, bankBalance: null, supplierDebt: null, grossProfit: null, financeHidden: true });
+      const ownerDashboard = (await call(owner(), "GET", "/api/analytics/dashboard")).json();
+      expect(typeof ownerDashboard.cashBalance).toBe("string");
+      expect(ownerDashboard.financeHidden).toBe(false);
+    } finally {
+      assistantProvider.client = original;
+    }
+  });
+
+  it("HR: o'z ta'tilini tasdiqlash rad; maosh faqat hr.salary bilan ko'rinadi va o'zgaradi; modul o'chiq bo'lsa ogohlantirish ko'rinmaydi", async () => {
+    const buxgalter = await addEmployee(app, company, "Buxgalter");
+    const employeeId = await hrEmployee(owner(), buxgalter.id, "Buxgalter");
+    const leave = await call(owner(), "POST", "/api/hr/leaves", { employeeId, type: "annual", startDate: "2030-01-01", endDate: "2030-01-05" });
+    expect(leave.statusCode, leave.body).toBe(201);
+    const leaveId = leave.json().leave.id as string;
+    const selfDecision = await call(buxgalter.cookie, "POST", `/api/hr/leaves/${leaveId}/decision`, { status: "approved" });
+    expect(selfDecision.statusCode, selfDecision.body).toBe(403);
+    expect((await call(owner(), "POST", `/api/hr/leaves/${leaveId}/decision`, { status: "approved" })).statusCode).toBe(200);
+
+    const roleRes = await call(owner(), "POST", "/api/company/roles", { name: "Kadrlar", permissions: ["hr.view", "hr.manage"] });
+    expect(roleRes.statusCode, roleRes.body).toBe(201);
+    const kadr = await addEmployee(app, company, "Kadrlar");
+    const card = await call(kadr.cookie, "GET", `/api/hr/employees/${employeeId}`);
+    expect(card.statusCode, card.body).toBe(200);
+    expect(card.json().employee.baseSalary).toBeUndefined();
+    expect((await call(kadr.cookie, "PATCH", `/api/hr/employees/${employeeId}`, { baseSalary: "9000000" })).statusCode).toBe(403);
+    expect((await call(owner(), "GET", `/api/hr/employees/${employeeId}`)).json().employee.baseSalary).toBe("1000000.00");
+
+    // Kutilayotgan ta'til ogohlantirishi: HR moduli o'chirilgach egaga ham ko'rinmaydi
+    expect((await call(owner(), "POST", "/api/hr/leaves", { employeeId, type: "annual", startDate: "2031-01-01", endDate: "2031-01-05" })).statusCode).toBe(201);
+    expect((await call(owner(), "POST", "/api/notifications/refresh")).statusCode).toBeLessThan(300);
+    const hasLeaveAlert = async () =>
+      ((await call(owner(), "GET", "/api/notifications")).json().notifications as { relatedType: string | null }[]).some((item) => item.relatedType === "leaves");
+    expect(await hasLeaveAlert()).toBe(true);
+    const off = await call(owner(), "PUT", "/api/company/modules/hr", { enabled: false });
+    expect(off.statusCode, off.body).toBeLessThan(300);
+    expect(await hasLeaveAlert()).toBe(false);
+  });
+
+  it("kassa qurilmasi: shu qurilmada ishlay olmaydigan xodimning telefoni va ruxsatlari yuborilmaydi", async () => {
+    const [warehouse] = await db.select({ id: warehouses.id }).from(warehouses).where(eq(warehouses.companyId, company.companyId));
+    const registered = await app.inject({
+      method: "POST",
+      url: "/api/pos-device/setup/register",
+      payload: { phone: company.owner.phone, password: company.owner.password, warehouseId: warehouse!.id, name: "Kassa P" },
+    });
+    expect(registered.statusCode, registered.body).toBe(201);
+    const hr = await addEmployee(app, company, "HR menejeri");
+    const kassir = await addEmployee(app, company, "Kassir");
+    const pulled = await app.inject({ method: "POST", url: "/api/pos-device/pull", headers: { authorization: `Bearer ${registered.json().token as string}` }, payload: {} });
+    expect(pulled.statusCode, pulled.body).toBe(200);
+    const rows = pulled.json().entities.cashiers.rows as { userId: string; phone: string; permissions: string[]; active: boolean }[];
+    expect(rows.find((row) => row.userId === hr.id)).toMatchObject({ active: false, phone: "", permissions: [] });
+    const kassirRow = rows.find((row) => row.userId === kassir.id)!;
+    expect(kassirRow).toMatchObject({ active: true, phone: kassir.phone });
+    expect(kassirRow.permissions).toContain("pos.use");
+  });
+
+  it("reliz yuklash: boshqa admin sessiyasiga yoza va uni bekor qila olmaydi; bitta so'rovli yuklashda x-sha256 majburiy va mos", async () => {
+    const adminA = await signedIn(app, { isPlatformAdmin: true });
+    const adminB = await signedIn(app, { isPlatformAdmin: true });
+    const chunk = 1024 * 1024;
+    const file = Buffer.concat([Buffer.from("MZ"), randomBytes(chunk + 100)]);
+    const sha = (data: Buffer) => createHash("sha256").update(data).digest("hex");
+    const started = await app.inject({
+      method: "POST",
+      url: "/api/platform/desktop-releases/uploads",
+      headers: { cookie: adminA.cookie },
+      payload: { version: "9.9.1", fileName: "BUM-POS-KASSA-Setup-9.9.1.exe", size: file.length, sha256: sha(file), chunkSize: chunk },
+    });
+    expect(started.statusCode, started.body).toBe(201);
+    const uploadId = started.json().upload.id as string;
+    const put = (cookie: string) =>
+      app.inject({
+        method: "PUT",
+        url: `/api/platform/desktop-releases/uploads/${uploadId}/chunks/0`,
+        headers: { cookie, "content-type": "application/octet-stream" },
+        payload: file.subarray(0, chunk),
+      });
+    expect((await put(adminB.cookie)).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: `/api/platform/desktop-releases/uploads/${uploadId}/abort`, headers: { cookie: adminB.cookie } })).statusCode).toBe(403);
+    expect((await put(adminA.cookie)).statusCode).toBe(200);
+
+    const single = (headers: Record<string, string>) =>
+      app.inject({
+        method: "POST",
+        url: "/api/platform/desktop-releases?version=9.9.2&fileName=BUM-POS-KASSA-Setup-9.9.2.exe",
+        headers: { cookie: adminA.cookie, "content-type": "application/octet-stream", ...headers },
+        payload: file,
+      });
+    expect((await single({})).statusCode).toBe(400);
+    expect((await single({ "x-sha256": "0".repeat(64) })).statusCode).toBe(400);
+    const ok = await single({ "x-sha256": sha(file) });
+    expect(ok.statusCode, ok.body).toBe(201);
   });
 });

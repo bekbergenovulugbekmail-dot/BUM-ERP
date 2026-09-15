@@ -131,9 +131,35 @@ export type AccountInput = {
   description?: string | null;
 };
 
+/**
+ * Tizim yozuvlari hisobni `subtype` bo'yicha eng kichik kodli faol hisobdan oladi (`findAccountBySubtype`). Mavjud hisobdan
+ * kichikroq kodli hisobga shu `subtype` ni berish barcha avtomatik yozuvlarni (kassa, sotuv, tannarx) jimgina boshqa
+ * hisobga burib yuboradi — taqiqlanadi. Kattaroq kodli qo'shimcha hisob yaratish mumkin.
+ */
+async function assertSubtypeNotHijacked(tx: Tx, companyId: string, subtype: string | null | undefined, code: string, selfId?: string) {
+  if (!subtype) return;
+  const [existing] = await tx
+    .select({ code: accounts.code })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.companyId, companyId),
+        eq(accounts.subtype, subtype),
+        eq(accounts.isActive, true),
+        sql`${accounts.code} > ${code}`,
+        selfId ? sql`${accounts.id} <> ${selfId}` : undefined,
+      ),
+    )
+    .limit(1);
+  if (existing) {
+    throw badRequest(`"${subtype}" turidagi asosiy hisob ${existing.code} — undan kichik kodli hisobga bu turni berib bo'lmaydi`);
+  }
+}
+
 export async function createAccount(tx: Tx, tenant: TenantContext, input: AccountInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
   if (input.parentId) await assertParent(tx, companyId, input.parentId, input.type);
+  await assertSubtypeNotHijacked(tx, companyId, input.subtype, input.code);
 
   const [account] = await tx
     .insert(accounts)
@@ -166,6 +192,9 @@ export async function updateAccount(
   if (!current) throw notFound("Hisob topilmadi");
 
   if (patch.parentId) await assertParent(tx, companyId, patch.parentId, current.type, current.id);
+  if (patch.subtype !== undefined && patch.subtype !== current.subtype) {
+    await assertSubtypeNotHijacked(tx, companyId, patch.subtype, current.code, current.id);
+  }
   if (patch.isActive === false && current.isActive && toMinor(current.balance) !== 0n) {
     throw conflict("Balansi nol bo'lmagan hisobni faolsizlantirib bo'lmaydi");
   }

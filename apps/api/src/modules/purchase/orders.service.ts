@@ -45,7 +45,7 @@ import { todayIso } from "../finance/cash.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { moveStock } from "../inventory/stock.service.js";
-import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
+import { allowedWarehouses, assertWarehouseAccess } from "../inventory/warehouses.service.js";
 import { assertProductsInScope, categoryScope, documentHasScopedItem } from "../catalog/category-scope.js";
 import { applySupplierBalance } from "./supplier-balances.service.js";
 import { purchaseAudit } from "./suppliers.service.js";
@@ -235,6 +235,8 @@ async function lockOrder(tx: Tx, tenant: TenantContext, orderId: string) {
     .limit(1)
     .for("update");
   if (!order) throw notFound("Buyurtma topilmadi");
+  // Tahrir, tasdiq, bekor qilish, qabul — faqat ruxsat berilgan ombor buyurtmasi
+  assertWarehouseAccess(tenant, order.warehouseId);
   return order;
 }
 
@@ -266,6 +268,7 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
     .where(and(eq(purchaseOrders.id, orderId), eq(purchaseOrders.companyId, tenant.company.id)))
     .limit(1);
   if (!order) throw notFound("Buyurtma topilmadi");
+  assertWarehouseAccess(tenant, order.warehouseId);
 
   const items = await conn
     .select({
@@ -377,6 +380,8 @@ export async function listOrders(
     .where(
       and(
         eq(purchaseOrders.companyId, tenant.company.id),
+        // Ombor cheklovi bor a'zo — faqat ruxsat berilgan omborlar xaridlari
+        allowedWarehouses(tenant) ? inArray(purchaseOrders.warehouseId, allowedWarehouses(tenant)!) : undefined,
         options.supplierId ? eq(purchaseOrders.supplierId, options.supplierId) : undefined,
         options.status ? eq(purchaseOrders.status, options.status) : undefined,
         options.dateFrom ? gte(purchaseOrders.orderDate, options.dateFrom) : undefined,

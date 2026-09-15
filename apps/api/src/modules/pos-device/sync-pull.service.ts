@@ -304,12 +304,16 @@ export async function pullChanges(
   const allCashiers = memberRows.map(({ companyRole, roleId, memberActive, userActive, allowedWarehouseIds, ...member }) => {
     const permissions = permissionsFromRoles(companyId, { companyRole, roleId }, roleRows);
     const warehouseAllowed = allowedWarehouseIds.length === 0 || allowedWarehouseIds.includes(context.device.warehouseId);
+    /** Shu qurilmada ishlay oladi: faol a'zo va foydalanuvchi, `pos.use`, qurilma omboriga ruxsat. */
+    const active = memberActive && userActive && warehouseAllowed && permissions.includes("pos.use");
+    // Qurilmada ishlay olmaydigan xodimlar (boshqa bo'lim, faol emas) — faqat o'chirish belgisi uchun: telefon va ruxsatlar
+    // qurilmaga (lokal bazaga) tushmaydi
     return {
       ...member,
+      phone: active ? member.phone : "",
       role: companyRole,
-      permissions,
-      /** Shu qurilmada ishlay oladi: faol a'zo va foydalanuvchi, `pos.use`, qurilma omboriga ruxsat. */
-      active: memberActive && userActive && warehouseAllowed && permissions.includes("pos.use"),
+      permissions: active ? permissions : [],
+      active,
     };
   });
   const accessDigest = createHash("sha256")
