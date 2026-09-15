@@ -105,18 +105,18 @@ export async function authenticate(
   }
 
   if (!user || !valid) {
-    if (user) {
-      await writeAuditLog({
-        userId: user.id,
-        userName: user.name,
-        companyId: user.activeCompanyId,
-        action: "login_failed",
-        resource: "users",
-        resourceId: user.id,
-        severity: "warning",
-        ...meta,
-      });
-    }
+    // Ro'yxatdan o'tmagan raqamga urinish ham qayd etiladi (raqamni sanash hujumini ko'rish uchun); raqam qisman yashiriladi
+    await writeAuditLog({
+      userId: user?.id ?? null,
+      userName: user?.name ?? null,
+      companyId: user?.activeCompanyId ?? null,
+      action: "login_failed",
+      resource: "users",
+      resourceId: user?.id ?? null,
+      severity: "warning",
+      ...(user ? {} : { details: { reason: "unknown_phone", phone: `${phone.slice(0, 6)}***${phone.slice(-2)}` } }),
+      ...meta,
+    });
     throw unauthenticated(INVALID_CREDENTIALS);
   }
 

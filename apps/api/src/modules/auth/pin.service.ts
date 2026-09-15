@@ -20,11 +20,16 @@ import { AppError, badRequest, conflict, forbidden, notFound, rateLimited } from
 import { sessions, users } from "../../db/schema/platform.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type AuditEntry, type RequestMeta } from "../../shared/audit.js";
+import { recordHit } from "../../shared/rate-limit.js";
 import { hashPassword, verifyPassword } from "./password.js";
-import type { ActiveSession, SessionUser } from "./session.js";
+import { revokeUserSessions, type ActiveSession, type SessionUser } from "./session.js";
 
 export const MAX_PIN_ATTEMPTS = 5;
+/** Birinchi blok; keyingilari 24 soat ichida ikki barobardan uzayadi. */
 export const PIN_LOCK_SECONDS = 5 * 60;
+/** 24 soat ichida shuncha blokdan keyin foydalanuvchining barcha sessiyalari bekor qilinadi (parol bilan qayta kirish). */
+export const MAX_PIN_LOCKS_PER_DAY = 3;
+const PIN_LOCK_WINDOW_SECONDS = 24 * 3600;
 const PIN_RE = /^\d{4,8}$/;
 
 export type PinResult = { success: true } | { success: false; reason: string };
@@ -91,22 +96,28 @@ async function checkPin(
 
   const attempts = previous + 1;
   const locked = attempts >= MAX_PIN_ATTEMPTS;
+  // Har keyingi blok (24 soat ichida) ikki barobar uzun; MAX_PIN_LOCKS_PER_DAY ga yetganda barcha sessiyalar bekor —
+  // sekin tanlashni davom ettirib bo'lmaydi, parol bilan qayta kirish kerak. Hisob tranzaksiyadan tashqarida saqlanadi
+  const lockCount = locked ? await recordHit(`pin-lock:${user.id}`, PIN_LOCK_WINDOW_SECONDS) : 0;
+  const lockSeconds = PIN_LOCK_SECONDS * 2 ** Math.min(Math.max(lockCount - 1, 0), 8);
+  const revoked = locked && lockCount >= MAX_PIN_LOCKS_PER_DAY;
   await tx
     .update(users)
     .set({
       pinFailedAttempts: locked ? 0 : attempts,
-      pinLockedUntil: locked ? new Date(now + PIN_LOCK_SECONDS * 1000) : null,
+      pinLockedUntil: locked ? new Date(now + lockSeconds * 1000) : null,
     })
     .where(eq(users.id, user.id));
+  if (revoked) await revokeUserSessions(tx, user.id);
   await audit(tx, user, meta, {
     action: locked ? "pin_locked" : "pin_unlock_failed",
     severity: locked ? "warning" : "info",
-    details: { purpose, attempts, locked },
+    details: { purpose, attempts, locked, ...(locked ? { lockCount, lockSeconds, sessionsRevoked: revoked } : {}) },
   });
 
   return {
     success: false,
-    reason: locked ? `PIN_LOCKED:${PIN_LOCK_SECONDS}` : `WRONG_PIN:${MAX_PIN_ATTEMPTS - attempts}`,
+    reason: locked ? `PIN_LOCKED:${lockSeconds}` : `WRONG_PIN:${MAX_PIN_ATTEMPTS - attempts}`,
   };
 }
 
@@ -246,7 +257,7 @@ export async function lockSession(tx: Tx, session: ActiveSession, meta: RequestM
 /**
  * Faqat shu, hali yaroqli (chiqilmagan, muddati o'tmagan) sessiyaning qulfini PIN bilan ochadi. Yangi sessiya
  * yaratmaydi: chiqishdan keyin yoki yangi qurilmada PIN yordam bermaydi — parol bilan kirish kerak.
- * Noto'g'ri PIN hisobi va vaqtincha bloklash `checkPin` da (5 urinish → 5 daqiqa).
+ * Noto'g'ri PIN hisobi va vaqtincha bloklash `checkPin` da (5 urinish → 5, 10, 20 … daqiqa; 24 soatda 3-blokda sessiyalar bekor).
  */
 export async function unlockSession(tx: Tx, session: ActiveSession, pin: string, meta: RequestMeta): Promise<PinResult> {
   if (!session.lockedAt) return { success: true };

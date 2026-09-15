@@ -41,7 +41,8 @@ export const CLOSE_CODES = { unauthenticated: 4401, forbidden: 4403, tooMany: 44
 /** @param companyKey tab biznesi (`bumCompany`); null — foydalanuvchining saqlangan aktiv kompaniyasi. */
 export async function resolveRealtimeAccess(token: string, companyKey: string | null = null): Promise<RealtimeAccess | "unauthenticated" | "forbidden"> {
   const session = await peekSession(token);
-  if (!session) return "unauthenticated";
+  // Qulflangan ekran real-time hodisalarni olmaydi (davriy qayta tekshiruvda ochiq ulanish ham yopiladi)
+  if (!session || session.lockedAt) return "unauthenticated";
   let tenant;
   try {
     tenant = await requireTenant(db, await resolveCompanyContext(db, session.user, companyKey));

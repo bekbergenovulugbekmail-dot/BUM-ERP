@@ -13,13 +13,18 @@ import { z } from "zod";
 import { notFound } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { companies, companyMembers } from "../../db/schema/platform.js";
+import { consumeAttempt } from "../../shared/rate-limit.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 
 const slugParams = z.object({ slug: z.string().trim().min(2).max(40) });
+/** Bitta IP dan daqiqasiga ochiq kompaniya so'rovlari. */
+const PUBLIC_LOOKUPS_PER_MINUTE = 60;
 
 export async function publicRoutes(app: FastifyInstance): Promise<void> {
   app.get("/companies/:slug", async (req) => {
     const { slug } = slugParams.parse(req.params);
+    // Sessiyasiz yo'l — slug'larni ommaviy sanab chiqishga qarshi IP limiti
+    await consumeAttempt(`public-company:ip:${req.ip}`, PUBLIC_LOOKUPS_PER_MINUTE, 60);
     const [company] = await db
       .select({
         id: companies.id,

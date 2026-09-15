@@ -77,12 +77,11 @@ export async function requestPasswordReset(phoneRaw: string, meta: RequestMeta, 
     );
   });
 
-  try {
-    await sms(phone, `BUM ERP: parolni tiklash kodi ${code}. 10 daqiqa amal qiladi. Kodni hech kimga bermang.`);
-  } catch (error) {
-    // Javob bir xil qoladi — aks holda raqam ro'yxatdan o'tgani oshkor bo'lardi
-    logger.error({ err: error, userId: user.id }, "Parol tiklash SMS yuborilmadi");
-  }
+  // SMS kutilmaydi: javob vaqti raqam ro'yxatdan o'tganiga bog'liq bo'lmasin (SMS xizmati sekin javob bersa ham).
+  // Xato bo'lsa javob baribir bir xil — aks holda raqam ro'yxatdan o'tgani oshkor bo'lardi
+  void Promise.resolve()
+    .then(() => sms(phone, `BUM ERP: parolni tiklash kodi ${code}. 10 daqiqa amal qiladi. Kodni hech kimga bermang.`))
+    .catch((error: unknown) => logger.error({ err: error, userId: user.id }, "Parol tiklash SMS yuborilmadi"));
 }
 
 export async function confirmPasswordReset(

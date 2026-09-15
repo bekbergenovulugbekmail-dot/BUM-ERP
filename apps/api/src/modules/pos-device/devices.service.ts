@@ -13,7 +13,7 @@ import { nextDocumentNumber } from "../../shared/numbering.js";
 import type { SessionUser } from "../auth/session.js";
 import { requirePermission, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
-import { newDeviceToken } from "./device-auth.js";
+import { newDeviceToken, revokeDeviceCashiers } from "./device-auth.js";
 
 const deviceFields = {
   id: posDevices.id,
@@ -139,10 +139,14 @@ export async function updateDevice(
   meta: RequestMeta,
 ) {
   const current = await deviceById(tx, tenant.company.id, deviceId);
+  // O'chirilganda token yangi tasodifiy xesh bilan almashtiriladi va kassir bog'lanishlari bekor: qayta yoqish eski
+  // (o'g'irlangan bo'lishi mumkin) tokenni tiklamaydi — kassa ilovada qayta ro'yxatdan o'tkaziladi
+  const deactivating = patch.isActive === false && current.isActive;
   await tx
     .update(posDevices)
-    .set({ ...patch, updatedAt: new Date() })
+    .set({ ...patch, ...(deactivating ? { tokenHash: newDeviceToken().tokenHash } : {}), updatedAt: new Date() })
     .where(eq(posDevices.id, deviceId));
+  if (deactivating) await revokeDeviceCashiers(tx, deviceId);
   await writeAuditLog(
     {
       userId: tenant.user.id,

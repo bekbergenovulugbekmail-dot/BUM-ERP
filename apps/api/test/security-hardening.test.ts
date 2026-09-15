@@ -1,15 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
 import { products, units } from "../src/db/schema/catalog.js";
 import { accounts, cashAccounts } from "../src/db/schema/finance.js";
 import { warehouses } from "../src/db/schema/inventory.js";
-import { auditLogs, companyMembers, passwordResetCodes, roles, users } from "../src/db/schema/platform.js";
+import { auditLogs, companyMembers, passwordResetCodes, roles, sessions, users } from "../src/db/schema/platform.js";
 import { posDeviceCashiers } from "../src/db/schema/pos.js";
 import { salesOrderItems } from "../src/db/schema/sales.js";
+import { hashToken } from "../src/modules/auth/session.js";
 import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
+import { resolveRealtimeAccess } from "../src/modules/delivery/realtime.js";
 import { buildServer } from "../src/server.js";
 import { writeAuditLog } from "../src/shared/audit.js";
 import { registerErrorHandler } from "../src/shared/errors.js";
@@ -507,5 +509,80 @@ describe("Xavfsizlik: pul va ruxsat chegaralari", () => {
     await mini.close();
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+describe("Xavfsizlik: PIN, qulflangan sessiya, qurilma tokeni va ochiq yo'llar", () => {
+  it("PIN: har blok uzayadi, 3-blokda sessiyalar bekor; qulflangan sessiya muddati cho'zilmaydi va real-time olmaydi", async () => {
+    const cookie = company.ownerCookie;
+    const token = cookie.slice(cookie.indexOf("=") + 1);
+    expect((await call(cookie, "POST", "/api/auth/pin", { pin: "2468" })).statusCode).toBeLessThan(300);
+    expect(await resolveRealtimeAccess(token)).not.toBe("unauthenticated");
+    expect((await call(cookie, "POST", "/api/auth/lock")).statusCode).toBeLessThan(300);
+    expect(await resolveRealtimeAccess(token)).toBe("unauthenticated");
+
+    // Qulflangan sessiyaga so'rovlar faolsizlik muddatini uzaytirmaydi
+    const sessionRow = async () => (await db.select().from(sessions).where(eq(sessions.tokenHash, hashToken(token))))[0]!;
+    await db.update(sessions).set({ lastUsedAt: new Date(Date.now() - 10 * 60_000) }).where(eq(sessions.tokenHash, hashToken(token)));
+    const idleBefore = (await sessionRow()).idleExpiresAt.getTime();
+    expect((await me(app, cookie)).statusCode).toBe(200);
+    expect((await sessionRow()).idleExpiresAt.getTime()).toBe(idleBefore);
+
+    const lockCycle = async () => {
+      let reason = "";
+      for (let i = 0; i < 5; i++) reason = (await call(cookie, "POST", "/api/auth/unlock", { pin: "0000" })).json().reason;
+      await db.update(users).set({ pinLockedUntil: new Date(Date.now() - 1000) }).where(eq(users.id, ownerId));
+      return reason;
+    };
+    expect(await lockCycle()).toBe("PIN_LOCKED:300");
+    expect(await lockCycle()).toBe("PIN_LOCKED:600");
+    expect((await me(app, cookie)).statusCode).toBe(200);
+    expect(await lockCycle()).toBe("PIN_LOCKED:1200");
+    // Uchinchi blok — sessiya bekor, faqat parol bilan qayta kirish
+    expect((await me(app, cookie)).statusCode).toBe(401);
+    expect((await login(app, company.owner.phone, company.owner.password)).res.statusCode).toBe(200);
+  });
+
+  it("kassa qurilmasi o'chirilsa token bekor: qayta yoqilganda ham eski token ishlamaydi", async () => {
+    const [warehouse] = await db.select({ id: warehouses.id }).from(warehouses).where(eq(warehouses.companyId, company.companyId));
+    const registered = await app.inject({
+      method: "POST",
+      url: "/api/pos-device/setup/register",
+      payload: { phone: company.owner.phone, password: company.owner.password, warehouseId: warehouse!.id, name: "Kassa Z" },
+    });
+    expect(registered.statusCode, registered.body).toBe(201);
+    const auth = { authorization: `Bearer ${registered.json().token as string}` };
+    const deviceId = registered.json().device.id as string;
+    const deviceSession = () => app.inject({ method: "GET", url: "/api/pos-device/session", headers: auth });
+    expect((await deviceSession()).statusCode).toBe(200);
+
+    const off = await call(company.ownerCookie, "PATCH", `/api/pos/devices/${deviceId}`, { isActive: false });
+    expect(off.statusCode, off.body).toBeLessThan(300);
+    const on = await call(company.ownerCookie, "PATCH", `/api/pos/devices/${deviceId}`, { isActive: true });
+    expect(on.statusCode, on.body).toBeLessThan(300);
+    expect((await deviceSession()).statusCode).toBe(401);
+    const [binding] = await db.select().from(posDeviceCashiers).where(and(eq(posDeviceCashiers.deviceId, deviceId), eq(posDeviceCashiers.userId, ownerId)));
+    expect(binding?.revokedAt).not.toBeNull();
+  });
+
+  it("parol tiklash SMS xizmatini kutmaydi; noma'lum raqamga kirish auditga yoziladi; ochiq kompaniya qidiruvi limitli", async () => {
+    // SMS xizmati hech qachon javob bermaydi — javob baribir darhol va bir xil
+    smsProvider.client = () => new Promise<void>(() => undefined);
+    const victim = await createUser();
+    const started = Date.now();
+    const reset = await app.inject({ method: "POST", url: "/api/auth/password-reset/request", payload: { phone: victim.phone } });
+    expect(reset.statusCode).toBe(200);
+    expect(Date.now() - started).toBeLessThan(5000);
+
+    const unknown = await login(app, "+998977777777", "xato-parol-000");
+    expect(unknown.res.statusCode).toBe(401);
+    const [row] = await db.select().from(auditLogs).where(and(eq(auditLogs.action, "login_failed"), isNull(auditLogs.userId)));
+    expect(row?.details).toMatchObject({ reason: "unknown_phone" });
+    expect(JSON.stringify(row?.details)).not.toContain("7777777");
+
+    const codes: number[] = [];
+    for (let i = 0; i < 61; i++) codes.push((await app.inject({ method: "GET", url: `/api/public/companies/${company.slug}` })).statusCode);
+    expect(codes.slice(0, 60).every((code) => code === 200)).toBe(true);
+    expect(codes[60]).toBe(429);
   });
 });

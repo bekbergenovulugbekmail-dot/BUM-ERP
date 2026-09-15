@@ -85,7 +85,8 @@ export async function validateSession(token: string): Promise<ActiveSession | nu
   if (!row || !row.user.isActive) return null;
 
   const lastUsed = row.session.lastUsedAt?.getTime() ?? 0;
-  if (now.getTime() - lastUsed > TOUCH_INTERVAL_MS) {
+  // Qulflangan sessiya (PIN ekrani) faollik hisoblanmaydi: PIN urinishlari yoki ochiq qolgan qulf ekrani sessiyani cho'zmasin
+  if (!row.session.lockedAt && now.getTime() - lastUsed > TOUCH_INTERVAL_MS) {
     await db
       .update(sessions)
       .set({ lastUsedAt: now, idleExpiresAt: idleDeadline(now.getTime(), row.session.expiresAt) })

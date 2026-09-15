@@ -48,20 +48,31 @@ protocol.registerSchemesAsPrivileged([{ scheme: "bum-image", privileges: { stand
 const PRODUCT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function tokenVault(store: LocalStore): TokenVault {
+  // Windows shifrlashi (safeStorage) bo'lmasa token diskka ochiq yozilmaydi — faqat shu ishga tushish davomida xotirada
+  // turadi (ilova qayta ochilganda qurilmani qayta ulash kerak). Eski versiyadan qolgan ochiq yozuv shifrlab qayta saqlanadi
+  let memoryToken: string | null = null;
+  const encrypt = (token: string) => ({ encrypted: true, value: safeStorage.encryptString(token).toString("base64") });
   return {
     save(token) {
       if (safeStorage.isEncryptionAvailable()) {
-        store.setMeta("deviceToken", { encrypted: true, value: safeStorage.encryptString(token).toString("base64") });
+        store.setMeta("deviceToken", encrypt(token));
+        memoryToken = null;
       } else {
-        store.setMeta("deviceToken", { encrypted: false, value: token });
+        memoryToken = token;
+        store.deleteMeta("deviceToken");
+        console.warn("Qurilma tokeni shifrlanmadi (safeStorage mavjud emas) — diskka saqlanmadi");
       }
     },
     load() {
+      if (memoryToken) return memoryToken;
       const saved = store.getMeta<{ encrypted: boolean; value: string }>("deviceToken");
       if (!saved) return null;
-      return saved.encrypted ? safeStorage.decryptString(Buffer.from(saved.value, "base64")) : saved.value;
+      if (saved.encrypted) return safeStorage.decryptString(Buffer.from(saved.value, "base64"));
+      if (safeStorage.isEncryptionAvailable()) store.setMeta("deviceToken", encrypt(saved.value));
+      return saved.value;
     },
     clear() {
+      memoryToken = null;
       store.deleteMeta("deviceToken");
     },
   };
