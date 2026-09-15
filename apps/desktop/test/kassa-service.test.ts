@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -1071,6 +1071,11 @@ describe("Kassa xizmati (main jarayon)", () => {
   it("sozlamalar: qurilma sozlamalari tekshiruvi, o'chirilgan to'lov usuli, qoldiqsiz sotuv taqiqi, PIN almashtirish, umumiy ma'lumot, yangilanish (SHA-256) va o'rnatish", async () => {
     const api = fakeApi();
     const installed: string[] = [];
+    // Faqat test uchun reliz kaliti; begona kalit imzosi rad etilishi kerak
+    const releaseKey = generateKeyPairSync("ed25519");
+    const foreignKey = generateKeyPairSync("ed25519").privateKey;
+    const signWith = (key: typeof foreignKey, version: string, sha: string) => sign(null, Buffer.from(`BUM-POS-KASSA-RELEASE\n${version}\n${sha}`), key).toString("base64");
+    const signed = (version: string, sha: string) => signWith(releaseKey.privateKey, version, sha);
     const kassa = new KassaService(store, vault, {
       appVersion: "0.1.0",
       platform: "win32",
@@ -1081,6 +1086,7 @@ describe("Kassa xizmati (main jarayon)", () => {
         },
       },
       downloadDir: tmpdir(),
+      releasePublicKeys: [releaseKey.publicKey.export({ format: "der", type: "spki" }).toString("base64")],
     });
     await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
@@ -1145,10 +1151,16 @@ describe("Kassa xizmati (main jarayon)", () => {
     const bytes = Buffer.from("BUM POS KASSA setup");
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     api.state.installer = bytes;
-    api.state.update = { configured: true, available: true, mandatory: false, current: "0.1.0", latest: "0.2.0", url: "https://releases.test/setup.exe", sha256: "0".repeat(64), notes: "Yangi" };
+    api.state.update = { configured: true, available: true, mandatory: false, current: "0.1.0", latest: "0.2.0", url: "https://releases.test/setup.exe", sha256: "0".repeat(64), signature: signed("0.2.0", "0".repeat(64)), notes: "Yangi" };
     await expect(kassa.downloadUpdate()).rejects.toMatchObject({ code: "CHECKSUM_MISMATCH" });
     await expect(kassa.installUpdate()).rejects.toMatchObject({ code: "CONFLICT" });
-    api.state.update = { ...api.state.update, sha256 };
+    // Imzosiz, begona kalit, boshqa versiya yoki boshqa xesh imzosi — fayl umuman yuklanmaydi
+    for (const signature of [null, "x".repeat(88), signWith(foreignKey, "0.2.0", sha256), signed("0.1.9", sha256), signed("0.2.0", "0".repeat(64))]) {
+      api.state.update = { ...api.state.update, sha256, signature };
+      await expect(kassa.downloadUpdate()).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
+      await expect(readFile(path.join(tmpdir(), "BUM-POS-KASSA-Setup-0.2.0.exe.part"))).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    api.state.update = { ...api.state.update, sha256, signature: signed("0.2.0", sha256) };
     const file = path.join(tmpdir(), "BUM-POS-KASSA-Setup-0.2.0.exe");
     try {
       await expect(kassa.downloadUpdate()).resolves.toMatchObject({ available: true, latest: "0.2.0", notes: "Yangi", downloaded: true });
@@ -1161,7 +1173,8 @@ describe("Kassa xizmati (main jarayon)", () => {
     // Nisbiy manzil (server bazasidagi reliz) — API manzilidan, qurilma tokeni bilan
     const nextBytes = Buffer.from("BUM POS KASSA setup 0.3.0");
     api.state.installer = nextBytes;
-    api.state.update = { ...api.state.update, latest: "0.3.0", url: "/api/pos-device/releases/r1/download", sha256: createHash("sha256").update(nextBytes).digest("hex") };
+    const nextSha = createHash("sha256").update(nextBytes).digest("hex");
+    api.state.update = { ...api.state.update, latest: "0.3.0", url: "/api/pos-device/releases/r1/download", sha256: nextSha, signature: signed("0.3.0", nextSha) };
     const nextFile = path.join(tmpdir(), "BUM-POS-KASSA-Setup-0.3.0.exe");
     try {
       await expect(kassa.downloadUpdate()).resolves.toMatchObject({ latest: "0.3.0", downloaded: true });
@@ -1172,7 +1185,8 @@ describe("Kassa xizmati (main jarayon)", () => {
     // Uzilgan yuklab olish: 27% va 70% da aloqa uziladi — har safar `.part` dan (Range) davom etadi, 0 dan emas
     const large = randomBytes(300_000);
     api.state.installer = large;
-    api.state.update = { ...api.state.update, latest: "0.4.0", url: "/api/pos-device/releases/r2/download", sha256: createHash("sha256").update(large).digest("hex") };
+    const largeSha = createHash("sha256").update(large).digest("hex");
+    api.state.update = { ...api.state.update, latest: "0.4.0", url: "/api/pos-device/releases/r2/download", sha256: largeSha, signature: signed("0.4.0", largeSha) };
     const largeFile = path.join(tmpdir(), "BUM-POS-KASSA-Setup-0.4.0.exe");
     try {
       api.state.interruptAt = 81_000;

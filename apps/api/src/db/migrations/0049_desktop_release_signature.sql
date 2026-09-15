@@ -1,0 +1,1 @@
+ALTER TABLE "desktop_releases" ADD COLUMN "signature" varchar(128);

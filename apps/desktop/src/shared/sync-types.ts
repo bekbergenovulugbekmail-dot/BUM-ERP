@@ -50,6 +50,8 @@ export type RemoteUpdate = {
   latest: string | null;
   url: string | null;
   sha256: string | null;
+  /** Ed25519 imzo (versiya + SHA-256) — kassa ichidagi ochiq kalit bilan tekshiriladi; yo'q yoki noto'g'ri — o'rnatilmaydi. */
+  signature?: string | null;
   notes: string | null;
 };
 

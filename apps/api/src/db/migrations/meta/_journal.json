@@ -344,6 +344,13 @@
       "when": 1789395277356,
       "tag": "0048_pos_device_cashiers",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1789456101044,
+      "tag": "0049_desktop_release_signature",
+      "breakpoints": true
     }
   ]
 }

@@ -8,8 +8,9 @@ import { desktopReleaseChunks } from "../src/db/schema/pos.js";
 import { RELEASE_CHUNK_BYTES } from "../src/modules/platform/desktop-releases.service.js";
 import { buildServer } from "../src/server.js";
 import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { foreignSignature, signRelease, useTestReleaseKey } from "./release-key.js";
 
-const ENV_KEYS = ["DESKTOP_LATEST_VERSION", "DESKTOP_DOWNLOAD_URL", "DESKTOP_SHA256", "DESKTOP_MIN_VERSION", "DESKTOP_RELEASE_NOTES"] as const;
+const ENV_KEYS = ["DESKTOP_LATEST_VERSION", "DESKTOP_DOWNLOAD_URL", "DESKTOP_SHA256", "DESKTOP_MIN_VERSION", "DESKTOP_RELEASE_NOTES", "DESKTOP_SIGNATURE"] as const;
 
 let app: FastifyInstance;
 let adminCookie: string;
@@ -18,6 +19,7 @@ let token: string;
 const saved: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
 
 beforeAll(async () => {
+  useTestReleaseKey();
   app = await buildServer();
   await app.ready();
 });
@@ -133,8 +135,17 @@ describe("Desktop kassa relizlari (platforma admini → qurilma)", () => {
       payload: { notes: "Rus tili", minVersion: "0.1.5" },
     });
     expect(patched.json().release).toMatchObject({ notes: "Rus tili", minVersion: "0.1.5" });
-    const published = await app.inject({ method: "POST", url: `/api/platform/desktop-releases/${release.id}/publish`, headers: { cookie: adminCookie } });
-    expect(published.json().release).toMatchObject({ status: "published", publishedAt: expect.any(String) });
+    // E'lon faqat reliz kaliti bilan imzolangan bo'lsa: imzosiz, begona kalit, boshqa versiya imzosi — rad
+    const publish = (id: string, payload?: Record<string, unknown>) =>
+      app.inject({ method: "POST", url: `/api/platform/desktop-releases/${id}/publish`, headers: { cookie: adminCookie }, ...(payload ? { payload } : {}) });
+    expect((await publish(release.id)).statusCode).toBe(400);
+    expect((await publish(release.id, { signature: foreignSignature("0.2.0", sha256) })).json()).toMatchObject({ details: { reason: "signature_invalid" } });
+    expect((await publish(release.id, { signature: signRelease("0.2.1", sha256) })).statusCode).toBe(400);
+    expect((await publish(release.id, { signature: signRelease("0.2.0", sha256), extra: 1 })).statusCode).toBe(400);
+    expect((await check("0.1.0")).json().update).toMatchObject({ configured: false });
+    const signature = signRelease("0.2.0", sha256);
+    const published = await publish(release.id, { signature });
+    expect(published.json().release).toMatchObject({ status: "published", signature, publishedAt: expect.any(String) });
 
     // Bazadagi reliz muhit o'zgaruvchilaridan ustun
     process.env.DESKTOP_LATEST_VERSION = "9.9.9";
@@ -148,6 +159,7 @@ describe("Desktop kassa relizlari (platforma admini → qurilma)", () => {
       latest: "0.2.0",
       url: downloadUrl,
       sha256,
+      signature,
       notes: "Rus tili",
     });
     expect((await check("0.2.0")).json().update).toMatchObject({ available: false, mandatory: false });
@@ -173,7 +185,7 @@ describe("Desktop kassa relizlari (platforma admini → qurilma)", () => {
     // Yangi reliz e'lon qilinsa oldingisi arxivga o'tadi
     const next = await upload(adminCookie, "0.3.0", Buffer.concat([Buffer.from("MZ"), randomBytes(1024)]), "BUM-POS-KASSA-Setup-0.3.0.exe");
     const nextId = next.json().release.id as string;
-    await app.inject({ method: "POST", url: `/api/platform/desktop-releases/${nextId}/publish`, headers: { cookie: adminCookie } });
+    expect((await publish(nextId, { signature: signRelease("0.3.0", next.json().release.sha256 as string) })).statusCode).toBe(200);
     const list = (await app.inject({ method: "GET", url: "/api/platform/desktop-releases", headers: { cookie: adminCookie } })).json().releases as {
       version: string;
       status: string;

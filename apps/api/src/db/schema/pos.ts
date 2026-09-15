@@ -187,6 +187,11 @@ export const desktopReleases = pgTable(
     /** Bo'laklab yuklash sessiyasi: mijoz aytgan hajm va SHA-256 — yakunlashda server hisoblagani bilan solishtiriladi. */
     expectedSize: integer("expected_size"),
     expectedSha256: varchar("expected_sha256", { length: 64 }),
+    /**
+     * Reliz tuzuvchi maxfiy kalit bilan qo'ygan Ed25519 imzo (versiya + SHA-256, base64). E'lon qilishda majburiy va
+     * tekshiriladi; kassa uni o'z ichidagi ochiq kalit bilan qayta tekshiradi.
+     */
+    signature: varchar("signature", { length: 128 }),
     /** `failed` sababi. */
     error: text("error"),
     uploadedBy: uuid("uploaded_by").references(() => users.id, { onDelete: "set null" }),

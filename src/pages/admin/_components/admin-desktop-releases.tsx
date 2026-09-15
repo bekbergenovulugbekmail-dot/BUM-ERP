@@ -229,7 +229,10 @@ function ReleaseRow({ release }: { release: DesktopRelease }) {
     (body: { notes: string | null; minVersion: string | null }) => api.patch<{ release: DesktopRelease }>(`${RELEASES_PATH}/${release.id}`, body),
     invalidate,
   );
-  const publish = useApiMutation(() => api.post<{ release: DesktopRelease }>(`${RELEASES_PATH}/${release.id}/publish`), invalidate);
+  const publish = useApiMutation(
+    (signature: string) => api.post<{ release: DesktopRelease }>(`${RELEASES_PATH}/${release.id}/publish`, { signature }),
+    invalidate,
+  );
   const archive = useApiMutation(() => api.post<{ release: DesktopRelease }>(`${RELEASES_PATH}/${release.id}/archive`), invalidate);
   const abort = useApiMutation(() => api.post(`${UPLOADS_PATH}/${release.id}/abort`), invalidate);
   const busy = patch.isPending || publish.isPending || archive.isPending || abort.isPending;
@@ -248,8 +251,12 @@ function ReleaseRow({ release }: { release: DesktopRelease }) {
   };
 
   const handlePublish = () => {
+    // Imzo reliz tuzuvchi kompyuterida: `node apps/desktop/scripts/release-sign.mjs sign <o'rnatuvchi.exe> <versiya>` — kassalar
+    // imzosiz yoki noto'g'ri imzoli yangilanishni o'rnatmaydi
+    const signature = window.prompt(`${release.version} relizining imzosi (release-sign.mjs sign natijasidagi "Imzo"):`)?.trim();
+    if (!signature) return;
     if (!window.confirm(`${release.version} e'lon qilinsinmi? Barcha kassalarga yangilanish taklif qilinadi.`)) return;
-    void run(() => publish.mutateAsync(), `${release.version} e'lon qilindi`);
+    void run(() => publish.mutateAsync(signature), `${release.version} e'lon qilindi`);
   };
 
   const handleAbort = () => {

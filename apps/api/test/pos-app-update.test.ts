@@ -70,8 +70,12 @@ describe("Desktop kassa: yangilanish va obuna holati", () => {
       latest: "0.2.0",
       url: "https://releases.bum-erp.uz/BUM-POS-KASSA-Setup-0.2.0.exe",
       sha256: SHA,
+      signature: null,
       notes: "Analitika va sozlamalar",
     });
+    // Tashqi reliz imzosi muhit o'zgaruvchisidan; tekshiruvni kassa o'zi bajaradi
+    process.env.DESKTOP_SIGNATURE = "imzo";
+    expect((await check("0.1.0")).json().update).toMatchObject({ signature: "imzo" });
     expect((await check("0.1.7")).json().update).toMatchObject({ available: true, mandatory: false });
     expect((await check("0.2.0")).json().update).toMatchObject({ available: false, mandatory: false });
     expect((await app.inject({ method: "GET", url: "/api/pos-device/app-update" })).statusCode).toBe(401);

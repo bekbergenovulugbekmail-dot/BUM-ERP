@@ -7,6 +7,7 @@ import { warehouses } from "../src/db/schema/inventory.js";
 import { parseByteRange } from "../src/modules/platform/desktop-releases.service.js";
 import { buildServer } from "../src/server.js";
 import { createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { signRelease, useTestReleaseKey } from "./release-key.js";
 
 const CHUNK = 1024 * 1024;
 const sha = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
@@ -17,6 +18,7 @@ let ownerCookie: string;
 let token: string;
 
 beforeAll(async () => {
+  useTestReleaseKey();
   app = await buildServer();
   await app.ready();
 });
@@ -96,7 +98,9 @@ describe("Desktop relizi: bo'laklab davom ettiriladigan yuklash va Range bilan y
     for (let index = 3; index <= 7; index++) expect((await put(upload.id, index, chunkOf(file, index))).statusCode).toBe(200);
     const listed = (await app.inject({ method: "GET", url: "/api/platform/desktop-releases", headers: { cookie: adminCookie } })).json().releases;
     expect(listed).toEqual([expect.objectContaining({ id: upload.id, status: "uploading", receivedBytes: 8 * CHUNK, expectedSize: file.length })]);
-    expect((await app.inject({ method: "POST", url: `/api/platform/desktop-releases/${upload.id}/publish`, headers: { cookie: adminCookie } })).statusCode).toBe(400);
+    const publish = (id: string, version: string, sha256: string) =>
+      app.inject({ method: "POST", url: `/api/platform/desktop-releases/${id}/publish`, headers: { cookie: adminCookie }, payload: { signature: signRelease(version, sha256) } });
+    expect((await publish(upload.id, "0.3.0", fileSha)).statusCode).toBe(400);
     expect((await state(upload.id)).receivedChunks).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
 
     // Qolganlari (oxirgisi qisqa) — teskari tartibda ham bo'ladi
@@ -107,7 +111,7 @@ describe("Desktop relizi: bo'laklab davom ettiriladigan yuklash va Range bilan y
     expect((await action(upload.id, "complete")).statusCode).toBe(200);
     expect((await put(upload.id, 0, chunkOf(file, 0))).statusCode).toBe(409);
     expect((await action(upload.id, "abort")).statusCode).toBe(409);
-    expect((await app.inject({ method: "POST", url: `/api/platform/desktop-releases/${upload.id}/publish`, headers: { cookie: adminCookie } })).statusCode).toBe(200);
+    expect((await publish(upload.id, "0.3.0", fileSha)).statusCode).toBe(200);
 
     // Qurilma: 27% da uzilgan yuklab olish Range bilan davom etadi
     const url = `/api/pos-device/releases/${upload.id}/download`;
@@ -158,7 +162,8 @@ describe("Desktop relizi: bo'laklab davom ettiriladigan yuklash va Range bilan y
     expect(failed.statusCode).toBe(422);
     expect(failed.json()).toMatchObject({ code: "CHECKSUM_MISMATCH", details: { release: { status: "failed" } } });
     expect((await state(wrongId))).toMatchObject({ status: "failed", receivedChunks: [], error: expect.stringContaining("SHA-256") });
-    expect((await app.inject({ method: "POST", url: `/api/platform/desktop-releases/${wrongId}/publish`, headers: { cookie: adminCookie } })).statusCode).toBe(400);
+    const signature = signRelease("0.4.0", sha(other));
+    expect((await app.inject({ method: "POST", url: `/api/platform/desktop-releases/${wrongId}/publish`, headers: { cookie: adminCookie }, payload: { signature } })).statusCode).toBe(400);
 
     // Shu versiyani to'g'ri fayl bilan qayta boshlash, keyin bekor qilish — versiya bo'shaydi
     const restarted = await start(adminCookie, { version: "0.4.0", fileName: "setup-0.4.0.exe", size: good.length, sha256: sha(good), chunkSize: CHUNK });

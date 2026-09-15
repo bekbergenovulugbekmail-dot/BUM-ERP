@@ -21,6 +21,7 @@ import { users } from "../../db/schema/platform.js";
 import { desktopReleaseChunks, desktopReleases } from "../../db/schema/pos.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
+import { isValidReleaseSignature } from "./release-signing.js";
 
 /** Bitta oqim bilan yuklashdagi bo'lak hajmi. */
 export const RELEASE_CHUNK_BYTES = 4 * 1024 * 1024;
@@ -47,6 +48,7 @@ const releaseFields = {
   chunkSize: desktopReleases.chunkSize,
   expectedSize: desktopReleases.expectedSize,
   expectedSha256: desktopReleases.expectedSha256,
+  signature: desktopReleases.signature,
   uploadedBy: desktopReleases.uploadedBy,
   error: desktopReleases.error,
   publishedAt: desktopReleases.publishedAt,
@@ -314,16 +316,22 @@ export async function updateRelease(tx: Tx, id: string, patch: { notes?: string 
 }
 
 /** E'lon qilish: qurilmalar shu relizni oladi; oldin e'lon qilingani arxivga. Faqat to'liq va tekshirilgan fayl. */
-export async function publishRelease(tx: Tx, id: string, actor: Actor, meta: RequestMeta) {
+export async function publishRelease(tx: Tx, id: string, signature: string, actor: Actor, meta: RequestMeta) {
   const release = await lockRelease(tx, id);
   if (isIncomplete(release.status) || release.size === 0 || !release.sha256) throw badRequest("Reliz fayli to'liq yuklanmagan yoki tekshiruvdan o'tmagan");
+  // Imzo reliz tuzuvchidagi maxfiy kalit bilan qo'yiladi; noto'g'ri imzoli relizni kassalar baribir o'rnatmaydi
+  if (!isValidReleaseSignature(release.version, release.sha256, signature)) {
+    throw badRequest("Reliz imzosi noto'g'ri — `node scripts/release-sign.mjs sign <o'rnatuvchi> <versiya>` bergan imzoni kiriting", {
+      reason: "signature_invalid",
+    });
+  }
   await tx
     .update(desktopReleases)
     .set({ status: "archived", updatedAt: new Date() })
     .where(and(eq(desktopReleases.status, "published"), ne(desktopReleases.id, id)));
   const [published] = await tx
     .update(desktopReleases)
-    .set({ status: "published", publishedAt: new Date(), updatedAt: new Date() })
+    .set({ status: "published", signature, publishedAt: new Date(), updatedAt: new Date() })
     .where(eq(desktopReleases.id, id))
     .returning(releaseFields);
   await audit(tx, actor, meta, "DESKTOP_RELEASE_PUBLISHED", id, { version: release.version, sha256: release.sha256 });

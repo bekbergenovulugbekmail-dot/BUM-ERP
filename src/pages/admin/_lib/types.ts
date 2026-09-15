@@ -128,6 +128,8 @@ export type DesktopRelease = {
   chunkSize: number;
   expectedSize: number | null;
   expectedSha256: string | null;
+  /** Ed25519 imzo (e'lon qilishda kiritiladi). */
+  signature?: string | null;
   error: string | null;
   /** Serverdagi bo'laklar hajmi (yuklanayotganda — qancha qabul qilingan). */
   receivedBytes?: number;

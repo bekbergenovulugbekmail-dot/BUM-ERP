@@ -125,6 +125,7 @@ import { ApiError, OfflineError, createApiClient, type ApiClient } from "./api-c
 import { kickDrawer, validateDrawerPrefs } from "./drawer.js";
 import type { LocalStore, OutboxOp, StockDelta, StoredDocument } from "./local-store.js";
 import { PIN_PATTERN, checkPin, hashPin } from "./pin.js";
+import { verifyReleaseSignature } from "./release-signature.js";
 import { SyncEngine } from "./sync-engine.js";
 import { parseWeightBarcode, type WeightBarcodeFormat } from "../shared/scale-barcode.js";
 import type { ScaleConfigInput, ScaleQueueStatus } from "../shared/scale-types.js";
@@ -458,6 +459,8 @@ export class KassaService {
       updater?: AppUpdater;
       /** Yangilanish o'rnatuvchisi yuklanadigan papka (standart — tizim vaqtinchalik papkasi). */
       downloadDir?: string;
+      /** Reliz imzosini tekshiradigan ochiq kalitlar (standart — ilova ichidagi rasmiy kalit; testlar almashtiradi). */
+      releasePublicKeys?: readonly string[];
       /** Mahsulot rasmlari keshi (yo'q bo'lsa rasmlar ko'rsatilmaydi — o'rniga belgi). */
       imageDir?: string;
     },
@@ -3604,7 +3607,7 @@ export class KassaService {
   }
 
   private savedUpdate() {
-    return this.store.getMeta<{ version: string; file: string; sha256: string }>("updateFile");
+    return this.store.getMeta<{ version: string; file: string; sha256: string; signature?: string | null }>("updateFile");
   }
 
   private async remoteUpdate(): Promise<RemoteUpdate> {
@@ -3673,6 +3676,10 @@ export class KassaService {
     this.requireCashier();
     const remote = await this.remoteUpdate();
     if (!remote.available || !remote.url || !remote.sha256 || !remote.latest) throw new KassaError("CONFLICT", "Yangi versiya yo'q");
+    // Imzo kassa ichidagi ochiq kalit bilan tekshiriladi: server yoki admin hisobi buzilsa ham begona fayl yuklanmaydi
+    if (!verifyReleaseSignature(remote.latest, remote.sha256, remote.signature, this.options.releasePublicKeys)) {
+      throw new KassaError("SIGNATURE_INVALID", "Yangilanish imzosi tasdiqlanmadi — o'rnatilmaydi. Administratorga murojaat qiling");
+    }
     const apiUrl = this.store.getMeta<string>("apiUrl");
     const token = this.vault.load();
     // "//host/..." ham "/" bilan boshlanadi, lekin boshqa hostga ketadi — token faqat aynan API origin'iga yuboriladi
@@ -3680,6 +3687,11 @@ export class KassaService {
     if (sameOrigin ? !apiUrl : !remote.url.startsWith("https://")) throw new KassaError("BAD_REQUEST", "Yangilanish manzili xavfsiz emas");
     const target = sameOrigin ? new URL(remote.url, apiUrl!) : new URL(remote.url);
     if (sameOrigin && target.origin !== new URL(apiUrl!).origin) throw new KassaError("BAD_REQUEST", "Yangilanish manzili xavfsiz emas");
+    // Imzo joriy etilishidan oldin yuklangan shu reliz — imzo (hozir tekshirildi) saqlanadi, fayl qayta yuklanmaydi
+    const saved = this.savedUpdate();
+    if (saved && saved.version === remote.latest && saved.sha256 === remote.sha256 && saved.signature !== remote.signature) {
+      this.store.setMeta("updateFile", { ...saved, signature: remote.signature });
+    }
     const info = await this.toUpdateInfo(remote);
     if (info.downloaded) return info;
 
@@ -3730,15 +3742,18 @@ export class KassaService {
     }
     await rename(part, file);
     this.store.deleteMeta("updatePartial");
-    this.store.setMeta("updateFile", { version: remote.latest, file, sha256: remote.sha256 });
+    this.store.setMeta("updateFile", { version: remote.latest, file, sha256: remote.sha256, signature: remote.signature ?? null });
     return { ...info, downloaded: true, partialBytes: 0 };
   }
 
-  /** Yuklangan o'rnatuvchini ishga tushirish (fayl qayta tekshiriladi). Lokal baza va navbat saqlanib qoladi. */
+  /** Yuklangan o'rnatuvchini ishga tushirish (fayl va imzo qayta tekshiriladi). Lokal baza va navbat saqlanib qoladi. */
   async installUpdate(): Promise<void> {
     this.requireCashier();
     const saved = this.savedUpdate();
     if (!saved) throw new KassaError("CONFLICT", "Avval yangilanishni yuklab oling");
+    if (!verifyReleaseSignature(saved.version, saved.sha256, saved.signature, this.options.releasePublicKeys)) {
+      throw new KassaError("SIGNATURE_INVALID", "Yangilanish imzosi tasdiqlanmadi — o'rnatilmaydi");
+    }
     if (!(await KassaService.fileMatches(saved.file, saved.sha256))) throw new KassaError("CHECKSUM_MISMATCH", "O'rnatuvchi fayl o'zgargan yoki o'chirilgan — qayta yuklab oling");
     if (!this.options.updater) throw new KassaError("UNAVAILABLE", "O'rnatish bu muhitda mavjud emas");
     await this.options.updater.install(saved.file);

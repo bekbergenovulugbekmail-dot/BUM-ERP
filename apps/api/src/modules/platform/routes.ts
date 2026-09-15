@@ -380,8 +380,10 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/desktop-releases/:releaseId/publish", async (req) => {
     const { releaseId } = releaseParams.parse(req.params);
+    // Ed25519 imzo (versiya + SHA-256) — reliz tuzuvchi `scripts/release-sign.mjs sign` bilan oladi
+    const { signature } = z.strictObject({ signature: z.string().trim().min(1).max(128) }).parse(req.body ?? {});
     const { user } = authOf(req);
-    return { release: await withTransaction((tx) => publishRelease(tx, releaseId, user, requestMeta(req))) };
+    return { release: await withTransaction((tx) => publishRelease(tx, releaseId, signature, user, requestMeta(req))) };
   });
 
   app.post("/desktop-releases/:releaseId/archive", async (req) => {
