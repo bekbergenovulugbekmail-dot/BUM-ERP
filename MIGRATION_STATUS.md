@@ -1647,6 +1647,43 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 
 **Qolgan xavfsizlik ishlari:** AUTH-7 (PIN bruteforce, qulflangan sessiyada WebSocket), AUTH-8/CLI-10 (token muddati, shifrlash), CLI-5/6 (S3 fayl tekshiruvi — S3 sozlanganda), CLI-9 (Electron fuses), CLI-13 (yuklash sessiyasi egasi), PAY-3 (offline xarid kursi), PAY-8 (dostavka naqdini topshirish), PAY-12 (qaytarishda smena kassiri), PAY-14 (tizim hisoblarini qayta yo'naltirish), PAY-15 (keshbek poygasi), PAY-17 (majburiy idempotentlik kaliti), PAY-18 (chegirma chegarasi/tasdiq), TEN-B-7 (AI/dashboard maosh jami), TEN-B-10 (bo'lim ichidagi ruxsat bo'shliqlari), TEN-B-11 (modul guard bo'shliqlari), TEN-B-13 (obuna yozish yo'llari), TEN-S-6/7/8/9 (modul ruxsatlari, ombor cheklovi o'qishda, pull'da a'zolar, GPS soxtalashtirish), TEN-S-11 (public OSRM). Pullik xizmat majburiy emas: kod imzolash sertifikati (Windows, yiliga taxminan 200–500 USD, kassalar keng tarqatilishidan oldin) — yagona tavsiya etilgan xarajat
 
+## Qolgan xavfsizlik ishlari — ikkinchi bosqich (2026-09-15)
+
+**Talab:** "qolgan xavfsizlik ishlarini qil". Pul oqimini o'zgartiradigan dizayn qarorlari egasining roziligisiz o'zgartirilmadi (pastda).
+
+| Topilma | Holat | Dalil |
+|---|---|---|
+| AUTH-7 PIN sekin tanlash, qulflangan sessiya | DONE | 24 soatda blok 5 → 10 → 20 daqiqa, 3-blokda barcha sessiyalar bekor; qulflangan sessiya muddati uzaymaydi; real-time berilmaydi — test |
+| AUTH-6 raqamni aniqlash | PARTIAL | parol tiklashda SMS kutilmaydi (javob vaqti bir xil) — test; ro'yxatdan o'tishda "raqam band" javobi qoldi (SMS tasdiqlash kerak — Eskiz kalitlari yo'q) |
+| AUTH-8 / CLI-10 qurilma tokeni | PARTIAL | web'dan o'chirilganda token almashtiriladi va kassir bog'lanishlari bekor — test; desktop tokeni shifrlashsiz diskka yozilmaydi (kassa 0.4.6); lokal baza shifrlanmagan — kassa kompyuterlarida BitLocker tavsiya |
+| AUTH-13 mayda nomuvofiqliklar | PARTIAL | noma'lum raqamga kirish urinishi auditga (raqam qisman yashirin), ochiq kompaniya qidiruvi IP limiti — test; "boshqa sessiyalarni ko'rish/yopish" — NOT STARTED |
+| PAY-12 qaytarishda smena kassiri | DONE | test |
+| PAY-15 keshbek poygasi | DONE (kod) | buyurtma qatori qulflanadi; alohida parallel test yo'q |
+| PAY-3 offline xarid kursi | DONE (kod) | `rate_changed` nomuvofiqligi (savdo bilan umumiy funksiya); alohida test yo'q, sinxron testlari o'tdi |
+| PAY-7 / TEN-B-3 qo'lda kirim | DONE | aktiv va tizim nazorat hisoblari qarshi hisob bo'lmaydi; o'rtacha tannarxdan 10 martadan ko'p farq — `finance.manage` — test |
+| PAY-14 tizim yozuvlarini qayta yo'naltirish | PARTIAL | kichikroq kodli hisob bilan subtype'ni tortib olish taqiqi — test; nazorat hisoblariga qo'lda jurnal, yopilgan davr — NOT STARTED |
+| TEN-B-9 moliya bo'shliqlari | PARTIAL | o'z xarajatini tasdiqlash (egadan tashqari) va tasdiqlanganini o'chirish rad — test; qarshi hisobsiz kassa amali jurnalga yozilmasligi — **egasining qarori** (kirim "boshqa daromad"mi yoki "kapital"mi) |
+| TEN-B-7 AI va bosh sahifa | DONE | kassa, qarz, foyda, maosh faqat `finance.view` / `hr.view` / `hr.salary` va modul yoqilgan bo'lsa — test |
+| TEN-S-7 / TEN-B-10 ombor va HR chegaralari | PARTIAL | smena, savdo va xarid buyurtmalari, to'lovlar ro'yxati, ishlab chiqarish buyurtmalari — ruxsat berilgan omborlar; o'z ta'tilini tasdiqlash rad; maosh faqat `hr.salary` bilan — test; ta'minotchi to'lovi hisobi, katalog partiyalari, BOM kategoriyasi — NOT STARTED |
+| TEN-B-11 modul guard | PARTIAL | fayllar tur bo'yicha modulga bog'landi, smart ogohlantirishlar modul o'chiq bo'lsa yashirin — test; moliya moduli o'chiq bo'lsa maosh to'lanmaydi (kod); omborlar yozuvi va ishlab chiqarishni yakunlash — NOT STARTED |
+| TEN-B-13 obuna yozuvlari | PARTIAL | litsenziya so'rovini faqat `license.manage` bekor qiladi (kod); to'xtatilgan kompaniya to'lov so'rovi yarata oladi — ataylab (qayta faollashtirish uchun kerak) |
+| TEN-S-8 qurilmaga a'zolar | DONE | qurilmada ishlay olmaydigan xodimning telefoni va ruxsatlari yuborilmaydi — test (`pos-cashier-permissions` testi userId bo'yicha yangilandi) |
+| TEN-S-9 soxta GPS | PARTIAL | agent qurilmasi 15 daqiqa ichida mock GPS bildirgan bo'lsa buyurtma yuborilmaydi, hodisa va audit (kod; agent testlari o'tdi); do'kon koordinatasini birinchi kiritishni tasdiqlash, dostavka `arrive`/`confirm` — NOT STARTED |
+| CLI-5 S3 yuklash | PARTIAL | biriktirishda tur majburiy va fayl imzosi (Range GET) — test (soxta klient); production'da S3 sozlanmagan — haqiqiy S3 bilan NOT VERIFIED; PDF uchun `content-disposition` — NOT STARTED |
+| CLI-6 rasm metama'lumoti | PARTIAL | bazaga saqlanadigan mahsulot rasmidan EXIF/XMP/izohlar qayta kodlashsiz olib tashlanadi (JPEG, PNG, WebP) — test; S3'ga to'g'ridan-to'g'ri yuklash yo'li — NOT STARTED |
+| CLI-9 Electron fuses | PARTIAL | RunAsNode, NODE_OPTIONS, `--inspect` o'chiq — 0.4.6 o'rnatuvchisidan o'qib tasdiqlangan; asar yaxlitligi va faqat asar'dan yuklash — paketlangan ilovani ishga tushirib sinamaguncha yoqilmadi (ishlab turgan kassaning lokal bazasiga tegmaslik uchun) |
+| CLI-13 reliz yuklash sessiyasi | DONE | sessiyaga faqat boshlagan admin yozadi, yakunlaydi, bekor qiladi; bitta so'rovli yuklashda `x-sha256` majburiy va mos — test |
+
+**Egasining qarori kerak (o'zgartirilmadi):** PAY-8 (dostavka naqdi — agent qo'lidagi pul hisobi va kassaga topshirish), PAY-9 (katta balans to'ldirish va farqli smena yopilishini rahbar tasdiqlashi), PAY-18 (chegirma chegarasi), PAY-19 (soliq yaxlitlashi — summalar o'zgaradi), qarshi hisobsiz kassa amalining jurnali, TEN-S-6 (dostavka/agent ruxsatlari savdo ruxsatlarini chetlab o'tishi), TEN-S-11 (public OSRM — o'chirilsa yo'l masofasi to'g'ri chiziq bo'ladi). PAY-17 — PARTIAL: web POS va to'lov oynasi kalitni doim yuboradi, server majburiy qilmaydi. AUTH-5 (ko'p IP bilan raqamni bloklash) — PARTIAL. CLI-1 — BLOCKED (sertifikat)
+
+**Testlar (shu bosqichdan keyin):**
+- API regressiya: 99 fayl / 438 test, `--maxWorkers=1`, 9 qismda (80 + 49 + 41 + 65 + 28 + 40 + 41 + 56 + 38). Birinchi o'tishda 1 test yiqildi (`pos-cashier-permissions` — kassir qatorini telefon bo'yicha qidirardi; TEN-S-8 dan keyin telefon yuborilmaydi) — test userId bo'yicha yangilandi, qayta o'tdi. Oraliq: B/C bosqichida 2 test noto'g'ri faraz bilan yozilgan edi (Savdo menejerida `finance.view` bor; xarajatlar testi o'zini tasdiqlashni kutardi) — tuzatildi, 35/35. API `tsc` (src + test) — toza
+- Web: 16 fayl / 62 test, tsc, lint (`dashboard/page.tsx`), `vite build` — toza, `dist` da inline skript yo'q
+- Desktop: tsc (main + renderer), 9 fayl / 57 test. **Kassa 0.4.6** — `apps/desktop/release/BUM-POS-KASSA-Setup-0.4.6.exe`, 111 733 115 bayt, SHA-256 `5E36F73E450DEA49BB327205F9059071A58A49AE18B3EEBC165EECBDFD000059`, NotSigned, e'lon qilinmagan, ishga tushirilmagan
+- Android: bu bosqichda o'zgarish yo'q — qayta qurilmadi
+
+**Production (2026-09-15):** `bum-api` `b9a683b4` va `bum-web` `b9b49200` — SUCCESS; migratsiya yo'q. API logida bitta ishga tushish (qayta-qayta yiqilish yo'q), `/health` ok, `/api/auth/me` 401; soxta `X-Forwarded-For` bilan so'rovda API tashqi IP'ni yozdi. Web: login 200, CSP bor, `theme-init.js` — JS, WebSocket cookiesiz 401. Tizimga kirgan holda sinov — NOT VERIFIED
+
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 
 ### Bajarilgan (tekshirilgan)
@@ -1679,7 +1716,7 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 ### Qolgan ishlar
 1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
 1a. **Bootstrap admin parolini almashtirish** (egasi, Railway o'zgaruvchisi): hozirgi parol oddiy parollar qoidasiga tushadi. Tizimga kirgan holda production smoke: realtime (dostavka xaritasi) CSP ostida, kassada kassir kirishi va qaytarish
-2. Kassa **0.4.5** ni (Naqd/Karta/Bank + UZCARD, HUMO va bank hisoblari bo'yicha to'lov, xavfsizlik: yangilanish tokeni faqat API'ga, chek oynasi CSP; 0.4.1–0.4.4 o'rniga) API deploydan keyin platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi, terminal cheki) qo'lda sinov
+2. Kassa **0.4.6** ni (Naqd/Karta/Bank + UZCARD, HUMO va bank hisoblari bo'yicha to'lov, xavfsizlik: yangilanish tokeni faqat API'ga, chek oynasi CSP, token shifrlashsiz saqlanmaydi, Electron fuses; 0.4.1–0.4.5 o'rniga) platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi, terminal cheki) qo'lda sinov; sinovdan keyin asar yaxlitligi fuse'larini yoqish
 3a. Yangi APK'ni telefonga o'rnatib, ish kunida Android "Batareya" bo'limida BUM ERP sarfini oldingi versiya bilan solishtirish; bonnu-market'da UZCARD/HUMO terminallarini "Uzcard"/"Humo" bank hisoblariga komissiya bilan qo'shish (egasi)
 3. Production'da tizimga kirgan holda qo'lda smoke (egasi hisobi bilan): kirish, Dostavka → "Hudud bo'yicha" → biriktirish, "Kunlik marshrut", distribyutsiya xaritasi
 4. Mavjud mijozlarga shahar/mahalla kiritish (avtomatik to'ldirilmaydi)
@@ -1698,7 +1735,7 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 - **Build/test xotirasi:** 8 GB mashinada Docker va Gradle birga ishlasa tizim fon vazifalarini to'xtatadi — APK Docker to'xtatilib qurildi
 - **DNS:** apex `bum-erp.uz` — webspace.uz panelida egasi o'zgartiradi (Railway tarifida `bum-web` ga yana domen qo'shib bo'lmaydi: `app` va `www` band)
 - **Production'da tizimga kirgan sinov:** egasining test hisobi yoki ishtiroki kerak (production admin paroli ishlatilmaydi)
-- **Kassa 0.4.5 e'loni:** platforma admini kirishi kerak (o'rnatuvchi tayyor, imzosiz); API xavfsizlik deployidan keyin
+- **Kassa 0.4.6 e'loni:** platforma admini kirishi kerak (o'rnatuvchi tayyor, imzosiz); API deploy qilingan (2026-09-15)
 - **Bootstrap admin paroli oddiy:** API endi ishga tushishni to'xtatmaydi, faqat ogohlantiradi — almashtirish egasining Railway o'zgaruvchilarida (parol hech qayerga chiqarilmagan)
 - **Kod imzolash sertifikati (CLI-1):** yangilanish o'rnatuvchisi imzosiz — sertifikat kerak (pullik, taxminiy)
 - **Terminal ekvayringi (UZCARD/HUMO API):** bank yoki processing protokoli va kalitlari kerak — hozir terminal to'lovi kassir tomonidan chekka qarab kiritiladi
