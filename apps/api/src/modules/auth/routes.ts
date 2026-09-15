@@ -15,6 +15,7 @@
  *   pin.setAutoLockTimeout    → PUT  /auto-lock
  *   (yangi)                   → POST /lock         ekranni qulflash (sessiya saqlanadi; PIN o'rnatilgan bo'lishi shart)
  *   (yangi)                   → POST /unlock       shu sessiyani PIN bilan ochish (doim 200, { success, reason })
+ *   (yangi)                   -> GET  /sessions, POST /sessions/revoke-others, DELETE /sessions/:sessionId — o'z qurilmalari
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -26,6 +27,7 @@ import { changeOwnPassword, verifyCurrentPassword } from "../users/user-admin.se
 import { confirmPasswordReset, requestPasswordReset } from "./password-reset.service.js";
 import { authenticate, buildMe, startSession } from "./auth.service.js";
 import { authOf, requireAuth, requireSession } from "./guard.js";
+import { listOwnSessions, revokeOtherSessions, revokeOwnSession } from "./sessions.service.js";
 import {
   changePin,
   lockSession,
@@ -71,6 +73,7 @@ const verifyPinBody = z.object({
 });
 const autoLockBody = z.object({ seconds: z.number() });
 const unlockBody = z.object({ pin: z.string().max(16) });
+const sessionParams = z.object({ sessionId: z.uuid() });
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post("/login", async (req, reply) => {
@@ -144,6 +147,22 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ─── SMS orqali parol tiklash ────────────────────────────────────────────
+
+  // Faol sessiyalar (o'z qurilmalari): ro'yxat, bittasini yoki joriydan boshqa hammasini tugatish
+  app.get("/sessions", { preHandler: requireAuth }, async (req) => {
+    return { sessions: await listOwnSessions(db, authOf(req).user.id, req.cookies[SESSION_COOKIE]!) };
+  });
+
+  app.post("/sessions/revoke-others", { preHandler: requireAuth }, async (req) => {
+    const revoked = await withTransaction((tx) => revokeOtherSessions(tx, authOf(req).user, req.cookies[SESSION_COOKIE]!, requestMeta(req)));
+    return { revoked };
+  });
+
+  app.delete("/sessions/:sessionId", { preHandler: requireAuth }, async (req) => {
+    const { sessionId } = sessionParams.parse(req.params);
+    await withTransaction((tx) => revokeOwnSession(tx, authOf(req).user, sessionId, req.cookies[SESSION_COOKIE]!, requestMeta(req)));
+    return { ok: true };
+  });
 
   app.post("/password-reset/request", async (req, reply) => {
     const { phone } = resetRequestBody.parse(req.body);

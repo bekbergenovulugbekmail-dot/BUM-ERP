@@ -214,3 +214,38 @@ describe("Ruxsat va kiritish chegaralari (LOW topilmalar)", () => {
     expect((await call(a.ownerCookie, "PUT", "/api/sales/cashback/settings", { ...settings, tiers: [{ minAmount: 100000.5, percent: 1 }] })).statusCode).toBe(200);
   });
 });
+
+describe("Faol sessiyalar (boshqa qurilmalarni ko'rish va yopish)", () => {
+  it("o'z sessiyalari ro'yxati (token yo'q), bitta sessiyani va boshqalarini tugatish; joriyni emas; begona sessiya 404", async () => {
+    const loginAs = async (userAgent: string) => {
+      const res = await inject("POST", "/api/auth/login", { "user-agent": userAgent }, { phone: a.owner.phone, password: a.owner.password });
+      expect(res.statusCode, res.body).toBe(200);
+      return String(res.headers["set-cookie"]).split(";")[0]!;
+    };
+    const desk = await loginAs("Kompyuter");
+    const phone = await loginAs("Telefon");
+    const tablet = await loginAs("Planshet");
+
+    const list = await call(desk, "GET", "/api/auth/sessions");
+    expect(list.statusCode, list.body).toBe(200);
+    const rows = list.json().sessions as { id: string; userAgent: string; current: boolean }[];
+    expect(rows.filter((row) => row.current).map((row) => row.userAgent)).toEqual(["Kompyuter"]);
+    expect(rows.map((row) => row.userAgent)).toEqual(expect.arrayContaining(["Kompyuter", "Telefon", "Planshet"]));
+    expect(list.body).not.toMatch(/token/i);
+
+    const current = rows.find((row) => row.current)!;
+    expect((await call(desk, "DELETE", `/api/auth/sessions/${current.id}`)).statusCode).toBe(400);
+    const phoneSession = rows.find((row) => row.userAgent === "Telefon")!;
+    expect((await call(b.ownerCookie, "DELETE", `/api/auth/sessions/${phoneSession.id}`)).statusCode).toBe(404);
+    expect((await me(app, phone)).statusCode).toBe(200);
+
+    expect((await call(desk, "DELETE", `/api/auth/sessions/${phoneSession.id}`)).statusCode).toBe(200);
+    expect((await me(app, phone)).statusCode).toBe(401);
+    expect((await me(app, tablet)).statusCode).toBe(200);
+
+    const others = await call(desk, "POST", "/api/auth/sessions/revoke-others");
+    expect(others.json().revoked).toBeGreaterThanOrEqual(1);
+    expect((await me(app, tablet)).statusCode).toBe(401);
+    expect((await me(app, desk)).statusCode).toBe(200);
+  });
+});
