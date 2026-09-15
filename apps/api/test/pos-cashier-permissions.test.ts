@@ -37,7 +37,7 @@ beforeEach(async () => {
 type Cursor = { t: string; id: string };
 type PullBody = {
   config: { hash: string } | null;
-  entities: { cashiers: { rows: { phone: string; permissions: string[]; active: boolean }[]; cursor: Cursor | null } };
+  entities: { cashiers: { rows: { userId: string; phone: string; permissions: string[]; active: boolean }[]; cursor: Cursor | null } };
 };
 
 const pull = async (configHash?: string, cursor?: Cursor | null) =>
@@ -53,7 +53,8 @@ const pull = async (configHash?: string, cursor?: Cursor | null) =>
 describe("Kassa: kassir ruxsatlari yangilanishi", () => {
   it("rol ruxsatlari a'zolik yozuvisiz o'zgarsa (rol tahriri, migratsiya) — config xeshi o'zgaradi va kassirlar qayta yuboriladi", async () => {
     const kassir = await addEmployee(app, company, "Kassir");
-    const rowOf = (body: PullBody) => body.entities.cashiers.rows.find((row) => row.phone === kassir.phone);
+    // Qurilma kassirni userId bo'yicha saqlaydi; shu qurilmada ishlay olmaydigan xodimning telefoni yuborilmaydi
+    const rowOf = (body: PullBody) => body.entities.cashiers.rows.find((row) => row.userId === kassir.id);
 
     const first = await pull();
     expect(rowOf(first)).toMatchObject({ active: true });
