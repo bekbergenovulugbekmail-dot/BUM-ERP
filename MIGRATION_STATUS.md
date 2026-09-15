@@ -1684,6 +1684,40 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 
 **Production (2026-09-15):** `bum-api` `b9a683b4` va `bum-web` `b9b49200` — SUCCESS; migratsiya yo'q. API logida bitta ishga tushish (qayta-qayta yiqilish yo'q), `/health` ok, `/api/auth/me` 401; soxta `X-Forwarded-For` bilan so'rovda API tashqi IP'ni yozdi. Web: login 200, CSP bor, `theme-init.js` — JS, WebSocket cookiesiz 401. Tizimga kirgan holda sinov — NOT VERIFIED
 
+## Mustaqil xavfsizlik tekshiruvi va egasining qarorlari (2026-09-15)
+
+**Talab:** oldingi audit xulosalariga ishonmasdan qayta tekshirish (faqat o'qish production'da), CRITICAL/HIGH darhol tuzatish; "kerakmi deganlaring barchasi kerak" — egasining qarorlarini joriy etish.
+
+| Topilma / qaror | Holat | Dalil |
+|---|---|---|
+| HIGH: kassa qurilmasi kassir nomidan (bog'lanmagan `cashierId`) chek, pul harakati, smena | DONE | barcha qurilma amallari amal vaqtida bog'langan kassirni talab qiladi, ro'yxatdan o'tkazgan avtomatik bog'lanmaydi — qurilma testlari (17 fayl) |
+| HIGH: karta/bank bilan to'langan chekni naqd qaytarish | DONE | bitta usulda asl usuldan ortig'i `finance.manage` siz rad — security-hardening, security-verification |
+| HIGH: kassa yangilanishi imzosiz (server buzilsa kassalarda begona o'rnatuvchi) | DONE | Ed25519 imzo (`apps/desktop/scripts/release-sign.mjs`), kassa ichidagi ochiq kalit bilan yuklashdan va o'rnatishdan oldin tekshiriladi; admin imzosiz e'lon qila olmaydi (0049) — API va kassa testlari |
+| PAY-19 soliq yaxlitlashi, keshbek foizi | DONE | bitta yaxlitlash (server, kassa, web) |
+| TEN-S-11 OSRM | DONE | standart `off` |
+| TEN-S-6 | DONE | yetkazuvchi o'ziga OTP bera olmaydi; agent buyurtmasini o'zi tasdiqlay olmaydi (egadan tashqari) |
+| Qarshi hisobsiz kassa amali | DONE | "boshqa daromad/xarajat" hisobiga jurnal — cash testi |
+| PAY-18 chegirma chegarasi | DONE | `PUT /api/sales/policy`; chegaradan ortig'i `sales.approve` (403 `discount_limit`), offline — `discount_over_limit` — owner-decisions |
+| PAY-9 katta depozit va smena farqi | DONE | kassada balansga (qaytim ham) chegaradan ortig'i `sales.approve`; farq chegaradan oshsa smena `pending`, tasdiqlovchilarga bildirishnoma, `/pos/shift-reviews`, o'z smenasini faqat ega (0050) — owner-decisions |
+| PAY-8 dostavka naqdi | DONE | naqd yetkazuvchining "yo'ldagi naqd" hisobiga, `POST /api/delivery/agents/:id/cash-handover` (boshqa kassa — `finance.manage`, summadan oshmaydi, boshqa kompaniya 404) — owner-decisions, payment-terminals |
+| AUTH F-01 agent/HR orqali boshqa xodim loginini bloklash | DONE | agent profili boshqa roldagi a'zoga bog'lansa yoki HR yozuvi o'chirilsa `employee.software_access.manage` — security-verification (birinchi o'tishda yiqildi: tekshiruv tipda bor, kodda yo'q edi — tuzatildi) |
+| CSRF (SameSite=Lax ustiga) | DONE | cookie bilan o'zgartiruvchi so'rov: begona Origin yoki `Sec-Fetch-Site: cross-site` — 403 `csrf_origin` — test va production (soxta cookie bilan, hech narsa yozilmadi) |
+| PAY F5 qo'lda jurnal nazorat hisoblariga | PARTIAL | kassa, bank, debitor, zaxira, kreditor, avans, keshbek, sotuv, tannarx va kassaga bog'langan hisob rad — finance testi; yopilgan davr (lock date) — NOT STARTED |
+| XSS xarita tooltip | DONE | nomlar matn tuguni |
+| W-1 dostavka oflayn navbati | DONE | navbat foydalanuvchiga bog'langan — web testi |
+| A-1 Android manzili | DONE (kod) | `https://app.bum-erp.uz` (200, CSP bor); APK pastda |
+| I-2/I-3 zaxira | DONE (kod) | `BACKUP_PASSPHRASE` bilan AES-256; tiklash sinovi baza nomini va manbadan farqini tekshiradi; Railway'da ishga tushirilmagan — NOT VERIFIED |
+| Mayda: bildirishnoma havolasi, `.dockerignore`, lokal PG 127.0.0.1, log yashirish, desktop tashqi havolalar | DONE | web testi (tab/yangi qator) |
+| PAY F3/F4 offline kassa (qarz, qaytarish chegaralari), D-3 asar fuse'lari, F-08 kassir boshqa smenani ko'rishi, RLS | NOT STARTED | |
+
+**Testlar:**
+- API: 101 fayl / 449 test, `--maxWorkers=1`, 9 qismda (80 + 49 + 41 + 66 + 27 + 38 + 45 + 57 + 46) — hammasi o'tdi; `tsc` toza. Yangi: `owner-decisions` (4), `security-verification` (7: CSRF, sessiya fiksatsiyasi va chiqishdan keyin cookie, SQLi/XSS yuklamalari, obuna muddati, agent/HR bloklash, boshqa kompaniya va takroriy qaytarish)
+- Web: 16 fayl / 63 test, tsc, lint, `vite build` (inline skript yo'q)
+- Desktop: tsc (main + renderer), 9 fayl / 57 test. **Kassa 0.4.7** — `apps/desktop/release/BUM-POS-KASSA-Setup-0.4.7.exe`, 111 733 951 bayt, SHA-256 `BEC4CB466C613BB8EEE3CA6C040320222F75EFC40FF3109198CA9A420C420E6B`, Ed25519 imzo `k6MIG3q/pIEcHyVWUBdKu2FWConYvWVxsnUqB2WvQK97HREct0oAxwZhbmcLlrKsdOTDKHpu49qkDX9xpzTFDQ==` (ochiq kalit bilan tekshirildi; boshqa versiya/xesh bilan — rad), Authenticode NotSigned, fuses: RunAsNode / NODE_OPTIONS / inspect o'chiq; e'lon qilinmagan
+- **Reliz imzolash:** `node apps/desktop/scripts/release-sign.mjs sign <o'rnatuvchi.exe> <versiya>` — chiqqan "Imzo" platforma admini e'lon qilishda kiritiladi. Maxfiy kalit `%USERPROFILE%\.bum-erp\release-signing-ed25519.pem` — git'da yo'q, **egasi zaxira nusxasini xavfsiz joyda saqlashi shart** (yo'qolsa keyingi yangilanishlarni avtomatik o'rnatib bo'lmaydi). Eski kassalar (0.4.6 va oldingi) imzoni tekshirmaydi — 0.4.7 ni bir marta qo'lda o'rnatish kerak
+
+**Production (2026-09-15):** `bum-api` `1ba3ec03` va `bum-web` `6d63cfe1` — SUCCESS. API logida bitta ishga tushish, migratsiyalar 0049 va 0050 (faqat qo'shimcha ustun va indeks) — bazada 51 ta migratsiya va yangi ustunlar faqat o'qish tranzaksiyasi bilan tasdiqlandi; `/health` ok, `/api/auth/me` 401; soxta `X-Forwarded-For` — API haqiqiy IP'ni yozdi; web sarlavhalari (CSP, HSTS, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy) bor; CORS begona originga ruxsat bermaydi (faqat `WEB_ORIGIN`); noto'g'ri JSON — 400 umumiy xabar; Postgres xizmatida ochiq TCP proksi o'zgaruvchisi yo'q. Tizimga kirgan holda sinov — NOT VERIFIED (production paroli ishlatilmaydi)
+
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 
 ### Bajarilgan (tekshirilgan)
