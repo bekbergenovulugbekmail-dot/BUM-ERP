@@ -39,7 +39,7 @@ import {
   POS_DENSITIES,
   POS_FONT_SCALES,
   POS_SHADOWS,
-  POS_THEMES,
+  POS_LAYOUTS, POS_PANEL_SIDES, POS_THEMES,
   badRequest,
   notFound,
   type PosThemeChoice,
@@ -142,6 +142,9 @@ const appearanceBody = z.strictObject({
   locked: z.boolean(),
   theme: z.enum([...POS_THEMES, CUSTOM_POS_THEME] as unknown as readonly [PosThemeChoice, ...PosThemeChoice[]]),
   custom: customThemeBody.nullable().optional(),
+  /** Biznes egasi: to'lov paneli tomoni va kassa ekrani tuzilishi (berilmasa — saqlangani). */
+  paymentPanelSide: z.enum(POS_PANEL_SIDES).optional(),
+  layout: z.enum(POS_LAYOUTS).optional(),
 });
 const quickSaleBody = z.strictObject({ productIds: z.array(z.uuid()).max(MAX_QUICK_SALE_ITEMS) });
 const suggestionsQuery = z.object({

@@ -18,7 +18,7 @@ import {
   POS_SHADOWS,
   POS_THEMES,
   POS_THEME_ICONS,
-  POS_THEME_LABELS,
+  POS_LAYOUTS, POS_LAYOUT_LABELS, POS_PANEL_SIDES, POS_PANEL_SIDE_LABELS, POS_THEME_LABELS,
   QUICK_SALE_PERIODS,
   activePromoPrice,
   contrastRatio,
@@ -247,6 +247,53 @@ function AppearanceCard() {
           ))}
         </div>
       </div>
+      <div className="space-y-2">
+        <p className="text-sm font-medium">To'lov paneli qayerda</p>
+        <p className="text-xs text-muted-foreground">Mijoz, to'lov usullari va "Yakunlash" tugmasi ekranning qaysi tomonida (web va desktop kassada bir xil)</p>
+        <div className="grid grid-cols-2 gap-2">
+          {POS_PANEL_SIDES.map((side) => (
+            <button
+              key={side}
+              type="button"
+              disabled={save.isPending}
+              onClick={() => void update({ paymentPanelSide: side }, "Kassa joylashuvi saqlandi")}
+              aria-pressed={appearance.paymentPanelSide === side}
+              className={cn(
+                "flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-60",
+                appearance.paymentPanelSide === side ? "border-primary bg-primary/5 font-medium" : "hover:bg-muted",
+              )}
+            >
+              <span aria-hidden className={cn("flex h-6 w-9 gap-0.5 rounded border border-border p-0.5", side === "left" && "flex-row-reverse")}>
+                <span className="flex-1 rounded-[2px] bg-muted" />
+                <span className="w-2.5 rounded-[2px] bg-primary/60" />
+              </span>
+              {POS_PANEL_SIDE_LABELS[side]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-sm font-medium">Kassa ekrani tuzilishi</p>
+        <div className="grid grid-cols-1 gap-2">
+          {POS_LAYOUTS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              disabled={save.isPending}
+              onClick={() => void update({ layout: option }, "Kassa tuzilishi saqlandi")}
+              aria-pressed={appearance.layout === option}
+              className={cn(
+                "rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-60",
+                appearance.layout === option ? "border-primary bg-primary/5 font-medium" : "hover:bg-muted",
+              )}
+            >
+              {POS_LAYOUT_LABELS[option]}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <CustomThemeEditor
         saved={appearance.custom}
         saving={save.isPending}

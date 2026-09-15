@@ -99,16 +99,38 @@ export type PosCustomTheme = {
   fontScale: PosFontScale;
 } & Record<CustomThemeColorField, string>;
 
+/** To'lov paneli (mijoz, to'lov usullari, jami, yakunlash) ekranning qaysi tomonida. */
+export const POS_PANEL_SIDES = ["right", "left"] as const;
+export type PosPanelSide = (typeof POS_PANEL_SIDES)[number];
+export const POS_PANEL_SIDE_LABELS: Record<PosPanelSide, string> = { right: "O'ng tomonda", left: "Chap tomonda" };
+
+/**
+ * Kassa ekrani tuzilishi (boshqa kassalardagi keng tarqalgan variantlar):
+ *   classic — mahsulot kartalari katta maydonda, savat va to'lov yon panelda (supermarket sensorli kassa)
+ *   table   — savat jadval ko'rinishida katta maydonda, mahsulot qidiruv/skaner bilan qo'shiladi (Bito, iiko uslubi)
+ *   compact — kichik kartalar ro'yxati va kengroq to'lov paneli (kichik ekran, noutbuk)
+ */
+export const POS_LAYOUTS = ["classic", "table", "compact"] as const;
+export type PosLayout = (typeof POS_LAYOUTS)[number];
+export const POS_LAYOUT_LABELS: Record<PosLayout, string> = {
+  classic: "Klassik — mahsulot kartalari va yon savat",
+  table: "Jadval — savat jadvali, qidiruv va skaner bilan",
+  compact: "Ixcham — kichik ro'yxat, keng to'lov paneli",
+};
+
 export type PosAppearance = {
   /** true — hamma kassada `theme`, kassir o'zgartira olmaydi; false — kassir tanlamagan bo'lsa `theme` (kompaniya standarti). */
   locked: boolean;
   theme: PosThemeChoice;
   custom: PosCustomTheme | null;
+  /** Biznes egasi tanlaydi — web va desktop kassada bir xil. */
+  paymentPanelSide: PosPanelSide;
+  layout: PosLayout;
 };
 
 export const POS_APPEARANCE_KEY = "pos.appearance";
 
-export const DEFAULT_POS_APPEARANCE: PosAppearance = { locked: false, theme: "system", custom: null };
+export const DEFAULT_POS_APPEARANCE: PosAppearance = { locked: false, theme: "system", custom: null, paymentPanelSide: "right", layout: "classic" };
 
 // ─── Kontrast (WCAG 2.x) ─────────────────────────────────────────────────────
 
@@ -183,13 +205,15 @@ export function parseCustomTheme(value: unknown): PosCustomTheme | null {
 export function parsePosAppearance(raw: string | null | undefined): PosAppearance {
   if (!raw) return DEFAULT_POS_APPEARANCE;
   try {
-    const data = JSON.parse(raw) as { locked?: unknown; theme?: unknown; custom?: unknown };
+    const data = JSON.parse(raw) as { locked?: unknown; theme?: unknown; custom?: unknown; paymentPanelSide?: unknown; layout?: unknown };
     const parsed = parseCustomTheme(data.custom);
     const custom = parsed && validateCustomTheme(parsed).length === 0 ? parsed : null;
     return {
       locked: data.locked === true,
       theme: normalizePosTheme(data.theme, custom !== null) ?? DEFAULT_POS_APPEARANCE.theme,
       custom,
+      paymentPanelSide: (POS_PANEL_SIDES as readonly unknown[]).includes(data.paymentPanelSide) ? (data.paymentPanelSide as PosPanelSide) : DEFAULT_POS_APPEARANCE.paymentPanelSide,
+      layout: (POS_LAYOUTS as readonly unknown[]).includes(data.layout) ? (data.layout as PosLayout) : DEFAULT_POS_APPEARANCE.layout,
     };
   } catch {
     return DEFAULT_POS_APPEARANCE;

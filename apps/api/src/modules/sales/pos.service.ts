@@ -579,7 +579,7 @@ export async function completeSale(
 
   // Keshbek va balansdan keyin qolgani naqd/karta/bank bilan (aralash ham) — universal taqsimot qoidalari
   // (`payment-allocation.service.ts`): terminal va hisob shu kompaniyaniki; karta/bank qoldiqdan oshmaydi; ortiqcha to'lov
-  // rad, qaytim faqat bitta naqd to'lovda; kam to'lov — faqat mijoz tanlanib nasiya (`onCredit`) belgilanganda.
+  // rad, qaytim naqd qismdan; kam to'lov — faqat mijoz tanlanib nasiya (`onCredit`) belgilanganda.
   // Offline chek qurilmada yopilgan (pul va qaytim berilgan) — qaytim va qarz rad etilmaydi
   const due = baseTotal - baseCovered;
   const requestedParts = await resolvePaymentParts(tx, companyId, posPaymentParts(input), { offline: offline !== undefined });
@@ -587,10 +587,12 @@ export async function completeSale(
   if (!buckets.has(baseCurrency) && tendered > 0n) {
     throw badRequest(`Chekda ${baseCurrency} dagi mahsulot yo'q — to'lov valyuta bo'yicha kiritiladi`);
   }
-  const singleCash = requestedParts.length === 1 && requestedParts[0]!.method === "cash";
+  // Qaytim naqd qismdan: karta/bank qoldiqdan oshmaydi (settlePaymentParts), shuning uchun qaytim berilgan naqddan katta
+  // bo'lmaydi — aralash to'lovda ham (masalan 70 000 chekka naqd 60 000 + karta 20 000 → qaytim 10 000)
+  const hasCash = requestedParts.some((part) => part.method === "cash");
   const creditAllowed = !!input.customerId && (offline !== undefined || input.onCredit === true);
   const { allocations, change, paid } = settlePaymentParts(requestedParts, due, {
-    allowCashChange: offline !== undefined || singleCash,
+    allowCashChange: offline !== undefined || hasCash,
     allowShortfall: creditAllowed,
     shortfallMessage: input.customerId
       ? (remaining) => `To'lov to'liq emas: qoldiq ${remaining} — qarzga yozish uchun nasiya belgilanadi`

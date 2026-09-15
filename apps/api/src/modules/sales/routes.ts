@@ -52,6 +52,7 @@ import {
 import { listCustomerPayments, recordSalesPayment } from "./payments.service.js";
 import { recordMixedCustomerPayment } from "./payment-allocation.service.js";
 import { paymentTerminalOptions, posBankAccountOptions } from "../finance/terminals.service.js";
+import { getPosAppearance } from "../pos-device/appearance.service.js";
 import {
   cashbackSettingsSchema,
   getCashbackSettings,
@@ -499,6 +500,8 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
       terminals: await paymentTerminalOptions(db, tenant.company.id, { posOnly: true }),
       bankAccounts: await posBankAccountOptions(db, tenant.company.id),
       maxParts: MAX_PAYMENT_PARTS,
+      // Biznes egasi tanlagan kassa tuzilishi (web kassa ham desktop kabi)
+      layout: await getPosAppearance(db, tenant.company.id).then(({ paymentPanelSide, layout }) => ({ paymentPanelSide, layout })),
     };
   });
 

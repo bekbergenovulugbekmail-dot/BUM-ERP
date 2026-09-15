@@ -323,8 +323,16 @@ describe("Kassa holati saqlanishi (regressiya)", () => {
     const bridge = installBridge();
     await openPosWithTwoColas();
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe("snow"));
-    fireEvent.change(document.getElementById("pay-cash")!, { target: { value: "10000" } });
-    fireEvent.change(document.getElementById("pay-card")!, { target: { value: "4000" } });
+    // To'lov: usul tugmasi → summa oynasi → "Saqlash" (ikki qism = aralash to'lov)
+    const addPayment = async (method: string, amount: string) => {
+      fireEvent.click(screen.getByRole("button", { name: `${method} to'lovi` }));
+      fireEvent.change(await screen.findByLabelText(`${method} summasi`), { target: { value: amount } });
+      fireEvent.click(screen.getByRole("button", { name: "Saqlash" }));
+      await waitFor(() => expect(screen.queryByLabelText(`${method} summasi`)).toBeNull());
+    };
+    await addPayment("Naqd", "10000");
+    await addPayment("Karta", "4000");
+    expect(screen.getByRole("button", { name: "Naqd qismini olib tashlash" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Sozlamalar" }));
     fireEvent.click(await screen.findByRole("button", { name: "Tashqi ko'rinish" }));
@@ -342,8 +350,9 @@ describe("Kassa holati saqlanishi (regressiya)", () => {
     fireEvent.click(screen.getByRole("button", { name: "← Bosh sahifa" }));
     fireEvent.click(await screen.findByText("Kassa (POS)"));
     expect((document.getElementById("cart-qty-0") as HTMLInputElement).value).toBe("2");
-    expect((document.getElementById("pay-cash") as HTMLInputElement).value).toBe("10000");
-    expect((document.getElementById("pay-card") as HTMLInputElement).value).toBe("4000");
+    // Saqlangan to'lov qismlari (aralash to'lov) ham joyida
+    expect(screen.getByRole("button", { name: "Naqd qismini olib tashlash" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Karta qismini olib tashlash" })).toBeTruthy();
     expect(digits(screen.getByTestId("pos-total"))).toBe("24000");
     // Mavzu qayta yuklashsiz: kassa ma'lumotlari qayta so'ralmagan (bitta kontekst so'rovi)
     expect(bridge.calls.filter((item) => item.channel === "pos:context")).toHaveLength(1);

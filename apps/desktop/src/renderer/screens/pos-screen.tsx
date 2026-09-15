@@ -62,6 +62,7 @@ import { decimalInput, fmtMoney, fmtQty, num, trimDecimal } from "../format.ts";
 import { call, errorText } from "../kassa.ts";
 import CustomerDialog from "../pos/customer-dialog.tsx";
 import HeldDialog from "../pos/held-dialog.tsx";
+import PaymentAmountDialog from "../pos/payment-amount-dialog.tsx";
 import { PaymentProgress } from "../pos/payment-progress.tsx";
 import { PosSidebar } from "../pos/pos-sidebar.tsx";
 import { PosStatusBar } from "../pos/pos-status.tsx";
@@ -104,8 +105,8 @@ const MAX_LIST = 960;
 type PayKey = "cash" | "card" | "bank";
 /** To'lov qismi: naqd, bank, karta — terminallar sinxronlangan bo'lsa har terminal alohida (`card:<id>`). */
 type PayPart = { key: string; method: PayKey; terminalId: string | null; cashAccountId: string | null; label: string };
-/** Kiritilgan summa qism kaliti bo'yicha ("cash", "bank", "card" yoki "card:<terminal>"). */
-const EMPTY_TENDER: Record<string, string> = {};
+/** Saqlangan to'lov qismi: tugma (usul + terminal yoki hisob) va kiritilgan summa. */
+type SavedPart = PayPart & { amount: string };
 
 const PAY_METHODS: { key: PayKey; label: string; action: "payCash" | "payCard" | "payBank"; dot: string }[] = [
   { key: "cash", label: "Naqd", action: "payCash", dot: "bg-pos-success" },
@@ -230,8 +231,12 @@ export default function PosScreen({
   const [customer, setCustomer] = useState<PosCustomer | null>(null);
   const [saleCurrencies, setSaleCurrencies] = useState<string[]>([]);
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
-  /** Aralash to'lov: usul bo'yicha kiritilgan summa; hammasi bo'sh — tanlangan usulda aniq summa (tez yakunlash). */
-  const [tender, setTender] = useState<Record<string, string>>(EMPTY_TENDER);
+  /** Saqlangan to'lov qismlari ("Saqlash" bosilganda qo'shiladi); bir nechtasi — aralash to'lov. Bo'sh — tez yakunlash. */
+  const [parts, setParts] = useState<SavedPart[]>([]);
+  /** Summa oynasi ochiq bo'lgan to'lov tugmasi. */
+  const [payPart, setPayPart] = useState<PayPart | null>(null);
+  /** "Qarzga": pul olinmaydi, chek summasi mijoz qarziga yoziladi. */
+  const [creditOnly, setCreditOnly] = useState(false);
   /** Tanlangan karta terminali (summa kiritilmagan tez yakunlashda karta shu terminalga). */
   const [cardTerminal, setCardTerminal] = useState<string | null>(null);
   /** Tanlangan bank hisobi (Moliya bo'limida "Kassada ko'rsatish" belgilanganlardan). */
@@ -356,25 +361,32 @@ export default function PosScreen({
   };
   const partKey = (method: PayKey) =>
     method === "card" && activeTerminalId ? `card:${activeTerminalId}` : method === "bank" && activeBankId ? `bank:${activeBankId}` : method;
-  const typedParts = PAY_METHODS.flatMap((method) => payParts(method.key)).filter((part) => (tender[part.key] ?? "").trim() !== "");
-  const typedMethods = [...new Set(typedParts.map((part) => part.method))];
   const quickMethod: PayKey = payMethod === "transfer" ? "bank" : payMethod;
-  const paymentsInput: { method: PayKey; amount: string | null; terminalId?: string; cashAccountId?: string }[] =
-    typedParts.length === 0
-      ? [
-          {
-            method: quickMethod,
-            amount: null,
-            ...(quickMethod === "card" && activeTerminalId ? { terminalId: activeTerminalId } : {}),
-            ...(quickMethod === "bank" && activeBankId ? { cashAccountId: activeBankId } : {}),
-          },
-        ]
-      : typedParts.map((part) => ({
-          method: part.method,
-          amount: tender[part.key]!.trim(),
-          ...(part.terminalId ? { terminalId: part.terminalId } : {}),
-          ...(part.cashAccountId ? { cashAccountId: part.cashAccountId } : {}),
-        }));
+  /** Kassadagi to'lov tugmalari: aniq karta turlari (UZCARD, HUMO) yoki bank hisoblari bo'lsa umumiy tugma ko'rsatilmaydi. */
+  const payButtons: PayPart[] = enabledMethods.flatMap((method) => {
+    const list = payParts(method.key);
+    return list.length > 1 ? list.slice(1) : list;
+  });
+  const paymentsFrom = (list: SavedPart[]): { method: PayKey; amount: string | null; terminalId?: string; cashAccountId?: string }[] => {
+    if (creditOnly) return [{ method: "cash", amount: "0" }];
+    if (list.length === 0) {
+      return [
+        {
+          method: quickMethod,
+          amount: null,
+          ...(quickMethod === "card" && activeTerminalId ? { terminalId: activeTerminalId } : {}),
+          ...(quickMethod === "bank" && activeBankId ? { cashAccountId: activeBankId } : {}),
+        },
+      ];
+    }
+    return list.map((part) => ({
+      method: part.method,
+      amount: part.amount,
+      ...(part.terminalId ? { terminalId: part.terminalId } : {}),
+      ...(part.cashAccountId ? { cashAccountId: part.cashAccountId } : {}),
+    }));
+  };
+  const paymentsInput = paymentsFrom(parts);
 
   const linesValid = cart.every((line) => QTY.test(line.quantity) && toMinor(line.quantity, 4) > 0n && (line.priceOverride === null || QTY.test(line.priceOverride)));
   let calc: SaleCalc | null = null;
@@ -428,7 +440,8 @@ export default function PosScreen({
     setSelected(0);
     setCustomer(null);
     setPayMethod(prefs?.defaultPaymentMethod ?? "cash");
-    setTender(EMPTY_TENDER);
+    setParts([]);
+    setCreditOnly(false);
     setUseBalance(false);
     setBalanceInput("");
     setUseCashback(false);
@@ -470,7 +483,8 @@ export default function PosScreen({
       ]);
       setSelected(cart.length);
     }
-    setFlash({ key: `${product.id}:${product.baseUnitId}`, at: Date.now() });
+    // Ketma-ket hisoblagich (vaqt emas): har qo'shilganda yangi kalit — animatsiya qayta ishga tushadi
+    setFlash((current) => ({ key: `${product.id}:${product.baseUnitId}`, at: (current?.at ?? 0) + 1 }));
     setNotice(null);
   };
 
@@ -546,21 +560,39 @@ export default function PosScreen({
     setForeignMethod({});
   };
 
-  /** Qolgan summani shu qismga yozish (boshqa qismlarda kiritilgani ayiriladi) — aralash to'lov; karta — terminal bo'yicha. */
-  const fillRest = (key: string) => {
-    const part = PAY_METHODS.flatMap((method) => payParts(method.key)).find((item) => item.key === key);
-    if (!part) return;
+  const dueMinor = calc?.due ?? 0n;
+  const paidMinor = parts.reduce((sum, part) => sum + toMinor(part.amount), 0n);
+  const remainingMinor = dueMinor > paidMinor ? dueMinor - paidMinor : 0n;
+
+  /** Karta/bank qismi chek summasidan oshmasin (server ham shunday tekshiradi); naqdda chegara yo'q — ortig'i qaytim. */
+  const maxForPart = (part: PayPart): bigint | null => {
+    if (part.method === "cash") return null;
+    const others = parts.reduce((sum, item) => sum + (item.method !== "cash" && item.key !== part.key ? toMinor(item.amount) : 0n), 0n);
+    const max = dueMinor - others;
+    return max > 0n ? max : 0n;
+  };
+
+  /** Usul tugmasi bosildi — summa oynasi ochiladi (taklif: qolgan summa). */
+  const openPayPart = (part: PayPart) => {
+    if (cart.length === 0) {
+      setNotice({ tone: "error", text: "Savatcha bo'sh" });
+      return;
+    }
+    setCreditOnly(false);
     setPayMethod(part.method);
     if (part.method === "card") setCardTerminal(part.terminalId);
     if (part.method === "bank") setBankChoice(part.cashAccountId);
-    const due = calc?.due ?? 0n;
-    const others = typedParts
-      .filter((item) => item.key !== key)
-      .reduce((sum, item) => sum + (QTY.test(tender[item.key] ?? "") ? toMinor(tender[item.key]!) : 0n), 0n);
-    setTender((current) => ({ ...current, [key]: trimDecimal(fromMinor(due > others ? due - others : 0n)) }));
+    setPayPart(part);
   };
 
-  const complete = async () => {
+  /** "Saqlash": qism qo'shiladi; bir xil tugma qayta saqlansa summasi qo'shiladi (server takror qismni qabul qilmaydi). */
+  const withPart = (list: SavedPart[], part: PayPart, amount: string): SavedPart[] => {
+    const existing = list.find((item) => item.key === part.key);
+    if (existing) return list.map((item) => (item.key === part.key ? { ...item, amount: trimDecimal(fromMinor(toMinor(item.amount) + toMinor(amount))) } : item));
+    return [...list, { ...part, amount }];
+  };
+
+  const complete = async (list: SavedPart[] = parts) => {
     if (busy || cart.length === 0) return;
     if (!calc) {
       setNotice({ tone: "error", text: "Miqdor yoki narxni tekshiring" });
@@ -579,7 +611,7 @@ export default function PosScreen({
         saleCurrencies: activeCurrencies,
         paymentMethod: payMethod,
         amountPaid: null,
-        payments: paymentsInput,
+        payments: paymentsFrom(list),
         cashbackAmount: useCashback ? cashbackInput.trim() : null,
         balanceAmount: useBalance ? balanceInput.trim() : null,
         changeToBalance,
@@ -681,9 +713,8 @@ export default function PosScreen({
     if (!active || dialog || receipt || detail) return;
     const pickMethod = (method: PayKey) => {
       if (!enabledMethods.some((item) => item.key === method)) return;
-      // Summa kiritilgan bo'lsa — qolgan summa shu usulga (aralash to'lov); aks holda usul tanlanadi (aniq summa)
-      if (typedMethods.length > 0) fillRest(partKey(method));
-      else setPayMethod(method);
+      const list = payParts(method);
+      openPayPart(list.find((item) => item.key === partKey(method)) ?? list[0]!);
     };
     const handlers: Record<(typeof HOTKEY_ACTIONS)[number], () => void> = {
       help: () => setDialog("help"),
@@ -737,6 +768,8 @@ export default function PosScreen({
   const shiftTotals = status.shift?.totals;
   const errors = calc?.errors.filter((error) => error !== "Savatcha bo'sh") ?? [];
   const productView = prefs?.productView ?? "cards";
+  /** To'lov paneli tomoni — biznes egasi web'da tanlaydi (Sozlamalar → Kassa qurilmalari → Kassa ko'rinishi). */
+  const panelLeft = prefs?.paymentPanelSide === "left";
   const shownProducts = showQuick ? (quick?.products ?? []) : products;
   const discountPercent = num(customer?.discountPercent ?? "0");
   const cartQty = new Map<string, number>();
@@ -745,7 +778,7 @@ export default function PosScreen({
   const themeChoices: PosThemeChoice[] = prefs?.customTheme ? [...POS_THEMES, CUSTOM_POS_THEME] : [...POS_THEMES];
   const themeLocked = !prefs || prefs.themeLock !== null;
   const itemsCount = cart.length;
-  const paymentEntered = typedMethods.length > 0 || (!!calc && calc.cashbackUsed + calc.balanceUsed > 0n);
+  const paymentEntered = parts.length > 0 || (!!calc && calc.cashbackUsed + calc.balanceUsed > 0n);
 
   const menu = (
     <DropdownMenu>
@@ -891,6 +924,31 @@ export default function PosScreen({
 
   const dialogs = (
     <>
+      {payPart && (
+        <PaymentAmountDialog
+          title={payPart.label}
+          isCash={payPart.method === "cash"}
+          suggested={(() => {
+            const max = maxForPart(payPart);
+            return max === null || remainingMinor < max ? remainingMinor : max;
+          })()}
+          remaining={remainingMinor}
+          max={maxForPart(payPart)}
+          currency={base}
+          busy={busy}
+          onClose={() => setPayPart(null)}
+          onSave={(amount) => {
+            setParts((current) => withPart(current, payPart, amount));
+            setPayPart(null);
+          }}
+          onFinish={(amount) => {
+            const next = withPart(parts, payPart, amount);
+            setParts(next);
+            setPayPart(null);
+            void complete(next);
+          }}
+        />
+      )}
       <CustomerDialog
         open={dialog === "customer"}
         baseCurrency={base}
@@ -1031,9 +1089,9 @@ export default function PosScreen({
     : "grid-cols-[repeat(auto-fill,minmax(min(100%,var(--pos-card-size)),1fr))]";
 
   return shell(
-    <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_clamp(21.5rem,33vw,30rem)]">
+    <div className={`grid min-h-0 ${panelLeft ? "grid-cols-[clamp(21.5rem,33vw,30rem)_minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)_clamp(21.5rem,33vw,30rem)]"}`}>
       {/* Mahsulotlar */}
-      <section className="flex min-h-0 flex-col gap-(--pos-gap) p-3">
+      <section className={`flex min-h-0 flex-col gap-(--pos-gap) p-3 ${panelLeft ? "order-2" : ""}`}>
         <div className="flex flex-wrap items-center gap-2">
           <form
             className="relative min-w-60 flex-1"
@@ -1206,7 +1264,7 @@ export default function PosScreen({
       </section>
 
       {/* Savat va to'lov */}
-      <aside className="pos-glass flex min-h-0 flex-col border-l border-border bg-pos-cart" aria-label="Savat">
+      <aside className={`pos-glass flex min-h-0 flex-col border-border bg-pos-cart ${panelLeft ? "order-1 border-r" : "border-l"}`} aria-label="Savat">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           {customer ? (
             <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -1420,99 +1478,58 @@ export default function PosScreen({
 
           {(!calc || calc.hasBaseBucket) && (
             <div className="space-y-1.5">
-              {/* Usullar yonma-yon (NAQD / KARTA / BANK): kichik ekranda savatga joy qoladi */}
-              <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.max(enabledMethods.length, 1)}, minmax(0, 1fr))` }}>
-                {enabledMethods.map((method) => {
-                  const chosen = payMethod === method.key;
-                  const parts = payParts(method.key);
-                  // Bir nechta qism (umumiy + UZCARD, HUMO yoki bank hisoblari) — har biri nomi bilan
-                  const labeled = parts.length > 1;
-                  const methodActiveId = method.key === "card" ? activeTerminalId : method.key === "bank" ? activeBankId : null;
+              {/* Usul tugmasi → summa oynasi → "Saqlash" (qism qo'shiladi) yoki "Yakunlash" (chek yopiladi) */}
+              <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(payButtons.length, 1), 3)}, minmax(0, 1fr))` }}>
+                {payButtons.map((part) => {
+                  const saved = parts.find((item) => item.key === part.key);
+                  const method = PAY_METHODS.find((item) => item.key === part.method)!;
                   return (
-                    <div
-                      key={method.key}
-                      className={`@container rounded-(--radius) border p-1 ${chosen ? "border-primary bg-pos-selected ring-1 ring-primary" : "border-border bg-background/60"}`}
+                    <button
+                      key={part.key}
+                      type="button"
+                      disabled={cart.length === 0}
+                      title={part.label}
+                      aria-label={`${part.label} to'lovi`}
+                      className={`pos-motion @container flex h-(--pos-tap-size) min-w-0 items-center justify-center gap-1.5 rounded-(--radius) border px-2 text-sm font-semibold disabled:opacity-50 ${
+                        saved ? "border-primary bg-pos-selected ring-1 ring-primary" : "border-border bg-background/60 hover:bg-muted"
+                      }`}
+                      onClick={() => openPayPart(part)}
                     >
-                      <div className="flex items-center gap-1 px-0.5">
-                        <button
-                          type="button"
-                          aria-pressed={chosen}
-                          title={typedMethods.length > 0 ? "Qolgan summani shu usulga" : undefined}
-                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded py-0.5 text-left text-sm font-semibold"
-                          onClick={() => (typedMethods.length > 0 ? fillRest(partKey(method.key)) : setPayMethod(method.key))}
-                        >
-                          <span className={`size-2 shrink-0 rounded-full ${method.dot}`} aria-hidden />
-                          <span className="truncate">{method.label}</span>
-                          <span className="hidden text-[10px] font-medium text-muted-foreground @[8.5rem]:inline">{hotkeys[method.action]}</span>
-                        </button>
-                        {calc && calc.due > 0n && parts.length === 1 && (
-                          <button
-                            type="button"
-                            className="shrink-0 rounded px-1 text-[11px] font-semibold text-primary hover:underline"
-                            title="Qolgan summani shu usulga"
-                            onClick={() => fillRest(parts[0]!.key)}
-                          >
-                            qoldiq
-                          </button>
-                        )}
-                      </div>
-                      {parts.map((part) => {
-                        // Terminal yoki bank hisobi: tanlangani belgilanadi; summa kiritilmagan tez yakunlashda to'lov shunga
-                        const specific = part.terminalId !== null || part.cashAccountId !== null;
-                        // Umumiy qism — aniq karta turi/hisob tanlanmagan paytda tanlangan
-                        const partChosen = chosen && (specific ? (part.terminalId ?? part.cashAccountId) === methodActiveId : methodActiveId === null);
-                        return (
-                          <div key={part.key}>
-                            {labeled && (
-                              <div className="mt-1 flex items-center gap-1 px-0.5">
-                                <button
-                                  type="button"
-                                  aria-pressed={partChosen}
-                                  title={part.terminalId ? "Karta turi" : part.cashAccountId ? "Bank hisobi" : "Umumiy (asosiy bank hisobi)"}
-                                  className={`min-w-0 flex-1 truncate rounded text-left text-[11px] font-bold tracking-wide ${partChosen ? "text-primary" : "text-muted-foreground"}`}
-                                  onClick={() => {
-                                    setPayMethod(part.method);
-                                    if (part.method === "card") setCardTerminal(part.terminalId);
-                                    if (part.method === "bank") setBankChoice(part.cashAccountId);
-                                  }}
-                                >
-                                  {part.label}
-                                </button>
-                                {calc && calc.due > 0n && (
-                                  <button
-                                    type="button"
-                                    className="shrink-0 rounded px-1 text-[11px] font-semibold text-primary hover:underline"
-                                    title="Qolgan summani shu qismga"
-                                    onClick={() => fillRest(part.key)}
-                                  >
-                                    qoldiq
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                            <Input
-                              id={part.terminalId ? `pay-card-${part.terminalId}` : part.cashAccountId ? `pay-bank-${part.cashAccountId}` : `pay-${method.key}`}
-                              aria-label={specific ? `${method.label} ${part.label}` : method.label}
-                              className="mt-1 h-(--pos-tap-size) min-w-0 px-2 text-right text-base font-bold tabular-nums"
-                              inputMode="decimal"
-                              placeholder={
-                                typedParts.length === 0 && calc && partChosen
-                                  ? trimDecimal(fromMinor(calc.due))
-                                  : "0"
-                              }
-                              value={tender[part.key] ?? ""}
-                              onChange={(e) => setTender((current) => ({ ...current, [part.key]: decimalInput(e.target.value) }))}
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
+                      <span className={`size-2 shrink-0 rounded-full ${method.dot}`} aria-hidden />
+                      <span className="truncate">{part.label}</span>
+                      {saved ? (
+                        <span className="shrink-0 text-xs font-bold tabular-nums">{fmtMoney(saved.amount, base)}</span>
+                      ) : (
+                        <span className="hidden text-[10px] font-medium text-muted-foreground @[9rem]:inline">{hotkeys[method.action]}</span>
+                      )}
+                    </button>
                   );
                 })}
               </div>
-              {/* Taqsimot va TO'LANADI / TO'LANGAN / QOLDIQ — summa kiritilganda (aniq summada qoldiq doim 0, joy savatga qoladi) */}
+
+              {parts.length > 0 && (
+                <ul className="space-y-1 rounded-(--radius) border border-border bg-background/60 p-1.5 text-sm">
+                  {parts.map((part) => (
+                    <li key={part.key} className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate">{part.label}</span>
+                      <span className="font-bold tabular-nums">{fmtMoney(part.amount, base)}</span>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="size-7"
+                        aria-label={`${part.label} qismini olib tashlash`}
+                        onClick={() => setParts((current) => current.filter((item) => item.key !== part.key))}
+                      >
+                        <X className="size-4 text-pos-danger" />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Taqsimot va TO'LANADI / TO'LANGAN / QOLDIQ */}
               {calc && paymentEntered && <PaymentProgress calc={calc} base={base} terminals={terminals} bankAccounts={bankAccounts} />}
-              {calc && paymentEntered && (
+              {calc && (
                 <dl className="grid grid-cols-3 gap-1.5">
                   <SummaryCell label="To'lanadi" value={fmtMoney(fromMinor(calc.due), base)} />
                   <SummaryCell label="To'langan" value={fmtMoney(fromMinor(calc.paid), base)} />
@@ -1524,7 +1541,15 @@ export default function PosScreen({
                 </dl>
               )}
               {customer && calc && calc.due > 0n && (
-                <Button size="sm" variant="ghost" className="w-full text-pos-warning" onClick={() => setTender({ cash: "0" })}>
+                <Button
+                  size="sm"
+                  variant={creditOnly ? "default" : "ghost"}
+                  className={creditOnly ? "w-full" : "w-full text-pos-warning"}
+                  onClick={() => {
+                    setParts([]);
+                    setCreditOnly((value) => !value);
+                  }}
+                >
                   Qarzga (mijoz hisobiga)
                 </Button>
               )}

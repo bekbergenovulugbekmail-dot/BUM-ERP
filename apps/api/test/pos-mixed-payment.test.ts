@@ -85,18 +85,17 @@ describe("POS: aralash to'lov (naqd + karta + bank)", () => {
     expect((await sell({})).statusCode).toBe(400);
     expect(await db.select().from(salesOrders).where(eq(salesOrders.companyId, company.companyId))).toHaveLength(0);
 
-    // Aralash to'lovda ortiqcha to'lov (22000 > 20000) rad — qaytim faqat bitta naqd to'lovda; hech narsa yozilmaydi
+    // Karta va bank chek summasidan oshmaydi (22000 > 20000) — rad; hech narsa yozilmaydi
     const clientRequestId = randomUUID();
     const overpaid = await sell({
       clientRequestId,
       payments: [
-        { method: "cash", amount: "12000" },
-        { method: "card", amount: "7000" },
-        { method: "bank", amount: "3000" },
+        { method: "card", amount: "17000" },
+        { method: "bank", amount: "5000" },
       ],
     });
     expect(overpaid.statusCode).toBe(400);
-    expect(overpaid.json()).toMatchObject({ details: { reason: "overpayment", total: "20000.00", paid: "22000.00" } });
+    expect(overpaid.json()).toMatchObject({ details: { reason: "overpayment" } });
     expect(await db.select().from(salesOrders).where(eq(salesOrders.companyId, company.companyId))).toHaveLength(0);
 
     const payments = MIXED;
@@ -140,6 +139,18 @@ describe("POS: aralash to'lov (naqd + karta + bank)", () => {
     expect((await sell({ items: [{ productId, quantity: "1" }], paymentMethod: "bank", amountPaid: "5000" })).statusCode).toBe(201);
     expect((await sell({ items: [{ productId, quantity: "1" }], paymentMethod: "cash", amountPaid: "6000" })).json()).toMatchObject({ change: "1000.00", payments: [{ method: "cash", amount: "5000.00" }] });
     expect(await shiftOf(kassir.cookie, shift.id)).toMatchObject({ totalBank: "8000.00", totalCash: "15000.00", receiptCount: 3 });
+  });
+
+  it("aralash to'lovda qaytim naqddan: naqd 12 000 + karta 10 000 → 20 000 chek, qaytim 2 000; naqdsiz ortiqcha — rad", async () => {
+    const kassir = await addEmployee(app, company, "Kassir");
+    const shift = await openShift(kassir.cookie);
+    const sell = (payments: object[]) => pos("POST", "/sales", kassir.cookie, { shiftId: shift.id, items: [{ productId, quantity: "4" }], payments });
+    const sold = await sell([{ method: "cash", amount: "12000" }, { method: "card", amount: "10000" }]);
+    expect(sold.statusCode, sold.body).toBe(201);
+    expect(sold.json()).toMatchObject({ paid: "20000.00", change: "2000.00", debt: "0.00", payments: [{ method: "cash", amount: "10000.00" }, { method: "card", amount: "10000.00" }] });
+    expect(await balanceOf(mainCash)).toBe("10000.00");
+    expect(await shiftOf(kassir.cookie, shift.id)).toMatchObject({ totalCash: "10000.00", totalCard: "10000.00" });
+    expect((await sell([{ method: "card", amount: "15000" }, { method: "bank", amount: "6000" }])).statusCode).toBe(400);
   });
 
   it("qaytarish: taqsimot, usul chegarasi va yig'indi tekshiruvi; to'liq qaytarishda asl tarkib bo'yicha", async () => {

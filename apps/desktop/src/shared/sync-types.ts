@@ -461,7 +461,7 @@ export type PosConfig = {
   /** Etiketka shablonlari (`LabelSettings`, web: Sozlamalar → Etiketka); eski server — yo'q. */
   labels?: unknown;
   /** Kassa mavzusi qulfi (web: Sozlamalar → Kassa qurilmalari); eski server — yo'q. */
-  appearance?: { locked: boolean; theme: string; custom?: unknown };
+  appearance?: { locked: boolean; theme: string; custom?: unknown; paymentPanelSide?: string; layout?: string };
   /** Tezkor sotuv assortimenti (tartibi bilan); eski server — yo'q. */
   quickSale?: { productIds: string[] };
   /** Faol karta terminallari (web: Moliya → Karta terminallari); eski server — yo'q. */

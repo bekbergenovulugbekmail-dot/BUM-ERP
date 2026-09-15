@@ -47,10 +47,10 @@ const put = (cookie: string, payload: object) => app.inject({ method: "PUT", url
 describe("Kassa ko'rinishi: kompaniya standart mavzusi, qulf va maxsus mavzu", () => {
   it("standart — Windows System, qulfsiz; rahbar o'zgartiradi (pos.devices.manage), kassir yo'q; qurilmaga config bilan; eski nomlar", async () => {
     const owner = company.ownerCookie;
-    expect((await app.inject({ method: "GET", url: path, headers: { cookie: owner } })).json()).toEqual({ appearance: { locked: false, theme: "system", custom: null } });
+    expect((await app.inject({ method: "GET", url: path, headers: { cookie: owner } })).json()).toEqual({ appearance: { locked: false, theme: "system", custom: null, paymentPanelSide: "right", layout: "classic" } });
 
     const before = await pull();
-    expect(before.config!.appearance).toEqual({ locked: false, theme: "system", custom: null });
+    expect(before.config!.appearance).toEqual({ locked: false, theme: "system", custom: null, paymentPanelSide: "right", layout: "classic" });
 
     const kassir = await addEmployee(app, company, "Kassir");
     expect((await put(kassir.cookie, { locked: true, theme: "midnight" })).statusCode).toBe(403);
@@ -59,10 +59,10 @@ describe("Kassa ko'rinishi: kompaniya standart mavzusi, qulf va maxsus mavzu", (
     expect((await put(owner, { locked: true, theme: "dark" })).statusCode).toBe(400);
 
     for (const theme of ["midnight", "snow", "ocean", "emerald", "royal", "sunset", "graphite", "glass", "neon", "classic", "high-contrast", "system"]) {
-      expect((await put(owner, { locked: false, theme })).json()).toEqual({ appearance: { locked: false, theme, custom: null } });
+      expect((await put(owner, { locked: false, theme })).json()).toEqual({ appearance: { locked: false, theme, custom: null, paymentPanelSide: "right", layout: "classic" } });
     }
     const saved = await put(owner, { locked: true, theme: "high-contrast" });
-    expect(saved.json()).toEqual({ appearance: { locked: true, theme: "high-contrast", custom: null } });
+    expect(saved.json()).toEqual({ appearance: { locked: true, theme: "high-contrast", custom: null, paymentPanelSide: "right", layout: "classic" } });
 
     const after = await pull(before.config!.hash);
     expect(after.config).toMatchObject({ appearance: { locked: true, theme: "high-contrast" } });
@@ -70,9 +70,9 @@ describe("Kassa ko'rinishi: kompaniya standart mavzusi, qulf va maxsus mavzu", (
     expect((await pull(after.config!.hash)).config).toBeNull();
 
     // K4 da saqlangan qiymatlar yangi nomlarga o'giriladi
-    expect(parsePosAppearance('{"locked":true,"theme":"dark"}')).toEqual({ locked: true, theme: "midnight", custom: null });
-    expect(parsePosAppearance('{"locked":false,"theme":"green"}')).toEqual({ locked: false, theme: "emerald", custom: null });
-    expect(parsePosAppearance("buzilgan")).toEqual({ locked: false, theme: "system", custom: null });
+    expect(parsePosAppearance('{"locked":true,"theme":"dark"}')).toEqual({ locked: true, theme: "midnight", custom: null, paymentPanelSide: "right", layout: "classic" });
+    expect(parsePosAppearance('{"locked":false,"theme":"green"}')).toEqual({ locked: false, theme: "emerald", custom: null, paymentPanelSide: "right", layout: "classic" });
+    expect(parsePosAppearance("buzilgan")).toEqual({ locked: false, theme: "system", custom: null, paymentPanelSide: "right", layout: "classic" });
   });
 
   it("maxsus mavzu: kontrast tekshiruvi (400 va sabablar), saqlash, kompaniya mavzusi sifatida qulf, qurilmaga config", async () => {
@@ -102,5 +102,22 @@ describe("Kassa ko'rinishi: kompaniya standart mavzusi, qulf va maxsus mavzu", (
     expect(contrastRatio("#000000", "#ffffff")).toBe(21);
     expect(readableTextColor("#1d4ed8")).toBe("#ffffff");
     expect(readableTextColor("#fde68a")).toBe("#111827");
+  });
+
+  it("to'lov paneli tomoni va kassa tuzilishi: biznes egasi tanlaydi, mavzu o'zgarsa saqlanadi, web kassa va qurilmaga boradi", async () => {
+    const owner = company.ownerCookie;
+    expect((await put(owner, { locked: false, theme: "ocean", paymentPanelSide: "top" })).statusCode).toBe(400);
+    expect((await put(owner, { locked: false, theme: "ocean", layout: "grid3d" })).statusCode).toBe(400);
+    const saved = await put(owner, { locked: false, theme: "ocean", paymentPanelSide: "left", layout: "table" });
+    expect(saved.json().appearance).toMatchObject({ paymentPanelSide: "left", layout: "table" });
+    // Mavzuni o'zgartirish joylashuvni tiklab yubormaydi
+    expect((await put(owner, { locked: true, theme: "snow" })).json().appearance).toMatchObject({ theme: "snow", paymentPanelSide: "left", layout: "table" });
+    expect((await pull()).config!.appearance).toMatchObject({ paymentPanelSide: "left", layout: "table" });
+
+    const kassir = await addEmployee(app, company, "Kassir");
+    const options = await app.inject({ method: "GET", url: "/api/sales/pos/payment-options", headers: { cookie: kassir.cookie } });
+    expect(options.statusCode, options.body).toBe(200);
+    expect(options.json().layout).toEqual({ paymentPanelSide: "left", layout: "table" });
+    expect(parsePosAppearance('{"theme":"snow","paymentPanelSide":"middle","layout":"x"}')).toMatchObject({ paymentPanelSide: "right", layout: "classic" });
   });
 });

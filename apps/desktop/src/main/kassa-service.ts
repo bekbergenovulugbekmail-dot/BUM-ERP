@@ -176,6 +176,8 @@ export const DEFAULT_PREFS: DevicePrefs = {
   density: "comfortable",
   fontScale: "normal",
   productView: "cards",
+  paymentPanelSide: "right",
+  companyLayout: "classic",
   hotkeys: { ...DEFAULT_HOTKEYS },
   blockNegativeStock: false,
   defaultPaymentMethod: "cash",
@@ -3503,6 +3505,9 @@ export class KassaService {
       customTheme,
       density: [own?.density, stored.density, themeDefaults?.density].find(isPosDensity) ?? "comfortable",
       fontScale: [own?.fontScale, stored.fontScale, themeDefaults?.fontScale].find(isPosFontScale) ?? "normal",
+      // Joylashuv va tuzilish — kompaniya sozlamasi (web: Sozlamalar → Kassa qurilmalari); eski server — standart
+      paymentPanelSide: appearance?.paymentPanelSide === "left" ? "left" : "right",
+      companyLayout: appearance?.layout === "table" ? "table" : appearance?.layout === "compact" ? "compact" : "classic",
     };
   }
 

@@ -638,6 +638,10 @@ export type DevicePrefs = {
   fontScale: PosFontScale;
   /** Kassa ekranidagi mahsulotlar: rasmli kartalar yoki ixcham jadval. */
   productView: "cards" | "table";
+  /** Faqat o'qish: to'lov paneli tomoni — biznes egasi web'da tanlaydi (Sozlamalar → Kassa qurilmalari). */
+  paymentPanelSide: "right" | "left";
+  /** Faqat o'qish: kompaniya tanlagan kassa tuzilishi (klassik, jadval, ixcham). */
+  companyLayout: "classic" | "table" | "compact";
   hotkeys: Record<HotkeyAction, string>;
   /** Qoldiq yetmasa sotishni taqiqlash (standart — ogohlantirib sotiladi, server nomuvofiqlik qayd etadi). */
   blockNegativeStock: boolean;

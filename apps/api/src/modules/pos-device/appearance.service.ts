@@ -11,6 +11,8 @@ import {
   validateCustomTheme,
   type PosAppearance,
   type PosCustomTheme,
+  type PosLayout,
+  type PosPanelSide,
   type PosThemeChoice,
 } from "@bum/shared";
 import { settings } from "../../db/schema/platform.js";
@@ -32,7 +34,7 @@ export async function getPosAppearance(conn: DbOrTx, companyId: string): Promise
 export async function savePosAppearance(
   tx: Tx,
   tenant: TenantContext,
-  input: { locked: boolean; theme: PosThemeChoice; custom?: PosCustomTheme | null },
+  input: { locked: boolean; theme: PosThemeChoice; custom?: PosCustomTheme | null; paymentPanelSide?: PosPanelSide; layout?: PosLayout },
   meta: RequestMeta,
 ): Promise<PosAppearance> {
   const current = await getPosAppearance(tx, tenant.company.id);
@@ -42,7 +44,14 @@ export async function savePosAppearance(
     if (issues.length > 0) throw badRequest("Maxsus mavzu kontrast talabidan o'tmadi", { issues });
   }
   if (input.theme === "custom" && !custom) throw badRequest("Kompaniya maxsus mavzusi yaratilmagan");
-  const value: PosAppearance = { locked: input.locked, theme: input.theme, custom };
+  const value: PosAppearance = {
+    locked: input.locked,
+    theme: input.theme,
+    custom,
+    // Berilmasa — saqlangan tanlov (mavzuni o'zgartirish joylashuvni tiklab yubormasin)
+    paymentPanelSide: input.paymentPanelSide ?? current.paymentPanelSide,
+    layout: input.layout ?? current.layout,
+  };
   await upsertCompanySetting(
     tx,
     tenant,
