@@ -43,7 +43,7 @@ import { fromMinor, rescale, toMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency, financeAudit } from "./accounts.service.js";
 import { currencyRate } from "./currencies.service.js";
-import { assertPeriodOpen, postJournalEntry, requireAccountBySubtype } from "./journal.service.js";
+import { assertPeriodOpen, ensureAccountBySubtype, findAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "./journal.service.js";
 import { applyOutgoingBankCommission } from "./bank-commission.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...cashAccountFields } = getTableColumns(cashAccounts);
@@ -78,6 +78,10 @@ export async function ledgerAccountFor(
       .where(and(eq(accounts.id, linked), eq(accounts.companyId, companyId), eq(accounts.type, "asset"), eq(accounts.isActive, true)))
       .limit(1);
     if (row) return row.id;
+  }
+  // Kutilayotgan hisob (karta/hamyon) — 1030 "Kutilayotgan to'lovlar"; bu hisob ochilmagan eski kompaniyada bank hisobi
+  if (isPendingAccountType(type)) {
+    return (await findAccountBySubtype(conn, companyId, "clearing", "asset")) ?? requireAccountBySubtype(conn, companyId, "bank", "asset", "Bank hisobi");
   }
   return requireAccountBySubtype(conn, companyId, type, "asset", type === "cash" ? "Naqd kassa" : "Bank hisobi");
 }
@@ -274,7 +278,30 @@ export type CashAccountInput = {
   showInPos?: boolean;
   /** Bank hisobidan pul chiqarish komissiyasi, %. */
   outgoingCommissionPercent?: string;
+  /** Kutilayotgan hisob (karta/hamyon) qaysi bank hisobiga qirqiladi. */
+  settlesToCashAccountId?: string | null;
+  /** Qirqim komissiyasi, % — kutilayotgan hisobdan bankka o'tkazishda ushlanadi. */
+  settlementCommissionPercent?: string;
 };
+
+/** Kutilayotgan hisob (karta terminali, elektron hamyon): pul qirqimgacha shu hisobda turadi. */
+export function isPendingAccountType(type: CashAccountType) {
+  return type === "card" || type === "ewallet";
+}
+
+/** Qirqim manzili: shu kompaniyaning faol bank hisobi, hisobning o'zi emas va bir xil valyutada. */
+async function assertSettlementTarget(conn: DbOrTx, companyId: string, targetId: string, currency: string, selfId?: string) {
+  if (selfId && targetId === selfId) throw badRequest("Hisob o'zini o'ziga qirqolmaydi");
+  const [target] = await conn
+    .select({ type: cashAccounts.type, isActive: cashAccounts.isActive, currency: cashAccounts.currency })
+    .from(cashAccounts)
+    .where(and(eq(cashAccounts.id, targetId), eq(cashAccounts.companyId, companyId)))
+    .limit(1);
+  if (!target) throw notFound("Bank hisobi topilmadi");
+  if (target.type !== "bank") throw badRequest("Qirqim faqat bank hisobiga o'tkaziladi");
+  if (!target.isActive) throw badRequest("Bank hisobi faol emas");
+  if (target.currency !== currency) throw badRequest("Qirqim bir xil valyutadagi bank hisobiga o'tkaziladi");
+}
 
 export async function createCashAccount(tx: Tx, tenant: TenantContext, input: CashAccountInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
@@ -285,6 +312,15 @@ export async function createCashAccount(tx: Tx, tenant: TenantContext, input: Ca
   const rate = await accountRate(tx, companyId, currency);
   if (input.isDefault && currency !== baseCurrency) {
     throw badRequest(`Asosiy kassa ${baseCurrency} valyutasida bo'lishi kerak`);
+  }
+  if (isPendingAccountType(input.type)) {
+    if (input.isDefault) throw badRequest("Kutilayotgan hisob asosiy kassa bo'la olmaydi");
+    if (currency !== baseCurrency) throw badRequest("Kutilayotgan hisob asosiy valyutada bo'ladi");
+    if (input.settlesToCashAccountId) await assertSettlementTarget(tx, companyId, input.settlesToCashAccountId, currency);
+    // 1030 "Kutilayotgan to'lovlar" — eski kompaniyada bo'lmasa shu yerda ochiladi
+    await ensureAccountBySubtype(tx, companyId, "clearing");
+  } else if (input.settlesToCashAccountId || toMinor(input.settlementCommissionPercent ?? "0") > 0n) {
+    throw badRequest("Qirqim sozlamasi faqat kutilayotgan hisobda (karta, hamyon) bo'ladi");
   }
   if (input.isDefault) await clearDefault(tx, companyId);
 
@@ -347,6 +383,8 @@ export async function updateCashAccount(
     ledgerAccountId?: string | null;
     showInPos?: boolean;
     outgoingCommissionPercent?: string;
+    settlesToCashAccountId?: string | null;
+    settlementCommissionPercent?: string;
   },
   meta: RequestMeta,
 ) {
@@ -360,6 +398,12 @@ export async function updateCashAccount(
     .for("update");
   if (!current) throw notFound("Kassa topilmadi");
 
+  if (patch.settlesToCashAccountId !== undefined || patch.settlementCommissionPercent !== undefined) {
+    if (!isPendingAccountType(current.type)) throw badRequest("Qirqim sozlamasi faqat kutilayotgan hisobda (karta, hamyon) bo'ladi");
+    if (patch.settlesToCashAccountId) {
+      await assertSettlementTarget(tx, companyId, patch.settlesToCashAccountId, current.currency, current.id);
+    }
+  }
   if (current.isDefault && patch.isDefault === false) {
     throw badRequest("Asosiy kassani olib bo'lmaydi — boshqa kassani asosiy qiling");
   }

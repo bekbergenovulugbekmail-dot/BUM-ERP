@@ -180,8 +180,9 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
       { accountId: await requireAccountBySubtype(tx, companyId, "receivable", "asset", "Debitorlar"), credit: input.amount },
     ],
   });
-  // Ekvayring komissiyasi: bank to'lovdan foizni ushlaydi — mijoz qarzi to'liq yopiladi, bank hisobiga qoldiq
-  const acquiringFee = terminal && !foreign ? commissionMinor(toMinor(input.amount), terminal.commissionPercent) : 0n;
+  // Ekvayring komissiyasi: bank to'lovdan foizni ushlaydi — mijoz qarzi to'liq yopiladi, bank hisobiga qoldiq.
+  // Pul "kutilayotgan" hisobga (karta/hamyon) tushgan bo'lsa komissiya qirqim (settlement) paytida ushlanadi.
+  const acquiringFee = terminal && !foreign && account.type === "bank" ? commissionMinor(toMinor(input.amount), terminal.commissionPercent) : 0n;
   if (terminal && acquiringFee > 0n) {
     await recordBankCommission(tx, tenant, {
       cashAccountId: account.id,

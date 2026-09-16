@@ -205,6 +205,8 @@ Har amalda a'zoning `allowedWarehouseIds` ruxsati tekshiriladi (bo'sh — barcha
 | GET / POST / PATCH | `/cash-accounts` (`?includeInactive=`), `/cash-accounts/:cashAccountId` | `finance.view` / `finance.manage` | `cashAccounts.list`, `createAccount` |
 | GET | `/cash-accounts/:cashAccountId/transactions` (`?dateFrom=&dateTo=&limit=&cursor=`) | `finance.view` | `getTransactions` |
 | POST | `/cash-transactions` (in/out, ixtiyoriy `counterAccountId`), `/cash-transfers` | `finance.manage` | `recordTransaction` |
+| GET | `/settlements` — kutilayotgan karta/hamyon puli: qirqilmagan qoldiq, bugungi tushum, qirqim manzili, terminallar | `finance.view` | yangi |
+| POST | `/cash-accounts/:cashAccountId/settle` (qirqim: komissiya ushlanib qolgani bank hisobiga) | `finance.manage` | yangi |
 | GET / POST / PATCH | `/terminals` (`?includeInactive=`), `/terminals/:terminalId` — karta terminali → bank hisobi | `finance.view` / `finance.manage` | yangi |
 | GET | `/expenses` (`?status=&category=&dateFrom=&dateTo=&limit=&cursor=`), `/expenses/stats` | `finance.view` | `expenses.list`, `getStats` |
 | POST / PATCH / DELETE | `/expenses`, `/expenses/:expenseId` | `finance.manage` | `create`, `remove` |
@@ -1739,6 +1741,24 @@ Holatlar: **DONE** — kod + test o'tdi; **PARTIAL** — qisman; **BLOCKED** —
 **Testlar (ikkinchi aylanma):** API 101 fayl / 453 test (8 qismda: 87 + 47 + 46 + 64 + 34 + 54 + 27 + 94) — hammasi o'tdi, `tsc` toza; web 16 fayl / 63 test, tsc, lint, build; desktop 9 fayl / 57 test. Android debug APK — 5 787 561 bayt, SHA-256 `CB50601389A1A53171403201098C9E3F272A7553E8359423AB8C61C4FA1C9AB6`
 
 **Production (ikkinchi aylanma):** `bum-api` `a82602ae` va `bum-web` `4559bfb4` — SUCCESS; yangi migratsiya yo'q; API logida bitta ishga tushish, `/health` ok; sessiyasiz `/api/auth/sessions`, `/api/finance/lock-date`, `/api/sales/policy`, `/api/sales/pos/shift-reviews` — 401; begona Origin bilan soxta cookie'li `DELETE /api/auth/sessions/:id` — 403 `csrf_origin` (hech narsa o'zgarmadi); login sahifasi 200. Tizimga kirgan holda sinov — NOT VERIFIED
+
+## Moliya: kutilayotgan to'lovlar va qirqim (2026-09-16)
+
+Egasining so'rovi: "hisob qo'shishda turi kiritilganda hozir naqd va bank turibdi, boshqasini qo'shish imkoniyati bo'lsin … uzcard va humo terminal bo'lsa ulardan qirqilsa u bank hisobiga o'tkazilsa kiritilgan komissiya yechilib qolgani bank hisobiga tushsin … uzcarddan kutilayotgan deb bugungi uzcard summasi ham tursin".
+
+- **Sxema (migratsiya 0051):** `cash_account_type` ga `card` va `ewallet` qo'shildi; `cash_accounts` ga `settles_to_cash_account_id` (o'ziga havola, `set null`) va `settlement_commission_percent`. Lokal bazada qo'llandi
+- **Hisoblar rejasi:** 1030 "Kutilayotgan to'lovlar" (`subtype: clearing`) — standart hisoblarga qo'shildi (kompaniyada endi 23 ta). Qo'lda jurnal yozuvi tushmaydigan nazorat hisobi (o'z hujjatlari bilan yuritiladi). Bu hisob ochilmagan eski kompaniyada kutilayotgan hisob yaratilganda avtomatik ochiladi, topilmasa yozuv bank hisobiga tushadi
+- **Terminal:** endi bank hisobiga yoki kutilayotgan hisobga bog'lanadi (naqd kassaga — yo'q). Kutilayotgan hisobda qirqim manzili belgilanmagan bo'lsa terminal ulanmaydi (400)
+- **To'lov:** terminal puli kutilayotgan hisobga tushsa ekvayring komissiyasi **to'lov paytida ushlanmaydi** — pul to'liq o'sha hisobda turadi va komissiya qirqimda ushlanadi. To'g'ridan-to'g'ri bank hisobiga bog'langan terminal eski tartibda ishlaydi (komissiya darhol)
+- **Qirqim:** kutilayotgan hisobdan bank hisobiga o'tkazma — komissiya "Bank komissiyasi" xarajati va DR 5800 / CR 1030 yozuvi bilan ushlanadi, qolgani bank hisobiga tushadi va o'sha hisob tarixida "Qirqim: …" bo'lib ko'rinadi. Summa berilmasa — butun qoldiq; qoldiqdan ortiq, boshqa valyuta, faol bo'lmagan yoki bank bo'lmagan manzil — rad
+- **Web (Moliya > Kassa & Bank):** "Kutilayotgan to'lovlar" paneli — har hisob bo'yicha "Kutilmoqda", "Bugun tushdi", terminal nomlari va "Qirqish" oynasi (komissiya va bankka tushadigan sof summa oldindan ko'rinadi); hisob qo'shishda turlar ro'yxati (naqd, bank, karta terminali, elektron hamyon) va kutilayotgan hisob uchun qirqim manzili va komissiyasi
+- **Aralash to'lov tuzatishi:** `payment-allocation` da karta/o'tkazma qismi endi "faqat bank" emas, "naqd kassa emas" deb tekshiriladi — terminal kutilayotgan hisobga bog'langanda ham to'lov o'tadi
+
+**Testlar (2026-09-16):** yangi `apps/api/test/settlement.test.ts` (2 test: to'lovda komissiya yo'q → qirqimda 0.25% ushlanib bankka 99 750, jurnal 1030/1020/5800; qoidalar — qoldiqdan ortiq, bank hisobini qirqish, manzilsiz terminal, naqd manzil, qisman qirqim). Ta'sirlangan qismlar bo'yicha regressiya: **42 fayl / 229 test** (4 qismda: 10 + 42 + 76 + 101) — hammasi o'tdi. To'liq API to'plami (102 fayl) bu bosqichda qayta ishga tushirilmadi. API `tsc` toza; web `tsc`, lint (o'zgargan fayllar) va `vite build` toza. Desktop kodi bu bosqichda o'zgarmadi
+
+Tuzatilgan eski kutilmalar: `finance.test` va `import-convex.test` (23 ta standart hisob), `payment-terminals.test` — ortiqcha to'lov holati oldingi bosqichdagi qoidaga moslandi (naqd qism bo'lsa ortig'i naqddan qaytim; naqdsiz ortiqcha va kartadan ortiq to'lov — rad)
+
+**Production:** bu bosqichda hali deploy qilinmagan — keyingi qadam
 
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 

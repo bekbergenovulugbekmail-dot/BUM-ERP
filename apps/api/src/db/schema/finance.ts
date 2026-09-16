@@ -22,6 +22,7 @@ import {
   uniqueIndex,
   uuid,
   varchar,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { branches, companies, users } from "./platform.js";
 import { percent } from "./_shared.js";
@@ -37,7 +38,12 @@ export const accountType = pgEnum("account_type", [
 
 export const journalStatus = pgEnum("journal_status", ["draft", "posted", "voided"]);
 export const expenseStatus = pgEnum("expense_status", ["pending", "approved", "paid"]);
-export const cashAccountType = pgEnum("cash_account_type", ["cash", "bank"]);
+/**
+ * Kassa/hisob turi: naqd, bank, hamda "kutilayotgan" hisoblar — karta terminali (UZCARD, HUMO) va elektron hamyon
+ * (Payme, Click). Kutilayotgan hisobga tushgan pul bank hisobiga qirqim (settlement) bilan o'tadi: komissiya o'shanda
+ * ushlanadi, qolgani bog'langan bank hisobiga tushadi.
+ */
+export const cashAccountType = pgEnum("cash_account_type", ["cash", "bank", "card", "ewallet"]);
 export const cashTxType = pgEnum("cash_tx_type", ["in", "out", "transfer"]);
 
 // ─── accounts (hisoblar rejasi) ──────────────────────────────────────────────
@@ -172,6 +178,13 @@ export const cashAccounts = pgTable(
     showInPos: boolean("show_in_pos").notNull().default(false),
     /** Bank hisobidan pul chiqarishda bank komissiyasi, % (ta'minotchiga, xarajat, maosh, o'tkazma) — avtomatik yechiladi. */
     outgoingCommissionPercent: percent("outgoing_commission_percent").notNull().default("0"),
+    /**
+     * "Kutilayotgan" hisob (turi `card`/`ewallet`) qaysi bank hisobiga qirqiladi. Karta tushumi shu hisobda turadi,
+     * bank pulni o'tkazganda `settlementCommissionPercent` ushlanib, qolgani shu bank hisobiga o'tadi.
+     */
+    settlesToCashAccountId: uuid("settles_to_cash_account_id").references((): AnyPgColumn => cashAccounts.id, { onDelete: "set null" }),
+    /** Qirqim (settlement) komissiyasi, % — kutilayotgan hisobdan bankka o'tkazishda ushlanadi. */
+    settlementCommissionPercent: percent("settlement_commission_percent").notNull().default("0"),
     /**
      * Yetkazuvchining "yo'ldagi naqd" hisobi: dostavkada yig'ilgan naqd kassaga topshirilguncha shu yerda.
      * FK yo'q (sales → finance importi aylanma bo'lmasin) — agent kodda tekshiriladi.

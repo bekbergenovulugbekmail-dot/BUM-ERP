@@ -138,9 +138,13 @@ describe("To'lov terminallari va universal aralash to'lov", () => {
     expect((await sell({ payments: rejected[1] })).statusCode).toBe(404);
     expect((await sell({ payments: rejected[2] })).statusCode).toBe(400);
     expect((await sell({ payments: rejected[3] })).statusCode).toBe(400);
-    const over = await sell({ payments: [...MIXED.slice(0, 2), { method: "card", amount: "9000", terminalId: humo.id }] });
+    // Naqdsiz ortiqcha to'lov — qaytim beriladigan naqd qism yo'q, rad etiladi
+    const over = await sell({ payments: [{ method: "card", amount: "12000", terminalId: uzcard.id }, { method: "card", amount: "9000", terminalId: humo.id }] });
     expect(over.statusCode).toBe(400);
     expect(over.json().details).toMatchObject({ reason: "overpayment" });
+    // Naqd qism bo'lsa ham kartadan ortiq to'lov qabul qilinmaydi (qaytim faqat naqddan)
+    const overCard = await sell({ payments: [{ method: "cash", amount: "1000" }, { method: "card", amount: "25000", terminalId: uzcard.id }] });
+    expect(overCard.statusCode).toBe(400);
     const under = await sell({ payments: MIXED.slice(0, 2) });
     expect(under.statusCode).toBe(400);
     expect(under.json().message).toContain("Mijozsiz");

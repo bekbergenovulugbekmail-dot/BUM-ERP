@@ -70,17 +70,28 @@ export async function getTerminal(conn: DbOrTx, companyId: string, terminalId: s
   return row;
 }
 
-/** Terminal bog'lanadigan hisob: shu kompaniyaning faol, asosiy valyutadagi bank hisobi. */
+/**
+ * Terminal bog'lanadigan hisob: faol, asosiy valyutadagi bank hisobi (pul darhol bankka tushadi, komissiya o'sha zahoti)
+ * yoki "kutilayotgan" hisob — karta/hamyon (pul qirqimgacha shu hisobda turadi, komissiya qirqimda ushlanadi).
+ */
 async function assertTerminalAccount(conn: DbOrTx, companyId: string, cashAccountId: string) {
   const [account] = await conn
-    .select({ type: cashAccounts.type, isActive: cashAccounts.isActive, currency: cashAccounts.currency })
+    .select({
+      type: cashAccounts.type,
+      isActive: cashAccounts.isActive,
+      currency: cashAccounts.currency,
+      settlesTo: cashAccounts.settlesToCashAccountId,
+    })
     .from(cashAccounts)
     .where(and(eq(cashAccounts.id, cashAccountId), eq(cashAccounts.companyId, companyId)))
     .limit(1);
-  if (!account) throw notFound("Bank hisobi topilmadi");
-  if (account.type !== "bank") throw badRequest("Terminal faqat bank hisobiga bog'lanadi");
-  if (!account.isActive) throw badRequest("Bank hisobi faol emas");
-  if (account.currency !== (await companyCurrency(conn, companyId))) throw badRequest("Terminal asosiy valyutadagi bank hisobiga bog'lanadi");
+  if (!account) throw notFound("Hisob topilmadi");
+  if (account.type === "cash") throw badRequest("Terminal naqd kassaga bog'lanmaydi — bank yoki kutilayotgan hisobni tanlang");
+  if (!account.isActive) throw badRequest("Hisob faol emas");
+  if (account.currency !== (await companyCurrency(conn, companyId))) throw badRequest("Terminal asosiy valyutadagi hisobga bog'lanadi");
+  if (account.type !== "bank" && !account.settlesTo) {
+    throw badRequest("Kutilayotgan hisob qaysi bank hisobiga qirqilishi belgilanmagan — hisob sozlamasida tanlang");
+  }
 }
 
 async function assertBranch(conn: DbOrTx, companyId: string, branchId: string) {

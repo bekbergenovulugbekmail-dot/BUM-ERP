@@ -21,10 +21,22 @@ export type Account = {
   updatedAt: string;
 };
 
+/** `card`/`ewallet` — kutilayotgan hisob: pul bank qirqimigacha shu hisobda turadi. */
+export type CashAccountType = "cash" | "bank" | "card" | "ewallet";
+
+export const CASH_ACCOUNT_TYPE_LABELS: Record<CashAccountType, string> = {
+  cash: "Naqd kassa",
+  bank: "Bank hisobi",
+  card: "Karta terminali (kutilayotgan)",
+  ewallet: "Elektron hamyon (kutilayotgan)",
+};
+
+export const isPendingAccountType = (type: CashAccountType) => type === "card" || type === "ewallet";
+
 export type CashAccount = {
   id: string;
   name: string;
-  type: "cash" | "bank";
+  type: CashAccountType;
   currency: string;
   bankName: string | null;
   accountNumber: string | null;
@@ -35,10 +47,30 @@ export type CashAccount = {
   showInPos: boolean;
   /** Bank hisobidan pul chiqarish komissiyasi, % ("1.00"). */
   outgoingCommissionPercent: string;
+  /** Kutilayotgan hisob qaysi bank hisobiga qirqiladi (faqat `card`/`ewallet`). */
+  settlesToCashAccountId: string | null;
+  /** Qirqim komissiyasi, % ("0.25") — qirqimda ushlanadi. */
+  settlementCommissionPercent: string;
   isDefault: boolean;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+/** `GET /api/finance/settlements` — qirqilmagan karta/hamyon pullari ("UZCARD'dan kutilayotgan"). */
+export type PendingSettlement = {
+  id: string;
+  name: string;
+  type: CashAccountType;
+  currency: string;
+  isActive: boolean;
+  /** Qirqilmagan qoldiq. */
+  pending: string;
+  /** Bugun shu hisobga tushgan summa. */
+  today: string;
+  commissionPercent: string;
+  settlesTo: { id: string; name: string } | null;
+  terminals: { id: string; name: string; network: TerminalNetwork }[];
 };
 
 export type PaymentTerminal = {

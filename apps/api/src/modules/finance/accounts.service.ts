@@ -24,6 +24,8 @@ export type AccountType = (typeof accounts.type.enumValues)[number];
 export const DEFAULT_ACCOUNTS: { code: string; name: string; type: AccountType; subtype: string }[] = [
   { code: "1010", name: "Naqd kassa", type: "asset", subtype: "cash" },
   { code: "1020", name: "Bank hisobi", type: "asset", subtype: "bank" },
+  /** Karta terminali va elektron hamyon puli — bank qirqimigacha shu hisobda ("UZCARD'dan kutilayotgan"). */
+  { code: "1030", name: "Kutilayotgan to'lovlar", type: "asset", subtype: "clearing" },
   { code: "1100", name: "Debitorlar", type: "asset", subtype: "receivable" },
   { code: "1200", name: "Tovar zaxirasi", type: "asset", subtype: "inventory" },
   { code: "2000", name: "Kreditorlar", type: "liability", subtype: "payable" },

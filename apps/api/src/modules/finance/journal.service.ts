@@ -338,7 +338,19 @@ export async function setLockDate(tx: Tx, tenant: TenantContext, lockDate: strin
  * Qo'lda jurnal yozuvi tushmaydigan nazorat hisoblari: ular o'z hujjatlari bilan yuritiladi va qo'lda yozuv jurnalni
  * kassa/bank qoldig'i, mijoz va ta'minotchi qarzi, zaxira, avans va keshbek ro'yxatlaridan ajratib qo'yardi.
  */
-const MANUAL_BLOCKED_SUBTYPES = new Set(["cash", "bank", "receivable", "inventory", "payable", "customer_advance", "cashback_liability", "sales", "cogs"]);
+const MANUAL_BLOCKED_SUBTYPES = new Set([
+  "cash",
+  "bank",
+  // 1030 kutilayotgan to'lovlar — kassa harakati va qirqim bilan yuritiladi
+  "clearing",
+  "receivable",
+  "inventory",
+  "payable",
+  "customer_advance",
+  "cashback_liability",
+  "sales",
+  "cogs",
+]);
 
 export async function createManualEntry(
   tx: Tx,

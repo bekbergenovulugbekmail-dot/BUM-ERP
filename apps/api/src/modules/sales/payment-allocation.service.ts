@@ -82,8 +82,8 @@ export async function resolvePaymentParts(
         .limit(1);
       if (!account) throw notFound("Kassa yoki bank hisobi topilmadi");
       if (!account.isActive && !options.offline) throw badRequest(`"${account.name}" hisobi faol emas`);
-      const expected = part.method === "cash" ? "cash" : "bank";
-      if (account.type !== expected) {
+      // Naqd — faqat kassaga; karta va o'tkazma — bank yoki "kutilayotgan" hisobga (terminal puli qirqimgacha o'sha yerda)
+      if (part.method === "cash" ? account.type !== "cash" : account.type === "cash") {
         throw badRequest(part.method === "cash" ? "Naqd to'lov kassaga tushadi — bank hisobi tanlangan" : `${label} to'lovi bank hisobiga tushadi — kassa tanlangan`);
       }
       if (account.currency !== baseCurrency) throw badRequest(`"${account.name}" asosiy valyutada emas — valyutadagi to'lov alohida kiritiladi`);

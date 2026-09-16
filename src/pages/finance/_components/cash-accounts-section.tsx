@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, ArrowUpRight, ArrowDownLeft, Wallet, Building2 } from "lucide-react";
+import { Plus, ArrowUpRight, ArrowDownLeft, Wallet, Building2, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -15,12 +15,25 @@ import { usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import { BankCommissionHint } from "@/components/payments/bank-commission-hint.tsx";
 import AccountCardPayments, { AccountCommissionSummary } from "./account-card-payments.tsx";
-import { localIsoDate, toNum, type Account, type CashAccount, type CashTransaction } from "../_lib/types.ts";
+import PendingSettlements from "./pending-settlements.tsx";
+import {
+  CASH_ACCOUNT_TYPE_LABELS,
+  isPendingAccountType,
+  localIsoDate,
+  toNum,
+  type Account,
+  type CashAccount,
+  type CashAccountType,
+  type CashTransaction,
+} from "../_lib/types.ts";
 
 const DEFAULT_LEDGER = "default";
+const NO_SETTLEMENT = "none";
 const PERCENT_RE = /^\d{1,3}(\.\d{1,2})?$/;
 
-type AccountPatch = Partial<Pick<CashAccount, "ledgerAccountId" | "showInPos" | "outgoingCommissionPercent">>;
+type AccountPatch = Partial<
+  Pick<CashAccount, "ledgerAccountId" | "showInPos" | "outgoingCommissionPercent" | "settlesToCashAccountId" | "settlementCommissionPercent">
+>;
 
 /** Bank hisobi sozlamalari: kassada ko'rsatish (darhol saqlanadi) va pul chiqarish komissiyasi. */
 function BankAccountSettings({ account, busy, onSave }: { account: CashAccount; busy: boolean; onSave: (patch: AccountPatch, message: string) => void }) {
@@ -63,6 +76,64 @@ function BankAccountSettings({ account, busy, onSave }: { account: CashAccount; 
   );
 }
 
+/** Kutilayotgan hisob (karta/hamyon): qaysi bank hisobiga qirqiladi va qirqimda ushlanadigan komissiya. */
+function SettlementSettings({
+  account,
+  bankAccounts,
+  busy,
+  onSave,
+}: {
+  account: CashAccount;
+  bankAccounts: CashAccount[];
+  busy: boolean;
+  onSave: (patch: AccountPatch, message: string) => void;
+}) {
+  const [commission, setCommission] = useState(String(Number(account.settlementCommissionPercent)));
+  const text = commission.trim().replace(",", ".") || "0";
+  const valid = PERCENT_RE.test(text) && Number(text) <= 100;
+  const changed = valid && Number(text) !== Number(account.settlementCommissionPercent);
+  const example = valid ? Math.round(1_000_000 * Number(text)) / 100 : 0;
+  return (
+    <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-3 text-sm">
+      <div className="space-y-1">
+        <Label htmlFor="settles-to" className="text-xs text-muted-foreground">Qaysi bank hisobiga qirqiladi</Label>
+        <Select
+          value={account.settlesToCashAccountId ?? NO_SETTLEMENT}
+          onValueChange={(value) =>
+            onSave({ settlesToCashAccountId: value === NO_SETTLEMENT ? null : value }, "Qirqim hisobi saqlandi")
+          }
+        >
+          <SelectTrigger id="settles-to" className="h-8 w-64 max-w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NO_SETTLEMENT}>Tanlanmagan</SelectItem>
+            {bankAccounts.map((bank) => <SelectItem key={bank.id} value={bank.id}>{bank.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="settlement-commission" className="text-xs text-muted-foreground">Qirqim komissiyasi, %</Label>
+        <div className="flex gap-2">
+          <Input
+            id="settlement-commission"
+            inputMode="decimal"
+            className={cn("h-8 w-24", !valid && "border-destructive")}
+            value={commission}
+            onChange={(e) => setCommission(e.target.value)}
+          />
+          <Button size="sm" variant="secondary" disabled={!changed || busy} onClick={() => onSave({ settlementCommissionPercent: text }, "Komissiya saqlandi")}>
+            Saqlash
+          </Button>
+        </div>
+      </div>
+      <p className="basis-full text-[11px] text-muted-foreground">
+        {valid && example > 0
+          ? `Masalan: ${formatMoney(1_000_000, account.currency)} qirqilsa — ${formatMoney(example, account.currency)} komissiya, bank hisobiga ${formatMoney(1_000_000 - example, account.currency)}`
+          : "Komissiya 0 — qirqimda to'liq summa bank hisobiga tushadi"}
+      </p>
+    </div>
+  );
+}
+
 const CATEGORIES = ["sotuv", "xarid", "ijara", "maosh", "kommunal", "transport", "boshqa"];
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -83,12 +154,17 @@ type CashTransactionBody = {
 
 type CashAccountBody = {
   name: string;
-  type: "cash" | "bank";
+  type: CashAccountType;
   bankName: string | null;
   accountNumber: string | null;
   openingBalance?: string;
   /** Standart — asosiy valyuta. */
   currency?: string;
+  showInPos?: boolean;
+  outgoingCommissionPercent?: string;
+  /** Kutilayotgan hisob uchun: qirqim manzili va komissiyasi. */
+  settlesToCashAccountId?: string | null;
+  settlementCommissionPercent?: string;
 };
 
 export default function CashAccountsSection() {
@@ -101,6 +177,8 @@ export default function CashAccountsSection() {
   const [createAccountOpen, setCreateAccountOpen] = useState(false);
 
   const selectedAccount = accounts?.find((a) => a.id === selectedAccountId) ?? accounts?.[0];
+  /** Qirqim manzili bo'la oladigan hisoblar. */
+  const bankAccounts = accounts?.filter((account) => account.type === "bank" && account.isActive) ?? [];
 
   const transactions = useApiQuery<{ transactions: CashTransaction[]; nextCursor: string | null }>(
     selectedAccount ? `/api/finance/cash-accounts/${selectedAccount.id}/transactions` : null,
@@ -113,11 +191,10 @@ export default function CashAccountsSection() {
   const ledgerOptions = useApiQuery<{ accounts: Account[] }>(canManage ? "/api/finance/accounts" : null, { type: "asset" })
     .data?.accounts.filter((account) => account.isActive);
   const updateAccount = useApiMutation(
-    ({ id, patch }: { id: string; patch: Partial<Pick<CashAccount, "ledgerAccountId" | "showInPos" | "outgoingCommissionPercent">> }) =>
-      api.patch(`/api/finance/cash-accounts/${id}`, patch),
-    { invalidate: ["/api/finance/cash-accounts"] },
+    ({ id, patch }: { id: string; patch: AccountPatch }) => api.patch(`/api/finance/cash-accounts/${id}`, patch),
+    { invalidate: ["/api/finance/cash-accounts", "/api/finance/settlements"] },
   );
-  const saveAccount = async (patch: Partial<Pick<CashAccount, "ledgerAccountId" | "showInPos" | "outgoingCommissionPercent">>, message: string) => {
+  const saveAccount = async (patch: AccountPatch, message: string) => {
     if (!selectedAccount) return;
     try {
       await updateAccount.mutateAsync({ id: selectedAccount.id, patch });
@@ -133,7 +210,9 @@ export default function CashAccountsSection() {
   const [txCategory, setTxCategory] = useState("boshqa");
 
   const [acctName, setAcctName] = useState("");
-  const [acctType, setAcctType] = useState<"cash" | "bank">("cash");
+  const [acctType, setAcctType] = useState<CashAccountType>("cash");
+  const [acctSettlesTo, setAcctSettlesTo] = useState(NO_SETTLEMENT);
+  const [acctSettlementCommission, setAcctSettlementCommission] = useState("");
   const [acctBank, setAcctBank] = useState("");
   const [acctNumber, setAcctNumber] = useState("");
   const [acctOpening, setAcctOpening] = useState("");
@@ -173,10 +252,17 @@ export default function CashAccountsSection() {
         ...(acctType === "bank"
           ? { showInPos: acctShowInPos, ...(acctCommission.trim() ? { outgoingCommissionPercent: acctCommission.trim().replace(",", ".") } : {}) }
           : {}),
+        ...(isPendingAccountType(acctType)
+          ? {
+              ...(acctSettlesTo !== NO_SETTLEMENT ? { settlesToCashAccountId: acctSettlesTo } : {}),
+              ...(acctSettlementCommission.trim() ? { settlementCommissionPercent: acctSettlementCommission.trim().replace(",", ".") } : {}),
+            }
+          : {}),
       });
-      toast.success("Kassa/bank hisobi qo'shildi");
+      toast.success("Hisob qo'shildi");
       setCreateAccountOpen(false);
       setAcctName(""); setAcctBank(""); setAcctNumber(""); setAcctOpening(""); setAcctCurrency(""); setAcctCommission(""); setAcctShowInPos(false);
+      setAcctSettlesTo(NO_SETTLEMENT); setAcctSettlementCommission("");
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -216,11 +302,15 @@ export default function CashAccountsSection() {
               <div className="flex items-center gap-2 mb-3">
                 <div className={cn(
                   "h-8 w-8 rounded-lg flex items-center justify-center",
-                  acct.type === "cash" ? "bg-emerald-500/10" : "bg-blue-500/10"
+                  acct.type === "cash" ? "bg-emerald-500/10" : isPendingAccountType(acct.type) ? "bg-violet-500/10" : "bg-blue-500/10"
                 )}>
-                  {acct.type === "cash"
-                    ? <Wallet className="h-4 w-4 text-emerald-500" />
-                    : <Building2 className="h-4 w-4 text-blue-500" />}
+                  {acct.type === "cash" ? (
+                    <Wallet className="h-4 w-4 text-emerald-500" />
+                  ) : isPendingAccountType(acct.type) ? (
+                    <CreditCard className="h-4 w-4 text-violet-500" />
+                  ) : (
+                    <Building2 className="h-4 w-4 text-blue-500" />
+                  )}
                 </div>
                 <div>
                   <p className="text-sm font-medium">
@@ -228,7 +318,13 @@ export default function CashAccountsSection() {
                     {acct.isDefault && <span className="ml-1.5 text-[10px] text-primary">asosiy</span>}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {acct.type === "cash" ? "Naqd" : acct.bankName ?? "Bank"}
+                    {acct.type === "cash"
+                      ? "Naqd"
+                      : acct.type === "card"
+                        ? "Karta — kutilayotgan"
+                        : acct.type === "ewallet"
+                          ? "Hamyon — kutilayotgan"
+                          : acct.bankName ?? "Bank"}
                     {acct.type === "bank" && acct.showInPos ? " · kassada" : ""}
                     {acct.type === "bank" && Number(acct.outgoingCommissionPercent) > 0 ? ` · chiqim ${Number(acct.outgoingCommissionPercent)}%` : ""}
                   </p>
@@ -239,6 +335,9 @@ export default function CashAccountsSection() {
           ))}
         </div>
       )}
+
+      {/* Kutilayotgan karta/hamyon puli va qirqim */}
+      <PendingSettlements />
 
       {/* Buxgalteriya hisobi: bir nechta bank hisobi hisoblar rejasida alohida ko'rinsin (bo'lmasa 1010 / 1020) */}
       {selectedAccount && canManage && ledgerOptions && (
@@ -252,7 +351,13 @@ export default function CashAccountsSection() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={DEFAULT_LEDGER}>{selectedAccount.type === "cash" ? "Umumiy: 1010 Naqd kassa" : "Umumiy: 1020 Bank hisobi"}</SelectItem>
+              <SelectItem value={DEFAULT_LEDGER}>
+                {selectedAccount.type === "cash"
+                  ? "Umumiy: 1010 Naqd kassa"
+                  : isPendingAccountType(selectedAccount.type)
+                    ? "Umumiy: 1030 Kutilayotgan to'lovlar"
+                    : "Umumiy: 1020 Bank hisobi"}
+              </SelectItem>
               {ledgerOptions.map((account) => (
                 <SelectItem key={account.id} value={account.id}>
                   {account.code} {account.name}
@@ -268,6 +373,17 @@ export default function CashAccountsSection() {
         <BankAccountSettings
           key={selectedAccount.id}
           account={selectedAccount}
+          busy={updateAccount.isPending}
+          onSave={(patch, message) => void saveAccount(patch, message)}
+        />
+      )}
+
+      {/* Kutilayotgan hisob: qirqim manzili va komissiyasi */}
+      {selectedAccount && canManage && isPendingAccountType(selectedAccount.type) && (
+        <SettlementSettings
+          key={selectedAccount.id}
+          account={selectedAccount}
+          bankAccounts={bankAccounts}
           busy={updateAccount.isPending}
           onSave={(patch, message) => void saveAccount(patch, message)}
         />
@@ -392,13 +508,19 @@ export default function CashAccountsSection() {
               </div>
               <div>
                 <Label>Turi</Label>
-                <Select value={acctType} onValueChange={(v) => setAcctType(v as "cash" | "bank")}>
+                <Select value={acctType} onValueChange={(v) => setAcctType(v as CashAccountType)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cash">Naqd kassa</SelectItem>
-                    <SelectItem value="bank">Bank hisobi</SelectItem>
+                    {(Object.keys(CASH_ACCOUNT_TYPE_LABELS) as CashAccountType[]).map((type) => (
+                      <SelectItem key={type} value={type}>{CASH_ACCOUNT_TYPE_LABELS[type]}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
+                {isPendingAccountType(acctType) && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Terminal puli bank o'tkazguncha shu hisobda turadi — qirqishda komissiya ushlanadi
+                  </p>
+                )}
               </div>
               {currencies.codes.length > 1 && (
                 <div>
@@ -430,6 +552,30 @@ export default function CashAccountsSection() {
                     <span>Kassada bank o'tkazmasi tugmasi</span>
                     <Switch checked={acctShowInPos} onCheckedChange={setAcctShowInPos} />
                   </label>
+                </>
+              )}
+              {isPendingAccountType(acctType) && (
+                <>
+                  <div>
+                    <Label>Qaysi bank hisobiga qirqiladi</Label>
+                    <Select value={acctSettlesTo} onValueChange={setAcctSettlesTo}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_SETTLEMENT}>Keyinroq tanlanadi</SelectItem>
+                        {bankAccounts.map((bank) => <SelectItem key={bank.id} value={bank.id}>{bank.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Qirqim komissiyasi, %</Label>
+                    <Input
+                      inputMode="decimal"
+                      value={acctSettlementCommission}
+                      onChange={(e) => setAcctSettlementCommission(e.target.value)}
+                      placeholder="0.25"
+                    />
+                    <p className="mt-1 text-[11px] text-muted-foreground">Qirqishda ushlanadi — bank hisobiga qolgani tushadi</p>
+                  </div>
                 </>
               )}
               <div>

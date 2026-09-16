@@ -14,6 +14,8 @@
  *   GET    /cash-accounts/:cashAccountId/transactions (?dateFrom=&dateTo=&limit=&cursor=)   finance.view
  *   POST   /cash-accounts, PATCH /cash-accounts/:cashAccountId finance.manage
  *   POST   /cash-transactions, /cash-transfers                 finance.manage
+ *   GET    /settlements                                        finance.view (kutilayotgan karta/hamyon puli)
+ *   POST   /cash-accounts/:cashAccountId/settle                finance.manage (qirqim: komissiya ushlanib bank hisobiga)
  *   GET    /terminals (?includeInactive=), /terminals/:terminalId   finance.view (karta terminallari → bank hisobi)
  *   POST   /terminals, PATCH /terminals/:terminalId            finance.manage
  *   GET    /expenses (?status=&category=&dateFrom=&dateTo=&limit=&cursor=), /expenses/stats   finance.view
@@ -71,6 +73,7 @@ import {
   setCurrencyRate,
 } from "./currencies.service.js";
 import { createManualEntry, getJournalEntry, getLockDate, listJournal, setLockDate, voidManualEntry } from "./journal.service.js";
+import { listPendingSettlements, settleCashAccount } from "./settlement.service.js";
 import { createTerminal, getTerminal, listTerminals, updateTerminal } from "./terminals.service.js";
 
 const nullableText = (max: number) =>
@@ -135,7 +138,8 @@ const journalQuery = z.object({
 
 const cashAccountBody = z.strictObject({
   name: z.string().trim().min(1).max(200),
-  type: z.enum(["cash", "bank"]),
+  /** `card`/`ewallet` — kutilayotgan hisob: pul qirqimgacha shu yerda, komissiya qirqimda ushlanadi. */
+  type: z.enum(["cash", "bank", "card", "ewallet"]),
   bankName: nullableText(200),
   accountNumber: nullableText(64),
   isDefault: z.boolean().optional(),
@@ -148,6 +152,10 @@ const cashAccountBody = z.strictObject({
   showInPos: z.boolean().optional(),
   /** Bank hisobidan pul chiqarish komissiyasi, % (0–100). */
   outgoingCommissionPercent: percentSchema.optional(),
+  /** Kutilayotgan hisob qaysi bank hisobiga qirqiladi. */
+  settlesToCashAccountId: z.uuid().nullable().optional(),
+  /** Qirqim komissiyasi, % (0–100) — kutilayotgan hisobdan bankka o'tkazishda ushlanadi. */
+  settlementCommissionPercent: percentSchema.optional(),
 });
 const cashAccountPatch = z.strictObject({
   name: z.string().trim().min(1).max(200).optional(),
@@ -158,6 +166,19 @@ const cashAccountPatch = z.strictObject({
   ledgerAccountId: z.uuid().nullable().optional(),
   showInPos: z.boolean().optional(),
   outgoingCommissionPercent: percentSchema.optional(),
+  /** Kutilayotgan hisob qaysi bank hisobiga qirqiladi. */
+  settlesToCashAccountId: z.uuid().nullable().optional(),
+  /** Qirqim komissiyasi, % (0–100). */
+  settlementCommissionPercent: percentSchema.optional(),
+});
+/** Qirqim: kutilayotgan hisobdan bank hisobiga (komissiya qirqimda ushlanadi). */
+const settlementBody = z.strictObject({
+  /** Berilmasa — qirqilmagan butun qoldiq. */
+  amount: positiveMoney.optional(),
+  /** Berilmasa — hisobga bog'langan bank hisobi. */
+  toCashAccountId: z.uuid().optional(),
+  txDate: isoDate.optional(),
+  notes: nullableText(500),
 });
 const terminalBody = z.strictObject({
   name: z.string().trim().min(1).max(100),
@@ -404,6 +425,23 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
     );
     reply.status(201);
     return result;
+  });
+
+  // ─── Qirqim: kutilayotgan karta/hamyon puli → bank hisobi ────────────────
+
+  app.get("/settlements", async (req) => {
+    const tenant = await readTenant(req, "finance.view");
+    return listPendingSettlements(db, tenant.company.id);
+  });
+
+  app.post("/cash-accounts/:cashAccountId/settle", async (req, reply) => {
+    const { cashAccountId } = cashAccountParams.parse(req.params);
+    const body = settlementBody.parse(req.body ?? {});
+    const settlement = await writeInTenant(req, "finance.manage", (tx, tenant) =>
+      settleCashAccount(tx, tenant, cashAccountId, body, requestMeta(req)),
+    );
+    reply.status(201);
+    return { settlement };
   });
 
   // ─── Karta terminallari ──────────────────────────────────────────────────
