@@ -243,7 +243,14 @@ describe("3. Distribyutsiya: yetkazib berish bilan", () => {
   it("tasdiqlangan buyurtmaga yetkazma ochiladi; sotuv hali YAKUNLANMAGAN", async () => {
     const orderId = await confirmedOrder(app, company, "10");
     const order = await orderOf(orderId);
-    expect(order).toMatchObject({ status: "confirmed", paymentStatus: "unpaid", source: "manual", isPos: false, deliveryRequired: true });
+    expect(order).toMatchObject({
+      status: "confirmed",
+      paymentStatus: "unpaid",
+      source: "manual",
+      fulfillmentMethod: "delivery",
+      isPos: false,
+      deliveryRequired: true,
+    });
 
     const tasks = await tasksOf(orderId);
     expect(tasks).toHaveLength(1);
@@ -299,7 +306,7 @@ describe("3. Distribyutsiya: yetkazib berish bilan", () => {
   it("mijoz o'zi olib ketadi (yetkazish shart emas) — YETKAZMA YARATILMAYDI", async () => {
     const orderId = await erpOrder("4", false);
     expect(await tasksOf(orderId)).toHaveLength(0);
-    expect(await orderOf(orderId)).toMatchObject({ status: "confirmed", deliveryRequired: false });
+    expect(await orderOf(orderId)).toMatchObject({ status: "confirmed", deliveryRequired: false, fulfillmentMethod: "pickup" });
 
     const shipped = await call(owner(), "POST", `/api/sales/orders/${orderId}/ship`);
     expect(shipped.statusCode, shipped.body).toBe(200);
@@ -377,7 +384,7 @@ describe("6. Ishlab chiqarish", () => {
 
     const orderId = await erpOrder("10", true, bread);
     expect(await tasksOf(orderId)).toHaveLength(1);
-    expect(await orderOf(orderId)).toMatchObject({ status: "confirmed", source: "manual", deliveryRequired: true });
+    expect(await orderOf(orderId)).toMatchObject({ status: "confirmed", source: "manual", fulfillmentMethod: "delivery", deliveryRequired: true });
   });
 });
 
@@ -453,8 +460,8 @@ describe("8. Bitta kompaniya bir vaqtda: chakana + distribyutsiya + ishlab chiqa
 
     // Har bir sotuv o'z kanali va yetkazish usulini saqlaydi
     expect(await orderOf(posId)).toMatchObject({ status: "completed", source: "pos", fulfillmentMethod: "counter", isPos: true });
-    expect(await orderOf(deliveryId)).toMatchObject({ status: "confirmed", source: "manual", isPos: false, deliveryRequired: true });
-    expect(await orderOf(pickupId)).toMatchObject({ status: "completed", source: "manual", isPos: false, deliveryRequired: false });
+    expect(await orderOf(deliveryId)).toMatchObject({ status: "confirmed", source: "manual", fulfillmentMethod: "delivery", isPos: false });
+    expect(await orderOf(pickupId)).toMatchObject({ status: "completed", source: "manual", fulfillmentMethod: "pickup", isPos: false });
 
     // Yetkazma faqat yetkazish talab qilgan buyurtmada
     expect(await tasksOf(posId)).toHaveLength(0);

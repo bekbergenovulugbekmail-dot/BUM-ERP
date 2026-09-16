@@ -1868,7 +1868,7 @@ Dalillar (12 joy): `pos.service.ts` chek yopilganda `total === 0 ? "delivered" :
 - `sales_order_status` ga terminal `completed` qiymati qo'shildi (migratsiya `0053`). Sotuv yakunlanganini bildiradi — "yetkazildi" degani emas
 - To'lov holati **ustun sifatida saqlanmaydi**, `paid_amount`/`total_amount` dan hisoblanadi (`paymentStatus`: `unpaid` / `partial` / `paid`) — ikki manba bir-biriga zid bo'lib qolmaydi
 - Yetkazish holati avvalgidek `delivery_tasks.status` da qoladi (u allaqachon to'g'ri ajratilgan edi)
-- Yangi ustunlar: `source` (`pos` / `sales_agent` / `manual` / `import`) va `fulfillment_method` (`counter` / `pickup` / `delivery`) — egasi so'ragan yetishmayotgan domen tushunchalari
+- Yangi ustunlar: `source` (`pos` / `sales_agent` / `manual` / `import`) va `fulfillment_method` (`counter` / `pickup` / `delivery`) — egasi so'ragan yetishmayotgan domen tushunchalari. Kanal serverda beriladi (so'rov tanasidan olinmaydi): kassa — `pos`, savdo agenti — `sales_agent`, ERP — `manual`. Yetkazish usuli buyurtmada `deliveryRequired` aniq bo'lsa yaratilishda (`delivery` / `pickup`), siyosat bo'yicha hal bo'lsa — yetkazma ochilganda yoziladi
 - To'lov endi sotuv holatini **o'zgartirmaydi**; kassa cheki `completed` + `counter` + `pos` bo'lib yoziladi
 - Yagona haqiqat manbai: `apps/api/src/modules/sales/sale-status.ts`
 

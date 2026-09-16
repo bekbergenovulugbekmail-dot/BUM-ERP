@@ -1,8 +1,9 @@
 /**
  * Savdo buyurtmalari (convex/sales/orders.ts).
  *
- * Holatlar: draft → confirmed → shipped → delivered (to'liq to'langan) → returned;
- * draft / confirmed → cancelled (to'lovsiz).
+ * Sotuv holatlari: draft → confirmed → completed → returned; draft / confirmed → cancelled (to'lovsiz).
+ * To'lov holati bu o'qda emas — u summalardan hisoblanadi; yetkazish holati ham emas — u `delivery_tasks.status` da.
+ * Eski `shipped`/`delivered` qiymatlari faqat migratsiyagacha yozilgan yozuvlarda qoladi (ma'nosi `completed`).
  *
  * Buxgalteriya modeli (savdo va POS uchun bir xil):
  *  - jo'natish (`dispatchOrder`): zaxira chiqimi (`moveStock`, AVCO shu lahzada),
@@ -95,6 +96,8 @@ export type SalesOrderInput = {
   items: SalesItemInput[];
   /** Sotuv valyutalari (POS bilan bir xil qoida); standart — asosiy valyuta. */
   saleCurrencies?: string[];
+  /** Sotuv kanali — serverda beriladi (mijoz so'rovda yubora olmaydi). */
+  source?: "manual" | "sales_agent" | "import";
 };
 
 export type DispatchableOrder = {
@@ -637,6 +640,9 @@ export async function createOrder(
       orderDate: input.orderDate,
       deliveryDate: input.deliveryDate ?? null,
       deliveryRequired: input.deliveryRequired ?? null,
+      source: input.source ?? "manual",
+      // Yetkazish aniq belgilangan bo'lsa usul ham aniq; null bo'lsa tasdiqlashda siyosat hal qiladi
+      fulfillmentMethod: input.deliveryRequired === true ? "delivery" : input.deliveryRequired === false ? "pickup" : null,
       notes: input.notes ?? null,
       currency: baseCurrency,
       ...totals,

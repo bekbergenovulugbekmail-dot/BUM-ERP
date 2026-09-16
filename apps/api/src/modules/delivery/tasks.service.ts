@@ -25,6 +25,7 @@ import type { RequestMeta } from "../../shared/audit.js";
 import { fromMinor, mulDivRound, toMinor } from "../../shared/decimal.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
 import type { TenantContext } from "../company/tenant.js";
+import { isCompletedSale } from "../sales/sale-status.js";
 import { getDeliveryPolicy } from "./policy.service.js";
 import { applyAutoAssign } from "./auto-assign.service.js";
 import { publishDeliveryEvent } from "./realtime-bus.js";
@@ -125,7 +126,7 @@ export async function createDeliveryTask(
   if (!order) throw notFound("Buyurtma topilmadi");
   if (order.isPos) throw badRequest("Kassa chekiga yetkazma yaratilmaydi");
   if (!order.customerId) throw badRequest("Yetkazish uchun buyurtmada mijoz bo'lishi kerak");
-  if (order.status !== "confirmed" && order.status !== "shipped" && order.status !== "delivered") {
+  if (order.status !== "confirmed" && !isCompletedSale(order.status)) {
     throw badRequest("Faqat tasdiqlangan buyurtma yetkaziladi");
   }
   const [open] = await tx
@@ -231,6 +232,8 @@ export async function autoCreateDeliveryTask(tx: Tx, tenant: TenantContext, orde
     .where(and(eq(deliveryTasks.orderId, orderId), inArray(deliveryTasks.status, OPEN)))
     .limit(1);
   if (open) return null;
+  // Yetkazma ochilmoqda — buyurtmaning yetkazish usuli shu bilan aniqlanadi
+  await tx.update(salesOrders).set({ fulfillmentMethod: "delivery", updatedAt: new Date() }).where(eq(salesOrders.id, orderId));
   return createDeliveryTask(tx, tenant, { orderId }, meta, "auto");
 }
 

@@ -535,7 +535,7 @@ export async function saveAgentDraft(tx: Tx, context: AgentContext, clientReques
     const order = await createOrder(
       tx,
       context,
-      { customerId: input.customerId, warehouseId, orderDate: todayIso(), deliveryDate, notes, items: priced.items },
+      { customerId: input.customerId, warehouseId, orderDate: todayIso(), deliveryDate, notes, items: priced.items, source: "sales_agent" },
       meta,
       { trustedPricing: true },
     );
