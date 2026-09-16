@@ -1827,6 +1827,8 @@ Qabul testida topilgan kamchiliklar bo'yicha oltita bosqich — har biri alohida
 
 **Kuzatuv:** `GET /api/analytics/dashboard` `analytics.view` talab qiladi — Kassir, Sotuv agenti va Dostavka agenti web bosh sahifasini ocholmaydi (403). Bu modul guardidan ozod, lekin ruxsatdan ozod emas; ruxsat sozlamasi o'zgartirilmadi, egasining qarori kerak
 
+**Production (2026-09-16):** commit `21be475`, `bum-api` va `bum-web` deploy qilindi — ikkalasi ham Online, web sahifasi 200. Sessiyasiz `POST /api/purchase/orders/import` → **401**, ya'ni yangi marshrut jonli (eski buildda bunday marshrut yo'q va 404 qaytardi). Eslatma: `GET /orders/export` bu yerda diskriminator bo'la olmaydi — eski buildda ham `GET /orders/:orderId` uni parametr sifatida qabul qilib 401 beradi. Bu bosqichda yangi migratsiya yo'q (sxema o'zgarmadi). Tizimga kirgan holda sinov — NOT VERIFIED (production paroli ishlatilmaydi)
+
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 
 ### Bajarilgan (tekshirilgan)
