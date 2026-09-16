@@ -78,7 +78,15 @@ export async function recordAllocations(
   tenant: TenantContext,
   header: { id: string; idempotencyKey: string | null },
   parts: ResolvedPart[],
-  target: { customerId?: string | null; orderId?: string | null; paymentDate?: string; notes?: string | null; firstReference?: string | null },
+  target: {
+    customerId?: string | null;
+    orderId?: string | null;
+    paymentDate?: string;
+    notes?: string | null;
+    firstReference?: string | null;
+    /** Kassa smenasi — har qism shu sessiyaga bog'lanadi. */
+    posShiftId?: string | null;
+  },
   meta: RequestMeta,
 ) {
   const rows = [];
@@ -96,6 +104,7 @@ export async function recordAllocations(
         cashAccountId: part.cashAccountId,
         terminalId: part.terminalId,
         paymentId: header.id,
+        posShiftId: target.posShiftId ?? null,
         reference,
         ...(target.paymentDate ? { paymentDate: target.paymentDate } : {}),
         notes: target.notes ?? null,
@@ -123,6 +132,8 @@ export async function recordMixedCustomerPayment(
     paymentDate?: string;
     notes?: string | null;
     allowedMethods?: readonly AllocationMethod[];
+    /** Kassa smenasi — kassada qabul qilingan to'lov shu sessiyaga tegishli. */
+    posShiftId?: string | null;
   },
   meta: RequestMeta,
 ) {

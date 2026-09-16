@@ -15,8 +15,9 @@
  *    ombor ruxsati tekshirilmasdi; `cashierName` mijozdan kelardi, `cashierId` yozilmasdi
  *  - `getShifts` / `getOpenShift` ruxsat tekshirmasdi — `pos.use`
  */
-import { and, desc, eq, getTableColumns, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, isNull, or, sql } from "drizzle-orm";
 import { AppError, badRequest, conflict, forbidden, notFound } from "@bum/shared";
+import { cashAccounts, paymentTerminals } from "../../db/schema/finance.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import { customerBalanceTransactions, customerPayments, customers, posShifts, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -77,7 +78,47 @@ export async function getShift(conn: DbOrTx, tenant: TenantContext, shiftId: str
   // Ruxsat berilmagan ombor smenasi (kassa summalari) ko'rinmaydi
   assertWarehouseAccess(tenant, shift.warehouseId);
   if (shift.cashierId !== tenant.user.id && !(await seesAllShifts(conn, tenant))) throw notFound("Smena topilmadi");
-  return shift;
+  // Yopish oynasi uchun: usul va terminal kesimidagi tushum (naqd farqi bilan bir qatorda ko'rsatiladi)
+  return { ...shift, payments: await shiftPaymentBreakdown(conn, tenant.company.id, shiftId) };
+}
+
+/**
+ * Smenadagi to'lovlar usul va terminal kesimida — sessiyani yopishda solishtirish uchun.
+ *
+ * Kartani naqd kabi "sanash" shart emas: bu yerda har terminal bo'yicha jami summa, tranzaksiyalar soni
+ * va pul tushgan bank hisobi ko'rsatiladi. To'lov smenaga ikki yo'l bilan bog'lanadi — to'g'ridan-to'g'ri
+ * `pos_shift_id` (yangi yozuvlar) yoki chek orqali (`sales_orders.pos_shift_id`); eski yozuvlar
+ * backfill qilinmagani uchun ikkalasi ham hisobga olinadi.
+ */
+export async function shiftPaymentBreakdown(conn: DbOrTx, companyId: string, shiftId: string) {
+  return conn
+    .select({
+      method: customerPayments.method,
+      terminalId: customerPayments.terminalId,
+      terminalName: paymentTerminals.name,
+      network: paymentTerminals.network,
+      accountName: cashAccounts.name,
+      amount: sql<string>`coalesce(sum(${customerPayments.amount}), 0)::numeric(18,2)`,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(customerPayments)
+    .leftJoin(salesOrders, eq(salesOrders.id, customerPayments.orderId))
+    .leftJoin(paymentTerminals, eq(paymentTerminals.id, customerPayments.terminalId))
+    .leftJoin(cashAccounts, eq(cashAccounts.id, customerPayments.cashAccountId))
+    .where(
+      and(
+        eq(customerPayments.companyId, companyId),
+        or(eq(customerPayments.posShiftId, shiftId), eq(salesOrders.posShiftId, shiftId)),
+      ),
+    )
+    .groupBy(
+      customerPayments.method,
+      customerPayments.terminalId,
+      paymentTerminals.name,
+      paymentTerminals.network,
+      cashAccounts.name,
+    )
+    .orderBy(customerPayments.method);
 }
 
 export async function getOpenShift(conn: DbOrTx, tenant: TenantContext, warehouseId: string) {
@@ -747,7 +788,9 @@ export async function completeSale(
           total: paymentTotal,
         })
       : null;
-  if (paymentHeader) await recordAllocations(tx, tenant, paymentHeader, allocations, { orderId: order!.id, paymentDate: today }, meta);
+  if (paymentHeader) {
+    await recordAllocations(tx, tenant, paymentHeader, allocations, { orderId: order!.id, paymentDate: today, posShiftId: shift.id }, meta);
+  }
   for (const part of foreignParts) {
     if (part.paid <= 0n) continue;
     await recordCustomerPayment(
@@ -759,6 +802,7 @@ export async function completeSale(
         currency: part.currency,
         foreignAmount: fromMinor(part.paid),
         method: part.method,
+        posShiftId: shift.id,
         paymentDate: today,
         paymentId: paymentHeader?.id ?? null,
       },
@@ -1077,6 +1121,7 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
       {
         source: "pos_customer_payment",
         customerId: input.customerId,
+        posShiftId: shift.id,
         parts: allocations.map((part) => ({ ...part, amount: fromMinor(part.amount) })),
         idempotencyKey,
         notes,
@@ -1175,7 +1220,15 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
       await recordCustomerPayment(
         tx,
         tenant,
-        { customerId: input.customerId, amount: fromMinor(payAmount), method: input.method, notes, reference, ...(date ? { paymentDate: date } : {}) },
+        {
+          customerId: input.customerId,
+          amount: fromMinor(payAmount),
+          method: input.method,
+          posShiftId: shift.id,
+          notes,
+          reference,
+          ...(date ? { paymentDate: date } : {}),
+        },
         meta,
       );
     }

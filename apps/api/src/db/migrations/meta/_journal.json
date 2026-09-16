@@ -379,6 +379,13 @@
       "when": 1789543036998,
       "tag": "0053_sale_status_completed",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1789574132527,
+      "tag": "0054_payment_session_link",
+      "breakpoints": true
     }
   ]
 }

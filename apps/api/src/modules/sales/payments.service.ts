@@ -60,6 +60,8 @@ export type CustomerPaymentInput = {
   terminalId?: string | null;
   /** To'lov hujjati (aralash to'lov qismi) — `payment-allocation.service.ts`. */
   paymentId?: string | null;
+  /** Kassa smenasi — to'lov qaysi sessiyada qabul qilingani (kassadan tashqarida null). */
+  posShiftId?: string | null;
 };
 
 export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input: CustomerPaymentInput, meta: RequestMeta) {
@@ -152,6 +154,7 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
       notes: input.notes ?? null,
       terminalId: input.terminalId ?? null,
       paymentId: input.paymentId ?? null,
+      posShiftId: input.posShiftId ?? null,
       createdBy: tenant.user.id,
     })
     .returning({ id: customerPayments.id });

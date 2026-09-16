@@ -374,12 +374,19 @@ export const customerPayments = pgTable(
     paymentId: uuid("payment_id").references(() => payments.id, { onDelete: "set null" }),
     /** Karta to'lovi qaysi terminal orqali (hisob — terminalga bog'langan bank hisobi). */
     terminalId: uuid("terminal_id").references(() => paymentTerminals.id, { onDelete: "set null" }),
+    /**
+     * Kassa smenasi: to'lov qaysi sessiyada qabul qilingan. Buyurtmasiz to'lovda (qarz to'lash)
+     * smenani buyurtma orqali topib bo'lmaydi — shuning uchun to'g'ridan-to'g'ri saqlanadi.
+     * Kassadan tashqari to'lovlarda null.
+     */
+    posShiftId: uuid("pos_shift_id").references(() => posShifts.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     ...timestamps(),
   },
   (t) => [
     index("cp_company_customer_idx").on(t.companyId, t.customerId),
     index("cp_payment_idx").on(t.paymentId),
+    index("cp_shift_idx").on(t.posShiftId),
     index("cp_company_date_idx").on(t.companyId, t.paymentDate),
     index("cp_order_idx").on(t.orderId),
     /** Takroriy yuborish ikkinchi to'lov yaratmasin (Convex ham kompaniya bo'yicha tekshirardi). */
