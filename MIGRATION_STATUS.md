@@ -1758,7 +1758,7 @@ Egasining so'rovi: "hisob qo'shishda turi kiritilganda hozir naqd va bank turibd
 
 Tuzatilgan eski kutilmalar: `finance.test` va `import-convex.test` (23 ta standart hisob), `payment-terminals.test` — ortiqcha to'lov holati oldingi bosqichdagi qoidaga moslandi (naqd qism bo'lsa ortig'i naqddan qaytim; naqdsiz ortiqcha va kartadan ortiq to'lov — rad)
 
-**Production:** bu bosqichda hali deploy qilinmagan — keyingi qadam
+**Production (2026-09-16):** commit `12c9033`, `bum-api` va `bum-web` deploy qilindi — ikkalasi ham Online. Yangi kod ishlayotgani tasdiqlandi: sessiyasiz `https://www.bum-erp.uz/api/finance/settlements` → **401** (eski buildda bu marshrut yo'q, 404 bo'lardi), `/api/auth/me` → 401, web sahifasi → 200. Migratsiya 0051 bazada **tekshirilmadi (NOT VERIFIED)** — production bazasi faqat ichki manzilda (`*.railway.internal`) va lokal mashinadan ochilmaydi, `railway run` orqali faqat o'qish tekshiruvi esa ruxsat klassifikatori tomonidan bloklandi. API ishga tushib xizmat ko'rsatayotgani bilvosita dalil (migratsiya yiqilsa konteyner ko'tarilmaydi), ammo to'g'ridan-to'g'ri tasdiq emas. Tizimga kirgan holda sinov — NOT VERIFIED (production paroli ishlatilmaydi)
 
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 
