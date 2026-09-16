@@ -25,7 +25,9 @@ pnpm --filter @bum/api dev
 pnpm dev
 ```
 
-### Demo hisoblar (parol: `demo-parol-123`)
+### Demo hisoblar
+
+Parol — `.env` dagi `DEMO_PASSWORD` (kodda ham, bu hujjatda ham saqlanmaydi).
 
 | Rol | Telefon |
 |---|---|
