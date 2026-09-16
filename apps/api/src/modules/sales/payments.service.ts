@@ -2,7 +2,7 @@
  * Mijoz to'lovlari (convex/sales/orders.ts `recordPayment`).
  *
  * Bitta tranzaksiyada: to'lov, kassa yoki bank kirimi, jurnal (DR kassa/bank / CR debitorlar),
- * buyurtmaning to'langan summasi (jo'natilgan + to'liq to'langan → delivered), mijoz qarzi.
+ * buyurtmaning to'langan summasi (sotuv holati o'zgarmaydi — to'lov holati summalardan hisoblanadi), mijoz qarzi.
  *
  * Convex'dan farqlar:
  *  - ortiqcha to'lov mumkin edi; qoralama va bekor qilingan buyurtmaga ham to'lanardi
@@ -37,6 +37,7 @@ import { earnOrderCashback, getCashbackSettings, maxCashbackUsage, redeemCashbac
 import { payFromBalance } from "./customer-balance.service.js";
 import { salesAudit } from "./customers.service.js";
 import { orderCurrencyBuckets } from "./orders.service.js";
+import { isPayableSale } from "./sale-status.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...paymentFields } = getTableColumns(customerPayments);
 
@@ -102,9 +103,7 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
       .for("update");
     if (!row) throw notFound("Buyurtma topilmadi");
     if (input.customerId && row.customerId !== input.customerId) throw badRequest("Buyurtma boshqa mijozniki");
-    if (row.status !== "confirmed" && row.status !== "shipped" && row.status !== "delivered") {
-      throw badRequest("Bu holatdagi buyurtmaga to'lov qabul qilinmaydi");
-    }
+    if (!isPayableSale(row.status)) throw badRequest("Bu holatdagi buyurtmaga to'lov qabul qilinmaydi");
     const balance = toMinor(row.totalAmount) - toMinor(row.paidAmount);
     if (amount > balance) throw badRequest(`To'lov buyurtma qoldig'idan ortiq (qoldiq ${fromMinor(balance)})`);
     order = row;
@@ -202,10 +201,10 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
 
   if (order) {
     const paid = toMinor(order.paidAmount) + amount;
-    const settled = order.status === "shipped" && paid >= toMinor(order.totalAmount);
+    // To'lov sotuv holatini o'zgartirmaydi: to'langanlik summalardan, yetkazilgani esa yetkazma hujjatidan o'qiladi
     await tx
       .update(salesOrders)
-      .set({ paidAmount: fromMinor(paid), ...(settled ? { status: "delivered" as const } : {}), updatedAt: new Date() })
+      .set({ paidAmount: fromMinor(paid), updatedAt: new Date() })
       .where(eq(salesOrders.id, order.id));
   }
   if (customerId) {

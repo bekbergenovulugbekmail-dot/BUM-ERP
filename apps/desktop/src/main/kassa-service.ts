@@ -1725,7 +1725,7 @@ export class KassaService {
     if (new Set(refundInput.map((part) => part.method)).size !== refundInput.length) throw new KassaError("BAD_REQUEST", "Qaytarish usuli takrorlangan");
     const receipt = await this.findReceipt({ number: input.number });
     if (receipt.status === "rejected" || receipt.status === "discarded") throw new KassaError("CONFLICT", "Chek serverga yozilmagan — qaytarib bo'lmaydi");
-    if (receipt.source === "server" && receipt.status !== "shipped" && receipt.status !== "delivered") {
+    if (receipt.source === "server" && !["completed", "shipped", "delivered"].includes(receipt.status)) {
       throw new KassaError("CONFLICT", "Faqat yakunlangan chekdagi mahsulot qaytariladi");
     }
     const usesBalance = refundInput.length > 0 ? refundInput.some((part) => part.method === "balance") : input.refundMethod === "balance";

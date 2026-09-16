@@ -145,7 +145,7 @@ const orderBody = z.strictObject({
   saleCurrencies: z.array(currencyCode).min(1).max(6).optional(),
 });
 const ordersQuery = z.object({
-  status: z.enum(["draft", "confirmed", "shipped", "delivered", "returned", "cancelled"]).optional(),
+  status: z.enum(["draft", "confirmed", "completed", "shipped", "delivered", "returned", "cancelled"]).optional(),
   customerId: z.uuid().optional(),
   warehouseId: z.uuid().optional(),
   isPos: boolQuery,

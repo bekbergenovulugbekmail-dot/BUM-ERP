@@ -38,6 +38,7 @@ import { companyCurrency } from "../finance/accounts.service.js";
 import { todayIso } from "../finance/cash.service.js";
 import { assertPeriodOpen, ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { salesAudit } from "./customers.service.js";
+import { isCompletedSale, isPayableSale } from "./sale-status.js";
 
 const { companyId: _companyId, ...cashbackTxFields } = getTableColumns(customerCashbackTransactions);
 
@@ -272,7 +273,7 @@ export async function earnOrderCashback(tx: Tx, tenant: TenantContext, orderId: 
     .limit(1);
   if (!order || order.isPos || !order.customerId) return 0n;
   const total = toMinor(order.totalAmount);
-  if (total <= 0n || (order.status !== "shipped" && order.status !== "delivered")) return 0n;
+  if (total <= 0n || !isCompletedSale(order.status)) return 0n;
   if (cashback.accrualBase === "paid" && toMinor(order.paidAmount) < total) return 0n;
 
   const [existing] = await tx
@@ -327,9 +328,7 @@ export async function redeemCashback(
     .for("update");
   if (!order) throw notFound("Buyurtma topilmadi");
   if (order.customerId !== input.customerId) throw badRequest("Buyurtma boshqa mijozniki");
-  if (order.status !== "confirmed" && order.status !== "shipped" && order.status !== "delivered") {
-    throw badRequest("Bu holatdagi buyurtmaga to'lov qabul qilinmaydi");
-  }
+  if (!isPayableSale(order.status)) throw badRequest("Bu holatdagi buyurtmaga to'lov qabul qilinmaydi");
   const due = toMinor(order.totalAmount) - toMinor(order.paidAmount);
   if (amount > due) throw badRequest(`To'lov buyurtma qoldig'idan ortiq (qoldiq ${fromMinor(due)})`);
 
@@ -367,10 +366,10 @@ export async function redeemCashback(
     .where(eq(customerPayments.id, payment!.id));
 
   const paid = toMinor(order.paidAmount) + amount;
-  const settled = order.status === "shipped" && paid >= toMinor(order.totalAmount);
+  // Keshbek bilan to'lash ham sotuv holatini o'zgartirmaydi — faqat to'langan summani oshiradi
   await tx
     .update(salesOrders)
-    .set({ paidAmount: fromMinor(paid), ...(settled ? { status: "delivered" as const } : {}), updatedAt: new Date() })
+    .set({ paidAmount: fromMinor(paid), updatedAt: new Date() })
     .where(eq(salesOrders.id, order.id));
 
   const balanceAfter = balance - amount;

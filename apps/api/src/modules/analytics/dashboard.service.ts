@@ -22,8 +22,8 @@ import type { TenantContext } from "../company/tenant.js";
 import { todayIso } from "../finance/cash.service.js";
 import { shiftDate } from "./dates.js";
 
-/** Tushum tan olingan holatlar. */
-export const REALIZED_STATUSES = ["shipped", "delivered"] as const;
+/** Tushum tan olingan holatlar (`shipped`/`delivered` — eski yozuvlar, `completed` bilan bir ma'noda). */
+export const REALIZED_STATUSES = ["completed", "shipped", "delivered"] as const;
 
 export async function getDashboard(conn: DbOrTx, tenant: TenantContext) {
   const companyId = tenant.company.id;

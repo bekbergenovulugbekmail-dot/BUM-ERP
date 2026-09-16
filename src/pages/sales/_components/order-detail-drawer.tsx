@@ -29,14 +29,16 @@ type Props = {
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-muted text-muted-foreground",
   confirmed: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400",
-  shipped: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400",
+  completed: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
+  shipped: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
   delivered: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
   returned: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400",
   cancelled: "bg-destructive/10 text-destructive",
 };
+/** Sotuv holati — yetkazish holati emas; eski `shipped`/`delivered` ham yakunlangan sotuvni bildirgan. */
 const STATUS_LABELS: Record<string, string> = {
-  draft: "Qoralama", confirmed: "Tasdiqlangan", shipped: "Jo'natilgan",
-  delivered: "Yetkazilgan", returned: "Qaytarilgan", cancelled: "Bekor",
+  draft: "Qoralama", confirmed: "Tasdiqlangan", completed: "Yakunlangan",
+  shipped: "Yakunlangan", delivered: "Yakunlangan", returned: "Qaytarilgan", cancelled: "Bekor",
 };
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
@@ -241,13 +243,13 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                       <Truck className="h-4 w-4 mr-1" /> Jo'natish
                     </Button>
                   )}
-                  {["confirmed", "shipped", "delivered"].includes(order.status) && balance > 0 && can("finance.manage") && (
+                  {["confirmed", "completed", "shipped", "delivered"].includes(order.status) && balance > 0 && can("finance.manage") && (
                     <Button size="sm" variant="secondary" onClick={() => setShowPayment((p) => !p)}>
                       <CreditCard className="h-4 w-4 mr-1" /> To'lov
                       {showPayment ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
                     </Button>
                   )}
-                  {["shipped", "delivered"].includes(order.status) && can("sales.refund") && (
+                  {["completed", "shipped", "delivered"].includes(order.status) && can("sales.refund") && (
                     <Button size="sm" variant="secondary" onClick={() => setShowReturn((p) => !p)}>
                       <Undo2 className="h-4 w-4 mr-1" /> Qaytarish
                       {showReturn ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}

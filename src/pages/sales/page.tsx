@@ -20,12 +20,12 @@ const PAGE_SIZE = 30;
 /** API chegarasi (`limit` ≤ 200). */
 const MAX_LIMIT = 200;
 
+/** "Yakunlangan" filtri serverda eski `shipped`/`delivered` yozuvlarni ham qamrab oladi. */
 const STATUS_TABS = [
   { label: "Barchasi", value: "all" },
   { label: "Qoralama", value: "draft" },
   { label: "Tasdiqlangan", value: "confirmed" },
-  { label: "Jo'natilgan", value: "shipped" },
-  { label: "Yetkazilgan", value: "delivered" },
+  { label: "Yakunlangan", value: "completed" },
   { label: "Qaytarilgan", value: "returned" },
   { label: "Bekor", value: "cancelled" },
 ] as const;
@@ -33,14 +33,23 @@ const STATUS_TABS = [
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-muted text-muted-foreground",
   confirmed: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400",
-  shipped: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400",
+  completed: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
+  shipped: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
   delivered: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
   returned: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400",
   cancelled: "bg-destructive/10 text-destructive",
 };
+/** Sotuv holati — yetkazish holati emas. Eski `shipped`/`delivered` ham yakunlangan sotuvni bildirgan. */
 const STATUS_LABELS: Record<string, string> = {
-  draft: "Qoralama", confirmed: "Tasdiqlangan", shipped: "Jo'natilgan",
-  delivered: "Yetkazilgan", returned: "Qaytarilgan", cancelled: "Bekor",
+  draft: "Qoralama", confirmed: "Tasdiqlangan", completed: "Yakunlangan",
+  shipped: "Yakunlangan", delivered: "Yakunlangan", returned: "Qaytarilgan", cancelled: "Bekor",
+};
+/** To'lov holati alohida ustun — sotuv holati bilan aralashtirilmaydi. */
+const PAYMENT_LABELS: Record<string, string> = { paid: "To'langan", partial: "Qisman", unpaid: "To'lanmagan" };
+const PAYMENT_COLORS: Record<string, string> = {
+  paid: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400",
+  partial: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400",
+  unpaid: "bg-muted text-muted-foreground",
 };
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
@@ -239,9 +248,16 @@ export default function SalesPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", STATUS_COLORS[order.status] ?? "")}>
-                            {STATUS_LABELS[order.status] ?? order.status}
-                          </span>
+                          <div className="flex flex-wrap items-center justify-center gap-1">
+                            <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", STATUS_COLORS[order.status] ?? "")}>
+                              {STATUS_LABELS[order.status] ?? order.status}
+                            </span>
+                            {order.paymentStatus && order.status !== "draft" && order.status !== "cancelled" && (
+                              <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", PAYMENT_COLORS[order.paymentStatus] ?? "")}>
+                                {PAYMENT_LABELS[order.paymentStatus] ?? order.paymentStatus}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-2 py-3">
                           <ChevronRight className="h-4 w-4 text-muted-foreground" />

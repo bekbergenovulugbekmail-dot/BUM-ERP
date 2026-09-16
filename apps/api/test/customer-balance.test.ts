@@ -155,7 +155,7 @@ describe("POS mijozlari", () => {
       debt: "0.00",
       customer: { balance: "50000.00", totalDebt: "0.00" },
     });
-    expect(sale.json().order).toMatchObject({ status: "delivered", totalAmount: "10000.00", paidAmount: "10000.00" });
+    expect(sale.json().order).toMatchObject({ status: "completed", paymentStatus: "paid", totalAmount: "10000.00", paidAmount: "10000.00" });
     expect(await cashBalance()).toBe("60000.00");
     expect(await ledger("2300")).toBe("50000.00");
     expect(await ledger("1100")).toBe("0.00");
@@ -170,7 +170,8 @@ describe("POS mijozlari", () => {
     });
     expect(credit.statusCode).toBe(201);
     expect(credit.json()).toMatchObject({ paid: "0.00", debt: "5000.00", customer: { totalDebt: "5000.00" } });
-    expect(credit.json().order.status).toBe("shipped");
+    // Nasiya chek ham yakunlangan sotuv; qarzligi to'lov holatida ko'rinadi
+    expect(credit.json().order).toMatchObject({ status: "completed", paymentStatus: "unpaid" });
     expect(await ledger("1100")).toBe("5000.00");
 
     expect((await payCustomer({ purpose: "debt", amount: "6000", method: "cash" })).statusCode).toBe(400);

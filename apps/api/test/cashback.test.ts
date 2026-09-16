@@ -163,7 +163,7 @@ describe("Keshbek", () => {
       cashbackEarned: "225.00",
       customer: { cashbackBalance: "465.00", totalDebt: "0.00" },
     });
-    expect(second.json().order).toMatchObject({ status: "delivered", paidAmount: "5000.00" });
+    expect(second.json().order).toMatchObject({ status: "completed", paymentStatus: "paid", paidAmount: "5000.00" });
     expect(await ledger("2400")).toBe("465.00");
     expect(await ledger("1100")).toBe("0.00");
     expect((await sell({ customerId: customer.id, items: one, amountPaid: "4400", cashbackAmount: "600" })).statusCode).toBe(400);

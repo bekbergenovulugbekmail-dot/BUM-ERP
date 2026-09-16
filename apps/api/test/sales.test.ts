@@ -164,7 +164,7 @@ describe("Savdo buyurtmalari", () => {
 
     const shipped = await sales("POST", `/orders/${order.id}/ship`);
     expect(shipped.statusCode).toBe(200);
-    expect(shipped.json().order.status).toBe("shipped");
+    expect(shipped.json().order.status).toBe("completed");
     const items = shipped.json().order.items as { productId: string; costPrice: string }[];
     expect(items.find((i) => i.productId === included)!.costPrice).toBe("7000.0000");
     expect(await stock(included)).toMatchObject({ quantity: "3.0000" });

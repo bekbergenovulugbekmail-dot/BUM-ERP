@@ -117,7 +117,11 @@ describe("POS", () => {
     expect(sale.json()).toMatchObject({ paid: "10000.00", change: "10000.00" });
     expect(sale.json().order).toMatchObject({
       isPos: true,
-      status: "delivered",
+      // Kassadan sotuv "yetkazildi" emas — yakunlangan sotuv; yetkazma yaratilmaydi
+      status: "completed",
+      source: "pos",
+      fulfillmentMethod: "counter",
+      paymentStatus: "paid",
       totalAmount: "10000.00",
       taxAmount: "1071.43",
       paidAmount: "10000.00",

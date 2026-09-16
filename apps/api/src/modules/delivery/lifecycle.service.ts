@@ -39,6 +39,7 @@ import { recordHit } from "../../shared/rate-limit.js";
 import { smsProvider } from "../../shared/sms.js";
 import type { TenantContext } from "../company/tenant.js";
 import { shipOrder } from "../sales/orders.service.js";
+import { isCompletedSale } from "../sales/sale-status.js";
 import { createPaymentHeader, recordAllocations, resolvePaymentParts, settlePaymentParts } from "../sales/payment-allocation.service.js";
 import { agentCashAccount } from "./agent-cash.service.js";
 import { returnSaleItems, type RefundMethod } from "../sales/returns.service.js";
@@ -261,7 +262,7 @@ export async function startDelivery(
   if (order!.status === "confirmed") {
     await shipOrder(tx, context, task.orderId, meta);
     dispatched = true;
-  } else if (order!.status !== "shipped" && order!.status !== "delivered") {
+  } else if (!isCompletedSale(order!.status)) {
     throw new AppError("CONFLICT", `Buyurtma ${order!.number} holati yetkazishga yaroqsiz`, { reason: "order_not_deliverable", orderStatus: order!.status });
   }
 
@@ -879,7 +880,7 @@ export async function returnDeliveryGoods(
 
   const [order] = await tx.select({ status: salesOrders.status }).from(salesOrders).where(eq(salesOrders.id, task.orderId)).limit(1);
   let restocked = false;
-  if (order!.status === "shipped" || order!.status === "delivered") {
+  if (isCompletedSale(order!.status)) {
     await returnSaleItems(
       tx,
       tenant,

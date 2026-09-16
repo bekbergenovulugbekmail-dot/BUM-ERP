@@ -4,7 +4,13 @@
 import type { CompanyInfo } from "@/lib/pdf/pdf-utils.ts";
 import type { ActiveCompany } from "@/hooks/use-company.ts";
 
-export type SalesOrderStatus = "draft" | "confirmed" | "shipped" | "delivered" | "returned" | "cancelled";
+/**
+ * Sotuv hujjatining holati — yetkazish holati emas (u `delivery` modulida), to'lov holati ham emas
+ * (u `paymentStatus` da). `shipped` va `delivered` — eski yozuvlar, ma'nosi `completed` bilan bir xil.
+ */
+export type SalesOrderStatus = "draft" | "confirmed" | "completed" | "shipped" | "delivered" | "returned" | "cancelled";
+/** To'lov holati — summalardan hisoblanadi, serverdan keladi. */
+export type SalePaymentStatus = "unpaid" | "partial" | "paid";
 /** `balance` — mijoz balansidan, `cashback` — keshbekdan (faqat server yozadi: POS va qarz to'lovi). */
 export type PaymentMethod = "cash" | "bank" | "card" | "transfer" | "balance" | "cashback";
 
@@ -77,6 +83,7 @@ export type SalesOrderRow = {
   warehouseName: string;
   itemCount: number;
   balance: string;
+  paymentStatus: SalePaymentStatus;
 };
 
 export type SalesOrderItem = {

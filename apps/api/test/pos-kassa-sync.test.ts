@@ -213,7 +213,7 @@ describe("Desktop kassa: naqd harakatlari, mijoz to'lovlari, sotuv tarixi", () =
     const first = await device(one.token, "GET", "/api/pos-device/sales?limit=2");
     expect(first.statusCode).toBe(200);
     expect(first.json().sales.map((sale: { number: string }) => sale.number)).toEqual([webSale.json().order.number, "K02-000001"]);
-    expect(first.json().sales[1]).toMatchObject({ deviceCode: "K02", totalAmount: "4000.00", status: "delivered" });
+    expect(first.json().sales[1]).toMatchObject({ deviceCode: "K02", totalAmount: "4000.00", status: "completed" });
     const second = await device(one.token, "GET", `/api/pos-device/sales?limit=2&cursor=${encodeURIComponent(first.json().nextCursor)}`);
     expect(second.json()).toMatchObject({ sales: [expect.objectContaining({ number: "K01-000001", deviceCode: "K01" })], nextCursor: null });
 

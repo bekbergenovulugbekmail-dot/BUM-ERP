@@ -1851,6 +1851,38 @@ Qabul testida topilgan kamchiliklar bo'yicha oltita bosqich — har biri alohida
 - **GPS zaryadi:** plagin patch'i (har soniya o'lchash o'rniga 10–30 s va paketli yetkazish), serverga paketli yuborish, fonda realtime yopilishi; debug APK qayta qurildi (bo'lim yuqorida); real telefonda o'lchanmagan
 - **Production deploy (komissiya va GPS):** `bum-api`, `bum-web` — SUCCESS, migratsiya 0047 bazada tasdiqlangan
 
+## Sotuv ≠ to'lov ≠ yetkazish: holatlarni ajratish (2026-09-16 audit)
+
+**Egasi xabar qilgan muammo:** kassadan qilingan oddiy 100 000 so'mlik chek (naqd/Uzcard, "Saqlash") Sotuvlar ro'yxatida **"YETKAZILDI"** bo'lib ko'rinardi.
+
+**ROOT CAUSE — UI'da emas, ma'lumot modelida.** `sales_order_status` enumi bitta o'qda uchta tushunchani aralashtirgan edi. Uning ikkita terminal qiymati aslida **to'lov holatini** bildirgan, yetkazishni emas:
+
+- `shipped` = yakunlangan sotuv, qarz bor
+- `delivered` = yakunlangan sotuv, to'liq to'langan
+
+Dalillar (12 joy): `pos.service.ts` chek yopilganda `total === 0 ? "delivered" : "shipped"` yozardi; `payments.service.ts`, `cashback.service.ts`, `customer-balance.service.ts` **to'liq to'lov** sodir bo'lganda holatni `shipped → delivered` ga ko'chirardi; `orders.service.ts` `shipOrder` da holat faqat `paidAmount >= totalAmount` ga qarab tanlanardi; `salesStats.totalDebt` qarzni `status = 'shipped'` bo'yicha sanardi; desktop kassa `history-screen.tsx` da bu ikki qiymat ochiq matnda `shipped: "qarz bor", delivered: "to'langan"` deb tarjima qilingan. Web esa ularni **yetkazish** lug'atida ("Jo'natilgan" / "Yetkazilgan") ko'rsatardi — shundan "YETKAZILDI".
+
+**Teskari nuqson ham bor edi:** `lifecycle.service.ts` da `update(salesOrders)` umuman yo'q — ya'ni **yetkazmani tasdiqlash sotuv holatini hech qachon o'zgartirmagan**. `delivery-flow.test.ts` da buyurtma "delivered" bo'lgani `confirm` dan emas, undan oldingi **to'lovdan** kelib chiqqan. Natijada nasiyaga haqiqatan yetkazilgan buyurtma hech qachon "yetkazilgan" ko'rinmasdi, kassadagi darhol to'langan chek esa ko'rinardi.
+
+**Yechim (qo'shimcha, buzmaydigan):**
+- `sales_order_status` ga terminal `completed` qiymati qo'shildi (migratsiya `0053`). Sotuv yakunlanganini bildiradi — "yetkazildi" degani emas
+- To'lov holati **ustun sifatida saqlanmaydi**, `paid_amount`/`total_amount` dan hisoblanadi (`paymentStatus`: `unpaid` / `partial` / `paid`) — ikki manba bir-biriga zid bo'lib qolmaydi
+- Yetkazish holati avvalgidek `delivery_tasks.status` da qoladi (u allaqachon to'g'ri ajratilgan edi)
+- Yangi ustunlar: `source` (`pos` / `sales_agent` / `manual` / `import`) va `fulfillment_method` (`counter` / `pickup` / `delivery`) — egasi so'ragan yetishmayotgan domen tushunchalari
+- To'lov endi sotuv holatini **o'zgartirmaydi**; kassa cheki `completed` + `counter` + `pos` bo'lib yoziladi
+- Yagona haqiqat manbai: `apps/api/src/modules/sales/sale-status.ts`
+
+**Eski ma'lumot tegilmadi:** mavjud `shipped`/`delivered` yozuvlar **o'zgartirilmadi** (egasining tasdig'isiz ma'lumot transformatsiyasi qilinmaydi). Ular o'qishda `completed` bilan teng hisoblanadi; "Yakunlangan" filtri uchchalasini qamrab oladi; barcha til fayllarida ular ham "Yakunlangan" deb ko'rsatiladi.
+
+**Regressiya (hammasi o'tdi):**
+- API: **111 fayl / 528 test** (6 bo'lakda; avvalgi hisobotdagi "26 fayl / 133 test" eskirgan baseline edi)
+- Yangi `acceptance-business-scenarios.test.ts` — **17 biznes ssenariysi**: chakana naqd/aralash/uch usulli, nasiya va keyingi to'lov, distribyutsiya, yetkazish, **nasiyaga yetkazish**, olib ketish, ulgurji qisman to'lov, to'liq va qisman qaytarish, ishlab chiqarish, ishlab chiqarish + chakana, ishlab chiqarish + distribyutsiya, xarid ≠ to'lov, xarajat, **bitta kompaniya bir vaqtda 4 biznes**
+- Web: 18 fayl / 77 test; Desktop: 9 fayl / 57 test
+- API tsc, web tsc, web lint, web build, desktop typecheck — toza
+
+**Deploy qilinmadi** — egasi audit davomida deploy qilmaslikni so'ragan.
+
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)

@@ -89,7 +89,8 @@ export type TodayRoute = { id: string; name: string; color: string | null; days:
 /** `GET /api/sales-agent/today`. */
 export type AgentToday = { date: string; routes: TodayRoute[]; stores: AgentStore[] };
 
-export type OrderStatus = "draft" | "confirmed" | "shipped" | "delivered" | "returned" | "cancelled";
+/** `shipped`/`delivered` — eski yozuvlar; yangi buyurtmalar `completed` bo'ladi. */
+export type OrderStatus = "draft" | "confirmed" | "completed" | "shipped" | "delivered" | "returned" | "cancelled";
 
 /** `GET /api/sales-agent/stores/:id`. */
 export type StoreProfile = AgentStore & {

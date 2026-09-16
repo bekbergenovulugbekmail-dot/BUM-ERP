@@ -109,7 +109,8 @@ describe("Dostavka: to'liq oqim (API darajasida E2E)", () => {
     expect((await agentAction(app, agent.cookie, taskId, "start", { clientRequestId: startKey })).json().task.status).toBe("out_for_delivery");
     expect((await agentAction(app, agent.cookie, taskId, "start", { clientRequestId: startKey })).statusCode).toBe(200);
     expect(await stock()).toBe("90.0000");
-    expect(await orderStatus(orderId)).toBe("shipped");
+    // Yo'lga chiqishda sotuv yakunlanadi (zaxira chiqdi, jurnal yozildi) — yetkazilgani yetkazma holatida
+    expect(await orderStatus(orderId)).toBe("completed");
     expect(await journalCount("sales_order", orderId)).toBe(1);
 
     const arrived = await agentAction(app, agent.cookie, taskId, "arrive", near(199));
@@ -152,7 +153,8 @@ describe("Dostavka: to'liq oqim (API darajasida E2E)", () => {
     expect(await journalCount("sales_order", orderId)).toBe(1);
     expect(await journalCount("customer_payment", orderPayments[0]!.id)).toBe(1);
     expect(await stock()).toBe("90.0000");
-    expect(await orderStatus(orderId)).toBe("delivered");
+    // To'lov ham, yetkazma tasdig'i ham sotuv holatini o'zgartirmaydi — u yakunlangan bo'lib qoladi
+    expect(await orderStatus(orderId)).toBe("completed");
 
     const final = await managerTask(taskId);
     expect(final.events.map((event: { action: string }) => event.action)).toEqual(

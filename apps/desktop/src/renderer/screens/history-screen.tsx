@@ -26,7 +26,14 @@ const STATE_LABEL: Record<string, { text: string; tone: string }> = {
   discarded: { text: "bekor qilingan", tone: "text-muted-foreground line-through" },
 };
 
-const STATUS_LABEL: Record<string, string> = { shipped: "qarz bor", delivered: "to'langan", returned: "qaytarilgan", confirmed: "tasdiqlangan" };
+/** Sotuv holati. To'langan-to'lanmagani alohida ko'rsatiladi — holat buni bildirmaydi. */
+const STATUS_LABEL: Record<string, string> = {
+  completed: "yakunlangan",
+  shipped: "yakunlangan",
+  delivered: "yakunlangan",
+  returned: "qaytarilgan",
+  confirmed: "tasdiqlangan",
+};
 
 /** Mahalliy kun chegaralari (sotuv tarixi kassa vaqti bo'yicha). */
 function presetRange(preset: Preset) {

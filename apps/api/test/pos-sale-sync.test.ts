@@ -175,7 +175,7 @@ describe("Desktop kassa: offline chek va qaytarish sinxroni", () => {
     const ret = (number: string, quantity: string, minutesAgo: number) =>
       op("sale.return", owner, { returnId: randomUUID(), orderId: saleId, shiftId, number, items: [{ orderItemId: line.id, quantity }], refundMethod: "cash", reason: "Sifatsiz" }, minutesAgo);
     const [first] = await push(token, [ret("K01-Q000001", "1", 20)]);
-    expect(first).toMatchObject({ status: "applied", result: { number: "K01-Q000001", totalAmount: "10000.00", refundAmount: "10000.00", orderStatus: "delivered" } });
+    expect(first).toMatchObject({ status: "applied", result: { number: "K01-Q000001", totalAmount: "10000.00", refundAmount: "10000.00", orderStatus: "completed" } });
     expect((await stockOf(tea))!.quantity).toBe("8.0000");
     expect((await db.select().from(posShifts).where(eq(posShifts.id, shiftId)))[0]).toMatchObject({ totalReturns: "10000.00", totalCash: "20000.00" });
 

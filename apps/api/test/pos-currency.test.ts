@@ -102,7 +102,7 @@ describe("POS: sotuv valyutalari", () => {
     });
     expect(sale.statusCode).toBe(201);
     const body = sale.json();
-    expect(body.order).toMatchObject({ totalAmount: "255000.00", paidAmount: "255000.00", status: "delivered" });
+    expect(body.order).toMatchObject({ totalAmount: "255000.00", paidAmount: "255000.00", status: "completed", paymentStatus: "paid" });
     expect(body.currencyTotals).toEqual(
       expect.arrayContaining([
         { currency: "USD", total: "20.00", covered: "0.00", paid: "20.00", change: "5.00" },
@@ -156,7 +156,7 @@ describe("POS: sotuv valyutalari", () => {
     const usdOnly = await sell({ items: [{ productId: cable, quantity: "1" }], currencyPayments: [{ currency: "USD", amount: "0.40" }] });
     expect(usdOnly.statusCode).toBe(201);
     expect(usdOnly.json().currencyTotals).toEqual([{ currency: "USD", total: "0.40", covered: "0.00", paid: "0.40", change: "0.00" }]);
-    expect(usdOnly.json().order).toMatchObject({ totalAmount: "5000.00", paidAmount: "5000.00", status: "delivered" });
+    expect(usdOnly.json().order).toMatchObject({ totalAmount: "5000.00", paidAmount: "5000.00", status: "completed", paymentStatus: "paid" });
 
     const customer = (await call(kassir.cookie, "POST", "/api/sales/pos/customers", { name: "Dollar mijoz" })).json().customer;
 
@@ -169,7 +169,7 @@ describe("POS: sotuv valyutalari", () => {
     });
     expect(credit.statusCode).toBe(201);
     expect(credit.json()).toMatchObject({ debt: "75000.00", customer: { totalDebt: "75000.00" } });
-    expect(credit.json().order).toMatchObject({ totalAmount: "125000.00", paidAmount: "50000.00", status: "shipped" });
+    expect(credit.json().order).toMatchObject({ totalAmount: "125000.00", paidAmount: "50000.00", status: "completed", paymentStatus: "partial" });
 
     const usdBefore = Number(await cashBalance(usdCash));
     const returned = await call(company.ownerCookie, "POST", `/api/sales/orders/${credit.json().order.id}/return`, { refund: true });
@@ -230,7 +230,7 @@ describe("POS: sotuv valyutalari", () => {
     expect(covered.statusCode).toBe(201);
     expect(covered.json()).toMatchObject({ debt: "0.00", balanceUsed: "62500.00", customer: { balance: "0.00", totalDebt: "0.00" } });
     expect(covered.json().currencyTotals).toEqual([{ currency: "USD", total: "10.00", covered: "5.00", paid: "5.00", change: "0.00" }]);
-    expect(covered.json().order).toMatchObject({ paidAmount: "125000.00", status: "delivered" });
+    expect(covered.json().order).toMatchObject({ paidAmount: "125000.00", status: "completed", paymentStatus: "paid" });
 
     let shift = (await call(kassir.cookie, "GET", `/api/sales/pos/shifts/${shiftId}`)).json().shift;
     expect(shift).toMatchObject({ foreignCash: { USD: "15.00" }, foreignCard: { USD: "20.00" }, totalCash: "62500.00" });

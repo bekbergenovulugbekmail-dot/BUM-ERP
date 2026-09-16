@@ -64,6 +64,7 @@ import { allowedWarehouses, assertWarehouseAccess } from "../inventory/warehouse
 import { assertProductsInScope, categoryScope, documentHasScopedItem } from "../catalog/category-scope.js";
 import { salesAudit } from "./customers.service.js";
 import { getSalesPolicy } from "./sales-policy.service.js";
+import { COMPLETED_STATUSES, isCompletedSale, paymentStatusSql } from "./sale-status.js";
 
 const { legacyId: _l1, companyId: _c1, ...orderFields } = getTableColumns(salesOrders);
 const { legacyId: _l2, companyId: _c2, ...itemFields } = getTableColumns(salesOrderItems);
@@ -433,6 +434,7 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
       customerPhone: customers.phone,
       warehouseName: warehouses.name,
       balance: balanceSql,
+      paymentStatus: paymentStatusSql,
     })
     .from(salesOrders)
     .leftJoin(customers, eq(customers.id, salesOrders.customerId))
@@ -536,6 +538,7 @@ export async function listOrders(
       warehouseName: warehouses.name,
       itemCount: sql<number>`(select count(*)::int from ${salesOrderItems} where ${salesOrderItems.orderId} = ${salesOrders.id})`,
       balance: balanceSql,
+      paymentStatus: paymentStatusSql,
     })
     .from(salesOrders)
     .leftJoin(customers, eq(customers.id, salesOrders.customerId))
@@ -544,7 +547,12 @@ export async function listOrders(
       and(
         eq(salesOrders.companyId, tenant.company.id),
         allowed ? inArray(salesOrders.warehouseId, allowed) : undefined,
-        options.status ? eq(salesOrders.status, options.status) : undefined,
+        // "Yakunlangan" filtri eski `shipped`/`delivered` yozuvlarni ham qamrab oladi
+        options.status
+          ? options.status === "completed"
+            ? inArray(salesOrders.status, [...COMPLETED_STATUSES])
+            : eq(salesOrders.status, options.status)
+          : undefined,
         options.customerId ? eq(salesOrders.customerId, options.customerId) : undefined,
         options.warehouseId ? eq(salesOrders.warehouseId, options.warehouseId) : undefined,
         options.isPos !== undefined ? eq(salesOrders.isPos, options.isPos) : undefined,
@@ -583,8 +591,9 @@ export async function salesStats(conn: DbOrTx, tenant: TenantContext) {
       totalThisMonth: sql<string>`coalesce(sum(${salesOrders.totalAmount}) filter (where ${salesOrders.orderDate} >= ${monthStart} and ${salesOrders.status} not in ('draft', 'cancelled', 'returned')), 0)::numeric(18,2)`,
       countThisMonth: sql<number>`(count(*) filter (where ${salesOrders.orderDate} >= ${monthStart} and ${salesOrders.status} not in ('draft', 'cancelled', 'returned')))::int`,
       todayCount: sql<number>`(count(*) filter (where ${salesOrders.orderDate} = ${today} and ${salesOrders.status} not in ('draft', 'cancelled')))::int`,
-      pendingPayment: sql<number>`(count(*) filter (where ${salesOrders.totalAmount} > ${salesOrders.paidAmount} and ${salesOrders.status} in ('confirmed', 'shipped')))::int`,
-      totalDebt: sql<string>`coalesce(sum(${salesOrders.totalAmount} - ${salesOrders.paidAmount}) filter (where ${salesOrders.status} = 'shipped'), 0)::numeric(18,2)`,
+      pendingPayment: sql<number>`(count(*) filter (where ${salesOrders.totalAmount} > ${salesOrders.paidAmount} and ${salesOrders.status} in ('confirmed', 'completed', 'shipped', 'delivered')))::int`,
+      // Qarz — yakunlangan sotuvning to'lanmagan qoldig'i (holat emas, summalar farqi)
+      totalDebt: sql<string>`coalesce(sum(${salesOrders.totalAmount} - ${salesOrders.paidAmount}) filter (where ${salesOrders.status} in ('completed', 'shipped', 'delivered') and ${salesOrders.totalAmount} > ${salesOrders.paidAmount}), 0)::numeric(18,2)`,
     })
     .from(salesOrders)
     .where(eq(salesOrders.companyId, tenant.company.id));
@@ -871,7 +880,8 @@ export async function shipOrder(tx: Tx, tenant: TenantContext, orderId: string, 
   await assertOrderInScope(tx, tenant, orderId);
 
   const { cogs } = await dispatchOrder(tx, tenant, order, todayIso());
-  const status: SalesOrderStatus = toMinor(order.paidAmount) >= toMinor(order.totalAmount) ? "delivered" : "shipped";
+  // Jo'natildi = sotuv yakunlandi. To'langan-to'lanmagani summalardan, yetkazilgani esa yetkazma hujjatidan o'qiladi
+  const status: SalesOrderStatus = "completed";
   await tx.update(salesOrders).set({ status, updatedAt: new Date() }).where(eq(salesOrders.id, orderId));
   // Keshbek: sozlama "total" — jo'natilganda, "paid" — to'liq to'langan bo'lsa
   const cashbackEarned = await earnOrderCashback(tx, tenant, orderId);
@@ -937,7 +947,7 @@ export async function returnOrder(
 ) {
   const companyId = tenant.company.id;
   const order = await lockOrder(tx, tenant, orderId);
-  if (order.status !== "shipped" && order.status !== "delivered") throw badRequest("Faqat jo'natilgan buyurtma qaytariladi");
+  if (!isCompletedSale(order.status)) throw badRequest("Faqat jo'natilgan buyurtma qaytariladi");
   assertWarehouseAccess(tenant, order.warehouseId);
   await assertOrderInScope(tx, tenant, orderId);
   const partial = await tx.$count(salesReturns, eq(salesReturns.orderId, orderId));

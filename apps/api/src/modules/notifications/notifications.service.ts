@@ -369,7 +369,7 @@ export async function generateSmartAlerts(tx: Tx, companyId: string) {
     .where(
       and(
         eq(salesOrders.companyId, companyId),
-        eq(salesOrders.status, "shipped"),
+        sql`${salesOrders.status} in ('completed', 'shipped', 'delivered')`,
         sql`${salesOrders.totalAmount} > ${salesOrders.paidAmount}`,
         sql`${salesOrders.orderDate} + ${customers.paymentTermDays} < ${today}::date`,
       ),

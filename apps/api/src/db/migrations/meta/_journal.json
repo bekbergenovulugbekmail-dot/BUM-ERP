@@ -372,6 +372,13 @@
       "when": 1789518810782,
       "tag": "0052_balance_adjustment",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1789543036998,
+      "tag": "0053_sale_status_completed",
+      "breakpoints": true
     }
   ]
 }

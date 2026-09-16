@@ -26,6 +26,7 @@ import {
 import { assertPeriodOpen, ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { setCustomerCashback } from "./cashback.service.js";
 import { salesAudit } from "./customers.service.js";
+import { isPayableSale } from "./sale-status.js";
 
 const { companyId: _companyId, ...balanceTxFields } = getTableColumns(customerBalanceTransactions);
 
@@ -209,9 +210,7 @@ export async function payFromBalance(
       .for("update");
     if (!row) throw notFound("Buyurtma topilmadi");
     if (row.customerId !== input.customerId) throw badRequest("Buyurtma boshqa mijozniki");
-    if (row.status !== "confirmed" && row.status !== "shipped" && row.status !== "delivered") {
-      throw badRequest("Bu holatdagi buyurtmaga to'lov qabul qilinmaydi");
-    }
+    if (!isPayableSale(row.status)) throw badRequest("Bu holatdagi buyurtmaga to'lov qabul qilinmaydi");
     const due = toMinor(row.totalAmount) - toMinor(row.paidAmount);
     if (amount > due) throw badRequest(`To'lov buyurtma qoldig'idan ortiq (qoldiq ${fromMinor(due)})`);
     order = row;
@@ -259,10 +258,10 @@ export async function payFromBalance(
 
   if (order) {
     const paid = toMinor(order.paidAmount) + amount;
-    const settled = order.status === "shipped" && paid >= toMinor(order.totalAmount);
+    // Balansdan to'lash ham sotuv holatini o'zgartirmaydi — faqat to'langan summani oshiradi
     await tx
       .update(salesOrders)
-      .set({ paidAmount: fromMinor(paid), ...(settled ? { status: "delivered" as const } : {}), updatedAt: new Date() })
+      .set({ paidAmount: fromMinor(paid), updatedAt: new Date() })
       .where(eq(salesOrders.id, order.id));
   }
 

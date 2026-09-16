@@ -114,7 +114,7 @@ export async function savePosQuickSale(tx: Tx, tenant: TenantContext, input: { p
  */
 export async function quickSaleSuggestions(conn: DbOrTx, companyId: string, input: { days: QuickSalePeriod; limit: number }) {
   const since = new Date(Date.now() - (input.days - 1) * 86_400_000).toISOString().slice(0, 10);
-  const counted = sql`(${salesOrders.status} in ('shipped', 'delivered') or (${salesOrders.status} = 'returned' and exists (select 1 from ${salesReturns} sr where sr.order_id = ${salesOrders.id})))`;
+  const counted = sql`(${salesOrders.status} in ('completed', 'shipped', 'delivered') or (${salesOrders.status} = 'returned' and exists (select 1 from ${salesReturns} sr where sr.order_id = ${salesOrders.id})))`;
   const returned = sql`coalesce((select sum(ri.quantity) from ${salesReturnItems} ri join ${salesReturns} r on r.id = ri.return_id where ri.product_id = ${salesOrderItems.productId} and r.company_id = ${companyId} and r.created_at >= ${since}::date), 0)`;
   const net = sql`(sum(${salesOrderItems.quantity}) - ${returned})`;
   const receipts = sql<number>`count(distinct ${salesOrders.id})::int`;

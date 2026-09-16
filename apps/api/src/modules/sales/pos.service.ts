@@ -679,6 +679,9 @@ export async function completeSale(
       currency: await companyCurrency(tx, companyId),
       ...totals,
       isPos: true,
+      source: "pos",
+      /** Kassa cheki — tovar shu yerda qo'lma-qo'l beriladi, yetkazma yaratilmaydi. */
+      fulfillmentMethod: "counter",
       posShiftId: shift.id,
       notes: input.notes ?? null,
       createdBy: tenant.user.id,
@@ -710,7 +713,8 @@ export async function completeSale(
   if (dispatched.creditLimit) conflicts.push({ kind: "credit_limit", details: { customerId: input.customerId, ...dispatched.creditLimit } });
   await tx
     .update(salesOrders)
-    .set({ status: total === 0n ? "delivered" : "shipped", updatedAt: new Date() })
+    // Chek yopildi — sotuv yakunlandi. Qarz qolgani `paidAmount` dan ko'rinadi, holatga aralashtirilmaydi
+    .set({ status: "completed", updatedAt: new Date() })
     .where(eq(salesOrders.id, order!.id));
 
   if (fromCashback > 0n) {

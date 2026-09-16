@@ -33,6 +33,17 @@ import { cashAccounts, expenses, journalEntries, paymentTerminals } from "./fina
 import { paymentMethod } from "./purchase.js";
 import { legacyId, money, percent, pk, price, qty, timestamps } from "./_shared.js";
 
+/**
+ * Sotuv hujjatining hayot sikli — faqat sotuvniki. To'lov holati bu yerda emas: u `paid_amount` va
+ * `total_amount` dan hisoblanadi; yetkazish holati ham bu yerda emas: u `delivery_tasks.status` da.
+ *
+ * `completed` — sotuv yakunlandi (tovar berildi, zaxira chiqdi, jurnal yozildi). Kassa cheki ham,
+ * yetkazib berilgan buyurtma ham shu holatga keladi — "yetkazildi" degani emas.
+ *
+ * `shipped` va `delivered` — eski yozuvlar uchun saqlanadi: ular aslida to'lov holatini bildirgan
+ * (`shipped` — qarz bor, `delivered` — to'langan) va yetkazishga aloqasi yo'q edi. Yangi yozuvlarda
+ * ishlatilmaydi; o'qishda `completed` bilan teng.
+ */
 export const salesOrderStatus = pgEnum("sales_order_status", [
   "draft",
   "confirmed",
@@ -40,6 +51,22 @@ export const salesOrderStatus = pgEnum("sales_order_status", [
   "delivered",
   "returned",
   "cancelled",
+  "completed",
+]);
+
+/** Sotuv qaysi kirish nuqtasidan kelgan — biznes turi yoki modul emas, aynan kanal. */
+export const salesOrderSource = pgEnum("sales_order_source", [
+  "pos", //         kassa (web yoki desktop)
+  "sales_agent", // savdo agenti buyurtmasi
+  "manual", //      ERP'da qo'lda kiritilgan
+  "import", //      fayldan import qilingan
+]);
+
+/** Tovar mijozga qanday yetadi — sotuv holatidan mustaqil o'q. */
+export const salesFulfillmentMethod = pgEnum("sales_fulfillment_method", [
+  "counter", //  kassada qo'lma-qo'l berildi
+  "pickup", //   mijoz o'zi olib ketadi
+  "delivery", // yetkazma orqali
 ]);
 
 export const posShiftStatus = pgEnum("pos_shift_status", ["open", "closed"]);
@@ -203,6 +230,10 @@ export const salesOrders = pgTable(
     deliveryDate: date("delivery_date"),
     /** Yetkazib berish kerakmi: null — kompaniya dostavka siyosati bo'yicha (`deliveryRequiredByDefault`). */
     deliveryRequired: boolean("delivery_required"),
+    /** Sotuv kanali — POS savdosini agent va qo'lda kiritilgan savdodan ajratish uchun. */
+    source: salesOrderSource("source").notNull().default("manual"),
+    /** Yetkazib berish usuli; null — hujjat yaratilganda aniqlanmagan (eski yozuvlar). */
+    fulfillmentMethod: salesFulfillmentMethod("fulfillment_method"),
 
     currency: varchar("currency", { length: 3 }).notNull().default("UZS"),
     exchangeRate: price("exchange_rate").notNull().default("1"),

@@ -74,7 +74,7 @@ const STATUS_COLORS: Record<string, string> = {
   paid: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
 };
 const STATUS_LABELS: Record<string, string> = {
-  draft: "Qoralama", confirmed: "Tasdiqlangan", shipped: "Jo'natildi",
+  draft: "Qoralama", confirmed: "Tasdiqlangan", completed: "Yakunlandi", shipped: "Jo'natildi",
   delivered: "Yetkazildi", cancelled: "Bekor", returned: "Qaytarildi",
   partial: "Qisman qabul", received: "Qabul qilindi", invoiced: "Hisob-faktura", paid: "To'langan",
 };

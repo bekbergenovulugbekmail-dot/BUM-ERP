@@ -271,7 +271,7 @@ export type DistPromotion = {
 export type SupervisorOrder = {
   id: string;
   number: string;
-  status: "draft" | "confirmed" | "shipped" | "delivered" | "returned" | "cancelled";
+  status: "draft" | "confirmed" | "completed" | "shipped" | "delivered" | "returned" | "cancelled";
   orderDate: string;
   deliveryDate: string | null;
   currency: string;

@@ -297,7 +297,7 @@ export async function agentDebtors(
       and(
         eq(salesOrders.companyId, context.company.id),
         inArray(salesOrders.customerId, stores.map((store) => store.id)),
-        inArray(salesOrders.status, ["shipped", "delivered"]),
+        inArray(salesOrders.status, ["completed", "shipped", "delivered"]),
         sql`${salesOrders.paidAmount} < ${salesOrders.totalAmount}`,
       ),
     )

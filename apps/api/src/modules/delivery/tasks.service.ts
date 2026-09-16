@@ -747,7 +747,7 @@ export async function getDeliveryTask(conn: DbOrTx, companyId: string, taskId: s
 export async function readyOrdersForDelivery(conn: DbOrTx, tenant: TenantContext, options: { search?: string; limit: number }) {
   const conditions: (SQL | undefined)[] = [
     eq(salesOrders.companyId, tenant.company.id),
-    inArray(salesOrders.status, ["confirmed", "shipped", "delivered"]),
+    inArray(salesOrders.status, ["confirmed", "completed", "shipped", "delivered"]),
     eq(salesOrders.isPos, false),
     isNotNull(salesOrders.customerId),
     notExists(

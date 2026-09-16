@@ -43,6 +43,7 @@ import { reverseCashback } from "./cashback.service.js";
 import { refundToBalance } from "./customer-balance.service.js";
 import { salesAudit } from "./customers.service.js";
 import { getOrder } from "./orders.service.js";
+import { isCompletedSale } from "./sale-status.js";
 import { assertShiftOperator, type SaleConflict } from "./pos.service.js";
 
 export const REFUND_METHODS = ["cash", "card", "bank", "balance"] as const;
@@ -247,7 +248,7 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
     .limit(1)
     .for("update");
   if (!order) throw notFound("Chek topilmadi");
-  if (order.status !== "shipped" && order.status !== "delivered") throw badRequest("Faqat yakunlangan chekdagi mahsulot qaytariladi");
+  if (!isCompletedSale(order.status)) throw badRequest("Faqat yakunlangan chekdagi mahsulot qaytariladi");
   assertWarehouseAccess(tenant, order.warehouseId);
   const conflicts: SaleConflict[] = [];
   if (offline) {
@@ -576,7 +577,8 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
   }
 
   const paidAfter = paid - refund;
-  const status = allReturned ? ("returned" as const) : paidAfter >= netAfter ? ("delivered" as const) : order.status;
+  // Qisman qaytarishda sotuv yakunlangan bo'lib qoladi; to'lov holati yangi summalardan hisoblanadi
+  const status = allReturned ? ("returned" as const) : order.status;
   await tx
     .update(salesOrders)
     .set({ paidAmount: fromMinor(paidAfter), status, updatedAt: new Date() })

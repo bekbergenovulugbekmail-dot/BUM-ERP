@@ -20,7 +20,7 @@ import type { AgentContext } from "./agent-context.js";
 import { agentDebtors, agentToday } from "./stores.service.js";
 
 /** Savdo hisoblanadigan holatlar (qoralama, tasdiq kutayotgan, bekor va qaytarilgan — yo'q). */
-export const SOLD_STATUSES = ["confirmed", "shipped", "delivered"] as const;
+export const SOLD_STATUSES = ["confirmed", "completed", "shipped", "delivered"] as const;
 
 const daysInMonth = (date: string) => new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0)).getUTCDate();
 const positive = (value: bigint) => (value > 0n ? value : 0n);

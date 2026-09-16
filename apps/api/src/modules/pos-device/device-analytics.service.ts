@@ -65,7 +65,7 @@ export async function deviceAnalytics(conn: DbOrTx, context: DeviceContext, rang
   const companyId = context.company.id;
   const warehouseId = context.device.warehouseId;
 
-  const counted = sql`(${salesOrders.status} in ('shipped', 'delivered') or (${salesOrders.status} = 'returned' and exists (select 1 from ${salesReturns} sr where sr.order_id = ${salesOrders.id})))`;
+  const counted = sql`(${salesOrders.status} in ('completed', 'shipped', 'delivered') or (${salesOrders.status} = 'returned' and exists (select 1 from ${salesReturns} sr where sr.order_id = ${salesOrders.id})))`;
   const orderScope = and(
     eq(salesOrders.companyId, companyId),
     eq(salesOrders.warehouseId, warehouseId),

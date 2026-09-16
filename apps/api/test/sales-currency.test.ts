@@ -100,7 +100,7 @@ describe("Savdo buyurtmasi valyutalarda", () => {
     const shipped = await call("POST", `/api/sales/orders/${order.id}/ship`);
     expect(shipped.statusCode).toBe(200);
     // 2% × 255 000
-    expect(shipped.json().order).toMatchObject({ status: "shipped", cashbackEarned: "5100.00" });
+    expect(shipped.json().order).toMatchObject({ status: "completed", paymentStatus: "unpaid", cashbackEarned: "5100.00" });
 
     const pay = (payload: object) => call("POST", "/api/sales/payments", { orderId: order.id, ...payload });
     expect((await pay({ amount: "21", currency: "USD" })).statusCode).toBe(400);
@@ -117,7 +117,7 @@ describe("Savdo buyurtmasi valyutalarda", () => {
     expect((await pay({ amount: "5000", method: "cashback" })).statusCode).toBe(201);
 
     const detail = (await call("GET", `/api/sales/orders/${order.id}`)).json().order;
-    expect(detail).toMatchObject({ paidAmount: "255000.00", status: "delivered", cashbackEarned: "5100.00" });
+    expect(detail).toMatchObject({ paidAmount: "255000.00", status: "completed", paymentStatus: "paid", cashbackEarned: "5100.00" });
     expect(detail.currencyTotals).toEqual(
       expect.arrayContaining([
         { currency: "USD", totalAmount: "20.00", paidAmount: "20.00" },
@@ -169,7 +169,7 @@ describe("Savdo buyurtmasi valyutalarda", () => {
     expect((await pay({ amount: "1000" })).statusCode).toBe(400);
 
     const detail = (await call("GET", `/api/sales/orders/${order.id}`)).json().order;
-    expect(detail).toMatchObject({ status: "delivered", paidAmount: "100000.00", cashbackEarned: "1000.00" });
+    expect(detail).toMatchObject({ status: "completed", paymentStatus: "paid", paidAmount: "100000.00", cashbackEarned: "1000.00" });
     expect(detail.currencyTotals).toEqual([{ currency: "UZS", totalAmount: "100000.00", paidAmount: "100000.00" }]);
     expect((await call("GET", `/api/sales/customers/${customerId}`)).json().customer).toMatchObject({
       balance: "0.00",

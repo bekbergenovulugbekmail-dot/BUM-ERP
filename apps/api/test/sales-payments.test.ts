@@ -111,14 +111,15 @@ describe("Mijoz to'lovlari", () => {
     expect(await cashBalance()).toBe("10000.00");
     expect(await ledger("1010")).toBe("10000.00");
     expect(await ledger("1100")).toBe("20000.00");
-    expect((await sales("GET", `/orders/${orderId}`)).json().order).toMatchObject({ status: "shipped", paidAmount: "10000.00" });
+    expect((await sales("GET", `/orders/${orderId}`)).json().order).toMatchObject({ status: "completed", paymentStatus: "partial", paidAmount: "10000.00" });
     expect((await customerRow(customerId)).totalDebt).toBe("20000.00");
 
     expect((await sales("POST", "/payments", { orderId, amount: "20000.01" })).statusCode).toBe(400);
 
     const rest = await sales("POST", "/payments", { orderId, amount: "20000", reference: "R-1" });
     expect(rest.statusCode).toBe(201);
-    expect((await sales("GET", `/orders/${orderId}`)).json().order.status).toBe("delivered");
+    // To'liq to'lov sotuv holatini o'zgartirmaydi — faqat to'lov holati "paid" bo'ladi
+    expect((await sales("GET", `/orders/${orderId}`)).json().order).toMatchObject({ status: "completed", paymentStatus: "paid" });
     expect((await customerRow(customerId)).totalDebt).toBe("0.00");
 
     const repeat = await sales("POST", "/payments", { orderId, amount: "20000", reference: "R-1" });
