@@ -13,17 +13,19 @@
  *    emas, barcha yozuvlardan
  */
 import { and, desc, eq, getTableColumns, gte, lt, lte, or, sql } from "drizzle-orm";
-import { badRequest, forbidden, notFound } from "@bum/shared";
+import { ALLOCATION_METHODS, badRequest, forbidden, notFound } from "@bum/shared";
 import { accounts, expenses } from "../../db/schema/finance.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
+import { fromMinor, toMinor } from "../../shared/decimal.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency, financeAudit } from "./accounts.service.js";
 import { ledgerAccountFor, recordCashTransaction, todayIso } from "./cash.service.js";
 import { assertPeriodOpen, findAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "./journal.service.js";
 import { applyOutgoingBankCommission } from "./bank-commission.service.js";
+import { resolvePaymentParts, type PaymentPartInput } from "./payment-parts.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...expenseFields } = getTableColumns(expenses);
 
@@ -208,26 +210,23 @@ export async function updateExpense(
 /**
  * Xarajat to'lovi: kassa (bank) chiqimi + DR xarajat hisobi / CR kassa (bank). Web'da "to'landi" holati va kassadan
  * xarajat (POS smenasi) shu yerdan. `allowOverdraft` — faqat offline kassa sinxroni (pul allaqachon berilgan).
+ *
+ * `parts` berilsa — ARALASH to'lov (naqd + UZCARD + bank). Qismlar mijoz to'lovlaridagi bilan bir xil universal
+ * qatlamda tekshiriladi (`resolvePaymentParts`: usul, terminal → bank hisobi, hisob turi va valyutasi). Xarajatning
+ * "to'landi" holati bo'linmaydi, shuning uchun qismlar yig'indisi xarajat summasiga AYNAN teng bo'lishi shart.
+ *
+ * Har qism o'z hisobidan alohida chiqim bo'ladi, jurnal esa BITTA yozuv: DR xarajat (jami) / CR har bir hisob
+ * o'z ulushi bilan. Sabab: jurnal yozuvi `(referenceType, referenceId)` bo'yicha takrorlanmaydi — har qismga
+ * alohida yozuv urinilsa, ikkinchisi va uchinchisi jimgina birinchisiga qaytardi va pul jurnalsiz chiqib ketardi.
  */
 export async function postExpensePayment(
   tx: Tx,
   tenant: TenantContext,
   expense: { id: string; number: string; description: string; category: string; amount: string; currency: string; accountId: string | null },
-  input: { cashAccountId?: string | null; paidDate: string; allowOverdraft?: boolean },
+  input: { cashAccountId?: string | null; paidDate: string; allowOverdraft?: boolean; parts?: PaymentPartInput[] },
 ) {
   const companyId = tenant.company.id;
-  const { transaction, account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
-    cashAccountId: input.cashAccountId ?? null,
-    type: "out",
-    amount: expense.amount,
-    txDate: input.paidDate,
-    description: `${expense.number}: ${expense.description}`,
-    category: expense.category,
-    referenceType: "expense",
-    referenceId: expense.id,
-    allowOverdraft: input.allowOverdraft,
-  });
-  if (account.currency !== expense.currency) throw badRequest("Kassa valyutasi xarajat valyutasiga mos emas");
+  const description = `${expense.number}: ${expense.description}`;
 
   const mapped = CATEGORY_SUBTYPES[expense.category];
   const debitAccount =
@@ -235,34 +234,74 @@ export async function postExpensePayment(
     (mapped ? await findAccountBySubtype(tx, companyId, mapped, "expense") : null) ??
     (await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"));
 
+  /** Bitta hisobdan chiqim: kassa harakati + bank komissiyasi; jurnal qatori qaytariladi. */
+  const payFrom = async (cashAccountId: string | null, amount: string) => {
+    const { transaction, account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
+      cashAccountId,
+      type: "out",
+      amount,
+      txDate: input.paidDate,
+      description,
+      category: expense.category,
+      referenceType: "expense",
+      referenceId: expense.id,
+      allowOverdraft: input.allowOverdraft,
+    });
+    if (account.currency !== expense.currency) throw badRequest("Kassa valyutasi xarajat valyutasiga mos emas");
+    await applyOutgoingBankCommission(tx, tenant, {
+      cashAccountId: account.id,
+      amount,
+      date: input.paidDate,
+      description,
+      sourceType: "expense",
+      sourceId: expense.id,
+      allowOverdraft: input.allowOverdraft,
+    });
+    return { transactionId: transaction.id, creditLine: { accountId: await ledgerAccountFor(tx, companyId, account), credit: amount } };
+  };
+
+  let posted: { transactionId: string; creditLine: { accountId: string; credit: string } }[];
+  if (input.parts?.length) {
+    const resolved = await resolvePaymentParts(tx, companyId, input.parts, {
+      allowedMethods: ALLOCATION_METHODS,
+      offline: input.allowOverdraft,
+    });
+    if (resolved.length === 0) throw badRequest("To'lov summasi kiritilmagan");
+    const total = resolved.reduce((sum, part) => sum + part.amount, 0n);
+    const due = toMinor(expense.amount);
+    if (total !== due) {
+      throw badRequest(`Qismlar yig'indisi xarajat summasiga teng bo'lishi kerak (${expense.amount})`, {
+        reason: total > due ? "overpayment" : "underpayment",
+        total: expense.amount,
+        paid: fromMinor(total),
+      });
+    }
+    // Ikki qism bitta hisobdan bo'lsa kassa harakati takrorlanmaydi (u ham hisob bo'yicha noyob) — jimgina yo'qolmasin
+    const accountsUsed = resolved.map((part) => part.cashAccountId).filter((id): id is string => id !== null);
+    if (new Set(accountsUsed).size !== accountsUsed.length) {
+      throw badRequest("Bitta hisob ikki marta kiritilgan — qismlarni birlashtiring");
+    }
+    posted = [];
+    for (const part of resolved) posted.push(await payFrom(part.cashAccountId, fromMinor(part.amount)));
+  } else {
+    posted = [await payFrom(input.cashAccountId ?? null, expense.amount)];
+  }
+
   const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
     entryDate: input.paidDate,
     description: `Xarajat ${expense.number}: ${expense.description}`,
     referenceType: "expense",
     referenceId: expense.id,
-    lines: [
-      { accountId: debitAccount, debit: expense.amount, description: expense.category },
-      { accountId: await ledgerAccountFor(tx, companyId, account), credit: expense.amount },
-    ],
+    lines: [{ accountId: debitAccount, debit: expense.amount, description: expense.category }, ...posted.map((item) => item.creditLine)],
   });
-  // Bank hisobidan to'langan xarajat — hisob komissiyasi alohida "Bank komissiyasi" xarajati
-  await applyOutgoingBankCommission(tx, tenant, {
-    cashAccountId: account.id,
-    amount: expense.amount,
-    date: input.paidDate,
-    description: `${expense.number}: ${expense.description}`,
-    sourceType: "expense",
-    sourceId: expense.id,
-    allowOverdraft: input.allowOverdraft,
-  });
-  return { cashTransactionId: transaction.id, journalEntryId: entry.id };
+  return { cashTransactionId: posted[0]!.transactionId, journalEntryId: entry.id, parts: posted.length };
 }
 
 export async function setExpenseStatus(
   tx: Tx,
   tenant: TenantContext,
   expenseId: string,
-  input: { status: ExpenseStatus; cashAccountId?: string | null; paidDate?: string },
+  input: { status: ExpenseStatus; cashAccountId?: string | null; paidDate?: string; parts?: PaymentPartInput[] },
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
@@ -277,7 +316,11 @@ export async function setExpenseStatus(
 
   let payment: { cashTransactionId: string; journalEntryId: string } | null = null;
   if (input.status === "paid") {
-    payment = await postExpensePayment(tx, tenant, expense, { cashAccountId: input.cashAccountId, paidDate: input.paidDate ?? todayIso() });
+    payment = await postExpensePayment(tx, tenant, expense, {
+      cashAccountId: input.cashAccountId,
+      paidDate: input.paidDate ?? todayIso(),
+      parts: input.parts,
+    });
   }
 
   const [updated] = await tx

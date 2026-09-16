@@ -32,7 +32,7 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { MAX_COMPANY_CURRENCIES, TERMINAL_NETWORKS, type Permission } from "@bum/shared";
+import { ALLOCATION_METHODS, MAX_COMPANY_CURRENCIES, MAX_PAYMENT_PARTS, TERMINAL_NETWORKS, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
@@ -269,10 +269,19 @@ const expenseImportBody = z.strictObject({
     .min(1)
     .max(500),
 });
+/** Aralash to'lov qismi — mijoz to'lovlaridagi bilan bir xil shakl. */
+const expensePart = z.strictObject({
+  method: z.enum(ALLOCATION_METHODS),
+  amount: decimalSchema({ scale: 2, positive: true }),
+  terminalId: z.uuid().nullable().optional(),
+  cashAccountId: z.uuid().nullable().optional(),
+});
 const expenseStatusBody = z.strictObject({
   status: z.enum(expenseStatuses),
   cashAccountId: z.uuid().nullable().optional(),
   paidDate: isoDate.optional(),
+  /** Aralash to'lov (naqd + UZCARD + bank): yig'indi xarajat summasiga aynan teng bo'lishi shart. */
+  parts: z.array(expensePart).min(1).max(MAX_PAYMENT_PARTS).optional(),
 });
 
 const currenciesBody = z.strictObject({

@@ -1883,6 +1883,47 @@ Dalillar (12 joy): `pos.service.ts` chek yopilganda `total === 0 ? "delivered" :
 **Deploy qilinmadi** — egasi audit davomida deploy qilmaslikni so'ragan.
 
 
+## Universal to'lov arxitekturasi: pul chiqimi ham bitta qoidalar to'plamiga o'tdi (2026-09-16)
+
+**Oldingi auditdagi M-1:** `PaymentAllocation` faqat pul KIRIMIDA (kassa, sotuv to'lovi, yetkazishdagi inkassatsiya)
+ishlatilardi; ta'minotchiga to'lov va xarajat to'lovi alohida kod yo'lidan borardi va aralash (naqd + UZCARD + bank)
+to'lovni umuman qo'llab-quvvatlamasdi.
+
+**Root cause:** `resolvePaymentParts` va `settlePaymentParts` aslida yo'nalishdan mutlaqo mustaqil — ularda mijozga xos
+hech narsa yo'q edi. Lekin ular `modules/sales/payment-allocation.service.ts` ichida turgani uchun chiquvchi oqimlar
+ularni hech qachon qabul qilmagan. Ya'ni bu joylashuv muammosi, dizayn xatosi emas.
+
+**Yechim — kengaytirish, parallel tizim emas:**
+- Yo'nalishdan mustaqil qatlam `modules/finance/payment-parts.service.ts` ga ko'chirildi (usul, terminal → bank hisobi,
+  hisob turi va valyutasi, takrorlanmaslik, ortiqcha/kam to'lov arifmetikasi). `sales/payment-allocation.service.ts`
+  uni qayta eksport qiladi — mavjud chaqiruvchilar tegilmadi
+- **Ta'minotchiga aralash to'lov** (`recordMixedSupplierPayment`): qismlar universal qatlamda tekshiriladi, so'ng har
+  qism mavjud `recordSupplierPayment` orqali yoziladi — kassa chiqimi, jurnal, bank komissiyasi, buyurtma qoldig'i va
+  ta'minotchi balansi avvalgidek. Har qism o'z to'lov yozuvi ID'si bilan ketadi
+- **Xarajatga aralash to'lov**: har qism o'z hisobidan chiqadi, jurnal esa BITTA balanslangan yozuv (DR xarajat jami /
+  CR har bir hisob o'z ulushi bilan). Sabab quyida
+- **Balansga aralash kirim** va **karta orqali kirimda terminal mapping'i**: ilgari kartadan balansga kirim terminalning
+  banki o'rniga standart bankka tushardi — endi `cashAccountId` uzatiladi
+
+**Audit paytida topilgan tuzoq:** `postJournalEntry` `(referenceType, referenceId)` bo'yicha takrorlanmaydi. Agar
+xarajatning har qismiga alohida jurnal yozuvi urinilganda edi, ikkinchi va uchinchi qism jimgina birinchisiga qaytardi
+va pul jurnalsiz chiqib ketardi. Shuning uchun xarajatda bitta ko'p qatorli yozuv ishlatiladi. Kassa harakati esa hisob
+bo'yicha ham ajratilgani uchun har qism alohida yoziladi; bitta hisob ikki marta kiritilsa — aniq xato.
+
+**Chegaralar (ataylab):** aralash to'lov faqat asosiy valyutada (valyutadagi to'lov bitta usul bilan alohida);
+ta'minotchida kam to'lash mumkin (qarz qoladi), xarajatda esa qismlar yig'indisi summaga aynan teng bo'lishi shart —
+chunki xarajatning "to'landi" holati bo'linmaydi.
+
+**Testlar:** yangi `acceptance-payment-architecture.test.ts` — 26 ta ssenariy: kassa (naqd, UZCARD, 2 va 3 usulli),
+mijoz to'lovlari (naqd, aralash kirim, aralash qarz to'lash), yetkazishda inkassatsiya, ta'minotchiga to'lov (naqd,
+UZCARD, 3 usulli, xarid hujjatiga), xarajat (naqd, 3 usulli, noto'g'ri yig'indi), qaytarish (to'liq va qisman),
+idempotentlik (takroriy havola va takroriy chek), xavfsizlik (begona kompaniya, begona hisob va terminal, ruxsatsiz
+xodim), modul chegaralari. Har ssenariyda buxgalteriya invarianti (jami debet = jami kredit) tekshiriladi.
+
+**Regressiya:** API 112 fayl / 554 test, web 18 / 77, desktop 9 / 57 — hammasi o'tdi. API va web tsc, lint, web build,
+desktop typecheck toza. Migratsiya qo'shilmadi — sxema o'zgarmadi.
+
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)

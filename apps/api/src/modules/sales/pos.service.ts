@@ -977,7 +977,76 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
 
   const notes = input.notes ?? null;
   if (input.parts?.length) {
-    if (input.purpose !== "debt" || offline) throw badRequest("Aralash to'lov faqat kassada qarzni to'lashda");
+    if (offline) throw badRequest("Aralash to'lov offline kassada qo'llanmaydi");
+    // Balansga kirim ham qismlarga bo'linadi: har qism o'z hisobiga (UZCARD → o'z banki), chegara butun summaga
+    if (input.purpose === "deposit") {
+      const resolved = await resolvePaymentParts(tx, tenant.company.id, input.parts);
+      if (resolved.length === 0) throw badRequest("To'lov summasi kiritilmagan");
+      const total = resolved.reduce((sum, part) => sum + part.amount, 0n);
+      const { cashierDepositLimit } = await getSalesPolicy(tx, tenant.company.id);
+      if (cashierDepositLimit !== null && total > toMinor(cashierDepositLimit)) {
+        if (!(await effectivePermissions(tx, tenant)).includes("sales.approve")) {
+          throw new AppError("FORBIDDEN", `Balansga ${cashierDepositLimit} dan ortiq summani rahbar (sales.approve) yozadi`, {
+            reason: "deposit_limit",
+            limit: cashierDepositLimit,
+          });
+        }
+      }
+      // Takroriy yuborish: birinchi qism yozuvining ID'si butun amalni qamrab oladi (hammasi bitta tranzaksiyada)
+      const depositKey = input.clientRequestId ?? null;
+      if (depositKey) {
+        const [done] = await tx
+          .select({ customerId: customerBalanceTransactions.customerId })
+          .from(customerBalanceTransactions)
+          .where(and(eq(customerBalanceTransactions.companyId, tenant.company.id), eq(customerBalanceTransactions.id, depositKey)))
+          .limit(1);
+        if (done) {
+          if (done.customerId !== input.customerId) throw conflict("So'rov kaliti boshqa mijoz to'lovida ishlatilgan");
+          return {
+            customer: await customerSummary(tx, tenant.company.id, input.customerId),
+            shift: await getShift(tx, tenant, shift.id),
+            conflicts,
+            duplicate: true,
+          };
+        }
+      }
+      for (const [index, part] of resolved.entries()) {
+        await depositToBalance(
+          tx,
+          tenant,
+          {
+            customerId: input.customerId,
+            type: "deposit",
+            amount: fromMinor(part.amount),
+            method: part.method,
+            cashAccountId: part.cashAccountId,
+            posShiftId: shift.id,
+            notes,
+            date,
+            ...(index === 0 && depositKey ? { id: depositKey } : {}),
+          },
+          meta,
+        );
+      }
+      const depositedBy = (...methods: string[]) =>
+        resolved.reduce((sum, part) => sum + (methods.includes(part.method) ? part.amount : 0n), 0n);
+      const [cashUp, cardUp, bankUp] = [depositedBy("cash"), depositedBy("card"), depositedBy("bank", "transfer")];
+      await tx
+        .update(posShifts)
+        .set({
+          ...(cashUp > 0n ? { totalCash: sql`${posShifts.totalCash} + ${fromMinor(cashUp)}::numeric` } : {}),
+          ...(cardUp > 0n ? { totalCard: sql`${posShifts.totalCard} + ${fromMinor(cardUp)}::numeric` } : {}),
+          ...(bankUp > 0n ? { totalBank: sql`${posShifts.totalBank} + ${fromMinor(bankUp)}::numeric` } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(posShifts.id, shift.id));
+      return {
+        customer: await customerSummary(tx, tenant.company.id, input.customerId),
+        shift: await getShift(tx, tenant, shift.id),
+        conflicts,
+      };
+    }
+    if (input.purpose !== "debt") throw badRequest("Aralash to'lov faqat balansga kirim yoki qarzni to'lashda");
     const idempotencyKey = input.clientRequestId ? `pos_customer_payment:${input.clientRequestId}` : null;
     // Takroriy yuborish (qarz allaqachon yopilgan) — ortiqcha to'lov deb rad etilmaydi, birinchi natija qaytadi
     const previous = idempotencyKey ? await findPaymentByKey(tx, tenant.company.id, idempotencyKey) : null;

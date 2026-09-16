@@ -21,7 +21,7 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { Permission } from "@bum/shared";
+import { ALLOCATION_METHODS, MAX_PAYMENT_PARTS, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
@@ -38,7 +38,7 @@ import {
   updateOrder,
 } from "./orders.service.js";
 import { exportPurchaseOrdersCsv, importPurchaseOrders } from "./orders-csv.service.js";
-import { listSupplierPayments, recordSupplierPayment } from "./payments.service.js";
+import { listSupplierPayments, recordMixedSupplierPayment, recordSupplierPayment } from "./payments.service.js";
 import { returnPurchaseItems } from "./returns.service.js";
 import { exportSuppliersCsv, importSuppliers } from "./suppliers-csv.service.js";
 import { createSupplier, getSupplier, listSuppliers, setSupplierDebt, updateSupplier } from "./suppliers.service.js";
@@ -190,18 +190,39 @@ const purchaseReturnBody = z.strictObject({
     .optional(),
 });
 
-const paymentBody = z.strictObject({
-  supplierId: z.uuid(),
-  orderId: z.uuid().nullable().optional(),
+/** Aralash to'lov qismi — mijoz to'lovlaridagi bilan bir xil shakl. */
+const supplierPaymentPart = z.strictObject({
+  method: z.enum(ALLOCATION_METHODS),
   amount: decimalSchema({ scale: 2, positive: true }),
-  /** To'lov valyutasi — kassa ham shu valyutada; standart asosiy valyuta. */
-  currency: currencyCode.optional(),
-  paymentDate: isoDate.optional(),
-  method: z.enum(["cash", "bank", "card", "transfer"]).default("cash"),
+  terminalId: z.uuid().nullable().optional(),
   cashAccountId: z.uuid().nullable().optional(),
-  reference: nullableText(100),
-  notes: nullableText(2000),
 });
+const paymentBody = z
+  .strictObject({
+    supplierId: z.uuid(),
+    orderId: z.uuid().nullable().optional(),
+    /** Bitta usulli to'lov summasi; `parts` berilsa yuborilmaydi. */
+    amount: decimalSchema({ scale: 2, positive: true }).optional(),
+    /** To'lov valyutasi — kassa ham shu valyutada; standart asosiy valyuta. Aralash to'lov faqat asosiy valyutada. */
+    currency: currencyCode.optional(),
+    paymentDate: isoDate.optional(),
+    method: z.enum(["cash", "bank", "card", "transfer"]).default("cash"),
+    cashAccountId: z.uuid().nullable().optional(),
+    /** Aralash to'lov (naqd + UZCARD + bank): har qism o'z hisobidan chiqadi. */
+    parts: z.array(supplierPaymentPart).min(1).max(MAX_PAYMENT_PARTS).optional(),
+    reference: nullableText(100),
+    notes: nullableText(2000),
+  })
+  .refine((body) => Boolean(body.amount) !== Boolean(body.parts), {
+    message: "Summa yoki aralash to'lov qismlaridan bittasi yuboriladi",
+  })
+  .refine((body) => !body.parts || !body.currency, {
+    message: "Aralash to'lov faqat asosiy valyutada — valyutadagi to'lov bitta usul bilan kiritiladi",
+  });
+/** Bitta usulli to'lov `{ payment }`, aralash to'lov `{ payments }` qaytaradi — mavjud javob shakli o'zgarmaydi. */
+type SupplierPaymentResult =
+  | Awaited<ReturnType<typeof recordSupplierPayment>>
+  | Awaited<ReturnType<typeof recordMixedSupplierPayment>>;
 const paymentsQuery = z.object({
   supplierId: z.uuid().optional(),
   orderId: z.uuid().optional(),
@@ -385,9 +406,23 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/payments", async (req, reply) => {
-    const body = paymentBody.parse(req.body);
-    const result = await writeInTenant(req, "purchase.approve", (tx, tenant) =>
-      recordSupplierPayment(tx, tenant, body, requestMeta(req)),
+    const { parts, amount, ...rest } = paymentBody.parse(req.body);
+    const result = await writeInTenant(req, "purchase.approve", (tx, tenant): Promise<SupplierPaymentResult> =>
+      parts
+        ? recordMixedSupplierPayment(
+            tx,
+            tenant,
+            {
+              supplierId: rest.supplierId,
+              orderId: rest.orderId,
+              parts,
+              paymentDate: rest.paymentDate,
+              reference: rest.reference,
+              notes: rest.notes,
+            },
+            requestMeta(req),
+          )
+        : recordSupplierPayment(tx, tenant, { ...rest, amount: amount! }, requestMeta(req)),
     );
     reply.status(result.created ? 201 : 200);
     return result;

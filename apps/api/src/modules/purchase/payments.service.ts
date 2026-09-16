@@ -20,7 +20,7 @@
  *  - kassa manfiyga tushardi; `purchase.create` bilan — endi `purchase.approve`
  */
 import { and, desc, eq, getTableColumns, lt, or, sql } from "drizzle-orm";
-import { badRequest, notFound } from "@bum/shared";
+import { ALLOCATION_METHODS, badRequest, notFound } from "@bum/shared";
 import { purchaseOrderCurrencies, purchaseOrders, supplierPayments, suppliers } from "../../db/schema/purchase.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
@@ -31,6 +31,7 @@ import { companyCurrency } from "../finance/accounts.service.js";
 import { applyOutgoingBankCommission } from "../finance/bank-commission.service.js";
 import { ledgerAccountFor, recordCashTransaction, resolvePaymentAccount, todayIso } from "../finance/cash.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
+import { resolvePaymentParts, type PaymentPartInput } from "../finance/payment-parts.service.js";
 import { ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { applySupplierBalance, lockSupplierBalance } from "./supplier-balances.service.js";
 import { purchaseAudit } from "./suppliers.service.js";
@@ -263,6 +264,66 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
     },
   });
   return { payment: updated!, created: true, overpaid: overpaid > 0n ? fromMinor(overpaid) : null };
+}
+
+/**
+ * Ta'minotchiga ARALASH to'lov: bitta to'lov bir nechta usulga bo'linadi (naqd + UZCARD + bank).
+ *
+ * Yangi to'lov mexanizmi yaratilmaydi — qismlar mijoz to'lovlaridagi bilan bir xil universal qatlamda
+ * tekshiriladi (`resolvePaymentParts`: usul, terminal → bank hisobi, hisob turi va valyutasi, takrorlanmaslik),
+ * so'ng har qism mavjud `recordSupplierPayment` orqali yoziladi. Shuning uchun har qism uchun kassa chiqimi,
+ * jurnal (DR kreditorlar / CR shu hisob), bank komissiyasi, buyurtma qoldig'i va ta'minotchi balansi avvalgidek
+ * hisoblanadi va har bir yozuv alohida balanslanadi.
+ *
+ * Qoldiqdan ortiq to'lash har qismda tekshiriladi — oshsa butun tranzaksiya bekor bo'ladi. Kam to'lash mumkin
+ * (qarz qoladi). Faqat asosiy valyuta: valyutadagi to'lov bitta usul bilan alohida kiritiladi.
+ * Takroriy yuborishdan himoya — `reference`: har qismga `reference:tartib` beriladi (bazada unique).
+ */
+export async function recordMixedSupplierPayment(
+  tx: Tx,
+  tenant: TenantContext,
+  input: {
+    supplierId: string;
+    orderId?: string | null;
+    parts: PaymentPartInput[];
+    paymentDate?: string;
+    reference?: string | null;
+    notes?: string | null;
+    offline?: boolean;
+  },
+  meta: RequestMeta,
+) {
+  const resolved = await resolvePaymentParts(tx, tenant.company.id, input.parts, {
+    allowedMethods: ALLOCATION_METHODS,
+    offline: input.offline,
+  });
+  if (resolved.length === 0) throw badRequest("To'lov summasi kiritilmagan");
+
+  const rows = [];
+  let created = false;
+  let total = 0n;
+  for (const [index, part] of resolved.entries()) {
+    const result = await recordSupplierPayment(
+      tx,
+      tenant,
+      {
+        supplierId: input.supplierId,
+        orderId: input.orderId ?? null,
+        amount: fromMinor(part.amount),
+        paymentDate: input.paymentDate,
+        method: part.method,
+        cashAccountId: part.cashAccountId,
+        reference: input.reference ? `${input.reference}:${index}` : null,
+        notes: input.notes ?? null,
+        offline: input.offline,
+      },
+      meta,
+    );
+    rows.push(result.payment);
+    created = created || result.created;
+    total += part.amount;
+  }
+  return { payments: rows, created, total: fromMinor(total) };
 }
 
 export async function listSupplierPayments(
