@@ -10,7 +10,8 @@
     "test": "vitest run",
     "lint": "eslint . --max-warnings=0",
     "prettier-fix": "prettier --write .",
-    "prettier-check": "prettier --check ."
+    "prettier-check": "prettier --check .",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@capacitor/core": "8.4.3",
@@ -53,6 +54,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",

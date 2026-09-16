@@ -20,7 +20,8 @@ import { buildServer } from "../server.js";
 
 const COMPANY_NAME = process.argv.find((arg) => arg.startsWith("--name="))?.slice(7) ?? "BUM Demo";
 const ALLOW_REMOTE = process.argv.includes("--allow-remote");
-const PASSWORD = "demo-parol-123";
+/** Demo hisoblar paroli — faqat `.env` dan (kodda saqlanmaydi). */
+const PASSWORD = process.env.DEMO_PASSWORD ?? "";
 const LICENSES = 10;
 
 const phones = {
@@ -62,6 +63,7 @@ try {
   }
   console.log(`Baza: ${host} — demo kompaniya: "${COMPANY_NAME}"\n`);
 
+  if (!PASSWORD) throw new Error("DEMO_PASSWORD .env da bo'lishi kerak (demo hisoblar paroli)");
   if (!env.BOOTSTRAP_ADMIN_PHONE || !env.BOOTSTRAP_ADMIN_PASSWORD) {
     throw new Error("BOOTSTRAP_ADMIN_PHONE va BOOTSTRAP_ADMIN_PASSWORD .env da bo'lishi kerak (avval db:seed)");
   }
@@ -215,7 +217,7 @@ try {
   soft(await api("POST", "/api/purchase/suppliers", { name: "Oziq-ovqat ta'minoti", code: "SUP-01" }), "ta'minotchi");
   console.log(`Mijozlar: ${customers.length} ta (koordinatali), ta'minotchi: 1 ta`);
 
-  console.log(`\n${"=".repeat(66)}\nKIRISH MA'LUMOTLARI — faqat lokal demo. Parol: ${PASSWORD}\n${"=".repeat(66)}`);
+  console.log(`\n${"=".repeat(66)}\nKIRISH MA'LUMOTLARI — faqat lokal demo. Parol: .env dagi DEMO_PASSWORD\n${"=".repeat(66)}`);
   const credentials: [string, string][] = [
     ["Egasi (Owner)", phones.owner],
     ["Direktor (Admin)", phones.direktor],

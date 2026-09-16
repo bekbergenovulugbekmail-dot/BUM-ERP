@@ -44,3 +44,9 @@ keystore.properties
 # Mahalliy AI yordamchi fayllari
 .agents/
 .claude/
+
+# Playwright e2e artefaktlari
+e2e/.artifacts/
+e2e/.report/
+playwright-report/
+test-results/

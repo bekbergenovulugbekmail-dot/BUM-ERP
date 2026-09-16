@@ -43,6 +43,25 @@ ta'minotchi, non retsepti (ishlab chiqarish uchun).
 
 ---
 
+## 0b. Avtomatik brauzer testlari (Playwright + haqiqiy Chrome)
+
+Quyidagi ro'yxatning bir qismi endi avtomatik bajariladi:
+
+```bash
+pnpm test:e2e             # barcha brauzer testlari (Chrome, headless)
+pnpm test:e2e --headed    # brauzer ko'rinadigan rejimda
+pnpm exec playwright show-report e2e/.report
+```
+
+Playwright API va web serverlarini o'zi ko'taradi. Nosozlikda ekran surati, video,
+trace va sahifa tuzilishi `e2e/.artifacts/` ga saqlanadi.
+
+**Hozir avtomatlashtirilgan:** kirish, noto'g'ri parol, chiqishdan keyin himoya,
+va **kritik POS testi** (100 000 = naqd 50 000 + UZCARD 50 000 → Dashboard'da
+"Yakunlandi", hech qayerda "Yetkazildi" yo'q).
+
+Qolgan bandlar hali qo'lda bajariladi.
+
 ## 1. POS — eng muhim test
 
 Kassir bilan kiring → Kassa.
