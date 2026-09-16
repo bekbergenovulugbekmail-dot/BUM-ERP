@@ -1924,6 +1924,44 @@ xodim), modul chegaralari. Har ssenariyda buxgalteriya invarianti (jami debet = 
 desktop typecheck toza. Migratsiya qo'shilmadi — sxema o'zgarmadi.
 
 
+## Modullararo ifloslanish auditi (2026-09-16)
+
+**Usul:** taxmin qilish o'rniga o'lchash. Har amaldan oldin va keyin butun kompaniya holati suratga olinadi —
+sotuv, yetkazma, xarid, ishlab chiqarish, zaxira, mijoz qarzi, ta'minotchi qarzi, kassa qoldiqlari va buxgalteriya —
+so'ng faqat KUTILGAN o'lchov o'zgarganini tasdiqlanadi.
+
+**Strukturaviy natija (kod bo'ylab):** hech bir modul boshqa modulning holat jadvaliga yozmaydi.
+`sales_orders` ga faqat `sales` (12 joy) va `delivery` (1 joy — u ham faqat `fulfillment_method`, holat emas);
+`purchase_orders` — faqat `purchase`; `production_orders` — faqat `manufacturing`; `delivery_tasks` — faqat
+`delivery`; `stock_levels` — faqat `inventory` (hammasi `moveStock` orqali); `suppliers` — faqat `purchase`.
+`customers` ga `sales-agent` ham yozadi (profil va joylashuv) — ikkalasi ham auditlanadi va oldindan
+`accessibleStore` bilan kirish huquqi tekshiriladi.
+
+**Yangi testlar** — `acceptance-cross-module.test.ts` (13 ta):
+- §25 negative: kassa chekiga qo'lda yetkazma yaratib bo'lmaydi; ta'minotchiga to'lov sotuv/mijoz qarzi/yetkazmaga
+  tegmaydi; xarajat to'lovi mijoz qarzi va zaxiraga tegmaydi; ombor o'tkazmasi sotuv va qarz yaratmaydi; ishlab
+  chiqarish sotuv/yetkazma/qarz yaratmaydi; yetkazmani tasdiqlash xarid va ishlab chiqarishga tegmaydi va sotuv
+  holatini o'zgartirmaydi; qaytarish ishlab chiqarish va xaridga tegmaydi; xarid qabul qilish sotuv va mijoz
+  qarzi yaratmaydi
+- §29 concurrency: bir xil kalitli ikkita parallel kassa cheki — bitta chek; bir xil havolali ikkita parallel
+  ta'minotchi to'lovi — pul bir marta chiqadi; qoldiqdan ortiq ikkita parallel sotuv — bittasi rad, zaxira manfiy
+  bo'lmaydi; yetkazmani ikki marta parallel tasdiqlash — bir marta bajariladi
+- §24 ketma-ket 10 qadamli ko'p biznesli oqim: ishlab chiqarish → chakana → distribyutsiya → yetkazish (nasiya) →
+  ulgurji (qisman to'lov) → qarz to'lovi → xarid → xarajat → ombor o'tkazmasi → qaytarish; har qadamdan keyin
+  tegishli bo'lmagan o'lchovlar o'zgarmagani tasdiqlanadi
+
+**§27 DB butunligi (faqat o'qish, toza bazada):** 112 jadvaldan 102 tasida `company_id`; qolgan 10 tasi global
+(`companies`, `users`, `sessions`, `units`, `subscription_plans`, `desktop_releases`…) yoki ota-jadval orqali
+bog'langan (`delivery_task_items`). 361 FK, 444 indeks, 87 CHECK. `delivery_tasks.order_id` RESTRICT — yetim
+yetkazma yaratib bo'lmaydi; `journal_lines.entry_id` CASCADE.
+
+**§30 Audit log:** 18 modulda 182 ta alohida amal — to'lov, qaytarish, yetkazma, sotuv, xarid, ishlab chiqarish,
+litsenziya, modul, bank hisobi va terminal qamrab olingan.
+
+**Regressiya:** API 113 fayl / 567 test, web 18 / 77, desktop 9 / 57 — hammasi o'tdi. tsc, lint va build toza.
+Sxema o'zgarmadi — migratsiya qo'shilmadi.
+
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
