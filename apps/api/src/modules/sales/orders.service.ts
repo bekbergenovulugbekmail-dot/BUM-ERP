@@ -29,6 +29,7 @@
 import { and, asc, desc, eq, getTableColumns, gte, ilike, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 import { AppError, activePromoPrice, badRequest, forbidden, notFound } from "@bum/shared";
 import { products, units } from "../../db/schema/catalog.js";
+import { deliveryTasks } from "../../db/schema/delivery.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import {
   customerCashbackTransactions,
@@ -428,6 +429,16 @@ async function assertOrderInScope(tx: Tx, tenant: TenantContext, orderId: string
 // ─── O'qish ──────────────────────────────────────────────────────────────────
 
 const balanceSql = sql<string>`(${salesOrders.totalAmount} - ${salesOrders.paidAmount})::numeric(18,2)`;
+/**
+ * Buyurtmaning yetkazish holati — SOTUV holati emas: u `delivery_tasks` dan o'qiladi.
+ * Yetkazma ochilmagan bo'lsa `null` (kassa cheki, olib ketish). Bir nechta urinish bo'lsa — oxirgisi.
+ */
+const deliveryStatusSql = sql<string | null>`(
+  select dt.status from ${deliveryTasks} dt
+  where dt.order_id = ${salesOrders.id}
+  order by dt.created_at desc
+  limit 1
+)`;
 
 export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: string) {
   const [order] = await conn
@@ -438,6 +449,7 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
       warehouseName: warehouses.name,
       balance: balanceSql,
       paymentStatus: paymentStatusSql,
+      deliveryStatus: deliveryStatusSql,
     })
     .from(salesOrders)
     .leftJoin(customers, eq(customers.id, salesOrders.customerId))
@@ -542,6 +554,7 @@ export async function listOrders(
       itemCount: sql<number>`(select count(*)::int from ${salesOrderItems} where ${salesOrderItems.orderId} = ${salesOrders.id})`,
       balance: balanceSql,
       paymentStatus: paymentStatusSql,
+      deliveryStatus: deliveryStatusSql,
     })
     .from(salesOrders)
     .leftJoin(customers, eq(customers.id, salesOrders.customerId))

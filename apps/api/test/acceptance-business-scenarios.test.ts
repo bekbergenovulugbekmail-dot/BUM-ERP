@@ -170,6 +170,8 @@ describe("1. Chakana: kassadan sotuv", () => {
     // Asosiy nuqta: kassadagi sotuv hech qachon "yetkazildi" bo'lmaydi va yetkazma hujjati ochilmaydi
     expect(order.status).not.toBe("delivered");
     expect(await tasksOf(order.id)).toHaveLength(0);
+    // Ro'yxatdagi "Yetkazma" ustuni bo'sh bo'lishi kerak — chek yetkazilmaydi
+    expect(order.deliveryStatus).toBeNull();
     expect(order.deliveryRequired).toBeNull();
     expect(await stockOf(company.productId)).toBe("98.0000");
   });
@@ -255,6 +257,8 @@ describe("3. Distribyutsiya: yetkazib berish bilan", () => {
     const tasks = await tasksOf(orderId);
     expect(tasks).toHaveLength(1);
     expect(tasks[0]).toMatchObject({ status: "ready", expectedAmount: "50000.00" });
+    // Yetkazma holati buyurtma javobida alohida maydon sifatida ko'rinadi
+    expect((await orderOf(orderId)).deliveryStatus).toBe("ready");
   });
 
   it("yo'lga chiqish sotuvni yakunlaydi; yetkazma tasdiqlangach SOTUV HOLATI O'ZGARMAYDI", async () => {
@@ -278,7 +282,7 @@ describe("3. Distribyutsiya: yetkazib berish bilan", () => {
 
     // Yetkazish holati — yetkazma hujjatida; sotuv holati o'zgarmadi
     expect((await tasksOf(orderId))[0]!.status).toBe("delivered");
-    expect(await orderOf(orderId)).toMatchObject({ status: "completed", paymentStatus: "paid" });
+    expect(await orderOf(orderId)).toMatchObject({ status: "completed", paymentStatus: "paid", deliveryStatus: "delivered" });
   });
 
   it("NASIYAGA yetkazilgan buyurtma: yetkazma YETKAZILDI, sotuv yakunlangan, to'lov TO'LANMAGAN", async () => {
@@ -299,14 +303,14 @@ describe("3. Distribyutsiya: yetkazib berish bilan", () => {
     // Eski xatti-harakatda bu buyurtma hech qachon "yetkazilgan" ko'rinmasdi (chunki to'lanmagan).
     // Endi yetkazish va to'lov alohida: yetkazma yetkazildi, pul esa qarz.
     expect((await tasksOf(orderId))[0]!.status).toBe("delivered");
-    expect(await orderOf(orderId)).toMatchObject({ status: "completed", paymentStatus: "unpaid" });
+    expect(await orderOf(orderId)).toMatchObject({ status: "completed", paymentStatus: "unpaid", deliveryStatus: "delivered" });
     expect(await debtOf(company.customerId)).toBe("50000.00");
   });
 
   it("mijoz o'zi olib ketadi (yetkazish shart emas) — YETKAZMA YARATILMAYDI", async () => {
     const orderId = await erpOrder("4", false);
     expect(await tasksOf(orderId)).toHaveLength(0);
-    expect(await orderOf(orderId)).toMatchObject({ status: "confirmed", deliveryRequired: false, fulfillmentMethod: "pickup" });
+    expect(await orderOf(orderId)).toMatchObject({ status: "confirmed", deliveryRequired: false, fulfillmentMethod: "pickup", deliveryStatus: null });
 
     const shipped = await call(owner(), "POST", `/api/sales/orders/${orderId}/ship`);
     expect(shipped.statusCode, shipped.body).toBe(200);
@@ -459,9 +463,9 @@ describe("8. Bitta kompaniya bir vaqtda: chakana + distribyutsiya + ishlab chiqa
     expect(purchase.statusCode, purchase.body).toBe(201);
 
     // Har bir sotuv o'z kanali va yetkazish usulini saqlaydi
-    expect(await orderOf(posId)).toMatchObject({ status: "completed", source: "pos", fulfillmentMethod: "counter", isPos: true });
-    expect(await orderOf(deliveryId)).toMatchObject({ status: "confirmed", source: "manual", fulfillmentMethod: "delivery", isPos: false });
-    expect(await orderOf(pickupId)).toMatchObject({ status: "completed", source: "manual", fulfillmentMethod: "pickup", isPos: false });
+    expect(await orderOf(posId)).toMatchObject({ status: "completed", source: "pos", fulfillmentMethod: "counter", isPos: true, deliveryStatus: null });
+    expect(await orderOf(deliveryId)).toMatchObject({ status: "confirmed", source: "manual", fulfillmentMethod: "delivery", isPos: false, deliveryStatus: "ready" });
+    expect(await orderOf(pickupId)).toMatchObject({ status: "completed", source: "manual", fulfillmentMethod: "pickup", isPos: false, deliveryStatus: null });
 
     // Yetkazma faqat yetkazish talab qilgan buyurtmada
     expect(await tasksOf(posId)).toHaveLength(0);

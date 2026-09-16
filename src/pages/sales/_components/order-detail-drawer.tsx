@@ -41,6 +41,21 @@ const STATUS_LABELS: Record<string, string> = {
   shipped: "Yakunlangan", delivered: "Yakunlangan", returned: "Qaytarilgan", cancelled: "Bekor",
 };
 
+/** To'lov holati — sotuv holatidan alohida ustun (nomi `PAYMENT_LABELS` bilan chalkashmasin: u to'lov USULI). */
+const PAY_STATUS_LABELS: Record<string, string> = { paid: "To'langan", partial: "Qisman", unpaid: "To'lanmagan" };
+const PAY_STATUS_COLORS: Record<string, string> = {
+  paid: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400",
+  partial: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400",
+  unpaid: "bg-muted text-muted-foreground",
+};
+/** Yetkazma holati — yetkazma ochilgan bo'lsagina ko'rsatiladi. */
+const DELIVERY_LABELS: Record<string, string> = {
+  ready: "Tayyor", assigned: "Biriktirilgan", accepted: "Qabul qilingan",
+  out_for_delivery: "Yo'lda", arrived: "Mijozda", delivering: "Topshirilmoqda",
+  delivered: "Yetkazildi", partially_delivered: "Qisman yetkazildi",
+  failed: "Yetkazilmadi", returned: "Qaytarildi", cancelled: "Bekor qilingan",
+};
+
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
 
 export default function OrderDetailDrawer({ orderId, onClose }: Props) {
@@ -193,9 +208,21 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
             </div>
             <div className="flex items-center gap-2">
               {order && (
-                <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", STATUS_COLORS[order.status] ?? "")}>
-                  {STATUS_LABELS[order.status] ?? order.status}
-                </span>
+                <>
+                  <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", STATUS_COLORS[order.status] ?? "")}>
+                    {STATUS_LABELS[order.status] ?? order.status}
+                  </span>
+                  {order.status !== "draft" && order.status !== "cancelled" && (
+                    <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", PAY_STATUS_COLORS[order.paymentStatus] ?? "")}>
+                      {PAY_STATUS_LABELS[order.paymentStatus] ?? order.paymentStatus}
+                    </span>
+                  )}
+                  {order.deliveryStatus && (
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400">
+                      {DELIVERY_LABELS[order.deliveryStatus] ?? order.deliveryStatus}
+                    </span>
+                  )}
+                </>
               )}
               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
                 <X className="h-4 w-4" />

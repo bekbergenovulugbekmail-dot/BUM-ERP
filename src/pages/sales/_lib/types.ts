@@ -11,6 +11,10 @@ import type { ActiveCompany } from "@/hooks/use-company.ts";
 export type SalesOrderStatus = "draft" | "confirmed" | "completed" | "shipped" | "delivered" | "returned" | "cancelled";
 /** To'lov holati — summalardan hisoblanadi, serverdan keladi. */
 export type SalePaymentStatus = "unpaid" | "partial" | "paid";
+/** Yetkazma holati — sotuv holatidan mustaqil; yetkazma ochilmagan bo'lsa `null`. */
+export type SaleDeliveryStatus =
+  | "ready" | "assigned" | "accepted" | "out_for_delivery" | "arrived"
+  | "delivering" | "delivered" | "partially_delivered" | "failed" | "returned" | "cancelled";
 /** `balance` — mijoz balansidan, `cashback` — keshbekdan (faqat server yozadi: POS va qarz to'lovi). */
 export type PaymentMethod = "cash" | "bank" | "card" | "transfer" | "balance" | "cashback";
 
@@ -84,6 +88,8 @@ export type SalesOrderRow = {
   itemCount: number;
   balance: string;
   paymentStatus: SalePaymentStatus;
+  /** Yetkazma ochilmagan bo'lsa null (kassa cheki, olib ketish). */
+  deliveryStatus: SaleDeliveryStatus | null;
 };
 
 export type SalesOrderItem = {

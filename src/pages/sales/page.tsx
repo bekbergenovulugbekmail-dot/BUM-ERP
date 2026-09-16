@@ -51,6 +51,20 @@ const PAYMENT_COLORS: Record<string, string> = {
   partial: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400",
   unpaid: "bg-muted text-muted-foreground",
 };
+/** Yetkazma holati — sotuvdan mustaqil ustun; yetkazma yo'q bo'lsa "—". */
+const DELIVERY_LABELS: Record<string, string> = {
+  ready: "Tayyor", assigned: "Biriktirilgan", accepted: "Qabul qilingan",
+  out_for_delivery: "Yo'lda", arrived: "Mijozda", delivering: "Topshirilmoqda",
+  delivered: "Yetkazildi", partially_delivered: "Qisman yetkazildi",
+  failed: "Yetkazilmadi", returned: "Qaytarildi", cancelled: "Bekor qilingan",
+};
+const DELIVERY_COLORS: Record<string, string> = {
+  delivered: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
+  partially_delivered: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400",
+  failed: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400",
+  returned: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400",
+  cancelled: "bg-destructive/10 text-destructive",
+};
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
@@ -216,7 +230,9 @@ export default function SalesPage() {
                     <th className="text-left px-4 py-3 text-xs text-muted-foreground font-medium">Sana</th>
                     <th className="text-right px-4 py-3 text-xs text-muted-foreground font-medium">Jami</th>
                     <th className="text-right px-4 py-3 text-xs text-muted-foreground font-medium">To'langan</th>
-                    <th className="text-center px-4 py-3 text-xs text-muted-foreground font-medium">Holat</th>
+                    <th className="text-center px-4 py-3 text-xs text-muted-foreground font-medium">Sotuv</th>
+                    <th className="text-center px-4 py-3 text-xs text-muted-foreground font-medium">To'lov</th>
+                    <th className="text-center px-4 py-3 text-xs text-muted-foreground font-medium">Yetkazma</th>
                     <th className="w-8 px-2"></th>
                   </tr>
                 </thead>
@@ -248,16 +264,27 @@ export default function SalesPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <div className="flex flex-wrap items-center justify-center gap-1">
-                            <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", STATUS_COLORS[order.status] ?? "")}>
-                              {STATUS_LABELS[order.status] ?? order.status}
+                          <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", STATUS_COLORS[order.status] ?? "")}>
+                            {STATUS_LABELS[order.status] ?? order.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {order.status === "draft" || order.status === "cancelled" ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", PAYMENT_COLORS[order.paymentStatus] ?? "")}>
+                              {PAYMENT_LABELS[order.paymentStatus] ?? order.paymentStatus}
                             </span>
-                            {order.paymentStatus && order.status !== "draft" && order.status !== "cancelled" && (
-                              <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", PAYMENT_COLORS[order.paymentStatus] ?? "")}>
-                                {PAYMENT_LABELS[order.paymentStatus] ?? order.paymentStatus}
-                              </span>
-                            )}
-                          </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {order.deliveryStatus ? (
+                            <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", DELIVERY_COLORS[order.deliveryStatus] ?? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400")}>
+                              {DELIVERY_LABELS[order.deliveryStatus] ?? order.deliveryStatus}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground" title="Yetkazma yaratilmagan">—</span>
+                          )}
                         </td>
                         <td className="px-2 py-3">
                           <ChevronRight className="h-4 w-4 text-muted-foreground" />
