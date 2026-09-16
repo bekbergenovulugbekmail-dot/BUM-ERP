@@ -16,6 +16,7 @@
  *   POST   /cash-transactions, /cash-transfers                 finance.manage
  *   GET    /settlements                                        finance.view (kutilayotgan karta/hamyon puli)
  *   POST   /cash-accounts/:cashAccountId/settle                finance.manage (qirqim: komissiya ushlanib bank hisobiga)
+ *   POST   /cash-accounts/:cashAccountId/set-balance           finance.approve (qoldiqni to'g'rilash: farq kirim/chiqim)
  *   GET    /terminals (?includeInactive=), /terminals/:terminalId   finance.view (karta terminallari → bank hisobi)
  *   POST   /terminals, PATCH /terminals/:terminalId            finance.manage
  *   GET    /expenses (?status=&category=&dateFrom=&dateTo=&limit=&cursor=), /expenses/stats   finance.view
@@ -51,6 +52,7 @@ import {
   listCashAccounts,
   listCashTransactions,
   recordManualCashTransaction,
+  setCashAccountBalance,
   transferCash,
   updateCashAccount,
 } from "./cash.service.js";
@@ -170,6 +172,12 @@ const cashAccountPatch = z.strictObject({
   settlesToCashAccountId: z.uuid().nullable().optional(),
   /** Qirqim komissiyasi, % (0–100). */
   settlementCommissionPercent: percentSchema.optional(),
+});
+/** Qoldiqni to'g'rilash: farq kirim yoki chiqim bo'lib yoziladi, sabab majburiy. */
+const cashBalanceBody = z.strictObject({
+  balance: moneySchema,
+  reason: z.string().trim().min(3).max(500),
+  txDate: isoDate.optional(),
 });
 /** Qirqim: kutilayotgan hisobdan bank hisobiga (komissiya qirqimda ushlanadi). */
 const settlementBody = z.strictObject({
@@ -442,6 +450,14 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
     );
     reply.status(201);
     return { settlement };
+  });
+
+  app.post("/cash-accounts/:cashAccountId/set-balance", async (req) => {
+    const { cashAccountId } = cashAccountParams.parse(req.params);
+    const body = cashBalanceBody.parse(req.body);
+    return writeInTenant(req, "finance.approve", (tx, tenant) =>
+      setCashAccountBalance(tx, tenant, cashAccountId, body, requestMeta(req)),
+    );
   });
 
   // ─── Karta terminallari ──────────────────────────────────────────────────

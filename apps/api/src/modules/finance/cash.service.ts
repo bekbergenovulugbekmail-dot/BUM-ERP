@@ -433,6 +433,83 @@ export async function updateCashAccount(
   return updated!;
 }
 
+/**
+ * Kassa/bank qoldig'ini to'g'rilash: hisobdagi qoldiq haqiqiy puldan farq qilsa — to'g'ri qiymatga o'rnatiladi.
+ * Farq oddiy kirim yoki chiqim tranzaksiyasi bo'lib yoziladi (hisob tarixida ko'rinadi), jurnalda esa "Boshqa
+ * daromadlar" (qoldiq oshsa) yoki "Boshqa xarajatlar" (kamaysa) bilan yopiladi. Sabab majburiy va audit jurnaliga
+ * tushadi; yopilgan davrga tuzatish kiritilmaydi.
+ */
+export async function setCashAccountBalance(
+  tx: Tx,
+  tenant: TenantContext,
+  cashAccountId: string,
+  input: { balance: string; reason: string; txDate?: string },
+  meta: RequestMeta,
+) {
+  const companyId = tenant.company.id;
+  const reason = input.reason.trim();
+  if (reason.length < 3) throw badRequest("To'g'rilash sababi ko'rsatilishi kerak");
+  const target = toMinor(input.balance);
+  if (target < 0n) throw badRequest("Qoldiq manfiy bo'lmaydi");
+
+  const txDate = input.txDate ?? todayIso();
+  await assertPeriodOpen(tx, companyId, txDate);
+  const [current] = await tx
+    .select(cashAccountFields)
+    .from(cashAccounts)
+    .where(and(eq(cashAccounts.id, cashAccountId), eq(cashAccounts.companyId, companyId)))
+    .limit(1)
+    .for("update");
+  if (!current) throw notFound("Kassa topilmadi");
+  if (!current.isActive) throw badRequest("Kassa faol emas");
+
+  const delta = target - toMinor(current.balance);
+  if (delta === 0n) return { cashAccount: current, transaction: null, delta: "0.00" };
+
+  const amount = fromMinor(delta > 0n ? delta : -delta);
+  const referenceId = randomUUID();
+  const description = `Qoldiq to'g'rilandi: ${reason}`;
+  const { account, transaction } = await recordCashTransaction(tx, companyId, tenant.user.id, {
+    cashAccountId,
+    type: delta > 0n ? "in" : "out",
+    amount,
+    currency: current.currency,
+    txDate,
+    description,
+    category: "tuzatish",
+    referenceType: "cash_adjustment",
+    referenceId,
+  });
+  // Jurnal asosiy valyutada — valyutali hisob joriy kurs bilan
+  const baseAmount = toBaseAmount(amount, await accountRate(tx, companyId, current.currency));
+  const ledger = await ledgerAccountFor(tx, companyId, account);
+  await postJournalEntry(tx, companyId, tenant.user.id, {
+    entryDate: txDate,
+    description: `${description} (${current.name})`,
+    referenceType: "cash_adjustment",
+    referenceId,
+    lines:
+      delta > 0n
+        ? [
+            { accountId: ledger, debit: baseAmount },
+            { accountId: await requireAccountBySubtype(tx, companyId, "other", "income", "Boshqa daromadlar"), credit: baseAmount },
+          ]
+        : [
+            { accountId: await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"), debit: baseAmount },
+            { accountId: ledger, credit: baseAmount },
+          ],
+  });
+
+  await financeAudit(tx, tenant, meta, {
+    action: "CASH_ACCOUNT_BALANCE_ADJUSTED",
+    resource: "cash_accounts",
+    resourceId: cashAccountId,
+    details: { reason, before: current.balance, after: fromMinor(target), delta: fromMinor(delta) },
+  });
+  const [fresh] = await tx.select(cashAccountFields).from(cashAccounts).where(eq(cashAccounts.id, cashAccountId));
+  return { cashAccount: fresh!, transaction, delta: fromMinor(delta) };
+}
+
 // ─── Tranzaksiyalar ──────────────────────────────────────────────────────────
 
 export async function listCashTransactions(

@@ -36,7 +36,7 @@ import { upsertCompanySetting } from "../company/settings.service.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { todayIso } from "../finance/cash.service.js";
-import { ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { assertPeriodOpen, ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { salesAudit } from "./customers.service.js";
 
 const { companyId: _companyId, ...cashbackTxFields } = getTableColumns(customerCashbackTransactions);
@@ -520,6 +520,71 @@ export async function reverseCashback(
     },
   });
   return { redeemedRefunded: input.restore, earnedReversed: reversible };
+}
+
+/**
+ * Keshbek hisobini to'g'rilash: noto'g'ri bo'lsa to'g'ri qiymatga o'rnatiladi. Farq 5600 "Keshbek xarajatlari" (hisob
+ * oshsa) yoki "Boshqa daromadlar" (kamaysa) bilan 2400 majburiyatga yoziladi va keshbek tarixida `adjustment` qatori
+ * bo'lib ko'rinadi. Sabab majburiy, audit jurnaliga tushadi; yopilgan davrga tuzatish kiritilmaydi.
+ */
+export async function setCustomerCashback(
+  tx: Tx,
+  tenant: TenantContext,
+  input: { customerId: string; cashback: string; reason: string; date?: string },
+  meta: RequestMeta,
+) {
+  const companyId = tenant.company.id;
+  const reason = input.reason.trim();
+  if (reason.length < 3) throw badRequest("To'g'rilash sababi ko'rsatilishi kerak");
+  const target = toMinor(input.cashback);
+  if (target < 0n) throw badRequest("Keshbek manfiy bo'lmaydi");
+
+  const date = input.date ?? todayIso();
+  await assertPeriodOpen(tx, companyId, date);
+  const customer = await lockCustomer(tx, companyId, input.customerId);
+  const delta = target - toMinor(customer.cashbackBalance);
+  if (delta === 0n) return null;
+
+  const id = randomUUID();
+  const amount = fromMinor(delta > 0n ? delta : -delta);
+  const liability = await ensureAccountBySubtype(tx, companyId, "cashback_liability");
+  const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+    entryDate: date,
+    description: `Keshbek to'g'rilandi: ${customer.name} — ${reason}`,
+    referenceType: "cashback",
+    referenceId: id,
+    lines:
+      delta > 0n
+        ? [
+            { accountId: await ensureAccountBySubtype(tx, companyId, "cashback_expense"), debit: amount },
+            { accountId: liability, credit: amount },
+          ]
+        : [
+            { accountId: liability, debit: amount },
+            { accountId: await requireAccountBySubtype(tx, companyId, "other", "income", "Boshqa daromadlar"), credit: amount },
+          ],
+  });
+  await tx
+    .update(customers)
+    .set({ cashbackBalance: fromMinor(target), updatedAt: new Date() })
+    .where(eq(customers.id, customer.id));
+  const transaction = await insertCashbackTx(tx, tenant, {
+    id,
+    customerId: customer.id,
+    type: "adjustment",
+    amount: fromMinor(delta),
+    balanceAfter: fromMinor(target),
+    journalEntryId: entry.id,
+    notes: reason,
+  });
+
+  await salesAudit(tx, tenant, meta, {
+    action: "CUSTOMER_CASHBACK_ADJUSTED",
+    resource: "customers",
+    resourceId: customer.id,
+    details: { reason, before: customer.cashbackBalance, after: fromMinor(target), delta: fromMinor(delta) },
+  });
+  return transaction;
 }
 
 export async function listCashbackTransactions(conn: DbOrTx, tenant: TenantContext, customerId: string, limit: number) {

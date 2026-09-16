@@ -23,7 +23,8 @@ import {
   todayIso,
   type PaymentMethod,
 } from "../finance/cash.service.js";
-import { ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { assertPeriodOpen, ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { setCustomerCashback } from "./cashback.service.js";
 import { salesAudit } from "./customers.service.js";
 
 const { companyId: _companyId, ...balanceTxFields } = getTableColumns(customerBalanceTransactions);
@@ -347,6 +348,122 @@ export async function refundToBalance(
     details: { amount: fromMinor(amount), orderId: input.orderId, balanceAfter: fromMinor(balanceAfter) },
   });
   return transaction;
+}
+
+/**
+ * Balansni to'g'rilash: hamyon balansi va/yoki qarz noto'g'ri bo'lsa — to'g'ri qiymatga o'rnatiladi (delta hisoblanadi).
+ * Farq jurnalda "Boshqa xarajatlar" (qiymat oshsa) yoki "Boshqa daromadlar" (kamaysa) bilan yopiladi; sabab majburiy
+ * va audit jurnaliga tushadi. Yopilgan davrga tuzatish kiritilmaydi. Hamyon tuzatishi balans tarixida `adjustment`
+ * qatori bo'lib ko'rinadi; qarz tuzatishi — jurnal yozuvi va audit orqali.
+ */
+export async function setCustomerBalances(
+  tx: Tx,
+  tenant: TenantContext,
+  input: { customerId: string; balance?: string; totalDebt?: string; cashback?: string; reason: string; date?: string },
+  meta: RequestMeta,
+) {
+  const companyId = tenant.company.id;
+  const reason = input.reason.trim();
+  if (reason.length < 3) throw badRequest("To'g'rilash sababi ko'rsatilishi kerak");
+  if (input.balance === undefined && input.totalDebt === undefined && input.cashback === undefined) {
+    throw badRequest("To'g'rilanadigan qiymat tanlanmagan");
+  }
+
+  const date = input.date ?? todayIso();
+  await assertPeriodOpen(tx, companyId, date);
+  const customer = await lockCustomer(tx, companyId, input.customerId);
+  const before = { balance: customer.balance, totalDebt: customer.totalDebt };
+  const otherIncome = () => requireAccountBySubtype(tx, companyId, "other", "income", "Boshqa daromadlar");
+  const otherExpense = () => requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar");
+  let transaction: Awaited<ReturnType<typeof insertBalanceTx>> | null = null;
+
+  if (input.balance !== undefined) {
+    const target = toMinor(input.balance);
+    if (target < 0n) throw badRequest("Balans manfiy bo'lmaydi");
+    const delta = target - toMinor(customer.balance);
+    if (delta !== 0n) {
+      const id = randomUUID();
+      const amount = fromMinor(delta > 0n ? delta : -delta);
+      const advance = await customerAdvanceAccount(tx, companyId);
+      const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+        entryDate: date,
+        description: `Balans to'g'rilandi: ${customer.name} — ${reason}`,
+        referenceType: "customer_balance",
+        referenceId: id,
+        lines:
+          delta > 0n
+            ? [
+                { accountId: await otherExpense(), debit: amount },
+                { accountId: advance, credit: amount },
+              ]
+            : [
+                { accountId: advance, debit: amount },
+                { accountId: await otherIncome(), credit: amount },
+              ],
+      });
+      await tx
+        .update(customers)
+        .set({ balance: fromMinor(target), updatedAt: new Date() })
+        .where(eq(customers.id, customer.id));
+      transaction = await insertBalanceTx(tx, tenant, {
+        id,
+        customerId: customer.id,
+        type: "adjustment",
+        amount: fromMinor(delta),
+        balanceAfter: fromMinor(target),
+        journalEntryId: entry.id,
+        notes: reason,
+      });
+    }
+  }
+
+  if (input.totalDebt !== undefined) {
+    const target = toMinor(input.totalDebt);
+    if (target < 0n) throw badRequest("Qarz manfiy bo'lmaydi — ortiqcha to'lov balansga yoziladi");
+    const delta = target - toMinor(customer.totalDebt);
+    if (delta !== 0n) {
+      const amount = fromMinor(delta > 0n ? delta : -delta);
+      const receivable = await requireAccountBySubtype(tx, companyId, "receivable", "asset", "Debitorlar");
+      await postJournalEntry(tx, companyId, tenant.user.id, {
+        entryDate: date,
+        description: `Qarz to'g'rilandi: ${customer.name} — ${reason}`,
+        referenceType: "customer_debt_adjustment",
+        referenceId: randomUUID(),
+        lines:
+          delta > 0n
+            ? [
+                { accountId: receivable, debit: amount },
+                { accountId: await otherIncome(), credit: amount },
+              ]
+            : [
+                { accountId: await otherExpense(), debit: amount },
+                { accountId: receivable, credit: amount },
+              ],
+      });
+      await tx
+        .update(customers)
+        .set({ totalDebt: fromMinor(target), updatedAt: new Date() })
+        .where(eq(customers.id, customer.id));
+    }
+  }
+
+  // Keshbek — alohida hisob: o'z tarixi, jurnal yozuvi va audit qatori bilan
+  const cashbackTransaction =
+    input.cashback === undefined
+      ? null
+      : await setCustomerCashback(tx, tenant, { customerId: customer.id, cashback: input.cashback, reason, date }, meta);
+
+  await salesAudit(tx, tenant, meta, {
+    action: "CUSTOMER_BALANCE_ADJUSTED",
+    resource: "customers",
+    resourceId: customer.id,
+    details: {
+      reason,
+      before,
+      after: { balance: input.balance ?? before.balance, totalDebt: input.totalDebt ?? before.totalDebt },
+    },
+  });
+  return { customer: await customerSummary(tx, companyId, customer.id), transaction, cashbackTransaction };
 }
 
 export async function listBalanceTransactions(conn: DbOrTx, tenant: TenantContext, customerId: string, limit: number) {

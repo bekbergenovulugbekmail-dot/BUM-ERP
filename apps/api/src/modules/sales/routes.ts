@@ -24,6 +24,7 @@
  *   POST   /pos/customers/:customerId/payments            pos.use (balansni to'ldirish / qarzni to'lash)
  *   GET    /customers/:customerId/balance (?limit=)       sales.view (balans tarixi)
  *   GET    /customers/:customerId/cashback (?limit=)      sales.view (keshbek tarixi)
+ *   POST   /customers/:customerId/balance-adjust          finance.approve (balans, qarz, keshbekni to'g'rilash)
  *   GET    /cashback/settings                             sales.view
  *   PUT    /cashback/settings                             settings.manage
  */
@@ -59,7 +60,7 @@ import {
   listCashbackTransactions,
   saveCashbackSettings,
 } from "./cashback.service.js";
-import { listBalanceTransactions } from "./customer-balance.service.js";
+import { listBalanceTransactions, setCustomerBalances } from "./customer-balance.service.js";
 import {
   closeShift,
   completeSale,
@@ -282,6 +283,14 @@ const posCustomerPaymentBody = z
   })
   .refine((body) => body.amount !== undefined || body.parts !== undefined, "To'lov summasi (amount) yoki qismlari (parts) kiritilsin");
 const balanceQuery = z.object({ limit: limitQuery });
+/** Balansni to'g'rilash: berilgan qiymat(lar) to'g'ri qiymatga o'rnatiladi, sabab majburiy. */
+const balanceAdjustBody = z.strictObject({
+  balance: moneySchema.optional(),
+  totalDebt: moneySchema.optional(),
+  cashback: moneySchema.optional(),
+  reason: z.string().trim().min(3).max(500),
+  date: z.iso.date().optional(),
+});
 
 const customerParams = z.object({ customerId: z.uuid() });
 const orderParams = z.object({ orderId: z.uuid() });
@@ -335,6 +344,14 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     const { customerId } = customerParams.parse(req.params);
     const { limit } = balanceQuery.parse(req.query);
     return { transactions: await listCashbackTransactions(db, await readTenant(req, "sales.view"), customerId, limit) };
+  });
+
+  app.post("/customers/:customerId/balance-adjust", async (req) => {
+    const { customerId } = customerParams.parse(req.params);
+    const body = balanceAdjustBody.parse(req.body);
+    return writeInTenant(req, "finance.approve", (tx, tenant) =>
+      setCustomerBalances(tx, tenant, { ...body, customerId }, requestMeta(req)),
+    );
   });
 
   // ─── Keshbek sozlamalari ─────────────────────────────────────────────────

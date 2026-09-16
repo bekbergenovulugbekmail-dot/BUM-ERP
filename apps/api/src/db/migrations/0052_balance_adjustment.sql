@@ -1,0 +1,1 @@
+ALTER TYPE "public"."customer_balance_tx_type" ADD VALUE 'adjustment';

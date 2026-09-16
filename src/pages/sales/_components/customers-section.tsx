@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation } from "lucide-react";
+import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -12,6 +12,7 @@ import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
+import SetBalanceDialog from "@/components/balances/set-balance-dialog.tsx";
 import { num, type Customer } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
@@ -67,6 +68,9 @@ export default function CustomersSection() {
   const [dialog, setDialog] = useState<DialogState>(null);
   const [form, setForm] = useState<CustomerForm>(emptyForm);
   const [locating, setLocating] = useState(false);
+  /** Balansni to'g'rilash — moliyaviy tasdiq ruxsati bilan. */
+  const canAdjustBalance = can("finance.approve");
+  const [adjusting, setAdjusting] = useState<Customer | null>(null);
 
   const customers = useApiQuery<{ customers: Customer[] }>(
     "/api/sales/customers",
@@ -199,10 +203,36 @@ export default function CustomersSection() {
                         </span>
                       )}
                     </div>
+                    {canAdjustBalance && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        title="Balansni to'g'rilash"
+                        aria-label={`${c.name} balansini to'g'rilash`}
+                        onClick={() => setAdjusting(c)}
+                      >
+                        <Wallet className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     {canManage && (
                       <Button variant="ghost" size="icon" className="h-7 w-7" title="Tahrirlash" onClick={() => openEdit(c)}>
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
+                    )}
+                    {adjusting?.id === c.id && (
+                      <SetBalanceDialog
+                        title={`${c.name} — balansni to'g'rilash`}
+                        description="Faqat o'zgargan qiymat yuboriladi; farq buxgalteriyada boshqa daromad yoki xarajat bo'lib yopiladi"
+                        fields={[
+                          { key: "balance", label: "Balans (hamyon)", current: c.balance },
+                          { key: "totalDebt", label: "Qarz", current: c.totalDebt },
+                          { key: "cashback", label: "Keshbek", current: c.cashbackBalance },
+                        ]}
+                        endpoint={`/api/sales/customers/${c.id}/balance-adjust`}
+                        invalidate={["/api/sales/customers"]}
+                        onClose={() => setAdjusting(null)}
+                      />
                     )}
                   </div>
                 </div>

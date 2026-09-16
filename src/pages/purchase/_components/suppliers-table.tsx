@@ -13,6 +13,7 @@ import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
+import SetBalanceDialog from "@/components/balances/set-balance-dialog.tsx";
 import { num, type Supplier } from "../_lib/types.ts";
 
 type Props = { suppliers: Supplier[] | undefined };
@@ -44,6 +45,9 @@ export default function SuppliersTable({ suppliers }: Props) {
   // Qarz valyuta bo'yicha ko'rsatiladi (asosiy valyutadagi `totalDebt` — kitob qiymati)
   const { base } = useCurrencies();
   const [createOpen, setCreateOpen] = useState(false);
+  /** Qarzni to'g'rilash — moliyaviy tasdiq ruxsati bilan. */
+  const canAdjustDebt = can("finance.approve");
+  const [adjusting, setAdjusting] = useState<Supplier | null>(null);
   const [form, setForm] = useState<SupplierForm>(EMPTY_FORM);
 
   const createSupplier = useApiMutation((body: SupplierForm) =>
@@ -157,6 +161,27 @@ export default function SuppliersTable({ suppliers }: Props) {
                     <p className="font-medium">{s.paymentTermDays} kun</p>
                   </div>
                 </div>
+                {canAdjustDebt && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="mt-3"
+                    aria-label={`${s.name} qarzini to'g'rilash`}
+                    onClick={() => setAdjusting(s)}
+                  >
+                    Qarzni to'g'rilash
+                  </Button>
+                )}
+                {adjusting?.id === s.id && (
+                  <SetBalanceDialog
+                    title={`${s.name} — qarzni to'g'rilash`}
+                    description="Farq buxgalteriyada boshqa daromad yoki xarajat bo'lib kreditorlar hisobiga yoziladi"
+                    fields={[{ key: "totalDebt", label: "Qarz", current: s.totalDebt }]}
+                    endpoint={`/api/purchase/suppliers/${s.id}/set-debt`}
+                    invalidate={["/api/purchase/suppliers"]}
+                    onClose={() => setAdjusting(null)}
+                  />
+                )}
               </div>
             );
           })}

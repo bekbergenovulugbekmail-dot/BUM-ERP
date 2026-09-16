@@ -365,6 +365,13 @@
       "when": 1789516685198,
       "tag": "0051_pending_settlement_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1789518810782,
+      "tag": "0052_balance_adjustment",
+      "breakpoints": true
     }
   ]
 }

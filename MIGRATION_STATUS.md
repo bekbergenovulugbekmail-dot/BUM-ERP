@@ -207,6 +207,7 @@ Har amalda a'zoning `allowedWarehouseIds` ruxsati tekshiriladi (bo'sh — barcha
 | POST | `/cash-transactions` (in/out, ixtiyoriy `counterAccountId`), `/cash-transfers` | `finance.manage` | `recordTransaction` |
 | GET | `/settlements` — kutilayotgan karta/hamyon puli: qirqilmagan qoldiq, bugungi tushum, qirqim manzili, terminallar | `finance.view` | yangi |
 | POST | `/cash-accounts/:cashAccountId/settle` (qirqim: komissiya ushlanib qolgani bank hisobiga) | `finance.manage` | yangi |
+| POST | `/cash-accounts/:cashAccountId/set-balance` (qoldiqni to'g'rilash: farq kirim/chiqim, sabab majburiy) | `finance.approve` | yangi |
 | GET / POST / PATCH | `/terminals` (`?includeInactive=`), `/terminals/:terminalId` — karta terminali → bank hisobi | `finance.view` / `finance.manage` | yangi |
 | GET | `/expenses` (`?status=&category=&dateFrom=&dateTo=&limit=&cursor=`), `/expenses/stats` | `finance.view` | `expenses.list`, `getStats` |
 | POST / PATCH / DELETE | `/expenses`, `/expenses/:expenseId` | `finance.manage` | `create`, `remove` |
@@ -218,6 +219,7 @@ Har amalda a'zoning `allowedWarehouseIds` ruxsati tekshiriladi (bo'sh — barcha
 |---|---|---|---|
 | GET | `/suppliers` (`?includeInactive=&search=`), `/suppliers/:supplierId` | `purchase.view` | `suppliers.list`, `getById` |
 | POST / PATCH | `/suppliers`, `/suppliers/:supplierId` | `purchase.create` / `purchase.edit` | `create`, `update` |
+| POST | `/suppliers/:supplierId/set-debt` (qarzni to'g'rilash: farq boshqa daromad/xarajat, sabab majburiy) | `finance.approve` | yangi |
 | GET | `/orders` (`?supplierId=&status=&dateFrom=&dateTo=&search=&limit=&cursor=`), `/orders/:orderId` (qatorlar, qabullar, to'lovlar) | `purchase.view` | `orders.list`, `getById` |
 | POST / PATCH | `/orders`, `/orders/:orderId` (faqat qoralama) | `purchase.create` / `purchase.edit` | `create` |
 | POST | `/orders/:orderId/confirm`, `/orders/:orderId/cancel` | `purchase.approve` / `purchase.cancel` | `confirm`, `cancel` |
@@ -230,6 +232,7 @@ Har amalda a'zoning `allowedWarehouseIds` ruxsati tekshiriladi (bo'sh — barcha
 |---|---|---|---|
 | GET | `/customers` (`?search=&includeInactive=&limit=`), `/customers/:customerId` (oxirgi buyurtma va to'lovlar) | `sales.view` | `customers.list`, `getById` |
 | POST / PATCH | `/customers`, `/customers/:customerId` | `crm.manage` | `create`, `update` |
+| POST | `/customers/:customerId/balance-adjust` (balans, qarz, keshbekni to'g'rilash; sabab majburiy) | `finance.approve` | yangi |
 | GET | `/orders` (`?status=&customerId=&warehouseId=&isPos=&shiftId=&dateFrom=&dateTo=&search=&limit=&cursor=`), `/orders/stats`, `/orders/:orderId` | `sales.view` | `orders.list`, `getStats`, `getById` |
 | POST / PATCH | `/orders`, `/orders/:orderId` (faqat qoralama) | `sales.create` / `sales.edit` (narx/chegirma o'zgartirish — `sales.edit`) | `create` |
 | POST | `/orders/:orderId/confirm`, `/orders/:orderId/ship` | `sales.approve` + ombor ruxsati | `confirm`, `ship` |
@@ -1759,6 +1762,25 @@ Egasining so'rovi: "hisob qo'shishda turi kiritilganda hozir naqd va bank turibd
 Tuzatilgan eski kutilmalar: `finance.test` va `import-convex.test` (23 ta standart hisob), `payment-terminals.test` — ortiqcha to'lov holati oldingi bosqichdagi qoidaga moslandi (naqd qism bo'lsa ortig'i naqddan qaytim; naqdsiz ortiqcha va kartadan ortiq to'lov — rad)
 
 **Production (2026-09-16):** commit `12c9033`, `bum-api` va `bum-web` deploy qilindi — ikkalasi ham Online. Yangi kod ishlayotgani tasdiqlandi: sessiyasiz `https://www.bum-erp.uz/api/finance/settlements` → **401** (eski buildda bu marshrut yo'q, 404 bo'lardi), `/api/auth/me` → 401, web sahifasi → 200. Migratsiya 0051 bazada **tekshirilmadi (NOT VERIFIED)** — production bazasi faqat ichki manzilda (`*.railway.internal`) va lokal mashinadan ochilmaydi, `railway run` orqali faqat o'qish tekshiruvi esa ruxsat klassifikatori tomonidan bloklandi. API ishga tushib xizmat ko'rsatayotgani bilvosita dalil (migratsiya yiqilsa konteyner ko'tarilmaydi), ammo to'g'ridan-to'g'ri tasdiq emas. Tizimga kirgan holda sinov — NOT VERIFIED (production paroli ishlatilmaydi)
+
+## Balanslarni to'g'rilash (2026-09-16)
+
+Egasining so'rovi: "hamma balanslarni o'rnatish funksiyasi bo'lsin masalan mijozning balansi nimagadir xato bo'lsa to'g'irlab qo'yish uchun. Yetkazib beruvchini balansi ham. Boshqa balanslar ham."
+
+- **Qamrov:** mijoz balansi (hamyon), mijoz qarzi, mijoz keshbegi, ta'minotchi qarzi va kassa/bank qoldig'i
+- **Qoida:** to'g'ri qiymat kiritiladi, server farqni (delta) hisoblab jurnalga yozadi — farq "Boshqa xarajatlar" (qiymat oshsa) yoki "Boshqa daromadlar" (kamaysa) bilan yopiladi; balans hisoblari (2300 avanslar, 1100 debitorlar, 2000 kreditorlar, 2400 keshbek, 1010/1020 kassa) jurnalsiz o'zgarmaydi
+- **Sabab majburiy** (kamida 3 belgi) — jurnal yozuvi izohiga va audit qatoriga tushadi
+- **Ruxsat:** `finance.approve` (egasi, buxgalter); kassirda yo'q — 403
+- **Cheklovlar:** manfiy qiymat rad etiladi; yopilgan davrga (`lock-date`) yozilmaydi; qiymat o'zgarmasa yozuv yaratilmaydi
+- **Sxema:** `customer_balance_tx_type` ga `adjustment` (migratsiya 0052) — hamyon tuzatishi balans tarixida ishorali qator bo'lib ko'rinadi; keshbek tuzatishi keshbek tarixida (`adjustment` enum'da avvaldan bor edi, endi ishlatiladi)
+- **Ta'minotchi:** `applySupplierBalance` orqali — valyuta bo'yicha qoldiq va `suppliers.total_debt` bir joyda yangilanadi; hozircha faqat asosiy valyutadagi ta'minotchi
+- **Kassa:** farq oddiy kirim yoki chiqim tranzaksiyasi bo'lib (`tuzatish` kategoriyasi) hisob tarixida ko'rinadi
+- **Endpointlar:** `POST /api/sales/customers/:customerId/balance-adjust` (balans, qarz, keshbek), `POST /api/purchase/suppliers/:supplierId/set-debt`, `POST /api/finance/cash-accounts/:cashAccountId/set-balance`
+- **Web:** umumiy "Balansni to'g'rilash" oynasi (`src/components/balances/set-balance-dialog.tsx`) — joriy qiymatlar oldindan to'ldiriladi va faqat o'zgargani yuboriladi; mijoz kartasida, ta'minotchi kartasida va Moliya > Kassa & Bank bo'limida
+
+**Testlar (2026-09-16):** yangi `apps/api/test/balance-adjust.test.ts` (3 test: mijoz balansi/qarzi/keshbegi jurnal bilan va sabab/manfiy qiymat/kassir 403 tekshiruvi; ta'minotchi qarzi va valyuta qoldig'i; kassa qoldig'i — kirim/chiqim, tarix va o'zgarishsiz holat). Ta'sirlangan qismlar regressiyasi: **13 fayl / 42 test** — hammasi o'tdi. API `tsc` toza; web `tsc`, lint (4 o'zgargan fayl) va `vite build` toza. Desktop kodi bu bosqichda o'zgarmadi
+
+**Production:** bu bosqichda hali deploy qilinmagan — keyingi qadam
 
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 

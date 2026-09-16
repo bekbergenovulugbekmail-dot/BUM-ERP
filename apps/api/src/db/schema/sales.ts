@@ -50,6 +50,7 @@ export const customerBalanceTxType = pgEnum("customer_balance_tx_type", [
   "change", //       chek qaytimi mijozga berilmay balansga yozildi
   "sale_payment", // chek yoki qarz balansdan to'landi
   "refund", //       qaytarilgan chekning balansdan to'langan qismi
+  "adjustment", //   qo'lda tuzatish: balansni to'g'ri qiymatga o'rnatish (sabab bilan, audit va jurnal yozuvi)
 ]);
 
 /** Keshbek hisobi harakati — pul balansidan alohida. */

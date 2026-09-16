@@ -10,16 +10,18 @@
  *  - qarzi bor ta'minotchini faolsizlantirib bo'lmaydi; `totalDebt` / `totalPurchased`
  *    faqat qabul va to'lovdan o'zgaradi
  */
+import { randomUUID } from "node:crypto";
 import { and, asc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
 import { purchaseOrders, suppliers } from "../../db/schema/purchase.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
-import { toMinor } from "../../shared/decimal.js";
+import { fromMinor, toMinor } from "../../shared/decimal.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
-import { supplierDebtsByCurrency } from "./supplier-balances.service.js";
+import { applySupplierBalance, supplierDebtsByCurrency } from "./supplier-balances.service.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
+import { assertPeriodOpen, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...supplierFields } = getTableColumns(suppliers);
 
@@ -167,4 +169,80 @@ export async function updateSupplier(
     details: { changes: Object.keys(patch) },
   });
   return updated!;
+}
+
+/**
+ * Ta'minotchi qarzini to'g'rilash: qarz noto'g'ri bo'lsa to'g'ri qiymatga o'rnatiladi (faqat asosiy valyutada).
+ * Farq jurnalda "Boshqa xarajatlar" (qarz oshsa) yoki "Boshqa daromadlar" (kamaysa) bilan kreditorlarga yoziladi;
+ * valyuta bo'yicha qoldiq va `total_debt` — `applySupplierBalance` orqali. Sabab majburiy, audit jurnaliga tushadi;
+ * yopilgan davrga tuzatish kiritilmaydi.
+ */
+export async function setSupplierDebt(
+  tx: Tx,
+  tenant: TenantContext,
+  supplierId: string,
+  input: { totalDebt: string; reason: string; date?: string },
+  meta: RequestMeta,
+) {
+  const companyId = tenant.company.id;
+  const reason = input.reason.trim();
+  if (reason.length < 3) throw badRequest("To'g'rilash sababi ko'rsatilishi kerak");
+  const target = toMinor(input.totalDebt);
+  if (target < 0n) throw badRequest("Qarz manfiy bo'lmaydi — ortiqcha to'lov avans bo'lib yuritiladi");
+
+  const date = input.date ?? new Date().toISOString().slice(0, 10);
+  await assertPeriodOpen(tx, companyId, date);
+  const [current] = await tx
+    .select(supplierFields)
+    .from(suppliers)
+    .where(and(eq(suppliers.id, supplierId), eq(suppliers.companyId, companyId)))
+    .limit(1)
+    .for("update");
+  if (!current) throw notFound("Ta'minotchi topilmadi");
+
+  const currency = await companyCurrency(tx, companyId);
+  if (current.currency !== currency) {
+    throw badRequest(`To'g'rilash faqat asosiy valyutadagi (${currency}) ta'minotchida`);
+  }
+  const delta = target - toMinor(current.totalDebt);
+  if (delta === 0n) return { supplier: current, delta: "0.00" };
+
+  const amount = fromMinor(delta > 0n ? delta : -delta);
+  const payable = await requireAccountBySubtype(tx, companyId, "payable", "liability", "Kreditorlar");
+  await postJournalEntry(tx, companyId, tenant.user.id, {
+    entryDate: date,
+    description: `Ta'minotchi qarzi to'g'rilandi: ${current.name} — ${reason}`,
+    referenceType: "supplier_debt_adjustment",
+    referenceId: randomUUID(),
+    lines:
+      delta > 0n
+        ? [
+            { accountId: await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"), debit: amount },
+            { accountId: payable, credit: amount },
+          ]
+        : [
+            { accountId: payable, debit: amount },
+            { accountId: await requireAccountBySubtype(tx, companyId, "other", "income", "Boshqa daromadlar"), credit: amount },
+          ],
+  });
+  // Asosiy valyutada qarz va kitob qiymati teng — `total_debt` shu yerda yangilanadi
+  await applySupplierBalance(tx, {
+    companyId,
+    userId: tenant.user.id,
+    supplierId,
+    currency,
+    debtDelta: delta,
+    bookDelta: delta,
+    date,
+    description: `Qarz to'g'rilandi — ${reason}`,
+  });
+
+  await purchaseAudit(tx, tenant, meta, {
+    action: "SUPPLIER_DEBT_ADJUSTED",
+    resource: "suppliers",
+    resourceId: supplierId,
+    details: { reason, before: current.totalDebt, after: fromMinor(target), delta: fromMinor(delta) },
+  });
+  const [fresh] = await tx.select(supplierFields).from(suppliers).where(eq(suppliers.id, supplierId));
+  return { supplier: fresh!, delta: fromMinor(delta) };
 }

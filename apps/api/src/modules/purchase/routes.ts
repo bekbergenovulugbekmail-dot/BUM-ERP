@@ -4,6 +4,7 @@
  *   GET    /suppliers (?includeInactive=&search=), /suppliers/:supplierId     purchase.view
  *   POST   /suppliers                                     purchase.create
  *   PATCH  /suppliers/:supplierId                         purchase.edit
+ *   POST   /suppliers/:supplierId/set-debt                finance.approve (qarzni to'g'rilash, sabab bilan)
  *   GET    /orders (?supplierId=&status=&dateFrom=&dateTo=&search=&limit=&cursor=), /orders/:orderId   purchase.view
  *   POST   /orders                                        purchase.create
  *   PATCH  /orders/:orderId (faqat qoralama)              purchase.edit
@@ -34,7 +35,7 @@ import {
 } from "./orders.service.js";
 import { listSupplierPayments, recordSupplierPayment } from "./payments.service.js";
 import { returnPurchaseItems } from "./returns.service.js";
-import { createSupplier, getSupplier, listSuppliers, updateSupplier } from "./suppliers.service.js";
+import { createSupplier, getSupplier, listSuppliers, setSupplierDebt, updateSupplier } from "./suppliers.service.js";
 
 const nullableText = (max: number) =>
   z
@@ -147,6 +148,12 @@ const paymentsQuery = z.object({
 });
 
 const supplierParams = z.object({ supplierId: z.uuid() });
+/** Ta'minotchi qarzini to'g'rilash: qarz to'g'ri qiymatga o'rnatiladi, sabab majburiy. */
+const supplierDebtBody = z.strictObject({
+  totalDebt: decimalSchema({ scale: 2 }),
+  reason: z.string().trim().min(3).max(500),
+  date: isoDate.optional(),
+});
 const orderParams = z.object({ orderId: z.uuid() });
 
 async function readTenant(req: FastifyRequest, permission: Permission): Promise<TenantContext> {
@@ -198,6 +205,14 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
       updateSupplier(tx, tenant, supplierId, patch, requestMeta(req)),
     );
     return { supplier };
+  });
+
+  app.post("/suppliers/:supplierId/set-debt", async (req) => {
+    const { supplierId } = supplierParams.parse(req.params);
+    const body = supplierDebtBody.parse(req.body);
+    return writeInTenant(req, "finance.approve", (tx, tenant) =>
+      setSupplierDebt(tx, tenant, supplierId, body, requestMeta(req)),
+    );
   });
 
   // ─── Buyurtmalar ─────────────────────────────────────────────────────────

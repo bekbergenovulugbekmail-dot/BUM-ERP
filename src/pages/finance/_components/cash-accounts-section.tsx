@@ -16,6 +16,7 @@ import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import { BankCommissionHint } from "@/components/payments/bank-commission-hint.tsx";
 import AccountCardPayments, { AccountCommissionSummary } from "./account-card-payments.tsx";
 import PendingSettlements from "./pending-settlements.tsx";
+import SetBalanceDialog from "@/components/balances/set-balance-dialog.tsx";
 import {
   CASH_ACCOUNT_TYPE_LABELS,
   isPendingAccountType,
@@ -175,6 +176,9 @@ export default function CashAccountsSection() {
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [txDialog, setTxDialog] = useState<"in" | "out" | null>(null);
   const [createAccountOpen, setCreateAccountOpen] = useState(false);
+  /** Qoldiqni to'g'rilash — moliyaviy tasdiq ruxsati bilan. */
+  const canAdjustBalance = can("finance.approve");
+  const [adjustOpen, setAdjustOpen] = useState(false);
 
   const selectedAccount = accounts?.find((a) => a.id === selectedAccountId) ?? accounts?.[0];
   /** Qirqim manzili bo'la oladigan hisoblar. */
@@ -402,7 +406,23 @@ export default function CashAccountsSection() {
           <Button size="sm" variant="secondary" className="text-rose-600 border-rose-200 dark:border-rose-800" onClick={() => setTxDialog("out")}>
             <ArrowDownLeft className="h-4 w-4 mr-1" /> Chiqim
           </Button>
+          {canAdjustBalance && (
+            <Button size="sm" variant="secondary" onClick={() => setAdjustOpen(true)}>
+              Qoldiqni to'g'rilash
+            </Button>
+          )}
         </div>
+      )}
+
+      {selectedAccount && adjustOpen && (
+        <SetBalanceDialog
+          title={`${selectedAccount.name} — qoldiqni to'g'rilash`}
+          description="Farq kirim yoki chiqim bo'lib hisob tarixida ko'rinadi; buxgalteriyada boshqa daromad yoki xarajat bilan yopiladi"
+          fields={[{ key: "balance", label: `Qoldiq (${selectedAccount.currency})`, current: selectedAccount.balance }]}
+          endpoint={`/api/finance/cash-accounts/${selectedAccount.id}/set-balance`}
+          invalidate={["/api/finance/cash-accounts", "/api/finance/dashboard", "/api/finance/settlements"]}
+          onClose={() => setAdjustOpen(false)}
+        />
       )}
 
       {/* Transactions list */}
