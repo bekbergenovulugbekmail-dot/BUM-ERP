@@ -1803,7 +1803,7 @@ Egasining so'rovi: "Xaridlarda, hodimlarda, marshrutlarda, import, export bo'lsi
 
 **Testlar (2026-09-16):** yangi `apps/api/test/csv-import-export.test.ts` (4 test: mijoz importi va BOM'li eksport; ta'minotchida takroriy kod; hodim importi login yaratmasligi, maosh ustunlari `hr.salary` bilan va kassirga 403; marshrut kunlari va noma'lum agent). Ta'sirlangan qismlar regressiyasi: **13 fayl / 48 test** — hammasi o'tdi. API `tsc` toza; web `tsc`, lint (5 fayl) va `vite build` toza
 
-**Production:** bu bosqichda hali deploy qilinmagan — keyingi qadam
+**Production (2026-09-16):** commit `e9dc7ae`, `bum-api` va `bum-web` deploy qilindi — ikkalasi ham Online, web sahifasi 200. Yangi marshrutlar ishlayotgani tasdiqlandi: sessiyasiz `GET /api/sales/customers/export`, `/api/purchase/suppliers/export`, `/api/hr/employees/export`, `/api/distribution/routes/export` — to'rttasi ham **401** (eski buildda bu marshrutlar yo'q edi, 404 bo'lardi). Bu bosqichda yangi migratsiya yo'q. Tizimga kirgan holda sinov — NOT VERIFIED (production paroli ishlatilmaydi)
 
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 
