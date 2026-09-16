@@ -1780,7 +1780,7 @@ Egasining so'rovi: "hamma balanslarni o'rnatish funksiyasi bo'lsin masalan mijoz
 
 **Testlar (2026-09-16):** yangi `apps/api/test/balance-adjust.test.ts` (3 test: mijoz balansi/qarzi/keshbegi jurnal bilan va sabab/manfiy qiymat/kassir 403 tekshiruvi; ta'minotchi qarzi va valyuta qoldig'i; kassa qoldig'i — kirim/chiqim, tarix va o'zgarishsiz holat). Ta'sirlangan qismlar regressiyasi: **13 fayl / 42 test** — hammasi o'tdi. API `tsc` toza; web `tsc`, lint (4 o'zgargan fayl) va `vite build` toza. Desktop kodi bu bosqichda o'zgarmadi
 
-**Production:** bu bosqichda hali deploy qilinmagan — keyingi qadam
+**Production (2026-09-16):** commit `aad78b6`, `bum-api` va `bum-web` deploy qilindi — ikkalasi ham Online, web sahifasi 200. Yangi marshrutlar ishlayotgani tasdiqlandi: sessiyasiz `POST /api/finance/cash-accounts/:id/set-balance`, `POST /api/sales/customers/:id/balance-adjust`, `POST /api/purchase/suppliers/:id/set-debt` — uchalasi ham **401** (eski buildda bu marshrutlar yo'q edi, 404 bo'lardi). Migratsiya 0052 bazada **tekshirilmadi (NOT VERIFIED)** — production bazasi faqat ichki manzilda (`*.railway.internal`), `railway run` orqali faqat o'qish tekshiruvi esa ruxsat klassifikatori tomonidan bloklandi. Tizimga kirgan holda sinov — NOT VERIFIED (production paroli ishlatilmaydi)
 
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 
