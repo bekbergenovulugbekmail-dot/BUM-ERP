@@ -14,6 +14,8 @@
  *   POST   /orders/:orderId/cancel                        purchase.cancel
  *   POST   /orders/:orderId/receipts                      warehouse.receive (+ ombor ruxsati)
  *   POST   /orders/:orderId/returns                       purchase.return (qisman; ta'minotchi qaytargan pul bilan)
+ *   GET    /orders/export (?supplierId=&status=&dateFrom=&dateTo=)   purchase.view (CSV: hujjat qatorlari)
+ *   POST   /orders/import ({rows, dryRun})                purchase.create (qoralama hujjat; dryRun — faqat tekshirish)
  *   GET    /payments (?supplierId=&orderId=&limit=&cursor=)   purchase.view
  *   POST   /payments                                      purchase.approve (201 yangi / 200 takroriy reference)
  */
@@ -35,6 +37,7 @@ import {
   receiveGoods,
   updateOrder,
 } from "./orders.service.js";
+import { exportPurchaseOrdersCsv, importPurchaseOrders } from "./orders-csv.service.js";
 import { listSupplierPayments, recordSupplierPayment } from "./payments.service.js";
 import { returnPurchaseItems } from "./returns.service.js";
 import { exportSuppliersCsv, importSuppliers } from "./suppliers-csv.service.js";
@@ -76,6 +79,8 @@ const suppliersQuery = z.object({ includeInactive: boolQuery, search: z.string()
 const suppliersExportQuery = z.object({ includeInactive: boolQuery });
 /** CSV import: fayl brauzerda o'qiladi, qatorlar shu yerda tekshiriladi. Qarz ustuni e'tiborsiz qoldiriladi. */
 const supplierImportBody = z.strictObject({
+  /** Preview: faqat tekshirish — bazaga hech narsa yozilmaydi. */
+  dryRun: z.boolean().optional(),
   rows: z
     .array(
       z.strictObject({
@@ -126,6 +131,38 @@ const ordersQuery = z.object({
   search: z.string().trim().min(1).max(100).optional(),
   limit: limitQuery,
   cursor: cursorQuery,
+});
+const ordersExportQuery = z.object({
+  supplierId: z.uuid().optional(),
+  status: z.enum(["draft", "confirmed", "partial", "received", "invoiced", "paid", "cancelled"]).optional(),
+  dateFrom: isoDate.optional(),
+  dateTo: isoDate.optional(),
+});
+/**
+ * CSV import: fayl qatori = hujjat qatori; bir xil "Hujjat raqami" bitta hujjatga birlashadi.
+ * `dryRun` — faqat tekshirish (preview), bazaga hech narsa yozilmaydi.
+ */
+const orderImportBody = z.strictObject({
+  dryRun: z.boolean().optional(),
+  rows: z
+    .array(
+      z.strictObject({
+        number: z.string().max(50).optional(),
+        orderDate: z.string().max(50).optional(),
+        supplier: z.string().max(300).optional(),
+        warehouse: z.string().max(300).optional(),
+        product: z.string().max(300).optional(),
+        quantity: z.string().max(50).optional(),
+        unit: z.string().max(50).optional(),
+        price: z.string().max(50).optional(),
+        discountPercent: z.string().max(50).optional(),
+        taxRate: z.string().max(50).optional(),
+        expectedDate: z.string().max(50).optional(),
+        notes: z.string().max(2000).optional(),
+      }),
+    )
+    .min(1)
+    .max(500),
 });
 const cancelBody = z.strictObject({ reason: nullableText(1000) }).optional();
 const receiptBody = z.strictObject({
@@ -243,8 +280,8 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/suppliers/import", async (req) => {
-    const { rows } = supplierImportBody.parse(req.body);
-    return writeInTenant(req, "purchase.create", (tx, tenant) => importSuppliers(tx, tenant, rows, requestMeta(req)));
+    const { rows, dryRun } = supplierImportBody.parse(req.body);
+    return writeInTenant(req, "purchase.create", (tx, tenant) => importSuppliers(tx, tenant, rows, requestMeta(req), { dryRun }));
   });
 
   app.post("/suppliers/:supplierId/set-debt", async (req) => {
@@ -260,6 +297,23 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   app.get("/orders", async (req) => {
     const query = ordersQuery.parse(req.query);
     return listOrders(db, await readTenant(req, "purchase.view"), query);
+  });
+
+  app.get("/orders/export", async (req, reply) => {
+    const filters = ordersExportQuery.parse(req.query);
+    const csv = await exportPurchaseOrdersCsv(db, await readTenant(req, "purchase.view"), filters);
+    const date = new Date().toISOString().slice(0, 10);
+    reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="xaridlar-${date}.csv"`);
+    return csv;
+  });
+
+  app.post("/orders/import", async (req) => {
+    const { rows, dryRun } = orderImportBody.parse(req.body);
+    return writeInTenant(req, "purchase.create", (tx, tenant) =>
+      importPurchaseOrders(tx, tenant, rows, requestMeta(req), { dryRun }),
+    );
   });
 
   app.get("/orders/:orderId", async (req) => {

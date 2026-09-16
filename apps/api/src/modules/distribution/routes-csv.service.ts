@@ -8,7 +8,14 @@ import { and, asc, eq } from "drizzle-orm";
 import { distributionRoutes, salesReps } from "../../db/schema/crm.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
-import { MAX_EXPORT_ROWS, csvDocument, optionalText, type ImportError } from "../../shared/csv.js";
+import {
+  MAX_EXPORT_ROWS,
+  csvDocument,
+  normalizeKey,
+  optionalText,
+  type ImportError,
+  type ImportOutcome,
+} from "../../shared/csv.js";
 import type { TenantContext } from "../company/tenant.js";
 import { createRoute } from "./distribution.service.js";
 
@@ -70,15 +77,31 @@ function parseDays(value: string | undefined): number[] | null {
   return [...new Set(days)];
 }
 
-export async function importRoutes(tx: Tx, tenant: TenantContext, rows: RouteImportRow[], meta: RequestMeta) {
+export async function importRoutes(
+  tx: Tx,
+  tenant: TenantContext,
+  rows: RouteImportRow[],
+  meta: RequestMeta,
+  options: { dryRun?: boolean } = {},
+): Promise<ImportOutcome> {
   const companyId = tenant.company.id;
+  const dryRun = options.dryRun === true;
   const repIndex = new Map(
     (await tx.select({ id: salesReps.id, name: salesReps.name }).from(salesReps).where(eq(salesReps.companyId, companyId)))
       .map((row) => [row.name.trim().toLowerCase(), row.id]),
   );
 
+  // Dublikat kaliti — marshrut nomi (kompaniya ichida)
+  const takenNames = new Set(
+    (await tx.select({ name: distributionRoutes.name }).from(distributionRoutes).where(eq(distributionRoutes.companyId, companyId)))
+      .map((row) => normalizeKey(row.name))
+      .filter((value): value is string => Boolean(value)),
+  );
   const errors: ImportError[] = [];
+  const duplicates: ImportError[] = [];
+  const warnings: ImportError[] = [];
   let created = 0;
+  let valid = 0;
 
   for (const [index, row] of rows.entries()) {
     const line = index + 1;
@@ -107,6 +130,16 @@ export async function importRoutes(tx: Tx, tenant: TenantContext, rows: RouteImp
       continue;
     }
 
+    // CREATE ONLY: shu nomli marshrut bo'lsa yangi yozuv ochilmaydi
+    const nameKey = normalizeKey(name);
+    if (nameKey && takenNames.has(nameKey)) {
+      duplicates.push({ row: line, key: name, message: `"${name}" nomli marshrut allaqachon bor` });
+      continue;
+    }
+
+    valid += 1;
+    if (nameKey) takenNames.add(nameKey);
+    if (dryRun) continue;
     await createRoute(
       tx,
       tenant,
@@ -122,5 +155,5 @@ export async function importRoutes(tx: Tx, tenant: TenantContext, rows: RouteImp
     created += 1;
   }
 
-  return { created, errors };
+  return { created, valid, errors, duplicates, warnings, dryRun };
 }

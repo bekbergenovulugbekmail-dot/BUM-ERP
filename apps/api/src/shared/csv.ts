@@ -12,6 +12,32 @@ export const MAX_EXPORT_ROWS = 10_000;
 /** Import xatosi: qator raqami (1 dan, sarlavhasiz), qatorni tanituvchi kalit (nom, kod) va sabab. */
 export type ImportError = { row: number; key: string | null; message: string };
 
+/**
+ * Import natijasi — preview (`dryRun: true`) va haqiqiy import uchun bitta shakl.
+ * Preview'da bazaga hech narsa yozilmaydi: `created` doim 0, `valid` — yozilishga tayyor qatorlar soni.
+ * Dublikat (CREATE ONLY rejimi) alohida ro'yxatda: u xato emas, lekin yangi yozuv ochilmaydi.
+ */
+export type ImportOutcome = {
+  created: number;
+  valid: number;
+  errors: ImportError[];
+  duplicates: ImportError[];
+  warnings: ImportError[];
+  dryRun: boolean;
+};
+
+/** Telefonni taqqoslash uchun normal shakl: faqat raqamlar ("+998 90 123-45-67" va "998901234567" — bir xil). */
+export function normalizePhone(value: string | null | undefined): string | null {
+  const digits = (value ?? "").replace(/\D/g, "");
+  return digits || null;
+}
+
+/** Nom, kod va shunga o'xshash matn kalitlarini taqqoslash uchun: bo'shliqlar qisqaradi, kichik harf. */
+export function normalizeKey(value: string | null | undefined): string | null {
+  const text = (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  return text || null;
+}
+
 /** Excel formula injection'dan himoya: `=`, `+`, `-`, `@` bilan boshlangan matn apostrof bilan. */
 export function csvText(value: string | null | undefined): string {
   const text = value ?? "";

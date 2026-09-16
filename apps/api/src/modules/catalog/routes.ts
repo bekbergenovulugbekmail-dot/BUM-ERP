@@ -166,6 +166,8 @@ const exportQuery = productListQuery.omit({ limit: true, cursor: true });
 
 const importCell = z.union([z.string().max(1000), z.number()]).optional();
 const importBody = z.strictObject({
+  /** Preview: faqat tekshirish — bazaga hech narsa yozilmaydi. */
+  dryRun: z.boolean().optional(),
   rows: z
     .array(
       z.object({
@@ -355,8 +357,8 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/products/import", async (req) => {
-    const { rows } = importBody.parse(req.body);
-    return writeInTenant(req, "products.create", (tx, tenant) => importProducts(tx, tenant, rows, requestMeta(req)));
+    const { rows, dryRun } = importBody.parse(req.body);
+    return writeInTenant(req, "products.create", (tx, tenant) => importProducts(tx, tenant, rows, requestMeta(req), { dryRun }));
   });
 
   app.get("/products/by-barcode/:barcode", async (req) => {

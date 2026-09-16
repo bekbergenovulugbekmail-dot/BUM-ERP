@@ -179,6 +179,12 @@ export type ProductOption = {
   taxIncluded: boolean;
   isActive: boolean;
   isSaleable: boolean;
+  /** Rasm kaliti (StorageService) — kassada mahsulot rasmi shu bo'yicha ko'rsatiladi; null — rasm yo'q. */
+  imageKey?: string | null;
+  /** O'lchov birligi qisqartmasi ("d", "kg") — kassada narx yonida. */
+  baseUnitName?: string | null;
+  /** Minimal qoldiq — kassada "Kam" holatini ko'rsatish uchun. */
+  minStock?: string | null;
 };
 
 export const PAYMENT_LABELS: Record<PaymentMethod, string> = {

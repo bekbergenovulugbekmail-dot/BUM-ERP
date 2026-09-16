@@ -23,6 +23,9 @@ import POSReceipt from "./_components/pos-receipt.tsx";
 import CustomerPicker from "./_components/customer-picker.tsx";
 import CustomerPaymentDialog from "./_components/customer-payment-dialog.tsx";
 import PaymentAmountDialog from "./_components/payment-amount-dialog.tsx";
+import { ProductCard, ProductDetailDialog, type PosCardItem } from "./_components/product-card.tsx";
+import { productInitials } from "./_lib/product-display.ts";
+import { ProductImage } from "@/pages/products/_lib/product-image.tsx";
 import BarcodeScanner from "@/components/barcode-scanner.tsx";
 import { useHIDScanner } from "@/hooks/use-hid-scanner.ts";
 import {
@@ -147,6 +150,8 @@ export default function POSPage() {
   const [parts, setParts] = useState<PayPart[]>([]);
   /** Summa oynasi ochiq bo'lgan to'lov tugmasi. */
   const [payDialog, setPayDialog] = useState<PayOption | null>(null);
+  /** Batafsil oyna ochilgan mahsulot (katta rasm va miqdor steppery). */
+  const [detail, setDetail] = useState<PosCardItem | null>(null);
   /** So'rov kaliti: ikki marta bosish yoki tarmoq qayta urinishida server ikkinchi chek yozmaydi; muvaffaqiyatdan keyin yangilanadi. */
   const requestIdRef = useRef<string | null>(null);
 
@@ -316,7 +321,8 @@ export default function POSPage() {
   const promoOf = (p: ProductOption) => activePromoPrice(p, new Date().toISOString().slice(0, 10));
   const basePriceOf = (p: ProductOption) => currencies.toBase(promoOf(p) ?? p.salesPrice, p.salesCurrency);
 
-  const addToCart = (p: ProductOption) => {
+  /** Savatga qo'shish: rasmni bosish — +1, batafsil oynadan — kiritilgan miqdor. Qoldiqdan oshmaydi. */
+  const addToCart = (p: ProductOption, quantity = 1) => {
     const stock = stockOf(p.id);
     if (stock <= 0) { toast.error("Omborda mavjud emas"); return; }
     if (!Number.isFinite(basePriceOf(p))) {
@@ -329,15 +335,18 @@ export default function POSPage() {
         const next = [...prev];
         const item = next[idx];
         if (item.qty >= item.stock) { toast.error("Omborda yetarli emas"); return prev; }
-        next[idx] = { ...item, qty: item.qty + 1 };
+        const wanted = item.qty + quantity;
+        if (wanted > item.stock) toast.error("Omborda yetarli emas — qoldiq bo'yicha qo'shildi");
+        next[idx] = { ...item, qty: Math.min(wanted, item.stock) };
         return next;
       }
+      if (quantity > stock) toast.error("Omborda yetarli emas — qoldiq bo'yicha qo'shildi");
       return [...prev, {
         productId: p.id,
         unitId: p.baseUnitId,
         name: p.name,
         sku: p.sku,
-        qty: 1,
+        qty: Math.min(quantity, stock),
         unitPrice: String(basePriceOf(p)),
         taxRate: p.taxRate,
         taxIncluded: p.taxIncluded,
@@ -543,6 +552,14 @@ export default function POSPage() {
       {closingShift && (
         <ShiftCloseDialog shift={closingShift} onClose={() => setClosingShift(null)} />
       )}
+      <ProductDetailDialog
+        item={detail}
+        onClose={() => setDetail(null)}
+        onAdd={(product, quantity) => {
+          addToCart(product, quantity);
+          setDetail(null);
+        }}
+      />
     </>
   );
 
@@ -602,11 +619,23 @@ export default function POSPage() {
   const paySuggestion = payDialog ? suggestAmount(activeParts, payDialog, dueMinor) : { amount: 0n, max: null as bigint | null };
   const searchResults = tableLayout && search.trim() !== "" ? filtered.slice(0, 8) : [];
 
+  /** Karta uchun ko'rsatiladigan qiymatlar (narx, aksiya, qoldiq, savatdagi miqdor) — desktop kassadagi bilan bir xil. */
+  const cardItem = (p: ProductOption): PosCardItem => ({
+    product: p,
+    price: basePriceOf(p) || 0,
+    regularPrice: promoOf(p) ? currencies.toBase(p.salesPrice, p.salesCurrency) || null : null,
+    stock: stockOf(p.id),
+    showStock: Boolean(stockMap),
+    inCart: cart.find((c) => c.productId === p.id)?.qty ?? 0,
+    currencyNote:
+      p.salesCurrency && p.salesCurrency !== currencies.base ? formatMoney(p.salesPrice, p.salesCurrency) : null,
+  });
+
   const productGrid = (
     <div className="flex-1 overflow-y-auto p-4">
       {!products ? (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-          {Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
+          {Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} className="h-44 rounded-xl" />)}
         </div>
       ) : layout === "compact" ? (
         <div className="divide-y divide-border rounded-xl border border-border bg-card">
@@ -618,12 +647,24 @@ export default function POSPage() {
                 key={p.id}
                 type="button"
                 onClick={() => addToCart(p)}
+                onContextMenu={(event) => { event.preventDefault(); setDetail(cardItem(p)); }}
                 disabled={stock <= 0}
                 className={cn(
                   "flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40",
                   inCart ? "bg-primary/5" : "hover:bg-accent/50",
                 )}
               >
+                <ProductImage
+                  productId={p.id}
+                  imageKey={p.imageKey ?? null}
+                  alt=""
+                  className="size-9 shrink-0 rounded-md"
+                  fallback={
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-[11px] font-semibold text-muted-foreground" aria-hidden>
+                      {productInitials(p.name)}
+                    </span>
+                  }
+                />
                 <span className="min-w-0 flex-1 truncate font-medium">{p.name}</span>
                 <span className="w-24 truncate font-mono text-xs text-muted-foreground">{p.sku}</span>
                 {stockMap && <span className="w-16 text-right text-xs text-muted-foreground tabular-nums">{fmt(stock)}</span>}
@@ -636,46 +677,14 @@ export default function POSPage() {
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-          {filtered.map((p) => {
-            const stock = stockOf(p.id);
-            const inCart = cart.find((c) => c.productId === p.id);
-            return (
-              <motion.button
-                key={p.id}
-                whileTap={{ scale: 0.96 }}
-                onClick={() => addToCart(p)}
-                disabled={stock <= 0}
-                className={cn(
-                  "rounded-xl border text-left p-3 transition-all cursor-pointer relative",
-                  stock <= 0
-                    ? "opacity-40 cursor-not-allowed bg-muted border-border"
-                    : inCart
-                      ? "bg-primary/5 border-primary/40 shadow-sm"
-                      : "bg-card border-border hover:border-primary/30 hover:bg-accent/50"
-                )}
-              >
-                {inCart && (
-                  <span className="absolute top-2 right-2 h-5 w-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">
-                    {inCart.qty}
-                  </span>
-                )}
-                <Package className="h-5 w-5 text-muted-foreground mb-2" />
-                <p className="text-xs font-medium leading-tight line-clamp-2">{p.name}</p>
-                <p className="text-[11px] text-muted-foreground font-mono mt-0.5">{p.sku}</p>
-                <p className="text-sm font-bold mt-1 text-primary">{fmt(basePriceOf(p) || 0)} so'm</p>
-                {promoOf(p) && (
-                  <p className="text-[10px] text-muted-foreground">
-                    <span className="font-semibold text-destructive">AKSIYA</span>{" "}
-                    <s>{fmt(currencies.toBase(p.salesPrice, p.salesCurrency) || 0)}</s>
-                  </p>
-                )}
-                {p.salesCurrency && p.salesCurrency !== currencies.base && (
-                  <p className="text-[10px] text-muted-foreground">{formatMoney(p.salesPrice, p.salesCurrency)}</p>
-                )}
-                {stockMap && <p className="text-[11px] text-muted-foreground">Qoldi: {fmt(stock)}</p>}
-              </motion.button>
-            );
-          })}
+          {filtered.map((p) => (
+            <ProductCard
+              key={p.id}
+              item={cardItem(p)}
+              onAdd={(product) => addToCart(product)}
+              onDetails={(product) => setDetail(cardItem(product))}
+            />
+          ))}
           {filtered.length === 0 && (
             <div className="col-span-full flex flex-col items-center py-12 text-center text-muted-foreground">
               <Package className="h-10 w-10 mb-2 opacity-30" />

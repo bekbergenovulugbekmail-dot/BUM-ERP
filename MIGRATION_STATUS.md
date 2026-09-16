@@ -223,7 +223,9 @@ Har amalda a'zoning `allowedWarehouseIds` ruxsati tekshiriladi (bo'sh — barcha
 | POST / PATCH | `/suppliers`, `/suppliers/:supplierId` | `purchase.create` / `purchase.edit` | `create`, `update` |
 | POST | `/suppliers/:supplierId/set-debt` (qarzni to'g'rilash: farq boshqa daromad/xarajat, sabab majburiy) | `finance.approve` | yangi |
 | GET | `/suppliers/export` (`?includeInactive=`) — CSV (UTF-8 BOM) | `purchase.view` | yangi |
-| POST | `/suppliers/import` (CSV qatorlari; qarz o'zgarmaydi, takroriy kod rad) | `purchase.create` | yangi |
+| POST | `/suppliers/import` ({rows, dryRun}; qarz o'zgarmaydi, takroriy kod va STIR — dublikat) | `purchase.create` | yangi |
+| GET | `/orders/export` (`?supplierId=&status=&dateFrom=&dateTo=`) — CSV: hujjat qatorlari | `purchase.view` | yangi |
+| POST | `/orders/import` ({rows, dryRun}) — qoralama hujjat; qarz, zaxira va jurnal tegilmaydi | `purchase.create` | yangi |
 | GET | `/orders` (`?supplierId=&status=&dateFrom=&dateTo=&search=&limit=&cursor=`), `/orders/:orderId` (qatorlar, qabullar, to'lovlar) | `purchase.view` | `orders.list`, `getById` |
 | POST / PATCH | `/orders`, `/orders/:orderId` (faqat qoralama) | `purchase.create` / `purchase.edit` | `create` |
 | POST | `/orders/:orderId/confirm`, `/orders/:orderId/cancel` | `purchase.approve` / `purchase.cancel` | `confirm`, `cancel` |
@@ -1809,6 +1811,21 @@ Egasining so'rovi: "Xaridlarda, hodimlarda, marshrutlarda, import, export bo'lsi
 **Production (2026-09-16):** commit `e9dc7ae`, `bum-api` va `bum-web` deploy qilindi — ikkalasi ham Online, web sahifasi 200. Yangi marshrutlar ishlayotgani tasdiqlandi: sessiyasiz `GET /api/sales/customers/export`, `/api/purchase/suppliers/export`, `/api/hr/employees/export`, `/api/distribution/routes/export` — to'rttasi ham **401** (eski buildda bu marshrutlar yo'q edi, 404 bo'lardi). Bu bosqichda yangi migratsiya yo'q. Tizimga kirgan holda sinov — NOT VERIFIED (production paroli ishlatilmaydi)
 
 **Xarajatlar qo'shimchasi (2026-09-16):** `csv-import-export.test.ts` 5 ta testga kengaytirildi (xarajat importi "kutilmoqda" holatida qoladi va pul harakatlanmaydi; yopilgan davrdagi qator xato bo'lib qaytadi, ochiq davrdagisi yoziladi). Ta'sirlangan qismlar regressiyasi: **10 fayl / 38 test** — hammasi o'tdi; API `tsc` toza, web `tsc`, lint va `vite build` toza. **Production (2026-09-16):** commit `92738dc`, `bum-api` va `bum-web` deploy qilindi — ikkalasi ham Online, web sahifasi 200. Sessiyasiz `GET /api/finance/expenses/export` → **401**, shu build'dan oldin esa **404** edi — yangi kod ishlayotganining dalili. `railway up` dastlab to'rt marta tarmoq xatosi bilan uzildi (backboard: "operation timed out", keyin "os error 10054"), beshinchi urinish o'zgarishsiz o'tdi — sabab kodda emas, tarmoqda. Bu bosqichda yangi migratsiya yo'q; tizimga kirgan holda sinov — NOT VERIFIED (production paroli ishlatilmaydi)
+
+## Qabul testi kamchiliklarini yopish (2026-09-16)
+
+Qabul testida topilgan kamchiliklar bo'yicha oltita bosqich — har biri alohida, mavjud funksiyalarni buzmasdan.
+
+- **Web POS'da rasm bilan sotish:** yangi `src/pages/pos/_components/product-card.tsx` — desktop kassadagi (`apps/desktop/src/renderer/pos/product-grid.tsx`) konsepsiya: rasm yoki nom bosh harflari, aksiya belgisi, qoldiq holati (Bor / Kam / Tugagan), birlik va narx; rasmni bosish — savatga +1, qayta bosish — miqdor +1 (qoldiqdan oshmaydi), uzoq bosish / o'ng tugma / ⓘ — batafsil oyna: katta rasm va miqdor steppery. Ixcham ko'rinishda kichik rasm. Rasm mavjud `ProductImage` (`/api/files/url`) orqali — yangi endpoint qo'shilmadi (`/api/catalog/products` allaqachon `imageKey`, `minStock`, `baseUnitName` qaytaradi)
+- **Xaridlar (purchase orders) CSV:** yetkazuvchilardan **alohida** — `GET /api/purchase/orders/export` (`purchase.view`) va `POST /api/purchase/orders/import` (`purchase.create`). Fayl qatori = hujjat qatori; bir xil "Hujjat raqami" bitta hujjatga birlashadi. Import **mavjud `createOrder` servisi** orqali **qoralama** hujjat ochadi — raw SQL bulk insert yo'q, ta'minotchi qarzi, ombor qoldig'i va jurnal tegilmaydi (ular qabul va to'lovda o'zgaradi)
+- **Universal import preview:** barcha importlarda `dryRun` — server hech narsa yozmasdan tekshiradi va `{valid, errors, duplicates, warnings}` qaytaradi; web'da jami / to'g'ri / xato / dublikat oynasi (qator raqami, kalit va sabab bilan), yozish faqat "Importni boshlash" bosilgandan keyin. Vaqtinchalik fayl ombori qo'shilmadi: fayl brauzerda o'qiladi, tekshiruv serverda — yangi saqlash va tozalash yuzasi paydo bo'lmasin
+- **Dublikat nazorati (CREATE ONLY):** mijoz — telefon, ta'minotchi — kod va STIR, hodim — telefon, marshrut — nom, xarajat — kategoriya+tavsif+summa+sana, mahsulot — SKU, xarid — hujjat raqami. Kalit yozishdan oldin belgilanadi, shuning uchun fayl ichidagi takror ham preview'da ko'rinadi. Dublikat `errors` emas, alohida `duplicates` ro'yxatida — keyinchalik UPDATE rejimi qo'shishga arxitektura tayyor
+- **"Aralash to'lov" terminologiyasi:** kassa chekida alohida tugma allaqachon yo'q edi; mijoz to'lovi oynasidagi "Aralash to'lov" / "Bitta usulda" toggle'i ham olib tashlandi — qarzda usullar paneli doim ochiq (bitta qator — bitta usul, bir nechta qator — aralash). **"Balansdan to'lash"** alohida amal sifatida saqlandi: u pul usuli emas va panel uni qo'llamaydi, shuning uchun uni panelga ko'chirish mavjud funksiyani yo'qotgan bo'lardi
+- **RBAC qabul testi:** 8 rol (Direktor, Buxgalter, Moliya menejeri, Savdo menejeri, Xarid menejeri, Kassir, Sotuv agenti, Dostavka agenti) uchun kutilma qo'lda yozilmaydi — `GET /api/company` dagi haqiqiy ruxsatlardan olinadi: ruxsat yo'q bo'lsa **403 shart**, bo'lsa 403 bo'lmasligi shart. Platforma marshrutlari kompaniya foydalanuvchilariga yopiq; IDOR/BOLA (begona mijoz, ta'minotchi, marshrut, mahsulot, ombor + begona mijozga to'lov va qarz to'g'rilash) — 403/404
+
+**Testlar (2026-09-16):** yangi `purchase-csv` (8), `import-preview` (9), `acceptance-rbac` (11) va web `product-card` (10). API `tsc` toza, regressiya **26 fayl / 133 test**; web `tsc`, lint va `vite build` toza, **18 fayl / 77 test**. Bu bosqichda yangi migratsiya yo'q (sxema o'zgarmadi)
+
+**Kuzatuv:** `GET /api/analytics/dashboard` `analytics.view` talab qiladi — Kassir, Sotuv agenti va Dostavka agenti web bosh sahifasini ocholmaydi (403). Bu modul guardidan ozod, lekin ruxsatdan ozod emas; ruxsat sozlamasi o'zgartirilmadi, egasining qarori kerak
 
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 

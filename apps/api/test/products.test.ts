@@ -218,7 +218,9 @@ describe("CSV import va export", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.created).toBe(2);
-    expect(body.errors.map((e: { row: number }) => e.row)).toEqual([3, 4, 5, 6, 7]);
+    expect(body.errors.map((e: { row: number }) => e.row)).toEqual([3, 6, 7]);
+    // Takroriy SKU (bazadagi va fayl ichidagi) — xato emas, dublikat: yangi mahsulot ochilmaydi
+    expect(body.duplicates.map((e: { row: number }) => e.row)).toEqual([4, 5]);
 
     const [apple] = await db.select().from(products).where(eq(products.sku, "IMP-1"));
     expect(apple).toMatchObject({ purchasePrice: "12000.5000", salesPrice: "15000.0000" });

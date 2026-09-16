@@ -146,6 +146,8 @@ const employeesExportQuery = z.object({
 });
 /** CSV import: fayl brauzerda o'qiladi, qatorlar shu yerda tekshiriladi. Login va parol fayldan olinmaydi. */
 const employeeImportBody = z.strictObject({
+  /** Preview: faqat tekshirish — bazaga hech narsa yozilmaydi. */
+  dryRun: z.boolean().optional(),
   rows: z
     .array(
       z.strictObject({
@@ -326,8 +328,8 @@ export async function hrRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/employees/import", async (req) => {
-    const { rows } = employeeImportBody.parse(req.body);
-    return writeInTenant(req, "hr.manage", (tx, tenant) => importEmployees(tx, tenant, rows, requestMeta(req)));
+    const { rows, dryRun } = employeeImportBody.parse(req.body);
+    return writeInTenant(req, "hr.manage", (tx, tenant) => importEmployees(tx, tenant, rows, requestMeta(req), { dryRun }));
   });
 
   app.get("/employees/:employeeId", async (req) => {

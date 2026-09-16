@@ -253,6 +253,8 @@ const expensesExportQuery = z.object({
 });
 /** CSV import: xarajat "kutilmoqda" holatida ochiladi — pul faqat tasdiqlangandan keyin harakatlanadi. */
 const expenseImportBody = z.strictObject({
+  /** Preview: faqat tekshirish — bazaga hech narsa yozilmaydi. */
+  dryRun: z.boolean().optional(),
   rows: z
     .array(
       z.strictObject({
@@ -579,8 +581,8 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/expenses/import", async (req) => {
-    const { rows } = expenseImportBody.parse(req.body);
-    return writeInTenant(req, "finance.manage", (tx, tenant) => importExpenses(tx, tenant, rows, requestMeta(req)));
+    const { rows, dryRun } = expenseImportBody.parse(req.body);
+    return writeInTenant(req, "finance.manage", (tx, tenant) => importExpenses(tx, tenant, rows, requestMeta(req), { dryRun }));
   });
 
   app.post("/expenses", async (req, reply) => {

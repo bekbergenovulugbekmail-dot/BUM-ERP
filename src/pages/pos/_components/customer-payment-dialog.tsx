@@ -1,6 +1,7 @@
 /**
  * POS: mijoz balansini to'ldirish yoki qarzini to'lash. Naqd, karta va bank smena yig'indisiga qo'shiladi;
- * qarzni balansdan yopishda kassaga pul tushmaydi. Qarz aralash to'lanishi mumkin (naqd + karta terminali + bank) —
+ * qarzni balansdan yopishda kassaga pul tushmaydi. Qarzda alohida "aralash to'lov" rejimi yo'q: usullar paneli doim
+ * ochiq — bitta qator bitta usul, bir nechta qator aralash to'lov (naqd + karta terminali + bank) —
  * jami qarzdan oshmaydi, takroriy yuborish ikkinchi to'lov yaratmaydi.
  */
 import { useRef, useState } from "react";
@@ -57,7 +58,8 @@ export default function CustomerPaymentDialog({ shiftId, customer, purpose: init
   const [purpose, setPurpose] = useState<CustomerPaymentPurpose>(initialPurpose);
   const [amount, setAmount] = useState(initialPurpose === "debt" && debt > 0 ? String(debt) : "");
   const [method, setMethod] = useState<Method>("cash");
-  const [split, setSplit] = useState(false);
+  /** Qarzni mijozning o'z balansidan yopish — pul usuli emas, alohida amal. */
+  const [useBalance, setUseBalance] = useState(false);
   const [rows, setRows] = useState<SplitRow[]>(() => [newSplitRow("cash", null, debt > 0 ? String(debt) : "")]);
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,11 +73,12 @@ export default function CustomerPaymentDialog({ shiftId, customer, purpose: init
   );
 
   // Balansdan faqat qarz yopiladi
-  const methods = METHODS.filter((m) => m.key !== "balance" || (purpose === "debt" && balance > 0));
-  const activeMethod: Method = methods.some((m) => m.key === method) ? method : "cash";
+  const methods = METHODS.filter((m) => m.key !== "balance");
+  const activeMethod: Method = useBalance ? "balance" : methods.some((m) => m.key === method) ? method : "cash";
 
   const debtMinor = BigInt(Math.round(debt * 100));
-  const splitActive = split && purpose === "debt";
+  // Qarzda usullar paneli doim ochiq (alohida "aralash to'lov" rejimi yo'q); balansdan to'lashda — bitta summa
+  const splitActive = purpose === "debt" && !useBalance;
   const splitPaid = splitPaidMinor(rows);
   const splitOver = splitActive && splitPaid > debtMinor;
   const splitDuplicate = splitActive && hasDuplicateParts(rows);
@@ -94,6 +97,7 @@ export default function CustomerPaymentDialog({ shiftId, customer, purpose: init
   const switchPurpose = (next: CustomerPaymentPurpose) => {
     setPurpose(next);
     setAmount(next === "debt" && debt > 0 ? String(debt) : "");
+    setUseBalance(false);
     setError(null);
   };
 
@@ -159,14 +163,14 @@ export default function CustomerPaymentDialog({ shiftId, customer, purpose: init
             ))}
           </div>
 
-          {purpose === "debt" && (
+          {purpose === "debt" && balance > 0 && (
             <div className="flex justify-end">
               <button
                 type="button"
                 className="text-xs font-semibold text-primary hover:underline cursor-pointer"
-                onClick={() => { setSplit((current) => !current); setError(null); }}
+                onClick={() => { setUseBalance((current) => !current); setError(null); }}
               >
-                {split ? "Bitta usulda" : "Aralash to'lov"}
+                {useBalance ? "Naqd, karta yoki bank bilan" : `Balansdan to'lash (${fmt(balance)} so'm)`}
               </button>
             </div>
           )}
@@ -199,7 +203,7 @@ export default function CustomerPaymentDialog({ shiftId, customer, purpose: init
                 />
               </div>
 
-              <div className={cn("grid gap-2", methods.length === 4 ? "grid-cols-4" : "grid-cols-3")}>
+              <div className={cn("grid grid-cols-3 gap-2", useBalance && "hidden")}>
                 {methods.map((m) => (
                   <button
                     key={m.key}

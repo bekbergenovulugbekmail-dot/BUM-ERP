@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/card.tsx";
 import { cn } from "@/lib/utils.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
+import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import OrdersTable from "./_components/orders-table.tsx";
 import SuppliersTable from "./_components/suppliers-table.tsx";
 import CreateOrderDialog from "./_components/create-order-dialog.tsx";
@@ -71,11 +72,36 @@ export default function PurchasePage() {
             <p className="text-xs text-muted-foreground">Yetkazuvchilar, buyurtmalar va to'lovlar</p>
           </div>
         </div>
-        {can("purchase.create") && (
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4 mr-1.5" /> Xarid buyurtmasi
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Eksport ekrandagi holat filtri bo'yicha; import hujjatni qoralama holatida ochadi */}
+          <CsvToolbar
+            exportUrl="/api/purchase/orders/export"
+            exportParams={statusFilter === "all" ? undefined : { status: statusFilter }}
+            filename="xaridlar"
+            importUrl="/api/purchase/orders/import"
+            invalidate={["/api/purchase/orders"]}
+            canImport={can("purchase.create")}
+            columns={[
+              { key: "number", aliases: ["Hujjat raqami", "number"] },
+              { key: "orderDate", aliases: ["Sana", "orderDate"] },
+              { key: "supplier", aliases: ["Ta'minotchi", "Ta'minotchi kodi", "supplier"] },
+              { key: "warehouse", aliases: ["Ombor", "warehouse"] },
+              { key: "product", aliases: ["SKU", "Mahsulot", "product"] },
+              { key: "quantity", aliases: ["Miqdor", "quantity"] },
+              { key: "unit", aliases: ["Birlik", "unit"] },
+              { key: "price", aliases: ["Narx", "price"] },
+              { key: "discountPercent", aliases: ["Chegirma %", "discountPercent"] },
+              { key: "taxRate", aliases: ["Soliq %", "taxRate"] },
+              { key: "expectedDate", aliases: ["Kutilgan sana", "expectedDate"] },
+              { key: "notes", aliases: ["Izoh", "notes"] },
+            ]}
+          />
+          {can("purchase.create") && (
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4 mr-1.5" /> Xarid buyurtmasi
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Stats */}

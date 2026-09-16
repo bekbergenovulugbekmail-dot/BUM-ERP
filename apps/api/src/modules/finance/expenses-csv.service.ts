@@ -10,7 +10,16 @@ import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
 import { expenses } from "../../db/schema/finance.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
-import { MAX_EXPORT_ROWS, cleanNumber, csvDocument, optionalText, parseIsoDate, type ImportError } from "../../shared/csv.js";
+import {
+  MAX_EXPORT_ROWS,
+  cleanNumber,
+  csvDocument,
+  normalizeKey,
+  optionalText,
+  parseIsoDate,
+  type ImportError,
+  type ImportOutcome,
+} from "../../shared/csv.js";
 import type { TenantContext } from "../company/tenant.js";
 import { createExpense } from "./expenses.service.js";
 import { getLockDate } from "./journal.service.js";
@@ -74,12 +83,41 @@ export type ExpenseImportRow = {
   notes?: string;
 };
 
-export async function importExpenses(tx: Tx, tenant: TenantContext, rows: ExpenseImportRow[], meta: RequestMeta) {
+export async function importExpenses(
+  tx: Tx,
+  tenant: TenantContext,
+  rows: ExpenseImportRow[],
+  meta: RequestMeta,
+  options: { dryRun?: boolean } = {},
+): Promise<ImportOutcome> {
+  const dryRun = options.dryRun === true;
   // Davr qulfi bir marta o'qiladi — yopilgan sanadagi qator xato bo'lib qaytadi, tranzaksiya yiqilmaydi
   const lockDate = await getLockDate(tx, tenant.company.id);
 
+  /**
+   * Dublikat kaliti — xarajatning biznes kaliti: kategoriya + tavsif + summa + sana.
+   * (Hujjat raqami avtomatik beriladi, shuning uchun kalit sifatida ishlatilmaydi.)
+   */
+  const expenseKey = (category: string, description: string, amount: string, date: string) =>
+    `${normalizeKey(category) ?? ""}|${normalizeKey(description) ?? ""}|${Number(amount)}|${date}`;
+  const takenKeys = new Set(
+    (
+      await tx
+        .select({
+          category: expenses.category,
+          description: expenses.description,
+          amount: expenses.amount,
+          expenseDate: expenses.expenseDate,
+        })
+        .from(expenses)
+        .where(eq(expenses.companyId, tenant.company.id))
+    ).map((row) => expenseKey(row.category, row.description, row.amount, row.expenseDate)),
+  );
   const errors: ImportError[] = [];
+  const duplicates: ImportError[] = [];
+  const warnings: ImportError[] = [];
   let created = 0;
+  let valid = 0;
 
   for (const [index, row] of rows.entries()) {
     const line = index + 1;
@@ -112,6 +150,16 @@ export async function importExpenses(tx: Tx, tenant: TenantContext, rows: Expens
       continue;
     }
 
+    // CREATE ONLY: bir xil kategoriya, tavsif, summa va sanadagi xarajat bo'lsa — dublikat
+    const key = expenseKey(category, description, cleanNumber(row.amount), expenseDate);
+    if (takenKeys.has(key)) {
+      duplicates.push({ row: line, key: category, message: `Bu xarajat allaqachon kiritilgan: ${description} — ${expenseDate}` });
+      continue;
+    }
+
+    valid += 1;
+    takenKeys.add(key);
+    if (dryRun) continue;
     // Holati standart "pending" — pul faqat tasdiqlangandan keyin harakatlanadi
     await createExpense(
       tx,
@@ -129,5 +177,5 @@ export async function importExpenses(tx: Tx, tenant: TenantContext, rows: Expens
     created += 1;
   }
 
-  return { created, errors };
+  return { created, valid, errors, duplicates, warnings, dryRun };
 }

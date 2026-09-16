@@ -481,8 +481,15 @@ function cleanNumber(value: string | number | undefined): string {
   return String(value).replace(/\s/g, "").replace(",", ".");
 }
 
-export async function importProducts(tx: Tx, tenant: TenantContext, rows: ImportRow[], meta: RequestMeta) {
+export async function importProducts(
+  tx: Tx,
+  tenant: TenantContext,
+  rows: ImportRow[],
+  meta: RequestMeta,
+  options: { dryRun?: boolean } = {},
+) {
   const companyId = tenant.company.id;
+  const dryRun = options.dryRun === true;
 
   const unitIndex = new Map<string, string>();
   for (const unit of await listUnits(tx)) {
@@ -514,6 +521,8 @@ export async function importProducts(tx: Tx, tenant: TenantContext, rows: Import
   );
 
   const errors: ImportError[] = [];
+  const duplicates: ImportError[] = [];
+  const warnings: ImportError[] = [];
   const values: (typeof products.$inferInsert)[] = [];
   let autoSku = await nextNumericSku(tx, companyId);
 
@@ -531,7 +540,11 @@ export async function importProducts(tx: Tx, tenant: TenantContext, rows: Import
       autoSku += 1n;
     }
     if (name.length > 300 || sku.length > 64) return fail("Nomi yoki SKU juda uzun");
-    if (taken.has(sku)) return fail("Bu SKU allaqachon mavjud");
+    // CREATE ONLY: mavjud SKU — xato emas, dublikat (yangi mahsulot ochilmaydi)
+    if (taken.has(sku)) {
+      duplicates.push({ row: line, sku, message: "Bu SKU allaqachon mavjud" });
+      return;
+    }
 
     const unitKey = row.unit?.trim().toLowerCase();
     const baseUnitId = unitKey ? unitIndex.get(unitKey) : defaultUnitId;
@@ -565,6 +578,9 @@ export async function importProducts(tx: Tx, tenant: TenantContext, rows: Import
     });
   });
 
+  // Preview (`dryRun`): tekshiruv tugadi — bazaga hech narsa yozilmaydi
+  if (dryRun) return { created: 0, valid: values.length, errors, duplicates, warnings, dryRun: true };
+
   for (let i = 0; i < values.length; i += IMPORT_CHUNK) {
     await tx.insert(products).values(values.slice(i, i + IMPORT_CHUNK));
   }
@@ -573,9 +589,9 @@ export async function importProducts(tx: Tx, tenant: TenantContext, rows: Import
     action: "PRODUCTS_IMPORTED",
     resource: "products",
     resourceId: "import",
-    details: { created: values.length, failed: errors.length },
+    details: { created: values.length, failed: errors.length, duplicates: duplicates.length },
   });
-  return { created: values.length, errors };
+  return { created: values.length, valid: values.length, errors, duplicates, warnings, dryRun: false };
 }
 
 const CSV_HEADER = ["Nomi", "SKU", "Shtrix-kod", "Kategoriya", "Brend", "O'lchov birligi", "Kirim narxi", "Sotuv narxi", "Min. qoldiq", "Faol"];

@@ -83,6 +83,8 @@ const routePatch = routeBody.partial().extend({ isActive: z.boolean().optional()
 const routeCustomerBody = z.strictObject({ customerId: z.uuid(), visitNotes: nullableText(1000) });
 /** CSV import: fayl brauzerda o'qiladi, qatorlar shu yerda tekshiriladi. Do'konlar fayl bilan biriktirilmaydi. */
 const routeImportBody = z.strictObject({
+  /** Preview: faqat tekshirish — bazaga hech narsa yozilmaydi. */
+  dryRun: z.boolean().optional(),
   rows: z
     .array(
       z.strictObject({
@@ -204,8 +206,8 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/routes/import", async (req) => {
-    const { rows } = routeImportBody.parse(req.body);
-    return writeInTenant(req, (tx, tenant) => importRoutes(tx, tenant, rows, requestMeta(req)));
+    const { rows, dryRun } = routeImportBody.parse(req.body);
+    return writeInTenant(req, (tx, tenant) => importRoutes(tx, tenant, rows, requestMeta(req), { dryRun }));
   });
 
   app.get("/routes/:routeId", async (req) => {

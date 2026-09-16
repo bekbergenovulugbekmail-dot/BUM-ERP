@@ -289,6 +289,8 @@ const balanceQuery = z.object({ limit: limitQuery });
 const customersExportQuery = z.object({ includeInactive: boolQuery });
 /** CSV import: fayl brauzerda o'qiladi, qatorlar shu yerda tekshiriladi. Qarz va balans ustunlari e'tiborsiz. */
 const customerImportBody = z.strictObject({
+  /** Preview: faqat tekshirish — bazaga hech narsa yozilmaydi. */
+  dryRun: z.boolean().optional(),
   rows: z
     .array(
       z.strictObject({
@@ -368,8 +370,8 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/customers/import", async (req) => {
-    const { rows } = customerImportBody.parse(req.body);
-    return writeInTenant(req, "crm.manage", (tx, tenant) => importCustomers(tx, tenant, rows, requestMeta(req)));
+    const { rows, dryRun } = customerImportBody.parse(req.body);
+    return writeInTenant(req, "crm.manage", (tx, tenant) => importCustomers(tx, tenant, rows, requestMeta(req), { dryRun }));
   });
 
   app.get("/customers/:customerId", async (req) => {

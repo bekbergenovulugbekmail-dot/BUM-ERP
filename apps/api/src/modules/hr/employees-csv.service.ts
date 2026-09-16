@@ -10,7 +10,16 @@ import { and, asc, eq } from "drizzle-orm";
 import { departments, employees, positions } from "../../db/schema/hr.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
-import { MAX_EXPORT_ROWS, cleanNumber, csvDocument, optionalText, parseIsoDate, type ImportError } from "../../shared/csv.js";
+import {
+  MAX_EXPORT_ROWS,
+  cleanNumber,
+  csvDocument,
+  normalizePhone,
+  optionalText,
+  parseIsoDate,
+  type ImportError,
+  type ImportOutcome,
+} from "../../shared/csv.js";
 import type { TenantContext } from "../company/tenant.js";
 import { createEmployee } from "./employees.service.js";
 
@@ -109,8 +118,15 @@ function salaryTypeOf(value: string | undefined): "monthly" | "hourly" | "daily"
   return null;
 }
 
-export async function importEmployees(tx: Tx, tenant: TenantContext, rows: EmployeeImportRow[], meta: RequestMeta) {
+export async function importEmployees(
+  tx: Tx,
+  tenant: TenantContext,
+  rows: EmployeeImportRow[],
+  meta: RequestMeta,
+  options: { dryRun?: boolean } = {},
+): Promise<ImportOutcome> {
   const companyId = tenant.company.id;
+  const dryRun = options.dryRun === true;
   const departmentIndex = new Map(
     (await tx.select({ id: departments.id, name: departments.name }).from(departments).where(eq(departments.companyId, companyId)))
       .map((row) => [row.name.trim().toLowerCase(), row.id]),
@@ -120,8 +136,17 @@ export async function importEmployees(tx: Tx, tenant: TenantContext, rows: Emplo
       .map((row) => [row.name.trim().toLowerCase(), row.id]),
   );
 
+  // Dublikat kaliti — telefon raqami (kompaniya ichida)
+  const takenPhones = new Set(
+    (await tx.select({ phone: employees.phone }).from(employees).where(eq(employees.companyId, companyId)))
+      .map((row) => normalizePhone(row.phone))
+      .filter((phone): phone is string => Boolean(phone)),
+  );
   const errors: ImportError[] = [];
+  const duplicates: ImportError[] = [];
+  const warnings: ImportError[] = [];
   let created = 0;
+  let valid = 0;
 
   for (const [index, row] of rows.entries()) {
     const line = index + 1;
@@ -171,6 +196,16 @@ export async function importEmployees(tx: Tx, tenant: TenantContext, rows: Emplo
       continue;
     }
 
+    // CREATE ONLY: shu telefonli hodim bo'lsa yangi yozuv ochilmaydi
+    const phone = normalizePhone(row.phone);
+    if (phone && takenPhones.has(phone)) {
+      duplicates.push({ row: line, key: name, message: `Bu telefon bilan hodim allaqachon bor: ${row.phone?.trim() ?? ""}` });
+      continue;
+    }
+
+    valid += 1;
+    if (phone) takenPhones.add(phone);
+    if (dryRun) continue;
     // `softwareAccess` berilmaydi — import login, parol va PIN yaratmaydi
     await createEmployee(
       tx,
@@ -196,5 +231,5 @@ export async function importEmployees(tx: Tx, tenant: TenantContext, rows: Emplo
     created += 1;
   }
 
-  return { created, errors };
+  return { created, valid, errors, duplicates, warnings, dryRun };
 }

@@ -9,7 +9,15 @@ import { and, asc, eq } from "drizzle-orm";
 import { customers } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
-import { MAX_EXPORT_ROWS, cleanNumber, csvDocument, optionalText, type ImportError } from "../../shared/csv.js";
+import {
+  MAX_EXPORT_ROWS,
+  cleanNumber,
+  csvDocument,
+  normalizePhone,
+  optionalText,
+  type ImportError,
+  type ImportOutcome,
+} from "../../shared/csv.js";
 import type { TenantContext } from "../company/tenant.js";
 import { createCustomer } from "./customers.service.js";
 
@@ -115,9 +123,25 @@ function partyTypeOf(value: string | undefined): "individual" | "legal" {
   return text.startsWith("yuridik") || text === "legal" ? "legal" : "individual";
 }
 
-export async function importCustomers(tx: Tx, tenant: TenantContext, rows: CustomerImportRow[], meta: RequestMeta) {
+export async function importCustomers(
+  tx: Tx,
+  tenant: TenantContext,
+  rows: CustomerImportRow[],
+  meta: RequestMeta,
+  options: { dryRun?: boolean } = {},
+): Promise<ImportOutcome> {
+  const dryRun = options.dryRun === true;
+  // Dublikat kaliti — telefon raqami (kompaniya ichida): bazadagilar va fayl ichidagilar
+  const takenPhones = new Set(
+    (await tx.select({ phone: customers.phone }).from(customers).where(eq(customers.companyId, tenant.company.id)))
+      .map((row) => normalizePhone(row.phone))
+      .filter((phone): phone is string => Boolean(phone)),
+  );
   const errors: ImportError[] = [];
+  const duplicates: ImportError[] = [];
+  const warnings: ImportError[] = [];
   let created = 0;
+  let valid = 0;
 
   for (const [index, row] of rows.entries()) {
     const line = index + 1;
@@ -149,6 +173,16 @@ export async function importCustomers(tx: Tx, tenant: TenantContext, rows: Custo
       continue;
     }
 
+    // CREATE ONLY: bir xil telefonli mijoz bo'lsa yangi yozuv ochilmaydi (keyinchalik UPDATE rejimi qo'shilishi mumkin)
+    const phone = normalizePhone(row.phone);
+    if (phone && takenPhones.has(phone)) {
+      duplicates.push({ row: line, key: name, message: `Bu telefon bilan mijoz allaqachon bor: ${row.phone?.trim() ?? ""}` });
+      continue;
+    }
+    if (phone) takenPhones.add(phone);
+
+    valid += 1;
+    if (dryRun) continue;
     await createCustomer(
       tx,
       tenant,
@@ -173,5 +207,5 @@ export async function importCustomers(tx: Tx, tenant: TenantContext, rows: Custo
     created += 1;
   }
 
-  return { created, errors };
+  return { created, valid, errors, duplicates, warnings, dryRun };
 }

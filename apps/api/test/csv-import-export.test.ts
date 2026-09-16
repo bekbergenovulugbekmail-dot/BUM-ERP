@@ -78,9 +78,12 @@ describe("CSV eksport va import", () => {
       ],
     });
     expect(res.statusCode, res.body).toBe(200);
-    expect(res.json()).toMatchObject({ created: 2 });
-    expect(res.json().errors).toHaveLength(2);
-    expect(res.json().errors[0].message).toContain("S-100");
+    expect(res.json()).toMatchObject({ created: 2, valid: 2 });
+    // Takroriy kod — xato emas, dublikat (mavjud yozuv o'zgartirilmaydi, yangisi ochilmaydi)
+    expect(res.json().duplicates).toHaveLength(1);
+    expect(res.json().duplicates[0].message).toContain("S-100");
+    expect(res.json().errors).toHaveLength(1);
+    expect(res.json().errors[0].message).toContain("To'lov muddati");
 
     const csv = (await call(owner(), "GET", "/api/purchase/suppliers/export")).body;
     expect(csv).toContain("S-200");

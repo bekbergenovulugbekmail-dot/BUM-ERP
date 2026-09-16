@@ -9,7 +9,15 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { suppliers } from "../../db/schema/purchase.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
-import { MAX_EXPORT_ROWS, cleanNumber, csvDocument, optionalText, type ImportError } from "../../shared/csv.js";
+import {
+  MAX_EXPORT_ROWS,
+  cleanNumber,
+  csvDocument,
+  normalizeKey,
+  optionalText,
+  type ImportError,
+  type ImportOutcome,
+} from "../../shared/csv.js";
 import type { TenantContext } from "../company/tenant.js";
 import { createSupplier } from "./suppliers.service.js";
 
@@ -100,8 +108,15 @@ function partyTypeOf(value: string | undefined): "individual" | "legal" {
   return text.startsWith("jismoniy") || text === "individual" ? "individual" : "legal";
 }
 
-export async function importSuppliers(tx: Tx, tenant: TenantContext, rows: SupplierImportRow[], meta: RequestMeta) {
+export async function importSuppliers(
+  tx: Tx,
+  tenant: TenantContext,
+  rows: SupplierImportRow[],
+  meta: RequestMeta,
+  options: { dryRun?: boolean } = {},
+): Promise<ImportOutcome> {
   const companyId = tenant.company.id;
+  const dryRun = options.dryRun === true;
   // Kod noyob (kompaniya ichida): fayldagi va bazadagi kodlar oldindan tekshiriladi — INSERT xatosi tranzaksiyani
   // yiqitmasin, xato qator alohida qaytsin
   const fileCodes = [...new Set(rows.map((row) => row.code?.trim()).filter((code): code is string => Boolean(code)))];
@@ -116,8 +131,17 @@ export async function importSuppliers(tx: Tx, tenant: TenantContext, rows: Suppl
         ).map((row) => row.code),
   );
 
+  // Ikkinchi dublikat kaliti — STIR (bo'sh bo'lmasa)
+  const takenTaxIds = new Set(
+    (await tx.select({ taxId: suppliers.taxId }).from(suppliers).where(eq(suppliers.companyId, companyId)))
+      .map((row) => normalizeKey(row.taxId))
+      .filter((value): value is string => Boolean(value)),
+  );
   const errors: ImportError[] = [];
+  const duplicates: ImportError[] = [];
+  const warnings: ImportError[] = [];
   let created = 0;
+  let valid = 0;
 
   for (const [index, row] of rows.entries()) {
     const line = index + 1;
@@ -133,8 +157,14 @@ export async function importSuppliers(tx: Tx, tenant: TenantContext, rows: Suppl
       fail("Nomi yoki kod juda uzun");
       continue;
     }
+    // CREATE ONLY: takroriy kod yoki STIR — xato emas, dublikat (yangi yozuv ochilmaydi)
     if (code && taken.has(code)) {
-      fail(`"${code}" kodli ta'minotchi allaqachon bor`);
+      duplicates.push({ row: line, key: code, message: `"${code}" kodli ta'minotchi allaqachon bor` });
+      continue;
+    }
+    const taxId = normalizeKey(row.taxId);
+    if (taxId && takenTaxIds.has(taxId)) {
+      duplicates.push({ row: line, key: code || name, message: `Bu STIR bilan ta'minotchi allaqachon bor: ${row.taxId?.trim() ?? ""}` });
       continue;
     }
 
@@ -144,6 +174,11 @@ export async function importSuppliers(tx: Tx, tenant: TenantContext, rows: Suppl
       continue;
     }
 
+    valid += 1;
+    // Fayl ichidagi keyingi takrorlar ham preview'da ko'rinishi uchun kalitlar shu yerda belgilanadi
+    if (code) taken.add(code);
+    if (taxId) takenTaxIds.add(taxId);
+    if (dryRun) continue;
     await createSupplier(
       tx,
       tenant,
@@ -162,9 +197,8 @@ export async function importSuppliers(tx: Tx, tenant: TenantContext, rows: Suppl
       },
       meta,
     );
-    if (code) taken.add(code);
     created += 1;
   }
 
-  return { created, errors };
+  return { created, valid, errors, duplicates, warnings, dryRun };
 }

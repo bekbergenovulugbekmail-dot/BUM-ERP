@@ -78,7 +78,7 @@ describe("QABUL: eksport (CSV)", () => {
 });
 
 describe("QABUL: import (CSV qatorlari)", () => {
-  it("mijozlar: to'g'ri qator yoziladi, xato qator sababi bilan qaytadi, qayta import ishlaydi", async () => {
+  it("mijozlar: to'g'ri qator yoziladi, xato qator sababi bilan qaytadi, takroriy telefon dublikat", async () => {
     const first = await call(owner(), "POST", "/api/sales/customers/import", {
       rows: [
         { name: "Mijoz 1", phone: "+998901111111" },
@@ -91,13 +91,14 @@ describe("QABUL: import (CSV qatorlari)", () => {
     expect(first.json().errors).toHaveLength(2);
     expect(first.json().errors[0]).toMatchObject({ row: 2 });
 
-    // Qayta import — bloklanmaydi (mijozda kod avtomatik), UI ro'yxatida ikkalasi ko'rinadi
+    // Qayta import — bir xil telefon dublikat sifatida bloklanadi (ikkita bir xil mijoz yaratilmaydi)
     const second = await call(owner(), "POST", "/api/sales/customers/import", { rows: [{ name: "Mijoz 1", phone: "+998901111111" }] });
     expect(second.statusCode, second.body).toBe(200);
-    expect(second.json()).toMatchObject({ created: 1 });
+    expect(second.json()).toMatchObject({ created: 0 });
+    expect(second.json().duplicates).toHaveLength(1);
 
     const list = (await call(owner(), "GET", "/api/sales/customers")).json().customers as { name: string }[];
-    expect(list.filter((row) => row.name === "Mijoz 1")).toHaveLength(2);
+    expect(list.filter((row) => row.name === "Mijoz 1")).toHaveLength(1);
   });
 
   it("500 qator chegarasi: 500 — o'tadi, 501 — rad etiladi", async () => {
@@ -128,8 +129,10 @@ describe("QABUL: import (CSV qatorlari)", () => {
     });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toMatchObject({ created: 1 });
-    expect(res.json().errors).toHaveLength(2);
-    for (const error of res.json().errors) expect(error.message).toContain("kodli ta'minotchi");
+    // Ikkalasi ham dublikat: biri bazadagi kod, ikkinchisi fayl ichidagi takror
+    expect(res.json().duplicates).toHaveLength(2);
+    for (const duplicate of res.json().duplicates) expect(duplicate.message).toContain("kodli ta'minotchi");
+    expect(res.json().errors).toHaveLength(0);
   });
 
   it("hodimlar: import foydalanuvchi, login, parol, PIN va litsenziya yaratmaydi", async () => {
