@@ -10,13 +10,15 @@ import { appPath, login, logout } from "./_lib/accounts.ts";
 
 /** Smena ochilmagan bo'lsa ochadi (oynadagi Label input bilan bog'lanmagan — dialog ichidan topamiz). */
 async function ensureShift(page: Page) {
+  // Sahifa smena holatini ko'rsatishini kutamiz (aks holda tugma hali yo'q bo'ladi)
+  await expect(page.getByRole("button", { name: /Smena (ochish|yopish)/ }).first()).toBeVisible({ timeout: 30_000 });
   const openButton = page.getByRole("button", { name: "Smena ochish" }).first();
   if (await openButton.isVisible().catch(() => false)) {
     await openButton.click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    await dialog.locator("input[type='number']").first().fill("0");
-    await dialog.getByRole("button", { name: "Smena ochish" }).click();
+    await dialog.getByTestId("opening-cash").fill("0");
+    await dialog.getByTestId("open-session-confirm").click();
     // Oyna yopilishi va smena ochilishini kutamiz
     await expect(dialog).toBeHidden({ timeout: 20_000 });
   }

@@ -50,9 +50,16 @@ export default function ShiftOpenDialog({ warehouseId, warehouseName, onClose }:
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>Boshlang'ich naqd pul (so'm)</Label>
-            <Input type="number" min="0" value={openingCash}
-              onChange={(e) => setOpeningCash(e.target.value)} placeholder="0" />
+            <Label htmlFor="shift-opening-cash">Boshlang'ich naqd pul (so'm)</Label>
+            <Input
+              id="shift-opening-cash"
+              data-testid="opening-cash"
+              type="number"
+              min="0"
+              value={openingCash}
+              onChange={(e) => setOpeningCash(e.target.value)}
+              placeholder="0"
+            />
           </div>
           {foreignCodes.length > 0 && (
             <div className="grid grid-cols-2 gap-3">
@@ -72,13 +79,13 @@ export default function ShiftOpenDialog({ warehouseId, warehouseName, onClose }:
             </div>
           )}
           <div>
-            <Label>Izoh</Label>
-            <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ixtiyoriy..." />
+            <Label htmlFor="shift-open-notes">Izoh</Label>
+            <Input id="shift-open-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ixtiyoriy..." />
           </div>
         </div>
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>Bekor</Button>
-          <Button onClick={handleOpen} disabled={openShift.isPending}>
+          <Button data-testid="open-session-confirm" onClick={handleOpen} disabled={openShift.isPending}>
             {openShift.isPending ? "..." : "Smena ochish"}
           </Button>
         </DialogFooter>

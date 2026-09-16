@@ -155,6 +155,13 @@ export type PosShift = {
   totalSales: string;
   totalCash: string;
   totalCard: string;
+  /** Bank va o'tkazma orqali tushum — naqd va kartadan alohida. */
+  totalBank: string;
+  /** Smenada qaytarilgan mahsulotlar summasi. */
+  totalReturns: string;
+  /** Kassaga kirim va kassadan chiqim — kutilayotgan naqdga kiradi. */
+  cashIn: string;
+  cashOut: string;
   receiptCount: number;
   notes: string | null;
   warehouseName: string;
@@ -165,6 +172,16 @@ export type PosShift = {
   foreignCash: Record<string, string>;
   foreignCard: Record<string, string>;
   closingForeignCash: Record<string, string> | null;
+  /** Usul va terminal kesimidagi tushum — smenani yopishda solishtirish uchun (server hisoblaydi). */
+  payments?: {
+    method: string;
+    terminalId: string | null;
+    terminalName: string | null;
+    network: string | null;
+    accountName: string | null;
+    amount: string;
+    count: number;
+  }[];
   /** Yopilishdagi kassa farqi; `pending` — savdo siyosatidagi chegaradan oshdi, rahbar ko'rib chiqadi. */
   cashDifference?: string | null;
   differenceReview?: "pending" | "approved" | "rejected" | null;

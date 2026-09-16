@@ -152,6 +152,8 @@ export default function POSPage() {
   const [payDialog, setPayDialog] = useState<PayOption | null>(null);
   /** Batafsil oyna ochilgan mahsulot (katta rasm va miqdor steppery). */
   const [detail, setDetail] = useState<PosCardItem | null>(null);
+  /** Telefonda savat/to'lov paneli pastdan chiqadi; desktopda doim yon tomonda turadi. */
+  const [cartOpen, setCartOpen] = useState(false);
   /** So'rov kaliti: ikki marta bosish yoki tarmoq qayta urinishida server ikkinchi chek yozmaydi; muvaffaqiyatdan keyin yangilanadi. */
   const requestIdRef = useRef<string | null>(null);
 
@@ -632,7 +634,8 @@ export default function POSPage() {
   });
 
   const productGrid = (
-    <div className="flex-1 overflow-y-auto p-4">
+    // Telefonda pastki savat paneli oxirgi qatorni yopmasligi uchun qo'shimcha joy
+    <div className="flex-1 overflow-y-auto p-4 pb-28 md:pb-4">
       {!products ? (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
           {Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} className="h-44 rounded-xl" />)}
@@ -805,7 +808,7 @@ export default function POSPage() {
   );
 
   return (
-    <div className={cn("flex h-screen bg-background overflow-hidden", panelLeft && "flex-row-reverse")}>
+    <div className={cn("flex h-full md:h-screen bg-background overflow-hidden", panelLeft && "md:flex-row-reverse")}>
       {/* Asosiy maydon — mahsulotlar (klassik, ixcham) yoki savat jadvali */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* POS topbar */}
@@ -882,14 +885,32 @@ export default function POSPage() {
       </div>
 
       {/* To'lov paneli — biznes egasi tanlagan tomonda */}
-      <div className={cn(
-        "flex flex-col bg-card border-border shrink-0",
-        layout === "compact" ? "w-[26rem] xl:w-[30rem]" : "w-80 xl:w-96",
-        panelLeft ? "border-r" : "border-l",
-      )}>
+      <div
+        data-testid="pos-cart-panel"
+        className={cn(
+          "flex flex-col bg-card border-border shrink-0",
+          // Telefon: butun ekranli panel, yopiq holatda pastga tushirilgan (mahsulot maydoni to'liq kenglikda qoladi)
+          "fixed inset-0 z-50 w-full transition-transform duration-200",
+          cartOpen ? "translate-y-0" : "translate-y-full",
+          // Desktop: avvalgidek yon panel
+          "md:static md:z-auto md:translate-y-0 md:transition-none",
+          layout === "compact" ? "md:w-[26rem] xl:w-[30rem]" : "md:w-80 xl:w-96",
+          panelLeft ? "md:border-r" : "md:border-l",
+        )}
+      >
         {/* Cart header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
           <div className="flex items-center gap-2">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8 md:hidden"
+              aria-label="Savatni yopish"
+              data-testid="cart-close"
+              onClick={() => setCartOpen(false)}
+            >
+              <X className="h-4 w-4" />
+            </Button>
             <ShoppingCart className="h-4 w-4 text-primary" />
             <span className="font-semibold text-sm">{tableLayout ? "To'lov" : "Savatcha"}</span>
             {cart.length > 0 && (
@@ -1233,6 +1254,22 @@ export default function POSPage() {
           </Button>
         </div>
       </div>
+
+      {/* Telefon: pastki savat paneli — bosilganda to'liq ekranli savat ochiladi */}
+      {!cartOpen && (
+        <button
+          type="button"
+          data-testid="cart-bar"
+          aria-label="Savatni ochish"
+          onClick={() => setCartOpen(true)}
+          className="fixed inset-x-0 bottom-16 z-30 flex items-center gap-3 border-t border-border bg-card px-4 py-3 text-left shadow-lg md:hidden"
+        >
+          <ShoppingCart className="h-4 w-4 shrink-0 text-primary" />
+          <span className="text-sm font-medium">Savat: {cart.length} ta</span>
+          <span className="ml-auto text-sm font-bold tabular-nums">{fmtMinor(totalMinor)}</span>
+          <span className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground">SAVAT</span>
+        </button>
+      )}
 
       {/* Modals */}
       {modals}

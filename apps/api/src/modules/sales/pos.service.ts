@@ -137,7 +137,8 @@ export async function getOpenShift(conn: DbOrTx, tenant: TenantContext, warehous
       ),
     )
     .limit(1);
-  return shift ?? null;
+  // Yopish oynasi shu javobdan foydalanadi — usul va terminal kesimi ham qaytadi
+  return shift ? { ...shift, payments: await shiftPaymentBreakdown(conn, tenant.company.id, shift.id) } : null;
 }
 
 export async function listShifts(

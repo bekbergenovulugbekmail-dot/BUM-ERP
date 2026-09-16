@@ -49,6 +49,17 @@ export default function ShiftCloseDialog({ shift, onClose }: Props) {
   const counted = closingCash.trim() === "" ? null : num(closingCash);
   const previewDifference = counted === null ? null : counted - expected;
 
+  /** Naqddan tashqari tushum — terminal (yoki usul) kesimida; naqd qoldiq hisobiga qo'shilmaydi. */
+  const terminalRows = (shift.payments ?? [])
+    .filter((row) => row.method !== "cash")
+    .map((row) => ({
+      key: `${row.method}:${row.terminalId ?? row.accountName ?? ""}`,
+      title: row.terminalName ?? (row.method === "bank" ? "Bank o'tkazma" : "Karta"),
+      accountName: row.accountName,
+      amount: row.amount,
+      count: row.count,
+    }));
+
   const foreignCodes = [...new Set([...Object.keys(shift.openingForeignCash ?? {}), ...Object.keys(shift.foreignCash ?? {})])].sort();
   const foreignExpected = (code: string) => num(shift.openingForeignCash?.[code]) + num(shift.foreignCash?.[code]);
 
@@ -80,8 +91,59 @@ export default function ShiftCloseDialog({ shift, onClose }: Props) {
           <DialogTitle>{result ? "Smena yopildi" : "Smenani yopish"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          {/* Stats */}
-          <div className="bg-muted/40 rounded-xl p-4 grid grid-cols-2 gap-3 text-sm">
+          {/* NAQD — kutilayotgan qoldiq aynan serverdagi qoida bo'yicha qatorma-qator */}
+          <div className="rounded-xl border border-border p-4 text-sm" data-testid="cash-reconciliation">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Naqd</p>
+            <dl className="space-y-1.5">
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">Boshlang'ich</dt>
+                <dd className="font-medium tabular-nums">{fmt(num(shift.openingCash))} so'm</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">Naqd savdo (qaytarishlar ayirilgan)</dt>
+                <dd className="font-medium tabular-nums">{fmt(num(shift.totalCash))} so'm</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">Kassaga kirim</dt>
+                <dd className="font-medium tabular-nums">{fmt(num(shift.cashIn))} so'm</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">Kassadan chiqim</dt>
+                <dd className="font-medium tabular-nums">−{fmt(num(shift.cashOut))} so'm</dd>
+              </div>
+              <div className="flex justify-between gap-3 border-t border-border pt-1.5">
+                <dt className="font-semibold">Kutilayotgan</dt>
+                <dd className="font-bold tabular-nums" data-testid="expected-cash">
+                  {fmt(result ? num(result.expectedCash) : expected)} so'm
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          {/* KARTA VA TERMINALLAR — naqd hisobiga QO'SHILMAYDI, alohida solishtiriladi */}
+          {terminalRows.length > 0 && (
+            <div className="rounded-xl border border-border p-4 text-sm" data-testid="terminal-reconciliation">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Karta va terminallar (naqd hisobiga kirmaydi)
+              </p>
+              <ul className="space-y-2">
+                {terminalRows.map((row) => (
+                  <li key={row.key} className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{row.title}</p>
+                      {row.accountName && <p className="truncate text-xs text-muted-foreground">{row.accountName}</p>}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-semibold tabular-nums">{fmt(num(row.amount))} so'm</p>
+                      <p className="text-xs text-muted-foreground">{row.count} ta tranzaksiya</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="rounded-xl bg-muted/40 p-4 grid grid-cols-2 gap-3 text-sm">
             <div>
               <p className="text-xs text-muted-foreground">Jami sotuv</p>
               <p className="font-bold">{fmt(num(shift.totalSales))} so'm</p>
@@ -91,20 +153,12 @@ export default function ShiftCloseDialog({ shift, onClose }: Props) {
               <p className="font-bold">{shift.receiptCount} ta</p>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Naqd sotuv</p>
-              <p className="font-bold">{fmt(num(shift.totalCash))} so'm</p>
+              <p className="text-xs text-muted-foreground">Qaytarishlar</p>
+              <p className="font-bold">{fmt(num(shift.totalReturns))} so'm</p>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Karta sotuv</p>
-              <p className="font-bold">{fmt(num(shift.totalCard))} so'm</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Boshlang'ich naqd</p>
-              <p className="font-bold">{fmt(num(shift.openingCash))} so'm</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Kassada bo'lishi kerak</p>
-              <p className="font-bold">{fmt(result ? num(result.expectedCash) : expected)} so'm</p>
+              <p className="text-xs text-muted-foreground">Bank / o'tkazma</p>
+              <p className="font-bold">{fmt(num(shift.totalBank))} so'm</p>
             </div>
             {foreignCodes.map((code) => (
               <div key={code} className="col-span-2 grid grid-cols-2 gap-3 pt-2 border-t border-border">
@@ -139,9 +193,16 @@ export default function ShiftCloseDialog({ shift, onClose }: Props) {
             <>
               <Separator />
               <div>
-                <Label>Kassadagi naqd pul (so'm)</Label>
-                <Input type="number" min="0" value={closingCash}
-                  onChange={(e) => setClosingCash(e.target.value)} placeholder="0" />
+                <Label htmlFor="shift-actual-cash">Kassadagi naqd pul (so'm)</Label>
+                <Input
+                  id="shift-actual-cash"
+                  data-testid="actual-cash"
+                  type="number"
+                  min="0"
+                  value={closingCash}
+                  onChange={(e) => setClosingCash(e.target.value)}
+                  placeholder="0"
+                />
               </div>
               {foreignCodes.length > 0 && (
                 <div className="grid grid-cols-2 gap-3">
@@ -170,8 +231,8 @@ export default function ShiftCloseDialog({ shift, onClose }: Props) {
                 </div>
               )}
               <div>
-                <Label>Izoh</Label>
-                <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ixtiyoriy..." />
+                <Label htmlFor="shift-close-notes">Izoh</Label>
+                <Input id="shift-close-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ixtiyoriy..." />
               </div>
             </>
           )}
@@ -182,7 +243,7 @@ export default function ShiftCloseDialog({ shift, onClose }: Props) {
           ) : (
             <>
               <Button variant="secondary" onClick={onClose}>Bekor</Button>
-              <Button variant="destructive" onClick={handleClose} disabled={closeShift.isPending}>
+              <Button variant="destructive" data-testid="close-session-confirm" onClick={handleClose} disabled={closeShift.isPending}>
                 {closeShift.isPending ? "..." : "Smena yopish"}
               </Button>
             </>
