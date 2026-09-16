@@ -220,6 +220,8 @@ Har amalda a'zoning `allowedWarehouseIds` ruxsati tekshiriladi (bo'sh — barcha
 | GET | `/suppliers` (`?includeInactive=&search=`), `/suppliers/:supplierId` | `purchase.view` | `suppliers.list`, `getById` |
 | POST / PATCH | `/suppliers`, `/suppliers/:supplierId` | `purchase.create` / `purchase.edit` | `create`, `update` |
 | POST | `/suppliers/:supplierId/set-debt` (qarzni to'g'rilash: farq boshqa daromad/xarajat, sabab majburiy) | `finance.approve` | yangi |
+| GET | `/suppliers/export` (`?includeInactive=`) — CSV (UTF-8 BOM) | `purchase.view` | yangi |
+| POST | `/suppliers/import` (CSV qatorlari; qarz o'zgarmaydi, takroriy kod rad) | `purchase.create` | yangi |
 | GET | `/orders` (`?supplierId=&status=&dateFrom=&dateTo=&search=&limit=&cursor=`), `/orders/:orderId` (qatorlar, qabullar, to'lovlar) | `purchase.view` | `orders.list`, `getById` |
 | POST / PATCH | `/orders`, `/orders/:orderId` (faqat qoralama) | `purchase.create` / `purchase.edit` | `create` |
 | POST | `/orders/:orderId/confirm`, `/orders/:orderId/cancel` | `purchase.approve` / `purchase.cancel` | `confirm`, `cancel` |
@@ -233,6 +235,8 @@ Har amalda a'zoning `allowedWarehouseIds` ruxsati tekshiriladi (bo'sh — barcha
 | GET | `/customers` (`?search=&includeInactive=&limit=`), `/customers/:customerId` (oxirgi buyurtma va to'lovlar) | `sales.view` | `customers.list`, `getById` |
 | POST / PATCH | `/customers`, `/customers/:customerId` | `crm.manage` | `create`, `update` |
 | POST | `/customers/:customerId/balance-adjust` (balans, qarz, keshbekni to'g'rilash; sabab majburiy) | `finance.approve` | yangi |
+| GET | `/customers/export` (`?includeInactive=`) — CSV (UTF-8 BOM) | `sales.view` | yangi |
+| POST | `/customers/import` (CSV qatorlari; pul qiymatlari o'zgarmaydi) | `crm.manage` | yangi |
 | GET | `/orders` (`?status=&customerId=&warehouseId=&isPos=&shiftId=&dateFrom=&dateTo=&search=&limit=&cursor=`), `/orders/stats`, `/orders/:orderId` | `sales.view` | `orders.list`, `getStats`, `getById` |
 | POST / PATCH | `/orders`, `/orders/:orderId` (faqat qoralama) | `sales.create` / `sales.edit` (narx/chegirma o'zgartirish — `sales.edit`) | `create` |
 | POST | `/orders/:orderId/confirm`, `/orders/:orderId/ship` | `sales.approve` + ombor ruxsati | `confirm`, `ship` |
@@ -278,6 +282,8 @@ O'qish — `hr.view` (pasport, INN, bank hisobi — faqat `hr.manage`).
 |---|---|---|---|
 | GET / POST / PATCH / DELETE | `/departments`, `/positions` (`?departmentId=`) | `hr.view` / `hr.manage` | `*Department`, `*Position` |
 | GET / POST / PATCH / DELETE | `/employees` (`?departmentId=&status=&search=`), `/employees/stats`, `/employees/:employeeId` | `hr.view` / `hr.manage` | `listEmployees`, `getStats`, `getEmployee`, `createEmployee`, `updateEmployee`, `deleteEmployee` |
+| GET | `/employees/export` (`?status=&includeSalary=`) — CSV; pasport, INN, hisob raqami va maosh ustunlari `hr.salary` bilan | `hr.view` | yangi |
+| POST | `/employees/import` (CSV qatorlari; login, parol yoki PIN yaratmaydi) | `hr.manage` | yangi |
 | GET | `/attendance` (`?employeeId=&month=&date=`), `/attendance/stats?month=` | `hr.view` | `listAttendance`, `getMonthlyStats` |
 | PUT | `/attendance`, `/attendance/bulk` | `hr.attendance` | `recordAttendance`, `bulkRecordAttendance` |
 | GET / POST / DELETE | `/leaves` (`?employeeId=&status=`), `/leaves/:leaveId` | `hr.view` / `hr.manage` | `listLeaves`, `createLeave` |
@@ -1342,6 +1348,7 @@ O'qish — `distribution.view`, yozish — `distribution.manage`.
 |---|---|
 | GET / POST / PATCH / DELETE | `/sales-reps` (`?includeInactive=`), `/sales-reps/stats`, `/sales-reps/:salesRepId` |
 | GET / POST / PATCH / DELETE | `/routes` (`?includeInactive=`), `/routes/:routeId` (mijozlar bilan) |
+| GET / POST | `/routes/export` (`?includeInactive=`) — CSV, `/routes/import` (CSV qatorlari; kunlar "1,3,5", do'konlar fayl bilan biriktirilmaydi) |
 | POST / PUT / DELETE | `/routes/:routeId/customers`, `/routes/:routeId/customers/order`, `/routes/:routeId/customers/:memberId` |
 | POST | `/routes/:routeId/optimize` `{apply}` — eng qisqa yo'l tartibi (ko'rish — `distribution.view`) |
 | GET | `/map` — faol marshrutlar do'konlari tartibda va marshrutsiz koordinatali do'konlar |
@@ -1781,6 +1788,22 @@ Egasining so'rovi: "hamma balanslarni o'rnatish funksiyasi bo'lsin masalan mijoz
 **Testlar (2026-09-16):** yangi `apps/api/test/balance-adjust.test.ts` (3 test: mijoz balansi/qarzi/keshbegi jurnal bilan va sabab/manfiy qiymat/kassir 403 tekshiruvi; ta'minotchi qarzi va valyuta qoldig'i; kassa qoldig'i — kirim/chiqim, tarix va o'zgarishsiz holat). Ta'sirlangan qismlar regressiyasi: **13 fayl / 42 test** — hammasi o'tdi. API `tsc` toza; web `tsc`, lint (4 o'zgargan fayl) va `vite build` toza. Desktop kodi bu bosqichda o'zgarmadi
 
 **Production (2026-09-16):** commit `aad78b6`, `bum-api` va `bum-web` deploy qilindi — ikkalasi ham Online, web sahifasi 200. Yangi marshrutlar ishlayotgani tasdiqlandi: sessiyasiz `POST /api/finance/cash-accounts/:id/set-balance`, `POST /api/sales/customers/:id/balance-adjust`, `POST /api/purchase/suppliers/:id/set-debt` — uchalasi ham **401** (eski buildda bu marshrutlar yo'q edi, 404 bo'lardi). Migratsiya 0052 bazada **tekshirilmadi (NOT VERIFIED)** — production bazasi faqat ichki manzilda (`*.railway.internal`), `railway run` orqali faqat o'qish tekshiruvi esa ruxsat klassifikatori tomonidan bloklandi. Tizimga kirgan holda sinov — NOT VERIFIED (production paroli ishlatilmaydi)
+
+## Import va eksport: mijozlar, ta'minotchilar, hodimlar, marshrutlar (2026-09-16)
+
+Egasining so'rovi: "Xaridlarda, hodimlarda, marshrutlarda, import, export bo'lsin va boshqa qaysi birida import export bo'lishi kerak bo'lsa qo'shilsin".
+
+- **Umumiy qoida** (mahsulotlar eksportidan ajratilgan `apps/api/src/shared/csv.ts`): eksport — UTF-8 BOM va CRLF bilan (Excel to'g'ri ochadi), har katak formula injection'dan himoyalanadi (`=`, `+`, `-`, `@` bilan boshlansa apostrof qo'shiladi), bir eksportda ko'pi bilan 10 000 qator. Import — fayl brauzerda o'qiladi, qatorlar serverda tekshiriladi va `{created, errors}` qaytadi: xato qator sababi bilan ko'rsatiladi, to'g'rilari yozilaveradi (bir so'rovda 500 qatorgacha)
+- **Mijozlar:** `GET /api/sales/customers/export` (`sales.view`), `POST /api/sales/customers/import` (`crm.manage`)
+- **Ta'minotchilar (xaridlar):** `GET /api/purchase/suppliers/export` (`purchase.view`), `POST /api/purchase/suppliers/import` (`purchase.create`) — fayldagi yoki bazadagi kod takrorlansa o'sha qator rad etiladi
+- **Hodimlar:** `GET /api/hr/employees/export` (`hr.view`; `?includeSalary=true` — **`hr.salary`** talab qilinadi va pasport/INN/hisob raqami/maosh ustunlari shunda qo'shiladi), `POST /api/hr/employees/import` (`hr.manage`)
+- **Marshrutlar:** `GET /api/distribution/routes/export` (`distribution.view`), `POST /api/distribution/routes/import` (`distribution.manage`) — kunlar "1,3,5" ko'rinishida (0 = yakshanba … 6 = shanba); do'konlar fayl bilan biriktirilmaydi
+- **Xavfsizlik qoidalari:** import **pul qiymatlarini o'zgartirmaydi** (qarz, balans, keshbek faqat hujjat yoki "to'g'rilash" amali orqali o'zgaradi); hodim importi **login, parol yoki PIN yaratmaydi** — dasturdan foydalanish alohida amal bilan beriladi
+- **Web:** umumiy `CsvToolbar` komponenti (`src/components/csv/csv-toolbar.tsx`) — "Eksport" va "Import" tugmalari mijozlar, yetkazuvchilar, hodimlar va marshrutlar ro'yxatida; fayl sarlavhalari o'zbekcha va inglizcha nom bilan ham moslanadi
+
+**Testlar (2026-09-16):** yangi `apps/api/test/csv-import-export.test.ts` (4 test: mijoz importi va BOM'li eksport; ta'minotchida takroriy kod; hodim importi login yaratmasligi, maosh ustunlari `hr.salary` bilan va kassirga 403; marshrut kunlari va noma'lum agent). Ta'sirlangan qismlar regressiyasi: **13 fayl / 48 test** — hammasi o'tdi. API `tsc` toza; web `tsc`, lint (5 fayl) va `vite build` toza
+
+**Production:** bu bosqichda hali deploy qilinmagan — keyingi qadam
 
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 

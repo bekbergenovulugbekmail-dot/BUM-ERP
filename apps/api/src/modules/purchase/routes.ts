@@ -5,6 +5,8 @@
  *   POST   /suppliers                                     purchase.create
  *   PATCH  /suppliers/:supplierId                         purchase.edit
  *   POST   /suppliers/:supplierId/set-debt                finance.approve (qarzni to'g'rilash, sabab bilan)
+ *   GET    /suppliers/export (?includeInactive=)          purchase.view (CSV)
+ *   POST   /suppliers/import                              purchase.create (CSV qatorlari; qarz o'zgarmaydi)
  *   GET    /orders (?supplierId=&status=&dateFrom=&dateTo=&search=&limit=&cursor=), /orders/:orderId   purchase.view
  *   POST   /orders                                        purchase.create
  *   PATCH  /orders/:orderId (faqat qoralama)              purchase.edit
@@ -35,6 +37,7 @@ import {
 } from "./orders.service.js";
 import { listSupplierPayments, recordSupplierPayment } from "./payments.service.js";
 import { returnPurchaseItems } from "./returns.service.js";
+import { exportSuppliersCsv, importSuppliers } from "./suppliers-csv.service.js";
 import { createSupplier, getSupplier, listSuppliers, setSupplierDebt, updateSupplier } from "./suppliers.service.js";
 
 const nullableText = (max: number) =>
@@ -70,6 +73,28 @@ const supplierBody = z.strictObject({
 });
 const supplierPatch = supplierBody.omit({ code: true }).partial().extend({ isActive: z.boolean().optional() });
 const suppliersQuery = z.object({ includeInactive: boolQuery, search: z.string().trim().min(1).max(100).optional() });
+const suppliersExportQuery = z.object({ includeInactive: boolQuery });
+/** CSV import: fayl brauzerda o'qiladi, qatorlar shu yerda tekshiriladi. Qarz ustuni e'tiborsiz qoldiriladi. */
+const supplierImportBody = z.strictObject({
+  rows: z
+    .array(
+      z.strictObject({
+        name: z.string().max(300).optional(),
+        code: z.string().max(50).optional(),
+        partyType: z.string().max(50).optional(),
+        contactPerson: z.string().max(300).optional(),
+        phone: z.string().max(50).optional(),
+        email: z.string().max(300).optional(),
+        address: z.string().max(1000).optional(),
+        taxId: z.string().max(50).optional(),
+        bankAccount: z.string().max(100).optional(),
+        bankMfo: z.string().max(50).optional(),
+        paymentTermDays: z.string().max(50).optional(),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
 
 const orderItem = z.strictObject({
   productId: z.uuid(),
@@ -205,6 +230,21 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
       updateSupplier(tx, tenant, supplierId, patch, requestMeta(req)),
     );
     return { supplier };
+  });
+
+  app.get("/suppliers/export", async (req, reply) => {
+    const { includeInactive } = suppliersExportQuery.parse(req.query);
+    const csv = await exportSuppliersCsv(db, await readTenant(req, "purchase.view"), { includeInactive: includeInactive ?? false });
+    const date = new Date().toISOString().slice(0, 10);
+    reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="taminotchilar-${date}.csv"`);
+    return csv;
+  });
+
+  app.post("/suppliers/import", async (req) => {
+    const { rows } = supplierImportBody.parse(req.body);
+    return writeInTenant(req, "purchase.create", (tx, tenant) => importSuppliers(tx, tenant, rows, requestMeta(req)));
   });
 
   app.post("/suppliers/:supplierId/set-debt", async (req) => {

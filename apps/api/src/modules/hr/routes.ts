@@ -7,6 +7,8 @@
  *          (POST /employees {softwareAccess} — qo'shimcha employee.software_access.manage)
  *   POST   /employees/:employeeId/software-access   bepul → dasturdan foydalanuvchi   hr.manage + employee.software_access.manage
  *   DELETE /employees/:employeeId/software-access   dasturdan foydalanuvchi → bepul   hr.manage + employee.software_access.manage
+ *   GET    /employees/export (?status=&includeSalary=)   hr.view (CSV; maxfiy ustunlar — hr.salary)
+ *   POST   /employees/import                             hr.manage (CSV qatorlari; login/parol yaratmaydi)
  *   GET    /attendance (?employeeId=&month=&date=&limit=), /attendance/stats?month=   hr.view
  *   PUT    /attendance, /attendance/bulk                                          hr.attendance
  *   GET    /leaves (?employeeId=&status=&limit=)                                  hr.view
@@ -26,6 +28,7 @@ import { decimalSchema, moneySchema, percentSchema, qtySchema } from "../../shar
 import { authOf, requireAuth } from "../auth/guard.js";
 import { requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import { attendanceStats, bulkRecordAttendance, listAttendance, recordAttendance } from "./attendance.service.js";
+import { exportEmployeesCsv, importEmployees } from "./employees-csv.service.js";
 import {
   createEmployee,
   deleteEmployee,
@@ -135,6 +138,35 @@ const employeesQuery = z.object({
   status: z.enum(["active", "on_leave", "terminated"]).optional(),
   search: z.string().trim().min(1).max(100).optional(),
   limit: limitQuery,
+});
+const employeesExportQuery = z.object({
+  status: z.enum(["active", "on_leave", "terminated"]).optional(),
+  /** Pasport, INN, hisob raqami va maosh ustunlari — faqat `hr.salary` bilan. */
+  includeSalary: boolQuery,
+});
+/** CSV import: fayl brauzerda o'qiladi, qatorlar shu yerda tekshiriladi. Login va parol fayldan olinmaydi. */
+const employeeImportBody = z.strictObject({
+  rows: z
+    .array(
+      z.strictObject({
+        name: z.string().max(300).optional(),
+        phone: z.string().max(50).optional(),
+        email: z.string().max(300).optional(),
+        department: z.string().max(200).optional(),
+        position: z.string().max(200).optional(),
+        hireDate: z.string().max(50).optional(),
+        birthDate: z.string().max(50).optional(),
+        gender: z.string().max(50).optional(),
+        address: z.string().max(1000).optional(),
+        passportNumber: z.string().max(50).optional(),
+        inn: z.string().max(50).optional(),
+        bankAccount: z.string().max(100).optional(),
+        baseSalary: z.string().max(50).optional(),
+        salaryType: z.string().max(50).optional(),
+      }),
+    )
+    .min(1)
+    .max(500),
 });
 
 const attendanceStatuses = ["present", "absent", "late", "half_day", "holiday", "on_leave"] as const;
@@ -279,6 +311,24 @@ export async function hrRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get("/employees/stats", async (req) => employeeStats(db, await readTenant(req)));
+
+  app.get("/employees/export", async (req, reply) => {
+    const { status, includeSalary } = employeesExportQuery.parse(req.query);
+    const tenant = await readTenant(req);
+    // Maxfiy ustunlar (pasport, INN, hisob raqami, maosh) — faqat maosh ruxsati bilan
+    if (includeSalary) await requirePermission(db, tenant, "hr.salary");
+    const csv = await exportEmployeesCsv(db, tenant, { includeSalary: includeSalary ?? false, status });
+    const date = new Date().toISOString().slice(0, 10);
+    reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="hodimlar-${date}.csv"`);
+    return csv;
+  });
+
+  app.post("/employees/import", async (req) => {
+    const { rows } = employeeImportBody.parse(req.body);
+    return writeInTenant(req, "hr.manage", (tx, tenant) => importEmployees(tx, tenant, rows, requestMeta(req)));
+  });
 
   app.get("/employees/:employeeId", async (req) => {
     const id = param(req, "employeeId");

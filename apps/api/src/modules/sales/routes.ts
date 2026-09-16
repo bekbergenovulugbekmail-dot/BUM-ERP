@@ -25,6 +25,8 @@
  *   GET    /customers/:customerId/balance (?limit=)       sales.view (balans tarixi)
  *   GET    /customers/:customerId/cashback (?limit=)      sales.view (keshbek tarixi)
  *   POST   /customers/:customerId/balance-adjust          finance.approve (balans, qarz, keshbekni to'g'rilash)
+ *   GET    /customers/export (?includeInactive=)          sales.view (CSV)
+ *   POST   /customers/import                              crm.manage (CSV qatorlari; pul qiymatlari o'zgarmaydi)
  *   GET    /cashback/settings                             sales.view
  *   PUT    /cashback/settings                             settings.manage
  */
@@ -60,6 +62,7 @@ import {
   listCashbackTransactions,
   saveCashbackSettings,
 } from "./cashback.service.js";
+import { exportCustomersCsv, importCustomers } from "./customers-csv.service.js";
 import { listBalanceTransactions, setCustomerBalances } from "./customer-balance.service.js";
 import {
   closeShift,
@@ -283,6 +286,31 @@ const posCustomerPaymentBody = z
   })
   .refine((body) => body.amount !== undefined || body.parts !== undefined, "To'lov summasi (amount) yoki qismlari (parts) kiritilsin");
 const balanceQuery = z.object({ limit: limitQuery });
+const customersExportQuery = z.object({ includeInactive: boolQuery });
+/** CSV import: fayl brauzerda o'qiladi, qatorlar shu yerda tekshiriladi. Qarz va balans ustunlari e'tiborsiz. */
+const customerImportBody = z.strictObject({
+  rows: z
+    .array(
+      z.strictObject({
+        name: z.string().max(300).optional(),
+        partyType: z.string().max(50).optional(),
+        phone: z.string().max(50).optional(),
+        email: z.string().max(300).optional(),
+        address: z.string().max(1000).optional(),
+        contactName: z.string().max(300).optional(),
+        taxId: z.string().max(50).optional(),
+        bankAccount: z.string().max(100).optional(),
+        bankMfo: z.string().max(50).optional(),
+        city: z.string().max(200).optional(),
+        district: z.string().max(200).optional(),
+        discountPercent: z.string().max(50).optional(),
+        creditLimit: z.string().max(50).optional(),
+        paymentTermDays: z.string().max(50).optional(),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
 /** Balansni to'g'rilash: berilgan qiymat(lar) to'g'ri qiymatga o'rnatiladi, sabab majburiy. */
 const balanceAdjustBody = z.strictObject({
   balance: moneySchema.optional(),
@@ -327,6 +355,21 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   app.get("/customers", async (req) => {
     const query = customersQuery.parse(req.query);
     return { customers: await listCustomers(db, await readTenant(req, "sales.view"), query) };
+  });
+
+  app.get("/customers/export", async (req, reply) => {
+    const { includeInactive } = customersExportQuery.parse(req.query);
+    const csv = await exportCustomersCsv(db, await readTenant(req, "sales.view"), { includeInactive: includeInactive ?? false });
+    const date = new Date().toISOString().slice(0, 10);
+    reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="mijozlar-${date}.csv"`);
+    return csv;
+  });
+
+  app.post("/customers/import", async (req) => {
+    const { rows } = customerImportBody.parse(req.body);
+    return writeInTenant(req, "crm.manage", (tx, tenant) => importCustomers(tx, tenant, rows, requestMeta(req)));
   });
 
   app.get("/customers/:customerId", async (req) => {

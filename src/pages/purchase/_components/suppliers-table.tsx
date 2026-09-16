@@ -14,6 +14,7 @@ import { useApiMutation } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import SetBalanceDialog from "@/components/balances/set-balance-dialog.tsx";
+import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import { num, type Supplier } from "../_lib/types.ts";
 
 type Props = { suppliers: Supplier[] | undefined };
@@ -88,13 +89,35 @@ export default function SuppliersTable({ suppliers }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-wrap justify-between items-center gap-2">
         <p className="text-sm text-muted-foreground">{suppliers.length} ta yetkazuvchi</p>
-        {canCreate && (
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4 mr-1" /> Yetkazuvchi qo'shish
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <CsvToolbar
+            exportUrl="/api/purchase/suppliers/export"
+            filename="taminotchilar"
+            importUrl="/api/purchase/suppliers/import"
+            invalidate={["/api/purchase/suppliers"]}
+            canImport={canCreate}
+            columns={[
+              { key: "name", aliases: ["Nomi", "name"] },
+              { key: "code", aliases: ["Kod", "code"] },
+              { key: "partyType", aliases: ["Turi", "partyType"] },
+              { key: "contactPerson", aliases: ["Mas'ul shaxs", "contactPerson"] },
+              { key: "phone", aliases: ["Telefon", "phone"] },
+              { key: "email", aliases: ["Email", "email"] },
+              { key: "address", aliases: ["Manzil", "address"] },
+              { key: "taxId", aliases: ["STIR", "taxId"] },
+              { key: "bankAccount", aliases: ["Hisob raqami", "bankAccount"] },
+              { key: "bankMfo", aliases: ["MFO", "bankMfo"] },
+              { key: "paymentTermDays", aliases: ["To'lov muddati (kun)", "paymentTermDays"] },
+            ]}
+          />
+          {canCreate && (
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4 mr-1" /> Yetkazuvchi qo'shish
+            </Button>
+          )}
+        </div>
       </div>
 
       {suppliers.length === 0 ? (

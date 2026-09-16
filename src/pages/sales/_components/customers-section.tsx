@@ -13,6 +13,7 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import SetBalanceDialog from "@/components/balances/set-balance-dialog.tsx";
+import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import { num, type Customer } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
@@ -143,18 +144,43 @@ export default function CustomersSection() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Input
           className="max-w-sm"
           placeholder="Mijoz qidirish..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        {canManage && (
-          <Button onClick={openCreate}>
-            <UserPlus className="h-4 w-4 mr-1.5" /> Mijoz qo'shish
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <CsvToolbar
+            exportUrl="/api/sales/customers/export"
+            filename="mijozlar"
+            importUrl="/api/sales/customers/import"
+            invalidate={["/api/sales/customers"]}
+            canImport={canManage}
+            columns={[
+              { key: "name", aliases: ["Nomi", "name"] },
+              { key: "partyType", aliases: ["Turi", "partyType"] },
+              { key: "phone", aliases: ["Telefon", "phone"] },
+              { key: "email", aliases: ["Email", "email"] },
+              { key: "address", aliases: ["Manzil", "address"] },
+              { key: "contactName", aliases: ["Mas'ul shaxs", "contactName"] },
+              { key: "taxId", aliases: ["STIR", "taxId"] },
+              { key: "bankAccount", aliases: ["Hisob raqami", "bankAccount"] },
+              { key: "bankMfo", aliases: ["MFO", "bankMfo"] },
+              { key: "city", aliases: ["Shahar/tuman", "city"] },
+              { key: "district", aliases: ["Mahalla", "district"] },
+              { key: "discountPercent", aliases: ["Chegirma %", "discountPercent"] },
+              { key: "creditLimit", aliases: ["Kredit limiti", "creditLimit"] },
+              { key: "paymentTermDays", aliases: ["To'lov muddati (kun)", "paymentTermDays"] },
+            ]}
+          />
+          {canManage && (
+            <Button onClick={openCreate}>
+              <UserPlus className="h-4 w-4 mr-1.5" /> Mijoz qo'shish
+            </Button>
+          )}
+        </div>
       </div>
 
       {!customers ? (

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Plus, Search, Users, Phone, Building2, Pencil, Trash2, User, MapPin, UserCheck, MonitorSmartphone, MonitorOff } from "lucide-react";
 import { FULL_ACCESS_ROLES } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
+import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
@@ -250,6 +251,31 @@ export default function EmployeesSection() {
             <Plus className="h-3.5 w-3.5 mr-1" /> {td("agents.add")}
           </Button>
         )}
+        {/* Maxfiy ustunlar (pasport, INN, hisob raqami, maosh) faqat maosh ruxsati bilan chiqadi */}
+        <CsvToolbar
+          exportUrl="/api/hr/employees/export"
+          exportParams={can("hr.salary") ? { includeSalary: true } : undefined}
+          filename="hodimlar"
+          importUrl="/api/hr/employees/import"
+          invalidate={["/api/hr/employees"]}
+          canImport={canManage}
+          columns={[
+            { key: "name", aliases: ["Ism-familiya", "name"] },
+            { key: "phone", aliases: ["Telefon", "phone"] },
+            { key: "email", aliases: ["Email", "email"] },
+            { key: "department", aliases: ["Bo'lim", "department"] },
+            { key: "position", aliases: ["Lavozim", "position"] },
+            { key: "hireDate", aliases: ["Ishga kirgan sana", "hireDate"] },
+            { key: "birthDate", aliases: ["Tug'ilgan sana", "birthDate"] },
+            { key: "gender", aliases: ["Jinsi", "gender"] },
+            { key: "address", aliases: ["Manzil", "address"] },
+            { key: "passportNumber", aliases: ["Pasport", "passportNumber"] },
+            { key: "inn", aliases: ["INN", "inn"] },
+            { key: "bankAccount", aliases: ["Hisob raqami", "bankAccount"] },
+            { key: "baseSalary", aliases: ["Maosh", "baseSalary"] },
+            { key: "salaryType", aliases: ["Maosh turi", "salaryType"] },
+          ]}
+        />
       </div>
       {agentOpen && <CreateAgentDialog onClose={() => setAgentOpen(false)} />}
       {deliveryAgentOpen && <DeliveryAgentDialog onClose={() => setDeliveryAgentOpen(false)} />}

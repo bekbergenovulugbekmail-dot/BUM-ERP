@@ -2,6 +2,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Plus, Route, Users, Calendar, ChevronDown, ChevronUp, Trash2, UserPlus, Sparkles, MapPinOff } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
+import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -118,11 +119,27 @@ export default function RoutesSection() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Distribyutsiya marshrutlari</h3>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-3.5 w-3.5 mr-1" /> Marshrut qo'shish
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <CsvToolbar
+            exportUrl="/api/distribution/routes/export"
+            filename="marshrutlar"
+            importUrl="/api/distribution/routes/import"
+            invalidate={["/api/distribution/routes"]}
+            canImport
+            columns={[
+              { key: "name", aliases: ["Nomi", "name"] },
+              { key: "salesRep", aliases: ["Sotuv agenti", "salesRep"] },
+              { key: "days", aliases: ["Kunlar (0-6)", "Kunlar", "days"] },
+              { key: "description", aliases: ["Tavsif", "description"] },
+              { key: "color", aliases: ["Rang", "color"] },
+            ]}
+          />
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> Marshrut qo'shish
+          </Button>
+        </div>
       </div>
 
       {!routes ? (

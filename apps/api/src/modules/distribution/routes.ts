@@ -5,6 +5,8 @@
  *   POST   /sales-reps, PATCH / DELETE /sales-reps/:salesRepId            distribution.manage
  *   GET    /routes (?includeInactive=), /routes/:routeId                  distribution.view
  *   POST   /routes, PATCH / DELETE /routes/:routeId                       distribution.manage
+ *   GET    /routes/export (?includeInactive=)                             distribution.view (CSV)
+ *   POST   /routes/import                                                 distribution.manage (CSV qatorlari)
  *   POST   /routes/:routeId/customers, PUT /routes/:routeId/customers/order,
  *          DELETE /routes/:routeId/customers/:memberId                   distribution.manage
  *   POST   /routes/:routeId/optimize ({ apply })                          distribution.view (apply — distribution.manage) — eng qisqa yo'l tartibi
@@ -23,6 +25,7 @@ import { requestMeta } from "../../shared/audit.js";
 import { moneySchema, percentSchema } from "../../shared/decimal.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 import { requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
+import { exportRoutesCsv, importRoutes } from "./routes-csv.service.js";
 import {
   addRouteCustomer,
   assignRoute,
@@ -78,6 +81,21 @@ const routeBody = z.strictObject({
 });
 const routePatch = routeBody.partial().extend({ isActive: z.boolean().optional() });
 const routeCustomerBody = z.strictObject({ customerId: z.uuid(), visitNotes: nullableText(1000) });
+/** CSV import: fayl brauzerda o'qiladi, qatorlar shu yerda tekshiriladi. Do'konlar fayl bilan biriktirilmaydi. */
+const routeImportBody = z.strictObject({
+  rows: z
+    .array(
+      z.strictObject({
+        name: z.string().max(300).optional(),
+        salesRep: z.string().max(200).optional(),
+        days: z.string().max(100).optional(),
+        description: z.string().max(2000).optional(),
+        color: z.string().max(50).optional(),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
 const reorderBody = z.strictObject({ memberIds: z.array(z.uuid()).max(1000) });
 const optimizeBody = z.strictObject({ apply: z.boolean().default(true) });
 
@@ -173,6 +191,21 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
   app.get("/routes", async (req) => {
     const { includeInactive } = includeInactiveQuery.parse(req.query);
     return { routes: await listRoutes(db, await readTenant(req), includeInactive ?? false) };
+  });
+
+  app.get("/routes/export", async (req, reply) => {
+    const { includeInactive } = includeInactiveQuery.parse(req.query);
+    const csv = await exportRoutesCsv(db, await readTenant(req), { includeInactive: includeInactive ?? false });
+    const date = new Date().toISOString().slice(0, 10);
+    reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="marshrutlar-${date}.csv"`);
+    return csv;
+  });
+
+  app.post("/routes/import", async (req) => {
+    const { rows } = routeImportBody.parse(req.body);
+    return writeInTenant(req, (tx, tenant) => importRoutes(tx, tenant, rows, requestMeta(req)));
   });
 
   app.get("/routes/:routeId", async (req) => {
