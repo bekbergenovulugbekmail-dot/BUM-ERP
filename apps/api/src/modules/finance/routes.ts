@@ -22,6 +22,8 @@
  *   GET    /expenses (?status=&category=&dateFrom=&dateTo=&limit=&cursor=), /expenses/stats   finance.view
  *   POST   /expenses, PATCH / DELETE /expenses/:expenseId      finance.manage
  *   POST   /expenses/:expenseId/status                         finance.approve (paid — kassa chiqimi + jurnal)
+ *   GET    /expenses/export (?status=&category=&dateFrom=&dateTo=)   finance.view (CSV)
+ *   POST   /expenses/import                                    finance.manage (CSV qatorlari; "kutilmoqda" holatida)
  *   GET    /currencies                                         a'zo (valyutalar va kurslar; CBU kursi kunda bir yangilanadi)
  *   GET    /currencies/cbu                                     a'zo (Markaziy bank kurslari; 503 — olib bo'lmasa)
  *   PUT    /currencies, POST /currencies/refresh               settings.manage
@@ -56,6 +58,7 @@ import {
   transferCash,
   updateCashAccount,
 } from "./cash.service.js";
+import { exportExpensesCsv, importExpenses } from "./expenses-csv.service.js";
 import {
   createExpense,
   deleteExpense,
@@ -241,6 +244,28 @@ const expensesQuery = z.object({
   dateTo: isoDate.optional(),
   limit: limitQuery,
   cursor: cursorQuery,
+});
+const expensesExportQuery = z.object({
+  status: z.enum(expenseStatuses).optional(),
+  category: z.string().trim().min(1).max(64).optional(),
+  dateFrom: isoDate.optional(),
+  dateTo: isoDate.optional(),
+});
+/** CSV import: xarajat "kutilmoqda" holatida ochiladi — pul faqat tasdiqlangandan keyin harakatlanadi. */
+const expenseImportBody = z.strictObject({
+  rows: z
+    .array(
+      z.strictObject({
+        category: z.string().max(100).optional(),
+        description: z.string().max(1000).optional(),
+        amount: z.string().max(50).optional(),
+        expenseDate: z.string().max(50).optional(),
+        paidBy: z.string().max(300).optional(),
+        notes: z.string().max(2000).optional(),
+      }),
+    )
+    .min(1)
+    .max(500),
 });
 const expenseStatusBody = z.strictObject({
   status: z.enum(expenseStatuses),
@@ -542,6 +567,21 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get("/expenses/stats", async (req) => expenseStats(db, await readTenant(req, "finance.view")));
+
+  app.get("/expenses/export", async (req, reply) => {
+    const query = expensesExportQuery.parse(req.query);
+    const csv = await exportExpensesCsv(db, await readTenant(req, "finance.view"), query);
+    const date = new Date().toISOString().slice(0, 10);
+    reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="xarajatlar-${date}.csv"`);
+    return csv;
+  });
+
+  app.post("/expenses/import", async (req) => {
+    const { rows } = expenseImportBody.parse(req.body);
+    return writeInTenant(req, "finance.manage", (tx, tenant) => importExpenses(tx, tenant, rows, requestMeta(req)));
+  });
 
   app.post("/expenses", async (req, reply) => {
     const body = expenseBody.parse(req.body);

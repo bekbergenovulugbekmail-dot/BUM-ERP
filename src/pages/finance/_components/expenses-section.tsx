@@ -12,6 +12,7 @@ import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { BankCommissionHint } from "@/components/payments/bank-commission-hint.tsx";
+import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import {
   fmt, localIsoDate, toNum,
   type CashAccount, type Expense, type ExpenseStats, type ExpenseStatus,
@@ -157,11 +158,30 @@ export default function ExpensesSection() {
             </button>
           ))}
         </div>
-        {canManage && (
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-3.5 w-3.5 mr-1" /> Xarajat qo'shish
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Eksport ekrandagi filtr bo'yicha; import xarajatni "kutilmoqda" holatida ochadi */}
+          <CsvToolbar
+            exportUrl="/api/finance/expenses/export"
+            exportParams={statusFilter === "all" ? undefined : { status: statusFilter }}
+            filename="xarajatlar"
+            importUrl="/api/finance/expenses/import"
+            invalidate={["/api/finance/expenses"]}
+            canImport={canManage}
+            columns={[
+              { key: "category", aliases: ["Kategoriya", "category"] },
+              { key: "description", aliases: ["Tavsif", "description"] },
+              { key: "amount", aliases: ["Summa", "amount"] },
+              { key: "expenseDate", aliases: ["Sana", "expenseDate"] },
+              { key: "paidBy", aliases: ["To'lagan", "paidBy"] },
+              { key: "notes", aliases: ["Izoh", "notes"] },
+            ]}
+          />
+          {canManage && (
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1" /> Xarajat qo'shish
+            </Button>
+          )}
+        </div>
       </div>
 
       {!expenses ? (

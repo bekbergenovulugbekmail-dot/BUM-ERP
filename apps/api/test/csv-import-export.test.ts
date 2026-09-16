@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
+import { expenses } from "../src/db/schema/finance.js";
 import { users } from "../src/db/schema/platform.js";
 import { customers } from "../src/db/schema/sales.js";
 import { buildServer } from "../src/server.js";
@@ -116,6 +117,49 @@ describe("CSV eksport va import", () => {
     const kassir = await addEmployee(app, company, "Kassir");
     expect((await call(kassir.cookie, "GET", "/api/hr/employees/export")).statusCode).toBe(403);
     expect((await call(kassir.cookie, "POST", "/api/hr/employees/import", { rows: [{ name: "X", hireDate: "2026-01-01" }] })).statusCode).toBe(403);
+  });
+
+  it("xarajatlar: import \"kutilmoqda\" holatida ochadi; yopilgan davr qator xatosi bo'ladi", async () => {
+    const res = await call(owner(), "POST", "/api/finance/expenses/import", {
+      rows: [
+        { category: "ijara", description: "Ofis ijarasi", amount: "1 500 000", expenseDate: "2026-09-10", paidBy: "Kassa" },
+        { category: "", description: "Kategoriyasiz", amount: "1000", expenseDate: "2026-09-10" },
+        { category: "transport", description: "Yoqilg'i", amount: "0", expenseDate: "2026-09-10" },
+      ],
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ created: 1 });
+    expect(res.json().errors).toHaveLength(2);
+
+    const rows = await db.select().from(expenses).where(eq(expenses.companyId, company.companyId));
+    expect(rows).toHaveLength(1);
+    // Import pulni harakatlantirmaydi — xarajat tasdiqlanmagan holatda turadi
+    expect(rows[0]).toMatchObject({ status: "pending", amount: "1500000.00", category: "ijara" });
+
+    const csv = await call(owner(), "GET", "/api/finance/expenses/export");
+    expect(csv.statusCode, csv.body).toBe(200);
+    expect(csv.body.startsWith("﻿")).toBe(true);
+    expect(csv.body).toContain("Ofis ijarasi");
+    expect(csv.body).toContain("Kutilmoqda");
+
+    // Yopilgan davr: o'sha sanadagi qator xato bo'lib qaytadi, qolgani yoziladi (tranzaksiya yiqilmaydi)
+    const lock = await app.inject({
+      method: "PUT",
+      url: "/api/finance/lock-date",
+      headers: { cookie: owner() },
+      payload: { lockDate: "2026-09-14" },
+    });
+    expect(lock.statusCode, lock.body).toBe(200);
+    const locked = await call(owner(), "POST", "/api/finance/expenses/import", {
+      rows: [
+        { category: "ijara", description: "Yopiq davr", amount: "500000", expenseDate: "2026-09-12" },
+        { category: "ijara", description: "Ochiq davr", amount: "700000", expenseDate: "2026-09-16" },
+      ],
+    });
+    expect(locked.statusCode, locked.body).toBe(200);
+    expect(locked.json()).toMatchObject({ created: 1 });
+    expect(locked.json().errors).toHaveLength(1);
+    expect(locked.json().errors[0].message).toContain("yopilgan");
   });
 
   it("marshrutlar: kunlar tekshiriladi, noma'lum agent rad etiladi", async () => {

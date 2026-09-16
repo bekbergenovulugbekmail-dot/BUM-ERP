@@ -212,6 +212,8 @@ Har amalda a'zoning `allowedWarehouseIds` ruxsati tekshiriladi (bo'sh — barcha
 | GET | `/expenses` (`?status=&category=&dateFrom=&dateTo=&limit=&cursor=`), `/expenses/stats` | `finance.view` | `expenses.list`, `getStats` |
 | POST / PATCH / DELETE | `/expenses`, `/expenses/:expenseId` | `finance.manage` | `create`, `remove` |
 | POST | `/expenses/:expenseId/status` (`paid` — kassa chiqimi + jurnal) | `finance.approve` | `updateStatus` |
+| GET | `/expenses/export` (`?status=&category=&dateFrom=&dateTo=`) — CSV (UTF-8 BOM) | `finance.view` | yangi |
+| POST | `/expenses/import` (CSV qatorlari; "kutilmoqda" holatida, yopilgan davr — qator xatosi) | `finance.manage` | yangi |
 
 ### Xarid (`/api/purchase`)
 
@@ -1798,12 +1800,15 @@ Egasining so'rovi: "Xaridlarda, hodimlarda, marshrutlarda, import, export bo'lsi
 - **Ta'minotchilar (xaridlar):** `GET /api/purchase/suppliers/export` (`purchase.view`), `POST /api/purchase/suppliers/import` (`purchase.create`) — fayldagi yoki bazadagi kod takrorlansa o'sha qator rad etiladi
 - **Hodimlar:** `GET /api/hr/employees/export` (`hr.view`; `?includeSalary=true` — **`hr.salary`** talab qilinadi va pasport/INN/hisob raqami/maosh ustunlari shunda qo'shiladi), `POST /api/hr/employees/import` (`hr.manage`)
 - **Marshrutlar:** `GET /api/distribution/routes/export` (`distribution.view`), `POST /api/distribution/routes/import` (`distribution.manage`) — kunlar "1,3,5" ko'rinishida (0 = yakshanba … 6 = shanba); do'konlar fayl bilan biriktirilmaydi
+- **Xarajatlar:** `GET /api/finance/expenses/export` (`finance.view`; ekrandagi holat filtri bilan), `POST /api/finance/expenses/import` (`finance.manage`) — import xarajatni **"kutilmoqda"** holatida ochadi (pul faqat "to'landi" deb tasdiqlanganda harakatlanadi), yopilgan davr (`lock-date`) bir marta o'qiladi va o'sha sanadagi qator xato bo'lib qaytadi — tranzaksiya yiqilmaydi
 - **Xavfsizlik qoidalari:** import **pul qiymatlarini o'zgartirmaydi** (qarz, balans, keshbek faqat hujjat yoki "to'g'rilash" amali orqali o'zgaradi); hodim importi **login, parol yoki PIN yaratmaydi** — dasturdan foydalanish alohida amal bilan beriladi
 - **Web:** umumiy `CsvToolbar` komponenti (`src/components/csv/csv-toolbar.tsx`) — "Eksport" va "Import" tugmalari mijozlar, yetkazuvchilar, hodimlar va marshrutlar ro'yxatida; fayl sarlavhalari o'zbekcha va inglizcha nom bilan ham moslanadi
 
 **Testlar (2026-09-16):** yangi `apps/api/test/csv-import-export.test.ts` (4 test: mijoz importi va BOM'li eksport; ta'minotchida takroriy kod; hodim importi login yaratmasligi, maosh ustunlari `hr.salary` bilan va kassirga 403; marshrut kunlari va noma'lum agent). Ta'sirlangan qismlar regressiyasi: **13 fayl / 48 test** — hammasi o'tdi. API `tsc` toza; web `tsc`, lint (5 fayl) va `vite build` toza
 
 **Production (2026-09-16):** commit `e9dc7ae`, `bum-api` va `bum-web` deploy qilindi — ikkalasi ham Online, web sahifasi 200. Yangi marshrutlar ishlayotgani tasdiqlandi: sessiyasiz `GET /api/sales/customers/export`, `/api/purchase/suppliers/export`, `/api/hr/employees/export`, `/api/distribution/routes/export` — to'rttasi ham **401** (eski buildda bu marshrutlar yo'q edi, 404 bo'lardi). Bu bosqichda yangi migratsiya yo'q. Tizimga kirgan holda sinov — NOT VERIFIED (production paroli ishlatilmaydi)
+
+**Xarajatlar qo'shimchasi (2026-09-16):** `csv-import-export.test.ts` 5 ta testga kengaytirildi (xarajat importi "kutilmoqda" holatida qoladi va pul harakatlanmaydi; yopilgan davrdagi qator xato bo'lib qaytadi, ochiq davrdagisi yoziladi). Ta'sirlangan qismlar regressiyasi: **10 fayl / 38 test** — hammasi o'tdi; API `tsc` toza, web `tsc`, lint va `vite build` toza. Production — keyingi qadam
 
 ## Yakuniy holat va keyingi qadam (2026-09-14)
 
