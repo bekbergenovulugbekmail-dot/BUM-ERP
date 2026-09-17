@@ -108,6 +108,29 @@ try {
   soft(await api("POST", "/api/delivery/agents", { name: "Demo Dostavchi", phone: phones.dostavchi, password: PASSWORD }), "dostavka agenti");
   console.log(`Xodimlar: ${staff.length} ta + dostavka agenti`);
 
+  // Sotuv agenti xodimini "sales_reps" yozuvi bilan bog'lash — busiz agent mobil ish joyiga kira olmaydi
+  // (ish sessiyasi, tashrif va lokatsiya kuzatuvi shu yozuvga bog'langan).
+  const members = ok(await api("GET", "/api/company/employees"), "xodimlar ro'yxati").employees as {
+    id: string;
+    phone: string;
+  }[];
+  const agentUserId = members.find((row) => row.phone === phones.agent)?.id;
+  const existingReps = (soft(await api("GET", "/api/distribution/sales-reps"), "agentlar ro'yxati") as
+    | { salesReps: { id: string; userId: string | null }[] }
+    | null)?.salesReps ?? [];
+  if (agentUserId && !existingReps.some((row) => row.userId === agentUserId)) {
+    soft(
+      await api("POST", "/api/distribution/sales-reps", {
+        name: "Demo Sotuv agenti",
+        phone: phones.agent,
+        userId: agentUserId,
+        region: "Toshkent",
+      }),
+      "savdo agenti yozuvi",
+    );
+  }
+  console.log("Savdo agenti: mobil ish joyiga bog'landi");
+
   // ── Moliya ────────────────────────────────────────────────────────────────
   const findOrCreate = async (listUrl: string, key: string, name: string, createUrl: string, payload: object, field: string) => {
     const list = ok(await api("GET", listUrl), `ro'yxat ${listUrl}`)[key] as Record<string, unknown>[];

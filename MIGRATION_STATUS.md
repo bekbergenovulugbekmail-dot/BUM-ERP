@@ -2017,6 +2017,39 @@ Kam xotirali mashinada `E2E_LIGHT=1` video va trace yozuvini o'chiradi (9.7 daq 
 **Regressiya:** API 114 fayl / 574 test, web 18 / 77, brauzer 29 test (5 fayl) — hammasi o'tdi.
 tsc (web va API), lint va build toza.
 
+## Litsenziya talabi va CSV import shabloni (2026-09-17)
+
+**Obuna sahifasida "Foydalanuvchi qo'shish"**
+Litsenziya talabi serverda avvaldan bor edi (`assignLicense` → included tugasa `license_limit_reached`,
+hech narsa yaratilmaydi). Yangi parallel tizim qo'shilmadi — mavjud oqim obuna sahifasiga chiqarildi:
+- litsenziya kartochkasida "Foydalanuvchi qo'shish" (faqat kompaniya egasiga — serverda ham shunday);
+  bo'sh litsenziya qolmagan bo'lsa ustida ogohlantirish chiqadi;
+- "Yangi foydalanuvchi" oynasi umumiy komponentga chiqarildi
+  (`src/components/company/new-employee-dialog.tsx`) — Sozlamalar → Foydalanuvchilar ham shuni ishlatadi,
+  takrorlangan 64 qator olib tashlandi;
+- brauzerda tasdiqlandi: bo'sh litsenziyalar to'ldirilgach oyna yopilmaydi, tarif tanlash so'raladi va
+  server xodimni yaratmaydi (`e2e/subscription-license.spec.ts`). Test o'zi yaratgan foydalanuvchilarni
+  faolsizlantiradi — litsenziyalar bo'shaydi, hech narsa o'chirilmaydi.
+
+**CSV import: shablon va ustunlarni qo'lda moslash** (`src/components/csv/csv-toolbar.tsx`)
+- "Shablon" — kutilayotgan sarlavhalar bilan bo'sh CSV (UTF-8 BOM, Excel to'g'ri ochadi);
+- fayl tanlangach endi darrov serverga ketmaydi: avval "Ustunlarni moslash" oynasi — har maydon uchun
+  fayl ustuni tanlanadi, yonida qaysi sarlavhalar avtomat tanilishi yozilgan, keraksizi o'tkazib yuboriladi;
+- tekshiruv oynasida "Ustunlarni o'zgartirish" bilan moslashga qaytish mumkin;
+- brauzerda tasdiqlandi (`e2e/csv-import.spec.ts`): notanish sarlavhali fayl avtomat tanilmaydi,
+  qo'lda moslangach import o'tadi.
+
+**Savdo agenti joyi — o'lchov** (`e2e/agent-location.spec.ts`)
+Demo kompaniyada savdo agenti `sales_reps` yozuvi yo'q edi — seeder endi uni bog'laydi (busiz agent mobil
+ish joyiga kira olmaydi). Haqiqiy Chrome'da ikki brauzer konteksti bilan o'lchandi: agent "ISHNI BOSHLASH"
+bosgandan keyin sessiya 0.4–0.5 s da ochiladi, birinchi lokatsiya serverda 1.1–1.2 s da qabul qilinadi,
+supervayzer brauzeriga 3.9–5.4 s da yetadi va xaritada 4.2–5.7 s da chiziladi. Supervayzer qadami
+`/supervisor/live` ning 15 soniyalik so'rov oralig'iga bog'liq — eng yomon holatda ~16 s.
+Bu Playwright GPS emulyatsiyasi; **haqiqiy telefonda GPS fiksatsiyasi uzoqroq** — NOT VERIFIED.
+
+**Regressiya:** web 18 fayl / 77 test, brauzer 33 test (7 fayl) — hammasi o'tdi. tsc (web va API) va lint toza.
+API manbasi o'zgarmadi (faqat demo seeder CLI) — oldingi to'liq yugurish: 114 fayl / 574 test.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)

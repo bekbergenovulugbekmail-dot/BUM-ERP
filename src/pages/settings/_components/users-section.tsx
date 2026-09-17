@@ -27,6 +27,7 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { useActiveCompany } from "@/hooks/use-company.ts";
 import AdditionalLicensePicker from "@/components/subscription/additional-license-picker.tsx";
+import NewEmployeeDialog from "@/components/company/new-employee-dialog.tsx";
 import { LICENSE_STATUS_LABEL, LICENSE_TYPE_LABEL, formatDay, licenseLimitOf } from "@/lib/subscription.ts";
 import type { Branch, CompanyRole, Employee } from "../_lib/types.ts";
 
@@ -93,27 +94,16 @@ export default function UsersSection() {
     ({ userId, patch }: { userId: string; patch: MemberPatch }) => api.patch(`/api/company/employees/${userId}`, patch),
     { invalidate: COMPANY },
   );
-  const createEmployee = useApiMutation(
-    (body: { phone: string; password: string; name?: string; role?: string; pin?: string; additionalLicensePlanId?: string }) =>
-      api.post<{ payment: { id: string } | null }>("/api/company/employees", body),
-    { invalidate: COMPANY },
-  );
   const resetPassword = useApiMutation(
     ({ userId, newPassword }: { userId: string; newPassword: string }) =>
       api.post(`/api/company/employees/${userId}/password`, { newPassword }),
     { invalidate: false },
   );
 
-  // Yangi xodim dialogi
+  // Yangi foydalanuvchi oynasi (umumiy komponent — Obuna sahifasida ham ishlatiladi)
   const [createOpen, setCreateOpen] = useState(false);
-  const [newPhone, setNewPhone] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [newRole, setNewRole] = useState("");
-  const [newPin, setNewPin] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
-  // Included litsenziyalar tugagan: yangi xodim yoki qayta yoqish — qo'shimcha litsenziya tarifi tanlanadi
-  const [createLimit, setCreateLimit] = useState<ReturnType<typeof licenseLimitOf>>(null);
+  // Qayta yoqishda included litsenziya tugagan bo'lsa — qo'shimcha litsenziya tarifi tanlanadi
   const [reactivate, setReactivate] = useState<{ employee: Employee; limit: NonNullable<ReturnType<typeof licenseLimitOf>> } | null>(null);
 
   // Tahrirlash va parol tiklash dialoglari
@@ -129,44 +119,6 @@ export default function UsersSection() {
     );
   }, [employees, search]);
 
-  const openCreate = () => {
-    setFormError(null);
-    setNewPhone("");
-    setNewName("");
-    setNewPassword("");
-    setNewPin("");
-    setCreateLimit(null);
-    setNewRole(assignableRoles.find((r) => r.name === "Kassir")?.name ?? assignableRoles[0]?.name ?? "");
-    setCreateOpen(true);
-  };
-
-  const handleCreate = async (additionalLicensePlanId?: string) => {
-    setFormError(null);
-    if (newPin && !/^\d{4,8}$/.test(newPin)) {
-      setFormError("PIN 4-8 ta raqamdan iborat bo'lishi kerak");
-      return;
-    }
-    try {
-      const result = await createEmployee.mutateAsync({
-        phone: newPhone.trim(),
-        password: newPassword,
-        name: newName.trim() || undefined,
-        role: newRole || undefined,
-        pin: newPin || undefined,
-        additionalLicensePlanId,
-      });
-      toast.success(
-        result.payment
-          ? "Xodim qo'shildi. Qo'shimcha litsenziya to'lovi tasdiqlanguncha u dasturga kira olmaydi."
-          : "Xodim qo'shildi",
-      );
-      setCreateOpen(false);
-    } catch (err) {
-      const reached = licenseLimitOf(err);
-      if (reached) setCreateLimit(reached);
-      else setFormError(errorMessage(err));
-    }
-  };
 
   const handleReset = async () => {
     if (!resetTarget) return;
@@ -205,7 +157,7 @@ export default function UsersSection() {
           </p>
         </div>
         {isOwner && (
-          <Button size="sm" onClick={openCreate} className="shrink-0">
+          <Button size="sm" onClick={() => setCreateOpen(true)} className="shrink-0">
             <UserPlus className="h-4 w-4 mr-1.5" /> Yangi xodim
           </Button>
         )}
@@ -375,70 +327,8 @@ export default function UsersSection() {
         />
       )}
 
-      {/* Yangi xodim */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Yangi xodim</DialogTitle>
-            <DialogDescription>
-              Telefon raqam login bo'ladi. Parolni xodimga o'zingiz yetkazasiz — u keyin
-              Sozlamalar → Xavfsizlik bo'limida o'zgartiradi.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Input
-              placeholder="+998901234567"
-              value={newPhone}
-              onChange={(e) => { setNewPhone(e.target.value); setFormError(null); }}
-            />
-            <Input placeholder="Ism (ixtiyoriy)" value={newName} onChange={(e) => setNewName(e.target.value)} />
-            <Input
-              type="password"
-              placeholder="Dastlabki parol"
-              value={newPassword}
-              onChange={(e) => { setNewPassword(e.target.value); setFormError(null); }}
-            />
-            <Input
-              type="password"
-              inputMode="numeric"
-              autoComplete="off"
-              placeholder="PIN — ekran qulfi uchun (4-8 raqam, ixtiyoriy)"
-              value={newPin}
-              onChange={(e) => { setNewPin(e.target.value.replace(/\D/g, "").slice(0, 8)); setFormError(null); }}
-            />
-            <Select value={newRole} onValueChange={setNewRole}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Rol tanlang" />
-              </SelectTrigger>
-              <SelectContent position="popper">
-                {assignableRoles.map((r) => (
-                  <SelectItem key={r.id} value={r.name}>{r.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Filial, omborlar va mas'ul kategoriyalarni yaratilgandan keyin "Tahrirlash" orqali belgilang.
-            </p>
-            {createLimit && (
-              <AdditionalLicensePicker
-                counts={createLimit.counts}
-                pending={createEmployee.isPending}
-                onSelect={(planId) => { void handleCreate(planId); }}
-              />
-            )}
-            {formError && <ErrorBanner message={formError} />}
-          </div>
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setCreateOpen(false)}>Bekor</Button>
-            <Button
-              onClick={() => { void handleCreate(); }}
-              disabled={createEmployee.isPending || !newPhone.trim() || !newPassword}
-            >
-              {createEmployee.isPending ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Yaratilmoqda</> : "Yaratish"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Yangi foydalanuvchi — litsenziya qoidasi bilan (Obuna sahifasida ham shu oyna) */}
+      <NewEmployeeDialog open={createOpen} onClose={() => setCreateOpen(false)} />
 
       {/* Qayta yoqish — litsenziya tugagan */}
       <Dialog open={reactivate !== null} onOpenChange={(o) => { if (!o) setReactivate(null); }}>

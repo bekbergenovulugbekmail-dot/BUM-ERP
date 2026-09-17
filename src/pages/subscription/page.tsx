@@ -7,7 +7,7 @@
  */
 import { useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, CalendarClock, CreditCard, History, Loader2, ShieldAlert, Users } from "lucide-react";
+import { AlertTriangle, CalendarClock, CreditCard, History, Loader2, ShieldAlert, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -15,7 +15,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
-import { usePermissions } from "@/hooks/use-company.ts";
+import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
+import { useCurrentUser } from "@/hooks/use-auth.ts";
+import NewEmployeeDialog from "@/components/company/new-employee-dialog.tsx";
 import {
   HISTORY_EVENT_LABEL,
   LICENSE_STATUS_LABEL,
@@ -51,6 +53,10 @@ function Pill({ tone, children }: { tone: string; children: React.ReactNode }) {
 
 export default function SubscriptionPage() {
   const { can } = usePermissions();
+  // Xodim qo'shishni server faqat kompaniya egasiga ruxsat beradi — tugma ham faqat unga ko'rinadi
+  const currentUser = useCurrentUser();
+  const activeCompany = useActiveCompany().data;
+  const isOwner = Boolean(currentUser && activeCompany?.company.ownerId === currentUser.id);
   const overviewQuery = useApiQuery<SubscriptionOverview>("/api/subscription");
   const plans = useApiQuery<PlansResponse>("/api/subscription/plans").data;
   const overview = overviewQuery.data;
@@ -161,7 +167,7 @@ export default function SubscriptionPage() {
             </CardContent>
           </Card>
 
-          <LicenseCountsCard counts={overview.licenses} />
+          <LicenseCountsCard counts={overview.licenses} canAddUser={isOwner} />
         </div>
       )}
 
@@ -231,7 +237,8 @@ export default function SubscriptionPage() {
   );
 }
 
-function LicenseCountsCard({ counts }: { counts: LicenseCounts | null }) {
+function LicenseCountsCard({ counts, canAddUser }: { counts: LicenseCounts | null; canAddUser: boolean }) {
+  const [addOpen, setAddOpen] = useState(false);
   const tiles = counts
     ? [
         { label: "Included", value: counts.includedTotal },
@@ -259,6 +266,20 @@ function LicenseCountsCard({ counts }: { counts: LicenseCounts | null }) {
           <p className="text-xs text-amber-700 dark:text-amber-300">{counts.additionalPending} ta qo'shimcha litsenziya to'lovi kutilmoqda.</p>
         )}
         <p className="text-xs text-muted-foreground">Kompaniya egasi ham bitta included litsenziyani egallaydi. Bepul xodimlar hisoblanmaydi.</p>
+
+        {canAddUser && (
+          <div className="border-t border-border pt-3 space-y-2">
+            {counts && counts.includedAvailable === 0 && (
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                Bo'sh included litsenziya yo'q — yangi foydalanuvchi uchun qo'shimcha litsenziya tarifi tanlanadi.
+              </p>
+            )}
+            <Button variant="outline" className="w-full" data-testid="add-user" onClick={() => setAddOpen(true)}>
+              <UserPlus className="h-4 w-4 mr-1.5" /> Foydalanuvchi qo'shish
+            </Button>
+          </div>
+        )}
+        <NewEmployeeDialog open={addOpen} onClose={() => setAddOpen(false)} />
       </CardContent>
     </Card>
   );

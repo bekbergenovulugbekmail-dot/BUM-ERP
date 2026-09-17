@@ -3,18 +3,23 @@
  *
  * Eksport — serverdan tayyor CSV (UTF-8 BOM bilan, Excel to'g'ri ochadi).
  *
- * Import ikki bosqichli:
- *   1) fayl brauzerda `papaparse` bilan o'qiladi, sarlavhalar `columns` bo'yicha moslanadi (o'zbekcha va inglizcha);
- *   2) qatorlar serverga **`dryRun: true`** bilan yuboriladi — server hech narsa yozmasdan har qatorni tekshiradi va
- *      xato, dublikat va ogohlantirishlarni qaytaradi (preview);
+ * "Shablon" — kutilayotgan sarlavhalar bilan bo'sh CSV (Excel to'g'ri ochishi uchun UTF-8 BOM).
+ *
+ * Import uch bosqichli:
+ *   1) fayl brauzerda `papaparse` bilan o'qiladi; sarlavhalar `columns` dagi nomlar bo'yicha avtomat moslanadi
+ *      (o'zbekcha va inglizcha), so'ng foydalanuvchi har bir maydon uchun fayl ustunini O'ZI o'zgartira oladi;
+ *   2) moslangan qatorlar serverga **`dryRun: true`** bilan yuboriladi — server hech narsa yozmasdan har qatorni
+ *      tekshiradi va xato, dublikat va ogohlantirishlarni qaytaradi (preview);
  *   3) foydalanuvchi "Importni boshlash" bosgandan keyingina xuddi shu qatorlar `dryRun: false` bilan yoziladi.
- * Ya'ni preview paytida bazaga biznes ma'lumot yozilmaydi.
+ * Ya'ni moslash va preview paytida bazaga biznes ma'lumot yozilmaydi.
  */
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import Papa from "papaparse";
-import { AlertTriangle, Copy, Download, Upload } from "lucide-react";
+import { AlertTriangle, Copy, Download, FileDown, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
+import { Label } from "@/components/ui/label.tsx";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation } from "@/lib/query.ts";
@@ -23,6 +28,8 @@ import { useApiMutation } from "@/lib/query.ts";
 const IMPORT_BATCH = 500;
 /** Oynada ko'rsatiladigan muammolar soni (qolgani "va yana N ta" bo'lib chiqadi). */
 const MAX_ISSUES_SHOWN = 50;
+/** Moslashda "bu maydon olinmasin" tanlovi (Radix Select bo'sh qiymatni qabul qilmaydi). */
+const SKIP = "__skip__";
 
 export type CsvColumn = {
   /** So'rov tanasidagi kalit (`name`, `phone` ...). */
@@ -40,6 +47,16 @@ type ImportOutcome = {
   duplicates?: ImportIssue[];
   warnings?: ImportIssue[];
   dryRun?: boolean;
+};
+
+/** Fayl o'qilgan, lekin hali serverga yuborilmagan holat: ustunlarni moslash bosqichi. */
+type Mapping = {
+  /** Fayldagi sarlavhalar. */
+  fields: string[];
+  /** Fayl qatorlari — sarlavha bo'yicha. */
+  raw: Record<string, string>[];
+  /** Maydon kaliti → fayl ustuni (yoki SKIP). */
+  choice: Record<string, string>;
 };
 
 type Preview = {
@@ -106,6 +123,9 @@ export default function CsvToolbar({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<"export" | "preview" | "import" | null>(null);
+  const [mapping, setMapping] = useState<Mapping | null>(null);
+  /** Preview'dan "Ustunlarni o'zgartirish" bilan qaytish uchun oxirgi moslama. */
+  const [lastMapping, setLastMapping] = useState<Mapping | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const importRows = useApiMutation(
     ({ rows, dryRun }: { rows: Record<string, string>[]; dryRun: boolean }) =>
@@ -133,6 +153,22 @@ export default function CsvToolbar({
     }
   };
 
+  /** Kutilayotgan sarlavhalar bilan bo'sh CSV — foydalanuvchi shuni to'ldirib qaytaradi. */
+  const handleTemplate = () => {
+    const header = columns.map((column) => column.aliases[0] ?? column.key);
+    // UTF-8 BOM — Excel o'zbekcha harflarni to'g'ri ochadi
+    const csv = "\uFEFF" + Papa.unparse([header]) + "\r\n";
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${filename}-shablon.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success("Shablon yuklab olindi");
+  };
+
   /** Qatorlarni bo'laklab yuborish; natijalar yig'iladi (qator raqamlari fayl bo'yicha to'g'rilanadi). */
   const send = async (rows: Record<string, string>[], dryRun: boolean) => {
     const errors: ImportIssue[] = [];
@@ -152,55 +188,63 @@ export default function CsvToolbar({
     return { created, valid, errors, duplicates, warnings };
   };
 
+  /** Fayl ustuni nomini maydon nomlari bilan solishtiradi (bo'shliq va registrga befarq). */
+  const norm = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
+
   const handleFile = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = ""; // bir xil faylni qayta tanlash mumkin bo'lsin
     if (!file) return;
 
-    setBusy("preview");
     Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
       complete: (parsed) => {
-        void (async () => {
-          const pick = (row: Record<string, string>, aliases: string[]) => {
-            for (const alias of aliases) {
-              const value = row[alias]?.toString().trim();
-              if (value) return value;
-            }
-            return undefined;
-          };
-          const rows = parsed.data.map((row) => {
-            const mapped: Record<string, string> = {};
-            for (const column of columns) {
-              const value = pick(row, column.aliases);
-              if (value !== undefined) mapped[column.key] = value;
-            }
-            return mapped;
-          });
-
-          if (rows.length === 0) {
-            setBusy(null);
-            toast.error("Faylda qator topilmadi");
-            return;
-          }
-
-          try {
-            // 1-bosqich: faqat tekshirish — bazaga yozilmaydi
-            const outcome = await send(rows, true);
-            setPreview({ rows, total: rows.length, ...outcome });
-          } catch (err) {
-            toast.error(errorMessage(err));
-          } finally {
-            setBusy(null);
-          }
-        })();
+        const fields = (parsed.meta.fields ?? []).filter((field) => field.trim() !== "");
+        const raw = parsed.data;
+        if (raw.length === 0 || fields.length === 0) {
+          toast.error("Faylda qator topilmadi");
+          return;
+        }
+        // Avtomat moslash: maydon nomlari (o'zbekcha/inglizcha) fayl sarlavhalari bilan solishtiriladi
+        const byName = new Map(fields.map((field) => [norm(field), field]));
+        const choice: Record<string, string> = {};
+        for (const column of columns) {
+          const hit = column.aliases.map((alias) => byName.get(norm(alias))).find(Boolean);
+          choice[column.key] = hit ?? SKIP;
+        }
+        setMapping({ fields, raw, choice });
       },
       error: () => {
-        setBusy(null);
         toast.error("CSV faylni o'qib bo'lmadi");
       },
     });
+  };
+
+  /** Moslangan ustunlar bo'yicha qatorlarni yig'ib, serverda tekshiradi (bazaga yozilmaydi). */
+  const runPreview = async (current: Mapping) => {
+    const rows = current.raw.map((row) => {
+      const mapped: Record<string, string> = {};
+      for (const column of columns) {
+        const field = current.choice[column.key];
+        if (!field || field === SKIP) continue;
+        const value = row[field]?.toString().trim();
+        if (value) mapped[column.key] = value;
+      }
+      return mapped;
+    });
+
+    setBusy("preview");
+    try {
+      const outcome = await send(rows, true);
+      setLastMapping(current);
+      setMapping(null);
+      setPreview({ rows, total: rows.length, ...outcome });
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
   };
 
   /** 2-bosqich: foydalanuvchi tasdiqlagandan keyin yoziladi. */
@@ -210,6 +254,7 @@ export default function CsvToolbar({
     try {
       const outcome = await send(preview.rows, false);
       setPreview(null);
+      setLastMapping(null);
       if (outcome.created > 0) toast.success(`${outcome.created} ta qator import qilindi`);
       else toast.error("Hech qanday qator import qilinmadi");
       if (outcome.errors.length + outcome.duplicates.length > 0) {
@@ -235,11 +280,86 @@ export default function CsvToolbar({
       </Button>
       {canImport && (
         <>
-          <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => fileInputRef.current?.click()}>
+          <Button size="sm" variant="ghost" data-testid="csv-template" onClick={handleTemplate}>
+            <FileDown className="h-3.5 w-3.5 mr-1" /> Shablon
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="csv-import"
+            disabled={busy !== null}
+            onClick={() => fileInputRef.current?.click()}
+          >
             <Upload className="h-3.5 w-3.5 mr-1" /> {busy === "preview" ? "Tekshirilmoqda..." : importLabel}
           </Button>
           <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleFile} />
         </>
+      )}
+
+      {mapping && (
+        <Dialog open onOpenChange={(open) => !open && setMapping(null)}>
+          <DialogContent className="sm:max-w-xl" data-testid="csv-mapping">
+            <DialogHeader>
+              <DialogTitle>Ustunlarni moslash</DialogTitle>
+              <DialogDescription>
+                Fayl sarlavhalari avtomat topildi. Mos kelmagan bo'lsa — har bir maydon uchun fayl ustunini o'zingiz
+                tanlang. Bu bosqichda bazaga hech narsa yozilmaydi.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+              {columns.map((column) => {
+                const label = column.aliases[0] ?? column.key;
+                const value = mapping.choice[column.key] ?? SKIP;
+                return (
+                  <div key={column.key} className="grid grid-cols-[1fr_1.2fr] items-center gap-3">
+                    <div className="min-w-0">
+                      <Label htmlFor={`csv-map-${column.key}`} className="truncate">{label}</Label>
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        Qabul qilinadi: {column.aliases.join(", ")}
+                      </p>
+                    </div>
+                    <Select
+                      value={value}
+                      onValueChange={(next) =>
+                        setMapping((current) =>
+                          current ? { ...current, choice: { ...current.choice, [column.key]: next } } : current,
+                        )
+                      }
+                    >
+                      <SelectTrigger className="w-full" id={`csv-map-${column.key}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent position="popper">
+                        <SelectItem value={SKIP}>— o'tkazib yuborish —</SelectItem>
+                        {mapping.fields.map((field) => (
+                          <SelectItem key={field} value={field}>{field}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                );
+              })}
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Faylda {mapping.raw.length} ta qator, {mapping.fields.length} ta ustun topildi.
+            </p>
+
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => setMapping(null)} disabled={busy === "preview"}>
+                Bekor
+              </Button>
+              <Button
+                data-testid="csv-mapping-continue"
+                onClick={() => { void runPreview(mapping); }}
+                disabled={busy === "preview" || Object.values(mapping.choice).every((field) => field === SKIP)}
+              >
+                {busy === "preview" ? "Tekshirilmoqda..." : "Tekshirish"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       {preview && (
@@ -287,6 +407,16 @@ export default function CsvToolbar({
               <Button variant="secondary" onClick={() => setPreview(null)} disabled={busy === "import"}>
                 Bekor
               </Button>
+              {lastMapping && (
+                <Button
+                  variant="outline"
+                  data-testid="csv-remap"
+                  disabled={busy === "import"}
+                  onClick={() => { setPreview(null); setMapping(lastMapping); }}
+                >
+                  Ustunlarni o'zgartirish
+                </Button>
+              )}
               <Button onClick={() => void handleCommit()} disabled={preview.valid === 0 || busy === "import"}>
                 {busy === "import" ? "..." : `Importni boshlash (${preview.valid})`}
               </Button>
