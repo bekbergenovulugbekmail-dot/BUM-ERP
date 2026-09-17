@@ -57,6 +57,25 @@ export function apiUrl(path: string, query?: QueryParams): string {
   return buildUrl(path, companyContext ? { ...query, bumCompany: companyContext } : query);
 }
 
+const DEVICE_KEY = "bum:device-id";
+
+/**
+ * Shu brauzer/ilovaning barqaror identifikatori. Parol emas va sir emas — u faqat "bu qaysi qurilma"
+ * degan savolga javob beradi; kirish huquqini qurilmaning TASDIQLANGANI beradi.
+ * Saqlab bo'lmasa (xususiy rejim) — har safar yangisi, ya'ni har kirishda tasdiq so'raladi.
+ */
+function deviceId(): string {
+  try {
+    const saved = localStorage.getItem(DEVICE_KEY);
+    if (saved) return saved;
+    const fresh = crypto.randomUUID().replace(/-/g, "");
+    localStorage.setItem(DEVICE_KEY, fresh);
+    return fresh;
+  } catch {
+    return crypto.randomUUID().replace(/-/g, "");
+  }
+}
+
 /** `company` — so'rov biznesi (undefined — joriy tab konteksti, null — saqlangan aktiv kompaniya). */
 type RequestOptions = { query?: QueryParams; body?: unknown; signal?: AbortSignal; company?: string | null };
 
@@ -66,6 +85,8 @@ async function send(method: string, path: string, options: RequestOptions): Prom
   if (options.body !== undefined) headers["content-type"] = "application/json";
   const company = options.company === undefined ? companyContext : options.company;
   if (company) headers[COMPANY_HEADER] = company;
+  // Qurilma identifikatori — yangi qurilmadan kirishni egasi tasdiqlashi uchun (sir emas)
+  headers["x-device-id"] = deviceId();
   try {
     response = await fetch(buildUrl(path, options.query), {
       method,

@@ -37,6 +37,7 @@ import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
 import { computeLine } from "../../shared/line-amounts.js";
+import { effectiveTaxRate, isTaxEnabled } from "../company/tax-settings.service.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
 import { unitFactorToBase } from "../catalog/conversions.js";
 import { effectivePermissions, type TenantContext } from "../company/tenant.js";
@@ -119,6 +120,7 @@ async function prepareItems(tx: Tx, companyId: string, items: OrderItemInput[], 
     salesPrice: string | null;
     salesCurrency: string | null;
   })[] = [];
+  const taxOn = await isTaxEnabled(tx, companyId);
   for (const item of items) {
     const product = byId.get(item.productId);
     if (!product) throw badRequest("Mahsulot topilmadi");
@@ -133,7 +135,9 @@ async function prepareItems(tx: Tx, companyId: string, items: OrderItemInput[], 
 
     // Ta'minotchi narxi soliqsiz — soliq ustiga qo'shiladi; qator summasi o'z valyutasida,
     // buyurtma jami asosiy valyutada (buyurtma kunidagi kurs bilan)
-    const amounts = computeLine({ ...item, quantity: item.orderedQty });
+    // Soliq kompaniya sozlamasida o'chirilgan bo'lsa — stavka 0
+    const taxRate = effectiveTaxRate(item.taxRate ?? "0", taxOn);
+    const amounts = computeLine({ ...item, taxRate, quantity: item.orderedQty });
     const inBase = (minor: bigint) => rescale(minor * toMinor(rate, 4), 6, 2);
     subtotal += inBase(amounts.net);
     taxAmount += inBase(amounts.tax);
@@ -143,7 +147,7 @@ async function prepareItems(tx: Tx, companyId: string, items: OrderItemInput[], 
       ...item,
       currency: code === baseCurrency ? null : code,
       exchangeRate: rate,
-      taxRate: item.taxRate ?? "0",
+      taxRate,
       discountPercent: item.discountPercent ?? "0",
       lineTotal: fromMinor(amounts.lineTotal),
       salesPrice: item.salesPrice ?? null,

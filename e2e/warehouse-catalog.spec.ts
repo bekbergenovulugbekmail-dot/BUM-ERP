@@ -4,22 +4,11 @@
  */
 import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
-import { ACCOUNTS, PASSWORD, appPath } from "./_lib/accounts.ts";
-
-async function signIn(page: Page, phone: string) {
-  await page.context().clearCookies();
-  await page.goto("about:blank");
-  await page.goto("/login");
-  await expect(page.locator("#phone")).toBeVisible({ timeout: 30_000 });
-  await page.locator("#phone").fill(phone);
-  await page.locator("#password").fill(PASSWORD);
-  await page.getByRole("button", { name: /kirish/i }).click();
-  await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 });
-}
+import { ACCOUNTS, PASSWORD, appPath, login } from "./_lib/accounts.ts";
 
 test("omborda katalog: tur bo'yicha filtr va xom ashyo qo'shish", async ({ page }) => {
   test.setTimeout(180_000);
-  await signIn(page, ACCOUNTS.owner.phone);
+  await login(page, "owner");
   await page.goto(appPath("warehouse"), { waitUntil: "domcontentloaded" });
 
   await page.getByRole("tab", { name: "Katalog" }).click();
@@ -77,7 +66,7 @@ test("admin panelida 'Chiqish' tugmasi bor va ishlaydi", async ({ page }) => {
 });
 
 async function runAdminLogout(page: Page) {
-  await signIn(page, ACCOUNTS.direktor.phone);
+  await login(page, "direktor");
   await page.goto(appPath("admin"), { waitUntil: "domcontentloaded" });
 
   const logout = page.getByTestId("admin-logout");

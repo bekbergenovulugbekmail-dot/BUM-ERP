@@ -14,7 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
-import { useApiMutation } from "@/lib/query.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { ToggleRow } from "./form-controls.tsx";
 import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
 
 const schema = z.object({
@@ -192,6 +193,43 @@ export default function CompanySection() {
         </form>
       </Form>
       {/* Eski "Ko'p tenantli migratsiya" kartasi olib tashlandi — ma'lumot ko'chirish server CLI orqali (PHASE 15) */}
+
+      <TaxToggle canManage={canManage} />
+    </div>
+  );
+}
+
+/**
+ * Soliqni avtomatik hisoblash. O'chirilsa YANGI sotuv va xarid hujjatlarida soliq 0 bo'ladi
+ * (mahsulotdagi stavka e'tiborga olinmaydi). Eski hujjatlar o'zgarmaydi.
+ */
+function TaxToggle({ canManage }: { canManage: boolean }) {
+  const path = "/api/company/settings";
+  const rows = useApiQuery<{ settings: { key: string; value: string }[] }>(path, { group: "finance" }).data?.settings;
+  const enabled = rows?.find((row) => row.key === "tax.auto")?.value !== "false";
+  const save = useApiMutation(
+    (value: boolean) => api.put(`${path}/tax.auto`, { value: value ? "true" : "false", group: "finance" }),
+    { invalidate: [path] },
+  );
+
+  return (
+    <div className="space-y-2 rounded-xl border border-border p-4">
+      <p className="font-semibold text-sm">Soliq</p>
+      <ToggleRow
+        label="Soliqni avtomatik hisoblash"
+        checked={enabled}
+        disabled={!canManage || save.isPending || rows === undefined}
+        onChange={(value) => {
+          save.mutate(value, {
+            onSuccess: () => toast.success(value ? "Soliq hisoblash yoqildi" : "Soliq hisoblash o'chirildi"),
+            onError: (err) => toast.error(errorMessage(err)),
+          });
+        }}
+      />
+      <p className="text-xs text-muted-foreground">
+        O'chirilsa yangi sotuv va xarid hujjatlarida QQS 0 bo'ladi — mahsulot kartochkasidagi stavka
+        e'tiborga olinmaydi. Ilgari yozilgan hujjatlar o'zgarmaydi.
+      </p>
     </div>
   );
 }

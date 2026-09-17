@@ -588,7 +588,9 @@ describe("Xavfsizlik", () => {
 // ─── 22–24. Modul chegaralari ────────────────────────────────────────────────
 
 describe("Modul chegaralari", () => {
-  const setModule = (key: string, enabled: boolean) => call(owner(), "PUT", `/api/company/modules/${key}`, { enabled });
+  // Modullarni endi faqat platforma admini yoqadi/o'chiradi
+  const setModule = (key: string, enabled: boolean) =>
+    call(adminCookie, "PUT", `/api/platform/companies/${company.companyId}/modules/${key}`, { enabled });
 
   it("22. Moliya moduli o'chirilganda xarajat to'lovi bloklanadi, ma'lumot qoladi", async () => {
     const expenseId = await approvedExpense("100000");

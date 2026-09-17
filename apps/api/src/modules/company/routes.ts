@@ -29,13 +29,16 @@
  *   PUT    /print-settings/labels       etiketka shablonlarini saqlash    (settings.manage)
  */
 import type { FastifyInstance } from "fastify";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { PIN_PATTERN, badRequest, isPermission, type Permission } from "@bum/shared";
+import { PIN_PATTERN, badRequest, forbidden, isPermission, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
-import { withTransaction } from "../../db/transaction.js";
-import { requestMeta } from "../../shared/audit.js";
+import { companyMembers } from "../../db/schema/platform.js";
+import { withTransaction, type DbOrTx } from "../../db/transaction.js";
+import { requestMeta, writeAuditLog } from "../../shared/audit.js";
 import { listAuditLogs } from "../audit/audit-log.service.js";
 import { authOf, requireAuth } from "../auth/guard.js";
+import { listUserDevices, setDeviceStatus } from "../auth/devices.service.js";
 import {
   createEmployee,
   listCompanyMembers,
@@ -141,6 +144,22 @@ const memberPatchBody = z.strictObject({
   additionalLicensePlanId: z.uuid().nullable().optional(),
 });
 const userParams = z.object({ userId: z.uuid() });
+const deviceParams = z.object({ userId: z.uuid(), deviceRowId: z.uuid() });
+
+/** Qurilmalar faqat SHU kompaniyaning xodimi uchun ko'riladi va tasdiqlanadi. */
+async function assertMember(conn: DbOrTx, companyId: string, userId: string) {
+  const [row] = await conn
+    .select({ userId: companyMembers.userId })
+    .from(companyMembers)
+    .where(and(eq(companyMembers.companyId, companyId), eq(companyMembers.userId, userId)))
+    .limit(1);
+  if (!row) throw badRequest("Xodim topilmadi");
+}
+const deviceBody = z.strictObject({
+  status: z.enum(["approved", "revoked"]),
+  /** Egasi qurilmaga tushunarli nom beradi ("Ulugbek telefoni"). */
+  name: z.string().trim().min(1).max(120).optional(),
+});
 const resetPasswordBody = z.object({ newPassword: z.string().min(1).max(256) });
 
 /** Faqat katalogdagi ruxsat nomlari — Convex'da ixtiyoriy satr qabul qilinardi. */
@@ -363,6 +382,45 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
 
   // ─── Sozlamalar ──────────────────────────────────────────────────────────
 
+  // ─── Xodimning ishonchli qurilmalari ─────────────────────────────────────
+  // Login va parolni bilgan begona odam kira olmasligi uchun: yangi qurilmani egasi tasdiqlaydi.
+
+  app.get("/employees/:userId/devices", async (req) => {
+    const { userId } = userParams.parse(req.params);
+    const tenant = await requireTenant(db, authOf(req).user);
+    await requirePermission(db, tenant, "users.manage");
+    await assertMember(db, tenant.company.id, userId);
+    return { devices: await listUserDevices(db, userId) };
+  });
+
+  app.post("/employees/:userId/devices/:deviceRowId", async (req) => {
+    const { userId, deviceRowId } = deviceParams.parse(req.params);
+    const body = deviceBody.parse(req.body);
+    const { user } = authOf(req);
+    const device = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, user);
+      await requirePermission(tx, tenant, "users.manage");
+      await assertMember(tx, tenant.company.id, userId);
+      const updated = await setDeviceStatus(tx, { deviceRowId, userId, status: body.status, name: body.name, actorId: user.id });
+      if (!updated) throw badRequest("Qurilma topilmadi");
+      await writeAuditLog(
+        {
+          userId: user.id,
+          userName: user.name,
+          companyId: tenant.company.id,
+          action: body.status === "approved" ? "DEVICE_APPROVED" : "DEVICE_REVOKED",
+          resource: "user_devices",
+          resourceId: deviceRowId,
+          details: { targetUserId: userId, name: updated.name },
+          ...requestMeta(req),
+        },
+        tx,
+      );
+      return updated;
+    });
+    return { device };
+  });
+
   // ─── Modullar ────────────────────────────────────────────────────────────
 
   // Holat — har a'zoga (menyu); tarix — modullarni boshqaruvchiga
@@ -375,19 +433,17 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  /**
+   * Modullarni kompaniyaning o'zi yoqa/o'chira olmaydi — bu faqat platforma admini orqali
+   * (`PUT /api/platform/companies/:companyId/modules/:key`). Kompaniya to'plami ro'yxatdan
+   * o'tishda tanlanadi, keyingi o'zgarish admin qaroriga bog'liq.
+   */
   app.put("/modules/:key", async (req) => {
-    const { key } = moduleParamsSchema.parse(req.params);
-    const { enabled, reason } = moduleChangeBodySchema.parse(req.body);
-    const { user } = authOf(req);
-    return withTransaction(async (tx) => {
-      const tenant = await requireTenantForWrite(tx, user);
-      await requirePermission(tx, tenant, "modules.manage");
-      return setCompanyModule(
-        tx,
-        { companyId: tenant.company.id, key, enabled, reason, actor: { id: user.id, name: user.name }, source: "owner" },
-        requestMeta(req),
-      );
-    });
+    moduleParamsSchema.parse(req.params);
+    moduleChangeBodySchema.parse(req.body);
+    throw forbidden(
+      "Modullar platforma administratori orqali ochiladi. Kerakli modulni so'rab murojaat qiling.",
+    );
   });
 
   app.get("/settings", async (req) => {

@@ -5,6 +5,7 @@ import {
   ShoppingCart, Search, Trash2, Plus, Minus, CreditCard, Banknote,
   Smartphone, X, Power, Package, Calculator, ScanLine,
   UserPlus, UserRound, Wallet, HandCoins, Gift,
+  Printer,
 } from "lucide-react";
 import type { CashbackSettings, PosLayout, PosPanelSide } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
@@ -20,6 +21,7 @@ import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import ShiftOpenDialog from "./_components/shift-open-dialog.tsx";
 import ShiftCloseDialog from "./_components/shift-close-dialog.tsx";
 import SessionSummaryDialog from "./_components/session-summary-dialog.tsx";
+import { autoPrintOverride, setAutoPrintOverride } from "./_lib/auto-print.ts";
 import POSReceipt from "./_components/pos-receipt.tsx";
 import CustomerPicker from "./_components/customer-picker.tsx";
 import CustomerPaymentDialog from "./_components/customer-payment-dialog.tsx";
@@ -165,6 +167,8 @@ export default function POSPage() {
   const [cartOpen, setCartOpen] = useState(false);
   /** Faol smena tafsiloti (terminal kesimi bilan). */
   const [sessionDetail, setSessionDetail] = useState(false);
+  /** Chekni avtomatik chop etish — shu qurilma uchun (kompaniya sozlamasi sukut qiymat). */
+  const [autoPrint, setAutoPrint] = useState(() => autoPrintOverride() ?? true);
   /** So'rov kaliti: ikki marta bosish yoki tarmoq qayta urinishida server ikkinchi chek yozmaydi; muvaffaqiyatdan keyin yangilanadi. */
   const requestIdRef = useRef<string | null>(null);
 
@@ -843,7 +847,30 @@ export default function POSPage() {
               {fmt(num(shift.totalSales))}
             </button>
           )}
-          <div className="ml-auto flex gap-2">
+          <div className="ml-auto flex items-center gap-2">
+            {/* Chekni avtomatik chop etish — kassirning o'zi shu qurilma uchun yoqadi/o'chiradi */}
+            <button
+              type="button"
+              data-testid="auto-print-toggle"
+              aria-pressed={autoPrint}
+              title={autoPrint ? "Chek avtomatik chiqadi" : "Chek avtomatik chiqmaydi"}
+              onClick={() => {
+                const next = !autoPrint;
+                setAutoPrint(next);
+                setAutoPrintOverride(next);
+                toast.success(next ? "Chek avtomatik chiqadi" : "Chek avtomatik chiqmaydi");
+              }}
+              className={cn(
+                "flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors cursor-pointer",
+                autoPrint
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                  : "border-border text-muted-foreground hover:bg-accent",
+              )}
+            >
+              <Printer className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Avto chek</span>
+              <span>{autoPrint ? "yoqiq" : "o'chiq"}</span>
+            </button>
             {shift && (
               <Button size="sm" variant="secondary" onClick={() => setClosingShift(shift)}>
                 <Power className="h-3.5 w-3.5 mr-1" /> Smena yopish

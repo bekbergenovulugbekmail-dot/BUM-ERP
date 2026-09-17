@@ -26,6 +26,8 @@ type Company = Awaited<ReturnType<typeof createCompany>>;
 let app: FastifyInstance;
 let company: Company;
 let ownerId: string;
+/** Platforma admini — modullarni faqat u yoqadi/o'chiradi. */
+let adminCookie: string;
 const originalSms = smsProvider.client;
 const today = new Date().toISOString().slice(0, 10);
 
@@ -43,6 +45,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await resetDatabase();
   const admin = await signedIn(app, { isPlatformAdmin: true });
+  adminCookie = admin.cookie;
   company = await createCompany(app, admin.cookie, { name: "Xavfsizlik do'koni", includedLicenses: 10 });
   ownerId = (await db.select({ id: users.id }).from(users).where(eq(users.phone, company.owner.phone)))[0]!.id;
 });
@@ -754,7 +757,7 @@ describe("Xavfsizlik: ombor, moliya ma'lumoti, HR va modul chegaralari", () => {
     const hasLeaveAlert = async () =>
       ((await call(owner(), "GET", "/api/notifications")).json().notifications as { relatedType: string | null }[]).some((item) => item.relatedType === "leaves");
     expect(await hasLeaveAlert()).toBe(true);
-    const off = await call(owner(), "PUT", "/api/company/modules/hr", { enabled: false });
+    const off = await call(adminCookie, "PUT", `/api/platform/companies/${company.companyId}/modules/hr`, { enabled: false });
     expect(off.statusCode, off.body).toBeLessThan(300);
     expect(await hasLeaveAlert()).toBe(false);
   });
@@ -835,7 +838,7 @@ describe("Xavfsizlik: fayllar", () => {
   it("HR moduli o'chirilsa xodim surati fayl yo'llari yopiladi", async () => {
     const photoUrl = () => call(company.ownerCookie, "GET", `/api/files/url?kind=employee-photo&targetId=${randomUUID()}`);
     expect((await photoUrl()).statusCode).toBe(404);
-    const off = await call(company.ownerCookie, "PUT", "/api/company/modules/hr", { enabled: false });
+    const off = await call(adminCookie, "PUT", `/api/platform/companies/${company.companyId}/modules/hr`, { enabled: false });
     expect(off.statusCode, off.body).toBeLessThan(300);
     const closed = await photoUrl();
     expect(closed.statusCode, closed.body).toBe(403);

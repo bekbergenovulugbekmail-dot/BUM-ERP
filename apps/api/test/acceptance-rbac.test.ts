@@ -48,7 +48,8 @@ const ENDPOINTS: { method: "GET" | "POST" | "PUT"; url: string; permission: stri
   { method: "GET", url: "/api/company/audit-logs", permission: "audit.view" },
   // Bosh sahifa modul guardidan ozod, lekin ruxsat talab qiladi: `analytics.view` yo'q rolda — 403
   { method: "GET", url: "/api/analytics/dashboard", permission: "analytics.view" },
-  { method: "PUT", url: "/api/company/modules/hr", permission: "modules.manage", payload: { enabled: true } },
+  // Modullar endi kompaniyaning o'z yo'li orqali umuman o'zgarmaydi (faqat platforma admini) —
+  // shuning uchun bu endpoint RBAC ro'yxatidan chiqarildi; taqiq `modules.test.ts` da tekshiriladi.
   {
     method: "POST",
     url: "/api/sales/customers/import",

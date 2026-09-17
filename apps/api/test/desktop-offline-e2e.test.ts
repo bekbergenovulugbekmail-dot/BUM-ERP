@@ -44,6 +44,24 @@ beforeEach(async () => {
   const adminCookie = (await signedIn(app, { isPlatformAdmin: true })).cookie;
   company = await createCompany(app, adminCookie, { name: "Bonnu" });
   mainWarehouseId = (await db.select().from(warehouses).where(eq(warehouses.companyId, company.companyId)))[0]!.id;
+
+  // Kassada kitob qoldig'i bo'lmasa chiqim rad etiladi (manfiy qoldiq hech qayerda bo'lmaydi).
+  // Ish kuni boshida kassada pul bo'lishi — haqiqiy holat.
+  const accounts = await app.inject({
+    method: "GET",
+    url: "/api/finance/cash-accounts",
+    headers: { cookie: company.ownerCookie },
+  });
+  const mainCash = (accounts.json().cashAccounts as { id: string; type: string; isDefault: boolean }[]).find(
+    (row) => row.type === "cash" && row.isDefault,
+  )!;
+  const funded = await app.inject({
+    method: "POST",
+    url: `/api/finance/cash-accounts/${mainCash.id}/set-balance`,
+    headers: { cookie: company.ownerCookie },
+    payload: { balance: "5000000", reason: "Ish kuni boshidagi kassa qoldig'i" },
+  });
+  expect(funded.statusCode, funded.body).toBe(200);
 });
 
 /** Kassa ↔ server "tarmog'i": o'chirish, push javobini yo'qotish (server bajaradi, qurilma javob olmaydi). */

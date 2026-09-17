@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import { CheckCircle, Printer, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
+import { autoPrintEnabled } from "../_lib/auto-print.ts";
 import { generateReceiptPDF } from "@/lib/pdf/receipt-pdf.ts";
 import { useActiveCompany } from "@/hooks/use-company.ts";
 import { usePrintSettings } from "@/hooks/use-print-settings.ts";
@@ -104,7 +105,8 @@ export default function POSReceipt({
   useEffect(() => {
     if (!templateLoaded || autoPrinted.current) return;
     autoPrinted.current = true;
-    if (template.autoPrint) handlePrint();
+    // Kassada o'chirilgan bo'lsa chop etilmaydi (qurilma tanlovi kompaniya sozlamasidan ustun)
+    if (autoPrintEnabled(template.autoPrint)) handlePrint();
   });
 
   const handleDownloadPDF = () => {

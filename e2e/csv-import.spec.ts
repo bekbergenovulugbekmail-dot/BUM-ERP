@@ -6,21 +6,10 @@
  * mavjud ma'lumot o'chirilmaydi va o'zgartirilmaydi.
  */
 import { expect, test, type Page } from "@playwright/test";
-import { ACCOUNTS, PASSWORD, appPath } from "./_lib/accounts.ts";
-
-async function signIn(page: Page, phone: string) {
-  await page.context().clearCookies();
-  await page.goto("about:blank");
-  await page.goto("/login");
-  await expect(page.locator("#phone")).toBeVisible({ timeout: 30_000 });
-  await page.locator("#phone").fill(phone);
-  await page.locator("#password").fill(PASSWORD);
-  await page.getByRole("button", { name: /kirish/i }).click();
-  await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 });
-}
+import { ACCOUNTS, PASSWORD, appPath, login } from "./_lib/accounts.ts";
 
 async function openCustomers(page: Page) {
-  await signIn(page, ACCOUNTS.owner.phone);
+  await login(page, "owner");
   await page.goto(appPath("sales"), { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "Mijozlar" }).first().click();
   await expect(page.getByTestId("csv-import")).toBeVisible({ timeout: 30_000 });
@@ -97,7 +86,7 @@ test("fayl sarlavhalari boshqacha bo'lsa — ustunlar qo'lda moslanadi va import
 
 test("mahsulotlar sahifasida ham shablon va moslash bor", async ({ page }) => {
   test.setTimeout(120_000);
-  await signIn(page, ACCOUNTS.owner.phone);
+  await login(page, "owner");
   await page.goto(appPath("products"), { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("csv-import")).toBeVisible({ timeout: 30_000 });
 

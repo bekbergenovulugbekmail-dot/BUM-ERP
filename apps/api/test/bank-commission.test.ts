@@ -53,6 +53,12 @@ const ledger = async (code: string) =>
   (await db.select({ balance: accounts.balance }).from(accounts).where(and(eq(accounts.companyId, company.companyId), eq(accounts.code, code))))[0]?.balance ?? null;
 const balanceOf = async (id: string) => (await db.select({ balance: cashAccounts.balance }).from(cashAccounts).where(eq(cashAccounts.id, id)))[0]!.balance;
 const debtOf = async (id: string) => (await db.select({ totalDebt: suppliers.totalDebt }).from(suppliers).where(eq(suppliers.id, id)))[0]!.totalDebt;
+/** Kirim/chiqim maqsadi endi majburiy — birinchi faol xarajat moddasi. */
+async function expenseAccount() {
+  const res = await call(owner(), "GET", "/api/finance/accounts?type=expense");
+  return (res.json().accounts as { id: string; isActive: boolean }[]).find((row) => row.isActive)!.id;
+}
+
 const bankFees = () =>
   db
     .select({ amount: expenses.amount, status: expenses.status, referenceType: expenses.referenceType, description: expenses.description })
@@ -180,7 +186,7 @@ describe("Bank komissiyasi", () => {
     // Bankdan kassaga: 100 000 + 1 000; qo'lda chiqim 50 000 + 500
     expect((await call(owner(), "POST", "/api/finance/cash-transfers", { fromCashAccountId: mainBank, toCashAccountId: mainCash, amount: "100000" })).statusCode).toBe(201);
     expect([await balanceOf(mainBank), await balanceOf(mainCash)]).toEqual(["788000.00", "100000.00"]);
-    expect((await call(owner(), "POST", "/api/finance/cash-transactions", { cashAccountId: mainBank, type: "out", amount: "50000", description: "Bank xizmati" })).statusCode).toBe(201);
+    expect((await call(owner(), "POST", "/api/finance/cash-transactions", { cashAccountId: mainBank, type: "out", amount: "50000", description: "Bank xizmati", counterAccountId: await expenseAccount() })).statusCode).toBe(201);
     expect(await balanceOf(mainBank)).toBe("737500.00");
     expect((await bankFees()).map((row) => row.amount).sort()).toEqual(["1000.00", "1000.00", "10000.00", "500.00"].sort());
     expect(await ledger("5800")).toBe("12500.00");

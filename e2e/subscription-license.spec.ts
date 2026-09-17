@@ -6,21 +6,10 @@
  * shunda demo kompaniya holati oldingiday qoladi. Mavjud ma'lumot o'chirilmaydi.
  */
 import { expect, test, type Page } from "@playwright/test";
-import { ACCOUNTS, PASSWORD, appPath } from "./_lib/accounts.ts";
+import { ACCOUNTS, PASSWORD, appPath, login } from "./_lib/accounts.ts";
 
 /** Yaratilgan test foydalanuvchilarining telefonlari — oxirida faolsizlantiriladi. */
 const created: string[] = [];
-
-async function signIn(page: Page, phone: string) {
-  await page.context().clearCookies();
-  await page.goto("about:blank");
-  await page.goto("/login");
-  await expect(page.locator("#phone")).toBeVisible({ timeout: 30_000 });
-  await page.locator("#phone").fill(phone);
-  await page.locator("#password").fill(PASSWORD);
-  await page.getByRole("button", { name: /kirish/i }).click();
-  await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 });
-}
 
 /** "Bo'sh" katagidagi raqam. */
 async function freeLicenses(page: Page) {
@@ -43,7 +32,7 @@ test.afterAll(async ({ browser }) => {
   if (created.length === 0) return;
   const context = await browser.newContext();
   const page = await context.newPage();
-  await signIn(page, ACCOUNTS.owner.phone);
+  await login(page, "owner");
   const list = await page.request.get("/api/company/employees");
   const { employees } = (await list.json()) as { employees: { id: string; phone: string }[] };
   for (const phone of created) {
@@ -56,7 +45,7 @@ test.afterAll(async ({ browser }) => {
 
 test("obuna sahifasida foydalanuvchi qo'shish litsenziya talab qiladi", async ({ page }) => {
   test.setTimeout(180_000);
-  await signIn(page, ACCOUNTS.owner.phone);
+  await login(page, "owner");
   await page.goto(appPath("subscription"), { waitUntil: "domcontentloaded" });
 
   const addButton = page.getByTestId("add-user");

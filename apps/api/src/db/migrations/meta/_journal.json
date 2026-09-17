@@ -400,6 +400,13 @@
       "when": 1789644454535,
       "tag": "0056_product_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1789652758286,
+      "tag": "0057_user_devices",
+      "breakpoints": true
     }
   ]
 }

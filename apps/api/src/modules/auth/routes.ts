@@ -17,11 +17,12 @@
  *   (yangi)                   → POST /unlock       shu sessiyani PIN bilan ochish (doim 200, { success, reason })
  *   (yangi)                   -> GET  /sessions, POST /sessions/revoke-others, DELETE /sessions/:sessionId — o'z qurilmalari
  */
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { requestMeta, writeAuditLog } from "../../shared/audit.js";
+import { deviceError, registerDevice } from "./devices.service.js";
 import { smsProvider } from "../../shared/sms.js";
 import { changeOwnPassword, verifyCurrentPassword } from "../users/user-admin.service.js";
 import { confirmPasswordReset, requestPasswordReset } from "./password-reset.service.js";
@@ -47,6 +48,18 @@ import {
   setSessionCookie,
   validateSession,
 } from "./session.js";
+
+/**
+ * Qurilma identifikatori: mijoz `x-device-id` sarlavhasida yuboradi (brauzerda saqlanadi).
+ * Yuborilmasa — eski mijoz, qurilma tekshiruvi qo'llanmaydi.
+ */
+function deviceIdOf(req: FastifyRequest): string | null {
+  const raw = req.headers["x-device-id"];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (!value) return null;
+  const trimmed = value.trim();
+  return /^[A-Za-z0-9_-]{8,64}$/.test(trimmed) ? trimmed : null;
+}
 
 const loginBody = z.object({
   phone: z.string().min(1).max(32),
@@ -81,6 +94,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const meta = requestMeta(req);
 
     const auth = await authenticate(body.phone, body.password, meta);
+    // Parol to'g'ri bo'lsa ham qurilma tasdiqlanmagan bo'lsa kirish berilmaydi
+    const device = {
+      deviceId: deviceIdOf(req),
+      userAgent: meta.userAgent,
+      ipAddress: meta.ipAddress,
+    };
+    // Qurilma yozuvi ALOHIDA tranzaksiyada saqlanadi — rad etilsa ham egasi uni ro'yxatda ko'radi
+    const decision = await withTransaction((tx) => registerDevice(tx, auth.user.id, device));
+    if (decision !== "allowed") throw deviceError(decision === "revoked");
+
     const { session, me } = await withTransaction((tx) => startSession(tx, auth, meta));
 
     setSessionCookie(reply, session.token, session.expiresAt);

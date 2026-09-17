@@ -28,6 +28,19 @@ export async function login(page: Page, who: AccountKey) {
   // Har safar toza sessiya: eski cookie qolsa ilova /login dan o'zi chetga burib yuboradi
   // va SPA yo'nalishi `/login/login` ga aylanib qolishi mumkin (testlar orasidagi flake).
   await page.context().clearCookies();
+  // Har test yangi brauzer ochadi — qurilma identifikatori bo'lmasa har kirish "yangi qurilma"
+  // bo'lib tasdiq so'rardi. Haqiqiy foydalanuvchida bu identifikator brauzerda saqlanadi,
+  // shuning uchun testda ham hisob bo'yicha BARQAROR qiymat qo'yamiz.
+  await page.context().addInitScript(
+    (value) => {
+      try {
+        localStorage.setItem("bum:device-id", value);
+      } catch {
+        // xususiy rejim — saqlanmaydi
+      }
+    },
+    `e2e${who}device0001`.replace(/[^A-Za-z0-9_-]/g, ""),
+  );
   await page.goto("about:blank");
   await page.goto("/login");
   await expect(page.locator("#phone")).toBeVisible({ timeout: 30_000 });

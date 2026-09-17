@@ -1122,6 +1122,28 @@ export default function PosScreen({
               }}
             />
           </form>
+          {/* Chekni avtomatik chop etish — kassir shu yerdan yoqadi/o'chiradi (Sozlamalarga kirmasdan) */}
+          <button
+            type="button"
+            data-testid="auto-print-toggle"
+            aria-pressed={prefs?.autoPrint ?? false}
+            title={prefs?.autoPrint ? "Chek avtomatik chiqadi" : "Chek avtomatik chiqmaydi"}
+            disabled={!prefs}
+            onClick={() => {
+              if (!prefs) return;
+              const next = { ...prefs, autoPrint: !prefs.autoPrint };
+              setPrefs(next);
+              void call("device:save-prefs", next).then(onPrefs, () => setPrefs(prefs));
+            }}
+            className={`pos-motion flex h-(--pos-tap-size) items-center gap-1.5 rounded-(--radius) border px-3 text-sm font-semibold whitespace-nowrap shadow-pos ${
+              prefs?.autoPrint
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border bg-card text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            <Printer className="h-4 w-4" />
+            Avto chek: {prefs?.autoPrint ? "yoqiq" : "o'chiq"}
+          </button>
           <div className="flex h-(--pos-tap-size) rounded-(--radius) border border-border bg-card p-1 shadow-pos" role="tablist" aria-label="Mahsulotlar">
             {(["quick", "all"] as const).map((key) => (
               <button

@@ -217,7 +217,12 @@ const cashTransactionBody = z.strictObject({
   txDate: isoDate.optional(),
   description: z.string().trim().min(1).max(1000),
   category: nullableText(64),
-  counterAccountId: z.uuid().nullable().optional(),
+  /**
+   * Maqsad MAJBURIY: kirim — daromad moddasi, chiqim — xarajat moddasi.
+   * Ilgari ixtiyoriy edi va "Boshqa xarajatlar" ga tushib ketardi — hisobotda nima uchun
+   * pul chiqqani ko'rinmasdi.
+   */
+  counterAccountId: z.uuid(),
 });
 const cashTransferBody = z.strictObject({
   fromCashAccountId: z.uuid(),

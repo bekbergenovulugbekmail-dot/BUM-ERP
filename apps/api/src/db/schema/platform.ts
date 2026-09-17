@@ -12,6 +12,7 @@ import {
   index,
   integer,
   jsonb,
+  pgEnum,
   pgTable,
   text,
   timestamp,
@@ -452,4 +453,47 @@ export const companyMembersRelations = relations(companyMembers, ({ one }) => ({
 
 export const sessionsRelations = relations(sessions, ({ one }) => ({
   user: one(users, { fields: [sessions.userId], references: [users.id] }),
+}));
+
+// ─── Ishonchli qurilmalar ────────────────────────────────────────────────────
+
+/** Qurilma holati: birinchi qurilma avtomatik ishonchli, qolganini biznes egasi tasdiqlaydi. */
+export const userDeviceStatus = pgEnum("user_device_status", ["pending", "approved", "revoked"]);
+
+/**
+ * Login + parolni bilgan begona odam kira olmasligi uchun: har foydalanuvchining kirish qurilmalari
+ * ro'yxatga olinadi. Birinchi qurilma avtomatik ishonchli (hisob ochilganda kimdir kirishi kerak),
+ * keyingilari "tasdiq kutilmoqda" bo'lib qoladi va biznes egasi tasdiqlamaguncha kirish berilmaydi.
+ *
+ * `deviceId` — brauzer/ilova saqlaydigan tasodifiy identifikator (parol emas, sir emas): u faqat
+ * "bu qaysi qurilma" degan savolga javob beradi, kirish huquqini esa tasdiq beradi.
+ */
+export const userDevices = pgTable(
+  "user_devices",
+  {
+    id: pk(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Qurilma brauzerida saqlanadigan identifikator. */
+    deviceId: varchar("device_id", { length: 64 }).notNull(),
+    /** Foydalanuvchiga ko'rinadigan nom ("Ulugbek telefoni"); dastlab User-Agent'dan taxmin qilinadi. */
+    name: varchar("name", { length: 120 }).notNull(),
+    status: userDeviceStatus("status").notNull().default("pending"),
+    userAgent: text("user_agent"),
+    lastIp: varchar("last_ip", { length: 64 }),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("user_device_key").on(t.userId, t.deviceId),
+    index("user_device_status_idx").on(t.userId, t.status),
+  ],
+);
+
+export const userDevicesRelations = relations(userDevices, ({ one }) => ({
+  user: one(users, { fields: [userDevices.userId], references: [users.id] }),
 }));

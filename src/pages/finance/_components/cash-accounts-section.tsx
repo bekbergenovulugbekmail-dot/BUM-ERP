@@ -150,6 +150,8 @@ type CashTransactionBody = {
   amount: string;
   description: string;
   category: string;
+  /** Maqsad — moliya moddasi (majburiy). */
+  counterAccountId: string;
   txDate: string;
 };
 
@@ -194,6 +196,12 @@ export default function CashAccountsSection() {
   // Kassaga bog'lanadigan buxgalteriya hisoblari — faol aktivlar
   const ledgerOptions = useApiQuery<{ accounts: Account[] }>(canManage ? "/api/finance/accounts" : null, { type: "asset" })
     .data?.accounts.filter((account) => account.isActive);
+  // Maqsad ro'yxati: kirim uchun daromad, chiqim uchun xarajat moddalari
+  const purposeOptions = useApiQuery<{ accounts: Account[] }>(
+    txDialog ? "/api/finance/accounts" : null,
+    { type: txDialog === "in" ? "income" : "expense" },
+  ).data?.accounts.filter((account) => account.isActive);
+
   const updateAccount = useApiMutation(
     ({ id, patch }: { id: string; patch: AccountPatch }) => api.patch(`/api/finance/cash-accounts/${id}`, patch),
     { invalidate: ["/api/finance/cash-accounts", "/api/finance/settlements"] },
@@ -212,6 +220,8 @@ export default function CashAccountsSection() {
   const [txAmount, setTxAmount] = useState("");
   const [txDesc, setTxDesc] = useState("");
   const [txCategory, setTxCategory] = useState("boshqa");
+  /** Maqsad (moliya moddasi) — MAJBURIY: kirimda daromad, chiqimda xarajat moddasi. */
+  const [txPurpose, setTxPurpose] = useState("");
 
   const [acctName, setAcctName] = useState("");
   const [acctType, setAcctType] = useState<CashAccountType>("cash");
@@ -227,6 +237,7 @@ export default function CashAccountsSection() {
   const handleTx = async () => {
     if (!selectedAccount || !txDialog) return;
     if (!(toNum(txAmount) > 0)) { toast.error("Summa musbat bo'lishi kerak"); return; }
+    if (!txPurpose) { toast.error("Maqsadni tanlang"); return; }
     try {
       await recordTx.mutateAsync({
         cashAccountId: selectedAccount.id,
@@ -234,10 +245,11 @@ export default function CashAccountsSection() {
         amount: txAmount,
         description: txDesc.trim() || (txDialog === "in" ? "Kirim" : "Chiqim"),
         category: txCategory,
+        counterAccountId: txPurpose,
         txDate: localIsoDate(),
       });
       toast.success(txDialog === "in" ? "Kirim qayd etildi" : "Chiqim qayd etildi");
-      setTxDialog(null); setTxAmount(""); setTxDesc("");
+      setTxDialog(null); setTxAmount(""); setTxDesc(""); setTxPurpose("");
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -497,6 +509,26 @@ export default function CashAccountsSection() {
                 <Input value={txDesc} onChange={(e) => setTxDesc(e.target.value)} placeholder="Nima uchun?" />
               </div>
               <div>
+                <Label htmlFor="cash-purpose">
+                  Maqsad * — {txDialog === "in" ? "daromad moddasi" : "xarajat moddasi"}
+                </Label>
+                <Select value={txPurpose} onValueChange={setTxPurpose}>
+                  <SelectTrigger id="cash-purpose" data-testid="cash-purpose">
+                    <SelectValue placeholder="Tanlang" />
+                  </SelectTrigger>
+                  <SelectContent position="popper">
+                    {(purposeOptions ?? []).map((account) => (
+                      <SelectItem key={account.id} value={account.id}>
+                        {account.code} — {account.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Hisobotda pul nima uchun kirgani/chiqqani shu bo'yicha ko'rinadi.
+                </p>
+              </div>
+              <div>
                 <Label>Kategoriya</Label>
                 <Select value={txCategory} onValueChange={setTxCategory}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -508,7 +540,7 @@ export default function CashAccountsSection() {
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => setTxDialog(null)}>Bekor</Button>
-              <Button onClick={handleTx} disabled={recordTx.isPending}>
+              <Button data-testid="cash-tx-save" onClick={handleTx} disabled={recordTx.isPending || !txPurpose}>
                 {recordTx.isPending ? "..." : "Qayd etish"}
               </Button>
             </DialogFooter>

@@ -43,7 +43,23 @@ beforeEach(async () => {
   const adminCookie = (await signedIn(app, { isPlatformAdmin: true })).cookie;
   company = await createCompany(app, adminCookie, { name: "Bonnu" });
   mainWarehouseId = (await db.select().from(warehouses).where(eq(warehouses.companyId, company.companyId)))[0]!.id;
+  // Kassada kitob qoldig'i bo'lmasa chiqim rad etiladi (manfiy qoldiq hech qayerda bo'lmaydi).
+  // Haqiqiy hayotda ham avval pul kirim bo'ladi, keyin sarflanadi.
+  await fundMainCash("1000000");
 });
+
+/** Asosiy kassaga boshlang'ich qoldiq beradi (qoldiqni to'g'rilash orqali). */
+async function fundMainCash(amount: string) {
+  const list = await web(company.ownerCookie, "GET", "/api/finance/cash-accounts");
+  const main = (list.json().cashAccounts as { id: string; isDefault: boolean; type: string }[]).find(
+    (row) => row.type === "cash" && row.isDefault,
+  )!;
+  const res = await web(company.ownerCookie, "POST", `/api/finance/cash-accounts/${main.id}/set-balance`, {
+    balance: amount,
+    reason: "Sinov uchun boshlang'ich qoldiq",
+  });
+  expect(res.statusCode, res.body).toBe(200);
+}
 
 const web = (cookie: string, method: Method, url: string, payload?: object) =>
   app.inject({ method, url, headers: { cookie }, ...(payload ? { payload } : {}) });

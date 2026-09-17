@@ -45,6 +45,7 @@ import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
 import { computeLine } from "../../shared/line-amounts.js";
+import { effectiveTaxRate, isTaxEnabled } from "../company/tax-settings.service.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
 import { unitFactorToBase } from "../catalog/conversions.js";
 import { effectivePermissions, type TenantContext } from "../company/tenant.js";
@@ -192,6 +193,9 @@ export async function prepareSalesItems(
   }[] = [];
   const priceChanges: PriceChange[] = [];
 
+  // Soliq kompaniya sozlamasida o'chirilgan bo'lsa — yangi hujjatlarda stavka 0
+  const taxOn = await isTaxEnabled(tx, companyId);
+
   for (const item of items) {
     const product = byId.get(item.productId);
     if (!product) throw badRequest("Mahsulot topilmadi");
@@ -231,7 +235,7 @@ export async function prepareSalesItems(
       quantity: item.quantity,
       unitPrice,
       discountPercent,
-      taxRate: product.taxRate,
+      taxRate: effectiveTaxRate(product.taxRate, taxOn),
       taxIncluded: product.taxIncluded,
     });
     subtotal += amounts.net;
@@ -242,7 +246,7 @@ export async function prepareSalesItems(
       unitId,
       quantity: item.quantity,
       unitPrice,
-      taxRate: product.taxRate,
+      taxRate: effectiveTaxRate(product.taxRate, taxOn),
       discountPercent,
       lineTotal: fromMinor(amounts.lineTotal),
       notes: item.notes ?? null,

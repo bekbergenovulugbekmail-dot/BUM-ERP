@@ -3,22 +3,11 @@
  * Faqat qoida yaratiladi — mavjud oyliklar va hujjatlarga tegilmaydi.
  */
 import { expect, test, type Page } from "@playwright/test";
-import { ACCOUNTS, PASSWORD, appPath } from "./_lib/accounts.ts";
-
-async function signIn(page: Page, phone: string) {
-  await page.context().clearCookies();
-  await page.goto("about:blank");
-  await page.goto("/login");
-  await expect(page.locator("#phone")).toBeVisible({ timeout: 30_000 });
-  await page.locator("#phone").fill(phone);
-  await page.locator("#password").fill(PASSWORD);
-  await page.getByRole("button", { name: /kirish/i }).click();
-  await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 });
-}
+import { ACCOUNTS, PASSWORD, appPath, login } from "./_lib/accounts.ts";
 
 test("lavozimga bosqichli KPI qoidasi yoziladi va hisob-kitob ko'rinadi", async ({ page }) => {
   test.setTimeout(180_000);
-  await signIn(page, ACCOUNTS.owner.phone);
+  await login(page, "owner");
   await page.goto(appPath("hr"), { waitUntil: "domcontentloaded" });
 
   await page.getByRole("button", { name: "KPI" }).click();
@@ -62,7 +51,7 @@ test("lavozimga bosqichli KPI qoidasi yoziladi va hisob-kitob ko'rinadi", async 
 
 test("bosqichlar noto'g'ri bo'lsa server rad etadi", async ({ page }) => {
   test.setTimeout(120_000);
-  await signIn(page, ACCOUNTS.owner.phone);
+  await login(page, "owner");
   await page.goto(appPath("hr"), { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "KPI" }).click();
   await expect(page.getByTestId("kpi-add")).toBeVisible({ timeout: 30_000 });

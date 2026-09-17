@@ -2039,7 +2039,7 @@ hech narsa yaratilmaydi). Yangi parallel tizim qo'shilmadi — mavjud oqim obuna
 - brauzerda tasdiqlandi (`e2e/csv-import.spec.ts`): notanish sarlavhali fayl avtomat tanilmaydi,
   qo'lda moslangach import o'tadi.
 
-**Savdo agenti joyi — o'lchov** (`e2e/agent-location.spec.ts`)
+**Savdo agenti joyi — o'lchov** (bir martalik, spec saqlanmadi)
 Demo kompaniyada savdo agenti `sales_reps` yozuvi yo'q edi — seeder endi uni bog'laydi (busiz agent mobil
 ish joyiga kira olmaydi). Haqiqiy Chrome'da ikki brauzer konteksti bilan o'lchandi: agent "ISHNI BOSHLASH"
 bosgandan keyin sessiya 0.4–0.5 s da ochiladi, birinchi lokatsiya serverda 1.1–1.2 s da qabul qilinadi,
@@ -2115,6 +2115,54 @@ lekin sahifa o'sha yerda qolib ketardi — endi kirish sahifasiga o'tkaziladi.
 Brauzerda tekshirildi (`e2e/warehouse-catalog.spec.ts`); test uchun lokal, vaqtinchalik platforma
 admini `apps/api/src/cli/test-platform-admin.ts` orqali beriladi va test oxirida qaytarib olinadi
 (faqat localhost, bootstrap adminga tegmaydi, parol o'zgartirmaydi).
+
+## Qurilma tasdig'i, modul nazorati, soliq va kassa qoidalari (2026-09-17)
+
+**Ishonchli qurilmalar** (migratsiya `0057_user_devices`, faqat qo'shish)
+Login va parolni bilgan begona odam kira olmasligi uchun ikkinchi to'siq: har foydalanuvchining
+kirish qurilmalari ro'yxatga olinadi. BIRINCHI qurilma avtomatik ishonchli, keyingilari
+"tasdiq kutilmoqda" bo'lib qoladi va **biznes egasi tasdiqlamaguncha kirish berilmaydi** —
+parol to'g'ri bo'lsa ham. Bekor qilingan qurilma qayta tasdiq so'raydi.
+- mijoz `x-device-id` sarlavhasini yuboradi (brauzerda saqlanadi, sir emas — huquqni tasdiq beradi);
+  sarlavha yuborilmasa tekshiruv qo'llanmaydi, shuning uchun yangilanmagan eski mijozlar kira oladi;
+- tasdiq kutayotgan qurilma yozuvi ALOHIDA tranzaksiyada saqlanadi — rad etilsa ham egasi ro'yxatda ko'radi;
+- UI: Sozlamalar → Foydalanuvchilar → xodim qatoridagi "Qurilmalar" (nom berish, tasdiqlash, bekor qilish);
+- testlar: `apps/api/test/user-devices.test.ts` (5 ta).
+
+**Modullar faqat platforma administratori orqali**
+Kompaniyaning o'z endpointi (`PUT /api/company/modules/:key`) endi har doim rad etadi va tushuntirish
+qaytaradi; Sozlamalar → Modullar faqat ko'rish rejimida. Kompaniya to'plami ro'yxatdan o'tishda
+tanlanadi (onboarding avvaldan so'raydi) va admin panelidagi "Yangi kompaniya" formasiga ham
+modul tanlovi qo'shildi. Keyingi o'zgarish — admin panelidan.
+
+**Soliqni avtomatik hisoblashni o'chirish**
+Sozlamalar → Kompaniya'da bitta tugma (`tax.auto`). O'chirilsa yangi sotuv va xarid hujjatlarida
+stavka 0 bo'ladi (mahsulotdagi qiymat e'tiborga olinmaydi). Eski hujjatlar o'zgarmaydi.
+
+**Kassa kirim/chiqim maqsadi majburiy**
+`counterAccountId` endi majburiy: kirim — daromad moddasi, chiqim — xarajat moddasi. Ilgari ixtiyoriy
+edi va jim "Boshqa xarajatlar" ga tushardi, hisobotda pul nima uchun chiqqani ko'rinmasdi.
+
+**Manfiy kassa qoldig'i hech qayerda bo'lmaydi**
+`allowOverdraft` imtiyozi olib tashlandi — oflayn kassa sinxroni ham istisno emas. Ilgari oflayn
+xarid to'lovi kitobdagi qoldiq yetmasa ham yozilardi; aynan shu production'da `-77 520 so'm` ga
+olib kelgan. Endi bunday amal rad etiladi va kassada nomuvofiqlik bo'lib ko'rinadi.
+Diqqat: smenaning boshlang'ich naqdi kassa hisobiga yozilmaydi — kassadan chiqim qilish uchun
+kitobda qoldiq bo'lishi kerak (kerak bo'lsa "Qoldiqni to'g'rilash" bilan kiritiladi).
+
+**Kassada avto chek tugmasi** — web POS va desktop kassaning yuqori panelida, mahsulotlar tabi yonida.
+Web'da tanlov shu brauzer uchun saqlanadi (kompaniya sozlamasi sukut qiymat bo'lib qoladi),
+desktopda qurilma sozlamasiga yoziladi.
+
+**Android release imzo kaliti — YARATILDI**
+`apps/mobile/android/bum-erp-release.jks` (RSA 4096, 10 000 kun), parollar `keystore.properties` da —
+ikkalasi ham gitignore'da va **egasining zaxirasida saqlanishi shart** (yo'qolsa ilovani yangilab bo'lmaydi).
+`gradle.properties` dagi `bumVersionCode`/`bumVersionName` dan versiya olinadi — har relizda oshiriladi.
+Imzolangan APK qurildi va `apksigner` bilan tekshirildi (V2 imzo).
+Qolgan ish: serverda Android relizlarini saqlash va ilovadan yangilanishni taklif qilish.
+
+**Regressiya:** API 116 fayl / 594 test, web 19 / 81, desktop 9 / 57, brauzer 37 test (9 fayl) —
+hammasi o'tdi. tsc (web, API, desktop) va lint toza. Migratsiyalar `0055`–`0057` — faqat qo'shish.
 
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi

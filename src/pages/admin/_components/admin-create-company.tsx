@@ -10,6 +10,14 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import {
+  DEFAULT_MODULE_SELECTION,
+  MODULE_KEYS,
+  MODULE_REGISTRY,
+  withModuleDependencies,
+  withoutModule,
+  type ModuleKey,
+} from "@bum/shared";
 import { toast } from "sonner";
 import {
   Building2, PlusCircle, Phone, Lock, Eye, EyeOff,
@@ -73,6 +81,18 @@ export default function AdminCreateCompany() {
     { invalidate: ["/api/platform"] },
   );
   const [showPw, setShowPw] = useState(false);
+  /**
+   * Qaysi modullar bilan ishlaydi — kompaniya yaratilayotganda shu yerda belgilanadi.
+   * Keyinchalik o'zgartirish faqat admin panelidan (kompaniya o'zi yoqa olmaydi).
+   */
+  const [modules, setModules] = useState<ModuleKey[]>(() => [...DEFAULT_MODULE_SELECTION]);
+  const toggleModule = (key: ModuleKey) =>
+    setModules((current) =>
+      // Bog'liq modullar avtomatik qo'shiladi/olib tashlanadi (masalan kassa → sotuv)
+      current.includes(key)
+        ? withoutModule(current, key)
+        : withModuleDependencies([...current, key]),
+    );
   const [created, setCreated] = useState<{ companyName: string; phone: string; password: string; slug: string } | null>(null);
 
   const {
@@ -93,6 +113,7 @@ export default function AdminCreateCompany() {
         taxId:     optional(values.taxId),
         address:   optional(values.address),
         city:      optional(values.city),
+        modules,
         owner: {
           phone:    values.ownerPhone.trim(),
           password: values.ownerPassword,
@@ -275,8 +296,37 @@ export default function AdminCreateCompany() {
                 {/* API'da yo'q: mavjud foydalanuvchini egasi qilib biriktirish — egasi har doim yangi akkaunt */}
               </div>
 
+              {/* Modullar — kompaniya qaysi bo'limlar bilan ishlaydi */}
+              <div className="space-y-2" data-testid="create-company-modules">
+                <Label className={labelClass}>Modullar — kompaniya qaysi bo'limlardan foydalanadi</Label>
+                <div className="flex flex-wrap gap-2">
+                  {MODULE_KEYS.map((key) => {
+                    const on = modules.includes(key);
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => toggleModule(key)}
+                        className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                          on
+                            ? "border-indigo-400/60 bg-indigo-500/20 text-indigo-200"
+                            : "border-white/15 text-white/50 hover:bg-white/10"
+                        }`}
+                      >
+                        {MODULE_REGISTRY[key].name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-white/40">
+                  Keyinchalik modul kerak bo'lsa — shu panelning "Kompaniyalar" bo'limidan ochiladi.
+                  Kompaniya o'zi yoqa olmaydi.
+                </p>
+              </div>
+
               <div className="flex justify-end pt-1">
-                <Button type="submit" disabled={createCompany.isPending} className="gap-2">
+                <Button type="submit" disabled={createCompany.isPending || modules.length === 0} className="gap-2">
                   {createCompany.isPending ? (
                     <><span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Yaratilmoqda...</>
                   ) : (

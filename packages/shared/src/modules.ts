@@ -158,6 +158,25 @@ export function withModuleDependencies(selected: readonly ModuleKey[]): ModuleKe
   return MODULE_KEYS.filter((key) => result.has(key));
 }
 
+/**
+ * Modulni olib tashlash — unga (bilvosita ham) bog'liq tanlangan modullar bilan birga.
+ * Masalan "Sotuv" o'chirilsa, unga tayanadigan "Kassa" ham tanlovdan chiqadi.
+ */
+export function withoutModule(selected: readonly ModuleKey[], key: ModuleKey): ModuleKey[] {
+  const removed = new Set<ModuleKey>([key]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const candidate of selected) {
+      if (!removed.has(candidate) && MODULE_REGISTRY[candidate].dependsOn.some((dependency) => removed.has(dependency))) {
+        removed.add(candidate);
+        grew = true;
+      }
+    }
+  }
+  return selected.filter((candidate) => !removed.has(candidate));
+}
+
 export const DEFAULT_MODULE_SELECTION: readonly ModuleKey[] = MODULE_KEYS.filter((key) => MODULE_REGISTRY[key].defaultEnabled);
 
 /** Kompaniya modullari holati: yozuv yo'q — yoqilgan (modullar joriy etilgunga qadar ochilgan kompaniyalar). */

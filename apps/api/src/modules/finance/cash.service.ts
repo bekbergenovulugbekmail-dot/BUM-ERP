@@ -161,8 +161,9 @@ export type CashMove = {
   /** Summa qaysi valyutada; kassa shu valyutada bo'lishi shart. Standart — asosiy valyuta. */
   currency?: string;
   /**
-   * Faqat desktop kassaning offline amali sinxronida: pul jismonan berilgan — hisobdagi qoldiq yetmasa ham chiqim
-   * yoziladi (qoldiq manfiy). Boshqa hollarda qoldiq manfiy bo'lmaydi.
+   * ESKIRGAN — endi e'tiborga olinmaydi. Ilgari oflayn kassa sinxroni qoldiqni manfiyga tushira olardi;
+   * bu hisobotda bo'lmagan pulni ko'rsatardi. Endi qoldiq hech qayerda manfiy bo'lmaydi: yetmasa amal rad etiladi
+   * va oflayn kassada nomuvofiqlik sifatida qayd etiladi (kassir ko'rib chiqadi).
    */
   allowOverdraft?: boolean;
 };
@@ -215,7 +216,9 @@ export async function recordCashTransaction(tx: Tx, companyId: string, createdBy
     .where(
       and(
         eq(cashAccounts.id, account.id),
-        move.allowOverdraft && move.type === "out" ? undefined : sql`${cashAccounts.balance} + ${delta}::numeric >= 0`,
+        // Manfiy qoldiq HECH QAYERDA bo'lmaydi — oflayn kassa sinxroni ham istisno emas:
+        // kassada bo'lmagan pul hujjatda ham ko'rinmasligi kerak.
+        sql`${cashAccounts.balance} + ${delta}::numeric >= 0`,
       ),
     )
     .returning({ balance: cashAccounts.balance });

@@ -56,7 +56,12 @@ const nameOf = (key: string) => MODULE_REGISTRY[key as ModuleKey]?.name ?? key;
 
 export default function ModulesSection() {
   const { can } = usePermissions();
-  const canManage = can("modules.manage");
+  /**
+   * Modullarni kompaniyaning o'zi yoqa/o'chira olmaydi — bu platforma administratori qaroriga
+   * bog'liq (server ham rad etadi). Bu yerda faqat holat ko'rsatiladi.
+   */
+  const canManage = false;
+  const canSeeHistory = can("modules.manage");
   const query = useApiQuery<{ modules: CompanyModuleRow[]; history: ModuleHistoryRow[] }>("/api/company/modules");
   const save = useApiMutation(
     ({ key, enabled }: { key: ModuleKey; enabled: boolean }) => api.put(`/api/company/modules/${key}`, { enabled }),
@@ -78,11 +83,10 @@ export default function ModulesSection() {
   return (
     <div className="space-y-5">
       <div>
-        <p className="text-sm font-semibold">Modullarni boshqarish</p>
+        <p className="text-sm font-semibold">Modullar</p>
         <p className="text-xs text-muted-foreground">
-          {canManage
-            ? "Foydalanmaydigan modullarni o'chiring — menyu va API yopiladi, ma'lumotlar o'chirilmaydi"
-            : "Modullarni o'zgartirish uchun ruxsat yo'q (modules.manage)"}
+          Kompaniyangiz qaysi bo'limlardan foydalanishi ro'yxatdan o'tishda tanlangan.
+          Yangi modul kerak bo'lsa — platforma administratoriga murojaat qiling, u ochib beradi.
         </p>
       </div>
 
@@ -155,7 +159,7 @@ export default function ModulesSection() {
         <span>O'chirilmaydigan tizim qismlari: {CORE_PARTS.join(", ")}. Obuna tugasa — faqat Bosh sahifa va Obuna ochiq qoladi.</span>
       </div>
 
-      {canManage && (query.data?.history.length ?? 0) > 0 && (
+      {canSeeHistory && (query.data?.history.length ?? 0) > 0 && (
         <div className="space-y-2">
           <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <History className="h-3.5 w-3.5" /> O'zgarishlar tarixi

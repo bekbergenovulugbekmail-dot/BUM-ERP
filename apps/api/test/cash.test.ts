@@ -48,8 +48,24 @@ async function cashBalance(id: string) {
   return row!.balance;
 }
 
-const record = (body: object, cookie = company.ownerCookie) =>
-  api(cookie, "POST", "/cash-transactions", { description: "Sinov", ...body });
+/**
+ * Kirim/chiqim maqsadi (moliya moddasi) endi MAJBURIY — testlarda sukut bo'yicha
+ * birinchi daromad/xarajat moddasi olinadi.
+ */
+async function purposeFor(type: "in" | "out") {
+  // Ro'yxat doim egasining cookie'si bilan olinadi — ruxsati yo'q xodim tekshiruvi
+  // maqsad qidirishda emas, so'rovning o'zida sodir bo'lishi kerak
+  const res = await api(company.ownerCookie, "GET", `/accounts?type=${type === "in" ? "income" : "expense"}`);
+  const accounts = res.json().accounts as { id: string; isActive: boolean }[];
+  return accounts.find((row) => row.isActive)!.id;
+}
+
+const record = async (body: { type?: string } & Record<string, unknown>, cookie = company.ownerCookie) =>
+  api(cookie, "POST", "/cash-transactions", {
+    description: "Sinov",
+    counterAccountId: await purposeFor(body.type === "out" ? "out" : "in"),
+    ...body,
+  });
 
 describe("Kassa va bank", () => {
   it("boshlang'ich qoldiq: kirim tranzaksiyasi va DR kassa / CR ustav kapitali", async () => {
@@ -83,8 +99,18 @@ describe("Kassa va bank", () => {
     expect(await cashBalance(mainCash)).toBe("300000.00");
     expect(await db.select().from(cashTransactions).where(eq(cashTransactions.cashAccountId, mainCash))).toHaveLength(1);
 
-    // Qarshi hisob tanlanmagan chiqim — "Boshqa xarajatlar" (5500): kassa va buxgalteriya sinxron qoladi
-    const plain = await record({ cashAccountId: mainCash, type: "out", amount: "100000.25" });
+    // Maqsad (moliya moddasi) MAJBURIY — berilmasa so'rov rad etiladi
+    const noPurpose = await api(company.ownerCookie, "POST", "/cash-transactions", {
+      cashAccountId: mainCash,
+      type: "out",
+      amount: "1000",
+      description: "Maqsadsiz",
+    });
+    expect(noPurpose.statusCode, noPurpose.body).toBe(400);
+
+    // "Boshqa xarajatlar" (5500) tanlangan chiqim: kassa va buxgalteriya sinxron qoladi
+    const other = await ledger("5500");
+    const plain = await record({ cashAccountId: mainCash, type: "out", amount: "100000.25", counterAccountId: other.id });
     expect(plain.json()).toMatchObject({ transaction: { balanceAfter: "199999.75" } });
     expect(plain.json().journalEntryId).not.toBeNull();
     expect((await ledger("1010")).balance).toBe("199999.75");

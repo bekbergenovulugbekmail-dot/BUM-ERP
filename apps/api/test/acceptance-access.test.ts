@@ -96,7 +96,7 @@ describe("QABUL: modullarni yoqish va o'chirish", () => {
     const before = await db.select({ id: employees.id }).from(employees).where(eq(employees.companyId, company.companyId));
     expect(before).toHaveLength(1);
 
-    const off = await call(owner(), "PUT", "/api/company/modules/hr", { enabled: false });
+    const off = await call(adminCookie, "PUT", `/api/platform/companies/${company.companyId}/modules/hr`, { enabled: false });
     expect(off.statusCode, off.body).toBe(200);
 
     const blocked = await call(owner(), "GET", "/api/hr/employees");
@@ -109,7 +109,7 @@ describe("QABUL: modullarni yoqish va o'chirish", () => {
     const during = await db.select({ id: employees.id }).from(employees).where(eq(employees.companyId, company.companyId));
     expect(during).toEqual(before);
 
-    const on = await call(owner(), "PUT", "/api/company/modules/hr", { enabled: true });
+    const on = await call(adminCookie, "PUT", `/api/platform/companies/${company.companyId}/modules/hr`, { enabled: true });
     expect(on.statusCode, on.body).toBe(200);
     const list = await call(owner(), "GET", "/api/hr/employees");
     expect(list.statusCode).toBe(200);

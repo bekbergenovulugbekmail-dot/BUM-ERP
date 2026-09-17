@@ -10,7 +10,7 @@
  */
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Search, UserCheck, UserX, UserPlus, KeyRound, Loader2, AlertTriangle, Pencil } from "lucide-react";
+import { Search, UserCheck, UserX, UserPlus, KeyRound, Loader2, AlertTriangle, Pencil, Smartphone } from "lucide-react";
 import { FULL_ACCESS_ROLES } from "@bum/shared";
 import { Input } from "@/components/ui/input.tsx";
 import { Button } from "@/components/ui/button.tsx";
@@ -28,6 +28,7 @@ import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { useActiveCompany } from "@/hooks/use-company.ts";
 import AdditionalLicensePicker from "@/components/subscription/additional-license-picker.tsx";
 import NewEmployeeDialog from "@/components/company/new-employee-dialog.tsx";
+import UserDevicesDialog from "./user-devices-dialog.tsx";
 import { LICENSE_STATUS_LABEL, LICENSE_TYPE_LABEL, formatDay, licenseLimitOf } from "@/lib/subscription.ts";
 import type { Branch, CompanyRole, Employee } from "../_lib/types.ts";
 
@@ -109,6 +110,8 @@ export default function UsersSection() {
   // Tahrirlash va parol tiklash dialoglari
   const [editTarget, setEditTarget] = useState<Employee | null>(null);
   const [resetTarget, setResetTarget] = useState<Employee | null>(null);
+  /** Kimning qurilmalari ochilgan (yangi qurilmani egasi tasdiqlaydi). */
+  const [deviceTarget, setDeviceTarget] = useState<Employee | null>(null);
   const [resetValue, setResetValue] = useState("");
 
   const filtered = useMemo(() => {
@@ -304,6 +307,15 @@ export default function UsersSection() {
                               >
                                 <KeyRound className="h-3 w-3 mr-1" /> Parol
                               </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-xs"
+                                data-testid={`devices-${employee.id}`}
+                                onClick={() => setDeviceTarget(employee)}
+                              >
+                                <Smartphone className="h-3 w-3 mr-1" /> Qurilmalar
+                              </Button>
                             </div>
                           )}
                         </td>
@@ -324,6 +336,14 @@ export default function UsersSection() {
           employee={editTarget}
           roles={assignableRoles}
           onClose={() => setEditTarget(null)}
+        />
+      )}
+
+      {deviceTarget && (
+        <UserDevicesDialog
+          userId={deviceTarget.id}
+          userName={deviceTarget.name ?? deviceTarget.phone}
+          onClose={() => setDeviceTarget(null)}
         />
       )}
 

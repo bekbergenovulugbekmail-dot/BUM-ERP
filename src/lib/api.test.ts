@@ -44,7 +44,9 @@ describe("api mijozi", () => {
     await expect(api.post("/api/notifications/read-all")).resolves.toBeNull();
     const init = fetchMock.mock.calls[0]![1]!;
     expect(init.body).toBe("{}");
-    expect(init.headers).toEqual({ "content-type": "application/json" });
+    // Qurilma identifikatori har so'rovda ketadi (yangi qurilmani egasi tasdiqlaydi)
+    expect(init.headers).toMatchObject({ "content-type": "application/json" });
+    expect((init.headers as Record<string, string>)["x-device-id"]).toMatch(/^[a-f0-9]{32}$/);
   });
 
   it("xato javobini ApiError ga aylantiradi", async () => {
