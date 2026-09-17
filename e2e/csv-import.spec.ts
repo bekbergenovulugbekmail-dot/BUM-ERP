@@ -94,3 +94,34 @@ test("fayl sarlavhalari boshqacha bo'lsa — ustunlar qo'lda moslanadi va import
   await page.getByPlaceholder(/qidir/i).first().fill(`Import Test ${stamp}`);
   await expect(page.getByText(`Import Test ${stamp}`).first()).toBeVisible({ timeout: 20_000 });
 });
+
+test("mahsulotlar sahifasida ham shablon va moslash bor", async ({ page }) => {
+  test.setTimeout(120_000);
+  await signIn(page, ACCOUNTS.owner.phone);
+  await page.goto(appPath("products"), { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("csv-import")).toBeVisible({ timeout: 30_000 });
+
+  // Shablon
+  const download = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByTestId("csv-template").click(),
+  ]).then(([event]) => event);
+  expect(download.suggestedFilename()).toBe("mahsulotlar-shablon.csv");
+  const text = await (await import("node:fs/promises")).readFile(await download.path(), "utf8");
+  expect(text).toContain("SKU");
+  expect(text).toContain("Sotuv narxi");
+
+  // Ustunlarni moslash oynasi
+  await page.getByTestId("csv-import").click();
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "mahsulot.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(["Tovar nomi;Kod", "Sinov mahsuloti;TEST-1"].join("\n"), "utf8"),
+  });
+  const dialog = page.getByTestId("csv-mapping");
+  await expect(dialog).toBeVisible({ timeout: 20_000 });
+  await expect(dialog).toContainText("1 ta qator");
+  // Avtomat topilmadi — foydalanuvchi o'zi tanlaydi
+  await expect(page.getByTestId("csv-mapping-continue")).toBeDisabled();
+  await page.keyboard.press("Escape");
+});

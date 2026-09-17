@@ -28,7 +28,8 @@
  */
 import { and, asc, eq, getTableColumns, gte, inArray, lt, sql } from "drizzle-orm";
 import { badRequest, forbidden, notFound } from "@bum/shared";
-import { attendances, departments, employees, leaves, positions, salaryPayments } from "../../db/schema/hr.js";
+import { attendances, departments, employees, leaves, positions, salaryKpiLines, salaryPayments } from "../../db/schema/hr.js";
+import { computeKpi, employeeLinks, resolveRules } from "./kpi.service.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
@@ -121,7 +122,12 @@ export async function generateSalaries(
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`${companyId}:salary:${input.month}`}))`);
 
   const staff = await tx
-    .select({ id: employees.id, baseSalary: employees.baseSalary, salaryType: employees.salaryType })
+    .select({
+      id: employees.id,
+      baseSalary: employees.baseSalary,
+      salaryType: employees.salaryType,
+      positionId: employees.positionId,
+    })
     .from(employees)
     .where(and(eq(employees.companyId, companyId), eq(employees.status, "active"), lt(employees.hireDate, next)));
   const existing = new Set(
@@ -163,7 +169,14 @@ export async function generateSalaries(
   const isUnpaidLeave = (employeeId: string, date: string) =>
     unpaidLeaves.some((l) => l.employeeId === employeeId && l.startDate <= date && l.endDate >= date);
 
+  // ── KPI: mukofot xodim qilgan ishdan hisoblanadi (qoida bo'lmasa — 0) ────
+  const kpiRulesByEmployee = await resolveRules(tx, companyId, pending);
+  const linksById = new Map(
+    (await employeeLinks(tx, companyId, pending.map((person) => person.id))).map((row) => [row.employeeId, row]),
+  );
+
   const rate = toMinor(taxRate, 2);
+  let kpiTotal = 0n;
   for (const employee of pending) {
     let days = 0n;
     let hours = 0n;
@@ -195,10 +208,20 @@ export async function generateSalaries(
       hourlyRate = base * 100n;
     }
     const overtimePay = rescale(mulDivRound(hourlyRate * overtime, 15n, 10n), 8, 2);
-    const gross = earned + overtimePay;
+
+    // KPI mukofoti — hisoblangan summaga qo'shiladi, soliq shundan ham olinadi
+    const rules = kpiRulesByEmployee.get(employee.id) ?? [];
+    const links = linksById.get(employee.id);
+    const kpi = links && rules.length > 0
+      ? await computeKpi(tx, companyId, links, rules, input.month)
+      : { total: "0.00", lines: [] };
+    const bonus = toMinor(kpi.total);
+    kpiTotal += bonus;
+
+    const gross = earned + overtimePay + bonus;
     const tax = mulDivRound(gross, rate, 10000n);
 
-    await tx.insert(salaryPayments).values({
+    const [created] = await tx.insert(salaryPayments).values({
       companyId,
       employeeId: employee.id,
       month: input.month,
@@ -207,19 +230,34 @@ export async function generateSalaries(
       actualDays: fromMinor(days, 4),
       overtime: fromMinor(overtime, 4),
       overtimePay: fromMinor(overtimePay),
+      bonus: fromMinor(bonus),
       grossSalary: fromMinor(gross),
       taxRate,
       tax: fromMinor(tax),
       netSalary: fromMinor(gross - tax),
       createdBy: tenant.user.id,
-    });
+    }).returning({ id: salaryPayments.id });
+
+    // KPI qanday chiqqani saqlanadi — oylik varaqasida "nega shuncha" ko'rinadi
+    if (created && kpi.lines.length > 0) {
+      await tx.insert(salaryKpiLines).values(
+        kpi.lines.map((line) => ({
+          companyId,
+          salaryPaymentId: created.id,
+          metric: line.metric,
+          metricValue: line.metricValue,
+          amount: line.amount,
+          ruleId: line.ruleId,
+        })),
+      );
+    }
   }
 
   await hrAudit(tx, tenant, meta, {
     action: "SALARY_GENERATED",
     resource: "salary_payments",
     resourceId: companyId,
-    details: { month: input.month, created: pending.length, attendanceBased, taxRate },
+    details: { month: input.month, created: pending.length, attendanceBased, taxRate, kpiTotal: fromMinor(kpiTotal) },
   });
   return { created: pending.length, attendanceBased };
 }

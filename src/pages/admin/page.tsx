@@ -127,8 +127,10 @@ function AdminDashboard() {
           </nav>
 
           {/* Right action */}
-          {onAdminSurface ? (
-            <div className="flex items-center gap-3 shrink-0 ml-auto">
+          {/* Chiqish har ikkala yuzada ham bor va YOZUVI bilan — ilgari faqat admin subdomenida,
+              yozuvsiz va xira belgi bo'lgani uchun topilmasdi. */}
+          <div className="flex items-center gap-3 shrink-0 ml-auto">
+            {onAdminSurface ? (
               <a
                 href="https://app.bum-erp.uz"
                 target="_blank"
@@ -138,23 +140,29 @@ function AdminDashboard() {
                 <ExternalLink className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">app.bum-erp.uz</span>
               </a>
-              <button
-                onClick={() => signout()}
-                className="flex items-center gap-1.5 text-xs text-white/50 hover:text-white transition-colors cursor-pointer"
-                title="Chiqish"
+            ) : (
+              <Link
+                to={`/${lng}/dashboard`}
+                className="flex items-center gap-1.5 text-xs text-white/50 hover:text-white transition-colors"
               >
-                <LogOut className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ) : (
-            <Link
-              to={`/${lng}/dashboard`}
-              className="flex items-center gap-1.5 text-xs text-white/50 hover:text-white transition-colors shrink-0 ml-auto"
+                <ArrowLeft className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">ERP ga qaytish</span>
+              </Link>
+            )}
+            <button
+              onClick={() => {
+                // Sessiyani tozalashning o'zi sahifani almashtirmaydi — admin panelida foydalanuvchi
+                // o'sha yerda qolib ketardi. Chiqishdan keyin ochiq kirish sahifasiga o'tkazamiz.
+                signout();
+                window.location.assign(onAdminSurface ? "/" : `/${lng ?? "uz"}/login`);
+              }}
+              data-testid="admin-logout"
+              className="flex items-center gap-1.5 rounded-md border border-white/20 px-2.5 py-1 text-xs text-white/80 hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
             >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">ERP ga qaytish</span>
-            </Link>
-          )}
+              <LogOut className="h-3.5 w-3.5" />
+              Chiqish
+            </button>
+          </div>
         </div>
       </header>
 

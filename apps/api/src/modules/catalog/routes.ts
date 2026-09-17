@@ -142,6 +142,8 @@ const productBody = z.strictObject({
   trackExpiry: z.boolean().optional(),
   shelfLifeDays: z.number().int().min(0).max(36_500).nullable().optional(),
   costingMethod: z.enum(["average", "fifo", "fefo", "manual"]).optional(),
+  /** Katalog turi: sotiladigan mahsulot, xom ashyo yoki yarim tayyor. Berilmasa — `product`. */
+  kind: z.enum(["product", "raw_material", "semi_finished"]).optional(),
   isSaleable: z.boolean().optional(),
   isPurchaseable: z.boolean().optional(),
   isManufactured: z.boolean().optional(),
@@ -158,6 +160,7 @@ const productListQuery = z.object({
   search: z.string().trim().min(1).max(100).optional(),
   categoryId: z.uuid().optional(),
   brandId: z.uuid().optional(),
+  kind: z.enum(["product", "raw_material", "semi_finished"]).optional(),
   isActive: boolQuery,
   limit: z.coerce.number().int().min(1).max(200).default(50),
   cursor: z.string().max(1000).optional(),

@@ -68,6 +68,7 @@ const schema = z.object({
   trackBatch: z.boolean(),
   trackExpiry: z.boolean(),
   shelfLifeDays: z.number().int().optional(),
+  kind: z.enum(["product", "raw_material", "semi_finished"]),
   isSaleable: z.boolean(),
   isPurchaseable: z.boolean(),
   isManufactured: z.boolean(),
@@ -92,7 +93,7 @@ const EMPTY_VALUES: FormValues = {
   taxRate: 12, taxIncluded: false,
   minStock: 0,
   trackBatch: false, trackExpiry: false,
-  isSaleable: true, isPurchaseable: true, isManufactured: false,
+  kind: "product", isSaleable: true, isPurchaseable: true, isManufactured: false,
   weightUnit: "kg",
   isWeighted: false,
 };
@@ -130,6 +131,7 @@ function toPayload(values: FormValues) {
     trackExpiry: values.trackExpiry,
     shelfLifeDays: numOrNull(values.shelfLifeDays),
     // costingMethod yuborilmaydi — server faqat o'rtacha tannarxni (AVCO) qo'llaydi
+    kind: values.kind,
     isSaleable: values.isSaleable,
     isPurchaseable: values.isPurchaseable,
     isManufactured: values.isManufactured,
@@ -206,6 +208,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
         trackBatch: existingProduct.trackBatch,
         trackExpiry: existingProduct.trackExpiry,
         shelfLifeDays: existingProduct.shelfLifeDays ?? undefined,
+        kind: existingProduct.kind ?? "product",
         isSaleable: existingProduct.isSaleable,
         isPurchaseable: existingProduct.isPurchaseable,
         isManufactured: existingProduct.isManufactured,
@@ -624,6 +627,24 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
               {/* Flags */}
               <TabsContent value="flags" className="space-y-4 pt-4">
                 <div className="space-y-4">
+                  {/* Katalog turi — omborda ham shu bo'yicha ajratiladi */}
+                  <FormField control={form.control} name="kind" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Katalog turi</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                        </FormControl>
+                        <SelectContent position="popper">
+                          <SelectItem value="product">Mahsulot — sotiladigan tayyor mahsulot</SelectItem>
+                          <SelectItem value="raw_material">Xom ashyo — ishlab chiqarishga kiradi</SelectItem>
+                          <SelectItem value="semi_finished">Yarim tayyor — ishlab chiqarilgan, yana ishlatiladi</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
                   {(
                     [
                       { name: "isSaleable" as const, label: "Sotiladi", desc: "Bu mahsulotni sotish mumkin" },

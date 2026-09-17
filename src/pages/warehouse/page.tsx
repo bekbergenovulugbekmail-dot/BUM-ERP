@@ -4,6 +4,7 @@ import {
   Warehouse, PackagePlus, PackageMinus, ArrowLeftRight,
   ClipboardList, TrendingUp, TrendingDown, AlertTriangle,
   BarChart3, Search, SlidersHorizontal, History, ScanLine,
+  Boxes,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -21,6 +22,7 @@ import MovementDialog from "./_components/movement-dialog.tsx";
 import TransferDialog from "./_components/transfer-dialog.tsx";
 import MovementHistory from "./_components/movement-history.tsx";
 import InventoryCountSection from "./_components/inventory-count-section.tsx";
+import CatalogSection from "./_components/catalog-section.tsx";
 import BarcodeScanner from "@/components/barcode-scanner.tsx";
 import { toNumber } from "@/pages/products/_lib/types.ts";
 import type { WarehouseItem, WarehouseStats } from "./_lib/types.ts";
@@ -182,6 +184,9 @@ export default function WarehousePage() {
               <TabsTrigger value="count">
                 <ClipboardList className="h-4 w-4 mr-1.5" /> Inventarizatsiya
               </TabsTrigger>
+              <TabsTrigger value="catalog">
+                <Boxes className="h-4 w-4 mr-1.5" /> Katalog
+              </TabsTrigger>
             </TabsList>
 
             {activeTab === "stock" && (
@@ -258,6 +263,11 @@ export default function WarehousePage() {
             {selectedWarehouseId && (
               <InventoryCountSection warehouseId={selectedWarehouseId} />
             )}
+          </TabsContent>
+
+          {/* Mahsulot, xom ashyo va yarim tayyor — bitta katalogda (ombor uchun ular bir xil) */}
+          <TabsContent value="catalog" className="flex-1 min-h-0 mt-0">
+            <CatalogSection />
           </TabsContent>
         </Tabs>
       </div>

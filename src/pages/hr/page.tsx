@@ -7,6 +7,7 @@ import EmployeesSection from "./_components/employees-section.tsx";
 import DepartmentsSection from "./_components/departments-section.tsx";
 import AttendanceSection from "./_components/attendance-section.tsx";
 import SalarySection from "./_components/salary-section.tsx";
+import KpiSection from "./_components/kpi-section.tsx";
 import { fmt, toNum, type EmployeeStats } from "./_lib/types.ts";
 
 const TABS = [
@@ -14,6 +15,7 @@ const TABS = [
   { key: "departments", label: "Bo'limlar", icon: Building2 },
   { key: "attendance", label: "Davomat", icon: CalendarDays },
   { key: "salary", label: "Maosh", icon: DollarSign },
+  { key: "kpi", label: "KPI", icon: TrendingUp },
 ] as const;
 
 export default function HRPage() {
@@ -145,6 +147,7 @@ export default function HRPage() {
         {tab === "departments" && <DepartmentsSection />}
         {tab === "attendance" && <AttendanceSection />}
         {tab === "salary" && <SalarySection />}
+        {tab === "kpi" && <KpiSection />}
       </motion.div>
     </div>
   );

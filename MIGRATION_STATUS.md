@@ -2047,8 +2047,74 @@ supervayzer brauzeriga 3.9–5.4 s da yetadi va xaritada 4.2–5.7 s da chizilad
 `/supervisor/live` ning 15 soniyalik so'rov oralig'iga bog'liq — eng yomon holatda ~16 s.
 Bu Playwright GPS emulyatsiyasi; **haqiqiy telefonda GPS fiksatsiyasi uzoqroq** — NOT VERIFIED.
 
-**Regressiya:** web 18 fayl / 77 test, brauzer 33 test (7 fayl) — hammasi o'tdi. tsc (web va API) va lint toza.
-API manbasi o'zgarmadi (faqat demo seeder CLI) — oldingi to'liq yugurish: 114 fayl / 574 test.
+**Regressiya (shu sessiya oxiri):** API 115 fayl / 589 test, web 19 / 81, desktop 9 / 57,
+brauzer 38 test (10 fayl) — hammasi o'tdi. tsc (web, API, desktop) va lint toza.
+Sxema: `0055_kpi_rules` va `0056_product_kind` — ikkalasi ham faqat qo'shish, destruktiv amal yo'q.
+
+## KPI, Android orqaga tugmasi va Mahsulotlar importi (2026-09-17)
+
+**KPI — oylik mukofot ishlangan ishdan hisoblanadi** (migratsiya `0055_kpi_rules`, faqat qo'shish)
+- `kpi_rules` (lavozim yoki xodim + ko'rsatkich), `kpi_rule_tiers` (bosqichlar), `salary_kpi_lines`
+  (oylikda KPI qanday chiqqani — auditga ochiq).
+- Qoida LAVOZIMGA yoziladi va shu lavozimdagi hamma xodimga tegadi; alohida xodimga yozilgani
+  o'sha xodim uchun lavozim qoidasining O'RNIGA ishlaydi (har ko'rsatkich bo'yicha alohida).
+- Hisob PROGRESSIV: har bosqich faqat o'z oralig'iga tushgan qismga qo'llanadi
+  (214 dona, 0–100→4 000, 100–200→6 000, 200+→9 000 → 1 126 000). Hammasi bigint'da, float yo'q.
+- 11 ta ko'rsatkich: dostavka (soni, summasi, og'irligi kg — mahsulot `weight` idan), savdo agenti
+  (sotuv summasi, buyurtma soni, tashrif soni, yig'ilgan to'lov), kassir (chek soni, kassa savdosi),
+  ombor (qabul va chiqim hujjatlari soni). Pul ko'rsatkichida stavka foizda, dona/kg da — birlik uchun summa.
+- `POST /api/hr/salaries/generate` endi mukofotni shu qoidalardan hisoblaydi va `salary_kpi_lines` ga yozadi;
+  qoida yo'q xodimda mukofot 0 (eski xatti-harakat o'zgarmadi).
+- Bosqichlar qat'iy tekshiriladi: 0 dan boshlanadi, bo'shliq va kesishuv bo'lmaydi, cheksiz bosqich oxirgi.
+- UI: Xodimlar → KPI. Qoidalar jadvali, bosqich muharriri va "Hisob-kitob" (oylik tayyorlanmasdan
+  kim qancha olishini ko'rsatadi, faqat SELECT). Ko'rish `hr.view`, o'zgartirish `hr.salary`.
+- Testlar: `apps/api/test/kpi.test.ts` 14 ta (bosqich matematikasi, validatsiya, kompaniya izolyatsiyasi,
+  oylikka qo'shilishi) va `e2e/hr-kpi.spec.ts` 2 ta brauzer testi.
+
+**Android: apparat "orqaga" tugmasi**
+`@capacitor/app` plagini umuman o'rnatilmagan edi — shuning uchun tugmaga ishlov berilmay, ilova
+standart yo'l bilan yopilardi. Endi tartib aniq: ochiq oyna bo'lsa avval U yopiladi → tarixda orqaga
+qaytiladi → bosh sahifada faqat IKKI marta bosilganda chiqiladi ("Chiqish uchun yana bir marta bosing").
+Mantiq `src/lib/native/back-button.test.ts` da 4 ta test bilan tekshirilgan.
+**Haqiqiy telefonda sinalmagan — yangi APK qurish kerak (NOT VERIFIED).**
+
+**Mahsulotlar importi umumiy komponentga o'tkazildi**
+Mahsulotlar sahifasi o'z import kodini ishlatardi — shuning uchun u yerda shablon ham, ustunlarni
+moslash ham yo'q edi (foydalanuvchi aynan shuni ko'rmagan). Endi u ham `CsvToolbar` ni ishlatadi:
+shablon yuklab olish, ustunlarni qo'lda moslash va tekshiruv oynasi. Sahifadagi 84 qator takror kod ketdi.
+
+## Katalog turlari, kassa yangilanishi va admin chiqishi (2026-09-17)
+
+**Xom ashyo va yarim tayyor mahsulotlar** (migratsiya `0056_product_kind`, faqat ustun qo'shish)
+- `products.kind` enum: `product` (sukut — mavjud yozuvlar shunday qoladi), `raw_material`, `semi_finished`.
+- API: `GET /api/catalog/products?kind=...` filtri, yaratish va tahrirda `kind`.
+- Ombor → **Katalog** yangi ichki bo'limi: uch tur bitta ro'yxatda, tur bo'yicha chiplar, qidiruv
+  va shu yerdan qo'shish (tur oldindan tanlangan; xom ashyo sotuvga chiqmaydi, yarim tayyor
+  ishlab chiqariladi deb belgilanadi). Mahsulotlar sahifasidagi shaklga ham "Katalog turi" qo'shildi —
+  mavjud yozuvlarni (masalan "Un (xomashyo)") shu yerdan qayta belgilaydi.
+- Testlar: `products.test.ts` da tur filtri, `e2e/warehouse-catalog.spec.ts` da brauzer oqimi.
+
+**Kassa: yangi versiyani avtomatik tekshirish**
+Ilgari yangilanish faqat Sozlamalar ekranidan qo'lda tekshirilardi. Endi kassir kirgach 20 soniyada
+va har 6 soatda avtomatik tekshiriladi; yangi versiya bo'lsa pastda banner chiqadi
+(`Yuklab olish` → `Yangilash va qayta ishga tushirish`). Yuklash va o'rnatish **qo'lda** —
+savdo o'rtasida ilova o'zi qayta ishga tushmaydi. Majburiy versiyada "Keyinroq" bo'lmaydi.
+Tekshiruv xatosi jim yutiladi (internet yo'qligi kassa ishiga xalaqit bermaydi).
+
+**Android avtomatik yangilanish — QILINMADI (blocker)**
+Ilova production web manzilini ochadi, shuning uchun web o'zgarishlari darhol yetadi, lekin APK
+o'zi yangilanmaydi. Buning uchun kerak: (1) **release imzo kaliti** — hozir yo'q, imzosiz APK
+mavjud o'rnatilgan ilova ustiga yangilanish bo'lib tushmaydi; (2) serverda Android relizlarini
+saqlash (hozir faqat desktop uchun bor); (3) `REQUEST_INSTALL_PACKAGES` ruxsati. Kalit yaratilgach
+qilinadi — hozir yarim ishlaydigan narsa qo'shilmadi.
+
+**Admin panelida chiqish**
+Tugma bor edi, lekin faqat admin subdomenida, yozuvsiz va xira (`text-white/50`) — topilmasdi.
+Endi ikkala yuzada ham yozuvi bilan ko'rinadi. Ikkinchi kamchilik: `signout()` sessiyani tozalardi,
+lekin sahifa o'sha yerda qolib ketardi — endi kirish sahifasiga o'tkaziladi.
+Brauzerda tekshirildi (`e2e/warehouse-catalog.spec.ts`); test uchun lokal, vaqtinchalik platforma
+admini `apps/api/src/cli/test-platform-admin.ts` orqali beriladi va test oxirida qaytarib olinadi
+(faqat localhost, bootstrap adminga tegmaydi, parol o'zgartirmaydi).
 
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi

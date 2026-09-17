@@ -386,6 +386,20 @@
       "when": 1789574132527,
       "tag": "0054_payment_session_link",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1789640576015,
+      "tag": "0055_kpi_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1789644454535,
+      "tag": "0056_product_kind",
+      "breakpoints": true
     }
   ]
 }

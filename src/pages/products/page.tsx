@@ -33,6 +33,7 @@ import {
   formatQty,
   type Category, type ImportResult, type ProductListItem, type ProductListResponse,
 } from "./_lib/types.ts";
+import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import LabelPrintDialog from "@/components/label-print-dialog.tsx";
 import { toLabelProduct, type LabelItem } from "@/lib/print/label-html.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
@@ -41,21 +42,6 @@ import BarcodeScanner from "@/components/barcode-scanner.tsx";
 type ViewMode = "table" | "grid";
 
 const PAGE_SIZE = 20;
-/** API bitta so'rovda ko'pi bilan 1000 qator qabul qiladi. */
-const IMPORT_BATCH = 1000;
-
-type ImportRow = {
-  name?: string;
-  sku?: string;
-  barcode?: string;
-  unit?: string;
-  purchasePrice?: string;
-  salesPrice?: string;
-  minStock?: string;
-  category?: string;
-  brand?: string;
-};
-
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -81,15 +67,9 @@ export default function ProductsPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [labelItems, setLabelItems] = useState<LabelItem[] | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [importing, setImporting] = useState(false);
-  const [exporting, setExporting] = useState(false);
 
   const categories = useApiQuery<{ categories: Category[] }>("/api/catalog/categories").data?.categories;
   const removeProduct = useApiMutation((id: string) => api.delete(`/api/catalog/products/${id}`));
-  const importProducts = useApiMutation((rows: ImportRow[]) =>
-    api.post<ImportResult>("/api/catalog/products/import", { rows }),
-  );
 
   const filters = {
     search: debouncedSearch.trim() || undefined,
@@ -111,90 +91,6 @@ export default function ProductsPage() {
   });
   const results = productsQuery.data?.pages.flatMap((page) => page.products) ?? [];
 
-  // ── CSV export: server joriy filtrga mos barcha mahsulotlarni beradi ──
-  const handleExport = async () => {
-    setExporting(true);
-    try {
-      const blob = await api.blob("/api/catalog/products/export", filters);
-      downloadBlob(blob, `mahsulotlar-${new Date().toISOString().slice(0, 10)}.csv`);
-      toast.success("Mahsulotlar eksport qilindi");
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  // ── CSV import: fayl brauzerda o'qiladi, tekshiruv va yozish serverda ──
-  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // bir xil faylni qayta tanlash mumkin bo'lsin
-    if (!file) return;
-
-    setImporting(true);
-    Papa.parse<Record<string, string>>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (parsed) => {
-        void (async () => {
-          const pick = (row: Record<string, string>, ...keys: string[]) => {
-            for (const key of keys) {
-              const value = row[key]?.toString().trim();
-              if (value) return value;
-            }
-            return undefined;
-          };
-          const rows: ImportRow[] = parsed.data.map((row) => ({
-            name: pick(row, "Nomi", "name"),
-            sku: pick(row, "SKU", "sku"),
-            barcode: pick(row, "Shtrix-kod", "barcode"),
-            // Eksport `shortName` yozadi ("d"); to'liq nom ("Dona") ham qabul qilinadi
-            unit: pick(row, "O'lchov birligi", "unit"),
-            purchasePrice: pick(row, "Kirim narxi", "purchasePrice"),
-            salesPrice: pick(row, "Sotuv narxi", "salesPrice"),
-            minStock: pick(row, "Min. qoldiq", "minStock"),
-            category: pick(row, "Kategoriya", "category"),
-            brand: pick(row, "Brend", "brand"),
-          }));
-
-          if (rows.length === 0) {
-            setImporting(false);
-            toast.error("Faylda qator topilmadi");
-            return;
-          }
-
-          let created = 0;
-          const errors: string[] = [];
-          try {
-            for (let offset = 0; offset < rows.length; offset += IMPORT_BATCH) {
-              const result = await importProducts.mutateAsync(rows.slice(offset, offset + IMPORT_BATCH));
-              created += result.created;
-              for (const error of result.errors) {
-                // Faylda: sarlavha 1-qator, ma'lumot 2-qatordan
-                const line = offset + error.row + 1;
-                errors.push(`${line}-qator${error.sku ? ` (${error.sku})` : ""}: ${error.message}`);
-              }
-            }
-          } catch (err) {
-            errors.push(errorMessage(err));
-          }
-
-          setImporting(false);
-          if (created > 0) toast.success(`${created} ta mahsulot import qilindi`);
-          if (errors.length > 0) {
-            toast.error(`${errors.length} ta qator o'tmadi`, {
-              description: errors.slice(0, 3).join("; "),
-              duration: 8000,
-            });
-          }
-        })();
-      },
-      error: () => {
-        setImporting(false);
-        toast.error("CSV faylni o'qib bo'lmadi");
-      },
-    });
-  };
 
   const handleDelete = async (id: string) => {
     try {
@@ -237,26 +133,26 @@ export default function ProductsPage() {
             <Button size="sm" variant="secondary" onClick={() => setScannerOpen(true)}>
               <ScanBarcode className="h-4 w-4 mr-1" /> Skaner
             </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={handleImportFile}
+            <CsvToolbar
+              exportUrl="/api/catalog/products/export"
+              exportParams={filters}
+              filename="mahsulotlar"
+              importUrl="/api/catalog/products/import"
+              invalidate={["/api/catalog/products"]}
+              canImport={perms.create}
+              columns={[
+                { key: "name", aliases: ["Nomi", "name"] },
+                { key: "sku", aliases: ["SKU", "sku"] },
+                { key: "barcode", aliases: ["Shtrix-kod", "barcode"] },
+                // Eksport `shortName` yozadi ("d"); to'liq nom ("Dona") ham qabul qilinadi
+                { key: "unit", aliases: ["O'lchov birligi", "unit"] },
+                { key: "purchasePrice", aliases: ["Kirim narxi", "purchasePrice"] },
+                { key: "salesPrice", aliases: ["Sotuv narxi", "salesPrice"] },
+                { key: "minStock", aliases: ["Min. qoldiq", "minStock"] },
+                { key: "category", aliases: ["Kategoriya", "category"] },
+                { key: "brand", aliases: ["Brend", "brand"] },
+              ]}
             />
-            {perms.create && (
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={importing}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Upload className="h-4 w-4 mr-1" /> {importing ? "Import..." : "Import"}
-              </Button>
-            )}
-            <Button size="sm" variant="secondary" disabled={exporting} onClick={() => { void handleExport(); }}>
-              <Download className="h-4 w-4 mr-1" /> {exporting ? "Export..." : "Export"}
-            </Button>
             {perms.create && (
               <Button size="sm" onClick={openCreate}>
                 <Plus className="h-4 w-4 mr-1" /> Mahsulot qo'shish

@@ -63,6 +63,8 @@ export type Product = {
   shelfLifeDays: number | null;
   costingMethod: CostingMethod;
   isActive: boolean;
+  /** Katalog turi: mahsulot, xom ashyo yoki yarim tayyor. */
+  kind: "product" | "raw_material" | "semi_finished";
   isSaleable: boolean;
   isPurchaseable: boolean;
   isManufactured: boolean;

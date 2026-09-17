@@ -16,6 +16,7 @@ import {
   date,
   index,
   integer,
+  pgEnum,
   pgTable,
   text,
   unique,
@@ -131,6 +132,9 @@ export const brands = pgTable(
 
 // ─── products ────────────────────────────────────────────────────────────────
 
+/** Katalog elementi nimaligi. `product` — sukut (mavjud yozuvlar shunday qoladi). */
+export const productKind = pgEnum("product_kind", ["product", "raw_material", "semi_finished"]);
+
 export const products = pgTable(
   "products",
   {
@@ -181,6 +185,11 @@ export const products = pgTable(
     costingMethod: costingMethod("costing_method").notNull().default("average"),
 
     isActive: boolean("is_active").notNull().default(true),
+    /**
+     * Nimaligi: sotiladigan mahsulot, xom ashyo (ishlab chiqarishga kiradi) yoki yarim tayyor
+     * (ishlab chiqarilgan, lekin yana boshqa mahsulotga kiradi). Qoldiq va harakat ikkalasida bir xil.
+     */
+    kind: productKind("kind").notNull().default("product"),
     isSaleable: boolean("is_saleable").notNull().default(true),
     isPurchaseable: boolean("is_purchaseable").notNull().default(true),
     isManufactured: boolean("is_manufactured").notNull().default(false),

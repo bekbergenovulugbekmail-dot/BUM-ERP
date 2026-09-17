@@ -21,7 +21,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { companies, users } from "./platform.js";
-import { legacyId, money, percent, pk, qty, timestamps } from "./_shared.js";
+import { createdAt, legacyId, money, percent, pk, qty, timestamps } from "./_shared.js";
 
 export const employeeStatus = pgEnum("employee_status", [
   "active",
@@ -292,4 +292,130 @@ export const employeesRelations = relations(employees, ({ one, many }) => ({
 
 export const salaryPaymentsRelations = relations(salaryPayments, ({ one }) => ({
   employee: one(employees, { fields: [salaryPayments.employeeId], references: [employees.id] }),
+}));
+
+// ─── KPI: oylik mukofotni ishlangan ishdan hisoblash ─────────────────────────
+
+/**
+ * Qaysi ko'rsatkich bo'yicha hisoblanadi. Nom oldidagi bo'lak — kimga tegishli.
+ * `_amount` — pul (stavka foizda), `_count` — dona, `_kg` — og'irlik (stavka dona/kg uchun summa).
+ */
+export const kpiMetric = pgEnum("kpi_metric", [
+  "delivery_count",
+  "delivery_amount",
+  "delivery_weight_kg",
+  "agent_sales_amount",
+  "agent_order_count",
+  "agent_visit_count",
+  "agent_collected_amount",
+  "cashier_receipt_count",
+  "cashier_sales_amount",
+  "warehouse_receipt_count",
+  "warehouse_issue_count",
+]);
+
+/** `percent` — ko'rsatkich summasidan foiz; `per_unit` — har bir dona/kg uchun belgilangan summa. */
+export const kpiRateType = pgEnum("kpi_rate_type", ["percent", "per_unit"]);
+
+/**
+ * KPI qoidasi. Lavozimga yozilsa — shu lavozimdagi hamma xodimga tegadi; xodimga yozilgani
+ * o'sha xodim uchun lavozim qoidasining o'rniga ishlaydi (bitta ko'rsatkich bo'yicha).
+ * Bir maqsadga bir nechta ko'rsatkich bo'lishi mumkin — ular qo'shiladi.
+ */
+export const kpiRules = pgTable(
+  "kpi_rules",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    /** Lavozim qoidasi (xodim qoidasi bo'lmasa ishlatiladi). */
+    positionId: uuid("position_id").references(() => positions.id, { onDelete: "cascade" }),
+    /** Alohida xodim uchun — lavozim qoidasidan ustun. */
+    employeeId: uuid("employee_id").references(() => employees.id, { onDelete: "cascade" }),
+    metric: kpiMetric("metric").notNull(),
+    rateType: kpiRateType("rate_type").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("kpi_rule_position_metric_key")
+      .on(t.companyId, t.positionId, t.metric)
+      .where(sql`${t.positionId} is not null`),
+    uniqueIndex("kpi_rule_employee_metric_key")
+      .on(t.companyId, t.employeeId, t.metric)
+      .where(sql`${t.employeeId} is not null`),
+    index("kpi_rule_company_idx").on(t.companyId, t.isActive),
+    check("kpi_rule_one_target", sql`(${t.positionId} is null) <> (${t.employeeId} is null)`),
+  ],
+);
+
+/**
+ * Bosqichlar. Hisob PROGRESSIV: har bosqich faqat o'z oralig'iga tushgan qismga qo'llanadi
+ * (masalan 214 ta yetkazma → 100 tasi 1-bosqich stavkasida, 100 tasi 2-bosqichda, 14 tasi 3-bosqichda).
+ */
+export const kpiRuleTiers = pgTable(
+  "kpi_rule_tiers",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    ruleId: uuid("rule_id")
+      .notNull()
+      .references(() => kpiRules.id, { onDelete: "cascade" }),
+    /** Bosqich boshlanishi (shu qiymatdan). */
+    fromValue: qty("from_value").notNull().default("0"),
+    /** Bosqich tugashi (shu qiymatgacha); `null` — cheksiz. */
+    toValue: qty("to_value"),
+    /** `percent` bo'lsa — foiz, `per_unit` bo'lsa — bir dona/kg uchun summa. */
+    rate: qty("rate").notNull().default("0"),
+    ...timestamps(),
+  },
+  (t) => [
+    index("kpi_tier_rule_idx").on(t.ruleId, t.fromValue),
+    check("kpi_tier_range", sql`${t.toValue} is null or ${t.toValue} > ${t.fromValue}`),
+    check("kpi_tier_non_negative", sql`${t.fromValue} >= 0 AND ${t.rate} >= 0`),
+  ],
+);
+
+/** Oylikda KPI qanday chiqqani — qaysi ko'rsatkich, qancha bo'lgani va qancha pul bo'lgani. */
+export const salaryKpiLines = pgTable(
+  "salary_kpi_lines",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    salaryPaymentId: uuid("salary_payment_id")
+      .notNull()
+      .references(() => salaryPayments.id, { onDelete: "cascade" }),
+    metric: kpiMetric("metric").notNull(),
+    /** Ko'rsatkichning o'zi (dona, kg yoki so'm). */
+    metricValue: qty("metric_value").notNull().default("0"),
+    /** Shu ko'rsatkichdan chiqqan mukofot. */
+    amount: money("amount").notNull().default("0"),
+    ruleId: uuid("rule_id").references(() => kpiRules.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("kpi_line_salary_metric_key").on(t.salaryPaymentId, t.metric),
+    index("kpi_line_company_idx").on(t.companyId),
+  ],
+);
+
+export const kpiRulesRelations = relations(kpiRules, ({ one, many }) => ({
+  position: one(positions, { fields: [kpiRules.positionId], references: [positions.id] }),
+  employee: one(employees, { fields: [kpiRules.employeeId], references: [employees.id] }),
+  tiers: many(kpiRuleTiers),
+}));
+
+export const kpiRuleTiersRelations = relations(kpiRuleTiers, ({ one }) => ({
+  rule: one(kpiRules, { fields: [kpiRuleTiers.ruleId], references: [kpiRules.id] }),
+}));
+
+export const salaryKpiLinesRelations = relations(salaryKpiLines, ({ one }) => ({
+  salary: one(salaryPayments, { fields: [salaryKpiLines.salaryPaymentId], references: [salaryPayments.id] }),
 }));

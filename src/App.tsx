@@ -1,4 +1,5 @@
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
+import { toast } from "sonner";
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { DefaultProviders } from "./components/providers/default.tsx";
 import BaseSegment from "./components/providers/base-segment.tsx";
@@ -6,6 +7,7 @@ import LocaleWrapper from "./components/providers/locale-wrapper.tsx";
 import { SAVED_OR_DEFAULT_LOCALE, setLocaleInPath } from "./i18n.ts";
 import "./i18n.ts";
 import { useServiceWorker } from "./hooks/use-service-worker.ts";
+import { listenAndroidBack } from "./lib/native/back-button.ts";
 import ERPLayout from "./components/erp-layout.tsx";
 import DashboardPage from "./pages/dashboard/page.tsx";
 import ProductsPage from "./pages/products/page.tsx";
@@ -193,6 +195,8 @@ function MainApp() {
 // ─── Root: pick surface based on hostname ─────────────────────────────────────
 export default function App() {
   useServiceWorker();
+  // Android apparat "orqaga" tugmasi: oldingi sahifaga qaytadi, ilovadan chiqmaydi (brauzerda ta'sirsiz)
+  useEffect(() => listenAndroidBack({ onConfirmExit: (message) => toast(message) }), []);
   const onAdminSurface = isAdminSubdomain();
 
   return (

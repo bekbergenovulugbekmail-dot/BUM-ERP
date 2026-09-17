@@ -19,7 +19,8 @@
     "db:seed": "tsx src/cli/seed-bootstrap-admin.ts",
     "db:import-convex": "tsx src/cli/import-convex.ts",
     "db:seed-demo": "tsx src/cli/seed-demo-company.ts",
-    "verify:last-pos-sale": "tsx src/cli/verify-last-pos-sale.ts"
+    "verify:last-pos-sale": "tsx src/cli/verify-last-pos-sale.ts",
+    "test:platform-admin": "tsx src/cli/test-platform-admin.ts"
   },
   "dependencies": {
     "@bum/shared": "workspace:*",

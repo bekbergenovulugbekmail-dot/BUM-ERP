@@ -16,6 +16,9 @@
  *   POST   /leaves/:leaveId/decision                                              hr.approve
  *   GET    /salaries (?month=&employeeId=&status=&limit=), /salaries/summary?month=   hr.view
  *   POST   /salaries/generate, PATCH / DELETE /salaries/:salaryId                 hr.salary
+ *   GET    /kpi/rules                          KPI qoidalari (bosqichlari bilan)  hr.view
+ *   PUT    /kpi/rules, DELETE /kpi/rules/:ruleId                                  hr.salary
+ *   GET    /kpi/preview (?month=&employeeId=)  oylik tayyorlanmasdan hisob-kitob  hr.salary
  *   POST   /salaries/:salaryId/approve, /revert, /pay                             hr.approve
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -60,6 +63,8 @@ import {
   salarySummary,
   updateSalary,
 } from "./salary.service.js";
+import { KPI_METRICS } from "./kpi.service.js";
+import { deleteKpiRule, kpiPreview, listKpiRules, saveKpiRule } from "./kpi-rules.service.js";
 
 const nullableText = (max: number) =>
   z
@@ -228,6 +233,27 @@ const salariesQuery = z.object({
   limit: limitQuery,
 });
 const monthQuery = z.object({ month });
+
+// ─── KPI ───────────────────────────────────────────────────────────────────
+const kpiTier = z.strictObject({
+  fromValue: decimalSchema({ scale: 4 }),
+  /** Bo'sh yoki `null` — oxirgi (cheksiz) bosqich. */
+  toValue: decimalSchema({ scale: 4 }).nullable().optional(),
+  rate: decimalSchema({ scale: 4 }),
+});
+const kpiRuleBody = z
+  .strictObject({
+    positionId: z.uuid().nullable().optional(),
+    employeeId: z.uuid().nullable().optional(),
+    metric: z.enum(KPI_METRICS),
+    tiers: z.array(kpiTier).min(1).max(20),
+    isActive: z.boolean().optional(),
+    notes: nullableText(1000),
+  })
+  .refine((body) => Boolean(body.positionId) !== Boolean(body.employeeId), {
+    message: "Qoida yo lavozimga, yo xodimga biriktiriladi",
+  });
+const kpiPreviewQuery = z.object({ month, employeeId: z.uuid().optional() });
 
 const includeInactiveQuery = z.object({ includeInactive: boolQuery });
 const positionsQuery = z.object({ departmentId: z.uuid().optional(), includeInactive: boolQuery });
@@ -439,6 +465,30 @@ export async function hrRoutes(app: FastifyInstance): Promise<void> {
   app.get("/salaries", async (req) => {
     const query = salariesQuery.parse(req.query);
     return { salaries: await listSalaries(db, await readTenant(req), query) };
+  });
+
+  // ─── KPI qoidalari ──────────────────────────────────────────────────────
+  // Qoida lavozimga yoziladi; xodimga yozilgani o'sha xodim uchun uning o'rniga ishlaydi.
+
+  app.get("/kpi/rules", async (req) => listKpiRules(db, (await readTenant(req)).company.id));
+
+  app.put("/kpi/rules", async (req) => {
+    const body = kpiRuleBody.parse(req.body);
+    return writeInTenant(req, "hr.salary", (tx, t) => saveKpiRule(tx, t, body, requestMeta(req)));
+  });
+
+  app.delete("/kpi/rules/:ruleId", async (req, reply) => {
+    const id = param(req, "ruleId");
+    await writeInTenant(req, "hr.salary", (tx, t) => deleteKpiRule(tx, t, id, requestMeta(req)));
+    return reply.status(204).send();
+  });
+
+  app.get("/kpi/preview", async (req) => {
+    const { month: value, employeeId } = kpiPreviewQuery.parse(req.query);
+    const tenant = await readTenant(req);
+    // Hisob-kitobni ko'rish maosh ruxsatini talab qiladi (kartochka ko'rish yetmaydi)
+    await requirePermission(db, tenant, "hr.salary");
+    return kpiPreview(db, tenant.company.id, value, employeeId);
   });
 
   app.get("/salaries/summary", async (req) => {

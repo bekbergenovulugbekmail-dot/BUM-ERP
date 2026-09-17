@@ -242,4 +242,40 @@ describe("CSV import va export", () => {
     expect(lines).toContain('"Choy ""Ahmad"", 100g",CHOY-1,,,,d,0.0000,25000.0000,0.0000,ha');
     expect(lines.some((l) => l.startsWith("\"'=HYPERLINK"))).toBe(true);
   });
+  it("katalog turi: sukut bo'yicha mahsulot, xom ashyo va yarim tayyor alohida filtrlanadi", async () => {
+    await create(companyA, { name: "Tayyor non", sku: "KIND-1" });
+    const raw = await api(companyA.ownerCookie, "POST", "/products", {
+      name: "Un",
+      sku: "KIND-2",
+      baseUnitId: piece,
+      kind: "raw_material",
+      isSaleable: false,
+    });
+    expect(raw.statusCode, raw.body).toBe(201);
+    const semi = await api(companyA.ownerCookie, "POST", "/products", {
+      name: "Non xamiri",
+      sku: "KIND-3",
+      baseUnitId: piece,
+      kind: "semi_finished",
+      isSaleable: false,
+      isManufactured: true,
+    });
+    expect(semi.statusCode, semi.body).toBe(201);
+
+    // Tur berilmagan mahsulot — `product`
+    expect(raw.json().product.kind).toBe("raw_material");
+    expect(semi.json().product.kind).toBe("semi_finished");
+
+    const rawOnly = await api(companyA.ownerCookie, "GET", "/products?kind=raw_material&limit=200");
+    expect(rawOnly.statusCode).toBe(200);
+    const rawSkus = rawOnly.json().products.map((row: { sku: string }) => row.sku);
+    expect(rawSkus).toContain("KIND-2");
+    expect(rawSkus).not.toContain("KIND-1");
+    expect(rawSkus).not.toContain("KIND-3");
+
+    const productsOnly = await api(companyA.ownerCookie, "GET", "/products?kind=product&limit=200");
+    const productSkus = productsOnly.json().products.map((row: { sku: string }) => row.sku);
+    expect(productSkus).toContain("KIND-1");
+    expect(productSkus).not.toContain("KIND-2");
+  });
 });

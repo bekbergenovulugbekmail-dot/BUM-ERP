@@ -17,7 +17,10 @@
 import { and, asc, eq, getTableColumns, gt, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { badRequest, notFound } from "@bum/shared";
-import { batches, brands, categories, products, units } from "../../db/schema/catalog.js";
+import { batches, brands, categories, productKind, products, units } from "../../db/schema/catalog.js";
+
+/** Katalog turi — sxemadagi enum bilan bir xil. */
+export type ProductKind = (typeof productKind.enumValues)[number];
 import { warehouses } from "../../db/schema/inventory.js";
 import { suppliers } from "../../db/schema/purchase.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -67,6 +70,8 @@ export type ProductFilters = {
   categoryId?: string;
   brandId?: string;
   isActive?: boolean;
+  /** Katalog turi: mahsulot, xom ashyo yoki yarim tayyor. */
+  kind?: ProductKind;
 };
 
 function productWhere(tenant: TenantContext, f: ProductFilters, scope: string[] | null) {
@@ -75,6 +80,7 @@ function productWhere(tenant: TenantContext, f: ProductFilters, scope: string[] 
     eq(products.companyId, tenant.company.id),
     productScopeCondition(scope),
     f.categoryId ? eq(products.categoryId, f.categoryId) : undefined,
+    f.kind ? eq(products.kind, f.kind) : undefined,
     f.brandId ? eq(products.brandId, f.brandId) : undefined,
     f.isActive === undefined ? undefined : eq(products.isActive, f.isActive),
     pattern
@@ -214,6 +220,7 @@ export type ProductInput = {
   trackExpiry?: boolean;
   shelfLifeDays?: number | null;
   costingMethod?: CostingMethod;
+  kind?: ProductKind;
   isSaleable?: boolean;
   isPurchaseable?: boolean;
   isManufactured?: boolean;
