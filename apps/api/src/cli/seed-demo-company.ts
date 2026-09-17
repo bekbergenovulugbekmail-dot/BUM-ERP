@@ -187,7 +187,57 @@ try {
       );
     }
   }
-  console.log(`Katalog: ${catalog.length} mahsulot (${addedProducts} tasi yangi), qoldiq bilan`);
+  // Qoldiqni minimal darajaga to'ldirish: takroriy qabul testlari zaxirani tugatib qo'ymasin.
+  // FAQAT KIRIM yoziladi — hech qanday qoldiq o'chirilmaydi yoki kamaytirilmaydi.
+  const stockRows = ok(await api("GET", `/api/inventory/stock?warehouseId=${mainWarehouse}`), "qoldiqlar").stock as {
+    productId: string;
+    quantity: string;
+  }[];
+  const onHand = new Map(stockRows.map((row) => [row.productId, Number(row.quantity)]));
+  let toppedUp = 0;
+  for (const item of catalog) {
+    const target = Number(item.qty);
+    const productId = bySku.get(item.sku);
+    if (!productId || target === 0) continue;
+    const missing = target - (onHand.get(productId) ?? 0);
+    if (missing <= 0) continue;
+    ok(
+      await api("POST", "/api/inventory/stock/movements", {
+        type: "receive",
+        productId,
+        warehouseId: mainWarehouse,
+        quantity: String(missing),
+        costPrice: item.cost === "0" ? "1000" : item.cost,
+      }),
+      `qoldiqni to'ldirish ${item.sku}`,
+    );
+    toppedUp += 1;
+  }
+  console.log(`Katalog: ${catalog.length} mahsulot (${addedProducts} tasi yangi), ${toppedUp} tasining qoldig'i to'ldirildi`);
+
+  // ── Kategoriyalar (kassada gorizontal ro'yxat uchun) ──────────────────────
+  const categoryOf: Record<string, string> = {
+    "COLA-1L": "Ichimlik",
+    "SUV-05": "Ichimlik",
+    SHOK: "Shirinlik",
+    NON: "Non",
+    UN: "Xomashyo",
+    SHAKAR: "Xomashyo",
+  };
+  const existingCategories = ok(await api("GET", "/api/catalog/categories"), "kategoriyalar").categories as { id: string; name: string }[];
+  const categoryId = new Map(existingCategories.map((row) => [row.name, row.id]));
+  for (const name of [...new Set(Object.values(categoryOf))]) {
+    if (categoryId.has(name)) continue;
+    const created = soft(await api("POST", "/api/catalog/categories", { name }), `kategoriya ${name}`);
+    if (created) categoryId.set(name, (created as { category: { id: string } }).category.id);
+  }
+  // Mahsulotni kategoriyaga biriktirish (takroriy yuritishda bir xil qiymat yoziladi — zararsiz)
+  for (const [sku, name] of Object.entries(categoryOf)) {
+    const productId = bySku.get(sku);
+    const target = categoryId.get(name);
+    if (productId && target) soft(await api("PATCH", `/api/catalog/products/${productId}`, { categoryId: target }), `kategoriya: ${sku}`);
+  }
+  console.log(`Kategoriyalar: ${categoryId.size} ta, mahsulotlar biriktirildi`);
 
   // ── Ishlab chiqarish retsepti ─────────────────────────────────────────────
   const boms = ok(await api("GET", "/api/manufacturing/boms"), "retseptlar").boms as { id: string; name: string }[];

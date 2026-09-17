@@ -7,7 +7,8 @@ import tseslint from "typescript-eslint";
 import { defineConfig } from "eslint/config";
 
 export default defineConfig([
-  globalIgnores(["dist", "apps/api/dist"]),
+  // Android/Gradle ishlab chiqargan fayllar tekshirilmaydi (build chiqishi, qo'lda yozilmagan)
+  globalIgnores(["dist", "apps/api/dist", "apps/mobile/android/**/build/**", "apps/desktop/dist", "apps/desktop/release"]),
   {
     files: ["**/*.{ts,tsx}"],
     extends: [

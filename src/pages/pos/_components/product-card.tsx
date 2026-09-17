@@ -125,6 +125,8 @@ export function ProductCard({
         type="button"
         className="flex flex-1 flex-col text-left disabled:cursor-not-allowed disabled:opacity-40"
         title={`${item.product.name} — savatga +1`}
+        // Testlar bosish natijasini aynan tekshirishi uchun (foydalanuvchiga ko'rinmaydi)
+        data-in-cart={trimQty(item.inCart)}
         aria-label={`${item.product.name} — savatga qo'shish`}
         disabled={soldOut}
         onClick={add}
@@ -137,7 +139,7 @@ export function ProductCard({
           onDetails(item.product);
         }}
       >
-        <span className="relative block aspect-[3/2] w-full overflow-hidden bg-muted">
+        <span className="relative block aspect-[3/2] short:aspect-[6/1] w-full overflow-hidden bg-muted">
           <ProductImage
             productId={item.product.id}
             imageKey={item.product.imageKey ?? null}

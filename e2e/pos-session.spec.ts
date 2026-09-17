@@ -34,7 +34,7 @@ test("sessiya: ochish → naqd+UZCARD sotuv → yopishda solishtirish → yopilg
   // Karta uchun "boshlang'ich qoldiq" so'ralmaydi
   await expect(openDialog).not.toContainText("UZCARD boshlang'ich");
   await expect(openDialog).not.toContainText("HUMO boshlang'ich");
-  await page.screenshot({ path: "e2e/.artifacts/session-open.png" });
+  await page.screenshot({ path: "e2e/.screenshots/session-open.png" });
   await openDialog.getByTestId("open-session-confirm").click();
   await expect(openDialog).toBeHidden({ timeout: 20_000 });
 
@@ -81,7 +81,7 @@ test("sessiya: ochish → naqd+UZCARD sotuv → yopishda solishtirish → yopilg
   await expect(terminals).toContainText("1 ta tranzaksiya");
 
   await closeDialog.getByTestId("actual-cash").fill("550000");
-  await page.screenshot({ path: "e2e/.artifacts/session-close.png" });
+  await page.screenshot({ path: "e2e/.screenshots/session-close.png" });
   await closeDialog.getByTestId("close-session-confirm").click();
   await expect(closeDialog).toContainText("Kassa mos keldi", { timeout: 20_000 });
   await closeDialog.getByRole("button", { name: "Yopish" }).click();

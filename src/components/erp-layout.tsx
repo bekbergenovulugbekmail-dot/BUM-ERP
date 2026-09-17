@@ -233,10 +233,10 @@ function TopBar({ onMenuToggle }: { onMenuToggle?: () => void }) {
   };
 
   return (
-    <header className="h-14 border-b border-border bg-card flex items-center px-4 gap-3 shrink-0">
+    <header className="h-14 short:h-10 border-b border-border bg-card flex items-center px-4 gap-2 sm:gap-3 shrink-0">
       {/* Mobile hamburger menu */}
       {onMenuToggle && (
-        <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden shrink-0" onClick={onMenuToggle}>
+        <Button variant="ghost" size="icon" className="h-8 w-8 wide:hidden shrink-0" onClick={onMenuToggle}>
           <Menu className="h-5 w-5" />
         </Button>
       )}
@@ -264,7 +264,7 @@ function TopBar({ onMenuToggle }: { onMenuToggle?: () => void }) {
       </div>
       <div className="flex-1 sm:hidden" />
 
-      <div className="flex items-center gap-1">
+      <div className="flex min-w-0 items-center gap-1">
         {/* Company switcher */}
         <Authenticated>
           <CompanySwitcher />
@@ -279,7 +279,7 @@ function TopBar({ onMenuToggle }: { onMenuToggle?: () => void }) {
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8"
+          className="h-8 w-8 shrink-0"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -288,7 +288,7 @@ function TopBar({ onMenuToggle }: { onMenuToggle?: () => void }) {
         {/* Language switcher */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8">
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
               <Globe className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -420,7 +420,7 @@ function CompanySwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2 max-w-[180px] flex">
+        <Button variant="ghost" size="sm" className="flex h-8 min-w-0 max-w-[110px] shrink gap-1.5 px-2 sm:max-w-[180px]">
           <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="text-xs font-medium truncate">
             <span className="md:hidden">
@@ -479,7 +479,7 @@ function CompanySwitcher() {
 
 function MobileDrawerSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
-    <div className={cn("fixed inset-0 z-50 md:hidden", !open && "pointer-events-none")}>
+    <div className={cn("fixed inset-0 z-50 wide:hidden", !open && "pointer-events-none")}>
       {/* Backdrop overlay */}
       <div
         className={cn(
@@ -508,7 +508,7 @@ function MobileBottomNav() {
   const mainModules = useVisibleModules().slice(0, 5);
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 flex justify-around border-t border-border bg-card md:hidden z-40 pb-safe">
+    <nav className="fixed bottom-0 left-0 right-0 flex justify-around border-t border-border bg-card wide:hidden z-40 pb-safe">
       {mainModules.map((mod) => {
         const Icon = getIcon(mod.icon);
         const to = `/${lng}/${mod.path}`;
@@ -810,7 +810,7 @@ export default function ERPLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Desktop sidebar */}
-      <div className="hidden md:flex shrink-0">
+      <div className="hidden wide:flex shrink-0">
         <SidebarNav collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
       </div>
 
@@ -821,7 +821,9 @@ export default function ERPLayout({ children }: { children: React.ReactNode }) {
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <TopBar onMenuToggle={() => setMobileDrawerOpen(true)} />
         <SubscriptionBanner />
-        <main className="flex-1 overflow-auto pb-16 md:pb-0">
+        {/* flex-col: to'liq balandlikni egallashi kerak sahifalar (kassa) `flex-1 min-h-0` bilan aynan
+            shu joyga sig'adi. pb-16 — pastki mobil menyu uchun, u `wide:` da yashiriladi. */}
+        <main className="flex flex-col flex-1 overflow-auto pb-16 wide:pb-0">
           {children}
         </main>
       </div>

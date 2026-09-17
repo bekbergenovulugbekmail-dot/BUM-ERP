@@ -19,6 +19,7 @@ import { useDebounce } from "@/hooks/use-debounce.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import ShiftOpenDialog from "./_components/shift-open-dialog.tsx";
 import ShiftCloseDialog from "./_components/shift-close-dialog.tsx";
+import SessionSummaryDialog from "./_components/session-summary-dialog.tsx";
 import POSReceipt from "./_components/pos-receipt.tsx";
 import CustomerPicker from "./_components/customer-picker.tsx";
 import CustomerPaymentDialog from "./_components/customer-payment-dialog.tsx";
@@ -118,11 +119,19 @@ export default function POSPage() {
   const stockWarehouseId = shift?.warehouseId ?? whId;
 
   const [search, setSearch] = useState("");
+  /** Tanlangan kategoriya; null — barchasi. Qidiruv shu kategoriya ichida ishlaydi. */
+  const [categoryId, setCategoryId] = useState<string | null>(null);
   const [debouncedSearch] = useDebounce(search.trim(), 250);
   // Qidiruv serverda (nom, SKU, barkod); API chegarasi 200 ta
+  const categories = useApiQuery<{ categories: { id: string; name: string }[] }>(
+    "/api/catalog/categories",
+    undefined,
+    { staleTime: 300_000 },
+  ).data?.categories;
+  // Qidiruv va kategoriya birga: server ikkalasini ham qo'llaydi
   const products = useApiQuery<{ products: ProductOption[] }>(
     "/api/catalog/products",
-    { limit: 200, isActive: true, search: debouncedSearch || undefined },
+    { limit: 200, isActive: true, search: debouncedSearch || undefined, categoryId: categoryId ?? undefined },
     { placeholderData: (previous) => previous },
   ).data?.products;
 
@@ -154,6 +163,8 @@ export default function POSPage() {
   const [detail, setDetail] = useState<PosCardItem | null>(null);
   /** Telefonda savat/to'lov paneli pastdan chiqadi; desktopda doim yon tomonda turadi. */
   const [cartOpen, setCartOpen] = useState(false);
+  /** Faol smena tafsiloti (terminal kesimi bilan). */
+  const [sessionDetail, setSessionDetail] = useState(false);
   /** So'rov kaliti: ikki marta bosish yoki tarmoq qayta urinishida server ikkinchi chek yozmaydi; muvaffaqiyatdan keyin yangilanadi. */
   const requestIdRef = useRef<string | null>(null);
 
@@ -554,6 +565,7 @@ export default function POSPage() {
       {closingShift && (
         <ShiftCloseDialog shift={closingShift} onClose={() => setClosingShift(null)} />
       )}
+      {sessionDetail && shift && <SessionSummaryDialog shift={shift} onClose={() => setSessionDetail(false)} />}
       <ProductDetailDialog
         item={detail}
         onClose={() => setDetail(null)}
@@ -635,7 +647,7 @@ export default function POSPage() {
 
   const productGrid = (
     // Telefonda pastki savat paneli oxirgi qatorni yopmasligi uchun qo'shimcha joy
-    <div className="flex-1 overflow-y-auto p-4 pb-28 md:pb-4">
+    <div className="flex-1 overflow-y-auto p-4 short:p-2 pb-28 wide:pb-4">
       {!products ? (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
           {Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} className="h-44 rounded-xl" />)}
@@ -783,11 +795,11 @@ export default function POSPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => updateQty(idx, -1)}>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" aria-label={`${item.name} — kamaytirish`} onClick={() => updateQty(idx, -1)}>
                     <Minus className="h-3 w-3" />
                   </Button>
                   <span className="w-6 text-center text-xs font-bold">{item.qty}</span>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => updateQty(idx, 1)}>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" aria-label={`${item.name} — ko'paytirish`} onClick={() => updateQty(idx, 1)}>
                     <Plus className="h-3 w-3" />
                   </Button>
                 </div>
@@ -796,7 +808,7 @@ export default function POSPage() {
                     {formatMoney(minorToNumber(lineDisplay[idx]!.total), lineDisplay[idx]!.code)}
                   </p>
                 </div>
-                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => removeFromCart(idx)}>
+                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" aria-label={`${item.name} — olib tashlash`} onClick={() => removeFromCart(idx)}>
                   <X className="h-3 w-3 text-destructive" />
                 </Button>
               </motion.div>
@@ -808,19 +820,28 @@ export default function POSPage() {
   );
 
   return (
-    <div className={cn("flex h-full md:h-screen bg-background overflow-hidden", panelLeft && "md:flex-row-reverse")}>
+    // `h-screen` emas: sahifa ilova sarlavhasi ostidagi `main` ichida — 100vh u yerda pastdan oshib ketadi
+    <div className={cn("flex min-h-0 flex-1 bg-background overflow-hidden", panelLeft && "wide:flex-row-reverse")}>
       {/* Asosiy maydon — mahsulotlar (klassik, ixcham) yoki savat jadvali */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* POS topbar */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-card shrink-0">
+        <div className="flex items-center gap-3 px-4 py-3 short:py-1.5 border-b border-border bg-card shrink-0">
           <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
             <Calculator className="h-4 w-4 text-primary" />
           </div>
           <span className="font-bold text-sm">POS Kassasi</span>
           {shift && (
-            <span className="text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-full">
-              {shift.warehouseName} · {shift.receiptCount} chek · {fmt(num(shift.totalSales))} so'm
-            </span>
+            <button
+              type="button"
+              data-testid="session-summary"
+              aria-label="Smena tafsilotlari"
+              onClick={() => setSessionDetail(true)}
+              className="min-w-0 truncate rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400 cursor-pointer"
+            >
+              <span className="hidden lg:inline">{shift.warehouseName} · </span>
+              Naqd {fmt(num(shift.totalCash))} · Karta {fmt(num(shift.totalCard) + num(shift.totalBank))} · Jami{" "}
+              {fmt(num(shift.totalSales))}
+            </button>
           )}
           <div className="ml-auto flex gap-2">
             {shift && (
@@ -832,7 +853,7 @@ export default function POSPage() {
         </div>
 
         {/* Search */}
-        <div className="px-4 py-3 border-b border-border shrink-0">
+        <div className="px-4 py-3 short:py-1.5 border-b border-border shrink-0">
           <div className="relative flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -881,6 +902,40 @@ export default function POSPage() {
           </div>
         </div>
 
+        {/* Kategoriya — telefonda gorizontal scroll; tanlov savatga tegmaydi */}
+        {(categories?.length ?? 0) > 0 && (
+          <div
+            data-testid="category-bar"
+            className="flex gap-2 overflow-x-auto border-b border-border px-4 py-2 short:py-1 shrink-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            <button
+              type="button"
+              onClick={() => setCategoryId(null)}
+              className={cn(
+                "shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium cursor-pointer",
+                categoryId === null ? "border-primary bg-primary/10 text-primary" : "border-border bg-muted/30 text-muted-foreground hover:bg-accent",
+              )}
+            >
+              Barchasi
+            </button>
+            {categories!.map((category) => (
+              <button
+                key={category.id}
+                type="button"
+                onClick={() => setCategoryId(category.id)}
+                className={cn(
+                  "shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium cursor-pointer",
+                  categoryId === category.id
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-muted/30 text-muted-foreground hover:bg-accent",
+                )}
+              >
+                {category.name}
+              </button>
+            ))}
+          </div>
+        )}
+
         {tableLayout ? cartTable : productGrid}
       </div>
 
@@ -893,9 +948,9 @@ export default function POSPage() {
           "fixed inset-0 z-50 w-full transition-transform duration-200",
           cartOpen ? "translate-y-0" : "translate-y-full",
           // Desktop: avvalgidek yon panel
-          "md:static md:z-auto md:translate-y-0 md:transition-none",
-          layout === "compact" ? "md:w-[26rem] xl:w-[30rem]" : "md:w-80 xl:w-96",
-          panelLeft ? "md:border-r" : "md:border-l",
+          "wide:static wide:z-auto wide:translate-y-0 wide:transition-none",
+          layout === "compact" ? "wide:w-[26rem] xl:w-[30rem]" : "wide:w-80 xl:w-96",
+          panelLeft ? "wide:border-r" : "wide:border-l",
         )}
       >
         {/* Cart header */}
@@ -904,7 +959,7 @@ export default function POSPage() {
             <Button
               size="icon"
               variant="ghost"
-              className="h-8 w-8 md:hidden"
+              className="h-8 w-8 wide:hidden"
               aria-label="Savatni yopish"
               data-testid="cart-close"
               onClick={() => setCartOpen(false)}
@@ -1013,7 +1068,9 @@ export default function POSPage() {
         {tableLayout ? <div className="flex-1" /> : cartList}
 
         {/* Checkout */}
-        <div className="border-t border-border p-4 space-y-3 shrink-0 max-h-[70vh] overflow-y-auto">
+        {/* `shrink-0` bo'lsa uch qismli to'lovda blok panel balandligidan oshib, "Yakunlash" kesilardi.
+            Endi blok qisqarib ichidan aylanadi, tugma esa doim pastda turadi. */}
+        <div className="border-t border-border p-4 space-y-3 min-h-0 shrink overflow-y-auto">
           {/* Keshbekdan to'lash */}
           {customer && cashbackAvailable > 0n && cashbackLimit > 0n && totalMinor > 0n && (
             <div className="flex items-center gap-2">
@@ -1239,11 +1296,21 @@ export default function POSPage() {
             </div>
           )}
 
-          {/* Checkout button */}
+          {/* Checkout button — to'lov qismlari ko'payganda ham ko'rinib tursin
+              (past ekranli noutbukda pastga aylantirmasdan yakunlash uchun) */}
           <Button
-            className="w-full h-12 text-base font-bold"
+            className="sticky bottom-0 w-full h-12 text-base font-bold shadow-lg"
             onClick={() => { void handleCheckout(); }}
-            disabled={completeSale.isPending || !cart.length || !shift || (onCredit && !customer) || preview.nonCashOver}
+            data-testid="finalize-sale"
+            // Kam to'lov: qism kiritilgan, lekin qoldiq bor va mijoz tanlanmagan — qarzga yozib bo'lmaydi
+            disabled={
+              completeSale.isPending ||
+              !cart.length ||
+              !shift ||
+              (onCredit && !customer) ||
+              preview.nonCashOver ||
+              (activeParts.length > 0 && preview.remaining > 0n && !customer)
+            }
           >
             {completeSale.isPending ? "Qayta ishlanmoqda..." : (
               <span className="flex items-center gap-2">
@@ -1262,7 +1329,7 @@ export default function POSPage() {
           data-testid="cart-bar"
           aria-label="Savatni ochish"
           onClick={() => setCartOpen(true)}
-          className="fixed inset-x-0 bottom-16 z-30 flex items-center gap-3 border-t border-border bg-card px-4 py-3 text-left shadow-lg md:hidden"
+          className="fixed inset-x-0 bottom-nav-safe z-30 flex items-center gap-3 border-t border-border bg-card px-4 py-3 text-left shadow-lg wide:hidden"
         >
           <ShoppingCart className="h-4 w-4 shrink-0 text-primary" />
           <span className="text-sm font-medium">Savat: {cart.length} ta</span>

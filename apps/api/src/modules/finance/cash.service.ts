@@ -604,7 +604,8 @@ export async function recordManualCashTransaction(
       input.type === "in" ? "income" : "expense",
       input.type === "in" ? "Boshqa daromadlar" : "Boshqa xarajatlar",
     ));
-  let journalEntryId: string | null = null;
+  // Quyidagi blok yo yozuv yaratadi, yo xato tashlaydi — shuning uchun boshlang'ich qiymat keraksiz
+  let journalEntryId: string;
   {
     const [counter] = await tx
       .select({ id: accounts.id })

@@ -50,6 +50,8 @@ async function payPart(page: Page, methodTitle: RegExp, amount: string, finish: 
 }
 
 test("100 000 so'm: naqd 50 000 + UZCARD 50 000 — Yetkazma ustuni bo'sh qoladi", async ({ page }) => {
+  // Bitta testda butun yo'l: kirish → smena → 25 ta bosish → sotuv → chiqish → qayta kirish → dashboard
+  test.setTimeout(180_000);
   await login(page, "kassir");
   await page.goto(appPath("pos"));
   await ensureShift(page);
@@ -69,7 +71,7 @@ test("100 000 so'm: naqd 50 000 + UZCARD 50 000 — Yetkazma ustuni bo'sh qoladi
   // "Yetkazildi" ko'rinardi, shuning uchun tekshiruv shu yuzada.
   await logout(page);
   await login(page, "owner");
-  await page.goto(appPath("dashboard"));
+  await page.goto(appPath("dashboard"), { waitUntil: "domcontentloaded" });
 
   // Chek ro'yxatda turibdi
   await expect(page.getByText("Chakana (POS)").first()).toBeVisible({ timeout: 30_000 });

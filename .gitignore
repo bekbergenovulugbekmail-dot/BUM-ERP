@@ -47,6 +47,7 @@ keystore.properties
 
 # Playwright e2e artefaktlari
 e2e/.artifacts/
+e2e/.screenshots/
 e2e/.report/
 playwright-report/
 test-results/

@@ -1962,6 +1962,61 @@ litsenziya, modul, bank hisobi va terminal qamrab olingan.
 Sxema o'zgarmadi — migratsiya qo'shilmadi.
 
 
+## Kassa sessiyasi + Android POS: yakuniy qabul (2026-09-17)
+
+3-bosqich — audit → minimal tuzatish → haqiqiy Chrome → regressiya. Yangi parallel tizim yaratilmadi,
+sxema o'zgarmadi (migratsiya qo'shilmagan), hech qanday ma'lumot o'chirilmadi.
+
+**Haqiqiy brauzerda tasdiqlangan (Playwright + o'rnatilgan Chrome, `e2e/pos-acceptance.spec.ts`)**
+- Faol smena paneli: yuqorida ixcham `Naqd X · Karta Y · Jami Z`, bosilganda terminal kesimi
+  (qaysi terminal → qaysi bank hisobi → nechta tranzaksiya).
+- Uch usulli to'lov: 100 000 = naqd 40 000 + UZCARD 30 000 + HUMO 30 000. Brauzerdan tashqari
+  **bazada ham** tekshiriladi (`pnpm --filter @bum/api verify:last-pos-sale`, faqat SELECT):
+  naqd → "Asosiy kassa", UZCARD → "Asosiy bank hisobi", HUMO → "Hamkorbank hisobi",
+  uchala qism ham bitta `pos_shift_id` ga bog'langan, `source=pos`, `fulfillment_method=counter`,
+  `delivery_tasks = 0`.
+- To'lov validatsiyasi: kam to'lovda "Yakunlash" o'chirilgan; to'liq to'lovda yoqilgan;
+  naqdsiz ortiqcha to'lov summa oynasining o'zida bloklanadi ("Ko'pi bilan: …", Saqlash/Yakunlash
+  o'chirilgan). Naqdda ortig'i ataylab ruxsat — bu qaytim. Server ham rad etadi
+  (`overpayment`, `pos-mixed-payment.test.ts` va `acceptance-payments.test.ts`).
+- Smenani yopish: naqd qatorma-qator (boshlang'ich, naqd savdo, kirim, chiqim, kutilayotgan) —
+  karta naqd hisobiga QO'SHILMAYDI; terminal kesimi alohida. Yopilgandan keyin kassa ish maydoni yo'q.
+- Kategoriya: gorizontal ro'yxat, "Barchasi", kategoriya ichida qidiruv, almashtirilganda savat saqlanadi.
+- Mahsulot kartochkasi: matn kartochka chegarasidan chiqmaydi; ikki bosish dublikat qator yaratmaydi
+  (bitta qator, miqdor 2). Telefondagi savat: +/−, o'chirish, jami yangilanishi.
+
+**Tuzatilgan kamchiliklar (audit natijasi)**
+- 360px da ilova sarlavhasining o'ng tugmalari ekrandan chiqib ketardi (avatar kesilgan) —
+  `min-w-0` va kompaniya nomining qisqarishi.
+- **Telefon yon holati**: eni 800–915px, balandligi 360–412px bo'lgan ekran `md:` bo'yicha "desktop"
+  deb hisoblanib, siqilgan desktop layout ko'rsatilardi. Yangi `wide:` varianti eni VA balandlikni
+  birga tekshiradi; `short:` varianti past ekranda sarlavha qatorlarini yupqalashtiradi va
+  kartochka rasmini pasaytiradi.
+- Savat ro'yxatidagi +/−/× tugmalarining o'qiladigan nomi yo'q edi — `aria-label` qo'shildi.
+- Uch qismli to'lovda "Yakunlash" tugmasi past ekranli noutbukda ko'rinmay qolardi — `sticky`.
+- Demo zaxira takroriy qabul testlarida tugab qolardi: seeder endi qoldiqni maqsad darajagacha
+  **to'ldiradi** (faqat kirim; hech narsa o'chirilmaydi), va Playwright `globalSetup` uni har yugurishdan
+  oldin ishga tushiradi.
+- Kassa sahifasi `h-screen` (100vh) ishlatardi, lekin u ilova sarlavhasi ostidagi `main` ichida —
+  uch qismli to'lovda "Yakunlash" tugmasi pastdan kesilardi (o'lchangan: 940 > 900). Endi sahifa
+  `main` ichiga aynan sig'adi; tugma o'rni testda tekshiriladi.
+- `pnpm lint` uchta xato bilan yiqilardi (bu sessiya o'zgarishlaridan emas): Android/Gradle build
+  chiqishi lint'dan chiqarildi, `cash.service.ts` dagi o'lik initializer olib tashlandi.
+
+**Skrinshotlar:** `e2e/.screenshots/final/` (gitignore'da) — 8 ta, har biri ko'zdan kechirilgan.
+Playwright `outputDir` ni har yugurishda tozalagani uchun skrinshotlar undan tashqariga chiqarildi.
+Kam xotirali mashinada `E2E_LIGHT=1` video va trace yozuvini o'chiradi (9.7 daq → 3.4 daq).
+
+**TEKSHIRILMAGAN (NOT VERIFIED)**
+- Haqiqiy Android qurilmada sinov — telefon ulanmagan. Playwright mobil emulyatsiyasi (360/390/412
+  tik va 800x360/844x390/915x412 yon) — PASS, lekin bu haqiqiy qurilma emas.
+- Haqiqiy UZCARD/HUMO terminali — ekvayring integratsiyasi yo'q. Kassir chekka qarab qo'lda kiritadi;
+  aynan shu qo'lda kiritish oqimi — PASS.
+- Telefon yon holati ishlaydi, lekin 390px balandlikda mahsulot maydoni tor — tik holat tavsiya etiladi.
+
+**Regressiya:** API 114 fayl / 574 test, web 18 / 77, brauzer 29 test (5 fayl) — hammasi o'tdi.
+tsc (web va API), lint va build toza.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)

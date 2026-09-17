@@ -1,9 +1,10 @@
 /**
  * Android/telefon o'lchamlarida POS: mahsulot maydoni to'liq kenglikda, savat pastki panelda,
- * gorizontal scroll yo'q, muhim tugmalar ekran ichida. Skrinshotlar `e2e/.artifacts/` ga saqlanadi.
+ * gorizontal scroll yo'q, muhim tugmalar ekran ichida. Skrinshotlar `e2e/.screenshots/` ga saqlanadi.
  */
 import { expect, test, type Page } from "@playwright/test";
 import { appPath, login } from "./_lib/accounts.ts";
+import { openCart } from "./_lib/pos.ts";
 
 const PHONES = [
   { name: "360", width: 360, height: 800 },
@@ -45,7 +46,7 @@ for (const phone of PHONES) {
 
     expect(await noHorizontalOverflow(page), "gorizontal scroll bo'lmasin").toBe(true);
 
-    await page.screenshot({ path: `e2e/.artifacts/pos-${phone.name}.png`, fullPage: false });
+    await page.screenshot({ path: `e2e/.screenshots/pos-${phone.name}.png`, fullPage: false });
   });
 }
 
@@ -62,16 +63,14 @@ test("telefonda savat ochiladi, to'lov tugmalari va yakunlash ko'rinadi", async 
   // Pastki panelda miqdor va jami ko'rinadi
   const cartBar = page.getByTestId("cart-bar");
   await expect(cartBar).toContainText("Savat: 1 ta");
-  await page.screenshot({ path: "e2e/.artifacts/pos-cart-bar.png" });
+  await page.screenshot({ path: "e2e/.screenshots/pos-cart-bar.png" });
 
   // Savatni ochamiz — to'liq ekranli panel
-  await cartBar.click();
-  const panel = page.getByTestId("pos-cart-panel");
-  await expect(panel).toBeVisible();
+  const panel = await openCart(page);
   await expect(page.getByTestId("cart-close")).toBeVisible();
   await expect(panel).toContainText("Nestle suv 0.5L");
   expect(await noHorizontalOverflow(page)).toBe(true);
-  await page.screenshot({ path: "e2e/.artifacts/pos-cart-mobile.png" });
+  await page.screenshot({ path: "e2e/.screenshots/pos-cart-mobile.png" });
 
   // To'lov usullari va yakunlash tugmasi ekran ichida
   const cash = panel.locator(`[aria-label="To'lov usuli"] button`).filter({ hasText: /naqd/i }).first();
@@ -85,6 +84,6 @@ test("telefonda savat ochiladi, to'lov tugmalari va yakunlash ko'rinadi", async 
   await cash.click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
-  await page.screenshot({ path: "e2e/.artifacts/pos-payment-mobile.png" });
+  await page.screenshot({ path: "e2e/.screenshots/pos-payment-mobile.png" });
   expect(await noHorizontalOverflow(page)).toBe(true);
 });

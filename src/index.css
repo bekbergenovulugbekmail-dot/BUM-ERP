@@ -4,6 +4,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Telefon yon holatda eni 800-915px, lekin balandligi atigi 360-412px.
+   Faqat enga qaraydigan `md:` bunday ekranni "desktop" deb hisoblab,
+   siqilgan desktop layoutni ko'rsatib qo'yardi. `wide:` eni va balandlikni
+   birga tekshiradi — past ekranda mobil layout qoladi. */
+@custom-variant wide (@media (min-width: 768px) and (min-height: 500px));
+/* Past ekran (telefon yon holati): sarlavha qatorlari yupqalashsin,
+   mahsulotlarga ko'proq joy qolsin. */
+@custom-variant short (@media (max-height: 500px));
+
 @theme inline {
   --font-sans:
     "Geist", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
@@ -133,4 +142,16 @@
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+}
+
+/* ─── Android/iOS xavfsiz zona ────────────────────────────────────────────────
+   `pb-safe` pastki navigatsiyada ishlatilardi, lekin hech qayerda aniqlanmagan
+   edi — ya'ni gesture bar himoyasi amalda ishlamasdi. */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Pastki navigatsiya ustidagi qatlam (kassa savat paneli) — gesture bar bilan to'qnashmaydi. */
+.bottom-nav-safe {
+  bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
 }

@@ -109,7 +109,10 @@ export default function ShiftCloseDialog({ shift, onClose }: Props) {
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-muted-foreground">Kassadan chiqim</dt>
-                <dd className="font-medium tabular-nums">−{fmt(num(shift.cashOut))} so'm</dd>
+                {/* Nol bo'lsa minus qo'yilmaydi: "−0 so'm" chalkash ko'rinadi */}
+                <dd className="font-medium tabular-nums">
+                  {num(shift.cashOut) > 0 ? "−" : ""}{fmt(num(shift.cashOut))} so'm
+                </dd>
               </div>
               <div className="flex justify-between gap-3 border-t border-border pt-1.5">
                 <dt className="font-semibold">Kutilayotgan</dt>

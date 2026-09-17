@@ -15,9 +15,12 @@ if (existsSync(".env")) process.loadEnvFile(".env");
 
 const WEB = process.env.E2E_BASE_URL ?? "http://localhost:5173";
 const API = process.env.E2E_API_URL ?? "http://localhost:3000";
+const LIGHT = process.env.E2E_LIGHT === "1";
 
 export default defineConfig({
   testDir: "./e2e",
+  // Demo ma'lumot va qoldiqni tayyorlaydi (idempotent, hech narsa o'chirilmaydi)
+  globalSetup: "./e2e/_lib/global-setup.ts",
   outputDir: "./e2e/.artifacts",
   timeout: 90_000,
   expect: { timeout: 15_000 },
@@ -33,8 +36,9 @@ export default defineConfig({
     headless: true,
     viewport: { width: 1440, height: 900 },
     screenshot: "only-on-failure",
-    video: "retain-on-failure",
-    trace: "retain-on-failure",
+    // Kam xotirali mashinada: E2E_LIGHT=1 bilan video va trace yozilmaydi
+    video: LIGHT ? "off" : "retain-on-failure",
+    trace: LIGHT ? "off" : "retain-on-failure",
     actionTimeout: 15_000,
   },
   webServer: [
