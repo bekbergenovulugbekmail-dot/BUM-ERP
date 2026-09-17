@@ -7,6 +7,8 @@
  *   GET  /stores (?scope=today|all&search=&lat=&lng=&limit=)   do'konlar (joy berilsa — yaqinidan)
  *   GET  /stores/:customerId (?lat=&lng=)           do'kon profili va bugungi tashrifi (faqat agentga ochiq do'kon)
  *   GET  /debtors (?filter=overdue|today|soon|all&lat=&lng=)   qarzdorlar
+ *   GET  /cash                                      agentdagi topshirilmagan naqd
+ *   POST /payments                                  mijozdan to'lov qabul qilish (naqd — agent hisobiga)
  *   GET  /customers/:customerId/history             mijoz tarixi: buyurtmalar, to'lovlar, o'z tashriflari, o'rtachalar
  *   PATCH /customers/:customerId                    aloqa ma'lumotlari (sales_agent.customer.edit)
  *   PUT  /customers/:customerId/location            joylashuv — mijoz yonida (sales_agent.customer.location.edit)
@@ -64,6 +66,7 @@ import {
 } from "../../db/schema/sales-agent.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
+import { MAX_PAYMENT_PARTS } from "@bum/shared";
 import { moneySchema, percentSchema, qtySchema } from "../../shared/decimal.js";
 import type { GeoPoint } from "../../shared/geo.js";
 import { storageProvider } from "../../shared/storage.js";
@@ -92,6 +95,10 @@ import {
   supervisorOrders,
 } from "./agent-orders.service.js";
 import { recordAgentLocation, reportLocationProblem } from "./location.service.js";
+import { repCashSummary, salesRepCashAccount } from "./agent-cash.service.js";
+import { recordMixedCustomerPayment } from "../sales/payment-allocation.service.js";
+import { notifyCustomerPaymentReceived } from "../telegram/notify.service.js";
+import { alertSuspiciousLocation } from "../telegram/alerts.service.js";
 import { getSalesAgentPolicy, recipientCandidates, salesAgentPolicySchema, saveSalesAgentPolicy } from "./policy.service.js";
 import { agentPromotions, createPromotion, deletePromotion, listPromotions, updatePromotion } from "./promotions.service.js";
 import { agentDashboard } from "./dashboard.service.js";
@@ -139,6 +146,25 @@ const storesQuery = z
     limit: z.coerce.number().int().min(1).max(500).default(200),
   })
   .refine(pairedOrigin, pairMessage);
+/** Agent qabul qilgan to'lov: aralash ham bo'lishi mumkin (naqd + karta). */
+const agentPaymentBody = z.strictObject({
+  customerId: z.uuid(),
+  orderId: z.uuid().nullable().optional(),
+  /** Takroriy yuborishda ikkinchi to'lov yozilmasin. */
+  clientRequestId: z.uuid(),
+  parts: z
+    .array(
+      z.strictObject({
+        method: z.enum(["cash", "card", "bank"]),
+        amount: moneySchema,
+        terminalId: z.uuid().nullable().optional(),
+      }),
+    )
+    .min(1)
+    .max(MAX_PAYMENT_PARTS),
+  notes: z.string().trim().max(500).nullable().optional(),
+});
+
 const debtorsQuery = z
   .object({ ...originShape, filter: z.enum(["overdue", "today", "soon", "all"]).default("all") })
   .refine(pairedOrigin, pairMessage);
@@ -425,6 +451,49 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
     return { store: { ...store, todayVisit: await latestStoreVisit(db, context, customerId) } };
   });
 
+  // ─── Mijozdan to'lov qabul qilish ────────────────────────────────────────
+  // Naqd pul agentning "yo'ldagi naqd" hisobiga tushadi — kassaga topshirilguncha
+  // kimda qancha borligi moliyada ko'rinib turadi.
+
+  app.get("/cash", async (req) => {
+    const context = await readAgent(req);
+    return repCashSummary(db, context.company.id, context.agent.id);
+  });
+
+  app.post("/payments", async (req, reply) => {
+    const body = agentPaymentBody.parse(req.body);
+    const result = await writeAgent(req, async (tx, context) => {
+      const cashAccountId = await salesRepCashAccount(tx, context.company.id, context.agent);
+      const payment = await recordMixedCustomerPayment(
+        tx,
+        context,
+        {
+          source: "sales_payment",
+          customerId: body.customerId,
+          orderId: body.orderId ?? null,
+          // Naqd — agent hisobiga; karta/bank — o'z hisobiga (terminal bo'yicha)
+          parts: body.parts.map((part) => (part.method === "cash" ? { ...part, cashAccountId } : part)),
+          idempotencyKey: `agent_payment:${body.clientRequestId}`,
+          notes: body.notes ?? null,
+        },
+        requestMeta(req),
+      );
+      return { payment, companyId: context.company.id, agentName: context.agent.name };
+    });
+
+    // Xabar tranzaksiyadan KEYIN — tarmoq kutishi bazani band qilmasin
+    void notifyCustomerPaymentReceived({
+      companyId: result.companyId,
+      customerId: body.customerId,
+      amount: body.parts.reduce((sum, part) => sum + Number(part.amount), 0).toFixed(2),
+      method: body.parts.length === 1 ? (body.parts[0]?.method ?? "cash") : "aralash",
+      collectedBy: `Savdo agenti ${result.agentName}`,
+    });
+
+    reply.status(result.payment.created ? 201 : 200);
+    return result.payment;
+  });
+
   app.get("/debtors", async (req) => {
     const query = debtorsQuery.parse(req.query);
     return { debtors: await agentDebtors(db, await readAgent(req), { filter: query.filter, origin: originOf(query) }) };
@@ -490,7 +559,14 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/location", async (req) => {
     const body = locationBody.parse(req.body);
-    return writeAgent(req, (tx, context) => recordAgentLocation(tx, context, body));
+    let owner = { companyId: "", agent: "" };
+    const result = await writeAgent(req, (tx, context) => {
+      owner = { companyId: context.company.id, agent: context.agent.name ?? context.agent.code };
+      return recordAgentLocation(tx, context, body);
+    });
+    // Soxta GPS yoki sakrash — egasiga darhol xabar (tranzaksiyadan keyin)
+    if (result.accepted && result.suspicious) void alertSuspiciousLocation(owner.companyId, { agent: owner.agent, flags: result.flags });
+    return result;
   });
 
   app.post("/location/events", async (req, reply) => {

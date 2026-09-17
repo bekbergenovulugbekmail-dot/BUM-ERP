@@ -13,6 +13,7 @@ import { autoEndStaleDeliverySessions, purgeDeliveryLocations } from "../modules
 import { purgeAgentLocations } from "../modules/sales-agent/location.service.js";
 import { autoEndStaleSessions } from "../modules/sales-agent/work-session.repo.js";
 import { processSubscriptionExpiry, type ExpiryResult } from "../modules/subscription/subscription.service.js";
+import { runTelegramJobs } from "../modules/telegram/scheduler.service.js";
 
 const RETENTION_MS = 24 * 60 * 60 * 1000;
 const INTERVAL_MS = 60 * 60 * 1000;
@@ -96,6 +97,11 @@ export function startMaintenance(log: FastifyBaseLogger): () => void {
       const expiry = await runSubscriptionExpiry();
       if (expiry && Object.values(expiry).some((count) => count > 0)) {
         log.info({ subscriptions: expiry }, "Obuna va litsenziya muddatlari yangilandi");
+      }
+      // Telegram: egaga kunlik xulosa (20:00 dan keyin), mijozga qarz eslatmasi (10:00 dan keyin)
+      const telegram = await runTelegramJobs();
+      if (telegram.summaries > 0 || telegram.reminders > 0) {
+        log.info({ telegram }, "Telegram xabarlari yuborildi");
       }
     } catch (error) {
       log.error({ err: error }, "Davriy tozalash xatosi");

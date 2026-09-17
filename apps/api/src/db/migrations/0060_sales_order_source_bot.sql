@@ -1,0 +1,1 @@
+ALTER TYPE "public"."sales_order_source" ADD VALUE 'bot';

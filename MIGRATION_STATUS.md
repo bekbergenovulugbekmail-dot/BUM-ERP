@@ -2164,6 +2164,68 @@ Qolgan ish: serverda Android relizlarini saqlash va ilovadan yangilanishni takli
 **Regressiya:** API 116 fayl / 594 test, web 19 / 81, desktop 9 / 57, brauzer 37 test (9 fayl) —
 hammasi o'tdi. tsc (web, API, desktop) va lint toza. Migratsiyalar `0055`–`0057` — faqat qo'shish.
 
+## Telegram botlari va agent naqdi (2026-09-18)
+
+Uch ish birga bajarildi: biznes egasi uchun platforma boti, har biznesning o'z mijozlar boti va
+savdo agenti mijozdan pul yig'ishi. Migratsiyalar `0058_telegram_bots`, `0059_sales_rep_cash`,
+`0060_sales_order_source_bot` — uchalasi ham FAQAT QO'SHISH (jadval, ustun, enum qiymati), bazada
+hech narsa o'chirilmadi yoki o'zgartirilmadi.
+
+**1. Biznes egasi uchun bot (platformada bitta)**
+Admin panel → Platforma sozlamalari → "Biznes egalari uchun Telegram bot": admin BotFather tokenini
+qo'yadi. Egasi botga telefon raqamini ulashadi — ERP'dagi raqami bo'yicha uning biznesi topiladi
+(faqat `companies.owner_id`, xodimlarga bu bot ochilmaydi) va u faqat O'Z biznesini ko'radi.
+- tugmalar: Bugungi xulosa, Qoldiq, Qarzdorlar, Xodimlar; erkin matn — mijoz va mahsulot qidiruvi
+- kunlik xulosa har kuni 20:00 dan keyin avtomatik (soatlik `startMaintenance` ichida), kuniga bir marta:
+  takrorlanmaslik har suhbat uchun `telegram_chats.state` dagi sana bilan (bitta UPDATE — ikki nusxa ham yubormaydi)
+- darhol ogohlantirishlar: smena kassa farqi chegaradan oshdi, chekdagi chegirma siyosat chegarasidan
+  oshdi, xodim joylashuvi shubhali (soxta GPS yoki imkonsiz sakrash), botdan yangi buyurtma
+- hisobotlar FAQAT O'QIYDI (`owner-reports.service.ts`) — bot orqali hech narsa o'zgartirilmaydi
+
+**2. Mijozlar uchun bot (har bizneda o'ziniki)**
+Sozlamalar → Telegram: egasi BotFather tokenini qo'yadi, ptichkalar bilan qaysi xabarlar borishini
+o'zi belgilaydi (xarid cheki, to'lov qabul qilindi, qarz eslatmasi, bot ichida xaridlar tarixi va qarz,
+botdan buyurtma berish). Standart holatda buyurtma berish o'chiq.
+- mijoz botga telefon raqamini ulashadi; raqam shu biznesning mijozlar ro'yxatida bo'lsagina bog'lanadi
+- xabar biznes amalini HECH QACHON to'xtatmaydi: Telegram ishlamasa sotuv/to'lov baribir yoziladi
+- qarz eslatmasi har kuni 10:00 dan keyin, muddati kelgan yoki 3 kun ichida keladigan qarz bo'yicha
+- botdan buyurtma: mahsulot qidirish → tanlash → miqdor → savat → yuborish. Buyurtma **qoralama**
+  (`source: "bot"`) bo'lib tushadi, egasining hisobi nomidan yoziladi va do'kon xodimi dasturda
+  tasdiqlaydi — bot zaxira yoki pulni o'zgartirmaydi. Yangi "buyurtma tizimi" yaratilmadi, mavjud
+  `createOrder` va uning barcha tekshiruvlari ishlaydi
+
+**Xavfsizlik:** token bazada AES-256-GCM bilan shifrlangan (`shared/secret-box.ts`, kalit
+`SESSION_SECRET` dan HKDF orqali), UI'ga faqat niqoblangan ko'rinishda chiqadi. Webhook ikki qavat
+himoyalangan: manzildagi 24 baytlik tasodifiy sir va Telegram yuboradigan
+`X-Telegram-Bot-Api-Secret-Token` sarlavhasi; noto'g'ri so'rov ishlanmaydi, lekin Telegram qayta
+urinavermasligi uchun 200 qaytadi. Webhook manzili `PUBLIC_API_URL` dan olinadi — u sozlanmagan
+bo'lsa bot saqlanadi, lekin webhook o'rnatilmaydi va sabab egasiga ko'rsatiladi.
+
+**3. Savdo agenti mijozdan pul yig'adi**
+Yetkazuvchidagi qoida bilan BIR XIL (yangi parallel tizim emas): mijozdan olingan naqd asosiy
+kassaga emas, agentning "yo'ldagi naqd" hisobiga tushadi (`cash_accounts.sales_rep_id`), shuning uchun
+moliyada "kimda qancha pul bor" ko'rinib turadi. Kassaga topshirilganda `transferCash` bilan agentdan
+yechilib kassa qoldig'iga qo'shiladi — sotuv jurnaliga tegmaydi.
+- agent ilovasi: mijoz kartochkasida "To'lov qabul qilish" (naqd/karta/bank), boshqaruv panelida
+  "Sizdagi naqd"; takroriy yuborish `clientRequestId` bilan bir marta yoziladi
+- supervayzer: Distribyutsiya → Savdo vakillari → hamyon tugmasi: agentdagi naqd, topshirish tarixi
+  va "Kassaga topshirish" (`distribution.manage`; boshqa kassani tanlash — `finance.manage`)
+- agentdagi summadan ortiq topshirib bo'lmaydi va boshqa agent hisobiga o'tkazib bo'lmaydi
+- to'lov yozilgach mijozning botiga avtomatik xabar ketadi: qancha to'landi, kim qabul qildi va qancha qarz qoldi
+
+**To'lov xabarlari qayerlarga ulandi:** kassadagi sotuv (`POST /api/sales/pos/sales`), oddiy sotuv
+hujjati, `POST /api/sales/payments` (bitta usul va aralash), kassada qarz to'lash, dostavshik yig'gan
+to'lov va savdo agenti to'lovi. Hammasi TRANZAKSIYADAN KEYIN `void` bilan yuboriladi — tarmoq kutishi
+bazani band qilmaydi.
+
+**Testlar:** `apps/api/test/telegram.test.ts` (18 ta — token shifri, ruxsatlar, webhook siri,
+ptichkalar, xabar qoidalari; `fetch` almashtirilgan, tarmoqqa chiqmaydi) va
+`apps/api/test/sales-agent-cash.test.ts` (11 ta — pul agentda qoladi, takror yozilmaydi, qarzdan
+ortiq to'lov rad, topshirish, chegaralar).
+
+**Regressiya:** API 118 fayl / 623 test, web 19 / 81 — hammasi o'tdi; tsc (API, web, desktop) va
+lint toza. Migratsiyalar `0058`–`0060` production bazasida HALI QO'LLANMAGAN (deploy qilinmadi).
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)

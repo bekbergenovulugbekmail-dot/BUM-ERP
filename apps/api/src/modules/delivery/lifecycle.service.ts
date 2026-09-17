@@ -488,7 +488,7 @@ export async function collectDeliveryPayment(
   const first = existing.find((row) => row.clientRequestId === input.clientRequestId);
   if (first) {
     if (first.taskId !== task.id) throw conflict("So'rov kaliti boshqa yetkazmada ishlatilgan");
-    return { payment: first, payments: existing.filter((row) => row.taskId === task.id), created: false };
+    return { payment: first, payments: existing.filter((row) => row.taskId === task.id), created: false, notify: null };
   }
   if (task.status !== "arrived" && task.status !== "delivering") {
     throw new AppError("CONFLICT", "To'lov mijoz oldida qabul qilinadi (yetib kelgandan keyin)", { reason: "invalid_transition", from: task.status });
@@ -575,7 +575,17 @@ export async function collectDeliveryPayment(
     paymentId: header.id,
     offline,
   });
-  return { payment: rows[0]!, payments: rows, created: true };
+  // Mijozga xabar uchun (tranzaksiyadan keyin marshrutda yuboriladi)
+  return {
+    payment: rows[0]!,
+    payments: rows,
+    created: true,
+    notify: {
+      customerId: task.customerId,
+      amount: fromMinor(total),
+      method: parts.length > 1 ? "mixed" : parts[0]!.method,
+    },
+  };
 }
 
 export type ConfirmSummary = {

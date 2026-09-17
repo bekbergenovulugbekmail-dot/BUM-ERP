@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import {
-  Settings, Shield, Users, Building2, ListChecks, Puzzle, Bell, MapPin, Lock, ReceiptText, Tag, Gift, Coins, Monitor, Scale,
+  Settings, Shield, Users, Building2, ListChecks, Puzzle, Bell, MapPin, Lock, ReceiptText, Tag, Gift, Coins, Monitor, Scale, Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import { useTranslation } from "react-i18next";
@@ -19,13 +19,14 @@ import CashbackSection from "./_components/cashback-section.tsx";
 import CurrenciesSection from "./_components/currencies-section.tsx";
 import PosDevicesSection from "./_components/pos-devices-section.tsx";
 import SalesPolicySection from "./_components/sales-policy-section.tsx";
+import TelegramSection from "./_components/telegram-section.tsx";
 
 // Takliflar (invitations) bo'limi yo'q — yakuniy qaror: xodim loginini kompaniya egasi o'zi ochadi
 export default function SettingsPage() {
   const { t } = useTranslation("modules");
   const [tab, setTab] = useState<
     | "company" | "currencies" | "branches" | "receipt" | "labels" | "cashback" | "sales-policy" | "pos-devices" | "modules" | "roles" | "users"
-    | "audit" | "notifications" | "security"
+    | "audit" | "notifications" | "security" | "telegram"
   >("company");
 
   const TABS = [
@@ -41,6 +42,7 @@ export default function SettingsPage() {
     { key: "roles"         as const, label: t("settings.tab.roles"),     icon: Shield },
     { key: "users"         as const, label: t("settings.tab.users"),     icon: Users },
     { key: "notifications" as const, label: "Bildirishnomalar",          icon: Bell },
+    { key: "telegram"      as const, label: "Telegram",                  icon: Send },
     { key: "security"      as const, label: "Xavfsizlik",                icon: Lock },
     { key: "audit"         as const, label: t("settings.tab.audit"),     icon: ListChecks },
   ];
@@ -86,6 +88,7 @@ export default function SettingsPage() {
         {tab === "cashback"      && <CashbackSection />}
         {tab === "sales-policy"  && <SalesPolicySection />}
         {tab === "pos-devices"   && <PosDevicesSection />}
+        {tab === "telegram"      && <TelegramSection />}
         {tab === "modules"       && <ModulesSection />}
         {tab === "roles"         && <RolesSection />}
         {tab === "users"         && <UsersSection />}

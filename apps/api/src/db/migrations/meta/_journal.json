@@ -407,6 +407,27 @@
       "when": 1789652758286,
       "tag": "0057_user_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1789669741082,
+      "tag": "0058_telegram_bots",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1789670066927,
+      "tag": "0059_sales_rep_cash",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1789683318307,
+      "tag": "0060_sales_order_source_bot",
+      "breakpoints": true
     }
   ]
 }

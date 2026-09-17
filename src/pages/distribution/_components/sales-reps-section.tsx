@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, Target, Percent, Phone, Mail, MapPin, Pencil, Trash2, KeyRound } from "lucide-react";
+import { Plus, Target, Percent, Phone, Mail, MapPin, Pencil, Trash2, KeyRound, Wallet, Loader2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -20,6 +20,99 @@ const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 const NO_USER = "none";
 
 const emptyForm = () => ({ name: "", phone: "", email: "", region: "", monthlyTarget: "", commission: "", userId: NO_USER });
+
+type RepCash = {
+  agent: { id: string; code: string; name: string | null };
+  balance: string;
+  currency: string;
+  cashAccountId: string | null;
+  handovers: { id: string; amount: string; txDate: string; description: string | null }[];
+};
+
+/**
+ * Agentdagi "yo'ldagi naqd" (mijozlardan yig'ilgan, kassaga topshirilmagan) va uni kassaga topshirish —
+ * yetkazuvchidagi bilan bir xil qoida: summa agentdagidan oshmaydi, pul agentdan yechilib kassaga o'tadi.
+ */
+function RepCashDialog({ rep, onClose }: { rep: SalesRep; onClose: () => void }) {
+  const { can } = usePermissions();
+  const path = `/api/distribution/sales-reps/${rep.id}/cash`;
+  const cash = useApiQuery<{ cash: RepCash }>(path).data?.cash;
+  const [amount, setAmount] = useState("");
+  const [notes, setNotes] = useState("");
+  const handover = useApiMutation(
+    (body: { amount: string; notes: string | null }) => api.post(`/api/distribution/sales-reps/${rep.id}/cash-handover`, body),
+    { invalidate: ["/api/distribution", "/api/finance"] },
+  );
+  const balance = num(cash?.balance ?? 0);
+  const canHandover = can("distribution.manage") && balance > 0;
+
+  const submit = async () => {
+    try {
+      await handover.mutateAsync({ amount: amount.trim() || String(balance), notes: notes.trim() || null });
+      toast.success("Naqd kassaga topshirildi");
+      setAmount("");
+      setNotes("");
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && !handover.isPending && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{rep.name} — yo'ldagi naqd</DialogTitle>
+        </DialogHeader>
+        {!cash ? (
+          <Skeleton className="h-32 rounded-xl" />
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-baseline justify-between rounded-xl bg-muted/40 px-4 py-3">
+              <span className="text-sm text-muted-foreground">Agentda turgan naqd</span>
+              <span className="text-lg font-bold tabular-nums">{fmt(balance)} {cash.currency}</span>
+            </div>
+            {canHandover ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="rep-cash-amount">Summa</Label>
+                  <Input id="rep-cash-amount" type="number" min={0} step="any" placeholder={String(balance)} value={amount} onChange={(e) => setAmount(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="rep-cash-notes">Izoh</Label>
+                  <Input id="rep-cash-notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
+                </div>
+              </div>
+            ) : (
+              balance <= 0 && <p className="text-sm text-muted-foreground">Topshiriladigan naqd yo'q</p>
+            )}
+            {cash.handovers.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">Oxirgi topshirishlar</p>
+                <ul className="max-h-40 space-y-1 overflow-y-auto text-sm">
+                  {cash.handovers.map((row) => (
+                    <li key={row.id} className="flex justify-between gap-2">
+                      <span className="truncate text-muted-foreground">{row.txDate}</span>
+                      <span className="tabular-nums">{fmt(num(row.amount))}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+        <DialogFooter className="gap-2">
+          <Button variant="secondary" disabled={handover.isPending} onClick={onClose}>Yopish</Button>
+          {canHandover && (
+            <Button disabled={handover.isPending} onClick={() => void submit()}>
+              {handover.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Kassaga topshirish
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 /** `GET /api/company/employees` — agentga bog'lanadigan tizim foydalanuvchisi (login). */
 type EmployeeOption = { id: string; name: string | null; phone: string; companyRole: string; membershipActive: boolean };
@@ -42,6 +135,7 @@ export default function SalesRepsSection() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editRep, setEditRep] = useState<string | null>(null);
+  const [cashRep, setCashRep] = useState<SalesRep | null>(null);
   const [form, setForm] = useState(emptyForm);
 
   const resetForm = () => setForm(emptyForm());
@@ -143,6 +237,9 @@ export default function SalesRepsSection() {
                   <p className="text-xs text-muted-foreground font-mono">{rep.code}</p>
                 </div>
                 <div className="flex gap-1">
+                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="Yo'ldagi naqd" onClick={() => setCashRep(rep)}>
+                    <Wallet className="h-3.5 w-3.5" />
+                  </Button>
                   <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => openEdit(rep)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
@@ -205,6 +302,8 @@ export default function SalesRepsSection() {
           ))}
         </div>
       )}
+
+      {cashRep && <RepCashDialog rep={cashRep} onClose={() => setCashRep(null)} />}
 
       {/* Create / Edit dialog */}
       {(createOpen || editRep) && (

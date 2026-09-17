@@ -190,6 +190,11 @@ export const cashAccounts = pgTable(
      * FK yo'q (sales → finance importi aylanma bo'lmasin) — agent kodda tekshiriladi.
      */
     deliveryAgentId: uuid("delivery_agent_id"),
+    /**
+     * Savdo agentining "yo'ldagi naqd" hisobi: mijozdan yig'ilgan naqd kassaga topshirilguncha shu yerda.
+     * FK yo'q (aylanma import bo'lmasin) — agent kodda tekshiriladi.
+     */
+    salesRepId: uuid("sales_rep_id"),
     isDefault: boolean("is_default").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps(),
@@ -199,6 +204,9 @@ export const cashAccounts = pgTable(
     uniqueIndex("ca_delivery_agent_key")
       .on(t.companyId, t.deliveryAgentId)
       .where(sql`${t.deliveryAgentId} is not null`),
+    uniqueIndex("ca_sales_rep_key")
+      .on(t.companyId, t.salesRepId)
+      .where(sql`${t.salesRepId} is not null`),
     index("ca_company_default_idx").on(t.companyId, t.isDefault),
     /** Har kompaniyada bitta asosiy kassa — to'lovlar shunga tushadi. */
     uniqueIndex("ca_one_default_per_company_key")

@@ -1,0 +1,2 @@
+ALTER TABLE "cash_accounts" ADD COLUMN "sales_rep_id" uuid;--> statement-breakpoint
+CREATE UNIQUE INDEX "ca_sales_rep_key" ON "cash_accounts" USING btree ("company_id","sales_rep_id") WHERE "cash_accounts"."sales_rep_id" is not null;

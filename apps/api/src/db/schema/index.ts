@@ -17,3 +17,4 @@ export * from "./manufacturing.js";
 export * from "./hr.js";
 export * from "./notifications.js";
 export * from "./subscription.js";
+export * from "./telegram.js";

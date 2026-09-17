@@ -60,6 +60,7 @@ export const salesOrderSource = pgEnum("sales_order_source", [
   "sales_agent", // savdo agenti buyurtmasi
   "manual", //      ERP'da qo'lda kiritilgan
   "import", //      fayldan import qilingan
+  "bot", //         mijozning Telegram boti orqali (qoralama)
 ]);
 
 /** Tovar mijozga qanday yetadi — sotuv holatidan mustaqil o'q. */

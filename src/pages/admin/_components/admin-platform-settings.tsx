@@ -8,7 +8,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
   KeyRound, Info, Settings,
-  ToggleLeft, ToggleRight, Clock, Save, Loader2,
+  ToggleLeft, ToggleRight, Clock, Save, Loader2, Send, Trash2, TriangleAlert,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -20,6 +20,98 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import type { PlatformSettings } from "../_lib/types.ts";
 
 const inputClass = "bg-white/5 border-white/10 text-white placeholder:text-white/30";
+
+const OWNER_BOT_PATH = "/api/telegram/owner-bot";
+
+type OwnerBot = { username: string | null; isActive: boolean; lastError: string | null; token: string; link: string | null };
+
+/**
+ * Biznes egalari uchun PLATFORMA boti — bitta bot barcha kompaniyalarga xizmat qiladi.
+ * Egasi botga ERP'dagi telefon raqamini ulashadi va faqat O'Z biznesining hisobotlarini oladi.
+ */
+function OwnerBotCard() {
+  const query = useApiQuery<{ bot: OwnerBot | null }>(OWNER_BOT_PATH);
+  const bot = query.data?.bot ?? null;
+  const [token, setToken] = useState("");
+  const save = useApiMutation(
+    (value: string) => api.put<{ bot: OwnerBot; webhookError?: string | null }>(OWNER_BOT_PATH, { token: value }),
+    { invalidate: [OWNER_BOT_PATH] },
+  );
+  const remove = useApiMutation(() => api.delete(OWNER_BOT_PATH), { invalidate: [OWNER_BOT_PATH] });
+
+  const submit = async () => {
+    const value = token.trim();
+    if (value.length < 20) {
+      toast.error("BotFather bergan to'liq tokenni qo'ying");
+      return;
+    }
+    try {
+      const result = await save.mutateAsync(value);
+      setToken("");
+      if (result.webhookError) toast.warning(`Saqlandi, lekin webhook o'rnatilmadi: ${result.webhookError}`);
+      else toast.success("Egalar boti ulandi");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
+  const disconnect = async () => {
+    if (!confirm("Egalar boti o'chirilsinmi? Barcha biznes egalariga xabarlar to'xtaydi.")) return;
+    try {
+      await remove.mutateAsync();
+      toast.success("Bot o'chirildi");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
+  return (
+    <Card className="bg-white/5 border-white/8">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm text-white/80 flex items-center gap-2">
+          <Send className="h-4 w-4 text-primary" />
+          Biznes egalari uchun Telegram bot
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-white/40">
+          Bitta platforma boti. Egasi botda telefon raqamini ulashadi — ERP'dagi raqami bo'yicha o'z biznesi aniqlanadi
+          va faqat shu biznes bo'yicha kunlik xulosa, ogohlantirish va qidiruv ishlaydi.
+        </p>
+        {bot && (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-white/70">
+            <span className="rounded-lg bg-white/8 px-2 py-1 font-mono text-xs">{bot.token}</span>
+            {bot.link && (
+              <a href={bot.link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                {bot.username ? `@${bot.username}` : "Botni ochish"}
+              </a>
+            )}
+            <span className={bot.isActive ? "text-green-400" : "text-white/40"}>{bot.isActive ? "Faol" : "O'chirilgan"}</span>
+          </div>
+        )}
+        {bot?.lastError && (
+          <p className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">
+            <TriangleAlert className="h-4 w-4 shrink-0" /> {bot.lastError}
+          </p>
+        )}
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1 min-w-[16rem] space-y-1.5">
+            <Label className="text-xs text-white/50">{bot ? "Tokenni almashtirish" : "Bot tokeni"}</Label>
+            <Input value={token} onChange={(e) => setToken(e.target.value)} placeholder="1234567890:AA..." className={inputClass} autoComplete="off" />
+          </div>
+          <Button onClick={() => { void submit(); }} disabled={save.isPending} className="gap-2">
+            <Send className="h-4 w-4" /> {bot ? "Almashtirish" : "Ulash"}
+          </Button>
+          {bot && (
+            <Button variant="destructive" onClick={() => { void disconnect(); }} disabled={remove.isPending} className="gap-2">
+              <Trash2 className="h-4 w-4" /> Uzish
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function AdminPlatformSettings() {
   const settingsQuery = useApiQuery<{ settings: PlatformSettings }>("/api/platform/settings");
@@ -149,6 +241,8 @@ export default function AdminPlatformSettings() {
           )}
         </CardContent>
       </Card>
+
+      <OwnerBotCard />
 
       {/* Bootstrap Admin — faqat ma'lumot */}
       <Card className="bg-white/5 border-white/8">

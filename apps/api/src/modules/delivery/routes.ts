@@ -86,6 +86,7 @@ import { COMPANY_CONTEXT_QUERY, companyKeyFrom } from "../company/company-contex
 import { effectivePermissions, requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import { recipientCandidates } from "../sales-agent/policy.service.js";
 import { agentCashSummary, handoverAgentCash } from "./agent-cash.service.js";
+import { notifyCustomerPaymentReceived } from "../telegram/notify.service.js";
 import { requireDeliveryAgent, type DeliveryAgentContext } from "./agent-context.js";
 import { applyAutoAssign, planAutoAssign } from "./auto-assign.service.js";
 import { DISPATCH_ASSIGN_MAX, assignDispatch, dispatchBoard } from "./dispatch.service.js";
@@ -908,8 +909,22 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
     const body = paymentBody.parse(req.body);
     const parts = "parts" in body ? body.parts : [{ method: body.method, amount: body.amount, terminalId: body.terminalId }];
     const input = { clientRequestId: body.clientRequestId, occurredAt: body.occurredAt, parts };
-    const result = await writeAgent(req, "delivery.collect_payment", (tx, context) => collectDeliveryPayment(tx, context, taskId, input, requestMeta(req)));
+    let collector = { companyId: "", name: "" };
+    const result = await writeAgent(req, "delivery.collect_payment", (tx, context) => {
+      collector = { companyId: context.company.id, name: context.deliveryAgent.name ?? context.deliveryAgent.code };
+      return collectDeliveryPayment(tx, context, taskId, input, requestMeta(req));
+    });
     reply.status(result.created ? 201 : 200);
+    // Mijozga "to'lovingiz qabul qilindi" — tranzaksiyadan keyin, javobni kutmasdan
+    if (result.notify) {
+      void notifyCustomerPaymentReceived({
+        companyId: collector.companyId,
+        customerId: result.notify.customerId,
+        amount: result.notify.amount,
+        method: result.notify.method,
+        collectedBy: `Yetkazuvchi ${collector.name}`,
+      });
+    }
     return { payment: result.payment, payments: result.payments, task: await agentTaskResponse(req, taskId) };
   });
 

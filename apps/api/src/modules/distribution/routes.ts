@@ -3,6 +3,8 @@
  *
  *   GET    /sales-reps (?includeInactive=), /sales-reps/stats             distribution.view
  *   POST   /sales-reps, PATCH / DELETE /sales-reps/:salesRepId            distribution.manage
+ *   GET    /sales-reps/:salesRepId/cash                                   distribution.view — agentdagi naqd
+ *   POST   /sales-reps/:salesRepId/cash-handover                          distribution.manage — naqdni kassaga topshirish
  *   GET    /routes (?includeInactive=), /routes/:routeId                  distribution.view
  *   POST   /routes, PATCH / DELETE /routes/:routeId                       distribution.manage
  *   GET    /routes/export (?includeInactive=)                             distribution.view (CSV)
@@ -45,6 +47,7 @@ import {
   updateVisit,
 } from "./distribution.service.js";
 import { createSalesRep, deleteSalesRep, listSalesReps, salesRepStats, updateSalesRep } from "./sales-reps.service.js";
+import { handoverRepCash, repCashSummary } from "../sales-agent/agent-cash.service.js";
 
 const nullableText = (max: number) =>
   z
@@ -136,6 +139,14 @@ const assignmentsQuery = z
   .refine((query) => query.dateFrom <= query.dateTo, { message: "Sana oralig'i noto'g'ri", path: ["dateTo"] });
 const assignmentParams = z.object({ assignmentId: z.uuid() });
 
+/** Agent naqdini kassaga topshirish — yetkazuvchidagi bilan bir xil shakl. */
+const cashHandoverBody = z.strictObject({
+  amount: moneySchema,
+  /** Standart — asosiy naqd kassa; boshqa kassa — finance.manage. */
+  toCashAccountId: z.uuid().nullable().optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
+});
+
 const includeInactiveQuery = z.object({ includeInactive: boolQuery });
 const repParams = z.object({ salesRepId: z.uuid() });
 const routeParams = z.object({ routeId: z.uuid() });
@@ -168,6 +179,21 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get("/sales-reps/stats", async (req) => ({ salesReps: await salesRepStats(db, await readTenant(req)) }));
+
+  // Agentdagi topshirilmagan naqd va uni kassaga topshirish (yetkazuvchidagi bilan bir xil qoida)
+  app.get("/sales-reps/:salesRepId/cash", async (req) => {
+    const { salesRepId } = repParams.parse(req.params);
+    const tenant = await readTenant(req);
+    return { cash: await repCashSummary(db, tenant.company.id, salesRepId) };
+  });
+
+  app.post("/sales-reps/:salesRepId/cash-handover", async (req, reply) => {
+    const { salesRepId } = repParams.parse(req.params);
+    const body = cashHandoverBody.parse(req.body);
+    const handover = await writeInTenant(req, (tx, tenant) => handoverRepCash(tx, tenant, salesRepId, body, requestMeta(req)));
+    reply.status(201);
+    return { handover };
+  });
 
   app.post("/sales-reps", async (req, reply) => {
     const body = repBody.parse(req.body);

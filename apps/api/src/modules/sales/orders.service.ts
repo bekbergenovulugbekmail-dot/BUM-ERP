@@ -99,7 +99,7 @@ export type SalesOrderInput = {
   /** Sotuv valyutalari (POS bilan bir xil qoida); standart — asosiy valyuta. */
   saleCurrencies?: string[];
   /** Sotuv kanali — serverda beriladi (mijoz so'rovda yubora olmaydi). */
-  source?: "manual" | "sales_agent" | "import";
+  source?: "manual" | "sales_agent" | "import" | "bot";
 };
 
 export type DispatchableOrder = {

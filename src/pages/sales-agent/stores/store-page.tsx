@@ -13,6 +13,7 @@ import CustomerPanel from "../_components/customer-panel.tsx";
 import EmptyState from "../_components/empty-state.tsx";
 import LocationBanner from "../_components/location-banner.tsx";
 import OrderEntry from "../_components/order-entry.tsx";
+import PaymentPanel from "../_components/payment-panel.tsx";
 import WorkSessionCard from "../_components/work-session-card.tsx";
 import VisitPanel from "../_components/visit-panel.tsx";
 import { originParams, useAgentLocation } from "../_lib/agent-location.ts";
@@ -78,6 +79,7 @@ export default function AgentStorePage() {
       <LocationBanner location={position} />
       <VisitPanel store={store} />
       <OrderEntry customerId={store.id} />
+      <PaymentPanel store={store} currency={company.currency} />
 
       <div className="rounded-2xl border border-border bg-card p-4 space-y-2.5 text-sm">
         {store.contactName && (

@@ -349,5 +349,21 @@
   "days.3": "Ср",
   "days.4": "Бс",
   "days.5": "Жм",
-  "days.6": "Сб"
+  "days.6": "Сб",
+  "payment": {
+    "title": "To'lemdi qabıllaw",
+    "hint": "Alıngan aqsha siziń esabıńızda kórinedi — kassaǵa tapsırılǵansha",
+    "collect": "To'lem alıw ({{amount}})",
+    "no_debt": "Qarız joq",
+    "amount": "Summa",
+    "max": "Kóbi menen: {{amount}}",
+    "invalid_amount": "Summanı durıs kiritiń (kóbi menen {{amount}})",
+    "saved": "To'lem qabıllandı",
+    "save": "Saqlaw",
+    "cash": "Naqd",
+    "card": "Karta",
+    "bank": "Bank",
+    "on_hand": "Sizdegi naqd",
+    "on_hand_hint": "Kassaǵa tapsırılmaǵan"
+  }
 }

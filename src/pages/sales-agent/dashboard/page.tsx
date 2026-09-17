@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { formatMoney } from "@/hooks/use-currencies.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import WorkSessionCard from "../_components/work-session-card.tsx";
+import { AgentCashCard } from "../_components/payment-panel.tsx";
 import { num, type AgentDashboard, type AgentMe } from "../_lib/types.ts";
 
 function Progress({ value }: { value: number }) {
@@ -77,6 +78,8 @@ export default function AgentDashboardPage() {
               </div>
             ))}
           </div>
+
+          <AgentCashCard currency={company.currency} />
 
           <div className="space-y-2 rounded-2xl border border-border bg-card p-4">
             <div className="flex items-center justify-between">

@@ -39,6 +39,7 @@ import { platformRoutes } from "./modules/platform/routes.js";
 import { publicRoutes } from "./modules/public/routes.js";
 import { purchaseRoutes } from "./modules/purchase/routes.js";
 import { registrationRoutes } from "./modules/registration/routes.js";
+import { telegramRoutes } from "./modules/telegram/routes.js";
 import { salesRoutes } from "./modules/sales/routes.js";
 
 export async function buildServer() {
@@ -109,6 +110,7 @@ export async function buildServer() {
   await app.register(authRoutes, { prefix: "/api/auth" });
   await app.register(registrationRoutes, { prefix: "/api/registration" });
   await app.register(publicRoutes, { prefix: "/api/public" });
+  await app.register(telegramRoutes, { prefix: "/api/telegram" });
   await app.register(platformRoutes, { prefix: "/api/platform" });
   await app.register(companyRoutes, { prefix: "/api/company" });
   await app.register(subscriptionRoutes, { prefix: "/api/subscription" });

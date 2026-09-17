@@ -36,6 +36,8 @@ import { ALLOCATION_METHODS, MAX_PAYMENT_PARTS, type Permission } from "@bum/sha
 import { db } from "../../db/client.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
+import { notifyCustomerPaymentReceived, notifyOrderPurchase } from "../telegram/notify.service.js";
+import { alertBigDiscount, alertShiftDifference } from "../telegram/alerts.service.js";
 import { decimalSchema, moneySchema, percentSchema, priceSchema } from "../../shared/decimal.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 import { requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
@@ -448,10 +450,13 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/orders", async (req, reply) => {
     const body = orderBody.parse(req.body);
-    const order = await writeInTenant(req, "sales.create", (tx, tenant) =>
-      createOrder(tx, tenant, body, requestMeta(req)),
-    );
+    let companyId = "";
+    const order = await writeInTenant(req, "sales.create", (tx, tenant) => {
+      companyId = tenant.company.id;
+      return createOrder(tx, tenant, body, requestMeta(req));
+    });
     reply.status(201);
+    if (order.customerId) void notifyOrderPurchase(companyId, order.id);
     return { order };
   });
 
@@ -519,10 +524,12 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/payments", async (req, reply) => {
     // Aralash to'lov (`parts`) — universal taqsimot; aks holda bitta usul (valyuta, balans, keshbek bilan)
+    let companyId = "";
     if (req.body && typeof req.body === "object" && "parts" in req.body) {
       const body = mixedPaymentBody.parse(req.body);
-      const result = await writeInTenant(req, "finance.manage", (tx, tenant) =>
-        recordMixedCustomerPayment(
+      const result = await writeInTenant(req, "finance.manage", (tx, tenant) => {
+        companyId = tenant.company.id;
+        return recordMixedCustomerPayment(
           tx,
           tenant,
           {
@@ -535,16 +542,36 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
             notes: body.notes,
           },
           requestMeta(req),
-        ),
-      );
+        );
+      });
       reply.status(result.created ? 201 : 200);
+      if (result.created) {
+        void notifyCustomerPaymentReceived({
+          companyId,
+          customerId: body.customerId ?? null,
+          orderId: body.orderId ?? null,
+          amount: result.payment.totalAmount,
+          method: body.parts.length > 1 ? "mixed" : body.parts[0]!.method,
+        });
+      }
       return result;
     }
     const body = paymentBody.parse(req.body);
-    const result = await writeInTenant(req, "finance.manage", (tx, tenant) =>
-      recordSalesPayment(tx, tenant, body, requestMeta(req)),
-    );
+    const result = await writeInTenant(req, "finance.manage", (tx, tenant) => {
+      companyId = tenant.company.id;
+      return recordSalesPayment(tx, tenant, body, requestMeta(req));
+    });
     reply.status(result.created ? 201 : 200);
+    // Chet valyutadagi to'lovda summa asosiy valyutada emas — xabar yuborilmaydi (noto'g'ri raqam chiqmasin)
+    if (result.created && !body.currency) {
+      void notifyCustomerPaymentReceived({
+        companyId,
+        customerId: body.customerId ?? null,
+        orderId: body.orderId ?? null,
+        amount: body.amount,
+        method: body.method,
+      });
+    }
     return result;
   });
 
@@ -587,7 +614,21 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   app.post("/pos/shifts/:shiftId/close", async (req) => {
     const { shiftId } = shiftParams.parse(req.params);
     const body = closeShiftBody.parse(req.body);
-    return writeInTenant(req, "pos.use", (tx, tenant) => closeShift(tx, tenant, shiftId, body, requestMeta(req)));
+    let companyId = "";
+    const result = await writeInTenant(req, "pos.use", (tx, tenant) => {
+      companyId = tenant.company.id;
+      return closeShift(tx, tenant, shiftId, body, requestMeta(req));
+    });
+    // Egasiga darhol xabar: farq chegaradan oshdi
+    if (result.review === "pending") {
+      void alertShiftDifference(companyId, {
+        cashier: result.shift.cashierName ?? null,
+        difference: result.difference,
+        expected: result.expectedCash,
+        counted: body.closingCash,
+      });
+    }
+    return result;
   });
 
   // Savdo siyosati: chegirma chegarasi, kassir depozit chegarasi, smena farqi chegarasi
@@ -630,10 +671,23 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/pos/sales", async (req, reply) => {
     const body = posSaleBody.parse(req.body);
-    const result = await writeInTenant(req, "pos.use", (tx, tenant) =>
-      completeSale(tx, tenant, body, requestMeta(req)),
-    );
+    let companyId = "";
+    const result = await writeInTenant(req, "pos.use", (tx, tenant) => {
+      companyId = tenant.company.id;
+      return completeSale(tx, tenant, body, requestMeta(req));
+    });
     reply.status(201);
+    // Mijozga chek — tranzaksiyadan KEYIN va javobni kutmasdan (Telegram kassani sekinlashtirmaydi)
+    if (body.customerId) void notifyOrderPurchase(companyId, result.order.id);
+    // Egasiga: chegirma siyosat chegarasidan oshgan bo'lsa
+    const overLimit = result.conflicts.find((conflict) => conflict.kind === "discount_over_limit");
+    if (overLimit) {
+      void alertBigDiscount(companyId, {
+        number: result.order.number,
+        cashier: authOf(req).user.name ?? null,
+        items: (overLimit.details.items as { name: string; discountPercent: string; maxDiscountPercent: string }[]) ?? [],
+      });
+    }
     return result;
   });
 
@@ -649,10 +703,23 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   app.post("/pos/customers/:customerId/payments", async (req, reply) => {
     const { customerId } = customerParams.parse(req.params);
     const body = posCustomerPaymentBody.parse(req.body);
-    const result = await writeInTenant(req, "pos.use", (tx, tenant) =>
-      posCustomerPayment(tx, tenant, { ...body, customerId }, requestMeta(req)),
-    );
+    let companyId = "";
+    const result = await writeInTenant(req, "pos.use", (tx, tenant) => {
+      companyId = tenant.company.id;
+      return posCustomerPayment(tx, tenant, { ...body, customerId }, requestMeta(req));
+    });
     reply.status(201);
+    // Qarz to'lash — mijozga xabar; balansni to'ldirish xarid emas, xabar yuborilmaydi
+    if (body.purpose === "debt") {
+      const parts = body.parts ?? [];
+      void notifyCustomerPaymentReceived({
+        companyId,
+        customerId,
+        amount: parts.length > 0 ? String(parts.reduce((sum, part) => sum + Number(part.amount), 0)) : (body.amount ?? "0"),
+        method: parts.length > 1 ? "mixed" : (parts[0]?.method ?? body.method),
+        collectedBy: "Kassa",
+      });
+    }
     return result;
   });
 }

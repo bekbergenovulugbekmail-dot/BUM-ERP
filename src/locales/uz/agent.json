@@ -349,5 +349,21 @@
   "days.3": "Ch",
   "days.4": "Pa",
   "days.5": "Ju",
-  "days.6": "Sh"
+  "days.6": "Sh",
+  "payment": {
+    "title": "To'lov qabul qilish",
+    "hint": "Mijozdan olingan pul sizning hisobingizda ko'rinadi — kassaga topshirgunicha",
+    "collect": "To'lov olish ({{amount}})",
+    "no_debt": "Qarz yo'q",
+    "amount": "Summa",
+    "max": "Ko'pi bilan: {{amount}}",
+    "invalid_amount": "Summani to'g'ri kiriting (ko'pi bilan {{amount}})",
+    "saved": "To'lov qabul qilindi",
+    "save": "Saqlash",
+    "cash": "Naqd",
+    "card": "Karta",
+    "bank": "Bank",
+    "on_hand": "Sizdagi naqd",
+    "on_hand_hint": "Kassaga topshirilmagan"
+  }
 }
