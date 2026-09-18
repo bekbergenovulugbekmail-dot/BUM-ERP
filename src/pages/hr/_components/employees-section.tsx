@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Plus, Search, Users, Phone, Building2, Pencil, Trash2, User, MapPin, UserCheck, MonitorSmartphone, MonitorOff } from "lucide-react";
 import { FULL_ACCESS_ROLES } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
+import NewEmployeeDialog from "@/components/company/new-employee-dialog.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -87,7 +87,6 @@ function credentialsError(credentials: Credentials): string | null {
 
 export default function EmployeesSection() {
   const { t } = useTranslation("distribution");
-  const { lng = "uz" } = useParams<{ lng: string }>();
   const { can } = usePermissions();
   const canManage = can("hr.manage");
   const canSoftware = canManage && can("employee.software_access.manage");
@@ -95,6 +94,8 @@ export default function EmployeesSection() {
   const [deptFilter, setDeptFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | EmployeeStatus>("all");
   const [editEmployee, setEditEmployee] = useState<string | null>(null);
+  /** Yagona "Xodim qo'shish" oynasi (Sozlamalar bo'limidagi bilan bir xil komponent). */
+  const [addOpen, setAddOpen] = useState(false);
   const [accessTarget, setAccessTarget] = useState<Employee | null>(null);
 
   const employeesQuery = useApiQuery<{ employees: Employee[] }>("/api/hr/employees", {
@@ -186,12 +187,10 @@ export default function EmployeesSection() {
             <SelectItem value="terminated">Ishdan ketgan</SelectItem>
           </SelectContent>
         </Select>
-        {/* Xodim qo'shish BITTA joyda — Sozlamalar → Foydalanuvchilar (kassir, agent, yetkazuvchi, bepul xodim) */}
+        {/* Xodim qo'shish YAGONA forma orqali: kassir, savdo agenti, yetkazuvchi yoki bepul xodim */}
         {canManage && (
-          <Button size="sm" asChild>
-            <Link to={`/${lng}/settings`}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> Xodim qo'shish
-            </Link>
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> Xodim qo'shish
           </Button>
         )}
         {/* Maxfiy ustunlar (pasport, INN, hisob raqami, maosh) faqat maosh ruxsati bilan chiqadi */}
@@ -231,8 +230,8 @@ export default function EmployeesSection() {
           <Users className="h-12 w-12 mx-auto mb-3 text-muted-foreground/20" />
           <p className="text-muted-foreground">Xodimlar topilmadi</p>
           {canManage && (
-            <Button size="sm" className="mt-3" asChild>
-              <Link to={`/${lng}/settings`}><Plus className="h-4 w-4 mr-1" /> Xodim qo'shish</Link>
+            <Button size="sm" className="mt-3" onClick={() => setAddOpen(true)}>
+              <Plus className="h-4 w-4 mr-1" /> Xodim qo'shish
             </Button>
           )}
         </div>
@@ -320,6 +319,8 @@ export default function EmployeesSection() {
           })}
         </div>
       )}
+
+      <NewEmployeeDialog open={addOpen} onClose={() => setAddOpen(false)} />
 
       {/* Edit dialog */}
       {editEmployee && (

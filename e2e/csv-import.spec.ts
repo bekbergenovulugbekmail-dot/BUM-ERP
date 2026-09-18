@@ -11,7 +11,7 @@ import { ACCOUNTS, PASSWORD, appPath, login } from "./_lib/accounts.ts";
 async function openCustomers(page: Page) {
   await login(page, "owner");
   await page.goto(appPath("sales"), { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "Mijozlar" }).first().click();
+  await page.getByRole("tab", { name: "Mijozlar" }).first().click();
   await expect(page.getByTestId("csv-import")).toBeVisible({ timeout: 30_000 });
 }
 

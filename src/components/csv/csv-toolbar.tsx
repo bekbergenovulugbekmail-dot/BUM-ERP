@@ -292,26 +292,36 @@ export default function CsvToolbar({
 
   return (
     <>
-      <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void handleExport()}>
-        <Download className="h-3.5 w-3.5 mr-1" /> {busy === "export" ? "..." : exportLabel}
-      </Button>
-      {canImport && (
-        <>
-          <Button size="sm" variant="ghost" data-testid="csv-template" onClick={handleTemplate}>
-            <FileDown className="h-3.5 w-3.5 mr-1" /> Shablon
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            data-testid="csv-import"
-            disabled={busy !== null}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Upload className="h-3.5 w-3.5 mr-1" /> {busy === "preview" ? "Tekshirilmoqda..." : importLabel}
-          </Button>
-          <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleFile} />
-        </>
-      )}
+      {/* Telefonda uchala tugma bitta qatorni bo'lib oladi, kompyuterda avvalgidek yonma-yon */}
+      <div className="flex w-full items-center gap-2 sm:w-auto">
+        <Button
+          size="sm"
+          variant="secondary"
+          className="flex-1 sm:flex-none"
+          disabled={busy !== null}
+          onClick={() => void handleExport()}
+        >
+          <Download className="h-3.5 w-3.5 mr-1" /> {busy === "export" ? "..." : exportLabel}
+        </Button>
+        {canImport && (
+          <>
+            <Button size="sm" variant="ghost" className="flex-1 sm:flex-none" data-testid="csv-template" onClick={handleTemplate}>
+              <FileDown className="h-3.5 w-3.5 mr-1" /> Shablon
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="flex-1 sm:flex-none"
+              data-testid="csv-import"
+              disabled={busy !== null}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="h-3.5 w-3.5 mr-1" /> {busy === "preview" ? "Tekshirilmoqda..." : importLabel}
+            </Button>
+            <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleFile} />
+          </>
+        )}
+      </div>
 
       {mapping && (
         <Dialog open onOpenChange={(open) => !open && setMapping(null)}>

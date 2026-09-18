@@ -113,7 +113,7 @@ export default function SalesPage() {
   return (
     <div className="p-4 md:p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl bg-emerald-500/10 flex items-center justify-center">
             <ShoppingBag className="h-5 w-5 text-emerald-500" />

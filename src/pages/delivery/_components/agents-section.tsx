@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ArrowDown, ArrowUp, ListOrdered, Loader2, Pencil, Plus, Power, Wallet } from "lucide-react";
 import { isOpenDeliveryStatus } from "@bum/shared";
 import DeliveryAgentDialog from "@/components/delivery/delivery-agent-dialog.tsx";
+import NewEmployeeDialog from "@/components/company/new-employee-dialog.tsx";
 import { StatusBadge } from "@/components/delivery/badges.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
@@ -259,7 +259,6 @@ function CashDialog({ agent, onClose }: { agent: DeliveryAgentRow; onClose: () =
 /** Yetkazuvchilar: profil (filial, hudud, zona, transport, yuk, jadval, supervayzer), faollik va kunlik yetkazish tartibi. */
 export default function AgentsSection() {
   const { t } = useTranslation("delivery");
-  const { lng = "uz" } = useParams<{ lng: string }>();
   const { can } = usePermissions();
   const manage = can("delivery.manage");
   const agents = useApiQuery<{ agents: DeliveryAgentRow[] }>("/api/delivery/agents").data?.agents;
@@ -267,17 +266,17 @@ export default function AgentsSection() {
   const [toggling, setToggling] = useState<DeliveryAgentRow | null>(null);
   const [routing, setRouting] = useState<DeliveryAgentRow | null>(null);
   const [cashFor, setCashFor] = useState<DeliveryAgentRow | null>(null);
+  /** Yagona "Xodim qo'shish" oynasi. */
+  const [addOpen, setAddOpen] = useState(false);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">{t("agents.subtitle")}</p>
-        {/* Yetkazuvchi xodim sifatida BITTA joyda qo'shiladi: Sozlamalar → Foydalanuvchilar ("Dostavka agenti" roli) */}
+        {/* Yetkazuvchi yagona "Xodim qo'shish" formasidan: rol "Dostavka agenti" bo'lsa profil ham yaratiladi */}
         {manage && (
-          <Button asChild>
-            <Link to={`/${lng}/settings`}>
-              <Plus className="mr-1.5 h-4 w-4" /> {t("agents.add")}
-            </Link>
+          <Button onClick={() => setAddOpen(true)}>
+            <Plus className="mr-1.5 h-4 w-4" /> {t("agents.add")}
           </Button>
         )}
       </div>
@@ -377,6 +376,7 @@ export default function AgentsSection() {
         </div>
       )}
 
+      <NewEmployeeDialog open={addOpen} onClose={() => setAddOpen(false)} />
       {editing && <DeliveryAgentDialog agent={editing} onClose={() => setEditing(null)} />}
       {toggling && <ToggleDialog agent={toggling} onClose={() => setToggling(null)} />}
       {routing && <RouteOrderDialog agent={routing} onClose={() => setRouting(null)} />}

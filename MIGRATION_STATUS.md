@@ -2252,8 +2252,14 @@ ishlatiladi. Sahifa yon bo'shliqlari telefonda `p-4`, kompyuterda `p-6`. Marshru
 mijozlar soni va kun belgilari endi sig'masa pastga o'tadi (ilgari qator ekrandan chiqib ketardi).
 Ombor yorliqlari o'z idishida suriladi.
 
+Ikkinchi aylanma (egasining telefondagi suratlari bo'yicha): Mahsulotlar, Xarid, Ombor va Sotuv
+sahifalarining sarlavha qatori telefonda pastga tushadi — "Eksport / Shablon / Import / Qo'shish"
+tugmalari ekrandan chiqib ketmaydi; Ombor bo'limlari ham ro'yxatga o'tdi, qidiruv maydoni to'liq
+kenglikda. CSV tugmalari telefonda bitta qatorni teng bo'lib oladi.
+
 Yangi tekshiruv: `e2e/mobile-layout.spec.ts` — 11 ta ERP sahifasi 360x740 ekranda ochiladi va
 sahifaning o'zi YON TOMONGA SURILMASLIGI tekshiriladi (keng jadval o'z idishida surilishi mumkin).
+Sahifa bo'limlari endi `role="tab"` bilan (brauzer testlari shu rol bo'yicha bosadi).
 
 **2. Import shabloni endi kataklarga bo'linadi**
 Shablon `;` (nuqtali vergul) bilan yoziladi — Excel'ning ruscha/o'zbekcha sozlamasida har bir ustun
@@ -2264,7 +2270,7 @@ yuboriladi — foydalanuvchi uni o'chirmasa ham bo'ladi. Import oynasida format 
 Hamma ro'yxatlar uchun (mahsulot, mijoz, ta'minotchi, xarajat, marshrut, xodim, xarid) namunalar
 to'ldirildi. Tekshiruv: `e2e/csv-import.spec.ts` ajratgich, `*` va `#` ni ham tekshiradi.
 
-**3. Xodim qo'shish — BITTA joyda**
+**3. Xodim qo'shish — BITTA forma**
 Sozlamalar → Foydalanuvchilar → "Xodim qo'shish". Rol tanlanadi, server esa shu rolga mos profilni
 o'zi yaratadi:
 - "Sotuv agenti" → login + a'zolik + HR kartochkasi + savdo agenti profili (hudud, ishga kirgan sana)
@@ -2273,8 +2279,9 @@ o'zi yaratadi:
 - "Dasturga kiradi" o'chirilsa — login ham, litsenziya ham berilmaydi, faqat HR kartochkasi ochiladi
   (yuk tashuvchi, qorovul kabi xodimlar uchun)
 
-Shu sababli Distribyutsiya, Dostavka va HR bo'limlaridagi alohida "qo'shish" formalari olib tashlandi —
-ular endi Sozlamalarga yo'naltiradi (`create-agent-dialog.tsx` o'chirildi). Tahrirlash va faolsizlantirish
+Shu forma HR, Distribyutsiya va Dostavka bo'limlaridagi "Xodim qo'shish" tugmasi bilan ham O'SHA YERDA
+ochiladi — sahifa almashmaydi (avval Sozlamalarga o'tkazardi, egasiga noqulay bo'ldi). Ilgarigi uchta
+alohida forma o'chirildi (`create-agent-dialog.tsx` va HR'dagi o'z oynasi), tahrirlash va faolsizlantirish
 o'z bo'limlarida qoladi.
 
 **Qurilma tasdig'i endi xodim bo'yicha** (migratsiya `0061_member_device_check`, faqat qo'shish):

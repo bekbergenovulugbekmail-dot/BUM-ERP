@@ -45,6 +45,8 @@ export default function PageTabs<K extends string>({
         type="button"
         onClick={() => setOpen(true)}
         data-testid="page-tabs-mobile"
+        aria-haspopup="dialog"
+        aria-label={`Bo'lim: ${active.label}`}
         className="flex w-full items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-sm font-semibold md:hidden"
       >
         {ActiveIcon && <ActiveIcon className="h-4 w-4 shrink-0 text-primary" />}
@@ -57,11 +59,13 @@ export default function PageTabs<K extends string>({
 
       {/* Kompyuter: avvalgidek yorliqlar qatori */}
       <div className="hidden border-b border-border md:block">
-        <div className="flex gap-1 overflow-x-auto">
+        <div className="flex gap-1 overflow-x-auto" role="tablist">
           {tabs.map((tab) => (
             <button
               key={tab.key}
               type="button"
+              role="tab"
+              aria-selected={tab.key === value}
               onClick={() => onChange(tab.key)}
               className={cn(
                 "flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-all cursor-pointer",
@@ -91,6 +95,8 @@ export default function PageTabs<K extends string>({
                 <button
                   key={tab.key}
                   type="button"
+                  role="tab"
+                  aria-selected={tab.key === value}
                   onClick={() => { onChange(tab.key); setOpen(false); }}
                   className={cn(
                     "flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition-colors",

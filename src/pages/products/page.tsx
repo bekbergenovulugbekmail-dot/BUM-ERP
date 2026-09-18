@@ -115,8 +115,8 @@ export default function ProductsPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="border-b border-border px-6 py-4 bg-card">
-        <div className="flex items-center justify-between gap-4">
+      <div className="border-b border-border bg-card px-4 py-4 md:px-6">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-4">
           <div>
             <h1 className="text-xl font-bold flex items-center gap-2">
               <Package className="h-5 w-5 text-primary" />
@@ -126,7 +126,7 @@ export default function ProductsPage() {
               Mahsulotlar katalogi, narxlar va partiyalar
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="secondary" onClick={() => setLabelItems([])}>
               <Tag className="h-4 w-4 mr-1" /> Etiketka
             </Button>

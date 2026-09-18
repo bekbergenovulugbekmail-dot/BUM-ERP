@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Card, CardContent } from "@/components/ui/card.tsx";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
+import { Tabs, TabsContent } from "@/components/ui/tabs.tsx";
+import PageTabs from "@/components/page-tabs.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
 import { useApiQuery } from "@/lib/query.ts";
@@ -98,7 +99,7 @@ export default function WarehousePage() {
   return (
     <div className="flex flex-col h-full gap-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+      <div className="flex flex-col gap-3 border-b border-border px-4 py-4 shrink-0 md:flex-row md:items-center md:justify-between md:px-6">
         <div className="flex items-center gap-3">
           <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center">
             <Warehouse className="h-5 w-5 text-primary" />
@@ -108,7 +109,7 @@ export default function WarehousePage() {
             <p className="text-xs text-muted-foreground">Zaxira, harakatlar va inventarizatsiya</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {canTransfer && (warehouses?.length ?? 0) > 1 && (
             <Button variant="secondary" size="sm" disabled={!selectedWarehouseId} onClick={() => setTransferOpen(true)}>
               <ArrowLeftRight className="h-4 w-4 mr-1.5" /> Ko'chirish
@@ -128,7 +129,7 @@ export default function WarehousePage() {
       </div>
 
       {/* Warehouse selector */}
-      <div className="px-6 py-3 border-b border-border shrink-0 bg-muted/30">
+      <div className="border-b border-border bg-muted/30 px-4 py-3 shrink-0 md:px-6">
         {!warehouses ? (
           warehousesQuery.isError ? (
             <p className="text-sm text-destructive">Omborlarni yuklab bo'lmadi</p>
@@ -145,7 +146,7 @@ export default function WarehousePage() {
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 px-6 py-4 shrink-0">
+      <div className="grid grid-cols-2 gap-3 px-4 py-4 shrink-0 md:grid-cols-4 md:gap-4 md:px-6">
         {STAT_CARDS.map((card, i) => (
           <motion.div
             key={card.label}
@@ -174,30 +175,27 @@ export default function WarehousePage() {
       <div className="flex-1 min-h-0 px-4 pb-6 md:px-6">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
           <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
-            <TabsList className="max-w-full overflow-x-auto">
-              <TabsTrigger value="stock">
-                <BarChart3 className="h-4 w-4 mr-1.5" /> Zaxira
-              </TabsTrigger>
-              <TabsTrigger value="movements">
-                <History className="h-4 w-4 mr-1.5" /> Harakatlar
-              </TabsTrigger>
-              <TabsTrigger value="count">
-                <ClipboardList className="h-4 w-4 mr-1.5" /> Inventarizatsiya
-              </TabsTrigger>
-              <TabsTrigger value="catalog">
-                <Boxes className="h-4 w-4 mr-1.5" /> Katalog
-              </TabsTrigger>
-            </TabsList>
+            <PageTabs
+              className="w-full md:w-auto"
+              tabs={[
+                { key: "stock", label: "Zaxira", icon: BarChart3 },
+                { key: "movements", label: "Harakatlar", icon: History },
+                { key: "count", label: "Inventarizatsiya", icon: ClipboardList },
+                { key: "catalog", label: "Katalog", icon: Boxes },
+              ]}
+              value={activeTab}
+              onChange={setActiveTab}
+            />
 
             {activeTab === "stock" && (
-              <div className="flex items-center gap-2">
-                <div className="relative">
+              <div className="flex w-full flex-wrap items-center gap-2 md:w-auto">
+                <div className="relative min-w-[10rem] flex-1 md:flex-none">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Mahsulot qidirish..."
-                    className="pl-9 h-9 w-56"
+                    className="h-9 w-full pl-9 md:w-56"
                   />
                 </div>
                 <Button

@@ -10,7 +10,7 @@ test("lavozimga bosqichli KPI qoidasi yoziladi va hisob-kitob ko'rinadi", async 
   await login(page, "owner");
   await page.goto(appPath("hr"), { waitUntil: "domcontentloaded" });
 
-  await page.getByRole("button", { name: "KPI" }).click();
+  await page.getByRole("tab", { name: "KPI" }).click();
   await expect(page.getByTestId("kpi-add")).toBeVisible({ timeout: 30_000 });
 
   // ── Yangi qoida: yetkazma soni bo'yicha ikki bosqich ─────────────────────
@@ -53,7 +53,7 @@ test("bosqichlar noto'g'ri bo'lsa server rad etadi", async ({ page }) => {
   test.setTimeout(120_000);
   await login(page, "owner");
   await page.goto(appPath("hr"), { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "KPI" }).click();
+  await page.getByRole("tab", { name: "KPI" }).click();
   await expect(page.getByTestId("kpi-add")).toBeVisible({ timeout: 30_000 });
 
   await page.getByTestId("kpi-add").click();

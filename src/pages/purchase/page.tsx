@@ -62,7 +62,7 @@ export default function PurchasePage() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+      <div className="flex flex-col gap-3 border-b border-border px-4 py-4 shrink-0 md:flex-row md:items-center md:justify-between md:px-6">
         <div className="flex items-center gap-3">
           <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center">
             <ShoppingCart className="h-5 w-5 text-primary" />
