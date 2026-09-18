@@ -76,6 +76,7 @@ import {
   MAX_STREAM_RELEASE_BYTES,
   MAX_UPLOAD_CHUNK_BYTES,
   MIN_UPLOAD_CHUNK_BYTES,
+  RELEASE_PLATFORMS,
   RELEASE_VERSION,
   abortUpload,
   archiveRelease,
@@ -145,13 +146,24 @@ const platformAdminBody = z.strictObject({ isPlatformAdmin: z.boolean() });
 
 const releaseParams = z.object({ releaseId: z.uuid() });
 // Xavfsiz nom: faqat harf, raqam, bo'shliq va `_ . ( ) -` — yo'l (../, \) bo'lolmaydi
-const releaseFileName = z.string().trim().min(5).max(200).regex(/^[\w .()-]+\.exe$/i, "Fayl nomi .exe bilan tugasin");
+/** Kassa o'rnatuvchisi `.exe`, telefon ilovasi `.apk`. */
+const releaseFileName = z
+  .string()
+  .trim()
+  .min(5)
+  .max(200)
+  .regex(/^[\w .()-]+\.(exe|apk)$/i, "Fayl nomi .exe yoki .apk bilan tugasin");
 const releaseVersion = z.string().trim().regex(RELEASE_VERSION, "Versiya formati: 1.2.3");
+/** Reliz qaysi ilova uchun: desktop kassa o'rnatuvchisi yoki Android APK. */
+const releasePlatform = z.enum(RELEASE_PLATFORMS).default("desktop");
+const releaseListQuery = z.object({ platform: z.enum(RELEASE_PLATFORMS).optional() });
 const releaseUploadQuery = z.object({
+  platform: releasePlatform,
   version: releaseVersion,
   fileName: releaseFileName.default("BUM-POS-KASSA-Setup.exe"),
 });
 const uploadStartBody = z.strictObject({
+  platform: releasePlatform,
   version: releaseVersion,
   fileName: releaseFileName,
   size: z.number().int().min(2).max(MAX_RELEASE_BYTES),
@@ -313,7 +325,10 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
   // O'rnatuvchi xom baytlar bilan keladi — oqim o'zgarmay servisga uzatiladi (hajm chegarasi servisda)
   app.addContentTypeParser("application/octet-stream", (_req, payload, done) => done(null, payload));
 
-  app.get("/desktop-releases", async () => ({ releases: await listReleases(db) }));
+  app.get("/desktop-releases", async (req) => {
+    const { platform } = releaseListQuery.parse(req.query);
+    return { releases: await listReleases(db, platform) };
+  });
 
   // ─ bo'laklab, davom ettiriladigan yuklash
   app.post("/desktop-releases/uploads", async (req, reply) => {
@@ -358,7 +373,7 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
 
   // ─ bitta oqim bilan (400 MB gacha)
   app.post("/desktop-releases", { bodyLimit: MAX_STREAM_RELEASE_BYTES }, async (req, reply) => {
-    const { version, fileName } = releaseUploadQuery.parse(req.query);
+    const { platform, version, fileName } = releaseUploadQuery.parse(req.query);
     if (!(req.body instanceof Readable)) throw badRequest("Fayl application/octet-stream sifatida yuborilsin");
     // Yo'lda buzilgan yoki almashtirilgan fayl serverda aniqlansin: mijoz faylning SHA-256 xeshini oldindan yuboradi
     const shaHeader = req.headers["x-sha256"];
@@ -366,7 +381,9 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
     const expectedSha256 = shaHeader.toLowerCase();
     const stream = req.body;
     const { user } = authOf(req);
-    const release = await withTransaction((tx) => uploadRelease(tx, { version, fileName, stream, expectedSha256 }, user, requestMeta(req)));
+    const release = await withTransaction((tx) =>
+      uploadRelease(tx, { platform, version, fileName, stream, expectedSha256 }, user, requestMeta(req)),
+    );
     reply.status(201);
     return { release };
   });
@@ -381,7 +398,8 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
   app.post("/desktop-releases/:releaseId/publish", async (req) => {
     const { releaseId } = releaseParams.parse(req.params);
     // Ed25519 imzo (versiya + SHA-256) — reliz tuzuvchi `scripts/release-sign.mjs sign` bilan oladi
-    const { signature } = z.strictObject({ signature: z.string().trim().min(1).max(128) }).parse(req.body ?? {});
+    // Android relizida imzo bo'sh bo'lishi mumkin — APK'ni Android o'zi tekshiradi
+    const { signature } = z.strictObject({ signature: z.string().trim().max(128).default("") }).parse(req.body ?? {});
     const { user } = authOf(req);
     return { release: await withTransaction((tx) => publishRelease(tx, releaseId, signature, user, requestMeta(req))) };
   });

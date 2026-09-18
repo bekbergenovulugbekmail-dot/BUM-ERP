@@ -8,6 +8,7 @@ import { SAVED_OR_DEFAULT_LOCALE, setLocaleInPath } from "./i18n.ts";
 import "./i18n.ts";
 import { useServiceWorker } from "./hooks/use-service-worker.ts";
 import { listenAndroidBack } from "./lib/native/back-button.ts";
+import AppUpdateBanner from "@/components/app-update-banner.tsx";
 import ERPLayout from "./components/erp-layout.tsx";
 import DashboardPage from "./pages/dashboard/page.tsx";
 import ProductsPage from "./pages/products/page.tsx";
@@ -203,6 +204,8 @@ export default function App() {
     <DefaultProviders>
       <BrowserRouter>
         {onAdminSurface ? <AdminSubdomainApp /> : <MainApp />}
+        {/* Telefon ilovasida yangi APK chiqqanda xabar (brauzerda ko'rinmaydi) */}
+        <AppUpdateBanner />
       </BrowserRouter>
     </DefaultProviders>
   );

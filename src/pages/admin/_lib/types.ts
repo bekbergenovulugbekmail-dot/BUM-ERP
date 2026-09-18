@@ -116,6 +116,8 @@ export type PlatformSettings = {
 
 /** `GET /api/platform/desktop-releases` — desktop kassa o'rnatuvchisi. */
 export type DesktopRelease = {
+  /** `desktop` — kassa o'rnatuvchisi, `android` — telefon ilovasi. */
+  platform: "desktop" | "android";
   id: string;
   version: string;
   fileName: string;

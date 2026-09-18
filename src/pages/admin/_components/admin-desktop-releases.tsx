@@ -22,6 +22,8 @@ import { cn } from "@/lib/utils.ts";
 import type { DesktopRelease, ReleaseUpload } from "../_lib/types.ts";
 
 const RELEASES_PATH = "/api/platform/desktop-releases";
+/** Telefon ilovasi fayli. */
+const APK_NAME = /^[\w.\-() ]+\.apk$/i;
 const UPLOADS_PATH = `${RELEASES_PATH}/uploads`;
 const CHUNK_BYTES = 8 * 1024 * 1024;
 const PARALLEL_CHUNKS = 3;
@@ -74,6 +76,8 @@ type Phase = { kind: "idle" } | { kind: "hashing"; done: number } | { kind: "upl
 function UploadCard({ onChanged }: { onChanged: () => Promise<unknown> }) {
   const [file, setFile] = useState<File | null>(null);
   const [version, setVersion] = useState("");
+  /** `desktop` — kassa o'rnatuvchisi (.exe), `android` — telefon ilovasi (.apk). */
+  const [platform, setPlatform] = useState<"desktop" | "android">("desktop");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [received, setReceived] = useState<{ bytes: number; total: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -88,7 +92,16 @@ function UploadCard({ onChanged }: { onChanged: () => Promise<unknown> }) {
     if (found) setVersion(found);
   };
 
-  const error = !file ? null : !FILE_NAME.test(file.name) ? "Fayl nomi .exe bilan tugasin (lotin harf, raqam, - _ . ( ) belgilari)" : !VERSION.test(version) ? "Versiya formati: 1.2.3" : null;
+  const namePattern = platform === "android" ? APK_NAME : FILE_NAME;
+  const error = !file
+    ? null
+    : !namePattern.test(file.name)
+      ? platform === "android"
+        ? "Fayl nomi .apk bilan tugasin (lotin harf, raqam, - _ . ( ) belgilari)"
+        : "Fayl nomi .exe bilan tugasin (lotin harf, raqam, - _ . ( ) belgilari)"
+      : !VERSION.test(version)
+        ? "Versiya formati: 1.2.3"
+        : null;
   const busy = phase.kind === "hashing" || phase.kind === "uploading" || phase.kind === "completing";
 
   const fileSha256 = async (target: File, signal: AbortSignal) => {
@@ -113,7 +126,14 @@ function UploadCard({ onChanged }: { onChanged: () => Promise<unknown> }) {
       setPhase({ kind: "hashing", done: 0 });
       const sha256 = await fileSha256(file, controller.signal);
       // Shu versiya shu fayl bilan yuklanayotgan bo'lsa — server o'sha sessiyani qaytaradi (davom ettirish)
-      const { upload: session } = await api.post<{ upload: ReleaseUpload }>(UPLOADS_PATH, { version, fileName: file.name, size: file.size, sha256, chunkSize: CHUNK_BYTES });
+      const { upload: session } = await api.post<{ upload: ReleaseUpload }>(UPLOADS_PATH, {
+        platform,
+        version,
+        fileName: file.name,
+        size: file.size,
+        sha256,
+        chunkSize: CHUNK_BYTES,
+      });
       setReceived({ bytes: session.receivedBytes, total: file.size });
       setPhase({ kind: "uploading" });
       const have = new Set(session.receivedChunks);
@@ -169,7 +189,7 @@ function UploadCard({ onChanged }: { onChanged: () => Promise<unknown> }) {
             <Input
               id="release-file"
               type="file"
-              accept=".exe,application/vnd.microsoft.portable-executable,application/octet-stream"
+              accept={platform === "android" ? ".apk,application/vnd.android.package-archive" : ".exe,application/vnd.microsoft.portable-executable,application/octet-stream"}
               disabled={busy}
               onChange={(event) => pick(event.target.files?.[0] ?? null)}
               className={cn(inputClass, "file:text-white/70")}
@@ -178,6 +198,25 @@ function UploadCard({ onChanged }: { onChanged: () => Promise<unknown> }) {
           <div className="space-y-1.5">
             <Label htmlFor="release-version" className="text-xs text-white/50">Versiya</Label>
             <Input id="release-version" value={version} placeholder="0.2.1" disabled={busy} onChange={(event) => setVersion(event.target.value.trim())} className={inputClass} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-white/50">Qaysi ilova</Label>
+            <div className="flex gap-2">
+              {(["desktop", "android"] as const).map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => { setPlatform(item); setFile(null); setPhase({ kind: "idle" }); }}
+                  className={cn(
+                    "h-9 flex-1 rounded-lg border text-xs font-medium transition-colors",
+                    platform === item ? "border-primary bg-primary/15 text-white" : "border-white/10 text-white/50 hover:text-white/80",
+                  )}
+                >
+                  {item === "desktop" ? "Kassa (.exe)" : "Telefon (.apk)"}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         {file && (
@@ -253,9 +292,14 @@ function ReleaseRow({ release }: { release: DesktopRelease }) {
   const handlePublish = () => {
     // Imzo reliz tuzuvchi kompyuterida: `node apps/desktop/scripts/release-sign.mjs sign <o'rnatuvchi.exe> <versiya>` — kassalar
     // imzosiz yoki noto'g'ri imzoli yangilanishni o'rnatmaydi
-    const signature = window.prompt(`${release.version} relizining imzosi (release-sign.mjs sign natijasidagi "Imzo"):`)?.trim();
-    if (!signature) return;
-    if (!window.confirm(`${release.version} e'lon qilinsinmi? Barcha kassalarga yangilanish taklif qilinadi.`)) return;
+    // Android APK'ni Android o'zi tekshiradi (boshqa kalit bilan imzolangani o'rnatilmaydi) — imzo so'ralmaydi
+    const signature =
+      release.platform === "android"
+        ? ""
+        : window.prompt(`${release.version} relizining imzosi (release-sign.mjs sign natijasidagi "Imzo"):`)?.trim();
+    if (signature === undefined || (release.platform !== "android" && !signature)) return;
+    const audience = release.platform === "android" ? "telefon ilovalariga" : "barcha kassalarga";
+    if (!window.confirm(`${release.version} e'lon qilinsinmi? ${audience} yangilanish taklif qilinadi.`)) return;
     void run(() => publish.mutateAsync(signature), `${release.version} e'lon qilindi`);
   };
 
@@ -272,6 +316,9 @@ function ReleaseRow({ release }: { release: DesktopRelease }) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-base font-semibold text-white tabular-nums">{release.version}</span>
         <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border", status.className)}>{status.label}</span>
+        <span className="text-[11px] font-medium px-2 py-0.5 rounded-full border border-white/10 text-white/60">
+          {release.platform === "android" ? "Telefon" : "Kassa"}
+        </span>
         <span className="text-xs text-white/40">{release.fileName} · {megabytes(expected)}</span>
         <span className="ml-auto flex gap-2">
           {!incomplete && release.status !== "published" && (

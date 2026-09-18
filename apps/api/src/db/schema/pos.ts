@@ -173,6 +173,8 @@ export const desktopReleases = pgTable(
   "desktop_releases",
   {
     id: pk(),
+    /** Qaysi ilova uchun: `desktop` — BUM POS KASSA o'rnatuvchisi, `android` — telefon ilovasi (APK). */
+    platform: varchar("platform", { length: 16 }).notNull().default("desktop"),
     version: varchar("version", { length: 32 }).notNull(),
     fileName: varchar("file_name", { length: 200 }).notNull(),
     size: integer("size").notNull().default(0),
@@ -199,8 +201,10 @@ export const desktopReleases = pgTable(
     ...timestamps(),
   },
   (t) => [
-    uniqueIndex("desktop_releases_version_key").on(t.version),
+    // Versiya har platforma ichida yagona (desktop 1.0.1 va android 1.0.1 birga bo'lishi mumkin)
+    uniqueIndex("desktop_releases_platform_version_key").on(t.platform, t.version),
     check("desktop_releases_status", sql`${t.status} in ('uploading', 'draft', 'published', 'archived', 'failed')`),
+    check("desktop_releases_platform", sql`${t.platform} in ('desktop', 'android')`),
   ],
 );
 

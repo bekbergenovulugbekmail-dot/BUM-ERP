@@ -36,8 +36,13 @@ export const RELEASE_VERSION = /^\d{1,4}\.\d{1,5}\.\d{1,6}$/;
 
 type Actor = { id: string; name: string | null };
 
+/** Reliz qaysi ilova uchun. */
+export const RELEASE_PLATFORMS = ["desktop", "android"] as const;
+export type ReleasePlatform = (typeof RELEASE_PLATFORMS)[number];
+
 const releaseFields = {
   id: desktopReleases.id,
+  platform: desktopReleases.platform,
   version: desktopReleases.version,
   fileName: desktopReleases.fileName,
   size: desktopReleases.size,
@@ -61,11 +66,12 @@ async function audit(tx: Tx, actor: Actor, meta: RequestMeta, action: string, id
 
 const receivedBytesSql = sql<number>`(select coalesce(sum(octet_length(c.data)), 0) from desktop_release_chunks c where c.release_id = ${desktopReleases.id})`.mapWith(Number);
 
-export function listReleases(conn: DbOrTx) {
+export function listReleases(conn: DbOrTx, platform?: ReleasePlatform) {
   return conn
     .select({ ...releaseFields, uploadedByName: users.name, receivedBytes: receivedBytesSql })
     .from(desktopReleases)
     .leftJoin(users, eq(users.id, desktopReleases.uploadedBy))
+    .where(platform ? eq(desktopReleases.platform, platform) : undefined)
     .orderBy(desc(desktopReleases.createdAt));
 }
 
@@ -81,6 +87,7 @@ const isIncomplete = (status: string) => status === "uploading" || status === "f
 export async function uploadRelease(
   tx: Tx,
   input: {
+    platform: ReleasePlatform;
     version: string;
     fileName: string;
     stream: AsyncIterable<Buffer | Uint8Array | string>;
@@ -92,12 +99,23 @@ export async function uploadRelease(
 ) {
   if (!RELEASE_VERSION.test(input.version)) throw badRequest("Versiya formati: 1.2.3");
   if (!/^[a-f0-9]{64}$/.test(input.expectedSha256)) throw badRequest("Fayl SHA-256 xeshi noto'g'ri");
-  const [taken] = await tx.select({ id: desktopReleases.id }).from(desktopReleases).where(eq(desktopReleases.version, input.version)).limit(1);
+  const [taken] = await tx
+    .select({ id: desktopReleases.id })
+    .from(desktopReleases)
+    .where(and(eq(desktopReleases.platform, input.platform), eq(desktopReleases.version, input.version)))
+    .limit(1);
   if (taken) throw conflict(`${input.version} versiyasi allaqachon yuklangan`);
 
   const [row] = await tx
     .insert(desktopReleases)
-    .values({ version: input.version, fileName: input.fileName, sha256: "", chunkSize: RELEASE_CHUNK_BYTES, uploadedBy: actor.id })
+    .values({
+      platform: input.platform,
+      version: input.version,
+      fileName: input.fileName,
+      sha256: "",
+      chunkSize: RELEASE_CHUNK_BYTES,
+      uploadedBy: actor.id,
+    })
     .returning({ id: desktopReleases.id });
   const releaseId = row!.id;
 
@@ -117,10 +135,13 @@ export async function uploadRelease(
   for await (const part of input.stream) {
     const chunk = Buffer.from(part);
     if (chunk.length === 0) continue;
-    // Windows o'rnatuvchisi (PE) "MZ" bilan boshlanadi — boshqa fayl bazaga yozilmasin
+    // Windows o'rnatuvchisi (PE) "MZ", Android APK (zip) esa "PK" bilan boshlanadi — boshqa fayl bazaga yozilmasin
     if (size < 2) {
+      const expectedHead = input.platform === "android" ? "PK" : "MZ";
       const head = Buffer.concat([...parts, chunk]).subarray(0, 2).toString("latin1");
-      if (head !== "MZ".slice(0, head.length)) throw badRequest("Bu Windows o'rnatuvchi (.exe) fayli emas");
+      if (head !== expectedHead.slice(0, head.length)) {
+        throw badRequest(input.platform === "android" ? "Bu Android ilovasi (.apk) fayli emas" : "Bu Windows o'rnatuvchi (.exe) fayli emas");
+      }
     }
     size += chunk.length;
     if (size > MAX_STREAM_RELEASE_BYTES) throw badRequest(`Fayl ${MAX_STREAM_RELEASE_BYTES / 1024 / 1024} MB dan katta — bo'laklab yuklang`);
@@ -166,13 +187,18 @@ export async function uploadState(conn: DbOrTx, id: string) {
  */
 export async function startUpload(
   tx: Tx,
-  input: { version: string; fileName: string; size: number; sha256: string; chunkSize: number },
+  input: { platform: ReleasePlatform; version: string; fileName: string; size: number; sha256: string; chunkSize: number },
   actor: Actor,
   meta: RequestMeta,
 ) {
   if (!RELEASE_VERSION.test(input.version)) throw badRequest("Versiya formati: 1.2.3");
   const session = { fileName: input.fileName, chunkSize: input.chunkSize, expectedSize: input.size, expectedSha256: input.sha256 };
-  const [existing] = await tx.select(releaseFields).from(desktopReleases).where(eq(desktopReleases.version, input.version)).limit(1).for("update");
+  const [existing] = await tx
+    .select(releaseFields)
+    .from(desktopReleases)
+    .where(and(eq(desktopReleases.platform, input.platform), eq(desktopReleases.version, input.version)))
+    .limit(1)
+    .for("update");
   if (existing) {
     const sameFile = existing.expectedSha256 === input.sha256 && existing.expectedSize === input.size && existing.chunkSize === input.chunkSize;
     if (existing.status === "uploading" && sameFile) return uploadState(tx, existing.id);
@@ -188,7 +214,7 @@ export async function startUpload(
   }
   const [row] = await tx
     .insert(desktopReleases)
-    .values({ version: input.version, sha256: "", status: "uploading", uploadedBy: actor.id, ...session })
+    .values({ platform: input.platform, version: input.version, sha256: "", status: "uploading", uploadedBy: actor.id, ...session })
     .returning({ id: desktopReleases.id });
   await audit(tx, actor, meta, "DESKTOP_RELEASE_UPLOAD_STARTED", row!.id, { version: input.version, size: input.size, sha256: input.sha256, chunkSize: input.chunkSize });
   return uploadState(tx, row!.id);
@@ -319,8 +345,12 @@ export async function updateRelease(tx: Tx, id: string, patch: { notes?: string 
 export async function publishRelease(tx: Tx, id: string, signature: string, actor: Actor, meta: RequestMeta) {
   const release = await lockRelease(tx, id);
   if (isIncomplete(release.status) || release.size === 0 || !release.sha256) throw badRequest("Reliz fayli to'liq yuklanmagan yoki tekshiruvdan o'tmagan");
-  // Imzo reliz tuzuvchidagi maxfiy kalit bilan qo'yiladi; noto'g'ri imzoli relizni kassalar baribir o'rnatmaydi
-  if (!isValidReleaseSignature(release.version, release.sha256, signature)) {
+  // Imzo reliz tuzuvchidagi maxfiy kalit bilan qo'yiladi; noto'g'ri imzoli relizni kassalar baribir o'rnatmaydi.
+  // Android APK'ni Android o'zi tekshiradi (boshqa kalit bilan imzolangani eski ilova ustiga o'rnatilmaydi),
+  // shuning uchun u yerda imzo ixtiyoriy.
+  if (release.platform === "android" && !signature) {
+    // imzo talab qilinmaydi
+  } else if (!isValidReleaseSignature(release.version, release.sha256, signature)) {
     throw badRequest("Reliz imzosi noto'g'ri — `node scripts/release-sign.mjs sign <o'rnatuvchi> <versiya>` bergan imzoni kiriting", {
       reason: "signature_invalid",
     });
@@ -328,7 +358,13 @@ export async function publishRelease(tx: Tx, id: string, signature: string, acto
   await tx
     .update(desktopReleases)
     .set({ status: "archived", updatedAt: new Date() })
-    .where(and(eq(desktopReleases.status, "published"), ne(desktopReleases.id, id)));
+    .where(
+      and(
+        eq(desktopReleases.status, "published"),
+        eq(desktopReleases.platform, release.platform),
+        ne(desktopReleases.id, id),
+      ),
+    );
   const [published] = await tx
     .update(desktopReleases)
     .set({ status: "published", signature, publishedAt: new Date(), updatedAt: new Date() })
@@ -348,12 +384,12 @@ export async function archiveRelease(tx: Tx, id: string, actor: Actor, meta: Req
 
 // ─── Qurilmaga berish ───────────────────────────────────────────────────────
 
-/** Qurilmalarga taklif qilinadigan reliz (eng oxirgi e'lon qilingan). */
-export async function currentRelease(conn: DbOrTx) {
+/** Qurilmalarga taklif qilinadigan reliz (shu platformadagi eng oxirgi e'lon qilingani). */
+export async function currentRelease(conn: DbOrTx, platform: ReleasePlatform = "desktop") {
   const [release] = await conn
     .select(releaseFields)
     .from(desktopReleases)
-    .where(eq(desktopReleases.status, "published"))
+    .where(and(eq(desktopReleases.status, "published"), eq(desktopReleases.platform, platform)))
     .orderBy(desc(desktopReleases.publishedAt))
     .limit(1);
   return release ?? null;

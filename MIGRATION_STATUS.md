@@ -2369,6 +2369,33 @@ shuning uchun hech narsa yo'qolmaydi. Bu NATIV sozlama — faqat yangi APK bilan
 V2 imzo, CN=BUM ERP) va APK ichidagi `capacitor.config.json` da `"captureInput": false` ekani
 tekshirildi. Web tomonida o'zgarish yo'q — deploy talab qilinmaydi.
 
+## Telefon ilovasida yangilanish (2026-09-18)
+
+Ilova production saytini ochgani uchun WEB qismi deploy bilan darhol yangilanadi, lekin NATIV qism
+(ruxsatlar, GPS xizmati, klaviatura sozlamasi, ikonka) faqat yangi APK bilan keladi. Endi APK ham
+dastur orqali tarqatiladi — mavjud desktop reliz tizimi ikkala platformaga umumiy qilindi
+(migratsiya `0062_release_platform`: `desktop_releases.platform` ustuni, versiya endi har platforma
+ichida yagona; ma'lumot o'chirilmadi, faqat indeks qayta yaratildi).
+
+- **Admin panel → Desktop kassa**: yuklash formasida "Kassa (.exe)" / "Telefon (.apk)" tanlovi,
+  ro'yxatda har reliz qaysi ilova uchun ekani ko'rinadi. Fayl turi boshidagi belgilar bilan
+  tekshiriladi (`MZ` — .exe, `PK` — .apk), SHA-256 avvalgidek solishtiriladi, yuklash uzilsa
+  o'sha joydan davom etadi.
+- **E'lon qilish**: desktop relizida Ed25519 imzo avvalgidek MAJBURIY (kassa uni tekshiradi);
+  Android APK uchun imzo so'ralmaydi — uni Android o'zi tekshiradi (boshqa kalit bilan imzolangan
+  APK eski ilova ustiga o'rnatilmaydi).
+- **Ilova tomoni**: `src/components/app-update-banner.tsx` — ilova ochilganda va har 6 soatda
+  `GET /api/public/app-release` so'raydi, o'zining versiyasi (`App.getInfo()`) bilan solishtiradi va
+  yangisi bo'lsa pastda xabar chiqaradi: versiya, hajm, izoh va "Yuklab olish". "Keyinroq" bosilsa
+  o'sha versiya uchun boshqa bezovta qilmaydi; `minVersion` dan eski bo'lsa xabarni yopib bo'lmaydi.
+  Brauzerda umuman ko'rinmaydi.
+- **Yuklab olish sessiyasiz** (`GET /api/public/app-release/download`): Android yuklab oluvchisi
+  cookie yubormaydi. Range qo'llab-quvvatlanadi — uzilgan yuklash davom etadi.
+
+Testlar: `apps/api/test/android-release.test.ts` (5 ta — yuklash, imzosiz e'lon, sessiyasiz yuklab
+olish, platformalar aralashmasligi, eski versiyaning arxivga o'tishi) va `src/lib/version.test.ts` (4 ta).
+**Regressiya:** API 121 fayl / 642 test, brauzer 39 test, web 20 / 85 — hammasi o'tdi; lint va tsc toza.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)

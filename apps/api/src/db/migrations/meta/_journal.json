@@ -435,6 +435,13 @@
       "when": 1789705722589,
       "tag": "0061_member_device_check",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1789731473603,
+      "tag": "0062_release_platform",
+      "breakpoints": true
     }
   ]
 }
