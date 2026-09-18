@@ -2288,8 +2288,15 @@ qo'shish (`POST /api/company/employees` + `POST /api/distribution/sales-reps`) y
 moslandi — `salesRepOf` yordamchisi avtomatik yaratilgan profilni topadi.
 
 **Regressiya:** API 119 fayl / 632 test, brauzer 38 test (11 fayl), web 19 / 81 — hammasi o'tdi;
-tsc (API, web, desktop) va lint toza. Migratsiya `0061` lokal bazada qo'llandi, production'ga
-HALI DEPLOY QILINMADI.
+tsc (API, web, desktop) va lint toza.
+
+**Production'ga deploy qilindi (2026-09-18, 12:17–12:19, egasi "deploy qil" dedi)**
+`bum-api` (4efc16f5) va `bum-web` (93edd785). Bazada TEKSHIRILDI (faqat o'qish, `railway ssh`):
+`company_members.device_check` bor, `telegram_bots`/`telegram_chats` ikkalasi bor,
+`cash_accounts.sales_rep_id` bor, `sales_order_source` da `bot` qiymati bor — ya'ni `0058`–`0061`
+production bazasida qo'llangan (jami 62 ta migratsiya). API barqaror (`/api/auth/me` — ketma-ket
+6 ta 401, crash-loop yo'q). Yangi web bundle `index-C22GeFzl.js` ichida "Qurilma tasdig'i",
+"Dasturga kiradi", "Bo'limlar" va `page-tabs-mobile` bor.
 
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
