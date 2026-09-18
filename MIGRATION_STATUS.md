@@ -2396,6 +2396,11 @@ Testlar: `apps/api/test/android-release.test.ts` (5 ta — yuklash, imzosiz e'lo
 olish, platformalar aralashmasligi, eski versiyaning arxivga o'tishi) va `src/lib/version.test.ts` (4 ta).
 **Regressiya:** API 121 fayl / 642 test, brauzer 39 test, web 20 / 85 — hammasi o'tdi; lint va tsc toza.
 
+**Deploy (2026-09-18 17:28–17:31):** `bum-api` (588b68e2), `bum-web` (eb28da7f), bundle
+`index-Ci7kL87g.js`. Tekshirildi: `/api/public/app-release` — 200 `{"release":null}` (hali APK
+e'lon qilinmagan), yuklab olish yo'li — 404 (reliz yo'q), `/api/auth/me` — barqaror 401.
+Migratsiya `0062` production bazasida qo'llandi (API ishga tushdi).
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
