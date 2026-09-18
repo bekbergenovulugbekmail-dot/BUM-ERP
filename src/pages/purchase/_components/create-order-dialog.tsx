@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea.tsx";
 import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { useTaxEnabled } from "@/hooks/use-tax.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import {
@@ -45,11 +46,14 @@ const emptyLine = (): LineItem => ({
   productId: "", unitId: "", orderedQty: 1, unitPrice: 0, taxRate: 12, discountPercent: 0, currency: "", salesPrice: "",
 });
 
-/** Oldindan ko'rish — ta'minotchi narxi soliqsiz, soliq ustiga; aniq summa serverda. */
-function lineAmounts(line: LineItem) {
+/**
+ * Oldindan ko'rish — ta'minotchi narxi soliqsiz, soliq ustiga; aniq summa serverda.
+ * `taxEnabled` false bo'lsa soliq umuman hisoblanmaydi (server ham 0 yozadi).
+ */
+function lineAmounts(line: LineItem, taxEnabled = true) {
   const gross = line.orderedQty * line.unitPrice;
   const net = gross - gross * (line.discountPercent / 100);
-  const tax = net * (line.taxRate / 100);
+  const tax = taxEnabled ? net * (line.taxRate / 100) : 0;
   return { net, tax, total: net + tax };
 }
 
@@ -64,6 +68,8 @@ function mergeById<T extends { id: string }>(list: T[] | undefined, extra: T[]):
 }
 
 export default function CreateOrderDialog({ onClose, onCreated }: Props) {
+  // Soliq o'chirilgan bo'lsa maydonlar ham ko'rinmaydi (server ham 0 yozadi)
+  const taxEnabled = useTaxEnabled();
   const { can } = usePermissions();
   const currencies = useCurrencies();
   const suppliers = useApiQuery<{ suppliers: Supplier[] }>("/api/purchase/suppliers").data?.suppliers;
@@ -150,7 +156,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   for (const line of lines) {
     if (!line.productId) continue;
     const code = lineCurrency(line);
-    const amounts = lineAmounts(line);
+    const amounts = lineAmounts(line, taxEnabled);
     const acc = perCurrency.get(code) ?? { net: 0, tax: 0, total: 0 };
     perCurrency.set(code, { net: acc.net + amounts.net, tax: acc.tax + amounts.tax, total: acc.total + amounts.total });
   }
@@ -304,7 +310,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-24">Miqdor</th>
                     {showCurrencyColumn && <th className="text-left px-3 py-2 text-xs text-muted-foreground w-24">Valyuta</th>}
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-28">Xarid narxi</th>
-                    <th className="text-right px-3 py-2 text-xs text-muted-foreground w-20">Soliq %</th>
+                    {taxEnabled && <th className="text-right px-3 py-2 text-xs text-muted-foreground w-20">Soliq %</th>}
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-20">Chegirma %</th>
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-28">Sotuv narxi</th>
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-32">Jami</th>
@@ -314,7 +320,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                 <tbody className="divide-y divide-border">
                   {lines.map((line, i) => {
                     const code = lineCurrency(line);
-                    const lineTotal = lineAmounts(line).total;
+                    const lineTotal = lineAmounts(line, taxEnabled).total;
 
                     return (
                       <tr key={i}>
@@ -364,11 +370,13 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                             value={line.unitPrice}
                             onChange={(e) => updateLine(i, "unitPrice", e.target.valueAsNumber || 0)} />
                         </td>
-                        <td className="px-2 py-2">
-                          <Input type="number" min="0" max="100" className="h-8 text-xs text-right"
-                            value={line.taxRate}
-                            onChange={(e) => updateLine(i, "taxRate", e.target.valueAsNumber || 0)} />
-                        </td>
+                        {taxEnabled && (
+                          <td className="px-2 py-2">
+                            <Input type="number" min="0" max="100" className="h-8 text-xs text-right"
+                              value={line.taxRate}
+                              onChange={(e) => updateLine(i, "taxRate", e.target.valueAsNumber || 0)} />
+                          </td>
+                        )}
                         <td className="px-2 py-2">
                           <Input type="number" min="0" max="100" className="h-8 text-xs text-right"
                             value={line.discountPercent}
@@ -416,10 +424,12 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                           <span>Mahsulotlar jami</span>
                           <span>{formatMoney(amounts.net, code)}</span>
                         </div>
-                        <div className="flex justify-between text-muted-foreground">
-                          <span>QQS</span>
-                          <span>{formatMoney(amounts.tax, code)}</span>
-                        </div>
+                        {taxEnabled && (
+                          <div className="flex justify-between text-muted-foreground">
+                            <span>QQS</span>
+                            <span>{formatMoney(amounts.tax, code)}</span>
+                          </div>
+                        )}
                         <Separator />
                       </>
                     )}

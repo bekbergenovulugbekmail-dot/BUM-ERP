@@ -3,7 +3,7 @@ import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { ImageIcon } from "lucide-react";
+import { ImageIcon, Loader2, Plus, ScanLine, Trash2 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog.tsx";
@@ -27,6 +27,8 @@ import {
 } from "../_lib/product-files.ts";
 import type { Brand, Category, ProductDetail, Unit } from "../_lib/types.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
+import BarcodeScanner from "@/components/barcode-scanner.tsx";
+import { useTaxEnabled } from "@/hooks/use-tax.ts";
 
 function CurrencySelect({ value, codes, onChange }: { value: string; codes: string[]; onChange: (code: string) => void }) {
   // Nofaol qilingan valyutada saqlangan narx ham ko'rinib tursin
@@ -144,6 +146,8 @@ function toPayload(values: FormValues) {
 }
 
 export default function ProductFormDialog({ open, onClose, editId }: Props) {
+  // Soliq o'chirilgan bo'lsa maydonlar ko'rinmaydi (server ham 0 yozadi)
+  const taxEnabled = useTaxEnabled();
   const categories = useApiQuery<{ categories: Category[] }>(open ? "/api/catalog/categories" : null).data?.categories;
   const brands = useApiQuery<{ brands: Brand[] }>(open ? "/api/catalog/brands" : null, { isActive: true }).data?.brands;
   const units = useApiQuery<{ units: Unit[] }>(open ? "/api/catalog/units" : null).data?.units;
@@ -151,6 +155,14 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
   const existingProduct = useApiQuery<{ product: ProductDetail }>(
     open && editId ? `/api/catalog/products/${editId}` : null,
   ).data?.product;
+
+  /** Telefonda barkodni kamera bilan o'qish (USB skaner ham shu oynaga yozadi). */
+  const [scannerOpen, setScannerOpen] = useState(false);
+  /** "Kategoriya qo'shish" / "Brend qo'shish" — ro'yxat bo'sh bo'lsa ham shu yerdan yaratiladi. */
+  const [newCategory, setNewCategory] = useState<string | null>(null);
+  const [newBrand, setNewBrand] = useState<string | null>(null);
+  /** O'lchov konversiyalari: 1 <birlik> = <koeffitsient> <asosiy birlik>. */
+  const [conversionDraft, setConversionDraft] = useState<{ unitId: string; factor: string }[]>([]);
 
   // Rasm: yangi fayl tanlangan yoki mavjud rasm olib tashlanadi — mahsulot saqlangach bajariladi
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -173,6 +185,9 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
     if (open) {
       setImageFile(null);
       setRemoveImage(false);
+      setConversionDraft([]);
+      setNewCategory(null);
+      setNewBrand(null);
     }
   }
   // Fayl maydonining o'zi (DOM) — effektda
@@ -222,11 +237,63 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
     }
   }, [open, existingProduct, editId, form]);
 
+  /** Ro'yxat bo'sh bo'lsa ham shu yerdan kategoriya/brend qo'shiladi. */
+  const createCategory = useApiMutation(
+    (name: string) => api.post<{ category: { id: string } }>("/api/catalog/categories", { name }),
+    { invalidate: ["/api/catalog/categories"] },
+  );
+  const createBrand = useApiMutation(
+    (name: string) => api.post<{ brand: { id: string } }>("/api/catalog/brands", { name }),
+    { invalidate: ["/api/catalog/brands"] },
+  );
+
+  const addCategory = async () => {
+    const name = (newCategory ?? "").trim();
+    if (!name) return;
+    try {
+      const { category } = await createCategory.mutateAsync(name);
+      form.setValue("categoryId", category.id);
+      setNewCategory(null);
+      toast.success("Kategoriya qo'shildi");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
+  const addBrand = async () => {
+    const name = (newBrand ?? "").trim();
+    if (!name) return;
+    try {
+      const { brand } = await createBrand.mutateAsync(name);
+      form.setValue("brandId", brand.id);
+      setNewBrand(null);
+      toast.success("Brend qo'shildi");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
   const save = useApiMutation(async (values: FormValues) => {
     const payload = toPayload(values);
     const { product } = editId
       ? await api.patch<{ product: { id: string } }>(`/api/catalog/products/${editId}`, payload)
       : await api.post<{ product: { id: string } }>("/api/catalog/products", payload);
+
+    // O'lchov konversiyalari: mahsulot id'si kerak, shuning uchun saqlangandan keyin yoziladi
+    let conversionError: string | null = null;
+    for (const row of conversionDraft) {
+      if (!row.unitId || !row.factor.trim() || row.unitId === values.baseUnitId) continue;
+      try {
+        await api.post("/api/catalog/unit-conversions", {
+          fromUnitId: row.unitId,
+          toUnitId: values.baseUnitId,
+          factor: row.factor.trim(),
+          productId: product.id,
+        });
+      } catch (err) {
+        conversionError = errorMessage(err);
+      }
+    }
 
     // Mahsulot saqlandi; rasm xatosi alohida ko'rsatiladi (masalan saqlash sozlanmagan — 503)
     let imageError: string | null = null;
@@ -236,18 +303,26 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
     } catch (err) {
       imageError = errorMessage(err);
     }
-    return { imageError };
+    return { imageError, conversionError };
   });
 
   const onSubmit = async (values: FormValues) => {
     try {
-      const { imageError } = await save.mutateAsync(values);
+      const { imageError, conversionError } = await save.mutateAsync(values);
       toast.success(editId ? "Mahsulot yangilandi" : "Mahsulot qo'shildi");
       if (imageError) toast.error(`Rasm saqlanmadi: ${imageError}`);
+      if (conversionError) toast.error(`Konversiya saqlanmadi: ${conversionError}`);
       onClose();
     } catch (err) {
       toast.error(errorMessage(err));
     }
+  };
+
+  /** Skanerdan kelgan kod to'g'ridan-to'g'ri maydonga tushadi. */
+  const handleScan = (code: string) => {
+    form.setValue("barcode", code.trim());
+    setScannerOpen(false);
+    toast.success(`Shtrix-kod o'qildi: ${code.trim()}`);
   };
 
   const handleImagePick = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -272,6 +347,32 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
   const shownImage = previewUrl ?? (removeImage ? null : currentImageUrl ?? null);
   const hasImage = Boolean(imageFile) || (Boolean(existingProduct?.imageKey) && !removeImage);
 
+  /** Konversiyalar asosiy birlikka nisbatan yoziladi — shuning uchun uning nomi kerak. */
+  const baseUnitId = useWatch({ control: form.control, name: "baseUnitId" });
+  const baseUnitName = units?.find((unit) => unit.id === baseUnitId)?.shortName ?? "asosiy birlik";
+  const conversionsQuery = useApiQuery<{ conversions: { id: string; fromUnitId: string; toUnitId: string; factor: string }[] }>(
+    open && editId ? "/api/catalog/unit-conversions" : null,
+    editId ? { productId: editId } : undefined,
+  );
+  const unitName = (id: string) => units?.find((unit) => unit.id === id)?.shortName ?? "?";
+  const savedConversions = conversionsQuery.data?.conversions.map((row) => ({
+    id: row.id,
+    factor: row.factor,
+    fromUnitName: unitName(row.fromUnitId),
+    toUnitName: unitName(row.toUnitId),
+  }));
+  const deleteConversion = useApiMutation((id: string) => api.delete(`/api/catalog/unit-conversions/${id}`), {
+    invalidate: ["/api/catalog/unit-conversions"],
+  });
+  const removeConversion = async (id: string) => {
+    try {
+      await deleteConversion.mutateAsync(id);
+      toast.success("Konversiya o'chirildi");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
   const sp = useWatch({ control: form.control, name: "salesPrice" });
   const pp = useWatch({ control: form.control, name: "purchasePrice" });
   const salesCurrency = useWatch({ control: form.control, name: "salesCurrency" }) || currencies.base;
@@ -287,6 +388,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
     form.setValue(name, code === currencies.base ? "" : code, { shouldDirty: true });
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -294,7 +396,11 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-0">
+          {/* Xato boshqa tabda bo'lsa ham foydalanuvchi ko'rsin — aks holda "Saqlash" jim qoladi */}
+          <form onSubmit={form.handleSubmit(onSubmit, (errors) => {
+            const first = Object.values(errors)[0];
+            toast.error(typeof first?.message === "string" ? first.message : "Majburiy maydonlarni to'ldiring");
+          })} className="space-y-0">
             <Tabs defaultValue="basic">
               <TabsList className="w-full">
                 <TabsTrigger value="basic" className="flex-1">Asosiy</TabsTrigger>
@@ -325,8 +431,23 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
 
                   <FormField control={form.control} name="barcode" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Barcode</FormLabel>
-                      <FormControl><Input placeholder="5449000000996" {...field} /></FormControl>
+                      <FormLabel>Shtrix-kod</FormLabel>
+                      <div className="flex items-center gap-2">
+                        <FormControl><Input placeholder="5449000000996" inputMode="numeric" data-testid="product-barcode" {...field} /></FormControl>
+                        {/* Telefonda kamera bilan o'qish; USB skaner ham shu oynaga yozadi */}
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="icon"
+                          className="h-9 w-9 shrink-0"
+                          title="Skaner bilan o'qish"
+                          aria-label="Shtrix-kodni skanerlash"
+                          data-testid="product-barcode-scan"
+                          onClick={() => setScannerOpen(true)}
+                        >
+                          <ScanLine className="h-4 w-4" />
+                        </Button>
+                      </div>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -341,8 +462,38 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                           {categories?.map((c) => (
                             <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                           ))}
+                          {categories?.length === 0 && (
+                            <p className="px-2 py-1.5 text-xs text-muted-foreground">Kategoriya yo'q — pastdan qo'shing</p>
+                          )}
                         </SelectContent>
                       </Select>
+                      {newCategory === null ? (
+                        <button
+                          type="button"
+                          data-testid="product-add-category"
+                          className="mt-1 text-xs text-primary hover:underline cursor-pointer"
+                          onClick={() => setNewCategory("")}
+                        >
+                          + Kategoriya qo'shish
+                        </button>
+                      ) : (
+                        <div className="mt-1 flex items-center gap-2">
+                          <Input
+                            autoFocus
+                            placeholder="Yangi kategoriya nomi"
+                            value={newCategory}
+                            onChange={(event) => setNewCategory(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") { event.preventDefault(); void addCategory(); }
+                              if (event.key === "Escape") setNewCategory(null);
+                            }}
+                          />
+                          <Button type="button" size="sm" disabled={createCategory.isPending} onClick={() => void addCategory()}>
+                            {createCategory.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Qo'shish"}
+                          </Button>
+                          <Button type="button" size="sm" variant="ghost" onClick={() => setNewCategory(null)}>Bekor</Button>
+                        </div>
+                      )}
                     </FormItem>
                   )} />
 
@@ -356,8 +507,38 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                           {brands?.map((b) => (
                             <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
                           ))}
+                          {brands?.length === 0 && (
+                            <p className="px-2 py-1.5 text-xs text-muted-foreground">Brend yo'q — pastdan qo'shing</p>
+                          )}
                         </SelectContent>
                       </Select>
+                      {newBrand === null ? (
+                        <button
+                          type="button"
+                          data-testid="product-add-brand"
+                          className="mt-1 text-xs text-primary hover:underline cursor-pointer"
+                          onClick={() => setNewBrand("")}
+                        >
+                          + Brend qo'shish
+                        </button>
+                      ) : (
+                        <div className="mt-1 flex items-center gap-2">
+                          <Input
+                            autoFocus
+                            placeholder="Yangi brend nomi"
+                            value={newBrand}
+                            onChange={(event) => setNewBrand(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") { event.preventDefault(); void addBrand(); }
+                              if (event.key === "Escape") setNewBrand(null);
+                            }}
+                          />
+                          <Button type="button" size="sm" disabled={createBrand.isPending} onClick={() => void addBrand()}>
+                            {createBrand.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Qo'shish"}
+                          </Button>
+                          <Button type="button" size="sm" variant="ghost" onClick={() => setNewBrand(null)}>Bekor</Button>
+                        </div>
+                      )}
                     </FormItem>
                   )} />
 
@@ -489,21 +670,30 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                     </div>
                   </div>
 
-                  <FormField control={form.control} name="taxRate" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Soliq stavkasi (%)</FormLabel>
-                      <FormControl><Input type="number" min="0" max="100" step="any" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} /></FormControl>
-                    </FormItem>
-                  )} />
+                  {/* Soliq hisoblash o'chirilgan bo'lsa stavka ham so'ralmaydi — hujjatlarda baribir 0 bo'ladi */}
+                  {taxEnabled ? (
+                    <>
+                      <FormField control={form.control} name="taxRate" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Soliq stavkasi (%)</FormLabel>
+                          <FormControl><Input type="number" min="0" max="100" step="any" {...field} onChange={e => field.onChange(e.target.valueAsNumber)} /></FormControl>
+                        </FormItem>
+                      )} />
 
-                  <FormField control={form.control} name="taxIncluded" render={({ field }) => (
-                    <FormItem className="flex items-center gap-3 self-end pb-2">
-                      <FormControl>
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
-                      </FormControl>
-                      <FormLabel className="!mt-0">Narxga soliq kiritilgan</FormLabel>
-                    </FormItem>
-                  )} />
+                      <FormField control={form.control} name="taxIncluded" render={({ field }) => (
+                        <FormItem className="flex items-center gap-3 self-end pb-2">
+                          <FormControl>
+                            <Switch checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                          <FormLabel className="!mt-0">Narxga soliq kiritilgan</FormLabel>
+                        </FormItem>
+                      )} />
+                    </>
+                  ) : (
+                    <p className="self-end pb-2 text-xs text-muted-foreground md:col-span-2">
+                      Soliqni avtomatik hisoblash o'chirilgan (Sozlamalar → Kompaniya) — hujjatlarda QQS 0.
+                    </p>
+                  )}
                 </div>
               </TabsContent>
 
@@ -557,11 +747,84 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                 </div>
 
                 <Separator />
-                <div>
-                  <p className="text-sm font-medium mb-1">O'lchov konversiyalari</p>
-                  <p className="text-xs text-muted-foreground">
-                    Masalan: 1 quti = 12 dona, 1 blok = 10 quti. Bu sozlamalar mahsulot saqlanganidan so'ng qo'shiladi.
-                  </p>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm font-medium">O'lchov konversiyalari</p>
+                    <p className="text-xs text-muted-foreground">
+                      Masalan: 1 quti = 12 dona. Bir nechta konversiya qo'shsa bo'ladi — "+ Konversiya qo'shish".
+                      Ular mahsulot saqlanganda birga yoziladi.
+                    </p>
+                  </div>
+
+                  {conversionDraft.map((row, index) => (
+                    <div key={index} className="flex flex-wrap items-center gap-2" data-testid="conversion-row">
+                      <span className="text-sm text-muted-foreground">1</span>
+                      <Select
+                        value={row.unitId}
+                        onValueChange={(value) =>
+                          setConversionDraft((rows) => rows.map((item, i) => (i === index ? { ...item, unitId: value } : item)))
+                        }
+                      >
+                        <SelectTrigger className="w-40"><SelectValue placeholder="Birlik" /></SelectTrigger>
+                        <SelectContent>
+                          {units?.filter((unit) => unit.id !== baseUnitId).map((unit) => (
+                            <SelectItem key={unit.id} value={unit.id}>{unit.name} ({unit.shortName})</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <span className="text-sm text-muted-foreground">=</span>
+                      <Input
+                        className="w-28"
+                        inputMode="decimal"
+                        placeholder="12"
+                        value={row.factor}
+                        onChange={(event) =>
+                          setConversionDraft((rows) => rows.map((item, i) => (i === index ? { ...item, factor: event.target.value } : item)))
+                        }
+                      />
+                      <span className="text-sm text-muted-foreground">{baseUnitName}</span>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-destructive"
+                        aria-label="Konversiyani o'chirish"
+                        onClick={() => setConversionDraft((rows) => rows.filter((_, i) => i !== index))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    data-testid="conversion-add"
+                    onClick={() => setConversionDraft((rows) => [...rows, { unitId: "", factor: "" }])}
+                  >
+                    <Plus className="h-4 w-4 mr-1" /> Konversiya qo'shish
+                  </Button>
+
+                  {savedConversions && savedConversions.length > 0 && (
+                    <div className="rounded-xl border border-border p-3">
+                      <p className="text-xs font-medium text-muted-foreground">Saqlangan konversiyalar</p>
+                      <ul className="mt-1 space-y-1 text-sm">
+                        {savedConversions.map((row) => (
+                          <li key={row.id} className="flex items-center justify-between gap-2">
+                            <span>1 {row.fromUnitName} = {Number(row.factor)} {row.toUnitName}</span>
+                            <button
+                              type="button"
+                              className="text-xs text-destructive hover:underline cursor-pointer"
+                              onClick={() => void removeConversion(row.id)}
+                            >
+                              O'chirish
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               </TabsContent>
 
@@ -708,7 +971,17 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
             </DialogFooter>
           </form>
         </Form>
+        {/* Skaner DialogContent ICHIDA: modal ochiq bo'lsa tashqaridagi elementlar bosilmaydi */}
+        {scannerOpen && (
+          <BarcodeScanner
+            title="Shtrix-kodni skanerlash"
+            hint="Kamerani shtrix-kodga to'g'rilang yoki USB skaner bilan o'qing"
+            onScan={handleScan}
+            onClose={() => setScannerOpen(false)}
+          />
+        )}
       </DialogContent>
     </Dialog>
+    </>
   );
 }

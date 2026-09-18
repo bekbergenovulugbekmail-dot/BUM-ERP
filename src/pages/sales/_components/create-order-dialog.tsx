@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { useTaxEnabled } from "@/hooks/use-tax.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import { cn } from "@/lib/utils.ts";
@@ -58,6 +59,8 @@ const toCurrencyMinor = (baseMinor: bigint, rate: number) => {
 };
 
 export default function CreateOrderDialog({ onClose, onCreated }: Props) {
+  // Soliq o'chirilgan bo'lsa maydonlar ham ko'rinmaydi (server ham 0 yozadi)
+  const taxEnabled = useTaxEnabled();
   const { can } = usePermissions();
   const currencies = useCurrencies();
   // Narx va chegirmani o'zgartirish — faqat sales.edit (aks holda server rad etadi)
@@ -120,7 +123,8 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
       quantity: l.quantity,
       unitPrice: l.unitPrice,
       discountPercent: l.discountPercent ?? customerDiscount,
-      taxRate: l.taxRate,
+      // Soliq o'chirilgan bo'lsa serverda ham 0 yoziladi — oldindan ko'rish shunga mos bo'lsin
+      taxRate: taxEnabled ? l.taxRate : "0",
       taxIncluded: l.taxIncluded,
     }),
   );
@@ -341,12 +345,16 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
 
           <div className="flex justify-end">
             <div className="w-64 space-y-1 text-sm">
-              <div className="flex justify-between text-muted-foreground">
-                <span>Soliqsiz summa</span><span>{fmt(subtotal)} so'm</span>
-              </div>
-              <div className="flex justify-between text-muted-foreground">
-                <span>QQS</span><span>{fmt(taxTotal)} so'm</span>
-              </div>
+              {taxEnabled && (
+                <>
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Soliqsiz summa</span><span>{fmt(subtotal)} so'm</span>
+                  </div>
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>QQS</span><span>{fmt(taxTotal)} so'm</span>
+                  </div>
+                </>
+              )}
               <Separator />
               {currencyMode && [...currencyTotals].map(([code, amount]) => (
                 <div key={code} className="flex justify-between font-bold text-base">

@@ -22,6 +22,7 @@ import { suppliers } from "../../db/schema/purchase.js";
 import { customers } from "../../db/schema/sales.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { LABELS_SETTING_KEY, RECEIPT_SETTING_KEY, parseLabelSettings, parseReceiptTemplate } from "../company/print-settings.service.js";
+import { isTaxEnabled } from "../company/tax-settings.service.js";
 import { permissionsFromRoles } from "../company/tenant.js";
 import { paymentTerminalOptions, posBankAccountOptions } from "../finance/terminals.service.js";
 import { getCashbackSettings } from "../sales/cashback.service.js";
@@ -111,6 +112,7 @@ export async function pullChanges(
   configHash?: string,
 ) {
   const companyId = context.company.id;
+  const taxOn = await isTaxEnabled(conn, companyId);
   const take = limit + 1;
 
   const unitRows = await conn
@@ -367,7 +369,12 @@ export async function pullChanges(
     unitConversions: toPage(conversionRows, limit, cursors.unitConversions),
     categories: toPage(categoryRows, limit, cursors.categories),
     brands: toPage(brandRows, limit, cursors.brands),
-    products: toPage(productRows, limit, cursors.products),
+    // Soliq o'chirilgan bo'lsa qurilmaga ham 0 stavka boradi — oflayn chek serverdagi hisob bilan bir xil
+    products: toPage(
+      taxOn ? productRows : productRows.map((row) => ({ ...row, taxRate: "0" })),
+      limit,
+      cursors.products,
+    ),
     customers: toPage(customerRows, limit, cursors.customers),
     warehouses: toPage(warehouseRows, limit, cursors.warehouses),
     stockLevels: toPage(stockRows, limit, cursors.stockLevels),

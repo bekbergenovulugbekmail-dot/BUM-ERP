@@ -16,6 +16,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { companyPathKey } from "@bum/shared";
 import { useState } from "react";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
+import BrandLogo from "@/components/brand-logo.tsx";
 import { useMyCompanies, useSwitchCompany } from "@/hooks/use-company.ts";
 import { motion } from "motion/react";
 import {
@@ -38,7 +39,7 @@ export default function SelectCompanyPage() {
       {/* Top bar */}
       <header className="relative z-10 flex items-center gap-2 px-5 py-4 border-b border-white/6">
         <div className="h-6 w-6 rounded-md bg-primary/90 flex items-center justify-center">
-          <Layers className="h-3.5 w-3.5 text-white" />
+          <BrandLogo variant="mark" className="h-3.5 w-auto" />
         </div>
         <span className="text-sm font-semibold text-white/60">BUM ERP</span>
       </header>

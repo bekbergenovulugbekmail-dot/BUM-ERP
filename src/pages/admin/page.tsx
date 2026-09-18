@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import { isAdminSubdomain } from "@/lib/subdomain.ts";
+import BrandLogo from "@/components/brand-logo.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { useAuth, useCurrentUser } from "@/hooks/use-auth.ts";
 import AdminOverview         from "./_components/admin-overview.tsx";
@@ -96,9 +97,7 @@ function AdminDashboard() {
 
           {/* Logo */}
           <div className="flex items-center gap-2 text-white shrink-0 mr-2">
-            <div className="h-7 w-7 rounded-lg bg-primary/90 flex items-center justify-center">
-              <Layers className="h-4 w-4" />
-            </div>
+            <BrandLogo variant="mark" className="h-7 w-auto" />
             <div className="hidden sm:flex items-center gap-1.5">
               <span className="font-bold text-sm tracking-tight">BUM ERP</span>
               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-primary/20 text-primary border border-primary/30 leading-none">

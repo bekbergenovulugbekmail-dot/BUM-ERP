@@ -2305,6 +2305,41 @@ production bazasida qo'llangan (jami 62 ta migratsiya). API barqaror (`/api/auth
 6 ta 401, crash-loop yo'q). Yangi web bundle `index-C22GeFzl.js` ichida "Qurilma tasdig'i",
 "Dasturga kiradi", "Bo'limlar" va `page-tabs-mobile` bor.
 
+## Logotip, mahsulot kartochkasi va soliq rejimi (2026-09-18)
+
+**Logotip qo'yildi** — egasining yuborgan BUM belgisi barcha yuzalarda:
+`public/brand/bum-logo.png` (yozuvi bilan) va `public/brand/bum-mark.png` (faqat belgi), ikkalasi ham
+shaffof fonli. `src/components/brand-logo.tsx` orqali ishlatiladi: kirish sahifasi (chap panel va
+mobil sarlavha), ERP yon menyusi, admin panel sarlavhasi, kompaniya tanlash. Favicon endi
+`/favicon.png` (ilgari ⚡ emoji edi). PWA ikonkalari (`public/icon/*`), Android ilova ikonkalari
+(`mipmap-*`, adaptiv oldingi qatlam bilan), splash rasmlari va desktop kassa ikonkasi (`icon.ico`,
+`icon.png`) ham shu logotipdan qayta yaratildi — ilgari eski "E" belgisi turardi.
+
+**Mahsulot qo'shish oynasi** (`product-form-dialog.tsx`):
+- Shtrix-kod yonida **skaner tugmasi** — telefonda kamera, kompyuterda USB/HID skaner yoki qo'lda
+  kiritish. Ilgari Androidda skanerlashning iloji yo'q edi.
+- **Kategoriya va brend shu yerdan qo'shiladi**: "+ Kategoriya qo'shish" / "+ Brend qo'shish".
+  Ro'yxat bo'sh bo'lsa "yo'q — pastdan qo'shing" deb turadi (ilgari shunchaki bo'sh ro'yxat chiqardi).
+- **O'lchov konversiyalari shu yerda kiritiladi**: "1 [birlik] = [son] [asosiy birlik]" qatorlari,
+  "+ Konversiya qo'shish" bilan istagancha qator, tahrirlashda saqlanganlari ko'rinadi va o'chiriladi.
+  Ilgari "mahsulot saqlangandan keyin qo'shiladi" degan izoh turardi, boshqa hech narsa yo'q edi.
+- Majburiy maydon boshqa tabda bo'lsa endi xato xabari chiqadi (ilgari "Saqlash" jim qolardi).
+
+**Soliq rejimi hamma joyda** — "Soliqni avtomatik hisoblash" o'chirilsa:
+- server allaqachon sotuv va xarid hujjatlarida 0 yozardi; endi **kassa qurilmasiga ham 0 stavka**
+  yuboriladi (`sync-pull`), ya'ni oflayn chek ham serverdagi hisob bilan bir xil;
+- interfeysda soliq maydonlari ko'rinmaydi: xarid oynasidagi "Soliq %" ustuni, sotuv va xarid
+  jamilaridagi QQS qatori, kassadagi "Soliqsiz / QQS" qatori, mahsulot kartochkasidagi stavka va
+  "narxga soliq kiritilgan" (o'rniga tushuntirish matni);
+- oldindan ko'rish ham 0 bilan hisoblaydi — ekrandagi jami serverdagi jami bilan mos.
+Eski hujjatlar o'zgarmaydi.
+
+Testlar: `apps/api/test/tax-toggle.test.ts` (5 ta — sotuv, xarid, qurilma sinxroni, qayta yoqish) va
+`e2e/product-form.spec.ts` (skaner, kategoriya/brend qo'shish, ikkita konversiya, saqlash).
+
+**Regressiya:** API 120 fayl / 637 test, brauzer 39 test (12 fayl), web 19 / 81 — hammasi o'tdi;
+tsc va lint toza.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)

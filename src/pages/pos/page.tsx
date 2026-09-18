@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils.ts";
 import { ApiError, api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { useTaxEnabled } from "@/hooks/use-tax.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
@@ -225,11 +226,13 @@ export default function POSPage() {
     : null;
   const stockOf = (productId: string) => (stockMap ? stockMap.get(productId) ?? 0 : Number.POSITIVE_INFINITY);
 
+  const taxEnabled = useTaxEnabled();
   const filtered = (products ?? []).filter((p) => p.isActive && p.isSaleable);
 
-  // Oldindan ko'rish — serverdagi hisob bilan bir xil (soliq `taxIncluded` bo'yicha ichida yoki ustiga)
+  // Oldindan ko'rish — serverdagi hisob bilan bir xil (soliq `taxIncluded` bo'yicha ichida yoki ustiga);
+  // soliq o'chirilgan bo'lsa serverda ham 0 yoziladi
   const amounts = cart.map((i) =>
-    computeLine({ quantity: i.qty, unitPrice: i.unitPrice, taxRate: i.taxRate, taxIncluded: i.taxIncluded }),
+    computeLine({ quantity: i.qty, unitPrice: i.unitPrice, taxRate: taxEnabled ? i.taxRate : "0", taxIncluded: i.taxIncluded }),
   );
   const totalMinor = amounts.reduce((s, a) => s + a.lineTotal, 0n);
   const subtotal = minorToNumber(amounts.reduce((s, a) => s + a.net, 0n));
@@ -1255,9 +1258,11 @@ export default function POSPage() {
             <div className="flex justify-between text-muted-foreground">
               <span>Umumiy miqdor</span><span className="tabular-nums">{fmt(totalQty)}</span>
             </div>
-            <div className="flex justify-between text-muted-foreground">
-              <span>Soliqsiz / QQS</span><span className="tabular-nums">{fmt(subtotal)} / {fmt(taxTotal)} so'm</span>
-            </div>
+            {taxEnabled && (
+              <div className="flex justify-between text-muted-foreground">
+                <span>Soliqsiz / QQS</span><span className="tabular-nums">{fmt(subtotal)} / {fmt(taxTotal)} so'm</span>
+              </div>
+            )}
             {cashbackMinor > 0n && (
               <div className="flex justify-between text-violet-600 dark:text-violet-400">
                 <span>Keshbekdan</span><span>−{fmtMinor(cashbackMinor)}</span>

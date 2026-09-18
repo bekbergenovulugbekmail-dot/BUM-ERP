@@ -19,6 +19,7 @@ import {
   ChevronRight, Loader2, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
+import BrandLogo from "@/components/brand-logo.tsx";
 
 export default function LoginPage() {
   const { signInWithPassword, isAuthenticated } = useAuth();
@@ -61,9 +62,7 @@ export default function LoginPage() {
       <div className="hidden lg:flex flex-col justify-between w-1/2 p-12 bg-gradient-to-br from-[oklch(0.15_0.04_260)] to-[oklch(0.11_0.025_255)] border-r border-white/5">
         {/* Logo */}
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-primary flex items-center justify-center">
-            <Shield className="h-5 w-5 text-white" />
-          </div>
+          <BrandLogo variant="mark" className="h-10 w-auto" />
           <div>
             <p className="font-bold text-white text-lg leading-none">BUM ERP</p>
             <p className="text-xs text-white/40 mt-0.5">Business Management Platform</p>
@@ -125,9 +124,7 @@ export default function LoginPage() {
         >
           {/* Mobile logo */}
           <div className="lg:hidden flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-primary flex items-center justify-center">
-              <Shield className="h-4 w-4 text-white" />
-            </div>
+            <BrandLogo variant="mark" className="h-9 w-auto" />
             <p className="font-bold text-white text-lg">BUM ERP</p>
           </div>
 

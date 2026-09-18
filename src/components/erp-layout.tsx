@@ -40,6 +40,7 @@ import type { AccessDenialReason } from "@bum/shared";
 import { NavLink, useParams, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils.ts";
+import BrandLogo from "@/components/brand-logo.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip.tsx";
 import {
@@ -133,10 +134,13 @@ function SidebarNav({ collapsed, onToggle, onLinkClick }: SidebarProps) {
     >
       {/* Logo */}
       <div className={cn("flex items-center h-14 px-4 border-b border-sidebar-border shrink-0", collapsed ? "justify-center" : "justify-between")}>
-        {!collapsed && (
-          <span className="font-bold text-sm tracking-wide text-sidebar-foreground truncate">
-            {t("app.name")}
+        {!collapsed ? (
+          <span className="flex min-w-0 items-center gap-2">
+            <BrandLogo variant="mark" className="h-6 w-auto shrink-0" />
+            <span className="truncate text-sm font-bold tracking-wide text-sidebar-foreground">{t("app.name")}</span>
           </span>
+        ) : (
+          <BrandLogo variant="mark" className="h-6 w-auto" />
         )}
         <button
           onClick={onToggle}
