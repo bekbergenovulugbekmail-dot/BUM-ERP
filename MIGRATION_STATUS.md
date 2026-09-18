@@ -2423,6 +2423,40 @@ tirik sarlavhalar HSTS/CSP/nosniff/X-Frame-Options.
 Yangi kod manfiy qoldiqqa yo'l qo'ymaydi; mavjud qoldiqni egasi "Qoldiqni to'g'rilash" orqali tuzatadi.
 Audit davomida ma'lumotga tegilmadi.
 
+## 7 sale blocker bo'yicha ish (2026-09-18)
+
+`FINAL-SALE-READINESS-AUDIT-v2.md` — har blocker uchun AUDIT -> REQUIREMENTS -> IMPLEMENT/CONFIGURE ->
+REAL TEST -> EVIDENCE. Production o'zgartirilmadi, deploy qilinmadi.
+
+**Yopildi (3):**
+- **Backup/restore — PASS.** Production `pg_dump -Fc` (1 729 945 bayt, sha256 mos) -> toza `bumerp_restore`
+  bazasiga `pg_restore` (6 s, 0 xato). 250 o'lchov taqqoslandi: 118 jadval, 1678 ustun, 466 indeks,
+  379 FK, 1174 CHECK, 69 enum, 7 trigger, 63 migratsiya, 118 jadvalning qator soni va **117 jadvalning
+  MD5 checksum'i — hammasi bir xil**. Yagona farq: ataylab chiqarilgan `desktop_release_chunks` (107 MB
+  kassa o'rnatuvchilari); binar sodiqligi alohida isbotlandi (md5 `680fc831...`). Restore ustida API
+  ko'tarildi: login, kompaniyalar, buyurtmalar, kassa qoldig'i (-77 520.00) o'qildi va yangi kategoriya
+  yozildi. Nusxa va dump audit tugagach o'chirildi.
+- **Sotuv agenti UI — PASS.** Yangi `e2e/sales-agent.spec.ts` (2 test): menyu aynan 5 bo'lim, ERP yopiq,
+  ish sessiyasi, marshrutdagi do'kon, tashrif, **vitrina rasmisiz buyurtma ochilmaydi**, rasm -> taymer,
+  buyurtma (3 dona = 12 000 so'm, naqd, yetkazish kuni); geofence UI'da ham, serverda ham rad etadi.
+- **Yetkazuvchi UI — PASS.** Yangi `e2e/delivery-agent.spec.ts` (2 test): menyu 5 bo'lim, to'liq zanjir
+  ASSIGNED -> ACCEPTED -> OUT_FOR_DELIVERY -> ARRIVED -> DELIVERING -> naqd -> DELIVERED; alohida testda
+  "Yetkazib bo'lmadi" (sabab majburiy). Ikkalasida ham asl buyurtma summasi o'zgarmadi. Yig'ilgan pul
+  "Yetkazuvchi DA-001 - yo'ldagi naqd" hisobida (16 000.00), kassada emas.
+
+**Tuzatilgan noto'g'ri da'vo:** v1 auditda "mahsulot rasmi va tashrif rasmlari productionda 503" deb
+yozilgan edi - **noto'g'ri**. Mahsulot rasmi, tashrif rasmi va yetkazma dalili S3 sozlanmaganda
+**bazaga** saqlanadi va ishlaydi (productionda `agent_visit_photos` 848 kB, `delivery_proofs` 376 kB).
+Faqat xarajat cheki va xodim surati S3 talab qiladi. S3 oqimining o'zi MinIO bilan 14/14 tekshirildi
+(yuklash, mavjudlik, imzolangan URL, ko'rish, o'chirish, tenant izolyatsiyasi, sessiyasiz kirish).
+
+**Ochiq qolgani (3):** SMS (Eskiz hisobi yo'q - mantiq 11/11 PASS), real Android (`adb devices` bo'sh),
+desktop kassa (0.4.7 qayta qurildi, `/S` bilan o'rnatildi va ishga tushdi - PASS; imzo yo'q va kassir
+oldida qo'lda sinov qilinmadi).
+
+**Muhit eslatmasi:** bu mashinada `localhost` avval IPv6 (`::1`) ga ketadi, MinIO esa faqat IPv4 da -
+lokal `.env` da `STORAGE_ENDPOINT` `127.0.0.1` ga o'zgartirildi (kod o'zgarmadi).
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
