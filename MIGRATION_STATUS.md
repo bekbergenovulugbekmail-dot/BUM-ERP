@@ -2230,7 +2230,17 @@ ptichkalar, xabar qoidalari; `fetch` almashtirilgan, tarmoqqa chiqmaydi) va
 ortiq to'lov rad, topshirish, chegaralar).
 
 **Regressiya:** API 118 fayl / 623 test, web 19 / 81 — hammasi o'tdi; tsc (API, web, desktop) va
-lint toza. Migratsiyalar `0058`–`0060` production bazasida HALI QO'LLANMAGAN (deploy qilinmadi).
+lint toza.
+
+**Production'ga deploy qilindi (2026-09-18, 07:35–07:43, egasi "deploy qil" dedi)**
+`bum-api` (a560e469) va `bum-web` (98963577) yuklandi; `railway up` yuklashi uch marta tarmoq
+xatosi bilan uzildi, to'rtinchi urinishda o'tdi (Railway tomonidagi nosozlik, kod bilan bog'liq emas).
+Tashqaridan tekshirildi: `/api/telegram/customer-bot`, `/api/telegram/owner-bot` va
+`/api/sales-agent/cash` — 401 (ilgari 404 edi), `/api/auth/me` — 8 ta ketma-ket so'rovda 401
+(crash-loop yo'q). Webhook yo'liga POST — 200, ya'ni `telegram_bots` jadvali bor va so'rov ishlayapti:
+migratsiyalar `0058`–`0060` production bazasida QO'LLANDI. Yangi web bundle `index-C4E9OizH.js`
+ichida "Biznes egalari uchun Telegram bot", "Mijozlar uchun Telegram bot", `admin-logout` va
+"yo'ldagi naqd" satrlari bor. `PUBLIC_API_URL=https://app.bum-erp.uz` — egasi qo'ydi.
 
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
