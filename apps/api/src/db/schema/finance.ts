@@ -195,6 +195,12 @@ export const cashAccounts = pgTable(
      * FK yo'q (aylanma import bo'lmasin) — agent kodda tekshiriladi.
      */
     salesRepId: uuid("sales_rep_id"),
+    /**
+     * Kassaning mas'ul xodimi: rahbar (asosiy) kassadan tashqari har kassa bitta xodimga biriktiriladi —
+     * "Kassir Diana", "Ishchilar kassasi" kabi. FK yo'q (hr → finance importi aylanma bo'lmasin),
+     * xodim shu kompaniyaniki ekani kodda tekshiriladi; xodim o'chirilsa bog'lanish bo'shatiladi.
+     */
+    employeeId: uuid("employee_id"),
     isDefault: boolean("is_default").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps(),
@@ -207,6 +213,7 @@ export const cashAccounts = pgTable(
     uniqueIndex("ca_sales_rep_key")
       .on(t.companyId, t.salesRepId)
       .where(sql`${t.salesRepId} is not null`),
+    index("ca_company_employee_idx").on(t.companyId, t.employeeId),
     index("ca_company_default_idx").on(t.companyId, t.isDefault),
     /** Har kompaniyada bitta asosiy kassa — to'lovlar shunga tushadi. */
     uniqueIndex("ca_one_default_per_company_key")

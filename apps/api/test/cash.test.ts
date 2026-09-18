@@ -190,4 +190,52 @@ describe("Kassa va bank", () => {
     expect((await api(sales.cookie, "GET", "/cash-accounts")).statusCode).toBe(200);
     expect((await record({ cashAccountId: mainBank, type: "in", amount: "1" }, sales.cookie)).statusCode).toBe(403);
   });
+
+  it("kassaning mas'ul xodimi: rahbar kassasi mas'ulsiz, qolganlari xodimga biriktiriladi", async () => {
+    /** HR kartochkasi (dasturga kirmaydigan xodim ham bo'lishi mumkin). */
+    const hrEmployee = async (cookie: string, name: string) => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/hr/employees",
+        headers: { cookie },
+        payload: { name, hireDate: new Date().toISOString().slice(0, 10), baseSalary: "0", salaryType: "monthly" },
+      });
+      if (res.statusCode !== 201) throw new Error(`Xodim yaratilmadi: ${res.statusCode} ${res.body}`);
+      return res.json().employee as { id: string; name: string };
+    };
+
+    const diana = await hrEmployee(company.ownerCookie, "Axmedova Diana");
+
+    // Xodimga biriktirilgan kassa
+    const created = await api(company.ownerCookie, "POST", "/cash-accounts", {
+      name: "Kassir Diana",
+      type: "cash",
+      employeeId: diana.id,
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    expect(created.json().cashAccount.employeeId).toBe(diana.id);
+
+    // Ro'yxatda mas'ul xodim ismi bilan; rahbar (asosiy) kassa mas'ulsiz va birinchi
+    const list = (await api(company.ownerCookie, "GET", "/cash-accounts")).json().cashAccounts as {
+      id: string;
+      isDefault: boolean;
+      employeeId: string | null;
+      employeeName: string | null;
+    }[];
+    expect(list[0]!.isDefault, "asosiy (rahbar) kassa birinchi").toBe(true);
+    expect(list[0]!.employeeId).toBeNull();
+    const linkedId = created.json().cashAccount.id as string;
+    expect(list.find((row) => row.id === linkedId)!.employeeName).toBe("Axmedova Diana");
+
+    // Bog'lanishni bo'shatish va qayta biriktirish
+    expect((await api(company.ownerCookie, "PATCH", `/cash-accounts/${linkedId}`, { employeeId: null })).json().cashAccount.employeeId).toBeNull();
+    expect((await api(company.ownerCookie, "PATCH", `/cash-accounts/${linkedId}`, { employeeId: diana.id })).json().cashAccount.employeeId).toBe(diana.id);
+
+    // Begona kompaniya xodimi biriktirilmaydi
+    const admin = await signedIn(app, { isPlatformAdmin: true });
+    const other = await createCompany(app, admin.cookie, { name: "Boshqa kompaniya" });
+    const foreign = await hrEmployee(other.ownerCookie, "Begona xodim");
+    const rejected = await api(company.ownerCookie, "POST", "/cash-accounts", { name: "Begona kassa", type: "cash", employeeId: foreign.id });
+    expect(rejected.statusCode, rejected.body).toBe(404);
+  });
 });

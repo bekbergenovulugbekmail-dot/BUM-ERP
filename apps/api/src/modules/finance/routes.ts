@@ -159,6 +159,8 @@ const cashAccountBody = z.strictObject({
   outgoingCommissionPercent: percentSchema.optional(),
   /** Kutilayotgan hisob qaysi bank hisobiga qirqiladi. */
   settlesToCashAccountId: z.uuid().nullable().optional(),
+  /** Kassaning mas'ul xodimi (rahbar kassasida bo'lmasligi mumkin). */
+  employeeId: z.uuid().nullable().optional(),
   /** Qirqim komissiyasi, % (0–100) — kutilayotgan hisobdan bankka o'tkazishda ushlanadi. */
   settlementCommissionPercent: percentSchema.optional(),
 });
@@ -173,6 +175,8 @@ const cashAccountPatch = z.strictObject({
   outgoingCommissionPercent: percentSchema.optional(),
   /** Kutilayotgan hisob qaysi bank hisobiga qirqiladi. */
   settlesToCashAccountId: z.uuid().nullable().optional(),
+  /** Kassaning mas'ul xodimi; `null` — bog'lanishni bo'shatadi. */
+  employeeId: z.uuid().nullable().optional(),
   /** Qirqim komissiyasi, % (0–100). */
   settlementCommissionPercent: percentSchema.optional(),
 });

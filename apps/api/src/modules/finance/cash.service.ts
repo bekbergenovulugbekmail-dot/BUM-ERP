@@ -34,6 +34,7 @@ import {
 } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
 import { accounts, cashAccounts, cashTransactions, companyCurrencies } from "../../db/schema/finance.js";
+import { employees } from "../../db/schema/hr.js";
 import { purchaseOrders } from "../../db/schema/purchase.js";
 import { salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -249,10 +250,12 @@ export async function recordCashTransaction(tx: Tx, companyId: string, createdBy
 
 // ─── Kassalar ────────────────────────────────────────────────────────────────
 
+/** Kassalar ro'yxati — asosiy (rahbar) kassa birinchi, keyin mas'ul xodimi bilan qolganlari. */
 export async function listCashAccounts(conn: DbOrTx, tenant: TenantContext, includeInactive = false) {
   return conn
-    .select(cashAccountFields)
+    .select({ ...cashAccountFields, employeeName: employees.name, employeeCode: employees.code })
     .from(cashAccounts)
+    .leftJoin(employees, eq(employees.id, cashAccounts.employeeId))
     .where(
       and(eq(cashAccounts.companyId, tenant.company.id), includeInactive ? undefined : eq(cashAccounts.isActive, true)),
     )
@@ -285,7 +288,23 @@ export type CashAccountInput = {
   settlesToCashAccountId?: string | null;
   /** Qirqim komissiyasi, % — kutilayotgan hisobdan bankka o'tkazishda ushlanadi. */
   settlementCommissionPercent?: string;
+  /** Kassaning mas'ul xodimi (rahbar kassasi mas'ulsiz bo'lishi mumkin). */
+  employeeId?: string | null;
 };
+
+/**
+ * Kassaning mas'ul xodimi shu kompaniyaning faol xodimi bo'lishi shart —
+ * begona kompaniya xodimi biriktirilmaydi (FK yo'q, tekshiruv shu yerda).
+ */
+async function assertEmployee(conn: DbOrTx, companyId: string, employeeId: string) {
+  const [employee] = await conn
+    .select({ id: employees.id, status: employees.status })
+    .from(employees)
+    .where(and(eq(employees.id, employeeId), eq(employees.companyId, companyId)))
+    .limit(1);
+  if (!employee) throw notFound("Xodim topilmadi");
+  if (employee.status !== "active") throw badRequest("Xodim faol emas");
+}
 
 /** Kutilayotgan hisob (karta terminali, elektron hamyon): pul qirqimgacha shu hisobda turadi. */
 export function isPendingAccountType(type: CashAccountType) {
@@ -310,6 +329,7 @@ export async function createCashAccount(tx: Tx, tenant: TenantContext, input: Ca
   const companyId = tenant.company.id;
   const { openingBalance, currency: requestedCurrency, ...fields } = input;
   if (input.ledgerAccountId) await assertLedgerAccount(tx, companyId, input.ledgerAccountId);
+  if (input.employeeId) await assertEmployee(tx, companyId, input.employeeId);
   const baseCurrency = await companyCurrency(tx, companyId);
   const currency = requestedCurrency ?? baseCurrency;
   const rate = await accountRate(tx, companyId, currency);
@@ -388,11 +408,13 @@ export async function updateCashAccount(
     outgoingCommissionPercent?: string;
     settlesToCashAccountId?: string | null;
     settlementCommissionPercent?: string;
+    employeeId?: string | null;
   },
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
   if (patch.ledgerAccountId) await assertLedgerAccount(tx, companyId, patch.ledgerAccountId);
+  if (patch.employeeId) await assertEmployee(tx, companyId, patch.employeeId);
   const [current] = await tx
     .select(cashAccountFields)
     .from(cashAccounts)

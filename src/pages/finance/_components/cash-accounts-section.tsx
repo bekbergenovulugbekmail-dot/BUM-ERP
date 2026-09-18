@@ -30,6 +30,8 @@ import {
 
 const DEFAULT_LEDGER = "default";
 const NO_SETTLEMENT = "none";
+/** Mas'ul xodim tanlanmagan (rahbar kassasi). */
+const NO_EMPLOYEE = "none";
 const PERCENT_RE = /^\d{1,3}(\.\d{1,2})?$/;
 
 type AccountPatch = Partial<
@@ -168,6 +170,8 @@ type CashAccountBody = {
   /** Kutilayotgan hisob uchun: qirqim manzili va komissiyasi. */
   settlesToCashAccountId?: string | null;
   settlementCommissionPercent?: string;
+  /** Kassaning mas'ul xodimi (rahbar kassasi mas'ulsiz bo'ladi). */
+  employeeId?: string | null;
 };
 
 export default function CashAccountsSection() {
@@ -193,6 +197,10 @@ export default function CashAccountsSection() {
 
   const recordTx = useApiMutation((body: CashTransactionBody) => api.post("/api/finance/cash-transactions", body));
   const createAccount = useApiMutation((body: CashAccountBody) => api.post("/api/finance/cash-accounts", body));
+  // Kassaga mas'ul qilib biriktiriladigan xodimlar (faol kartochkalar)
+  const employees = useApiQuery<{ employees: { id: string; name: string; code: string; status: string }[] }>(
+    canManage ? "/api/hr/employees" : null,
+  ).data?.employees.filter((employee) => employee.status === "active");
   // Kassaga bog'lanadigan buxgalteriya hisoblari — faol aktivlar
   const ledgerOptions = useApiQuery<{ accounts: Account[] }>(canManage ? "/api/finance/accounts" : null, { type: "asset" })
     .data?.accounts.filter((account) => account.isActive);
@@ -233,6 +241,7 @@ export default function CashAccountsSection() {
   const [acctCurrency, setAcctCurrency] = useState("");
   const [acctCommission, setAcctCommission] = useState("");
   const [acctShowInPos, setAcctShowInPos] = useState(false);
+  const [acctEmployee, setAcctEmployee] = useState(NO_EMPLOYEE);
 
   const handleTx = async () => {
     if (!selectedAccount || !txDialog) return;
@@ -274,11 +283,12 @@ export default function CashAccountsSection() {
               ...(acctSettlementCommission.trim() ? { settlementCommissionPercent: acctSettlementCommission.trim().replace(",", ".") } : {}),
             }
           : {}),
+        ...(acctEmployee !== NO_EMPLOYEE ? { employeeId: acctEmployee } : {}),
       });
       toast.success("Hisob qo'shildi");
       setCreateAccountOpen(false);
       setAcctName(""); setAcctBank(""); setAcctNumber(""); setAcctOpening(""); setAcctCurrency(""); setAcctCommission(""); setAcctShowInPos(false);
-      setAcctSettlesTo(NO_SETTLEMENT); setAcctSettlementCommission("");
+      setAcctSettlesTo(NO_SETTLEMENT); setAcctSettlementCommission(""); setAcctEmployee(NO_EMPLOYEE);
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -341,6 +351,7 @@ export default function CashAccountsSection() {
                         : acct.type === "ewallet"
                           ? "Hamyon — kutilayotgan"
                           : acct.bankName ?? "Bank"}
+                    {acct.employeeName ? ` · ${acct.employeeName}` : ""}
                     {acct.type === "bank" && acct.showInPos ? " · kassada" : ""}
                     {acct.type === "bank" && Number(acct.outgoingCommissionPercent) > 0 ? ` · chiqim ${Number(acct.outgoingCommissionPercent)}%` : ""}
                   </p>
@@ -573,6 +584,22 @@ export default function CashAccountsSection() {
                     Terminal puli bank o'tkazguncha shu hisobda turadi — qirqishda komissiya ushlanadi
                   </p>
                 )}
+              </div>
+              {/* Mas'ul xodim: rahbar kassasi mas'ulsiz, qolgan kassalar xodimga biriktiriladi */}
+              <div>
+                <Label>Mas'ul xodim</Label>
+                <Select value={acctEmployee} onValueChange={setAcctEmployee}>
+                  <SelectTrigger><SelectValue placeholder="Rahbar kassasi (mas'ulsiz)" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_EMPLOYEE}>Rahbar kassasi (mas'ulsiz)</SelectItem>
+                    {(employees ?? []).map((employee) => (
+                      <SelectItem key={employee.id} value={employee.id}>
+                        {employee.name} · {employee.code}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1 text-xs text-muted-foreground">Kassa pulini kim yuritishi — hisobotlarda shu xodim ko'rinadi.</p>
               </div>
               {currencies.codes.length > 1 && (
                 <div>

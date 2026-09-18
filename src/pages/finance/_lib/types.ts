@@ -51,6 +51,11 @@ export type CashAccount = {
   settlesToCashAccountId: string | null;
   /** Qirqim komissiyasi, % ("0.25") — qirqimda ushlanadi. */
   settlementCommissionPercent: string;
+  /** Kassaning mas'ul xodimi: rahbar (asosiy) kassada bo'lmaydi, qolganlari xodimga biriktiriladi. */
+  employeeId: string | null;
+  /** Ro'yxatda qulaylik uchun — mas'ul xodimning ismi va kodi. */
+  employeeName?: string | null;
+  employeeCode?: string | null;
   isDefault: boolean;
   isActive: boolean;
   createdAt: string;
