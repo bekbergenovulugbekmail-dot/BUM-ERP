@@ -2457,6 +2457,32 @@ oldida qo'lda sinov qilinmadi).
 **Muhit eslatmasi:** bu mashinada `localhost` avval IPv6 (`::1`) ga ketadi, MinIO esa faqat IPv4 da -
 lokal `.env` da `STORAGE_ENDPOINT` `127.0.0.1` ga o'zgartirildi (kod o'zgarmadi).
 
+## Distributsiya 0->100 simulyatsiyasi va kassa o'zgarishlari (2026-09-19)
+
+**Desktop kassa:** qurilmani ulashda server manzili maydoni olib tashlandi — kassir faqat login va
+parol kiritadi (manzil ilovada: DEFAULT_API_URL, sinovlarda KASSA_API_URL). IPC shartnomasidan
+apiUrl chiqarildi. Desktop testlari 57/57.
+
+**Kassalar mas'ul xodim bilan (migratsiya 0063):** `cash_accounts.employee_id` (nullable) qo'shildi —
+rahbar (asosiy) kassa mas'ulsiz, qolgan kassalar xodimga biriktiriladi ("Kassir Diana" kabi).
+API xodim shu kompaniyaniki va faol ekanini tekshiradi; ro'yxatda `employeeName` qaytadi;
+Moliya -> Kassalar oynasida tanlov bor.
+
+**Yangi brauzer/Electron testlari:** `e2e/desktop-kassa.spec.ts` (5 test — ulash, kassir PIN,
+smena, naqd sotuv, chek tarixi, qayta ishga tushirish, smenani yopish), `e2e/agent-mobile.spec.ts`
+(4 test — agent va yetkazuvchi 390x844 va 412x915 da), `e2e/delivery-agent.spec.ts` ga qisman
+yetkazish va qaytarish testi qo'shildi.
+
+**0->100 simulyatsiya:** `scripts/distribution/` — noldan kompaniya, 12 xodim, 2 ombor, 2 bank,
+2 terminal, 10 mahsulot, xarid, aksiya, marshrut, 3 mijoz (naqd/nasiya/aralash), POS, yetkazib
+bo'lmadi, qisman yetkazish, qaytarish, ko'chirish, hisobotlar, salbiy testlar, parallellik va
+buxgalteriya solishtiruvi. **114 tekshiruv — 114 PASS.** Bazadan: 37 jurnal yozuvi, balanslanmagan 0,
+DEBIT = KREDIT = 23 062 000, manfiy kassa va zaxira yo'q.
+
+Topilmalar `DISTRIBUTION-E2E-BUG-REPORT.md` da: 2 MEDIUM (yetkazib bo'lmaganda sotuv "completed"
+qolishi; kassir ERP to'lovlari uchun finance.manage talab qilinishi), 4 LOW, BLOCKER/HIGH yo'q.
+Yakuniy holat `DISTRIBUTION-E2E-FINAL-REPORT.md` da.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
