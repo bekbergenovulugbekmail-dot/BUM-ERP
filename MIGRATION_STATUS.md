@@ -2328,6 +2328,7 @@ mobil sarlavha), ERP yon menyusi, admin panel sarlavhasi, kompaniya tanlash. Fav
   yozilgan matnni o'chirib bo'lmasdi — har harfda butun oyna qayta chizilib, kiritilgan matn eskisiga
   qaytib qolardi (Android klaviaturasi bilan). Konversiya qatorlari barqaror `id` bilan chiziladi,
   shuning uchun bitta qator o'chirilganda qolganlarining qiymati aralashib ketmaydi.
+  Deploy: `bum-web` (932e40cd), 2026-09-18 15:57, bundle `index-9I_f8DQh.js`.
 
 **Soliq rejimi hamma joyda** — "Soliqni avtomatik hisoblash" o'chirilsa:
 - server allaqachon sotuv va xarid hujjatlarida 0 yozardi; endi **kassa qurilmasiga ham 0 stavka**
