@@ -2340,6 +2340,13 @@ Testlar: `apps/api/test/tax-toggle.test.ts` (5 ta — sotuv, xarid, qurilma sinx
 **Regressiya:** API 120 fayl / 637 test, brauzer 39 test (12 fayl), web 19 / 81 — hammasi o'tdi;
 tsc va lint toza.
 
+**Production'ga deploy qilindi (2026-09-18, 15:08–15:09).** Egasi shu kundan boshlab har safar
+so'ramasdan avtomatik deploy qilishni so'radi — ish tugagach tekshiruvlar o'tsa, deploy qilinadi.
+`bum-api` (a7f29a4a) va `bum-web` (545e9b11). Tekshirildi: `/api/auth/me` — 5 ta ketma-ket 401
+(crash-loop yo'q), `/favicon.png`, `/brand/bum-logo.png`, `/brand/bum-mark.png` — 200, yangi bundle
+`index-Deezin2W.js` ichida `product-barcode-scan`, "Kategoriya qo'shish", "Konversiya qo'shish" va
+logotip manzili bor.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
