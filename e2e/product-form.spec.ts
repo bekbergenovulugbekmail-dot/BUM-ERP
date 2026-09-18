@@ -31,12 +31,17 @@ test("mahsulot oynasi: skaner tugmasi, kategoriya/brend qo'shish va konversiya",
   // ── Kategoriya va brend shu oynadan qo'shiladi ──────────────────────────
   const suffix = stamp();
   await dialog.getByTestId("product-add-category").click();
-  await dialog.getByPlaceholder("Yangi kategoriya nomi").fill(`Sinov kategoriya ${suffix}`);
+  const categoryInput = dialog.getByTestId("product-new-category");
+  // Yozganni o'chirib bo'lishi kerak (Android klaviaturasida ishlamay qolgan edi)
+  await categoryInput.fill("Xato matn");
+  await categoryInput.press("Backspace");
+  await expect(categoryInput).toHaveValue("Xato mat");
+  await categoryInput.fill(`Sinov kategoriya ${suffix}`);
   await dialog.getByRole("button", { name: "Qo'shish", exact: true }).first().click();
   await expect(dialog.getByTestId("product-add-category")).toBeVisible({ timeout: 20_000 });
 
   await dialog.getByTestId("product-add-brand").click();
-  await dialog.getByPlaceholder("Yangi brend nomi").fill(`Sinov brend ${suffix}`);
+  await dialog.getByTestId("product-new-brand").fill(`Sinov brend ${suffix}`);
   await dialog.getByRole("button", { name: "Qo'shish", exact: true }).first().click();
   await expect(dialog.getByTestId("product-add-brand")).toBeVisible({ timeout: 20_000 });
 

@@ -2324,6 +2324,10 @@ mobil sarlavha), ERP yon menyusi, admin panel sarlavhasi, kompaniya tanlash. Fav
   "+ Konversiya qo'shish" bilan istagancha qator, tahrirlashda saqlanganlari ko'rinadi va o'chiriladi.
   Ilgari "mahsulot saqlangandan keyin qo'shiladi" degan izoh turardi, boshqa hech narsa yo'q edi.
 - Majburiy maydon boshqa tabda bo'lsa endi xato xabari chiqadi (ilgari "Saqlash" jim qolardi).
+- Yangi kategoriya/brend nomi va konversiya soni ALOHIDA kichik komponentlarda turadi: telefonda
+  yozilgan matnni o'chirib bo'lmasdi — har harfda butun oyna qayta chizilib, kiritilgan matn eskisiga
+  qaytib qolardi (Android klaviaturasi bilan). Konversiya qatorlari barqaror `id` bilan chiziladi,
+  shuning uchun bitta qator o'chirilganda qolganlarining qiymati aralashib ketmaydi.
 
 **Soliq rejimi hamma joyda** — "Soliqni avtomatik hisoblash" o'chirilsa:
 - server allaqachon sotuv va xarid hujjatlarida 0 yozardi; endi **kassa qurilmasiga ham 0 stavka**

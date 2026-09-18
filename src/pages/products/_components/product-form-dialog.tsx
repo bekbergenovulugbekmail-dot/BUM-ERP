@@ -145,6 +145,114 @@ function toPayload(values: FormValues) {
   };
 }
 
+/**
+ * "Kategoriya qo'shish" / "Brend qo'shish" maydoni.
+ *
+ * Matn SHU komponentning ichida turadi: har harfda butun oyna qayta chizilmaydi.
+ * Android klaviaturasida katta forma qayta chizilganda o'chirish (backspace) ishlamay
+ * qolardi — kursor har safar oxiriga sakrab, harf qaytib kelaverardi.
+ */
+function InlineCreate({
+  placeholder,
+  pending,
+  testId,
+  onSubmit,
+  onCancel,
+}: {
+  placeholder: string;
+  pending: boolean;
+  testId: string;
+  onSubmit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState("");
+  return (
+    <div className="mt-1 flex items-center gap-2">
+      <Input
+        autoFocus
+        data-testid={testId}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            if (value.trim()) onSubmit(value.trim());
+          }
+          if (event.key === "Escape") onCancel();
+        }}
+      />
+      <Button type="button" size="sm" disabled={pending || !value.trim()} onClick={() => onSubmit(value.trim())}>
+        {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Qo'shish"}
+      </Button>
+      <Button type="button" size="sm" variant="ghost" onClick={onCancel}>Bekor</Button>
+    </div>
+  );
+}
+
+/**
+ * Bitta konversiya qatori: "1 [birlik] = [son] [asosiy birlik]".
+ *
+ * Son SHU qatorning ichida turadi — Android klaviaturasida o'chirish ishlashi uchun
+ * (butun oyna qayta chizilganda kiritilgan matn eskisiga qaytib qolmasin).
+ */
+function ConversionRow({
+  units,
+  baseUnitId,
+  baseUnitName,
+  unitId,
+  factor,
+  onUnitChange,
+  onFactorChange,
+  onRemove,
+}: {
+  units: Unit[] | undefined;
+  baseUnitId: string;
+  baseUnitName: string;
+  unitId: string;
+  factor: string;
+  onUnitChange: (value: string) => void;
+  onFactorChange: (value: string) => void;
+  onRemove: () => void;
+}) {
+  const [text, setText] = useState(factor);
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid="conversion-row">
+      <span className="text-sm text-muted-foreground">1</span>
+      <Select value={unitId} onValueChange={onUnitChange}>
+        <SelectTrigger className="w-40"><SelectValue placeholder="Birlik" /></SelectTrigger>
+        <SelectContent>
+          {units?.filter((unit) => unit.id !== baseUnitId).map((unit) => (
+            <SelectItem key={unit.id} value={unit.id}>{unit.name} ({unit.shortName})</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <span className="text-sm text-muted-foreground">=</span>
+      <Input
+        className="w-28"
+        inputMode="decimal"
+        placeholder="12"
+        value={text}
+        onChange={(event) => {
+          setText(event.target.value);
+          onFactorChange(event.target.value);
+        }}
+      />
+      <span className="text-sm text-muted-foreground">{baseUnitName}</span>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="h-8 w-8 text-destructive"
+        aria-label="Konversiyani o'chirish"
+        onClick={onRemove}
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+
 export default function ProductFormDialog({ open, onClose, editId }: Props) {
   // Soliq o'chirilgan bo'lsa maydonlar ko'rinmaydi (server ham 0 yozadi)
   const taxEnabled = useTaxEnabled();
@@ -162,7 +270,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
   const [newCategory, setNewCategory] = useState<string | null>(null);
   const [newBrand, setNewBrand] = useState<string | null>(null);
   /** O'lchov konversiyalari: 1 <birlik> = <koeffitsient> <asosiy birlik>. */
-  const [conversionDraft, setConversionDraft] = useState<{ unitId: string; factor: string }[]>([]);
+  const [conversionDraft, setConversionDraft] = useState<{ id: string; unitId: string; factor: string }[]>([]);
 
   // Rasm: yangi fayl tanlangan yoki mavjud rasm olib tashlanadi — mahsulot saqlangach bajariladi
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -247,8 +355,8 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
     { invalidate: ["/api/catalog/brands"] },
   );
 
-  const addCategory = async () => {
-    const name = (newCategory ?? "").trim();
+  const addCategory = async (value: string) => {
+    const name = value.trim();
     if (!name) return;
     try {
       const { category } = await createCategory.mutateAsync(name);
@@ -260,8 +368,8 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
     }
   };
 
-  const addBrand = async () => {
-    const name = (newBrand ?? "").trim();
+  const addBrand = async (value: string) => {
+    const name = value.trim();
     if (!name) return;
     try {
       const { brand } = await createBrand.mutateAsync(name);
@@ -477,22 +585,13 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                           + Kategoriya qo'shish
                         </button>
                       ) : (
-                        <div className="mt-1 flex items-center gap-2">
-                          <Input
-                            autoFocus
-                            placeholder="Yangi kategoriya nomi"
-                            value={newCategory}
-                            onChange={(event) => setNewCategory(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") { event.preventDefault(); void addCategory(); }
-                              if (event.key === "Escape") setNewCategory(null);
-                            }}
-                          />
-                          <Button type="button" size="sm" disabled={createCategory.isPending} onClick={() => void addCategory()}>
-                            {createCategory.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Qo'shish"}
-                          </Button>
-                          <Button type="button" size="sm" variant="ghost" onClick={() => setNewCategory(null)}>Bekor</Button>
-                        </div>
+                        <InlineCreate
+                          testId="product-new-category"
+                          placeholder="Yangi kategoriya nomi"
+                          pending={createCategory.isPending}
+                          onSubmit={(name) => void addCategory(name)}
+                          onCancel={() => setNewCategory(null)}
+                        />
                       )}
                     </FormItem>
                   )} />
@@ -522,22 +621,13 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                           + Brend qo'shish
                         </button>
                       ) : (
-                        <div className="mt-1 flex items-center gap-2">
-                          <Input
-                            autoFocus
-                            placeholder="Yangi brend nomi"
-                            value={newBrand}
-                            onChange={(event) => setNewBrand(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") { event.preventDefault(); void addBrand(); }
-                              if (event.key === "Escape") setNewBrand(null);
-                            }}
-                          />
-                          <Button type="button" size="sm" disabled={createBrand.isPending} onClick={() => void addBrand()}>
-                            {createBrand.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Qo'shish"}
-                          </Button>
-                          <Button type="button" size="sm" variant="ghost" onClick={() => setNewBrand(null)}>Bekor</Button>
-                        </div>
+                        <InlineCreate
+                          testId="product-new-brand"
+                          placeholder="Yangi brend nomi"
+                          pending={createBrand.isPending}
+                          onSubmit={(name) => void addBrand(name)}
+                          onCancel={() => setNewBrand(null)}
+                        />
                       )}
                     </FormItem>
                   )} />
@@ -756,44 +846,22 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                     </p>
                   </div>
 
-                  {conversionDraft.map((row, index) => (
-                    <div key={index} className="flex flex-wrap items-center gap-2" data-testid="conversion-row">
-                      <span className="text-sm text-muted-foreground">1</span>
-                      <Select
-                        value={row.unitId}
-                        onValueChange={(value) =>
-                          setConversionDraft((rows) => rows.map((item, i) => (i === index ? { ...item, unitId: value } : item)))
-                        }
-                      >
-                        <SelectTrigger className="w-40"><SelectValue placeholder="Birlik" /></SelectTrigger>
-                        <SelectContent>
-                          {units?.filter((unit) => unit.id !== baseUnitId).map((unit) => (
-                            <SelectItem key={unit.id} value={unit.id}>{unit.name} ({unit.shortName})</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <span className="text-sm text-muted-foreground">=</span>
-                      <Input
-                        className="w-28"
-                        inputMode="decimal"
-                        placeholder="12"
-                        value={row.factor}
-                        onChange={(event) =>
-                          setConversionDraft((rows) => rows.map((item, i) => (i === index ? { ...item, factor: event.target.value } : item)))
-                        }
-                      />
-                      <span className="text-sm text-muted-foreground">{baseUnitName}</span>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-destructive"
-                        aria-label="Konversiyani o'chirish"
-                        onClick={() => setConversionDraft((rows) => rows.filter((_, i) => i !== index))}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+                  {conversionDraft.map((row) => (
+                    <ConversionRow
+                      key={row.id}
+                      units={units}
+                      baseUnitId={baseUnitId}
+                      baseUnitName={baseUnitName}
+                      unitId={row.unitId}
+                      factor={row.factor}
+                      onUnitChange={(value) =>
+                        setConversionDraft((rows) => rows.map((item) => (item.id === row.id ? { ...item, unitId: value } : item)))
+                      }
+                      onFactorChange={(value) =>
+                        setConversionDraft((rows) => rows.map((item) => (item.id === row.id ? { ...item, factor: value } : item)))
+                      }
+                      onRemove={() => setConversionDraft((rows) => rows.filter((item) => item.id !== row.id))}
+                    />
                   ))}
 
                   <Button
@@ -801,7 +869,7 @@ export default function ProductFormDialog({ open, onClose, editId }: Props) {
                     size="sm"
                     variant="secondary"
                     data-testid="conversion-add"
-                    onClick={() => setConversionDraft((rows) => [...rows, { unitId: "", factor: "" }])}
+                    onClick={() => setConversionDraft((rows) => [...rows, { id: crypto.randomUUID(), unitId: "", factor: "" }])}
                   >
                     <Plus className="h-4 w-4 mr-1" /> Konversiya qo'shish
                   </Button>
