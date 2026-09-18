@@ -312,6 +312,53 @@ async function resolveReferences(
   return { departmentId, positionId };
 }
 
+/**
+ * Har qanday rolda ochilgan login uchun HR kartochkasi — xodim ro'yxatda ko'rinib tursin.
+ * Bo'lim "Asosiy", lavozim esa rol nomi bilan ochiladi (bo'lmasa yaratiladi).
+ */
+export async function createHrCard(
+  tx: Tx,
+  tenant: TenantContext,
+  input: { name: string; phone: string | null; userId: string | null; role: string; hireDate?: string },
+  meta: RequestMeta,
+) {
+  const companyId = tenant.company.id;
+  let [department] = await tx
+    .select({ id: departments.id })
+    .from(departments)
+    .where(and(eq(departments.companyId, companyId), eq(departments.code, "ASOSIY")))
+    .limit(1);
+  if (!department) {
+    [department] = await tx.insert(departments).values({ companyId, code: "ASOSIY", name: "Asosiy" }).returning({ id: departments.id });
+  }
+  let [position] = await tx
+    .select({ id: positions.id })
+    .from(positions)
+    .where(and(eq(positions.companyId, companyId), eq(positions.departmentId, department!.id), eq(positions.name, input.role)))
+    .limit(1);
+  if (!position) {
+    [position] = await tx
+      .insert(positions)
+      .values({ companyId, departmentId: department!.id, name: input.role })
+      .returning({ id: positions.id });
+  }
+  return createEmployee(
+    tx,
+    tenant,
+    {
+      name: input.name,
+      phone: input.phone,
+      ...(input.userId ? { userId: input.userId } : {}),
+      departmentId: department!.id,
+      positionId: position!.id,
+      hireDate: input.hireDate ?? new Date().toISOString().slice(0, 10),
+      baseSalary: "0",
+      salaryType: "monthly",
+    },
+    meta,
+  );
+}
+
 export async function createEmployee(
   tx: Tx,
   tenant: TenantContext,

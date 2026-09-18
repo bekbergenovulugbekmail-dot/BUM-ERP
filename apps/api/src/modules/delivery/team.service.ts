@@ -41,7 +41,18 @@ type ProfileFields = {
   notes?: string | null;
 };
 
-export type NewDeliveryAgentInput = ProfileFields & { name: string; phone: string; password: string; hireDate?: string };
+export type NewDeliveryAgentInput = ProfileFields & {
+  name: string;
+  phone: string;
+  password: string;
+  hireDate?: string;
+  /** Kassa va ilovaga tez kirish uchun PIN (ixtiyoriy). */
+  pin?: string;
+  /** Included litsenziya tugagan bo'lsa — qo'shimcha litsenziya tarifi. */
+  additionalLicensePlanId?: string;
+  /** Qurilma tasdig'i shu xodimga qo'llanadimi (standart — ha). */
+  deviceCheck?: boolean;
+};
 export type DeliveryAgentPatch = ProfileFields & { isActive?: boolean };
 
 function audit(tx: Tx, tenant: TenantContext, meta: RequestMeta, action: string, resourceId: string, details: Record<string, unknown>) {
@@ -179,7 +190,15 @@ export async function createDeliveryAgent(tx: Tx, tenant: TenantContext, input: 
     tx,
     tenant.user,
     { id: companyId, name: tenant.company.name },
-    { name: input.name, phone: input.phone, password: input.password, role: DELIVERY_AGENT_ROLE },
+    {
+      name: input.name,
+      phone: input.phone,
+      password: input.password,
+      role: DELIVERY_AGENT_ROLE,
+      ...(input.pin ? { pin: input.pin } : {}),
+      ...(input.additionalLicensePlanId ? { additionalLicensePlanId: input.additionalLicensePlanId } : {}),
+      ...(input.deviceCheck === false ? { deviceCheck: false } : {}),
+    },
     meta,
   );
   if (input.branchId) {

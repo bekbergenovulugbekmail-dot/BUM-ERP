@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Plus, Search, Users, Phone, Building2, Pencil, Trash2, User, MapPin, UserCheck, MonitorSmartphone, MonitorOff } from "lucide-react";
@@ -7,7 +8,6 @@ import { Button } from "@/components/ui/button.tsx";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
-import { Switch } from "@/components/ui/switch.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -15,8 +15,6 @@ import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
-import CreateAgentDialog from "@/components/sales-agent/create-agent-dialog.tsx";
-import DeliveryAgentDialog from "@/components/delivery/delivery-agent-dialog.tsx";
 import AdditionalLicensePicker from "@/components/subscription/additional-license-picker.tsx";
 import { LICENSE_STATUS_LABEL, LICENSE_TYPE_LABEL, formatDay, licenseLimitOf } from "@/lib/subscription.ts";
 import {
@@ -89,20 +87,13 @@ function credentialsError(credentials: Credentials): string | null {
 
 export default function EmployeesSection() {
   const { t } = useTranslation("distribution");
+  const { lng = "uz" } = useParams<{ lng: string }>();
   const { can } = usePermissions();
   const canManage = can("hr.manage");
   const canSoftware = canManage && can("employee.software_access.manage");
-  const canAddAgent = can("sales_agent.agents.manage");
-  const [agentOpen, setAgentOpen] = useState(false);
-  // Dostavka agenti: xodim + login + "Dostavka agenti" roli + yetkazuvchi profili bitta amalda
-  const { t: td } = useTranslation("delivery");
-  const canAddDeliveryAgent = can("delivery.manage");
-  const [deliveryAgentOpen, setDeliveryAgentOpen] = useState(false);
-
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | EmployeeStatus>("all");
-  const [createOpen, setCreateOpen] = useState(false);
   const [editEmployee, setEditEmployee] = useState<string | null>(null);
   const [accessTarget, setAccessTarget] = useState<Employee | null>(null);
 
@@ -117,27 +108,13 @@ export default function EmployeesSection() {
   const roles = useApiQuery<{ roles: RoleOption[] }>(canSoftware ? "/api/company/roles" : null).data?.roles;
   const assignableRoles = (roles ?? []).filter((role) => role.isActive && !FULL_ACCESS.has(role.name));
 
-  const createEmployee = useApiMutation((body: EmployeeBody & { softwareAccess?: SoftwareAccessBody }) => api.post("/api/hr/employees", body));
   const updateEmployee = useApiMutation(({ id, ...body }: EmployeeBody & { id: string; status: EmployeeStatus }) =>
     api.patch(`/api/hr/employees/${id}`, body),
   );
   const deleteEmployee = useApiMutation((id: string) => api.delete(`/api/hr/employees/${id}`));
   const disableAccess = useApiMutation((id: string) => api.delete(`/api/hr/employees/${id}/software-access`));
 
-  const [form, setForm] = useState<FormState>(emptyForm);
   const [localEditForm, setLocalEditForm] = useState<FormState>(emptyForm);
-  // BEPUL yoqiq (standart) — xodim dasturdan foydalanmaydi, litsenziya olmaydi
-  const [free, setFree] = useState(true);
-  const [credentials, setCredentials] = useState<Credentials>(emptyCredentials);
-  const [limit, setLimit] = useState<ReturnType<typeof licenseLimitOf>>(null);
-
-  const openCreate = () => {
-    setForm(emptyForm());
-    setFree(true);
-    setCredentials(emptyCredentials());
-    setLimit(null);
-    setCreateOpen(true);
-  };
 
   const openEdit = (emp: Employee) => {
     setEditEmployee(emp.id);
@@ -150,33 +127,6 @@ export default function EmployeesSection() {
       address: emp.address ?? "", bankAccount: emp.bankAccount ?? "", notes: emp.notes ?? "",
       status: emp.status,
     });
-  };
-
-  const handleCreate = async (additionalLicensePlanId?: string) => {
-    if (!form.name.trim()) { toast.error("Ism kiritilishi shart"); return; }
-    const software = canSoftware && !free;
-    if (software) {
-      const problem = credentialsError(credentials);
-      if (problem) { toast.error(problem); return; }
-    }
-    try {
-      await createEmployee.mutateAsync({
-        ...toBody(form, canManage),
-        ...(software
-          ? { softwareAccess: { ...credentials, phone: credentials.phone.trim(), ...(additionalLicensePlanId ? { additionalLicensePlanId } : {}) } }
-          : {}),
-      });
-      toast.success(
-        additionalLicensePlanId
-          ? "Xodim qo'shildi. Qo'shimcha litsenziya to'lovi tasdiqlanguncha u dasturga kira olmaydi."
-          : "Xodim qo'shildi",
-      );
-      setCreateOpen(false);
-    } catch (e) {
-      const reached = licenseLimitOf(e);
-      if (reached) setLimit(reached);
-      else toast.error(errorMessage(e));
-    }
   };
 
   const handleUpdate = async () => {
@@ -210,7 +160,7 @@ export default function EmployeesSection() {
     } catch (e) { toast.error(errorMessage(e)); }
   };
 
-  const loading = createEmployee.isPending || updateEmployee.isPending;
+  const loading = updateEmployee.isPending;
 
   return (
     <div className="space-y-4">
@@ -236,19 +186,12 @@ export default function EmployeesSection() {
             <SelectItem value="terminated">Ishdan ketgan</SelectItem>
           </SelectContent>
         </Select>
+        {/* Xodim qo'shish BITTA joyda — Sozlamalar → Foydalanuvchilar (kassir, agent, yetkazuvchi, bepul xodim) */}
         {canManage && (
-          <Button size="sm" onClick={openCreate}>
-            <Plus className="h-3.5 w-3.5 mr-1" /> Xodim qo'shish
-          </Button>
-        )}
-        {canAddAgent && (
-          <Button size="sm" variant="secondary" onClick={() => setAgentOpen(true)}>
-            <Plus className="h-3.5 w-3.5 mr-1" /> {t("team.add")}
-          </Button>
-        )}
-        {canAddDeliveryAgent && (
-          <Button size="sm" variant="secondary" onClick={() => setDeliveryAgentOpen(true)}>
-            <Plus className="h-3.5 w-3.5 mr-1" /> {td("agents.add")}
+          <Button size="sm" asChild>
+            <Link to={`/${lng}/settings`}>
+              <Plus className="h-3.5 w-3.5 mr-1" /> Xodim qo'shish
+            </Link>
           </Button>
         )}
         {/* Maxfiy ustunlar (pasport, INN, hisob raqami, maosh) faqat maosh ruxsati bilan chiqadi */}
@@ -260,25 +203,23 @@ export default function EmployeesSection() {
           invalidate={["/api/hr/employees"]}
           canImport={canManage}
           columns={[
-            { key: "name", aliases: ["Ism-familiya", "name"] },
-            { key: "phone", aliases: ["Telefon", "phone"] },
-            { key: "email", aliases: ["Email", "email"] },
-            { key: "department", aliases: ["Bo'lim", "department"] },
-            { key: "position", aliases: ["Lavozim", "position"] },
-            { key: "hireDate", aliases: ["Ishga kirgan sana", "hireDate"] },
-            { key: "birthDate", aliases: ["Tug'ilgan sana", "birthDate"] },
-            { key: "gender", aliases: ["Jinsi", "gender"] },
-            { key: "address", aliases: ["Manzil", "address"] },
-            { key: "passportNumber", aliases: ["Pasport", "passportNumber"] },
-            { key: "inn", aliases: ["INN", "inn"] },
-            { key: "bankAccount", aliases: ["Hisob raqami", "bankAccount"] },
-            { key: "baseSalary", aliases: ["Maosh", "baseSalary"] },
-            { key: "salaryType", aliases: ["Maosh turi", "salaryType"] },
+            { key: "name", aliases: ["Ism-familiya", "name"], required: true, example: "Anvar Karimov" },
+            { key: "phone", aliases: ["Telefon", "phone"], example: "+998901234567" },
+            { key: "email", aliases: ["Email", "email"], example: "anvar@mail.uz" },
+            { key: "department", aliases: ["Bo'lim", "department"], example: "Savdo" },
+            { key: "position", aliases: ["Lavozim", "position"], example: "Sotuvchi" },
+            { key: "hireDate", aliases: ["Ishga kirgan sana", "hireDate"], required: true, example: "2026-01-15" },
+            { key: "birthDate", aliases: ["Tug'ilgan sana", "birthDate"], example: "1995-04-20" },
+            { key: "gender", aliases: ["Jinsi", "gender"], example: "Erkak" },
+            { key: "address", aliases: ["Manzil", "address"], example: "Urganch, Al-Xorazmiy 12" },
+            { key: "passportNumber", aliases: ["Pasport", "passportNumber"], example: "AA1234567" },
+            { key: "inn", aliases: ["INN", "inn"], example: "123456789" },
+            { key: "bankAccount", aliases: ["Hisob raqami", "bankAccount"], example: "20208000000000000001" },
+            { key: "baseSalary", aliases: ["Maosh", "baseSalary"], example: "4000000" },
+            { key: "salaryType", aliases: ["Maosh turi", "salaryType"], example: "Oylik" },
           ]}
         />
       </div>
-      {agentOpen && <CreateAgentDialog onClose={() => setAgentOpen(false)} />}
-      {deliveryAgentOpen && <DeliveryAgentDialog onClose={() => setDeliveryAgentOpen(false)} />}
 
       {/* List */}
       {!employees ? (
@@ -290,7 +231,9 @@ export default function EmployeesSection() {
           <Users className="h-12 w-12 mx-auto mb-3 text-muted-foreground/20" />
           <p className="text-muted-foreground">Xodimlar topilmadi</p>
           {canManage && (
-            <Button size="sm" className="mt-3" onClick={openCreate}><Plus className="h-4 w-4 mr-1" /> Xodim qo'shish</Button>
+            <Button size="sm" className="mt-3" asChild>
+              <Link to={`/${lng}/settings`}><Plus className="h-4 w-4 mr-1" /> Xodim qo'shish</Link>
+            </Button>
           )}
         </div>
       ) : (
@@ -376,60 +319,6 @@ export default function EmployeesSection() {
             );
           })}
         </div>
-      )}
-
-      {/* Create dialog */}
-      {createOpen && (
-        <Dialog open onOpenChange={(o) => !o && setCreateOpen(false)}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader><DialogTitle>Yangi xodim qo'shish</DialogTitle></DialogHeader>
-            <div className="max-h-[65vh] overflow-y-auto pr-1 space-y-4">
-              <EmployeeForm
-                form={form} setForm={setForm}
-                departments={departments ?? []}
-                positions={positions ?? []}
-                showSensitive={canManage}
-              />
-              {canSoftware && (
-                <div className="rounded-xl border border-border p-3 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <Label htmlFor="employee-free" className="font-semibold">BEPUL (dasturdan foydalanmaydi)</Label>
-                    <Switch
-                      id="employee-free"
-                      checked={free}
-                      onCheckedChange={(checked) => {
-                        setFree(checked);
-                        setLimit(null);
-                        if (!checked && !credentials.phone) setCredentials({ ...credentials, phone: form.phone });
-                      }}
-                    />
-                  </div>
-                  <p className={cn("text-sm", free ? "text-muted-foreground" : "text-primary")}>
-                    {free
-                      ? "Bu xodim BUM ERP dasturidan foydalanmaydi. License talab qilinmaydi."
-                      : "Bu xodim BUM ERP dasturidan foydalanadi. Software license kerak."}
-                  </p>
-                  {!free && (
-                    <>
-                      <CredentialsFields value={credentials} onChange={(next) => { setCredentials(next); setLimit(null); }} roles={assignableRoles} />
-                      {limit && (
-                        <AdditionalLicensePicker
-                          counts={limit.counts}
-                          pending={createEmployee.isPending}
-                          onSelect={(planId) => { void handleCreate(planId); }}
-                        />
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-            <DialogFooter>
-              <Button variant="secondary" onClick={() => setCreateOpen(false)}>Bekor</Button>
-              <Button onClick={() => { void handleCreate(); }} disabled={loading}>{loading ? "..." : "Saqlash"}</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       )}
 
       {/* Edit dialog */}

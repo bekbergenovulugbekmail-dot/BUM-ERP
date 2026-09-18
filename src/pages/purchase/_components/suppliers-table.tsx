@@ -99,17 +99,17 @@ export default function SuppliersTable({ suppliers }: Props) {
             invalidate={["/api/purchase/suppliers"]}
             canImport={canCreate}
             columns={[
-              { key: "name", aliases: ["Nomi", "name"] },
-              { key: "code", aliases: ["Kod", "code"] },
-              { key: "partyType", aliases: ["Turi", "partyType"] },
-              { key: "contactPerson", aliases: ["Mas'ul shaxs", "contactPerson"] },
-              { key: "phone", aliases: ["Telefon", "phone"] },
-              { key: "email", aliases: ["Email", "email"] },
-              { key: "address", aliases: ["Manzil", "address"] },
-              { key: "taxId", aliases: ["STIR", "taxId"] },
-              { key: "bankAccount", aliases: ["Hisob raqami", "bankAccount"] },
-              { key: "bankMfo", aliases: ["MFO", "bankMfo"] },
-              { key: "paymentTermDays", aliases: ["To'lov muddati (kun)", "paymentTermDays"] },
+              { key: "name", aliases: ["Nomi", "name"], required: true, example: "Nestle Uzbekistan" },
+              { key: "code", aliases: ["Kod", "code"], example: "TA-001" },
+              { key: "partyType", aliases: ["Turi", "partyType"], example: "Yuridik shaxs" },
+              { key: "contactPerson", aliases: ["Mas'ul shaxs", "contactPerson"], example: "Bobur Aliyev" },
+              { key: "phone", aliases: ["Telefon", "phone"], example: "+998901234567" },
+              { key: "email", aliases: ["Email", "email"], example: "info@nestle.uz" },
+              { key: "address", aliases: ["Manzil", "address"], example: "Toshkent, Amir Temur 1" },
+              { key: "taxId", aliases: ["STIR", "taxId"], example: "302123456" },
+              { key: "bankAccount", aliases: ["Hisob raqami", "bankAccount"], example: "20208000000000000001" },
+              { key: "bankMfo", aliases: ["MFO", "bankMfo"], example: "00014" },
+              { key: "paymentTermDays", aliases: ["To'lov muddati (kun)", "paymentTermDays"], example: "30" },
             ]}
           />
           {canCreate && (

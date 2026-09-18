@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { Label } from "@/components/ui/label.tsx";
+import { Switch } from "@/components/ui/switch.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -44,6 +45,8 @@ type MemberPatch = {
   allowedWarehouseIds?: string[];
   allowedCategoryIds?: string[];
   isActive?: boolean;
+  /** Qurilma tasdig'i shu xodimga qo'llanadimi. */
+  deviceCheck?: boolean;
   /** Qayta yoqishda included litsenziya tugagan bo'lsa — qo'shimcha litsenziya tarifi. */
   additionalLicensePlanId?: string;
 };
@@ -155,13 +158,13 @@ export default function UsersSection() {
           <p className="text-sm font-semibold">Xodimlar boshqaruvi</p>
           <p className="text-xs text-muted-foreground">
             {isOwner
-              ? "Xodim loginini oching, ma'lumotlarini, rolini va ruxsatlarini boshqaring"
+              ? "Xodim shu yerdan qo'shiladi — kassir, savdo agenti, yetkazuvchi yoki dasturga kirmaydigan xodim"
               : "Xodimlarni faqat kompaniya egasi qo'sha va o'zgartira oladi"}
           </p>
         </div>
         {isOwner && (
           <Button size="sm" onClick={() => setCreateOpen(true)} className="shrink-0">
-            <UserPlus className="h-4 w-4 mr-1.5" /> Yangi xodim
+            <UserPlus className="h-4 w-4 mr-1.5" /> Xodim qo'shish
           </Button>
         )}
       </div>
@@ -425,6 +428,7 @@ function EditEmployeeDialog({
   const [branchId, setBranchId] = useState(employee.branchId ?? NO_BRANCH);
   const [warehouseIds, setWarehouseIds] = useState<string[]>(employee.allowedWarehouseIds);
   const [categoryIds, setCategoryIds] = useState<string[]>(employee.allowedCategoryIds ?? []);
+  const [deviceCheck, setDeviceCheck] = useState(employee.deviceCheck !== false);
   const [error, setError] = useState<string | null>(null);
 
   const update = useApiMutation(
@@ -451,6 +455,7 @@ function EditEmployeeDialog({
     if (nextBranch !== employee.branchId) patch.branchId = nextBranch;
     if (!sameIds(warehouseIds, employee.allowedWarehouseIds)) patch.allowedWarehouseIds = warehouseIds;
     if (!sameIds(categoryIds, employee.allowedCategoryIds ?? [])) patch.allowedCategoryIds = categoryIds;
+    if (deviceCheck !== (employee.deviceCheck !== false)) patch.deviceCheck = deviceCheck;
 
     if (Object.keys(patch).length === 0) {
       onClose();
@@ -529,6 +534,16 @@ function EditEmployeeDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="flex items-start justify-between gap-3 rounded-xl border border-border px-3 py-2.5">
+            <div className="min-w-0">
+              <Label htmlFor="edit-device-check" className="cursor-pointer text-sm font-medium">Qurilma tasdig'i</Label>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Yoqilgan bo'lsa xodim yangi qurilmadan kirganda siz tasdiqlashingiz kerak.
+              </p>
+            </div>
+            <Switch id="edit-device-check" checked={deviceCheck} onCheckedChange={setDeviceCheck} />
           </div>
 
           <CheckList

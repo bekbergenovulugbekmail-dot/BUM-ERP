@@ -8,7 +8,7 @@ import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
 import { todayIso } from "../src/modules/finance/cash.service.js";
 import { buildServer } from "../src/server.js";
 import { distanceMeters, isValidCoordinate } from "../src/shared/geo.js";
-import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, signedIn, salesRepOf } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
@@ -54,9 +54,8 @@ beforeEach(async () => {
 /** Agent xodimi + unga bog'langan savdo agenti. */
 async function agent(name: string) {
   const employee = await addEmployee(app, company, "Sotuv agenti");
-  const rep = await call(company.ownerCookie, "POST", "/api/distribution/sales-reps", { name, userId: employee.id });
-  expect(rep.statusCode).toBe(201);
-  return { cookie: employee.cookie, repId: rep.json().salesRep.id as string };
+  const repId = await salesRepOf(app, company.ownerCookie, employee.id, { name });
+  return { cookie: employee.cookie, repId: repId };
 }
 
 async function store(body: object) {

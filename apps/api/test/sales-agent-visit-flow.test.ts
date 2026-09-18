@@ -11,7 +11,7 @@ import { agentLocationEvents, agentVisitPhotos, agentVisits } from "../src/db/sc
 import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
 import { buildServer } from "../src/server.js";
 import { storageProvider } from "../src/shared/storage.js";
-import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, signedIn, salesRepOf } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 type Method = "GET" | "POST" | "PUT";
@@ -63,8 +63,7 @@ const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000);
 
 async function agent(name: string) {
   const employee = await addEmployee(app, company, "Sotuv agenti");
-  const rep = await call(company.ownerCookie, "POST", "/api/distribution/sales-reps", { name, userId: employee.id });
-  const repId = rep.json().salesRep.id as string;
+  const repId = await salesRepOf(app, company.ownerCookie, employee.id, { name });
   expect((await call(employee.cookie, "POST", "/api/sales-agent/work-session/start", { ...near, accuracy: 10, recordedAt: iso() })).statusCode).toBe(201);
   return { cookie: employee.cookie, repId };
 }

@@ -6,7 +6,7 @@ import { DEFAULT_ROLES } from "@bum/shared";
 import { closeDb, db } from "../src/db/client.js";
 import { roles } from "../src/db/schema/platform.js";
 import { buildServer } from "../src/server.js";
-import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, salesRepOf, signedIn } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 
@@ -45,16 +45,9 @@ describe("Sotuv agenti roli va ish joyi", () => {
     const owner = company.ownerCookie;
     const agent = await addEmployee(app, company, "Sotuv agenti");
 
-    // Bog'lanmagan — 403
-    expect((await call(agent.cookie, "GET", "/api/sales-agent/me")).statusCode).toBe(403);
-
-    const rep = await call(owner, "POST", "/api/distribution/sales-reps", {
-      name: "Ali Valiyev",
-      userId: agent.id,
-      region: "Chilonzor",
-      monthlyTarget: "150000000",
-    });
-    expect(rep.statusCode).toBe(201);
+    // Xodim "Sotuv agenti" roli bilan qo'shilganda profil ham shu zahoti yaratiladi —
+    // distribyutsiya bo'limida qo'shimcha amal talab qilinmaydi
+    const repId = await salesRepOf(app, owner, agent.id, { name: "Ali Valiyev", region: "Chilonzor", monthlyTarget: "150000000" });
     const me = await call(agent.cookie, "GET", "/api/sales-agent/me");
     expect(me.statusCode).toBe(200);
     expect(me.json()).toMatchObject({
@@ -81,7 +74,7 @@ describe("Sotuv agenti roli va ish joyi", () => {
     }
 
     // Faolsizlantirilgan agent — 403; ruxsati yo'q xodim — 403
-    expect((await call(owner, "PATCH", `/api/distribution/sales-reps/${rep.json().salesRep.id}`, { isActive: false })).statusCode).toBe(200);
+    expect((await call(owner, "PATCH", `/api/distribution/sales-reps/${repId}`, { isActive: false })).statusCode).toBe(200);
     expect((await call(agent.cookie, "GET", "/api/sales-agent/me")).statusCode).toBe(403);
     const kassir = await addEmployee(app, company, "Kassir");
     expect((await call(kassir.cookie, "GET", "/api/sales-agent/me")).statusCode).toBe(403);

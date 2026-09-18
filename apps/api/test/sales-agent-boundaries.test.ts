@@ -10,7 +10,7 @@ import { customers } from "../src/db/schema/sales.js";
 import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
 import { buildServer } from "../src/server.js";
 import { LEGACY_VISIT_POLICY, setAgentPolicy } from "./agent-policy.js";
-import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, signedIn, salesRepOf } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 type Method = "GET" | "POST" | "PUT" | "PATCH";
@@ -56,7 +56,7 @@ const iso = (secondsAgo = 0) => new Date(Date.now() - secondsAgo * 1000).toISOSt
 
 async function agent(owner: Company, name: string) {
   const employee = await addEmployee(app, owner, "Sotuv agenti");
-  const repId = (await call(owner.ownerCookie, "POST", "/api/distribution/sales-reps", { name, userId: employee.id })).json().salesRep.id as string;
+  const repId = await salesRepOf(app, owner.ownerCookie, employee.id, { name });
   expect((await call(employee.cookie, "POST", "/api/sales-agent/work-session/start", { ...northOf(10), accuracy: 10, recordedAt: iso() })).statusCode).toBe(201);
   const customerId = (await call(owner.ownerCookie, "POST", "/api/sales/customers", { name: `${name} do'koni`, ...shop })).json().customer.id as string;
   const routeId = (await call(owner.ownerCookie, "POST", "/api/distribution/routes", { name: `R-${name}`, salesRepId: repId, days: [0, 1, 2, 3, 4, 5, 6] })).json()

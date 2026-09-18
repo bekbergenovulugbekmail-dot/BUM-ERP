@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ArrowDown, ArrowUp, ListOrdered, Loader2, Pencil, Plus, Power, Wallet } from "lucide-react";
@@ -258,10 +259,11 @@ function CashDialog({ agent, onClose }: { agent: DeliveryAgentRow; onClose: () =
 /** Yetkazuvchilar: profil (filial, hudud, zona, transport, yuk, jadval, supervayzer), faollik va kunlik yetkazish tartibi. */
 export default function AgentsSection() {
   const { t } = useTranslation("delivery");
+  const { lng = "uz" } = useParams<{ lng: string }>();
   const { can } = usePermissions();
   const manage = can("delivery.manage");
   const agents = useApiQuery<{ agents: DeliveryAgentRow[] }>("/api/delivery/agents").data?.agents;
-  const [editing, setEditing] = useState<DeliveryAgentRow | "new" | null>(null);
+  const [editing, setEditing] = useState<DeliveryAgentRow | null>(null);
   const [toggling, setToggling] = useState<DeliveryAgentRow | null>(null);
   const [routing, setRouting] = useState<DeliveryAgentRow | null>(null);
   const [cashFor, setCashFor] = useState<DeliveryAgentRow | null>(null);
@@ -270,9 +272,12 @@ export default function AgentsSection() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">{t("agents.subtitle")}</p>
+        {/* Yetkazuvchi xodim sifatida BITTA joyda qo'shiladi: Sozlamalar → Foydalanuvchilar ("Dostavka agenti" roli) */}
         {manage && (
-          <Button onClick={() => setEditing("new")}>
-            <Plus className="mr-1.5 h-4 w-4" /> {t("agents.add")}
+          <Button asChild>
+            <Link to={`/${lng}/settings`}>
+              <Plus className="mr-1.5 h-4 w-4" /> {t("agents.add")}
+            </Link>
           </Button>
         )}
       </div>
@@ -372,7 +377,7 @@ export default function AgentsSection() {
         </div>
       )}
 
-      {editing && <DeliveryAgentDialog agent={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} />}
+      {editing && <DeliveryAgentDialog agent={editing} onClose={() => setEditing(null)} />}
       {toggling && <ToggleDialog agent={toggling} onClose={() => setToggling(null)} />}
       {routing && <RouteOrderDialog agent={routing} onClose={() => setRouting(null)} />}
       {cashFor && <CashDialog agent={cashFor} onClose={() => setCashFor(null)} />}

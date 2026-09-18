@@ -129,11 +129,12 @@ export default function RoutesSection() {
             invalidate={["/api/distribution/routes"]}
             canImport
             columns={[
-              { key: "name", aliases: ["Nomi", "name"] },
-              { key: "salesRep", aliases: ["Sotuv agenti", "salesRep"] },
-              { key: "days", aliases: ["Kunlar (0-6)", "Kunlar", "days"] },
-              { key: "description", aliases: ["Tavsif", "description"] },
-              { key: "color", aliases: ["Rang", "color"] },
+              { key: "name", aliases: ["Nomi", "name"], required: true, example: "Urganch markaz" },
+              { key: "salesRep", aliases: ["Sotuv agenti", "salesRep"], example: "Bekzod Bekzod" },
+              // 0 - yakshanba, 1 - dushanba ... 6 - shanba; bo'sh joy bilan ajratiladi
+              { key: "days", aliases: ["Kunlar (0-6)", "Kunlar", "days"], example: "1 3 5" },
+              { key: "description", aliases: ["Tavsif", "description"], example: "Markaziy do'konlar" },
+              { key: "color", aliases: ["Rang", "color"], example: "#2563eb" },
             ]}
           />
           <Button size="sm" onClick={() => setCreateOpen(true)}>
@@ -161,7 +162,7 @@ export default function RoutesSection() {
                 <div className="h-3 w-3 rounded-full flex-shrink-0" style={{ background: route.color ?? "#6366f1" }} />
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold">{route.name}</p>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     {route.salesRepName && <span>{route.salesRepName}</span>}
                     <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {route.customerCount} ta mijoz</span>
                     <div className="flex gap-0.5">
@@ -174,7 +175,7 @@ export default function RoutesSection() {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                   <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); setVisitDialogRoute(route.id); }}>
                     <Calendar className="h-3.5 w-3.5 mr-1" /> Tashrif
                   </Button>

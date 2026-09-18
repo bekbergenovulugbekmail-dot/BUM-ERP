@@ -168,12 +168,12 @@ export default function ExpensesSection() {
             invalidate={["/api/finance/expenses"]}
             canImport={canManage}
             columns={[
-              { key: "category", aliases: ["Kategoriya", "category"] },
-              { key: "description", aliases: ["Tavsif", "description"] },
-              { key: "amount", aliases: ["Summa", "amount"] },
-              { key: "expenseDate", aliases: ["Sana", "expenseDate"] },
-              { key: "paidBy", aliases: ["To'lagan", "paidBy"] },
-              { key: "notes", aliases: ["Izoh", "notes"] },
+              { key: "category", aliases: ["Kategoriya", "category"], required: true, example: "Ijara" },
+              { key: "description", aliases: ["Tavsif", "description"], required: true, example: "Do'kon ijarasi, sentabr" },
+              { key: "amount", aliases: ["Summa", "amount"], required: true, example: "3500000" },
+              { key: "expenseDate", aliases: ["Sana", "expenseDate"], required: true, example: "2026-09-01" },
+              { key: "paidBy", aliases: ["To'lagan", "paidBy"], example: "Ulug'bek" },
+              { key: "notes", aliases: ["Izoh", "notes"], example: "Naqd to'landi" },
             ]}
           />
           {canManage && (

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
+import PageTabs from "@/components/page-tabs.tsx";
 import { useApiQuery } from "@/lib/query.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
@@ -110,7 +111,7 @@ export default function SalesPage() {
   const canCreate = can("sales.create");
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -152,27 +153,14 @@ export default function SalesPage() {
         ))}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-border">
-        {[
+      <PageTabs
+        tabs={[
           { key: "orders", label: "Buyurtmalar", icon: ShoppingBag },
           { key: "customers", label: "Mijozlar", icon: Users },
-        ].map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer",
-              tab === t.key
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <t.icon className="h-4 w-4" />
-            {t.label}
-          </button>
-        ))}
-      </div>
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
 
       {tab === "customers" ? (
         <CustomersSection />

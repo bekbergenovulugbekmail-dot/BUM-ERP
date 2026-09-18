@@ -288,6 +288,12 @@ export const companyMembers = pgTable(
     allowedCategoryIds: uuid("allowed_category_ids").array().notNull().default([]),
 
     isActive: boolean("is_active").notNull().default(true),
+    /**
+     * Qurilma tasdig'i shu xodimga qo'llanadimi. `true` (standart) — yangi qurilmadan kirish egasi
+     * tasdiqlamaguncha berilmaydi; `false` — faqat parol tekshiriladi (doim bir joyda ishlaydigan
+     * ofis xodimi uchun). Qurilma har holda ro'yxatga olinadi, shuning uchun egasi ko'rib turadi.
+     */
+    deviceCheck: boolean("device_check").notNull().default(true),
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull(),
     ...timestamps(),
   },

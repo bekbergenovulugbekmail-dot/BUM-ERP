@@ -2242,6 +2242,55 @@ migratsiyalar `0058`–`0060` production bazasida QO'LLANDI. Yangi web bundle `i
 ichida "Biznes egalari uchun Telegram bot", "Mijozlar uchun Telegram bot", `admin-logout` va
 "yo'ldagi naqd" satrlari bor. `PUBLIC_API_URL=https://app.bum-erp.uz` — egasi qo'ydi.
 
+## Mobil ko'rinish, import shabloni va yagona xodim qo'shish (2026-09-18)
+
+**1. Telefonda bo'limlar kompyuterdagidek siqilmaydi**
+Yangi umumiy komponent `src/components/page-tabs.tsx`: tor ekranda (md dan kichik) sahifa bo'limlari
+bitta tugma + ro'yxat bo'lib ochiladi, keng ekranda esa avvalgidek yorliqlar qatori. Shu komponent
+Sozlamalar, Distribyutsiya, Dostavka, Moliya, HR, CRM, Sotuv, Ishlab chiqarish va Tahlil sahifalarida
+ishlatiladi. Sahifa yon bo'shliqlari telefonda `p-4`, kompyuterda `p-6`. Marshrut qatoridagi agent nomi,
+mijozlar soni va kun belgilari endi sig'masa pastga o'tadi (ilgari qator ekrandan chiqib ketardi).
+Ombor yorliqlari o'z idishida suriladi.
+
+Yangi tekshiruv: `e2e/mobile-layout.spec.ts` — 11 ta ERP sahifasi 360x740 ekranda ochiladi va
+sahifaning o'zi YON TOMONGA SURILMASLIGI tekshiriladi (keng jadval o'z idishida surilishi mumkin).
+
+**2. Import shabloni endi kataklarga bo'linadi**
+Shablon `;` (nuqtali vergul) bilan yoziladi — Excel'ning ruscha/o'zbekcha sozlamasida har bir ustun
+ALOHIDA katakka tushadi (ilgari vergul bilan bo'lgani uchun hammasi bitta katakda ko'rinardi).
+Majburiy ustun sarlavhasida `*` turadi, ikkinchi qator esa `#` bilan boshlanadigan NAMUNA:
+`# Coca Cola 1L;COLA-1L;4780000000001;Dona;8000;10000;...`. Namuna qatori import paytida o'tkazib
+yuboriladi — foydalanuvchi uni o'chirmasa ham bo'ladi. Import oynasida format haqida qisqa izoh bor.
+Hamma ro'yxatlar uchun (mahsulot, mijoz, ta'minotchi, xarajat, marshrut, xodim, xarid) namunalar
+to'ldirildi. Tekshiruv: `e2e/csv-import.spec.ts` ajratgich, `*` va `#` ni ham tekshiradi.
+
+**3. Xodim qo'shish — BITTA joyda**
+Sozlamalar → Foydalanuvchilar → "Xodim qo'shish". Rol tanlanadi, server esa shu rolga mos profilni
+o'zi yaratadi:
+- "Sotuv agenti" → login + a'zolik + HR kartochkasi + savdo agenti profili (hudud, ishga kirgan sana)
+- "Dostavka agenti" → login + a'zolik + HR kartochkasi + yetkazuvchi profili (transport, davlat raqami)
+- boshqa rollar → login + a'zolik
+- "Dasturga kiradi" o'chirilsa — login ham, litsenziya ham berilmaydi, faqat HR kartochkasi ochiladi
+  (yuk tashuvchi, qorovul kabi xodimlar uchun)
+
+Shu sababli Distribyutsiya, Dostavka va HR bo'limlaridagi alohida "qo'shish" formalari olib tashlandi —
+ular endi Sozlamalarga yo'naltiradi (`create-agent-dialog.tsx` o'chirildi). Tahrirlash va faolsizlantirish
+o'z bo'limlarida qoladi.
+
+**Qurilma tasdig'i endi xodim bo'yicha** (migratsiya `0061_member_device_check`, faqat qo'shish):
+`company_members.device_check` — standart `true` (avvalgi xatti-harakat saqlanadi). Formadagi tugma
+bilan yoqiladi/o'chiriladi, keyin ham "Tahrirlash" oynasida o'zgartiriladi. O'chirilgan bo'lsa xodim
+istalgan qurilmadan kiradi, lekin qurilma baribir ro'yxatga olinadi — egasi kim qayerdan kirganini
+ko'rib turadi.
+
+Testlar: `apps/api/test/employee-onboarding.test.ts` (9 ta). Agent testlaridagi eski ikki bosqichli
+qo'shish (`POST /api/company/employees` + `POST /api/distribution/sales-reps`) yagona qo'shishga
+moslandi — `salesRepOf` yordamchisi avtomatik yaratilgan profilni topadi.
+
+**Regressiya:** API 119 fayl / 632 test, brauzer 38 test (11 fayl), web 19 / 81 — hammasi o'tdi;
+tsc (API, web, desktop) va lint toza. Migratsiya `0061` lokal bazada qo'llandi, production'ga
+HALI DEPLOY QILINMADI.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)

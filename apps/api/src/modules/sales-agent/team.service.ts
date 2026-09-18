@@ -35,6 +35,12 @@ export type NewSalesAgentInput = {
   supervisorUserId?: string | null;
   monthlyTarget?: string;
   hireDate?: string;
+  /** Kassa va ilovaga tez kirish uchun PIN (ixtiyoriy). */
+  pin?: string;
+  /** Included litsenziya tugagan bo'lsa — qo'shimcha litsenziya tarifi. */
+  additionalLicensePlanId?: string;
+  /** Qurilma tasdig'i shu xodimga qo'llanadimi (standart — ha). */
+  deviceCheck?: boolean;
 };
 
 function audit(tx: Tx, tenant: TenantContext, meta: RequestMeta, action: string, resourceId: string, details: Record<string, unknown>) {
@@ -156,7 +162,15 @@ export async function createSalesAgent(tx: Tx, tenant: TenantContext, input: New
     tx,
     tenant.user,
     { id: companyId, name: tenant.company.name },
-    { name: input.name, phone: input.phone, password: input.password, role: SALES_AGENT_ROLE },
+    {
+      name: input.name,
+      phone: input.phone,
+      password: input.password,
+      role: SALES_AGENT_ROLE,
+      ...(input.pin ? { pin: input.pin } : {}),
+      ...(input.additionalLicensePlanId ? { additionalLicensePlanId: input.additionalLicensePlanId } : {}),
+      ...(input.deviceCheck === false ? { deviceCheck: false } : {}),
+    },
     meta,
   );
 

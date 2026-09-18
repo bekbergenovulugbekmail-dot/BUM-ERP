@@ -11,7 +11,7 @@ import { proratedTarget } from "../src/modules/sales-agent/reports.service.js";
 import { buildServer } from "../src/server.js";
 import { fromMinor } from "../src/shared/decimal.js";
 import { LEGACY_VISIT_POLICY, setAgentPolicy } from "./agent-policy.js";
-import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, signedIn, salesRepOf } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 type Method = "GET" | "POST" | "PUT";
@@ -54,8 +54,7 @@ const shift = (date: string, days: number) => new Date(Date.parse(`${date}T00:00
 
 async function agent(name: string, monthlyTarget = "0") {
   const employee = await addEmployee(app, company, "Sotuv agenti");
-  const rep = await call(company.ownerCookie, "POST", "/api/distribution/sales-reps", { name, userId: employee.id, monthlyTarget });
-  const repId = rep.json().salesRep.id as string;
+  const repId = await salesRepOf(app, company.ownerCookie, employee.id, { name, monthlyTarget });
   await call(employee.cookie, "POST", "/api/sales-agent/work-session/start", { ...near, recordedAt: iso() });
   const customerId = (await call(company.ownerCookie, "POST", "/api/sales/customers", { name: `${name} do'koni`, latitude: 41.311081, longitude: 69.240562 })).json()
     .customer.id as string;

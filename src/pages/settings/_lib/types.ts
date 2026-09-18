@@ -28,6 +28,8 @@ export type Employee = {
   /** Mas'ul kategoriyalar (ichkilari bilan); bo'sh — barcha kategoriyalar. */
   allowedCategoryIds: string[];
   membershipActive: boolean;
+  /** Qurilma tasdig'i shu xodimga qo'llanadimi. */
+  deviceCheck: boolean;
   joinedAt: string;
   lastSeenAt: string | null;
   /** Joriy litsenziya (bekor qilinmagan); yo'q — dasturdan foydalanmaydi. */

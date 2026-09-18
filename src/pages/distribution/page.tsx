@@ -6,6 +6,7 @@ import {
   MapPinned, UserCheck, CalendarCheck, CircleDollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
+import PageTabs from "@/components/page-tabs.tsx";
 import { useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import RoutesSection from "./_components/routes-section.tsx";
@@ -130,26 +131,12 @@ export default function DistributionPage() {
         ))}
       </motion.div>
 
-      {/* Tabs */}
-      <div className="border-b border-border overflow-x-auto">
-        <div className="flex gap-1">
-          {tabs.map((item) => (
-            <button
-              key={item.key}
-              onClick={() => setTab(item.key)}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-all cursor-pointer whitespace-nowrap",
-                activeTab === item.key
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <item.icon className="h-4 w-4" />
-              {t(`tabs.${item.key}`)}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* Bo'limlar: telefonda ro'yxat, kompyuterda yorliqlar */}
+      <PageTabs
+        tabs={tabs.map((item) => ({ key: item.key, label: t(`tabs.${item.key}`), icon: item.icon }))}
+        value={activeTab}
+        onChange={setTab}
+      />
 
       {/* Tab content */}
       <motion.div

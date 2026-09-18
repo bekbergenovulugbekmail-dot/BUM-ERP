@@ -171,10 +171,10 @@ export default function WarehousePage() {
       </div>
 
       {/* Main tabs */}
-      <div className="flex-1 min-h-0 px-6 pb-6">
+      <div className="flex-1 min-h-0 px-4 pb-6 md:px-6">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
           <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
-            <TabsList>
+            <TabsList className="max-w-full overflow-x-auto">
               <TabsTrigger value="stock">
                 <BarChart3 className="h-4 w-4 mr-1.5" /> Zaxira
               </TabsTrigger>

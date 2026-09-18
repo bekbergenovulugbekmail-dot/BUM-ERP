@@ -159,20 +159,20 @@ export default function CustomersSection() {
             invalidate={["/api/sales/customers"]}
             canImport={canManage}
             columns={[
-              { key: "name", aliases: ["Nomi", "name"] },
-              { key: "partyType", aliases: ["Turi", "partyType"] },
-              { key: "phone", aliases: ["Telefon", "phone"] },
-              { key: "email", aliases: ["Email", "email"] },
-              { key: "address", aliases: ["Manzil", "address"] },
-              { key: "contactName", aliases: ["Mas'ul shaxs", "contactName"] },
-              { key: "taxId", aliases: ["STIR", "taxId"] },
-              { key: "bankAccount", aliases: ["Hisob raqami", "bankAccount"] },
-              { key: "bankMfo", aliases: ["MFO", "bankMfo"] },
-              { key: "city", aliases: ["Shahar/tuman", "city"] },
-              { key: "district", aliases: ["Mahalla", "district"] },
-              { key: "discountPercent", aliases: ["Chegirma %", "discountPercent"] },
-              { key: "creditLimit", aliases: ["Kredit limiti", "creditLimit"] },
-              { key: "paymentTermDays", aliases: ["To'lov muddati (kun)", "paymentTermDays"] },
+              { key: "name", aliases: ["Nomi", "name"], required: true, example: "Anvar aka do'koni" },
+              { key: "partyType", aliases: ["Turi", "partyType"], example: "Jismoniy shaxs" },
+              { key: "phone", aliases: ["Telefon", "phone"], example: "+998901234567" },
+              { key: "email", aliases: ["Email", "email"], example: "anvar@mail.uz" },
+              { key: "address", aliases: ["Manzil", "address"], example: "Urganch, Al-Xorazmiy 12" },
+              { key: "contactName", aliases: ["Mas'ul shaxs", "contactName"], example: "Anvar Karimov" },
+              { key: "taxId", aliases: ["STIR", "taxId"], example: "302123456" },
+              { key: "bankAccount", aliases: ["Hisob raqami", "bankAccount"], example: "20208000000000000001" },
+              { key: "bankMfo", aliases: ["MFO", "bankMfo"], example: "00014" },
+              { key: "city", aliases: ["Shahar/tuman", "city"], example: "Urganch" },
+              { key: "district", aliases: ["Mahalla", "district"], example: "Gulobod" },
+              { key: "discountPercent", aliases: ["Chegirma %", "discountPercent"], example: "5" },
+              { key: "creditLimit", aliases: ["Kredit limiti", "creditLimit"], example: "1000000" },
+              { key: "paymentTermDays", aliases: ["To'lov muddati (kun)", "paymentTermDays"], example: "14" },
             ]}
           />
           {canManage && (

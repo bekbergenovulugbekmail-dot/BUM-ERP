@@ -55,6 +55,11 @@ import {
   updateCompany,
 } from "./company.service.js";
 import { ownerUpdateMember } from "./member.service.js";
+import { moneySchema } from "../../shared/decimal.js";
+// Xodim qo'shish bitta joyda: rolga qarab agent yoki yetkazuvchi profili ham shu yerda yaratiladi
+import { SALES_AGENT_ROLE, createSalesAgent } from "../sales-agent/team.service.js";
+import { DELIVERY_AGENT_ROLE, createDeliveryAgent } from "../delivery/team.service.js";
+import { createHrCard } from "../hr/employees.service.js";
 import {
   assertPermissionsNotEmpty,
   createRole,
@@ -123,16 +128,39 @@ const branchCreateBody = z.strictObject({
 const branchPatchBody = branchCreateBody.partial().extend({ isActive: z.boolean().optional() });
 const branchParams = z.object({ branchId: z.uuid() });
 
+/**
+ * Xodim qo'shish — BITTA joy: rol qaysi bo'lsa, shunga mos profil ham shu yerda yaratiladi
+ * ("Sotuv agenti" → savdo agenti profili, "Dostavka agenti" → yetkazuvchi profili). Shuning uchun
+ * distribyutsiya va dostavka bo'limlarida alohida "qo'shish" formasi kerak emas.
+ */
 const employeeBody = z.object({
   phone: z.string().min(1).max(32),
-  password: z.string().min(1).max(256),
+  /** Dasturga kirmaydigan xodim uchun parol kerak emas (`softwareAccess: false`). */
+  password: z.string().min(1).max(256).optional(),
+  /** `false` — faqat HR kartochkasi ochiladi: login ham, litsenziya ham berilmaydi. */
+  softwareAccess: z.boolean().default(true),
   name: z.string().max(200).optional(),
   role: z.string().min(1).max(100).optional(),
   pin: z.string().regex(PIN_PATTERN, "PIN 4-8 ta raqamdan iborat bo'lishi kerak").optional(),
   /** Included litsenziyalar tugagan bo'lsa — qo'shimcha litsenziya tarifi (to'lov tasdiqlanguncha kirish yopiq). */
   additionalLicensePlanId: z.uuid().optional(),
+  /** Qurilma tasdig'i shu xodimga qo'llanadimi (standart — ha). */
+  deviceCheck: z.boolean().optional(),
+  /** Ishga kirgan sana (agent va yetkazuvchi uchun HR kartochkasiga yoziladi). */
+  hireDate: z.iso.date().optional(),
+  /** Savdo agenti: hudud va oylik plan. */
+  region: z.string().trim().max(100).optional(),
+  monthlyTarget: moneySchema.optional(),
+  /** Yetkazuvchi: transport. */
+  vehicleType: z.enum(["car", "motorcycle", "bicycle", "foot", "truck"]).optional(),
+  vehicleNumber: z.string().trim().max(32).optional(),
+}).refine((body) => body.softwareAccess === false || Boolean(body.password), {
+  message: "Dasturga kiradigan xodim uchun parol kiritilishi shart",
+  path: ["password"],
 });
 const memberPatchBody = z.strictObject({
+  /** Qurilma tasdig'i shu xodimga qo'llanadimi. */
+  deviceCheck: z.boolean().optional(),
   name: z.string().trim().max(200).nullable().optional(),
   phone: z.string().min(1).max(32).optional(),
   role: z.string().min(1).max(100).optional(),
@@ -280,10 +308,63 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
   app.post("/employees", async (req, reply) => {
     const body = employeeBody.parse(req.body);
     const { user } = authOf(req);
+    const meta = requestMeta(req);
+
+    // Dasturdan foydalanmaydigan xodim (yuk tashuvchi, qorovul ...) — faqat HR kartochkasi, litsenziyasiz
+    if (body.softwareAccess === false) {
+      if (!body.name?.trim()) throw badRequest("Ism-familiya kiritilishi shart");
+      const employee = await withTransaction(async (tx) => {
+        await resolveOwnedCompany(tx, user);
+        const tenant = await requireTenantForWrite(tx, user);
+        return createHrCard(
+          tx,
+          tenant,
+          { name: body.name!.trim(), phone: body.phone, userId: null, role: body.role ?? "Xodim", hireDate: body.hireDate },
+          meta,
+        );
+      });
+      reply.status(201);
+      return { employee, license: null, payment: null };
+    }
+
+    // Agent va yetkazuvchi uchun login + a'zolik + HR xodimi + profil bitta tranzaksiyada yaratiladi
+    if (body.role === SALES_AGENT_ROLE || body.role === DELIVERY_AGENT_ROLE) {
+      if (!body.name?.trim()) throw badRequest("Ism-familiya kiritilishi shart");
+      const created = await withTransaction(async (tx) => {
+        await resolveOwnedCompany(tx, user);
+        const tenant = await requireTenantForWrite(tx, user);
+        const shared = {
+          name: body.name!.trim(),
+          phone: body.phone,
+          password: body.password!,
+          ...(body.pin ? { pin: body.pin } : {}),
+          ...(body.additionalLicensePlanId ? { additionalLicensePlanId: body.additionalLicensePlanId } : {}),
+          ...(body.deviceCheck === false ? { deviceCheck: false } : {}),
+          ...(body.hireDate ? { hireDate: body.hireDate } : {}),
+        };
+        return body.role === SALES_AGENT_ROLE
+          ? createSalesAgent(tx, tenant, { ...shared, region: body.region ?? null, ...(body.monthlyTarget ? { monthlyTarget: body.monthlyTarget } : {}) }, meta)
+          : createDeliveryAgent(
+              tx,
+              tenant,
+              { ...shared, ...(body.vehicleType ? { vehicleType: body.vehicleType } : {}), ...(body.vehicleNumber ? { vehicleNumber: body.vehicleNumber } : {}) },
+              meta,
+            );
+      });
+      reply.status(201);
+      return {
+        employee: { id: created.userId, phone: body.phone, name: body.name, companyRole: body.role },
+        profile: created,
+        license: null,
+        payment: null,
+      };
+    }
 
     const { user: employee, role, license } = await withTransaction(async (tx) => {
       const company = await resolveOwnedCompany(tx, user);
-      return createEmployee(tx, user, company, body, requestMeta(req));
+      // HR kartochkasi faqat kerakli rollarda (agent, yetkazuvchi) yoki "dasturga kirmaydi" holatida
+      // yaratiladi — boshqa xodimni HR bo'limida mavjud kartochkaga bog'lash yo'li ochiq qoladi.
+      return createEmployee(tx, user, company, { ...body, password: body.password! }, meta);
     });
 
     reply.status(201);

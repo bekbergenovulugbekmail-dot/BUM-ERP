@@ -82,18 +82,19 @@ export default function PurchasePage() {
             invalidate={["/api/purchase/orders"]}
             canImport={can("purchase.create")}
             columns={[
-              { key: "number", aliases: ["Hujjat raqami", "number"] },
-              { key: "orderDate", aliases: ["Sana", "orderDate"] },
-              { key: "supplier", aliases: ["Ta'minotchi", "Ta'minotchi kodi", "supplier"] },
-              { key: "warehouse", aliases: ["Ombor", "warehouse"] },
-              { key: "product", aliases: ["SKU", "Mahsulot", "product"] },
-              { key: "quantity", aliases: ["Miqdor", "quantity"] },
-              { key: "unit", aliases: ["Birlik", "unit"] },
-              { key: "price", aliases: ["Narx", "price"] },
-              { key: "discountPercent", aliases: ["Chegirma %", "discountPercent"] },
-              { key: "taxRate", aliases: ["Soliq %", "taxRate"] },
-              { key: "expectedDate", aliases: ["Kutilgan sana", "expectedDate"] },
-              { key: "notes", aliases: ["Izoh", "notes"] },
+              // Bitta hujjatning har bir mahsuloti - alohida qator; hujjat raqami takrorlanadi
+              { key: "number", aliases: ["Hujjat raqami", "number"], example: "XB-2026-0001" },
+              { key: "orderDate", aliases: ["Sana", "orderDate"], required: true, example: "2026-09-01" },
+              { key: "supplier", aliases: ["Ta'minotchi", "Ta'minotchi kodi", "supplier"], required: true, example: "Nestle Uzbekistan" },
+              { key: "warehouse", aliases: ["Ombor", "warehouse"], required: true, example: "Asosiy ombor" },
+              { key: "product", aliases: ["SKU", "Mahsulot", "product"], required: true, example: "COLA-1L" },
+              { key: "quantity", aliases: ["Miqdor", "quantity"], required: true, example: "24" },
+              { key: "unit", aliases: ["Birlik", "unit"], example: "Dona" },
+              { key: "price", aliases: ["Narx", "price"], required: true, example: "8000" },
+              { key: "discountPercent", aliases: ["Chegirma %", "discountPercent"], example: "0" },
+              { key: "taxRate", aliases: ["Soliq %", "taxRate"], example: "0" },
+              { key: "expectedDate", aliases: ["Kutilgan sana", "expectedDate"], example: "2026-09-05" },
+              { key: "notes", aliases: ["Izoh", "notes"], example: "Shartnoma bo'yicha" },
             ]}
           />
           {can("purchase.create") && (

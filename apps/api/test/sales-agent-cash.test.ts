@@ -16,7 +16,7 @@ import { customerPayments, salesOrders } from "../src/db/schema/sales.js";
 import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
 import { buildServer } from "../src/server.js";
 import { LEGACY_VISIT_POLICY, setAgentPolicy } from "./agent-policy.js";
-import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, signedIn, salesRepOf } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 type Method = "GET" | "POST" | "PATCH" | "PUT";
@@ -71,8 +71,7 @@ beforeEach(async () => {
 /** Agent + uning logini; ish sessiyasi ochilgan. */
 async function agent(name: string) {
   const employee = await addEmployee(app, company, "Sotuv agenti");
-  const rep = await call(company.ownerCookie, "POST", "/api/distribution/sales-reps", { name, userId: employee.id });
-  expect(rep.statusCode).toBe(201);
+  const repId = await salesRepOf(app, company.ownerCookie, employee.id, { name });
   const session = await call(employee.cookie, "POST", "/api/sales-agent/work-session/start", {
     latitude: 41.3115,
     longitude: 69.2406,
@@ -80,7 +79,7 @@ async function agent(name: string) {
     recordedAt: new Date().toISOString(),
   });
   expect(session.statusCode).toBe(201);
-  return { cookie: employee.cookie, repId: rep.json().salesRep.id as string };
+  return { cookie: employee.cookie, repId: repId };
 }
 
 /** Qarzga sotilgan buyurtma — mijozda qarz qoladi. */

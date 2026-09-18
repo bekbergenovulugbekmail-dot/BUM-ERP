@@ -11,7 +11,7 @@ import { auditLogs } from "../src/db/schema/platform.js";
 import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
 import { buildServer } from "../src/server.js";
 import { LEGACY_VISIT_POLICY, setAgentPolicy } from "./agent-policy.js";
-import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, signedIn, salesRepOf } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 type Method = "GET" | "POST" | "PUT";
@@ -74,7 +74,7 @@ const near = { latitude: 41.3115, longitude: 69.2406, accuracy: 10 };
 
 async function agentWithStore(customer: object) {
   const employee = await addEmployee(app, company, "Sotuv agenti");
-  const repId = (await call(company.ownerCookie, "POST", "/api/distribution/sales-reps", { name: "Ali", userId: employee.id })).json().salesRep.id as string;
+  const repId = await salesRepOf(app, company.ownerCookie, employee.id, { name: "Ali" });
   await call(employee.cookie, "POST", "/api/sales-agent/work-session/start", { ...near, recordedAt: iso() });
   const customerId = (await call(company.ownerCookie, "POST", "/api/sales/customers", { name: "Baraka", latitude: 41.311081, longitude: 69.240562, ...customer }))
     .json().customer.id as string;

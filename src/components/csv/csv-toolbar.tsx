@@ -3,7 +3,10 @@
  *
  * Eksport — serverdan tayyor CSV (UTF-8 BOM bilan, Excel to'g'ri ochadi).
  *
- * "Shablon" — kutilayotgan sarlavhalar bilan bo'sh CSV (Excel to'g'ri ochishi uchun UTF-8 BOM).
+ * "Shablon" — kutilayotgan sarlavhalar bilan CSV. Ustunlar ALOHIDA kataklarda ochilishi uchun ajratgich
+ * nuqtali vergul (`;`) va UTF-8 BOM ishlatiladi (Excel'ning ruscha/o'zbekcha sozlamasi shuni kutadi).
+ * Majburiy ustun sarlavhasida `*` turadi, ikkinchi qator esa `#` bilan boshlanadigan NAMUNA —
+ * u import paytida o'tkazib yuboriladi, ya'ni o'chirish shart emas.
  *
  * Import uch bosqichli:
  *   1) fayl brauzerda `papaparse` bilan o'qiladi; sarlavhalar `columns` dagi nomlar bo'yicha avtomat moslanadi
@@ -36,6 +39,10 @@ export type CsvColumn = {
   key: string;
   /** Fayldagi sarlavha variantlari — birinchi topilgani olinadi. */
   aliases: string[];
+  /** Shablonda sarlavhaga `*` qo'yiladi (majburiylikni server tekshiradi). */
+  required?: boolean;
+  /** Shablondagi namuna qatorida shu katakda turadigan qiymat. */
+  example?: string;
 };
 
 type ImportIssue = { row: number; key?: string | null; sku?: string | null; message: string };
@@ -67,6 +74,10 @@ type Preview = {
   duplicates: ImportIssue[];
   warnings: ImportIssue[];
 };
+
+/** Shablondagi izoh/namuna qatori — import qilinmaydi. */
+const isExampleRow = (row: Record<string, string>, fields: string[]) =>
+  (row[fields[0] ?? ""] ?? "").trim().startsWith("#");
 
 /** Fayldagi qator raqami: sarlavha 1-qator, ma'lumot 2-qatordan; `offset` — bo'lak boshlanishi. */
 const fileLine = (offset: number, issue: ImportIssue) => offset + issue.row + 1;
@@ -153,11 +164,16 @@ export default function CsvToolbar({
     }
   };
 
-  /** Kutilayotgan sarlavhalar bilan bo'sh CSV — foydalanuvchi shuni to'ldirib qaytaradi. */
+  /**
+   * Shablon: sarlavhalar + bitta namuna qatori. Har bir ustun Excel'da ALOHIDA katakda chiqishi uchun
+   * ajratgich `;` (vergul emas) — vergulli fayl bitta katakka tushib qoladi.
+   */
   const handleTemplate = () => {
-    const header = columns.map((column) => column.aliases[0] ?? column.key);
+    const header = columns.map((column) => `${column.aliases[0] ?? column.key}${column.required ? "*" : ""}`);
+    // Namuna qatori `#` bilan boshlanadi — foydalanuvchi o'chirmasa ham import qilinmaydi
+    const sample = columns.map((column, index) => (index === 0 ? `# ${column.example ?? ""}` : (column.example ?? "")));
     // UTF-8 BOM — Excel o'zbekcha harflarni to'g'ri ochadi
-    const csv = "\uFEFF" + Papa.unparse([header]) + "\r\n";
+    const csv = "\uFEFF" + Papa.unparse([header, sample], { delimiter: ";" }) + "\r\n";
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
@@ -188,8 +204,8 @@ export default function CsvToolbar({
     return { created, valid, errors, duplicates, warnings };
   };
 
-  /** Fayl ustuni nomini maydon nomlari bilan solishtiradi (bo'shliq va registrga befarq). */
-  const norm = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
+  /** Fayl ustuni nomini maydon nomlari bilan solishtiradi (bo'shliq, registr va `*` ga befarq). */
+  const norm = (value: string) => value.trim().replace(/\*+$/, "").trim().toLowerCase().replace(/\s+/g, " ");
 
   const handleFile = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -201,7 +217,8 @@ export default function CsvToolbar({
       skipEmptyLines: true,
       complete: (parsed) => {
         const fields = (parsed.meta.fields ?? []).filter((field) => field.trim() !== "");
-        const raw = parsed.data;
+        // Shablondagi namuna qatori foydalanuvchida qolib ketsa ham import qilinmaydi
+        const raw = parsed.data.filter((row) => !isExampleRow(row, fields));
         if (raw.length === 0 || fields.length === 0) {
           toast.error("Faylda qator topilmadi");
           return;
@@ -305,6 +322,10 @@ export default function CsvToolbar({
                 Fayl sarlavhalari avtomat topildi. Mos kelmagan bo'lsa — har bir maydon uchun fayl ustunini o'zingiz
                 tanlang. Bu bosqichda bazaga hech narsa yozilmaydi.
               </DialogDescription>
+              <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                Shablonda har bir ustun alohida katakda turadi (ajratgich — nuqtali vergul). Sarlavhadagi{" "}
+                <b>*</b> — majburiy maydon. <b>#</b> bilan boshlangan namuna qatori import qilinmaydi.
+              </p>
             </DialogHeader>
 
             <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">

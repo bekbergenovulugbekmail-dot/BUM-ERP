@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Plus, Target, Percent, Phone, Mail, MapPin, Pencil, Trash2, KeyRound, Wallet, Loader2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -12,7 +13,6 @@ import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { useTranslation } from "react-i18next";
-import CreateAgentDialog from "@/components/sales-agent/create-agent-dialog.tsx";
 import { num, type SalesRep } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
@@ -118,9 +118,9 @@ function RepCashDialog({ rep, onClose }: { rep: SalesRep; onClose: () => void })
 type EmployeeOption = { id: string; name: string | null; phone: string; companyRole: string; membershipActive: boolean };
 
 export default function SalesRepsSection() {
+  const { lng = "uz" } = useParams<{ lng: string }>();
   const { t } = useTranslation("distribution");
   const { can } = usePermissions();
-  const [agentOpen, setAgentOpen] = useState(false);
   const reps = useApiQuery<{ salesReps: SalesRep[] }>("/api/distribution/sales-reps", { includeInactive: true }).data?.salesReps;
   // `users.view` bo'lmasa ro'yxat kelmaydi — bog'lash maydoni ko'rsatilmaydi
   const employees = useApiQuery<{ employees: EmployeeOption[] }>("/api/company/employees").data?.employees;
@@ -205,18 +205,13 @@ export default function SalesRepsSection() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">Savdo vakillari</h3>
-        <div className="flex gap-2">
-          {can("sales_agent.agents.manage") && (
-            <Button size="sm" onClick={() => setAgentOpen(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> {t("team.add")}
-            </Button>
-          )}
-          <Button size="sm" variant="secondary" onClick={() => { resetForm(); setCreateOpen(true); }}>
-            <Plus className="h-3.5 w-3.5 mr-1" /> Qo'shish
-          </Button>
-        </div>
+        {/* Savdo agenti xodim sifatida BITTA joyda qo'shiladi: Sozlamalar → Foydalanuvchilar ("Sotuv agenti" roli) */}
+        <Button size="sm" asChild>
+          <Link to={`/${lng}/settings`}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> Xodim qo'shish
+          </Link>
+        </Button>
       </div>
-      {agentOpen && <CreateAgentDialog onClose={() => setAgentOpen(false)} />}
 
       {!reps ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -225,7 +220,12 @@ export default function SalesRepsSection() {
       ) : reps.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <p>Savdo vakillari yo'q</p>
-          <Button size="sm" className="mt-3" onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4 mr-1" /> Qo'shish</Button>
+          <p className="mt-1 text-xs">
+            Savdo agenti Sozlamalar → Foydalanuvchilar bo'limida "Sotuv agenti" roli bilan qo'shiladi — profili shu yerda paydo bo'ladi.
+          </p>
+          <Button size="sm" className="mt-3" asChild>
+            <Link to={`/${lng}/settings`}><Plus className="h-4 w-4 mr-1" /> Xodim qo'shish</Link>
+          </Button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">

@@ -32,6 +32,14 @@ test("shablon yuklab olinadi va kutilayotgan sarlavhalarni o'z ichiga oladi", as
   expect(text).toContain("Nomi");
   expect(text).toContain("Telefon");
   expect(text).toContain("STIR");
+
+  // Har bir ustun ALOHIDA katakda ochilishi uchun ajratgich nuqtali vergul
+  const [header, sample] = text.replace(/^\ufeff/, "").split(/\r?\n/);
+  expect(header!.split(";").length).toBeGreaterThan(5);
+  expect(header).toContain("Nomi*");
+  // Ikkinchi qator — namuna, `#` bilan boshlanadi va import qilinmaydi
+  expect(sample!.startsWith("# ")).toBe(true);
+  expect(sample!.split(";").length).toBe(header!.split(";").length);
 });
 
 test("fayl sarlavhalari boshqacha bo'lsa — ustunlar qo'lda moslanadi va import o'tadi", async ({ page }) => {

@@ -428,6 +428,13 @@
       "when": 1789683318307,
       "tag": "0060_sales_order_source_bot",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1789705722589,
+      "tag": "0061_member_device_check",
+      "breakpoints": true
     }
   ]
 }

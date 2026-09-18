@@ -7,7 +7,7 @@ import { auditLogs } from "../src/db/schema/platform.js";
 import { agentLocationEvents, agentLocationLatest, agentLocations } from "../src/db/schema/sales-agent.js";
 import { buildServer } from "../src/server.js";
 import { purgeExpired } from "../src/shared/maintenance.js";
-import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, signedIn, salesRepOf } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 type Method = "GET" | "POST" | "PUT";
@@ -37,13 +37,12 @@ const call = (cookie: string, method: Method, url: string, payload?: object) =>
 
 async function agent(name: string, owner = company) {
   const employee = await addEmployee(app, owner, "Sotuv agenti");
-  const rep = await call(owner.ownerCookie, "POST", "/api/distribution/sales-reps", { name, userId: employee.id });
-  expect(rep.statusCode).toBe(201);
+  const repId = await salesRepOf(app, owner.ownerCookie, employee.id, { name });
   expect(
     (await call(employee.cookie, "POST", "/api/sales-agent/work-session/start", { latitude: 41.3115, longitude: 69.2406, accuracy: 10, recordedAt: new Date().toISOString() }))
       .statusCode,
   ).toBe(201);
-  return { cookie: employee.cookie, userId: employee.id, repId: rep.json().salesRep.id as string };
+  return { cookie: employee.cookie, userId: employee.id, repId: repId };
 }
 
 const iso = (offsetMs = 0) => new Date(Date.now() + offsetMs).toISOString();
@@ -88,11 +87,12 @@ describe("Agent lokatsiyasi", () => {
     const [aliAgain] = await db.select().from(agentLocationLatest).where(eq(agentLocationLatest.salesRepId, ali.repId));
     expect(aliAgain!.latitude).toBe("39.650000");
 
-    // Ruxsatsiz: kassir va bog'lanmagan agent
+    // Ruxsatsiz: kassir va faolsizlantirilgan agent (profil xodim bilan birga yaratiladi)
     const kassir = await addEmployee(app, company, "Kassir");
     expect((await send(kassir.cookie, { ...tashkent, accuracy: 10, recordedAt: iso() })).statusCode).toBe(403);
-    const unlinked = await addEmployee(app, company, "Sotuv agenti");
-    expect((await send(unlinked.cookie, { ...tashkent, accuracy: 10, recordedAt: iso() })).statusCode).toBe(403);
+    const disabled = await addEmployee(app, company, "Sotuv agenti");
+    await salesRepOf(app, company.ownerCookie, disabled.id, { isActive: false });
+    expect((await send(disabled.cookie, { ...tashkent, accuracy: 10, recordedAt: iso() })).statusCode).toBe(403);
 
     // Qurilma ruxsat bermadi — hodisa va audit
     expect((await call(ali.cookie, "POST", "/api/sales-agent/location/events", { type: "permission_denied" })).statusCode).toBe(204);

@@ -10,7 +10,7 @@ import { todayIso } from "../src/modules/finance/cash.service.js";
 import { buildServer } from "../src/server.js";
 import { storageProvider, type StorageClient, type StoredObject } from "../src/shared/storage.js";
 import { LEGACY_VISIT_POLICY, setAgentPolicy } from "./agent-policy.js";
-import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, signedIn, salesRepOf } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 type Method = "GET" | "POST" | "PUT";
@@ -55,13 +55,12 @@ const call = (cookie: string, method: Method, url: string, payload?: object) =>
 
 async function agent(name: string) {
   const employee = await addEmployee(app, company, "Sotuv agenti");
-  const rep = await call(company.ownerCookie, "POST", "/api/distribution/sales-reps", { name, userId: employee.id });
-  expect(rep.statusCode).toBe(201);
+  const repId = await salesRepOf(app, company.ownerCookie, employee.id, { name });
   expect(
     (await call(employee.cookie, "POST", "/api/sales-agent/work-session/start", { latitude: 41.3115, longitude: 69.2406, accuracy: 10, recordedAt: new Date().toISOString() }))
       .statusCode,
   ).toBe(201);
-  return { cookie: employee.cookie, repId: rep.json().salesRep.id as string };
+  return { cookie: employee.cookie, repId: repId };
 }
 
 async function store(body: object) {

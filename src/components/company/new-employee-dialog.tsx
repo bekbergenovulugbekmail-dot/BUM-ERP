@@ -1,9 +1,14 @@
 /**
- * Yangi dasturdan foydalanuvchi xodim qo'shish — `POST /api/company/employees` (faqat kompaniya egasi).
+ * Xodim qo'shish — BITTA joy (`POST /api/company/employees`, faqat kompaniya egasi).
+ *
+ * Kim bo'lishidan qat'i nazar — kassir, savdo agenti, yetkazuvchi yoki boshqa xodim — shu bitta
+ * forma ishlatiladi. Rol tanlanganda server shunga mos profilni ham o'zi yaratadi:
+ * "Sotuv agenti" → savdo agenti profili, "Dostavka agenti" → yetkazuvchi profili. Shuning uchun
+ * Distribyutsiya, Dostavka va HR bo'limlarida alohida "qo'shish" formasi yo'q.
  *
  * Litsenziya qoidasi shu yerda ko'rinadi: bo'sh included litsenziya bo'lsa xodim darhol yaratiladi,
  * tugagan bo'lsa server `license_limit_reached` qaytaradi va qo'shimcha litsenziya tarifi tanlanmaguncha
- * hech narsa yaratilmaydi. Ikki joydan ochiladi: Sozlamalar → Foydalanuvchilar va Obuna sahifasi.
+ * hech narsa yaratilmaydi.
  */
 import { useState } from "react";
 import { toast } from "sonner";
@@ -12,6 +17,7 @@ import { FULL_ACCESS_ROLES } from "@bum/shared";
 import { Input } from "@/components/ui/input.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Label } from "@/components/ui/label.tsx";
+import { Switch } from "@/components/ui/switch.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -22,8 +28,20 @@ import AdditionalLicensePicker from "@/components/subscription/additional-licens
 import { licenseLimitOf } from "@/lib/subscription.ts";
 
 const FULL_ACCESS = new Set<string>(FULL_ACCESS_ROLES);
-/** Xodim qo'shilgach obuna va litsenziya sanoqlari ham yangilanishi kerak. */
-const INVALIDATE = ["/api/company", "/api/subscription"];
+/** Xodim qo'shilgach obuna, litsenziya, agent va yetkazuvchi ro'yxatlari ham yangilanadi. */
+const INVALIDATE = ["/api/company", "/api/subscription", "/api/distribution", "/api/delivery", "/api/hr", "/api/sales-agent"];
+
+/** Shu rollar tanlansa server profilni ham yaratadi (nomlar serverdagi bilan bir xil). */
+const SALES_AGENT_ROLE = "Sotuv agenti";
+const DELIVERY_AGENT_ROLE = "Dostavka agenti";
+
+const VEHICLES = [
+  { value: "car", label: "Yengil avtomobil" },
+  { value: "motorcycle", label: "Mototsikl" },
+  { value: "bicycle", label: "Velosiped" },
+  { value: "foot", label: "Piyoda" },
+  { value: "truck", label: "Yuk mashinasi" },
+];
 
 type CompanyRole = { id: string; name: string; isActive: boolean };
 
@@ -49,18 +67,38 @@ function NewEmployeeForm({ onClose, onCreated }: Omit<Props, "open">) {
   const [password, setPassword] = useState("");
   const [pin, setPin] = useState("");
   const [pickedRole, setPickedRole] = useState<string | null>(null);
+  /** Xodim dasturga kiradimi: o'chirilsa login ham, litsenziya ham berilmaydi (faqat ro'yxatda qoladi). */
+  const [softwareAccess, setSoftwareAccess] = useState(true);
+  /** Qurilma tasdig'i: yangi telefon/kompyuterdan kirish egasining tasdig'ini talab qiladimi. */
+  const [deviceCheck, setDeviceCheck] = useState(true);
+  const [hireDate, setHireDate] = useState("");
+  const [region, setRegion] = useState("");
+  const [vehicleType, setVehicleType] = useState("");
+  const [vehicleNumber, setVehicleNumber] = useState("");
   const [error, setError] = useState<string | null>(null);
   /** Included litsenziya tugagan — qo'shimcha tarif tanlanmaguncha xodim yaratilmaydi. */
   const [limit, setLimit] = useState<ReturnType<typeof licenseLimitOf>>(null);
 
   const create = useApiMutation(
-    (body: { phone: string; password: string; name?: string; role?: string; pin?: string; additionalLicensePlanId?: string }) =>
-      api.post<{ payment: { id: string } | null }>("/api/company/employees", body),
+    (body: Record<string, unknown>) => api.post<{ payment: { id: string } | null }>("/api/company/employees", body),
     { invalidate: INVALIDATE },
   );
 
   // Sukut bo'yicha rol ro'yxatdan hisoblanadi — foydalanuvchi tanlaguncha
   const role = pickedRole ?? assignable.find((item) => item.name === "Kassir")?.name ?? assignable[0]?.name ?? "";
+  const isSalesAgent = role === SALES_AGENT_ROLE;
+  const isDeliveryAgent = role === DELIVERY_AGENT_ROLE;
+  /** Agent va yetkazuvchi profili ism bilan yaratiladi — bu rollarda ism majburiy. */
+  const nameRequired = isSalesAgent || isDeliveryAgent;
+
+  /** Muvaffaqiyat xabari: nima yaratilgani va keyin qayerda ko'rinishi. */
+  const created = (pendingPayment: boolean) => {
+    if (pendingPayment) return "Xodim qo'shildi. Qo'shimcha litsenziya to'lovi tasdiqlanguncha u dasturga kira olmaydi.";
+    if (!softwareAccess) return "Xodim qo'shildi (dasturga kirmaydi, litsenziya band qilmaydi)";
+    if (isSalesAgent) return "Savdo agenti qo'shildi — profili Distribyutsiya bo'limida ko'rinadi";
+    if (isDeliveryAgent) return "Yetkazuvchi qo'shildi — profili Dostavka bo'limida ko'rinadi";
+    return "Xodim qo'shildi";
+  };
 
   const submit = async (additionalLicensePlanId?: string) => {
     setError(null);
@@ -68,20 +106,23 @@ function NewEmployeeForm({ onClose, onCreated }: Omit<Props, "open">) {
       setError("PIN 4-8 ta raqamdan iborat bo'lishi kerak");
       return;
     }
+    if ((nameRequired || !softwareAccess) && !name.trim()) {
+      setError("Ism-familiya kiritilishi shart");
+      return;
+    }
     try {
       const result = await create.mutateAsync({
         phone: phone.trim(),
-        password,
+        softwareAccess,
+        ...(softwareAccess ? { password, pin: pin || undefined, deviceCheck, additionalLicensePlanId } : {}),
         name: name.trim() || undefined,
         role: role || undefined,
-        pin: pin || undefined,
-        additionalLicensePlanId,
+        ...(hireDate ? { hireDate } : {}),
+        ...(isSalesAgent && region.trim() ? { region: region.trim() } : {}),
+        ...(isDeliveryAgent && vehicleType ? { vehicleType } : {}),
+        ...(isDeliveryAgent && vehicleNumber.trim() ? { vehicleNumber: vehicleNumber.trim() } : {}),
       });
-      toast.success(
-        result.payment
-          ? "Xodim qo'shildi. Qo'shimcha litsenziya to'lovi tasdiqlanguncha u dasturga kira olmaydi."
-          : "Xodim qo'shildi",
-      );
+      toast.success(created(Boolean(result.payment)));
       onCreated?.();
       onClose();
     } catch (err) {
@@ -93,16 +134,29 @@ function NewEmployeeForm({ onClose, onCreated }: Omit<Props, "open">) {
 
   return (
     <Dialog open onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="sm:max-w-md" data-testid="new-employee-dialog">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md" data-testid="new-employee-dialog">
         <DialogHeader>
-          <DialogTitle>Yangi foydalanuvchi</DialogTitle>
+          <DialogTitle>Xodim qo'shish</DialogTitle>
           <DialogDescription>
-            Telefon raqam login bo'ladi. Har bir foydalanuvchi bitta litsenziyani band qiladi —
-            bo'sh litsenziya qolmagan bo'lsa qo'shimcha tarif tanlanadi.
+            Kassir, savdo agenti, yetkazuvchi — hammasi shu yerdan qo'shiladi. Telefon raqam login bo'ladi.
+            Har bir xodim bitta litsenziyani band qiladi — bo'sh litsenziya qolmagan bo'lsa qo'shimcha tarif tanlanadi.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
+          <div className="flex items-start justify-between gap-3 rounded-xl border border-border px-3 py-2.5">
+            <div className="min-w-0">
+              <Label htmlFor="new-employee-software" className="cursor-pointer text-sm font-medium">Dasturga kiradi</Label>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                O'chirilsa login va litsenziya berilmaydi — xodim faqat ro'yxatda qoladi (masalan yuk tashuvchi).
+              </p>
+            </div>
+            <Switch
+              id="new-employee-software"
+              checked={softwareAccess}
+              onCheckedChange={(value) => { setSoftwareAccess(value); setError(null); }}
+            />
+          </div>
           <div className="space-y-1.5">
             <Label htmlFor="new-employee-phone">Telefon raqam</Label>
             <Input
@@ -113,31 +167,35 @@ function NewEmployeeForm({ onClose, onCreated }: Omit<Props, "open">) {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="new-employee-name">Ism (ixtiyoriy)</Label>
+            <Label htmlFor="new-employee-name">Ism-familiya{nameRequired ? "" : " (ixtiyoriy)"}</Label>
             <Input id="new-employee-name" value={name} onChange={(event) => setName(event.target.value)} />
           </div>
+          {softwareAccess && (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="new-employee-password">Dastlabki parol</Label>
+                <Input
+                  id="new-employee-password"
+                  type="password"
+                  value={password}
+                  onChange={(event) => { setPassword(event.target.value); setError(null); }}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="new-employee-pin">PIN — ekran qulfi uchun (4-8 raqam, ixtiyoriy)</Label>
+                <Input
+                  id="new-employee-pin"
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={pin}
+                  onChange={(event) => { setPin(event.target.value.replace(/\D/g, "").slice(0, 8)); setError(null); }}
+                />
+              </div>
+            </>
+          )}
           <div className="space-y-1.5">
-            <Label htmlFor="new-employee-password">Dastlabki parol</Label>
-            <Input
-              id="new-employee-password"
-              type="password"
-              value={password}
-              onChange={(event) => { setPassword(event.target.value); setError(null); }}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="new-employee-pin">PIN — ekran qulfi uchun (4-8 raqam, ixtiyoriy)</Label>
-            <Input
-              id="new-employee-pin"
-              type="password"
-              inputMode="numeric"
-              autoComplete="off"
-              value={pin}
-              onChange={(event) => { setPin(event.target.value.replace(/\D/g, "").slice(0, 8)); setError(null); }}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="new-employee-role">Rol</Label>
+            <Label htmlFor="new-employee-role">{softwareAccess ? "Rol" : "Lavozim"}</Label>
             <Select value={role} onValueChange={setPickedRole}>
               <SelectTrigger className="w-full" id="new-employee-role">
                 <SelectValue placeholder="Rol tanlang" />
@@ -148,9 +206,73 @@ function NewEmployeeForm({ onClose, onCreated }: Omit<Props, "open">) {
                 ))}
               </SelectContent>
             </Select>
+            {(isSalesAgent || isDeliveryAgent) && (
+              <p className="text-xs text-muted-foreground">
+                {isSalesAgent
+                  ? "Savdo agenti profili va HR kartochkasi avtomatik yaratiladi."
+                  : "Yetkazuvchi profili va HR kartochkasi avtomatik yaratiladi."}
+              </p>
+            )}
           </div>
+
+          {(isSalesAgent || isDeliveryAgent) && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="new-employee-hire-date">Ishga kirgan sana</Label>
+                <Input id="new-employee-hire-date" type="date" value={hireDate} onChange={(event) => setHireDate(event.target.value)} />
+              </div>
+              {isSalesAgent && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="new-employee-region">Hudud (ixtiyoriy)</Label>
+                  <Input id="new-employee-region" maxLength={100} value={region} onChange={(event) => setRegion(event.target.value)} />
+                </div>
+              )}
+              {isDeliveryAgent && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="new-employee-vehicle">Transport (ixtiyoriy)</Label>
+                    <Select value={vehicleType} onValueChange={setVehicleType}>
+                      <SelectTrigger className="w-full" id="new-employee-vehicle">
+                        <SelectValue placeholder="Tanlang" />
+                      </SelectTrigger>
+                      <SelectContent position="popper">
+                        {VEHICLES.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label htmlFor="new-employee-vehicle-number">Davlat raqami (ixtiyoriy)</Label>
+                    <Input
+                      id="new-employee-vehicle-number"
+                      maxLength={32}
+                      value={vehicleNumber}
+                      onChange={(event) => setVehicleNumber(event.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {softwareAccess && (
+          <div className="flex items-start justify-between gap-3 rounded-xl border border-border px-3 py-2.5">
+            <div className="min-w-0">
+              <Label htmlFor="new-employee-device-check" className="cursor-pointer text-sm font-medium">
+                Qurilma tasdig'i
+              </Label>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Yoqilgan bo'lsa: xodim yangi telefon yoki kompyuterdan kirganda siz tasdiqlamaguncha kira olmaydi.
+                O'chirilgan bo'lsa: faqat parol tekshiriladi.
+              </p>
+            </div>
+            <Switch id="new-employee-device-check" checked={deviceCheck} onCheckedChange={setDeviceCheck} />
+          </div>
+          )}
+
           <p className="text-xs text-muted-foreground">
-            Filial, omborlar va mas'ul kategoriyalarni Sozlamalar → Foydalanuvchilar bo'limida "Tahrirlash" orqali belgilaysiz.
+            Filial, omborlar va mas'ul kategoriyalarni shu bo'limdagi "Tahrirlash" orqali belgilaysiz.
           </p>
 
           {limit && (
@@ -170,7 +292,7 @@ function NewEmployeeForm({ onClose, onCreated }: Omit<Props, "open">) {
           <Button
             data-testid="new-employee-submit"
             onClick={() => { void submit(); }}
-            disabled={create.isPending || !phone.trim() || !password}
+            disabled={create.isPending || !phone.trim() || (softwareAccess && !password)}
           >
             {create.isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
             Qo'shish

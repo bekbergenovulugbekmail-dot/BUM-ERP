@@ -117,6 +117,33 @@ export async function addEmployee(
   return { id: res.json().employee.id as string, phone: payload.phone, cookie };
 }
 
+/**
+ * Xodim roli bo'yicha profil ham yaratiladi ("Sotuv agenti" → savdo agenti profili), shuning uchun
+ * testlar uni QAYTA yaratmaydi: shu yerda avtomatik yaratilgan profil topiladi va kerak bo'lsa
+ * qo'shimcha maydonlari (nom, oylik plan, hudud) yangilanadi.
+ */
+export async function salesRepOf(
+  app: FastifyInstance,
+  ownerCookie: string,
+  userId: string,
+  patch: Record<string, unknown> = {},
+): Promise<string> {
+  const list = await app.inject({ method: "GET", url: "/api/distribution/sales-reps", headers: { cookie: ownerCookie } });
+  const reps = list.json().salesReps as { id: string; userId: string | null }[];
+  const rep = reps.find((row) => row.userId === userId);
+  if (!rep) throw new Error(`Savdo agenti profili topilmadi: ${userId}`);
+  if (Object.keys(patch).length > 0) {
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `/api/distribution/sales-reps/${rep.id}`,
+      headers: { cookie: ownerCookie },
+      payload: patch,
+    });
+    if (updated.statusCode !== 200) throw new Error(`Profilni yangilab bo'lmadi: ${updated.statusCode} ${updated.body}`);
+  }
+  return rep.id;
+}
+
 let phoneSeq = 0;
 
 /** Testlar orasida takrorlanmaydigan telefon raqam. */

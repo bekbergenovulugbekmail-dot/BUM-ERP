@@ -6,7 +6,7 @@ import { auditLogs } from "../src/db/schema/platform.js";
 import { agentLocationLatest, agentLocations, agentWorkSessions } from "../src/db/schema/sales-agent.js";
 import { buildServer } from "../src/server.js";
 import { purgeExpired } from "../src/shared/maintenance.js";
-import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, signedIn, salesRepOf } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 type Method = "GET" | "POST" | "PATCH";
@@ -38,8 +38,8 @@ const actionCount = (action: string) => db.$count(auditLogs, eq(auditLogs.action
 
 async function agent() {
   const employee = await addEmployee(app, company, "Sotuv agenti");
-  const rep = await call(company.ownerCookie, "POST", "/api/distribution/sales-reps", { name: "Ali", userId: employee.id });
-  return { cookie: employee.cookie, repId: rep.json().salesRep.id as string };
+  const repId = await salesRepOf(app, company.ownerCookie, employee.id, { name: "Ali" });
+  return { cookie: employee.cookie, repId: repId };
 }
 
 describe("Ish sessiyasi va lokatsiya maxfiyligi", () => {

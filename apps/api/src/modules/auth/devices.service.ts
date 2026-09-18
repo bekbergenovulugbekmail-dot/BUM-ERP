@@ -13,7 +13,7 @@
  */
 import { and, desc, eq, sql } from "drizzle-orm";
 import { AppError } from "@bum/shared";
-import { userDevices } from "../../db/schema/platform.js";
+import { companyMembers, userDevices } from "../../db/schema/platform.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 
 export type DeviceContext = {
@@ -88,6 +88,21 @@ export async function registerDevice(tx: Tx, userId: string, context: DeviceCont
   });
 
   return first ? "allowed" : "pending";
+}
+
+/**
+ * Qurilma tasdig'i shu foydalanuvchiga qo'llanadimi. Xodim kartochkasidagi "Qurilma tasdig'i" belgisi
+ * o'chirilgan bo'lsa — qurilma baribir ro'yxatga olinadi, lekin kirish to'sib qo'yilmaydi.
+ * A'zolik topilmasa (platforma admini, kompaniyasiz foydalanuvchi) — tekshiruv KUCHDA qoladi.
+ */
+export async function deviceCheckRequired(conn: DbOrTx, user: { id: string; activeCompanyId: string | null }): Promise<boolean> {
+  if (!user.activeCompanyId) return true;
+  const [member] = await conn
+    .select({ deviceCheck: companyMembers.deviceCheck })
+    .from(companyMembers)
+    .where(and(eq(companyMembers.companyId, user.activeCompanyId), eq(companyMembers.userId, user.id)))
+    .limit(1);
+  return member?.deviceCheck !== false;
 }
 
 /** Rad etish xatosi — yozuv saqlangandan KEYIN tashlanadi. */

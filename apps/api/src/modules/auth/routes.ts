@@ -22,7 +22,7 @@ import { z } from "zod";
 import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { requestMeta, writeAuditLog } from "../../shared/audit.js";
-import { deviceError, registerDevice } from "./devices.service.js";
+import { deviceCheckRequired, deviceError, registerDevice } from "./devices.service.js";
 import { smsProvider } from "../../shared/sms.js";
 import { changeOwnPassword, verifyCurrentPassword } from "../users/user-admin.service.js";
 import { confirmPasswordReset, requestPasswordReset } from "./password-reset.service.js";
@@ -102,7 +102,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     };
     // Qurilma yozuvi ALOHIDA tranzaksiyada saqlanadi — rad etilsa ham egasi uni ro'yxatda ko'radi
     const decision = await withTransaction((tx) => registerDevice(tx, auth.user.id, device));
-    if (decision !== "allowed") throw deviceError(decision === "revoked");
+    // Xodim kartochkasida qurilma tasdig'i o'chirilgan bo'lsa — qurilma yoziladi, lekin kirish to'silmaydi
+    if (decision !== "allowed" && (await deviceCheckRequired(db, auth.user))) throw deviceError(decision === "revoked");
 
     const { session, me } = await withTransaction((tx) => startSession(tx, auth, meta));
 

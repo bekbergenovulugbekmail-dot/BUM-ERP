@@ -141,16 +141,16 @@ export default function ProductsPage() {
               invalidate={["/api/catalog/products"]}
               canImport={perms.create}
               columns={[
-                { key: "name", aliases: ["Nomi", "name"] },
-                { key: "sku", aliases: ["SKU", "sku"] },
-                { key: "barcode", aliases: ["Shtrix-kod", "barcode"] },
+                { key: "name", aliases: ["Nomi", "name"], required: true, example: "Coca Cola 1L" },
+                { key: "sku", aliases: ["SKU", "sku"], example: "COLA-1L" },
+                { key: "barcode", aliases: ["Shtrix-kod", "barcode"], example: "4780000000001" },
                 // Eksport `shortName` yozadi ("d"); to'liq nom ("Dona") ham qabul qilinadi
-                { key: "unit", aliases: ["O'lchov birligi", "unit"] },
-                { key: "purchasePrice", aliases: ["Kirim narxi", "purchasePrice"] },
-                { key: "salesPrice", aliases: ["Sotuv narxi", "salesPrice"] },
-                { key: "minStock", aliases: ["Min. qoldiq", "minStock"] },
-                { key: "category", aliases: ["Kategoriya", "category"] },
-                { key: "brand", aliases: ["Brend", "brand"] },
+                { key: "unit", aliases: ["O'lchov birligi", "unit"], example: "Dona" },
+                { key: "purchasePrice", aliases: ["Kirim narxi", "purchasePrice"], example: "8000" },
+                { key: "salesPrice", aliases: ["Sotuv narxi", "salesPrice"], example: "10000" },
+                { key: "minStock", aliases: ["Min. qoldiq", "minStock"], example: "10" },
+                { key: "category", aliases: ["Kategoriya", "category"], example: "Ichimliklar" },
+                { key: "brand", aliases: ["Brend", "brand"], example: "Coca Cola" },
               ]}
             />
             {perms.create && (

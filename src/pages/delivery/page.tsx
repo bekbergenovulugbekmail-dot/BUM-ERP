@@ -18,6 +18,7 @@ import { formatMoney } from "@/hooks/use-currencies.ts";
 import { DeliveryRealtimeContext, useDeliveryRealtime } from "@/lib/delivery/realtime.ts";
 import { num } from "@/lib/delivery/types.ts";
 import { cn } from "@/lib/utils.ts";
+import PageTabs from "@/components/page-tabs.tsx";
 import AgentsSection from "./_components/agents-section.tsx";
 import AutoAssignDialog from "./_components/auto-assign-dialog.tsx";
 import ControlSection from "./_components/control-section.tsx";
@@ -81,23 +82,11 @@ export default function DeliveryPage() {
           )}
         </div>
 
-        <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
-          <div className="flex w-max gap-1 rounded-xl bg-muted p-1">
-            {tabs.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => setTab(item.key)}
-                className={cn(
-                  "flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-sm font-medium transition-colors",
-                  active === item.key ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <item.icon className="h-4 w-4" /> {t(`sv.tab.${item.key}`)}
-              </button>
-            ))}
-          </div>
-        </div>
+        <PageTabs
+          tabs={tabs.map((item) => ({ key: item.key, label: t(`sv.tab.${item.key}`), icon: item.icon }))}
+          value={active}
+          onChange={setTab}
+        />
 
         {active === "today" && <TodaySection money={money} onOpenTasks={openTasks} onOpenControl={() => setTab("control")} />}
         {active === "tasks" && <TasksSection filters={filters} onFiltersChange={setFilters} money={money} onOpenTask={setOpenTaskId} />}

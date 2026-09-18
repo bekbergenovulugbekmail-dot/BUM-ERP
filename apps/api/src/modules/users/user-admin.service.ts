@@ -387,6 +387,8 @@ export type CompanyAccountInput = NewAccount & {
   employeeId?: string | null;
   /** Included litsenziyalar tugagan bo'lsa — qo'shimcha litsenziya tarifi. */
   additionalLicensePlanId?: string | null;
+  /** Qurilma tasdig'i shu xodimga qo'llanadimi (standart — ha). */
+  deviceCheck?: boolean;
 };
 
 export type CompanyAccount = { user: SessionUser; role: string; license: AssignLicenseResult };
@@ -429,6 +431,7 @@ export async function createCompanyAccount(
     companyRole: role.name,
     roleId: role.id,
     branchId: branch?.id ?? null,
+    deviceCheck: input.deviceCheck !== false,
     joinedAt: new Date(),
   });
   await tx
@@ -504,6 +507,7 @@ export async function listCompanyMembers(conn: DbOrTx, companyId: string) {
       allowedWarehouseIds: companyMembers.allowedWarehouseIds,
       allowedCategoryIds: companyMembers.allowedCategoryIds,
       membershipActive: companyMembers.isActive,
+      deviceCheck: companyMembers.deviceCheck,
       joinedAt: companyMembers.joinedAt,
       lastSeenAt: users.lastSeenAt,
       licenseId: licenses.id,

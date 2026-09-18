@@ -37,6 +37,8 @@ export type MemberPatch = {
   /** Mas'ul kategoriyalar (ichki kategoriyalari bilan); bo'sh massiv = barcha kategoriyalar. */
   allowedCategoryIds?: string[];
   isActive?: boolean;
+  /** Qurilma tasdig'i shu xodimga qo'llanadimi. */
+  deviceCheck?: boolean;
   /** Qayta yoqishda included litsenziya tugagan bo'lsa — qo'shimcha litsenziya tarifi. */
   additionalLicensePlanId?: string | null;
 };
@@ -176,6 +178,11 @@ export async function ownerUpdateMember(
       set.allowedCategoryIds = ids;
       changes.push("categories");
     }
+  }
+
+  if (patch.deviceCheck !== undefined && patch.deviceCheck !== membership.deviceCheck) {
+    set.deviceCheck = patch.deviceCheck;
+    changes.push("deviceCheck");
   }
 
   if (patch.isActive !== undefined && patch.isActive !== membership.isActive) {
