@@ -88,6 +88,16 @@ async function readOrder(page: Page, orderId: string) {
   }, orderId);
 }
 
+/** Demo mahsulotning umumiy qoldig'i (qaytish tekshiruvi uchun). */
+async function readStock(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    const products = (await (await fetch("/api/catalog/products?limit=50")).json()).products as { id: string; name: string }[];
+    const product = products.find((row) => /Nestle suv/.test(row.name)) ?? products[0];
+    const rows = (await (await fetch(`/api/inventory/stock/products/${product.id}`)).json()).stock as { quantity: string }[];
+    return rows.reduce((sum, row) => sum + Number(row.quantity), 0);
+  });
+}
+
 /** Yetkazuvchi ish sessiyasini ochadi. */
 async function startWork(page: Page) {
   await page.goto(appPath("delivery-agent/dashboard"));
@@ -197,5 +207,76 @@ test.describe("Yetkazuvchi ish joyi (brauzer)", () => {
     await page.goto(appPath("dashboard"));
     const order = await readOrder(page, fixture.orderId);
     expect(order.total).toBe(fixture.total);
+  });
+
+  test("qisman yetkazish: 2 dan 1 dona — QISMAN YETKAZILDI, qolgani supervayzer qabulidan keyin omborga qaytadi", async ({ page, context }) => {
+    await login(page, "owner");
+    await page.goto(appPath("dashboard"));
+    const fixture = await makeTask(page);
+    const stockBefore = await readStock(page);
+
+    await context.grantPermissions(["geolocation"]);
+    await context.setGeolocation({ latitude: SHOP.latitude, longitude: SHOP.longitude, accuracy: 10 });
+    await login(page, "dostavchi");
+    await startWork(page);
+    await page.goto(appPath(`delivery-agent/tasks/${fixture.taskId}`));
+
+    const step = async (button: RegExp, nextStatus: string) => {
+      await page.getByRole("button", { name: button }).first().click();
+      await expect(page.getByText(nextStatus).first()).toBeVisible({ timeout: 30_000 });
+    };
+    await step(/QABUL QILISH/, "Qabul qilingan");
+    await step(/YO'LGA CHIQISH/, "Yo'lda");
+    await step(/MIJOZGA YETDIM/, "Mijozda");
+    await step(/TOPSHIRISHNI BOSHLASH/, "Topshirilmoqda");
+
+    await page.getByRole("button", { name: /YETKAZILDI — TASDIQLASH/ }).first().click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    // Rejada 2 dona edi — mijoz 1 donani oldi
+    const qty = dialog.getByRole("textbox", { name: /Yetkazilgan miqdor/ }).first();
+    await qty.fill("1");
+    await expect(dialog.getByText("Qisman", { exact: true })).toBeVisible();
+    // Kutilgan to'lov ham kamayadi, kam yig'ilgan farq supervayzerga boradi
+    await expect(dialog.getByText(/To'lov kam yig'ilgan/)).toBeVisible();
+    // Miqdor kam bo'lgani uchun tugma "Qisman yetkazildi" ga o'zgaradi
+    await dialog.getByRole("button", { name: "Qisman yetkazildi" }).click();
+    await expect(dialog).toBeHidden({ timeout: 30_000 });
+    await expect(page.getByText("Qisman yetkazildi").first()).toBeVisible({ timeout: 30_000 });
+    await page.screenshot({ path: "e2e/.screenshots/delivery-partial.png" });
+
+    // ── Asl buyurtma o'zgarmaydi; tovar hali yetkazuvchida (avtomatik qaytmaydi) ──
+    await login(page, "owner");
+    await page.goto(appPath("dashboard"));
+    const order = await readOrder(page, fixture.orderId);
+    expect(order.total, "qisman yetkazish buyurtma summasini o'zgartirmasligi kerak").toBe(fixture.total);
+    // Tovar yetkazish jarayonida ombordan chiqadi (rejadagi 2 dona)
+    const stockMid = await readStock(page);
+    expect(stockMid, `zaxira: oldin=${stockBefore} qisman yetkazishdan keyin=${stockMid}`).toBe(stockBefore - 2);
+
+    // ── Supervayzer qaytgan tovarni omborga qabul qiladi (RETURNED oqimi) ──
+    const returned = await page.evaluate(async (taskId) => {
+      const res = await fetch(`/api/delivery/tasks/${taskId}/return`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refundMethod: "balance", reason: "E2E: qolgan tovar omborga" }),
+      });
+      return { status: res.status, body: (await res.text()).slice(0, 200) };
+    }, fixture.taskId);
+    expect(returned.status, returned.body).toBe(200);
+    // Faqat yetkazilgan 1 dona sotilgan bo'lib qoladi — qolgan 1 dona omborga qaytadi
+    const stockAfterReturn = await readStock(page);
+    expect(stockAfterReturn, `qaytarishdan keyin: ${stockAfterReturn} (kutilgan ${stockBefore - 1})`).toBe(stockBefore - 1);
+
+    // Ikkinchi marta qaytarib bo'lmaydi
+    const again = await page.evaluate(async (taskId) => {
+      const res = await fetch(`/api/delivery/tasks/${taskId}/return`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refundMethod: "balance" }),
+      });
+      return res.status;
+    }, fixture.taskId);
+    expect(again, "takroriy qaytarish rad etilishi kerak").toBeGreaterThanOrEqual(400);
   });
 });
