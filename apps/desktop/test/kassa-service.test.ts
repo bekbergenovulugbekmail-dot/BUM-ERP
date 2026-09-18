@@ -159,33 +159,37 @@ beforeEach(() => {
   };
 });
 
-const service = (api: ReturnType<typeof fakeApi>) => new KassaService(store, vault, { appVersion: "0.1.0", platform: "win32", fetchImpl: api.fetchImpl });
+/** Server manzili endi kassirdan emas, sozlamadan keladi. */
+const service = (api: ReturnType<typeof fakeApi>, apiUrl = "https://bum-erp.uz") =>
+  new KassaService(store, vault, { appVersion: "0.1.0", platform: "win32", fetchImpl: api.fetchImpl, apiUrl });
 
 describe("Kassa xizmati (main jarayon)", () => {
   it("ro'yxatdan o'tkazish: https talab, token saqlanadi, darhol sinxron", async () => {
     const api = fakeApi();
     const kassa = service(api);
     expect(kassa.status().registered).toBe(false);
-    await expect(kassa.setupOptions({ apiUrl: "http://bum-erp.uz", phone: "+998900000001", password: "right" })).rejects.toBeInstanceOf(KassaError);
-    await expect(kassa.setupOptions({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "wrong" })).rejects.toMatchObject({ status: 401 });
+    // Sozlamadagi manzil https bo'lmasa — rad etiladi (kassir manzilni kiritmaydi)
+    await expect(service(api, "http://bum-erp.uz").setupOptions({ phone: "+998900000001", password: "right" })).rejects.toBeInstanceOf(KassaError);
+    await expect(kassa.setupOptions({ phone: "+998900000001", password: "wrong" })).rejects.toMatchObject({ status: 401 });
 
-    const options = await kassa.setupOptions({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right" });
+    const options = await kassa.setupOptions({ phone: "+998900000001", password: "right" });
     expect(options.warehouses[0]!.id).toBe("w1");
-    const status = await kassa.register({ apiUrl: "https://bum-erp.uz/uz/login", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    const status = await service(api, "https://bum-erp.uz/uz/login").register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     expect(status).toMatchObject({ registered: true, apiUrl: "https://bum-erp.uz", device: { code: "K01" }, company: { name: "Bonnu" } });
     expect(vault.value).toBe(api.state.token);
     expect(api.state.pulls).toBe(1);
     expect(status.counts.products).toBe(1);
 
-    // Qayta ishga tushganda token va manzil lokal bazadan
-    expect(service(api).status().registered).toBe(true);
-    await expect(kassa.register({ apiUrl: "https://bum-erp.uz", phone: "x", password: "right", warehouseId: "w1", name: "K" })).rejects.toMatchObject({ code: "CONFLICT" });
+    // Qayta ishga tushganda token va manzil lokal bazadan — qayta ro'yxatdan o'tkazib bo'lmaydi
+    const restarted = service(api);
+    expect(restarted.status().registered).toBe(true);
+    await expect(restarted.register({ phone: "x", password: "right", warehouseId: "w1", name: "K" })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   it("mavzu: ustuvorlik (qulf → kassir → kompaniya standarti → Windows), qayta kirish va ilova qayta ishga tushishida tiklanadi, standartga qaytish, zichlik va shrift, eski nomlar, maxsus mavzu", async () => {
     const api = fakeApi();
     const kassa = service(api);
-    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
     const userId = kassa.status().cashier!.userId;
     const setAppearance = (appearance: Record<string, unknown>) =>
@@ -257,7 +261,7 @@ describe("Kassa xizmati (main jarayon)", () => {
     const options = { appVersion: "0.1.0", platform: "win32", fetchImpl, imageDir };
     const kassa = new KassaService(store, vault, options);
     try {
-      await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+      await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
       await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
       const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
       store.applyPull(
@@ -354,7 +358,7 @@ describe("Kassa xizmati (main jarayon)", () => {
   it("tarozi: ruxsatlar, etiketka shtrix-kodi (PLU va og'irlik), simulyator og'irligi, o'zgargan mahsulot sinxrondan keyin taroziga", async () => {
     const api = fakeApi();
     const kassa = service(api);
-    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
     store.applyPull(
       pullResponse({
@@ -398,30 +402,34 @@ describe("Kassa xizmati (main jarayon)", () => {
   it("server manzili: sxemasiz — https qo'shiladi; sertifikat mos emas yoki domen topilmadi — aniq xabar", async () => {
     const api = fakeApi();
     const requested: string[] = [];
-    const tracking = service({ ...api, fetchImpl: (async (input: URL | RequestInfo, init?: RequestInit) => {
+    const tracked = { ...api, fetchImpl: (async (input: URL | RequestInfo, init?: RequestInit) => {
       requested.push(String(input));
       return api.fetchImpl(input, init);
-    }) as typeof fetch });
-    await expect(tracking.setupOptions({ apiUrl: "  www.bum-erp.uz ", phone: "+998900000001", password: "right" })).resolves.toMatchObject({ warehouses: [{ id: "w1" }] });
+    }) as typeof fetch };
+    // Sozlamadagi manzil sxemasiz bo'lsa — https qo'shiladi
+    await expect(service(tracked, "  www.bum-erp.uz ").setupOptions({ phone: "+998900000001", password: "right" })).resolves.toMatchObject({
+      warehouses: [{ id: "w1" }],
+    });
     expect(requested).toEqual(["https://www.bum-erp.uz/api/pos-device/setup/options"]);
-    await expect(tracking.setupOptions({ apiUrl: "kassa", phone: "+998900000001", password: "right" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(service(tracked, "kassa").setupOptions({ phone: "+998900000001", password: "right" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
     const failing = (code: string) =>
       new KassaService(store, vault, {
         appVersion: "0.1.0",
         platform: "win32",
+        apiUrl: "bum-erp.uz",
         fetchImpl: (async () => {
           throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(code), { code }) });
         }) as typeof fetch,
       });
-    await expect(failing("ERR_TLS_CERT_ALTNAME_INVALID").setupOptions({ apiUrl: "bum-erp.uz", phone: "+998900000001", password: "right" })).rejects.toMatchObject({
+    await expect(failing("ERR_TLS_CERT_ALTNAME_INVALID").setupOptions({ phone: "+998900000001", password: "right" })).rejects.toMatchObject({
       name: "OfflineError",
       message: expect.stringContaining("sertifikati bu manzilga mos emas"),
     });
-    await expect(failing("ENOTFOUND").setupOptions({ apiUrl: "bum-erp.uz", phone: "+998900000001", password: "right" })).rejects.toMatchObject({
+    await expect(failing("ENOTFOUND").setupOptions({ phone: "+998900000001", password: "right" })).rejects.toMatchObject({
       message: "Server topilmadi — manzilni tekshiring",
     });
-    await expect(failing("ECONNRESET").setupOptions({ apiUrl: "bum-erp.uz", phone: "+998900000001", password: "right" })).rejects.toMatchObject({
+    await expect(failing("ECONNRESET").setupOptions({ phone: "+998900000001", password: "right" })).rejects.toMatchObject({
       message: "Server bilan aloqa yo'q",
     });
   });
@@ -429,7 +437,7 @@ describe("Kassa xizmati (main jarayon)", () => {
   it("kassir: birinchi kirish onlayn PIN bilan, keyin offline PIN; o'chirilgan kassir kira olmaydi; smena navbatga", async () => {
     const api = fakeApi();
     const kassa = service(api);
-    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
 
     await expect(kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "12" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(kassa.firstLogin({ phone: "+998901112233", password: "xato", pin: "1234" })).rejects.toMatchObject({ status: 401 });
@@ -464,7 +472,7 @@ describe("Kassa xizmati (main jarayon)", () => {
   it("chek offline: K01 raqami, qoldiq kutilmoqda, qaytim, kechiktirish, qaytarish, rad etilganini qayta yuborish va bekor qilish", async () => {
     const api = fakeApi();
     const kassa = service(api);
-    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
     const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
     store.saveCashier({ ...cashier, permissions: ["pos.use"] });
@@ -548,7 +556,7 @@ describe("Kassa xizmati (main jarayon)", () => {
   it("karta terminallari: config bilan keladi, chekda terminal bo'yicha qismlar, navbatdagi amalda terminalId; noma'lum terminal va naqdda terminal rad", async () => {
     const api = fakeApi();
     const kassa = service(api);
-    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
     const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
     store.saveCashier({ ...cashier, permissions: ["pos.use"] });
@@ -626,7 +634,7 @@ describe("Kassa xizmati (main jarayon)", () => {
   it("bank hisoblari: config bilan keladi, bank qismi tanlangan hisobga, chekda hisob nomi; kassada yo'q hisob va naqdda hisob rad", async () => {
     const api = fakeApi();
     const kassa = service(api);
-    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
     store.saveCashier({ id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true, permissions: ["pos.use"] });
     const bankAccounts = [
@@ -703,7 +711,7 @@ describe("Kassa xizmati (main jarayon)", () => {
   it("kassa bo'limi: kirim-chiqim, xarajat ruxsati, mijoz to'lovi (qarzdan ortig'i balansga), X/Z-hisobot, tarix, navbat tartibi", async () => {
     const api = fakeApi();
     const kassa = service(api);
-    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
     const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
     store.saveCashier({ ...cashier, permissions: ["pos.use"] });
@@ -900,7 +908,7 @@ describe("Kassa xizmati (main jarayon)", () => {
   it("xarid bo'limi: ta'minotchi (offline), xarid va qoldiq, darhol to'lov smenadan, qaytarish va qaytgan pul, ta'minotchiga to'lov, X-hisobot", async () => {
     const api = fakeApi();
     const kassa = service(api);
-    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
     const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
     store.saveCashier({ ...cashier, permissions: ["pos.use"] });
@@ -995,7 +1003,7 @@ describe("Kassa xizmati (main jarayon)", () => {
   it("ma'lumotlar: jismoniy/yuridik mijoz va ta'minotchi, offline tahrir faqat o'zgargan maydonlar bilan, narxlar va ruxsatlar", async () => {
     const api = fakeApi();
     const kassa = service(api);
-    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
     const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
     store.saveCashier({ ...cashier, permissions: ["pos.use"] });
@@ -1087,8 +1095,9 @@ describe("Kassa xizmati (main jarayon)", () => {
       },
       downloadDir: tmpdir(),
       releasePublicKeys: [releaseKey.publicKey.export({ format: "der", type: "spki" }).toString("base64")],
+      apiUrl: "https://bum-erp.uz",
     });
-    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
     api.state.online = false;
     store.applyPull(
@@ -1209,7 +1218,7 @@ describe("Kassa xizmati (main jarayon)", () => {
   it("analitika: offline — shu kassa hujjatlaridan (tushum, qaytarish, taxminiy foyda, to'lov turlari, qarzdorlik, mahsulot va kategoriya); onlayn — serverdan", async () => {
     const api = fakeApi();
     const kassa = service(api);
-    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
     const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
     store.saveCashier({ ...cashier, permissions: ["pos.use", "sales.refund"] });
@@ -1286,7 +1295,7 @@ describe("Kassa xizmati (main jarayon)", () => {
   it("etiketka: kontekstda shablonlar, mahsulotlar ID bo'yicha, etiketka printeri sozlamasi, o'lcham tekshiruvi va chop etish", async () => {
     const api = fakeApi();
     const kassa = service(api);
-    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
     api.state.online = false;
     store.applyPull(pullResponse({ products: { rows: [product("p1", "Cola"), product("p2", "Pepsi", { isActive: false })] } }));
@@ -1329,7 +1338,7 @@ describe("Kassa xizmati (main jarayon)", () => {
   it("ombor bo'limi: qoldiqlar va qiymat, hisobdan chiqarish, ko'chirish, inventarizatsiya qoralamasi va farq, harakatlar, navbat", async () => {
     const api = fakeApi();
     const kassa = service(api);
-    await kassa.register({ apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
     await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
     const cashier = { id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true };
     store.saveCashier({ ...cashier, permissions: ["pos.use"] });

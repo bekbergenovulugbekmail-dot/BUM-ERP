@@ -7,9 +7,11 @@ import { call, errorText } from "../kassa.ts";
 
 type Options = KassaChannels["setup:options"]["output"];
 
-/** Qurilmani ro'yxatdan o'tkazish: server, rahbar telefon/parol → kompaniya va ombor → kassa nomi. */
+/**
+ * Qurilmani ro'yxatdan o'tkazish: rahbar telefoni va paroli → kompaniya va ombor → kassa nomi.
+ * Server manzili so'ralmaydi — ilovaga kiritilgan (asosiy jarayondagi sozlama).
+ */
 export default function SetupScreen({ onDone }: { onDone: (status: AppStatus) => void }) {
-  const [apiUrl, setApiUrl] = useState("https://www.bum-erp.uz");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [options, setOptions] = useState<Options | null>(null);
@@ -33,7 +35,7 @@ export default function SetupScreen({ onDone }: { onDone: (status: AppStatus) =>
 
   const loadOptions = (company?: string) =>
     run(async () => {
-      const result = await call("setup:options", { apiUrl, phone, password, ...(company ? { companyId: company } : {}) });
+      const result = await call("setup:options", { phone, password, ...(company ? { companyId: company } : {}) });
       setOptions(result);
       setCompanyId(result.company?.id);
       setWarehouseId(result.warehouses.find((w) => w.isDefault)?.id ?? result.warehouses[0]?.id ?? "");
@@ -41,7 +43,7 @@ export default function SetupScreen({ onDone }: { onDone: (status: AppStatus) =>
 
   const register = () =>
     run(async () => {
-      onDone(await call("setup:register", { apiUrl, phone, password, companyId, warehouseId, name: name.trim() }));
+      onDone(await call("setup:register", { phone, password, companyId, warehouseId, name: name.trim() }));
     });
 
   return (
@@ -53,11 +55,6 @@ export default function SetupScreen({ onDone }: { onDone: (status: AppStatus) =>
         </div>
 
         <div className="space-y-3">
-          <div className="space-y-1">
-            <Label htmlFor="setup-url">Server manzili</Label>
-            <Input id="setup-url" value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} disabled={Boolean(options)} />
-            <p className="text-xs text-muted-foreground">Masalan: https://www.bum-erp.uz</p>
-          </div>
           <div className="space-y-1">
             <Label htmlFor="setup-phone">Rahbar telefoni</Label>
             <Input id="setup-phone" inputMode="tel" placeholder="+998 90 123 45 67" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={Boolean(options)} />

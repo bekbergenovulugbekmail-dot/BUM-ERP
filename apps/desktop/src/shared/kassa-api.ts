@@ -717,10 +717,10 @@ export type KassaChannels = {
   "app:quit": { input: void; output: void };
   "device:unpair": { input: void; output: { status: AppStatus; serverRevoked: boolean } };
   "setup:options": {
-    input: { apiUrl: string; phone: string; password: string; companyId?: string };
+    input: { phone: string; password: string; companyId?: string };
     output: { companies: { id: string; name: string }[]; company: { id: string; name: string } | null; warehouses: { id: string; name: string; code: string; isDefault: boolean }[] };
   };
-  "setup:register": { input: { apiUrl: string; phone: string; password: string; companyId?: string; warehouseId: string; name: string }; output: AppStatus };
+  "setup:register": { input: { phone: string; password: string; companyId?: string; warehouseId: string; name: string }; output: AppStatus };
   "cashier:list": { input: void; output: (CashierRecord & { hasPin: boolean })[] };
   "cashier:first-login": { input: { phone: string; password: string; pin: string }; output: AppStatus };
   "cashier:unlock": { input: { userId: string; pin: string }; output: AppStatus };

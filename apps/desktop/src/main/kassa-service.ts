@@ -150,6 +150,9 @@ const PERCENT = /^\d{1,3}(\.\d{1,2})?$/;
 const PAYMENT_METHODS: PaymentMethod[] = ["cash", "card", "bank", "transfer"];
 /** Bitta chekdagi to'lov qismlari chegarasi — server bilan bir xil (`MAX_PAYMENT_PARTS`). */
 const MAX_PAYMENT_PARTS = 8;
+
+/** Rasmiy server manzili — kassir kiritmaydi (sozlamada boshqasi berilishi mumkin). */
+export const DEFAULT_API_URL = "https://app.bum-erp.uz";
 const REFUND_METHODS: RefundMethod[] = ["cash", "card", "bank", "balance"];
 
 export type TokenVault = { save(token: string): void; load(): string | null; clear(): void };
@@ -465,6 +468,11 @@ export class KassaService {
       releasePublicKeys?: readonly string[];
       /** Mahsulot rasmlari keshi (yo'q bo'lsa rasmlar ko'rsatilmaydi — o'rniga belgi). */
       imageDir?: string;
+      /**
+       * Server manzili — kassir kiritmaydi. Ilovaga kiritilgan qiymat (sozlamada berilmasa
+       * rasmiy manzil); ishlab chiqish va testlarda `KASSA_API_URL` bilan almashtiriladi.
+       */
+      apiUrl?: string;
     },
   ) {
     this.scales = new ScaleService(store, {
@@ -547,16 +555,21 @@ export class KassaService {
     return createApiClient({ baseUrl: KassaService.apiOrigin(apiUrl), appVersion: this.options.appVersion, fetchImpl: this.options.fetchImpl });
   }
 
-  async setupOptions(input: { apiUrl: string; phone: string; password: string; companyId?: string }) {
-    return this.setupClient(input.apiUrl).setupOptions(input);
+  /** Kassir server manzilini kiritmaydi — ilovaga kiritilgan manzil ishlatiladi. */
+  private get configuredApiUrl(): string {
+    return this.options.apiUrl ?? DEFAULT_API_URL;
   }
 
-  async register(input: { apiUrl: string; phone: string; password: string; companyId?: string; warehouseId: string; name: string }): Promise<AppStatus> {
+  async setupOptions(input: { phone: string; password: string; companyId?: string }) {
+    return this.setupClient(this.configuredApiUrl).setupOptions(input);
+  }
+
+  async register(input: { phone: string; password: string; companyId?: string; warehouseId: string; name: string }): Promise<AppStatus> {
     if (this.api) throw new KassaError("CONFLICT", "Qurilma allaqachon ro'yxatdan o'tgan");
-    const client = this.setupClient(input.apiUrl);
+    const client = this.setupClient(this.configuredApiUrl);
     const registration = await client.setupRegister({ ...input, platform: this.options.platform });
     this.vault.save(registration.token);
-    this.store.setMeta("apiUrl", KassaService.apiOrigin(input.apiUrl));
+    this.store.setMeta("apiUrl", KassaService.apiOrigin(this.configuredApiUrl));
     this.store.setMeta("device", registration.device);
     this.store.setMeta("company", registration.company);
     this.connect();

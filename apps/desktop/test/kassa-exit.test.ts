@@ -63,10 +63,10 @@ beforeEach(() => {
   };
 });
 
-const registerInput = { apiUrl: "https://bum-erp.uz", phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" };
+const registerInput = { phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" };
 
 async function registered(server: ReturnType<typeof fakeServer>) {
-  const kassa = new KassaService(store, vault, { appVersion: "0.4.1", platform: "win32", fetchImpl: server.fetchImpl });
+  const kassa = new KassaService(store, vault, { appVersion: "0.4.1", platform: "win32", fetchImpl: server.fetchImpl, apiUrl: "https://bum-erp.uz" });
   await kassa.register(registerInput);
   await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
   return kassa;

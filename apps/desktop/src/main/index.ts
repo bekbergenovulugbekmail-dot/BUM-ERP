@@ -364,6 +364,8 @@ if (!app.requestSingleInstanceLock()) {
       updater,
       downloadDir: app.getPath("temp"),
       imageDir: path.join(app.getPath("userData"), "product-images"),
+      // Server manzili kassirdan so'ralmaydi; ishlab chiqish va testlarda almashtiriladi
+      apiUrl: process.env.KASSA_API_URL || undefined,
     });
     protocol.handle("bum-image", async (request) => {
       const url = new URL(request.url);

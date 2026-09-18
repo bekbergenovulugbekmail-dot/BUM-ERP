@@ -37,7 +37,8 @@ async function launch(dataDir: string) {
   const instance = await electron.launch({
     args: ["."],
     cwd: DESKTOP,
-    env: { ...process.env, KASSA_USER_DATA: dataDir, NODE_ENV: "development" },
+    // Server manzili kassirdan so'ralmaydi — ilovaga sozlama orqali beriladi
+    env: { ...process.env, KASSA_USER_DATA: dataDir, KASSA_API_URL: API, NODE_ENV: "development" },
     timeout: 90_000,
   });
   const page = await instance.firstWindow({ timeout: 90_000 });
@@ -57,9 +58,11 @@ test.afterAll(async () => {
   if (userData) rmSync(userData, { recursive: true, force: true });
 });
 
-test("qurilmani ulash: server manzili, egasining logini, kompaniya va ombor", async () => {
-  await expect(win.locator("#setup-url")).toBeVisible({ timeout: 60_000 });
-  await win.locator("#setup-url").fill(API);
+test("qurilmani ulash: faqat login va parol (server manzili so'ralmaydi), kompaniya va ombor", async () => {
+  await expect(win.locator("#setup-phone")).toBeVisible({ timeout: 60_000 });
+  // Server manzili maydoni ko'rsatilmaydi — faqat login va parol
+  await expect(win.locator("#setup-url")).toHaveCount(0);
+  await expect(win.getByText(/Server manzili/)).toHaveCount(0);
   await win.locator("#setup-phone").fill(ACCOUNTS.owner.phone);
   await win.locator("#setup-password").fill(PASSWORD);
   await win.getByRole("button", { name: /Davom|Keyingi|Tekshir/i }).first().click();
@@ -125,7 +128,7 @@ test("ilova qayta ishga tushganda qurilma ulangan qoladi va PIN bilan kiriladi",
   ({ instance: app, page: win } = await launch(userData));
 
   // Qayta ulash so'ralmaydi — qurilma va kassa nomi saqlanadi
-  await expect(win.locator("#setup-url")).toBeHidden({ timeout: 60_000 });
+  await expect(win.locator("#setup-phone")).toHaveCount(0, { timeout: 60_000 });
   await expect(win.getByText(/E2E Kassa/)).toBeVisible({ timeout: 60_000 });
 
   // Kassir PIN bilan kiradi (parol qayta so'ralmaydi)
