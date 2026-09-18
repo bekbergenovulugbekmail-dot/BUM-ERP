@@ -2352,6 +2352,23 @@ so'ramasdan avtomatik deploy qilishni so'radi — ish tugagach tekshiruvlar o'ts
 `index-Deezin2W.js` ichida `product-barcode-scan`, "Kategoriya qo'shish", "Konversiya qo'shish" va
 logotip manzili bor.
 
+## Androidda o'chirish (backspace) tugmasi ishlamasligi (2026-09-18)
+
+Egasi: "Dasturda Androidda hamma yerda matn yozishda o'chirish knopkasi 5-6 marta bosgandan keyin
+ishlab boshlaydi, telefonning boshqa joylarida ajoyib ishlaydi."
+
+**Sabab topildi:** `apps/mobile/capacitor.config.ts` dagi `android.captureInput: true`. Bu sozlama
+APPARAT klaviaturasi (masalan USB skaner) uchun mo'ljallangan: yoqilganda WebView o'zini "matn
+muharriri" deb e'lon qiladi va Android klaviaturasi (GBoard) boshqa kirish rejimiga o'tadi —
+bashoratli yozuvda o'chirish tugmasi bir necha bosishdan keyingina ta'sir qiladi. Shuning uchun
+muammo FAQAT ilovada ko'rinardi (brauzerda va boshqa ilovalarda yo'q edi).
+
+**Yechim:** `captureInput: false`. Shtrix-kod skaneri baribir oddiy tugma hodisalari orqali ishlaydi,
+shuning uchun hech narsa yo'qolmaydi. Bu NATIV sozlama — faqat yangi APK bilan tushadi:
+`bumVersionCode=2`, `bumVersionName=1.0.1`, imzolangan APK qurildi (`app-release.apk`, 4,2 MB,
+V2 imzo, CN=BUM ERP) va APK ichidagi `capacitor.config.json` da `"captureInput": false` ekani
+tekshirildi. Web tomonida o'zgarish yo'q — deploy talab qilinmaydi.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)

@@ -24,7 +24,13 @@ const config: CapacitorConfig = {
   },
   android: {
     allowMixedContent: false,
-    captureInput: true,
+    /**
+     * `captureInput` O'CHIRILGAN. U apparat klaviaturasi uchun mo'ljallangan, lekin yoqilganda
+     * WebView o'zini "matn muharriri" deb e'lon qiladi va Android klaviaturasi (GBoard) boshqa
+     * rejimga o'tadi: o'chirish tugmasi 5-6 marta bosilgandan keyingina ishlardi. Shtrix-kod
+     * skaneri baribir oddiy tugma hodisalari orqali ishlaydi.
+     */
+    captureInput: false,
     webContentsDebuggingEnabled: false,
   },
   plugins: {
