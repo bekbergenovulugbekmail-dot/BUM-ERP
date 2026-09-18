@@ -2401,6 +2401,28 @@ olish, platformalar aralashmasligi, eski versiyaning arxivga o'tishi) va `src/li
 e'lon qilinmagan), yuklab olish yo'li — 404 (reliz yo'q), `/api/auth/me` — barqaror 401.
 Migratsiya `0062` production bazasida qo'llandi (API ishga tushdi).
 
+## Yakuniy sotuvga tayyorlik auditi (2026-09-18)
+
+Egasining topshirigi bo'yicha faqat tekshiruv o'tkazildi: kod, sxema va production o'zgartirilmadi,
+deploy qilinmadi, production tranzaksiyasi yaratilmadi. Natija: **`FINAL-SALE-READINESS-AUDIT.md`**
+(25 bo'lim, har biri PASS / PARTIAL / FAIL / NOT VERIFIED).
+
+**O'lchangan va o'tgan:** API 121 fayl / 642 test, brauzer E2E 39, web 20 fayl / 85, desktop 9 fayl / 57;
+tsc (API, web, desktop) va `eslint --max-warnings=0` toza; `vite build` yig'iladi.
+Productionda faqat o'qish bilan: migratsiyalar 63 = 63 (lokal bilan bir xil), 118 jadval,
+noma'lum formatdagi parol xeshi 0, qisqa PIN xeshi 0, **balanslanmagan jurnal yozuvi 0**,
+tirik sarlavhalar HSTS/CSP/nosniff/X-Frame-Options.
+
+**Hukm: NOT SALE READY** — sabab kodda emas, tekshirilmagan haqiqiy dunyo qismlarida:
+(1) zaxira nusxadan tiklash sinalmagan, (2) haqiqiy Android telefonda hech narsa tekshirilmagan,
+(3) savdo agenti ish joyi brauzer testlarida ochilmagan, (4) yetkazuvchi ish joyi ham,
+(5) productionda fayl saqlash sozlanmagan (rasm 503), (6) SMS sozlanmagan (parol tiklash 503),
+(7) desktop kassa haqiqiy kassa kompyuterida o'rnatilmagan.
+
+**Ochiq ma'lumot masalasi:** `Bonnu Market -> Asosiy kassa` qoldig'i **-77 520 so'm** (eski yozuv).
+Yangi kod manfiy qoldiqqa yo'l qo'ymaydi; mavjud qoldiqni egasi "Qoldiqni to'g'rilash" orqali tuzatadi.
+Audit davomida ma'lumotga tegilmadi.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
