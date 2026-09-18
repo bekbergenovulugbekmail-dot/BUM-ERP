@@ -34,8 +34,9 @@ const schema = z.object({
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(1),
 
   /**
-   * API'ning OMMAVIY manzili (masalan https://api.bum-erp.uz yoki https://app.bum-erp.uz).
-   * Telegram webhook shu manzilga o'rnatiladi; berilmasa botlar sozlanadi, lekin xabar qabul qilmaydi.
+   * API alohida domenda bo'lsa — uning OMMAVIY manzili (masalan https://api.bum-erp.uz).
+   * Telegram webhook shu manzilga o'rnatiladi. Berilmasa `WEB_ORIGIN` ishlatiladi:
+   * nginx `/api/` so'rovlarini API'ga uzatadi, shuning uchun odatda sozlash shart emas.
    */
   PUBLIC_API_URL: z.string().url().optional(),
 

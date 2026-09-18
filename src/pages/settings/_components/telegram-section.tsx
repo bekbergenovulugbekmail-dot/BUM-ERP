@@ -84,8 +84,14 @@ export default function TelegramSection() {
     <div className="space-y-4">
       <SettingsGroup
         title="Mijozlar uchun Telegram bot"
-        description="@BotFather'da bot yarating, tokenni shu yerga qo'ying. Mijoz botga telefon raqamini ulashadi va xabarlarni oladi."
+        description="Token faqat shu yerdan kiritiladi va bazada shifrlangan holda saqlanadi — kodda ham, serverda ham yozilmaydi."
       >
+        <ol className="list-decimal space-y-1 pl-5 text-xs text-muted-foreground">
+          <li>Telegram'da <span className="font-medium">@BotFather</span> ga kiring va <code>/newbot</code> deb yozing.</li>
+          <li>Bot nomi va foydalanuvchi nomini tanlang (oxiri <code>_bot</code> bilan tugashi kerak).</li>
+          <li>BotFather bergan tokenni (<code>1234567890:AA…</code>) nusxalab, quyidagi maydonga qo'ying.</li>
+          <li>Mijozlaringizga bot havolasini yuboring — ular telefon raqamini ulashadi va xabarlarni oladi.</li>
+        </ol>
         {bot ? (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-sm">

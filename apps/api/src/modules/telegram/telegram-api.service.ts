@@ -25,7 +25,9 @@ async function call<T>(token: string, method: string, payload: unknown): Promise
     });
     return (await response.json()) as TelegramResponse<T>;
   } catch (error) {
-    return { ok: false, description: error instanceof Error ? error.message : String(error) };
+    // Xato matnida token qolib ketmasin (manzilda token bor) — o'rniga yulduzcha
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, description: message.split(token).join("***") };
   } finally {
     clearTimeout(timer);
   }
@@ -68,10 +70,15 @@ export async function getBotInfo(token: string): Promise<BotInfo | null> {
   return result.ok && result.result ? result.result : null;
 }
 
-/** Webhook manzili — public API manzili asosida. */
+/**
+ * Webhook manzili. Standart — saytning o'zi (`WEB_ORIGIN`): nginx `/api/` ni API'ga uzatadi,
+ * shuning uchun alohida sozlash shart emas. API alohida domenda bo'lsa `PUBLIC_API_URL` beriladi.
+ * Telegram faqat HTTPS qabul qiladi — boshqa manzil bilan webhook o'rnatilmaydi.
+ */
 export function webhookUrl(secret: string): string | null {
-  const base = env.PUBLIC_API_URL?.replace(/\/+$/, "");
-  return base ? `${base}/api/telegram/webhook/${secret}` : null;
+  const base = (env.PUBLIC_API_URL ?? env.WEB_ORIGIN).replace(/\/+$/, "");
+  if (!base.startsWith("https://")) return null;
+  return `${base}/api/telegram/webhook/${secret}`;
 }
 
 /**
@@ -80,7 +87,12 @@ export function webhookUrl(secret: string): string | null {
  */
 export async function setWebhook(token: string, secret: string): Promise<{ ok: boolean; error: string | null }> {
   const url = webhookUrl(secret);
-  if (!url) return { ok: false, error: "Ommaviy manzil sozlanmagan (PUBLIC_API_URL) — webhook o'rnatilmadi" };
+  if (!url) {
+    return {
+      ok: false,
+      error: "Ommaviy HTTPS manzil yo'q (WEB_ORIGIN yoki PUBLIC_API_URL) — webhook o'rnatilmadi, bot xabar qabul qilmaydi",
+    };
+  }
   const result = await call(token, "setWebhook", {
     url,
     // Telegram har so'rovda shu sarlavhani yuboradi — begona so'rov qabul qilinmaydi

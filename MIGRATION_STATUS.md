@@ -2194,6 +2194,12 @@ botdan buyurtma berish). Standart holatda buyurtma berish o'chiq.
   tasdiqlaydi — bot zaxira yoki pulni o'zgartirmaydi. Yangi "buyurtma tizimi" yaratilmadi, mavjud
   `createOrder` va uning barcha tekshiruvlari ishlaydi
 
+**Webhook manzili:** standart — `WEB_ORIGIN` (nginx `/api/` ni API'ga uzatadi, shuning uchun
+Railway'da qo'shimcha o'zgaruvchi shart emas). API alohida domenda bo'lsa `PUBLIC_API_URL`
+**bum-api** xizmatiga qo'yiladi. Manzil HTTPS bo'lishi shart — Telegram HTTP qabul qilmaydi.
+Hozirgi production uchun ishlaydigan qiymat: `https://www.bum-erp.uz` (apex `bum-erp.uz` hali
+yo'naltirilmagan — WEB_ORIGIN shunday bo'lsa PUBLIC_API_URL ni qo'lda qo'yish kerak).
+
 **Xavfsizlik:** token bazada AES-256-GCM bilan shifrlangan (`shared/secret-box.ts`, kalit
 `SESSION_SECRET` dan HKDF orqali), UI'ga faqat niqoblangan ko'rinishda chiqadi. Webhook ikki qavat
 himoyalangan: manzildagi 24 baytlik tasodifiy sir va Telegram yuboradigan
