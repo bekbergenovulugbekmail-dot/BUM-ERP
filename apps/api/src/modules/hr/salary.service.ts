@@ -45,6 +45,7 @@ import {
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { applyOutgoingBankCommission } from "../finance/bank-commission.service.js";
 import { monthRange } from "./attendance.service.js";
+import { allowanceTotalsForMonth } from "./allowances.service.js";
 import { hrAudit } from "./org.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...salaryFields } = getTableColumns(salaryPayments);
@@ -175,6 +176,8 @@ export async function generateSalaries(
     (await employeeLinks(tx, companyId, pending.map((person) => person.id))).map((row) => [row.employeeId, row]),
   );
 
+  // Yo'l puli, ovqat puli va boshqa muntazam to'lovlar — shu oyga tegishlilari
+  const allowanceTotals = await allowanceTotalsForMonth(tx, companyId, input.month);
   const rate = toMinor(taxRate, 2);
   let kpiTotal = 0n;
   for (const employee of pending) {
@@ -220,6 +223,8 @@ export async function generateSalaries(
 
     const gross = earned + overtimePay + bonus;
     const tax = mulDivRound(gross, rate, 10000n);
+    // Kompensatsiya (yo'l, ovqat) soliqqa kirmaydi — qo'lga beriladigan summaga qo'shiladi
+    const allowances = allowanceTotals.get(employee.id) ?? 0n;
 
     const [created] = await tx.insert(salaryPayments).values({
       companyId,
@@ -231,10 +236,11 @@ export async function generateSalaries(
       overtime: fromMinor(overtime, 4),
       overtimePay: fromMinor(overtimePay),
       bonus: fromMinor(bonus),
+      allowances: fromMinor(allowances),
       grossSalary: fromMinor(gross),
       taxRate,
       tax: fromMinor(tax),
-      netSalary: fromMinor(gross - tax),
+      netSalary: fromMinor(gross - tax + allowances),
       createdBy: tenant.user.id,
     }).returning({ id: salaryPayments.id });
 

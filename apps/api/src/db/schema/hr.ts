@@ -30,6 +30,8 @@ export const employeeStatus = pgEnum("employee_status", [
 ]);
 
 export const salaryType = pgEnum("salary_type", ["monthly", "hourly", "daily"]);
+/** Maoshdan tashqari muntazam to'lovlar: yo'l puli, ovqat puli va boshqalar. */
+export const allowanceKind = pgEnum("allowance_kind", ["transport", "meal", "phone", "housing", "other"]);
 export const genderType = pgEnum("gender_type", ["male", "female"]);
 
 export const attendanceStatus = pgEnum("attendance_status", [
@@ -158,6 +160,46 @@ export const employees = pgTable(
 
 // ─── attendances ─────────────────────────────────────────────────────────────
 
+/**
+ * Xodimga biriktirilgan muntazam qo'shimcha to'lov (yo'l puli, ovqat puli, aloqa va h.k.).
+ * Davri "2026-01" ko'rinishida: `startMonth` dan `endMonth` gacha (endMonth bo'sh — muddatsiz).
+ * Maosh tayyorlashda shu davrga tushgan to'lovlar avtomatik qo'shiladi.
+ */
+export const employeeAllowances = pgTable(
+  "employee_allowances",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+
+    kind: allowanceKind("kind").notNull().default("other"),
+    /** "Boshqa" uchun nom (masalan, "Telefon aloqasi"); qolganida ixtiyoriy. */
+    label: varchar("label", { length: 100 }),
+    /** Bir oylik summa. */
+    amount: money("amount").notNull().default("0"),
+
+    /** "2026-01" — shu oydan boshlab. */
+    startMonth: varchar("start_month", { length: 7 }).notNull(),
+    /** "2026-12" — shu oygacha (shu oy ham kiradi); null — muddatsiz. */
+    endMonth: varchar("end_month", { length: 7 }),
+
+    isActive: boolean("is_active").notNull().default(true),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    index("eal_company_employee_idx").on(t.companyId, t.employeeId),
+    index("eal_company_period_idx").on(t.companyId, t.startMonth),
+    check("eal_amount_non_negative", sql`${t.amount} >= 0`),
+    check("eal_period_order", sql`${t.endMonth} is null or ${t.endMonth} >= ${t.startMonth}`),
+  ],
+);
+
 export const attendances = pgTable(
   "attendances",
   {
@@ -236,6 +278,8 @@ export const salaryPayments = pgTable(
     overtime: qty("overtime").notNull().default("0"),
     overtimePay: money("overtime_pay").notNull().default("0"),
     bonus: money("bonus").notNull().default("0"),
+    /** Yo'l puli, ovqat puli va boshqa muntazam to'lovlar — soliqqa kirmaydi, qo'lga qo'shiladi. */
+    allowances: money("allowances").notNull().default("0"),
     deductions: money("deductions").notNull().default("0"),
     /** Hisoblangan (ishlangan + ortiqcha ish + mukofot) — soliq shundan. */
     grossSalary: money("gross_salary").notNull().default("0"),

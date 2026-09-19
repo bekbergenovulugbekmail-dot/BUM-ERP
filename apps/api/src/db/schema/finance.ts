@@ -319,6 +319,13 @@ export const expenses = pgTable(
     expenseDate: date("expense_date").notNull(),
 
     accountId: uuid("account_id").references(() => accounts.id, { onDelete: "set null" }),
+    /**
+     * Xarajat qaysi xodimga tegishli (maosh, ovqat puli, yo'l haqi). FK yo'q — hr → finance importi
+     * aylanma bo'lmasin; xodim shu kompaniyaniki ekani kodda tekshiriladi.
+     */
+    employeeId: uuid("employee_id"),
+    /** Xodimga to'lov turi: `salary`, `meal`, `transport`, `phone`, `housing`, `other`. */
+    payoutKind: varchar("payout_kind", { length: 20 }),
     paidBy: varchar("paid_by", { length: 200 }),
     attachmentKey: text("attachment_key"),
 

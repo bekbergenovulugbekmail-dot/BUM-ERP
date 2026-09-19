@@ -16,6 +16,7 @@ import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { BankCommissionHint } from "@/components/payments/bank-commission-hint.tsx";
 import { fmt, localIsoDate, toNum, trimQty, type SalaryPayment, type SalarySummary } from "../_lib/types.ts";
+import SalarySetupCard from "./salary-setup-card.tsx";
 
 const STATUS_MAP = {
   draft: { label: "Qoralama", color: "bg-muted text-muted-foreground" },
@@ -152,6 +153,9 @@ export default function SalarySection() {
 
   return (
     <div className="space-y-4">
+      {/* Ish haqi turi, miqdori va qo'shimcha to'lovlar — maosh hisoblashdan oldin shu yerda sozlanadi */}
+      <SalarySetupCard canManage={canPrepare} />
+
       {/* Header controls */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2">

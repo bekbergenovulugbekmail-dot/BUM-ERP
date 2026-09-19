@@ -60,6 +60,7 @@ import {
 } from "./cash.service.js";
 import { exportExpensesCsv, importExpenses } from "./expenses-csv.service.js";
 import {
+  PAYOUT_KINDS,
   createExpense,
   deleteExpense,
   expenseStats,
@@ -245,6 +246,9 @@ const expenseBody = z.strictObject({
   accountId: z.uuid().nullable().optional(),
   paidBy: nullableText(200),
   notes: nullableText(2000),
+  /** Xodimga to'lov: kim va nima uchun (maosh, ovqat puli, yo'l haqi...). */
+  employeeId: z.uuid().nullable().optional(),
+  payoutKind: z.enum(PAYOUT_KINDS).nullable().optional(),
 });
 const expensesQuery = z.object({
   status: z.enum(expenseStatuses).optional(),

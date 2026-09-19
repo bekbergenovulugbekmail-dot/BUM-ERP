@@ -15,6 +15,7 @@
 import { and, desc, eq, getTableColumns, gte, lt, lte, or, sql } from "drizzle-orm";
 import { ALLOCATION_METHODS, badRequest, forbidden, notFound } from "@bum/shared";
 import { accounts, expenses } from "../../db/schema/finance.js";
+import { employees } from "../../db/schema/hr.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
@@ -45,6 +46,10 @@ const CATEGORY_SUBTYPES: Record<string, string> = {
   transport: "transport",
 };
 
+/** Xodimga to'lov turlari: maosh yoki kompensatsiya (yo'l, ovqat, aloqa, turar joy, boshqa). */
+export const PAYOUT_KINDS = ["salary", "transport", "meal", "phone", "housing", "other"] as const;
+export type PayoutKind = (typeof PAYOUT_KINDS)[number];
+
 export type ExpenseInput = {
   category: string;
   description: string;
@@ -53,7 +58,21 @@ export type ExpenseInput = {
   accountId?: string | null;
   paidBy?: string | null;
   notes?: string | null;
+  /** Xarajat qaysi xodimga tegishli (maosh, ovqat puli, yo'l haqi). */
+  employeeId?: string | null;
+  /** Xodim tanlanganda to'lov turi majburiy — hisobotda nima uchun berilgani aniq bo'lsin. */
+  payoutKind?: PayoutKind | null;
 };
+
+/** Xodim shu kompaniyaniki ekanini tekshiradi (FK yo'q — hr va finance orasida aylanma import bo'lmasin). */
+async function assertExpenseEmployee(tx: Tx, companyId: string, employeeId: string) {
+  const [employee] = await tx
+    .select({ id: employees.id })
+    .from(employees)
+    .where(and(eq(employees.id, employeeId), eq(employees.companyId, companyId)))
+    .limit(1);
+  if (!employee) throw notFound("Xodim topilmadi");
+}
 
 async function assertExpenseAccount(tx: Tx, companyId: string, accountId: string) {
   const [account] = await tx
@@ -150,6 +169,12 @@ export async function createExpense(tx: Tx, tenant: TenantContext, input: Expens
   const companyId = tenant.company.id;
   await assertPeriodOpen(tx, companyId, input.expenseDate);
   if (input.accountId) await assertExpenseAccount(tx, companyId, input.accountId);
+  if (input.employeeId) {
+    await assertExpenseEmployee(tx, companyId, input.employeeId);
+    if (!input.payoutKind) throw badRequest("Xodim tanlanganda to'lov turini ko'rsating (maosh, ovqat puli, yo'l haqi...)");
+  } else if (input.payoutKind) {
+    throw badRequest("To'lov turi faqat xodim tanlanganda ko'rsatiladi");
+  }
 
   const number = await nextDocumentNumber(tx, {
     table: expenses,

@@ -16,6 +16,8 @@
  *   POST   /leaves/:leaveId/decision                                              hr.approve
  *   GET    /salaries (?month=&employeeId=&status=&limit=), /salaries/summary?month=   hr.view
  *   POST   /salaries/generate, PATCH / DELETE /salaries/:salaryId                 hr.salary
+ *   GET    /allowances (?employeeId=&month=)      qo'shimcha to'lovlar (yo'l, ovqat, aloqa)  hr.view
+ *   POST   /allowances, PATCH / DELETE /allowances/:allowanceId                    hr.salary
  *   GET    /kpi/rules                          KPI qoidalari (bosqichlari bilan)  hr.view
  *   PUT    /kpi/rules, DELETE /kpi/rules/:ruleId                                  hr.salary
  *   GET    /kpi/preview (?month=&employeeId=)  oylik tayyorlanmasdan hisob-kitob  hr.salary
@@ -31,6 +33,7 @@ import { decimalSchema, moneySchema, percentSchema, qtySchema } from "../../shar
 import { authOf, requireAuth } from "../auth/guard.js";
 import { requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import { attendanceStats, bulkRecordAttendance, listAttendance, recordAttendance } from "./attendance.service.js";
+import { createAllowance, deleteAllowance, listAllowances, updateAllowance } from "./allowances.service.js";
 import { exportEmployeesCsv, importEmployees } from "./employees-csv.service.js";
 import {
   createEmployee,
@@ -138,6 +141,19 @@ const softwareAccessBody = z.strictObject({
   role: z.string().trim().min(1).max(100).optional(),
   additionalLicensePlanId: z.uuid().nullable().optional(),
 });
+const allowanceBody = z.strictObject({
+  employeeId: z.uuid(),
+  kind: z.enum(["transport", "meal", "phone", "housing", "other"]),
+  label: z.string().trim().max(100).nullable().optional(),
+  amount: moneySchema,
+  startMonth: month,
+  endMonth: month.nullable().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+const allowancePatch = allowanceBody.omit({ employeeId: true }).partial();
+const allowancesQuery = z.object({ employeeId: z.uuid().optional(), month: month.optional() });
+
 const employeesQuery = z.object({
   departmentId: z.uuid().optional(),
   status: z.enum(["active", "on_leave", "terminated"]).optional(),
@@ -494,6 +510,31 @@ export async function hrRoutes(app: FastifyInstance): Promise<void> {
   app.get("/salaries/summary", async (req) => {
     const { month: value } = monthQuery.parse(req.query);
     return salarySummary(db, await readTenant(req), value);
+  });
+
+  // ─── Qo'shimcha to'lovlar (yo'l puli, ovqat puli, aloqa) ─────────────────
+  app.get("/allowances", async (req) => {
+    const query = allowancesQuery.parse(req.query);
+    return { allowances: await listAllowances(db, await readTenant(req), query) };
+  });
+
+  app.post("/allowances", async (req, reply) => {
+    const body = allowanceBody.parse(req.body);
+    const allowance = await writeInTenant(req, "hr.salary", (tx, t) => createAllowance(tx, t, body, requestMeta(req)));
+    reply.status(201);
+    return { allowance };
+  });
+
+  app.patch("/allowances/:allowanceId", async (req) => {
+    const id = param(req, "allowanceId");
+    const patch = allowancePatch.parse(req.body);
+    return { allowance: await writeInTenant(req, "hr.salary", (tx, t) => updateAllowance(tx, t, id, patch, requestMeta(req))) };
+  });
+
+  app.delete("/allowances/:allowanceId", async (req, reply) => {
+    const id = param(req, "allowanceId");
+    await writeInTenant(req, "hr.salary", (tx, t) => deleteAllowance(tx, t, id, requestMeta(req)));
+    return reply.status(204).send();
   });
 
   app.post("/salaries/generate", async (req) => {

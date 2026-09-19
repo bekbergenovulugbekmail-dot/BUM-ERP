@@ -39,11 +39,26 @@ type ExpenseBody = {
   expenseDate: string;
   paidBy: string | null;
   notes: string | null;
+  /** Xodimga to'lov bo'lsa: kim va nima uchun. */
+  employeeId?: string;
+  payoutKind?: PayoutKind;
 };
 
 type StatusBody = { id: string; status: ExpenseStatus; cashAccountId?: string | null; paidDate?: string };
 
 const DEFAULT_CASH = "default";
+/** Xarajat xodimga bog'lanmagan. */
+const NO_EMPLOYEE = "none";
+type PayoutKind = "salary" | "transport" | "meal" | "phone" | "housing" | "other";
+/** Xodimga to'lov turi — hisobotda nima uchun berilgani aniq ko'rinsin. */
+const PAYOUT_KINDS: { value: PayoutKind; label: string }[] = [
+  { value: "salary", label: "Maosh" },
+  { value: "transport", label: "Yo'l puli" },
+  { value: "meal", label: "Ovqat puli" },
+  { value: "phone", label: "Aloqa" },
+  { value: "housing", label: "Turar joy" },
+  { value: "other", label: "Boshqa" },
+];
 
 export default function ExpensesSection() {
   const { can } = usePermissions();
@@ -59,6 +74,9 @@ export default function ExpensesSection() {
   const [date, setDate] = useState(localIsoDate());
   const [paidBy, setPaidBy] = useState("");
   const [notes, setNotes] = useState("");
+  // Xodimga to'lov: kim va nima uchun (maosh, ovqat puli, yo'l haqi...)
+  const [employeeId, setEmployeeId] = useState(NO_EMPLOYEE);
+  const [payoutKind, setPayoutKind] = useState<PayoutKind>("salary");
 
   const [payExpense, setPayExpense] = useState<Expense | null>(null);
   const [payCashAccount, setPayCashAccount] = useState(DEFAULT_CASH);
@@ -69,6 +87,11 @@ export default function ExpensesSection() {
     limit: 100,
   }).data?.expenses;
   const expStats = useApiQuery<ExpenseStats>("/api/finance/expenses/stats").data;
+  // Xarajatni xodimga bog'lash uchun (maosh, ovqat puli, yo'l haqi) — faqat oyna ochilganda
+  const employees = useApiQuery<{ employees: { id: string; name: string; status: string }[] }>(
+    createOpen ? "/api/hr/employees" : null,
+    { limit: 200 },
+  ).data?.employees;
   const cashAccounts = useApiQuery<{ cashAccounts: CashAccount[] }>(
     payExpense ? "/api/finance/cash-accounts" : null,
   ).data?.cashAccounts;
@@ -88,10 +111,12 @@ export default function ExpensesSection() {
         expenseDate: date,
         paidBy: paidBy.trim() || null,
         notes: notes.trim() || null,
+        ...(employeeId !== NO_EMPLOYEE ? { employeeId, payoutKind } : {}),
       });
       toast.success("Xarajat qo'shildi");
       setCreateOpen(false);
       setDescription(""); setAmount(""); setNotes(""); setPaidBy("");
+      setEmployeeId(NO_EMPLOYEE); setPayoutKind("salary");
     } catch (err) { toast.error(errorMessage(err)); }
   };
 
@@ -296,6 +321,36 @@ export default function ExpensesSection() {
                   <Label>To'lovchi</Label>
                   <Input value={paidBy} onChange={(e) => setPaidBy(e.target.value)} placeholder="Ixtiyoriy..." />
                 </div>
+              </div>
+              {/* Xodimga to'lov: tanlansa nima uchun berilayotgani aniq belgilanadi */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Xodim</Label>
+                  <Select value={employeeId} onValueChange={setEmployeeId}>
+                    <SelectTrigger><SelectValue placeholder="Xodimga tegishli emas" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_EMPLOYEE}>Xodimga tegishli emas</SelectItem>
+                      {(employees ?? [])
+                        .filter((employee) => employee.status !== "terminated")
+                        .map((employee) => (
+                          <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {employeeId !== NO_EMPLOYEE && (
+                  <div>
+                    <Label>To'lov turi *</Label>
+                    <Select value={payoutKind} onValueChange={(value) => setPayoutKind(value as PayoutKind)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {PAYOUT_KINDS.map((kind) => (
+                          <SelectItem key={kind.value} value={kind.value}>{kind.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
               <div>
                 <Label>Izoh</Label>

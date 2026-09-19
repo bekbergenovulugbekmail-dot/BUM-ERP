@@ -162,6 +162,8 @@ export default function EmployeesSection() {
   };
 
   const loading = updateEmployee.isPending;
+  /** Tahrir oynasidagi xodim (dasturga kirish holatini ko'rsatish uchun). */
+  const editing = editEmployee ? (employees ?? []).find((emp) => emp.id === editEmployee) ?? null : null;
 
   return (
     <div className="space-y-4">
@@ -290,7 +292,7 @@ export default function EmployeesSection() {
                     <p className="font-bold">{fmt(emp.baseSalary)} so'm</p>
                   </div>
                   {canManage && (
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <div className="flex gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
                       {canSoftware && emp.status !== "terminated" && (
                         usesSoftware ? (
                           <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" title="Bepul xodimga aylantirish"
@@ -334,6 +336,36 @@ export default function EmployeesSection() {
               showSensitive={canManage}
               showStatus
             />
+            {/* Dasturga kirish: import qilingan xodimda ham shu yerdan yoqiladi/o'chiriladi */}
+            {canSoftware && editing && (
+              <div className="rounded-xl border border-border p-3 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium">Dasturga kirish</p>
+                    <p className="text-xs text-muted-foreground">
+                      {editing.userId ? "Kiradi — login va parol bor" : "Kirmaydi — bepul xodim (login yo'q)"}
+                    </p>
+                  </div>
+                  {editing.status === "terminated" ? (
+                    <p className="text-xs text-muted-foreground">Ishdan bo'shagan xodimga ulanmaydi</p>
+                  ) : editing.userId ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={disableAccess.isPending}
+                      onClick={() => { void handleMakeFree(editing); }}
+                    >
+                      <MonitorOff className="h-4 w-4 mr-1" /> Dasturdan uzish
+                    </Button>
+                  ) : (
+                    <Button size="sm" onClick={() => { setEditEmployee(null); setAccessTarget(editing); }}>
+                      <MonitorSmartphone className="h-4 w-4 mr-1" /> Dasturga ulash
+                    </Button>
+                  )}
+                </div>
+                <AccessBadge employee={editing} now={employeesQuery.dataUpdatedAt} />
+              </div>
+            )}
             <DialogFooter>
               <Button variant="secondary" onClick={() => setEditEmployee(null)}>Bekor</Button>
               <Button onClick={handleUpdate} disabled={loading}>{loading ? "..." : "Saqlash"}</Button>
@@ -521,21 +553,7 @@ function EmployeeForm({ form, setForm, departments, positions, showSensitive, sh
           </SelectContent>
         </Select>
       </div>
-      <div>
-        <Label>Ish haqi turi</Label>
-        <Select value={form.salaryType} onValueChange={(v) => setForm({ ...form, salaryType: v as SalaryType })}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="monthly">Oylik</SelectItem>
-            <SelectItem value="hourly">Soatlik</SelectItem>
-            <SelectItem value="daily">Kunlik</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      <div>
-        <Label>Asosiy maosh (so'm) *</Label>
-        <Input type="number" min="0" value={form.baseSalary} onChange={(e) => setForm({ ...form, baseSalary: e.target.value })} placeholder="3000000" />
-      </div>
+      {/* Ish haqi turi va miqdori "Maosh" bo'limida kiritiladi — bu yerda so'ralmaydi */}
       {showStatus && (
         <div>
           <Label>Holat</Label>
