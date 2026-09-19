@@ -6,7 +6,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb } from "../src/db/client.js";
 import { buildServer } from "../src/server.js";
-import { createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { createCompany, createUser, resetDatabase, signedIn } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 type DeviceRow = { id: string; name: string; status: "pending" | "approved" | "revoked" };
@@ -116,6 +116,27 @@ describe("Ishonchli qurilmalar", () => {
     expect((await login()).statusCode).toBe(200);
     // Sarlavhasiz kirish qurilma yozmaydi
     expect(await listDevices()).toHaveLength(0);
+  });
+
+  it("Admin panel: platforma admini istalgan qurilmadan telefon+parol bilan kiradi", async () => {
+    const admin = await createUser({ isPlatformAdmin: true });
+
+    const adminLogin = (device: string) =>
+      app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        headers: { "x-device-id": device },
+        payload: { phone: admin.phone, password: admin.password },
+      });
+
+    expect((await adminLogin("admin-device-1")).statusCode, "birinchi qurilma").toBe(200);
+    const second = await adminLogin("admin-device-2");
+    expect(second.statusCode, "ikkinchi qurilma ham to'silmaydi — tasdiqlaydigan egasi yo'q").toBe(200);
+    expect(second.json().user).toMatchObject({ isPlatformAdmin: true });
+
+    // Kompaniya xodimida qoida avvalgidek: ikkinchi qurilma tasdiq kutadi
+    await login("device-aaa-1111");
+    expect((await login("device-bbb-2222")).statusCode).toBe(403);
   });
 
   it("boshqa kompaniya xodimining qurilmalarini ko'rib bo'lmaydi", async () => {

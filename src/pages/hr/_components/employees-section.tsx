@@ -207,8 +207,8 @@ export default function EmployeesSection() {
             { key: "name", aliases: ["Ism-familiya", "name"], required: true, example: "Anvar Karimov" },
             { key: "phone", aliases: ["Telefon", "phone"], example: "+998901234567" },
             { key: "email", aliases: ["Email", "email"], example: "anvar@mail.uz" },
-            { key: "department", aliases: ["Bo'lim", "department"], example: "Savdo" },
-            { key: "position", aliases: ["Lavozim", "position"], example: "Sotuvchi" },
+            { key: "department", aliases: ["Bo'lim", "department"], example: "Savdo", shared: true },
+            { key: "position", aliases: ["Lavozim", "position"], example: "Sotuvchi", shared: true },
             { key: "hireDate", aliases: ["Ishga kirgan sana", "hireDate"], required: true, example: "2026-01-15" },
             { key: "birthDate", aliases: ["Tug'ilgan sana", "birthDate"], example: "1995-04-20" },
             { key: "gender", aliases: ["Jinsi", "gender"], example: "Erkak" },
@@ -217,7 +217,7 @@ export default function EmployeesSection() {
             { key: "inn", aliases: ["INN", "inn"], example: "123456789" },
             { key: "bankAccount", aliases: ["Hisob raqami", "bankAccount"], example: "20208000000000000001" },
             { key: "baseSalary", aliases: ["Maosh", "baseSalary"], example: "4000000" },
-            { key: "salaryType", aliases: ["Maosh turi", "salaryType"], example: "Oylik" },
+            { key: "salaryType", aliases: ["Maosh turi", "salaryType"], example: "Oylik", shared: true },
           ]}
         />
       </div>

@@ -2512,6 +2512,30 @@ cashier-collect-payment (2), device-self-service (4); purchase-csv (9).
 **Deploy (2026-09-19):** `bum-api` va `bum-web` — tekshirildi: `/api/auth/devices` 401 (mavjud),
 `?returnPending=true` 401, bundle `index-BemJjLKO.js` da yangi matnlar bor.
 
+## Tezda qo'shish: hujjat sarlavhasi + qatorlar (2026-09-19)
+
+"Tezda qo'shish" endi importdagi kabi barcha kataklarni takrorlamaydi: hujjatga xos, bir marta
+yoziladigan maydonlar (ta'minotchi, ombor, sana, kategoriya, brend, bo'lim kabi — ustunda
+`shared: true`) oynaning yuqorisida BIR MARTA kiritiladi va har bir qatorga qo'shiladi; jadvalda
+faqat mahsulotga (yozuvga) tegishli kataklar qoladi. Har bir umumiy maydonni "har qatorda" bilan
+jadvalga ko'chirish va "umumiy" bilan qaytarish mumkin.
+
+Xaridda bir saqlash = BITTA hujjat: qatorlar `docKey` bilan bog'lanadi (import bodyda yangi ixtiyoriy
+maydon; hujjat raqami sifatida saqlanmaydi, raqamni tizim beradi). Raqamli va raqamsiz fayl importi
+avvalgidek ishlaydi.
+
+Ikkala oyna ham butun ekranga yoyiladi ("Tezda qo'shish" va "Yangi xarid buyurtmasi"). Yo'l-yo'lakay
+tuzatildi: bu oynalarda `max-w-5xl` `sm:max-w-lg` bilan bosilib qolayotgan edi — ya'ni kompyuterda
+oyna kerakli kenglikka ochilmasdi.
+
+**Admin panel:** platforma admini endi qurilma tasdig'isiz, telefon + parol bilan kiradi — uning
+qurilmasini tasdiqlaydigan biznes egasi yo'q edi va ikkinchi qurilmadan kirish berkilib qolardi.
+Qurilma baribir ro'yxatga yoziladi (kim, qachon, qaysi IP). Kompaniya xodimlarida qoida
+o'zgarmadi: ikkinchi qurilma egasi tasdiqlaguncha kutadi.
+
+Testlar: API 126 fayl / 668 test (yangi: docKey guruhlash 2 ta, admin panel qurilmasi 1 ta),
+brauzer 61 test (`quick-add.spec.ts` 5 tasi — umumiy maydonlar, bitta hujjat, katta ekran).
+
 ## Maosh, tezda qo'shish va biznes manzili (2026-09-19, deploy qilindi)
 
 **Maosh (migratsiya 0066):** xodim qo'shish oynasidan ish haqi turi va miqdori olib tashlandi —

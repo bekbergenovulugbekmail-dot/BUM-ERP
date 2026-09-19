@@ -145,12 +145,12 @@ export default function ProductsPage() {
                 { key: "sku", aliases: ["SKU", "sku"], example: "COLA-1L" },
                 { key: "barcode", aliases: ["Shtrix-kod", "barcode"], example: "4780000000001" },
                 // Eksport `shortName` yozadi ("d"); to'liq nom ("Dona") ham qabul qilinadi
-                { key: "unit", aliases: ["O'lchov birligi", "unit"], example: "Dona" },
+                { key: "unit", aliases: ["O'lchov birligi", "unit"], example: "Dona", shared: true },
                 { key: "purchasePrice", aliases: ["Kirim narxi", "purchasePrice"], example: "8000" },
                 { key: "salesPrice", aliases: ["Sotuv narxi", "salesPrice"], example: "10000" },
                 { key: "minStock", aliases: ["Min. qoldiq", "minStock"], example: "10" },
-                { key: "category", aliases: ["Kategoriya", "category"], example: "Ichimliklar" },
-                { key: "brand", aliases: ["Brend", "brand"], example: "Coca Cola" },
+                { key: "category", aliases: ["Kategoriya", "category"], example: "Ichimliklar", shared: true },
+                { key: "brand", aliases: ["Brend", "brand"], example: "Coca Cola", shared: true },
               ]}
             />
             {perms.create && (

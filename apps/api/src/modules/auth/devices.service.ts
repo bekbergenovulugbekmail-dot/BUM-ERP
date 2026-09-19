@@ -5,7 +5,9 @@
  *  - foydalanuvchining BIRINCHI qurilmasi avtomatik ishonchli (hisob ochilganda kimdir kirishi kerak);
  *  - keyingi har bir yangi qurilma "tasdiq kutilmoqda" bo'lib yoziladi va kirish BERILMAYDI;
  *  - biznes egasi (`users.manage`) uni Sozlamalar → Qurilmalar bo'limida tasdiqlaydi;
- *  - bekor qilingan qurilma qayta kirmoqchi bo'lsa — yana tasdiq so'raladi.
+ *  - bekor qilingan qurilma qayta kirmoqchi bo'lsa — yana tasdiq so'raladi;
+ *  - Admin panel (platforma admini) — istisno: qurilma yoziladi, lekin kirish telefon + parol bilan
+ *    bo'ladi (uni tasdiqlaydigan biznes egasi yo'q).
  *
  * `deviceId` sir emas: u faqat "bu qaysi qurilma" degan savolga javob beradi. Kirish huquqini
  * qurilmaning TASDIQLANGANI beradi, shuning uchun uni o'g'irlash kirish imkonini bermaydi —
@@ -93,9 +95,17 @@ export async function registerDevice(tx: Tx, userId: string, context: DeviceCont
 /**
  * Qurilma tasdig'i shu foydalanuvchiga qo'llanadimi. Xodim kartochkasidagi "Qurilma tasdig'i" belgisi
  * o'chirilgan bo'lsa — qurilma baribir ro'yxatga olinadi, lekin kirish to'sib qo'yilmaydi.
- * A'zolik topilmasa (platforma admini, kompaniyasiz foydalanuvchi) — tekshiruv KUCHDA qoladi.
+ * A'zolik topilmasa (kompaniyasiz foydalanuvchi) — tekshiruv KUCHDA qoladi.
+ *
+ * Platforma admini (Admin panel) — istisno: uning qurilmasini tasdiqlaydigan "egasi" yo'q, shuning
+ * uchun kirish telefon + parol bilan bo'ladi. Qurilma baribir ro'yxatga yoziladi (kim, qachon,
+ * qaysi IP — ko'rinib turadi).
  */
-export async function deviceCheckRequired(conn: DbOrTx, user: { id: string; activeCompanyId: string | null }): Promise<boolean> {
+export async function deviceCheckRequired(
+  conn: DbOrTx,
+  user: { id: string; activeCompanyId: string | null; isPlatformAdmin?: boolean },
+): Promise<boolean> {
+  if (user.isPlatformAdmin) return false;
   if (!user.activeCompanyId) return true;
   const [member] = await conn
     .select({ deviceCheck: companyMembers.deviceCheck })

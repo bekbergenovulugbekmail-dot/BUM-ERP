@@ -255,4 +255,34 @@ describe("Xaridlar CSV: import", () => {
       .where(and(eq(purchaseOrders.companyId, company.companyId), eq(purchaseOrders.status, "draft")));
     expect(all).toHaveLength(2);
   });
+
+  it("«Tezda qo'shish»: raqamsiz qatorlar docKey bilan bitta hujjatga birlashadi", async () => {
+    const res = await call(owner(), "POST", "/api/purchase/orders/import", {
+      rows: [
+        { docKey: "quick-1", orderDate: "2026-09-12", supplier: "S-1", warehouse: warehouseName, product: "SHK-1", quantity: "2", price: "500" },
+        { docKey: "quick-1", orderDate: "2026-09-12", supplier: "S-1", warehouse: warehouseName, product: "Shakar", quantity: "3", price: "600" },
+      ],
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json(), "ikkala mahsulot bitta hujjatda").toMatchObject({ created: 1, documents: 1 });
+    expect(res.json().errors).toHaveLength(0);
+
+    const orders = await db.select().from(purchaseOrders).where(eq(purchaseOrders.companyId, company.companyId));
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.number, "raqamni tizim beradi — docKey raqam sifatida yozilmaydi").not.toContain("quick-1");
+    expect(orders[0]!.status).toBe("draft");
+    const items = await db.select().from(purchaseOrderItems).where(eq(purchaseOrderItems.orderId, orders[0]!.id));
+    expect(items).toHaveLength(2);
+  });
+
+  it("har xil docKey — har xil hujjat", async () => {
+    const res = await call(owner(), "POST", "/api/purchase/orders/import", {
+      rows: [
+        { docKey: "quick-a", orderDate: "2026-09-12", supplier: "S-1", warehouse: warehouseName, product: "SHK-1", quantity: "2", price: "500" },
+        { docKey: "quick-b", orderDate: "2026-09-12", supplier: "S-1", warehouse: warehouseName, product: "SHK-1", quantity: "1", price: "500" },
+      ],
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ created: 2, documents: 2 });
+  });
 });

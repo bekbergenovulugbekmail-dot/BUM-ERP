@@ -130,11 +130,11 @@ export default function RoutesSection() {
             canImport
             columns={[
               { key: "name", aliases: ["Nomi", "name"], required: true, example: "Urganch markaz" },
-              { key: "salesRep", aliases: ["Sotuv agenti", "salesRep"], example: "Bekzod Bekzod" },
+              { key: "salesRep", aliases: ["Sotuv agenti", "salesRep"], example: "Bekzod Bekzod", shared: true },
               // 0 - yakshanba, 1 - dushanba ... 6 - shanba; bo'sh joy bilan ajratiladi
-              { key: "days", aliases: ["Kunlar (0-6)", "Kunlar", "days"], example: "1 3 5" },
+              { key: "days", aliases: ["Kunlar (0-6)", "Kunlar", "days"], example: "1 3 5", shared: true },
               { key: "description", aliases: ["Tavsif", "description"], example: "Markaziy do'konlar" },
-              { key: "color", aliases: ["Rang", "color"], example: "#2563eb" },
+              { key: "color", aliases: ["Rang", "color"], example: "#2563eb", shared: true },
             ]}
           />
           <Button size="sm" onClick={() => setCreateOpen(true)}>

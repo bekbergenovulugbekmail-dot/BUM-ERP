@@ -15,11 +15,16 @@
  *      tekshiradi va xato, dublikat va ogohlantirishlarni qaytaradi (preview);
  *   3) foydalanuvchi "Importni boshlash" bosgandan keyingina xuddi shu qatorlar `dryRun: false` bilan yoziladi.
  * Ya'ni moslash va preview paytida bazaga biznes ma'lumot yozilmaydi.
+ *
+ * "Tezda qo'shish" — fayl tayyorlamasdan, o'sha kataklarga yozib saqlash. Hujjatga xos maydonlar
+ * (`shared: true` — ta'minotchi, sana, ombor) YUQORIDA bir marta kiritiladi va har bir qatorga
+ * qo'shiladi; jadvalda faqat yozuvga (mahsulotga) tegishli kataklar qoladi. Har bir umumiy maydonni
+ * "har qatorda" bilan jadvalga ko'chirish mumkin. Tekshiruv — import bilan bir xil endpoint.
  */
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import Papa from "papaparse";
-import { AlertTriangle, Copy, Download, FileDown, Plus, TableProperties, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, Copy, Download, FileDown, Maximize2, Minimize2, Plus, TableProperties, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -44,6 +49,11 @@ export type CsvColumn = {
   required?: boolean;
   /** Shablondagi namuna qatorida shu katakda turadigan qiymat. */
   example?: string;
+  /**
+   * Hujjatga xos maydon: "Tezda qo'shish"da bir marta yuqorida kiritiladi va har bir qatorga qo'shiladi
+   * (ta'minotchi, sana, ombor kabi). Kerak bo'lsa foydalanuvchi uni "har qatorda" ga o'tkaza oladi.
+   */
+  shared?: boolean;
 };
 
 type ImportIssue = { row: number; key?: string | null; sku?: string | null; message: string };
@@ -121,6 +131,7 @@ export default function CsvToolbar({
   canImport,
   importLabel = "Import",
   exportLabel = "Eksport",
+  quickGroupField,
 }: {
   exportUrl: string;
   exportParams?: Record<string, string | number | boolean | undefined>;
@@ -132,6 +143,11 @@ export default function CsvToolbar({
   canImport: boolean;
   importLabel?: string;
   exportLabel?: string;
+  /**
+   * Hujjatli importlarda (xarid) qatorlarni BITTA hujjatga bog'laydigan maydon nomi.
+   * "Tezda qo'shish"da bir saqlash = bir hujjat: barcha qatorlarga bir xil tasodifiy kalit qo'yiladi.
+   */
+  quickGroupField?: string;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<"export" | "preview" | "import" | null>(null);
@@ -141,6 +157,12 @@ export default function CsvToolbar({
   const [preview, setPreview] = useState<Preview | null>(null);
   /** "Tezda qo'shish": fayl tayyorlamasdan, kataklarga yozib saqlash. */
   const [quickRows, setQuickRows] = useState<Record<string, string>[] | null>(null);
+  /** Hujjatga xos maydonlar — bir marta kiritiladi va har qatorga qo'shiladi. */
+  const [quickShared, setQuickShared] = useState<Record<string, string>>({});
+  /** Foydalanuvchi umumiy maydonni qatorlarga ko'chirsa — shu ro'yxatga tushadi. */
+  const [perRowKeys, setPerRowKeys] = useState<string[]>([]);
+  /** Oyna butun ekranga yoyilganmi. */
+  const [quickFull, setQuickFull] = useState(false);
   const importRows = useApiMutation(
     ({ rows, dryRun }: { rows: Record<string, string>[]; dryRun: boolean }) =>
       api.post<ImportOutcome>(importUrl, { rows, dryRun }),
@@ -296,27 +318,80 @@ export default function CsvToolbar({
   /** Bo'sh qator — barcha ustunlar bo'sh matn. */
   const emptyRow = () => Object.fromEntries(columns.map((column) => [column.key, ""])) as Record<string, string>;
 
-  const openQuick = () => setQuickRows([emptyRow(), emptyRow(), emptyRow()]);
+  const label = (column: CsvColumn) => column.aliases[0] ?? column.key;
+  /** Yuqorida bir marta kiritiladigan maydonlar (foydalanuvchi qatorlarga ko'chirmaganlari). */
+  const sharedColumns = columns.filter((column) => column.shared && !perRowKeys.includes(column.key));
+  /** Jadval ustunlari — mahsulotga (yozuvga) xos maydonlar. */
+  const rowColumns = columns.filter((column) => !column.shared || perRowKeys.includes(column.key));
 
-  /** Kataklarga yozilgan qatorlarni import endpointiga yuboradi (import bilan bir xil tekshiruv). */
+  const openQuick = () => {
+    setQuickShared(Object.fromEntries(columns.filter((column) => column.shared).map((column) => [column.key, ""])));
+    setPerRowKeys([]);
+    setQuickFull(false);
+    setQuickRows([emptyRow(), emptyRow(), emptyRow()]);
+  };
+
+  const closeQuick = () => {
+    setQuickRows(null);
+    setQuickShared({});
+    setPerRowKeys([]);
+  };
+
+  /** Qatorda biror katak to'ldirilganmi (faqat jadval ustunlari bo'yicha). */
+  const rowFilled = (row: Record<string, string>) => rowColumns.some((column) => (row[column.key] ?? "").trim() !== "");
+
+  /**
+   * Kataklarga yozilgan qatorlarni import endpointiga yuboradi (import bilan bir xil tekshiruv).
+   * Umumiy maydonlar har bir qatorga qo'shiladi; `quickGroupField` berilgan bo'lsa barcha qatorlar
+   * bitta hujjatga tushadi.
+   */
   const handleQuickSave = async () => {
     if (!quickRows) return;
-    const filled = quickRows.filter((row) => Object.values(row).some((value) => value.trim() !== ""));
+    const missingShared = sharedColumns.find((column) => column.required && !(quickShared[column.key] ?? "").trim());
+    if (missingShared) {
+      toast.error(`«${label(missingShared)}» to'ldirilmagan (umumiy maydon)`);
+      return;
+    }
+    const sharedValues: Record<string, string> = {};
+    for (const column of sharedColumns) {
+      const value = (quickShared[column.key] ?? "").trim();
+      if (value) sharedValues[column.key] = value;
+    }
+
+    const filled = quickRows.filter(rowFilled);
     if (filled.length === 0) {
       toast.error("Kamida bitta qatorni to'ldiring");
       return;
     }
-    const missing = filled.findIndex((row) => columns.some((column) => column.required && !row[column.key]?.trim()));
-    if (missing >= 0) {
-      toast.error(`${missing + 1}-qatorda majburiy maydon bo'sh`);
-      return;
+    for (const [index, row] of filled.entries()) {
+      const missing = rowColumns.find((column) => column.required && !(row[column.key] ?? "").trim());
+      if (missing) {
+        toast.error(`${index + 1}-qatorda «${label(missing)}» bo'sh`);
+        return;
+      }
     }
+
+    // Bir saqlash = bir hujjat: qatorlarni bog'lash uchun tasodifiy kalit
+    const groupKey = quickGroupField ? `quick-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}` : null;
+    const payload = filled.map((row) => {
+      const mapped: Record<string, string> = { ...sharedValues };
+      for (const column of rowColumns) {
+        const value = (row[column.key] ?? "").trim();
+        if (value) mapped[column.key] = value;
+      }
+      if (quickGroupField && groupKey) mapped[quickGroupField] = groupKey;
+      return mapped;
+    });
+
     setBusy("import");
     try {
-      const outcome = await send(filled, false);
+      const outcome = await send(payload, false);
       if (outcome.created > 0) {
-        toast.success(`${outcome.created} ta qator qo'shildi`);
-        setQuickRows(null);
+        // Hujjatli bo'limda (xarid) `created` — hujjatlar soni, qatorlar esa uning ichida
+        toast.success(
+          quickGroupField ? `Hujjat qo'shildi (${payload.length} ta qator)` : `${outcome.created} ta qator qo'shildi`,
+        );
+        closeQuick();
       } else {
         toast.error("Hech narsa qo'shilmadi");
       }
@@ -376,27 +451,87 @@ export default function CsvToolbar({
         )}
       </div>
 
-      {/* Tezda qo'shish: import shablonidagi kataklar, fayl tayyorlamasdan */}
+      {/* Tezda qo'shish: umumiy maydonlar bir marta yuqorida, yozuvga xos maydonlar jadvalda */}
       {quickRows && (
-        <Dialog open onOpenChange={(open) => !open && busy === null && setQuickRows(null)}>
-          <DialogContent className="max-w-5xl">
+        <Dialog open onOpenChange={(open) => !open && busy === null && closeQuick()}>
+          <DialogContent className={quickFull ? "sm:max-w-[98vw]" : "sm:max-w-5xl"}>
             <DialogHeader>
-              <DialogTitle>Tezda qo'shish</DialogTitle>
+              <DialogTitle className="flex items-center gap-2">
+                Tezda qo'shish
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 w-7 p-0"
+                  data-testid="quick-add-fullscreen"
+                  aria-label={quickFull ? "Oynani kichraytirish" : "Butun ekranga yoyish"}
+                  title={quickFull ? "Kichraytirish" : "Butun ekranga yoyish"}
+                  onClick={() => setQuickFull((current) => !current)}
+                >
+                  {quickFull ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                </Button>
+              </DialogTitle>
               <DialogDescription>
-                Kataklarga to'ldiring va saqlang — fayl tayyorlash shart emas. Tekshiruv importdagi bilan bir xil:
-                xato qator qo'shilmaydi va sababi ko'rsatiladi. <b>*</b> — majburiy maydon.
+                {sharedColumns.length > 0
+                  ? "Umumiy ma'lumotlarni (ta'minotchi, sana kabi) bir marta yuqoriga yozing — jadvalda faqat mahsulotga tegishli kataklar qoladi."
+                  : "Kataklarga to'ldiring va saqlang — fayl tayyorlash shart emas."}{" "}
+                Tekshiruv importdagi bilan bir xil: xato qator qo'shilmaydi va sababi ko'rsatiladi. <b>*</b> — majburiy maydon.
               </DialogDescription>
             </DialogHeader>
 
-            <div className="max-h-[55vh] overflow-auto rounded-lg border border-border">
+            {sharedColumns.length > 0 && (
+              <div className="rounded-xl border border-border bg-muted/30 p-3" data-testid="quick-add-shared">
+                <p className="mb-2 text-xs font-semibold">Umumiy ma'lumotlar — bir marta kiritiladi</p>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {sharedColumns.map((column) => (
+                    <div key={column.key} className="space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <Label htmlFor={`quick-shared-${column.key}`} className="truncate text-xs">
+                          {label(column)}
+                          {column.required && <span className="text-destructive"> *</span>}
+                        </Label>
+                        <button
+                          type="button"
+                          className="shrink-0 text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+                          title="Bu maydonni har bir qatorda alohida to'ldirish"
+                          onClick={() => setPerRowKeys((keys) => [...keys, column.key])}
+                        >
+                          har qatorda
+                        </button>
+                      </div>
+                      <Input
+                        id={`quick-shared-${column.key}`}
+                        className="h-8 text-sm"
+                        placeholder={column.example ?? ""}
+                        value={quickShared[column.key] ?? ""}
+                        onChange={(event) =>
+                          setQuickShared((current) => ({ ...current, [column.key]: event.target.value }))
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className={`overflow-auto rounded-lg border border-border ${quickFull ? "max-h-[62vh]" : "max-h-[45vh]"}`}>
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-muted/60 backdrop-blur">
                   <tr>
                     <th className="w-10 px-2 py-2 text-left text-xs text-muted-foreground">#</th>
-                    {columns.map((column) => (
+                    {rowColumns.map((column) => (
                       <th key={column.key} className="px-2 py-2 text-left text-xs font-medium whitespace-nowrap">
-                        {column.aliases[0] ?? column.key}
+                        {label(column)}
                         {column.required && <span className="text-destructive"> *</span>}
+                        {column.shared && (
+                          <button
+                            type="button"
+                            className="ml-1 text-[11px] font-normal text-muted-foreground underline-offset-2 hover:underline"
+                            title="Yuqoridagi umumiy maydonga qaytarish"
+                            onClick={() => setPerRowKeys((keys) => keys.filter((key) => key !== column.key))}
+                          >
+                            umumiy
+                          </button>
+                        )}
                       </th>
                     ))}
                     <th className="w-10" />
@@ -406,7 +541,7 @@ export default function CsvToolbar({
                   {quickRows.map((row, index) => (
                     <tr key={index} className="border-t border-border">
                       <td className="px-2 py-1 text-xs text-muted-foreground">{index + 1}</td>
-                      {columns.map((column) => (
+                      {rowColumns.map((column) => (
                         <td key={column.key} className="px-1 py-1">
                           <Input
                             className="h-8 min-w-32 text-sm"
@@ -444,12 +579,13 @@ export default function CsvToolbar({
                 <Plus className="h-3.5 w-3.5 mr-1" /> Qator qo'shish
               </Button>
               <p className="text-xs text-muted-foreground">
-                To'ldirilgan qatorlar: {quickRows.filter((row) => Object.values(row).some((value) => value.trim() !== "")).length}
+                To'ldirilgan qatorlar: {quickRows.filter(rowFilled).length}
+                {quickGroupField && sharedColumns.length > 0 && " — hammasi bitta hujjatga tushadi"}
               </p>
             </div>
 
             <DialogFooter>
-              <Button variant="secondary" disabled={busy !== null} onClick={() => setQuickRows(null)}>
+              <Button variant="secondary" disabled={busy !== null} onClick={closeQuick}>
                 Bekor
               </Button>
               <Button disabled={busy !== null} onClick={() => void handleQuickSave()}>

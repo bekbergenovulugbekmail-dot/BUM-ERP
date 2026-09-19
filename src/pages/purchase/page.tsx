@@ -81,12 +81,13 @@ export default function PurchasePage() {
             importUrl="/api/purchase/orders/import"
             invalidate={["/api/purchase/orders"]}
             canImport={can("purchase.create")}
+            quickGroupField="docKey"
             columns={[
               // Bitta hujjatning har bir mahsuloti - alohida qator; hujjat raqami takrorlanadi
-              { key: "number", aliases: ["Hujjat raqami", "number"], example: "XB-2026-0001" },
-              { key: "orderDate", aliases: ["Sana", "orderDate"], required: true, example: "2026-09-01" },
-              { key: "supplier", aliases: ["Ta'minotchi", "Ta'minotchi kodi", "supplier"], required: true, example: "Nestle Uzbekistan" },
-              { key: "warehouse", aliases: ["Ombor", "warehouse"], required: true, example: "Asosiy ombor" },
+              { key: "number", aliases: ["Hujjat raqami", "number"], example: "XB-2026-0001", shared: true },
+              { key: "orderDate", aliases: ["Sana", "orderDate"], required: true, example: "2026-09-01", shared: true },
+              { key: "supplier", aliases: ["Ta'minotchi", "Ta'minotchi kodi", "supplier"], required: true, example: "Nestle Uzbekistan", shared: true },
+              { key: "warehouse", aliases: ["Ombor", "warehouse"], required: true, example: "Asosiy ombor", shared: true },
               // Mahsulot NOMI bilan qidiriladi (SKU ham qabul qilinadi); bunday tovar bo'lmasa avtomatik ochiladi
               { key: "product", aliases: ["Mahsulot", "Mahsulot nomi", "SKU", "product"], required: true, example: "Coca-Cola 1L" },
               { key: "quantity", aliases: ["Miqdor", "quantity"], required: true, example: "24" },
@@ -94,8 +95,8 @@ export default function PurchasePage() {
               { key: "price", aliases: ["Narx", "price"], required: true, example: "8000" },
               { key: "discountPercent", aliases: ["Chegirma %", "discountPercent"], example: "0" },
               { key: "taxRate", aliases: ["Soliq %", "taxRate"], example: "0" },
-              { key: "expectedDate", aliases: ["Kutilgan sana", "expectedDate"], example: "2026-09-05" },
-              { key: "notes", aliases: ["Izoh", "notes"], example: "Shartnoma bo'yicha" },
+              { key: "expectedDate", aliases: ["Kutilgan sana", "expectedDate"], example: "2026-09-05", shared: true },
+              { key: "notes", aliases: ["Izoh", "notes"], example: "Shartnoma bo'yicha", shared: true },
             ]}
           />
           {can("purchase.create") && (

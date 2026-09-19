@@ -157,6 +157,11 @@ export async function exportPurchaseOrdersCsv(conn: DbOrTx, tenant: TenantContex
 
 export type PurchaseImportRow = {
   number?: string;
+  /**
+   * Hujjat raqamisiz qatorlarni bitta hujjatga bog'laydigan kalit ("Tezda qo'shish" yuboradi).
+   * Hujjat raqami sifatida saqlanmaydi — raqamni tizim o'zi beradi.
+   */
+  docKey?: string;
   orderDate?: string;
   supplier?: string;
   warehouse?: string;
@@ -172,13 +177,17 @@ export type PurchaseImportRow = {
 
 type Group = { key: string; number: string | null; rows: { line: number; row: PurchaseImportRow }[] };
 
-/** Bir xil hujjat raqamli qatorlar — bitta hujjat; raqamsiz qator — alohida hujjat. */
+/**
+ * Bir xil hujjat raqamli qatorlar — bitta hujjat; raqamsiz qator — alohida hujjat.
+ * `docKey` berilgan bo'lsa (raqamsiz "Tezda qo'shish") shu kalit bo'yicha birlashadi.
+ */
 function groupRows(rows: PurchaseImportRow[]): Group[] {
   const groups = new Map<string, Group>();
   rows.forEach((row, index) => {
     const line = index + 1;
     const number = row.number?.trim() || null;
-    const key = number ? `no:${number.toLowerCase()}` : `row:${line}`;
+    const docKey = row.docKey?.trim() || null;
+    const key = number ? `no:${number.toLowerCase()}` : docKey ? `key:${docKey}` : `row:${line}`;
     const group = groups.get(key) ?? { key, number, rows: [] };
     group.rows.push({ line, row });
     groups.set(key, group);

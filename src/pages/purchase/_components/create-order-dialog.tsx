@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, ScanLine, Trash2, ShoppingCart } from "lucide-react";
+import { Maximize2, Minimize2, Plus, ScanLine, Trash2, ShoppingCart } from "lucide-react";
 import { currencySymbol } from "@bum/shared";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -88,6 +88,8 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineItem[]>([emptyLine()]);
   const [loading, setLoading] = useState(false);
+  /** Oyna butun ekranga yoyilganmi — ko'p qatorli buyurtmalarni qulay ko'rish uchun. */
+  const [full, setFull] = useState(false);
 
   // Xaridda ishlatiladigan valyutalar (yuqorida tanlanadi); qator valyutasi shulardan
   const [chosenCurrencies, setChosenCurrencies] = useState<string[] | null>(null);
@@ -279,11 +281,22 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className={cn("max-h-[92vh] overflow-y-auto", full ? "sm:max-w-[98vw]" : "sm:max-w-5xl")}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShoppingCart className="h-5 w-5 text-primary" />
             Yangi xarid buyurtmasi
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              data-testid="order-fullscreen"
+              aria-label={full ? "Oynani kichraytirish" : "Butun ekranga yoyish"}
+              title={full ? "Kichraytirish" : "Butun ekranga yoyish"}
+              onClick={() => setFull((current) => !current)}
+            >
+              {full ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </Button>
           </DialogTitle>
         </DialogHeader>
 

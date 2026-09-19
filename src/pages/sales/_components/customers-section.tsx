@@ -160,7 +160,7 @@ export default function CustomersSection() {
             canImport={canManage}
             columns={[
               { key: "name", aliases: ["Nomi", "name"], required: true, example: "Anvar aka do'koni" },
-              { key: "partyType", aliases: ["Turi", "partyType"], example: "Jismoniy shaxs" },
+              { key: "partyType", aliases: ["Turi", "partyType"], example: "Jismoniy shaxs", shared: true },
               { key: "phone", aliases: ["Telefon", "phone"], example: "+998901234567" },
               { key: "email", aliases: ["Email", "email"], example: "anvar@mail.uz" },
               { key: "address", aliases: ["Manzil", "address"], example: "Urganch, Al-Xorazmiy 12" },
@@ -168,11 +168,11 @@ export default function CustomersSection() {
               { key: "taxId", aliases: ["STIR", "taxId"], example: "302123456" },
               { key: "bankAccount", aliases: ["Hisob raqami", "bankAccount"], example: "20208000000000000001" },
               { key: "bankMfo", aliases: ["MFO", "bankMfo"], example: "00014" },
-              { key: "city", aliases: ["Shahar/tuman", "city"], example: "Urganch" },
-              { key: "district", aliases: ["Mahalla", "district"], example: "Gulobod" },
+              { key: "city", aliases: ["Shahar/tuman", "city"], example: "Urganch", shared: true },
+              { key: "district", aliases: ["Mahalla", "district"], example: "Gulobod", shared: true },
               { key: "discountPercent", aliases: ["Chegirma %", "discountPercent"], example: "5" },
               { key: "creditLimit", aliases: ["Kredit limiti", "creditLimit"], example: "1000000" },
-              { key: "paymentTermDays", aliases: ["To'lov muddati (kun)", "paymentTermDays"], example: "14" },
+              { key: "paymentTermDays", aliases: ["To'lov muddati (kun)", "paymentTermDays"], example: "14", shared: true },
             ]}
           />
           {canManage && (

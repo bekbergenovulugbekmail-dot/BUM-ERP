@@ -148,6 +148,8 @@ const orderImportBody = z.strictObject({
     .array(
       z.strictObject({
         number: z.string().max(50).optional(),
+        // Raqamsiz qatorlarni bitta hujjatga bog'laydi ("Tezda qo'shish"); raqam sifatida saqlanmaydi
+        docKey: z.string().max(100).optional(),
         orderDate: z.string().max(50).optional(),
         supplier: z.string().max(300).optional(),
         warehouse: z.string().max(300).optional(),
