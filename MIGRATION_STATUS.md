@@ -2483,6 +2483,35 @@ Topilmalar `DISTRIBUTION-E2E-BUG-REPORT.md` da: 2 MEDIUM (yetkazib bo'lmaganda s
 qolishi; kassir ERP to'lovlari uchun finance.manage talab qilinishi), 4 LOW, BLOCKER/HIGH yo'q.
 Yakuniy holat `DISTRIBUTION-E2E-FINAL-REPORT.md` da.
 
+## F-01/F-03 tuzatildi, import va qurilmalar (2026-09-19, deploy qilindi)
+
+**F-01 — yetkazib bo'lmagan yetkazma ko'rinmay qolishi:** endi `GET /api/delivery/tasks` har
+yetkazmada `returnPending` belgisini qaytaradi va `?returnPending=true` filtri bor; Yetkazmalar
+sahifasida "Tovar qaytarilmagan" filtri va sariq nishon; xato bildirishnomasi keyingi qadamni
+aytadi. Zaxira va pul mantig'i ataylab o'zgartirilmadi (tovar jismonan yetkazuvchida).
+
+**F-03 — kassir mijozdan to'lov qabul qila olmasligi:** yangi ruxsat `sales.collect_payment`
+(Kassir va Savdo menejerida), `POST /api/sales/payments` endi `sales.collect_payment` YOKI
+`finance.manage` bilan ochiladi. Kassirda moliya sozlamalari yopiq qoldi.
+
+**Xarid importi:** SKU majburiy emas — mahsulot avval NOMI bo'yicha qidiriladi, topilmasa
+avtomatik ochiladi (SKU o'zi beriladi). `dryRun` da faqat ogohlantirish chiqadi.
+
+**Qurilmalar:** yangi ruxsat `devices.manage` (HR menejeri, Direktor, ega) — rahbar yo'qda ham
+yangi telefon ochiladi. Foydalanuvchi O'ZINING qurilmasini ishonchli qurilmadan turib tasdiqlaydi:
+`GET/POST /api/auth/devices`, Sozlamalar -> Xavfsizlik -> "Mening qurilmalarim". Rahbarning 2-3
+telefoni/noutbuki muammosiz.
+
+**Migratsiyalar:** 0063 (kassa mas'ul xodimi), 0064 (kassir to'lovi), 0065 (qurilma ruxsati) —
+hammasi faqat qo'shadi. Production'da tasdiqlandi: 66 migratsiya, Kassir/Savdo menejeri
+`sales.collect_payment` bilan, HR menejeri `devices.manage` bilan.
+
+**Testlar:** API 124 fayl / 653 test. Yangi fayllar: delivery-return-pending (3),
+cashier-collect-payment (2), device-self-service (4); purchase-csv (9).
+
+**Deploy (2026-09-19):** `bum-api` va `bum-web` — tekshirildi: `/api/auth/devices` 401 (mavjud),
+`?returnPending=true` 401, bundle `index-BemJjLKO.js` da yangi matnlar bor.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
