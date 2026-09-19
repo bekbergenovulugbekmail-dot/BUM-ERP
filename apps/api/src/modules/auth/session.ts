@@ -15,7 +15,22 @@ import type { DbOrTx } from "../../db/transaction.js";
 import { env, isProd } from "../../env.js";
 import type { RequestMeta } from "../../shared/audit.js";
 
+/**
+ * Biznesga bog'lanmagan sessiya cookie'si — desktop kassa, telefon ilovasi va platforma admini
+ * (ular manzilda biznes bo'lagini yubormaydi).
+ */
 export const SESSION_COOKIE = "bum_session";
+
+/**
+ * Biznes manzilidan kirilgan sessiya cookie'si: har bir biznes ALOHIDA cookie.
+ *
+ * Shu tufayli bitta brauzerda `app.bum-erp.uz/ezo` va `app.bum-erp.uz/bonnu-market` bir vaqtda ochiq
+ * tursa ham sessiyalar aralashmaydi; bir tabda chiqish faqat o'sha biznes cookie'sini o'chiradi.
+ * Nom faqat manzil bo'lagidan tuziladi (slug: `[a-z0-9-]`, yoki eski bizneslarda id).
+ */
+export function tenantSessionCookie(companyKey: string): string {
+  return `bum_s_${companyKey.toLowerCase()}`;
+}
 
 /** Faollik shundan tez-tez yozilmaydi — har so'rovda UPDATE bo'lmasligi uchun. */
 const TOUCH_INTERVAL_MS = 60_000;
@@ -28,6 +43,8 @@ export type SessionUser = typeof users.$inferSelect;
 export type ActiveSession = {
   sessionId: string;
   user: SessionUser;
+  /** Sessiya bog'langan biznes (`null` — bog'lanmagan: kassa, telefon ilovasi, platforma admini). */
+  companyId: string | null;
   /** Ekran qulflangan — faqat /me, /unlock (PIN) va /logout ochiq. */
   lockedAt: Date | null;
 };
@@ -42,7 +59,7 @@ function idleDeadline(now: number, expiresAt: Date): Date {
 
 export async function createSession(
   conn: DbOrTx,
-  input: { userId: string } & RequestMeta,
+  input: { userId: string; companyId?: string | null } & RequestMeta,
 ): Promise<{ token: string; sessionId: string; expiresAt: Date }> {
   const token = randomBytes(32).toString("base64url");
   const now = Date.now();
@@ -52,6 +69,8 @@ export async function createSession(
     .insert(sessions)
     .values({
       userId: input.userId,
+      // Biznes manzilidan kirilgan sessiya AYNAN shu biznesga bog'lanadi
+      companyId: input.companyId ?? null,
       tokenHash: hashToken(token),
       expiresAt,
       idleExpiresAt: idleDeadline(now, expiresAt),
@@ -94,7 +113,7 @@ export async function validateSession(token: string): Promise<ActiveSession | nu
     await db.update(users).set({ lastSeenAt: now }).where(eq(users.id, row.user.id));
   }
 
-  return { sessionId: row.session.id, user: row.user, lockedAt: row.session.lockedAt };
+  return { sessionId: row.session.id, user: row.user, companyId: row.session.companyId, lockedAt: row.session.lockedAt };
 }
 
 /**
@@ -117,7 +136,7 @@ export async function peekSession(token: string): Promise<ActiveSession | null> 
     )
     .limit(1);
   if (!row || !row.user.isActive) return null;
-  return { sessionId: row.session.id, user: row.user, lockedAt: row.session.lockedAt };
+  return { sessionId: row.session.id, user: row.user, companyId: row.session.companyId, lockedAt: row.session.lockedAt };
 }
 
 export async function revokeSession(token: string): Promise<void> {
@@ -135,8 +154,9 @@ export async function revokeUserSessions(conn: DbOrTx, userId: string): Promise<
     .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
 }
 
-export function setSessionCookie(reply: FastifyReply, token: string, expiresAt: Date): void {
-  reply.setCookie(SESSION_COOKIE, token, {
+/** `companyKey` berilsa — o'sha biznesning alohida cookie'si, aks holda umumiy (kassa/ilova/admin). */
+export function setSessionCookie(reply: FastifyReply, token: string, expiresAt: Date, companyKey?: string | null): void {
+  reply.setCookie(companyKey ? tenantSessionCookie(companyKey) : SESSION_COOKIE, token, {
     httpOnly: true,
     secure: isProd,
     sameSite: "lax",
@@ -145,6 +165,6 @@ export function setSessionCookie(reply: FastifyReply, token: string, expiresAt: 
   });
 }
 
-export function clearSessionCookie(reply: FastifyReply): void {
-  reply.clearCookie(SESSION_COOKIE, { path: "/" });
+export function clearSessionCookie(reply: FastifyReply, companyKey?: string | null): void {
+  reply.clearCookie(companyKey ? tenantSessionCookie(companyKey) : SESSION_COOKIE, { path: "/" });
 }

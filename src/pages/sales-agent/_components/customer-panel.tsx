@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
 import { usePermissions } from "@/hooks/use-company.ts";
-import { api } from "@/lib/api.ts";
+import { api, apiUrl } from "@/lib/api.ts";
 import { useApiMutation } from "@/lib/query.ts";
 import { freshPosition, uploadCustomerPhoto, visitErrorMessage } from "../_lib/visit-api.ts";
 import type { CustomerHistory, StoreProfile } from "../_lib/types.ts";
@@ -113,8 +113,9 @@ export default function CustomerPanel({ store, history }: { store: StoreProfile;
   return (
     <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
       {history?.photo && (
+        // Brauzer rasmni o'zi yuklaydi: biznes konteksti sarlavhada emas, manzilda (`apiUrl`)
         <img
-          src={`/api/sales-agent/customers/${store.id}/photo?v=${history.photo.id}`}
+          src={apiUrl(`/api/sales-agent/customers/${store.id}/photo`, { v: history.photo.id })}
           alt={t("customer.photo_alt", { name: store.name })}
           className="w-full max-h-56 rounded-xl bg-muted object-cover"
         />

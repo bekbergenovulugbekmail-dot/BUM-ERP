@@ -129,7 +129,8 @@ export async function authenticate(
   return { user, upgradedHash };
 }
 
-export async function startSession(tx: Tx, auth: Authenticated, meta: RequestMeta) {
+/** `companyId` — sessiya bog'lanadigan biznes (biznes manzilidan kirilganda); `null` — kassa/ilova/admin. */
+export async function startSession(tx: Tx, auth: Authenticated, meta: RequestMeta, companyId: string | null = null) {
   const { user } = auth;
 
   await tx
@@ -142,7 +143,7 @@ export async function startSession(tx: Tx, auth: Authenticated, meta: RequestMet
     })
     .where(eq(users.id, user.id));
 
-  const session = await createSession(tx, { userId: user.id, ...meta });
+  const session = await createSession(tx, { userId: user.id, companyId, ...meta });
 
   await writeAuditLog(
     {

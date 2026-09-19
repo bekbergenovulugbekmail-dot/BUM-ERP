@@ -23,6 +23,11 @@ export type MyCompany = {
   trialEndsAt: string | null;
   companyRole: string;
   membershipActive: boolean;
+  /** Bog'langan Kadrlar kartochkasi (yo'q bo'lsa — null: "Xodim biriktirilmagan"). */
+  employeeId?: string | null;
+  employeeName?: string | null;
+  employeeCode?: string | null;
+  employeeStatus?: string | null;
   isCurrent: boolean;
 };
 

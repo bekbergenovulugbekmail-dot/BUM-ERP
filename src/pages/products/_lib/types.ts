@@ -44,7 +44,8 @@ export type Product = {
   baseUnitId: string;
   purchaseUnitId: string | null;
   salesUnitId: string | null;
-  purchasePrice: string;
+  /** Tannarx: `products.view_cost` ruxsati bo'lmasa server bu maydonni umuman yubormaydi. */
+  purchasePrice?: string;
   salesPrice: string;
   wholesalePrice: string | null;
   retailPrice: string | null;

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ArrowDown, ArrowUp, ListOrdered, Loader2, Pencil, Plus, Power, Wallet } from "lucide-react";
 import { isOpenDeliveryStatus } from "@bum/shared";
 import DeliveryAgentDialog from "@/components/delivery/delivery-agent-dialog.tsx";
-import NewEmployeeDialog from "@/components/company/new-employee-dialog.tsx";
+
 import { StatusBadge } from "@/components/delivery/badges.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
@@ -258,6 +259,8 @@ function CashDialog({ agent, onClose }: { agent: DeliveryAgentRow; onClose: () =
 
 /** Yetkazuvchilar: profil (filial, hudud, zona, transport, yuk, jadval, supervayzer), faollik va kunlik yetkazish tartibi. */
 export default function AgentsSection() {
+  // Manzilning birinchi bo'lagi (biznes yoki til) — Kadrlar havolasi uchun
+  const { lng } = useParams<{ lng: string }>();
   const { t } = useTranslation("delivery");
   const { can } = usePermissions();
   const manage = can("delivery.manage");
@@ -267,16 +270,17 @@ export default function AgentsSection() {
   const [routing, setRouting] = useState<DeliveryAgentRow | null>(null);
   const [cashFor, setCashFor] = useState<DeliveryAgentRow | null>(null);
   /** Yagona "Xodim qo'shish" oynasi. */
-  const [addOpen, setAddOpen] = useState(false);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">{t("agents.subtitle")}</p>
-        {/* Yetkazuvchi yagona "Xodim qo'shish" formasidan: rol "Dostavka agenti" bo'lsa profil ham yaratiladi */}
+        {/* Xodim FAQAT Kadrlar bo'limida ochiladi; rol "Dostavka agenti" bo'lsa profil avtomatik yaratiladi */}
         {manage && (
-          <Button onClick={() => setAddOpen(true)}>
-            <Plus className="mr-1.5 h-4 w-4" /> {t("agents.add")}
+          <Button asChild>
+            <Link to={`/${lng ?? "uz"}/hr`} data-testid="agents-add-via-hr">
+              <Plus className="mr-1.5 h-4 w-4" /> {t("agents.add_via_hr")}
+            </Link>
           </Button>
         )}
       </div>
@@ -376,7 +380,6 @@ export default function AgentsSection() {
         </div>
       )}
 
-      <NewEmployeeDialog open={addOpen} onClose={() => setAddOpen(false)} />
       {editing && <DeliveryAgentDialog agent={editing} onClose={() => setEditing(null)} />}
       {toggling && <ToggleDialog agent={toggling} onClose={() => setToggling(null)} />}
       {routing && <RouteOrderDialog agent={routing} onClose={() => setRouting(null)} />}

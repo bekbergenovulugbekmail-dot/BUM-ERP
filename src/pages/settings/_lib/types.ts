@@ -37,6 +37,11 @@ export type Employee = {
   licenseType: "included" | "additional" | null;
   licenseStatus: "active" | "pending_payment" | "expired" | "revoked" | null;
   licenseExpiresAt: string | null;
+  /** Bog'langan Kadrlar kartochkasi (null — "Xodim biriktirilmagan"). */
+  employeeId: string | null;
+  employeeName: string | null;
+  employeeCode: string | null;
+  employeeStatus: string | null;
 };
 
 export type Branch = {

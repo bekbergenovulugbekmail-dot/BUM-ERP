@@ -11,6 +11,9 @@
  *   GET    /brands                             (?isActive=)                  (a'zo)
  *   POST   /brands, PATCH|DELETE /brands/:brandId                            (products.manage)
  *   GET    /products                           ro'yxat (?search=&categoryId=&brandId=&isActive=&limit=&cursor=)  (products.view)
+ *   GET    /products/costs                     tannarx ro'yxati (?search=&limit=)  (products.view_cost)
+ *   GET    /products/:productId/price-suggestions  narx tavsiyalari (?unitId=)   (products.view_cost)
+ *   GET    /products/:productId/cost-history   tannarx tarixi (?limit=)       (products.view_cost)
  *   GET    /products/export                    CSV                           (products.view)
  *   POST   /products/import                    CSV qatorlari (JSON)          (products.create)
  *   GET    /products/by-barcode/:barcode                                     (products.view)
@@ -30,6 +33,7 @@ import { requestMeta } from "../../shared/audit.js";
 import { decimalSchema, percentSchema, priceSchema, qtySchema } from "../../shared/decimal.js";
 import { authOf, requireAuth, requirePlatformAdmin } from "../auth/guard.js";
 import {
+  hasPermission,
   requirePermission,
   requireTenant,
   requireTenantForWrite,
@@ -45,6 +49,7 @@ import {
   updateBrand,
   updateCategory,
 } from "./categories.service.js";
+import { costHistory, priceSuggestions, productCosts } from "./product-cost.service.js";
 import {
   addBatch,
   createProduct,
@@ -208,6 +213,13 @@ const categoryParams = z.object({ categoryId: z.uuid() });
 const brandParams = z.object({ brandId: z.uuid() });
 const productParams = z.object({ productId: z.uuid() });
 const barcodeParams = z.object({ barcode: z.string().trim().min(1).max(64) });
+const costQuery = z.object({
+  search: z.string().trim().min(1).max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
+/** `unitId` — tavsiya narxi shu birlik uchun keltiriladi; berilmasa asosiy birlik. */
+const suggestionQuery = z.object({ unitId: z.uuid().optional() });
+const historyQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) });
 const conversionQuery = z.object({ productId: z.uuid().optional() });
 const categoryQuery = z.object({ includeInactive: boolQuery });
 const brandQuery = z.object({ isActive: boolQuery });
@@ -218,6 +230,12 @@ async function readTenant(req: FastifyRequest, permission?: Permission): Promise
   const tenant = await requireTenant(db, authOf(req).user);
   if (permission) await requirePermission(db, tenant, permission);
   return tenant;
+}
+
+/** Mahsulotni ko'rish ruxsati + tannarxni ko'rish huquqi (alohida ruxsat). */
+async function readCatalogTenant(req: FastifyRequest): Promise<{ tenant: TenantContext; canViewCost: boolean }> {
+  const tenant = await readTenant(req, "products.view");
+  return { tenant, canViewCost: await hasPermission(db, tenant, "products.view_cost") };
 }
 
 /** Yozish: tranzaksiya ichida tenant (to'xtatilgan/sinov muddati tekshiruvi) + ruxsat. */
@@ -346,12 +364,37 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/products", async (req) => {
     const query = productListQuery.parse(req.query);
-    return listProducts(db, await readTenant(req, "products.view"), query);
+    const { tenant, canViewCost } = await readCatalogTenant(req);
+    return listProducts(db, tenant, { ...query, canViewCost });
+  });
+
+  /** Tannarx sahifasi — faqat `products.view_cost`. */
+  app.get("/products/costs", async (req) => {
+    const query = costQuery.parse(req.query);
+    return productCosts(db, await readTenant(req, "products.view_cost"), query);
+  });
+
+  /**
+   * Xarid hujjatida narx tavsiyalari (oxirgi xarid, o'rtacha xarid, oxirgi sotuv narxi).
+   * Faqat ma'lumot qaytaradi — hech narsani o'zgartirmaydi va avtomatik qo'llamaydi.
+   */
+  app.get("/products/:productId/price-suggestions", async (req) => {
+    const { productId } = productParams.parse(req.params);
+    const { unitId } = suggestionQuery.parse(req.query);
+    return priceSuggestions(db, await readTenant(req, "products.view_cost"), { productId, unitId });
+  });
+
+  /** Tannarx tarixi — tovar kelgan xarid hujjatlari (yangisidan eskisiga). */
+  app.get("/products/:productId/cost-history", async (req) => {
+    const { productId } = productParams.parse(req.params);
+    const { limit } = historyQuery.parse(req.query);
+    return costHistory(db, await readTenant(req, "products.view_cost"), productId, limit);
   });
 
   app.get("/products/export", async (req, reply) => {
     const filters = exportQuery.parse(req.query);
-    const csv = await exportProductsCsv(db, await readTenant(req, "products.view"), filters);
+    const { tenant, canViewCost } = await readCatalogTenant(req);
+    const csv = await exportProductsCsv(db, tenant, filters, { canViewCost });
     const date = new Date().toISOString().slice(0, 10);
     reply
       .header("content-type", "text/csv; charset=utf-8")
@@ -366,12 +409,14 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/products/by-barcode/:barcode", async (req) => {
     const { barcode } = barcodeParams.parse(req.params);
-    return { product: await getProductByBarcode(db, await readTenant(req, "products.view"), barcode) };
+    const { tenant, canViewCost } = await readCatalogTenant(req);
+    return { product: await getProductByBarcode(db, tenant, barcode, { canViewCost }) };
   });
 
   app.get("/products/:productId", async (req) => {
     const { productId } = productParams.parse(req.params);
-    return { product: await getProduct(db, await readTenant(req, "products.view"), productId) };
+    const { tenant, canViewCost } = await readCatalogTenant(req);
+    return { product: await getProduct(db, tenant, productId, { canViewCost }) };
   });
 
   app.post("/products", async (req, reply) => {

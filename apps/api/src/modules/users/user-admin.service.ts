@@ -26,6 +26,7 @@ import {
   notFound,
 } from "@bum/shared";
 import { branches, companies, companyMembers, roles, users } from "../../db/schema/platform.js";
+import { employees } from "../../db/schema/hr.js";
 import { licenses, subscriptions } from "../../db/schema/subscription.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
@@ -514,10 +515,16 @@ export async function listCompanyMembers(conn: DbOrTx, companyId: string) {
       licenseType: licenses.licenseType,
       licenseStatus: licenses.status,
       licenseExpiresAt: licenses.expiresAt,
+      // Foydalanuvchi qaysi Kadrlar kartochkasiga bog'langan (bog'lanmagan bo'lsa — null)
+      employeeId: employees.id,
+      employeeCode: employees.code,
+      employeeName: employees.name,
+      employeeStatus: employees.status,
     })
     .from(companyMembers)
     .innerJoin(users, eq(users.id, companyMembers.userId))
     .leftJoin(branches, eq(branches.id, companyMembers.branchId))
+    .leftJoin(employees, and(eq(employees.userId, companyMembers.userId), eq(employees.companyId, companyMembers.companyId)))
     .leftJoin(
       licenses,
       and(eq(licenses.companyId, companyMembers.companyId), eq(licenses.userId, companyMembers.userId), ne(licenses.status, "revoked")),

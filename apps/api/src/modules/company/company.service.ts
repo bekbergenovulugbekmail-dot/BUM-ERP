@@ -11,7 +11,7 @@
  * Ruxsat tekshiruvi controller'da (routes.ts); bu yerdagi funksiyalar tayyor
  * TenantContext va tx qabul qiladi.
  */
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { badRequest, forbidden, notFound } from "@bum/shared";
 import { branches, companies, companyMembers, users } from "../../db/schema/platform.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -101,15 +101,22 @@ export async function listMyCompanies(conn: DbOrTx, user: SessionUser) {
   return rows.map((row) => ({ ...row, isCurrent: row.id === user.activeCompanyId }));
 }
 
-export async function switchCompany(tx: Tx, user: SessionUser, companyId: string, meta: RequestMeta): Promise<void> {
+/** Faol biznesni almashtiradi va maqsad biznes (manzil bo'lagi uchun) ma'lumotini qaytaradi. */
+export async function switchCompany(
+  tx: Tx,
+  user: SessionUser,
+  companyId: string,
+  meta: RequestMeta,
+): Promise<{ id: string; slug: string | null }> {
   const [membership] = await tx
-    .select({ isActive: companyMembers.isActive })
+    .select({ isActive: companyMembers.isActive, slug: companies.slug })
     .from(companyMembers)
+    .innerJoin(companies, eq(companies.id, companyMembers.companyId))
     .where(and(eq(companyMembers.companyId, companyId), eq(companyMembers.userId, user.id)))
     .limit(1);
 
   if (!membership || !membership.isActive) throw forbidden("Bu kompaniyaga kirishingiz yo'q");
-  if (user.activeCompanyId === companyId) return;
+  if (user.activeCompanyId === companyId) return { id: companyId, slug: membership.slug };
 
   await tx.update(users).set({ activeCompanyId: companyId }).where(eq(users.id, user.id));
   await audit(tx, user, meta, {
@@ -119,6 +126,7 @@ export async function switchCompany(tx: Tx, user: SessionUser, companyId: string
     companyId,
     details: { from: user.activeCompanyId },
   });
+  return { id: companyId, slug: membership.slug };
 }
 
 /**
@@ -126,10 +134,13 @@ export async function switchCompany(tx: Tx, user: SessionUser, companyId: string
  * Noto'g'ri manzil — 404, to'xtatilgan yoki begona biznes — 403. Hech narsa yozilmaydi.
  */
 export async function assertCompanyLoginBySlug(conn: DbOrTx, user: SessionUser, slug: string) {
+  // Manzil bo'lagi odatda slug; slug'siz eski bizneslarda id bo'lishi mumkin
+  const key = slug.trim().toLowerCase();
+  const isId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(key);
   const [company] = await conn
     .select({ id: companies.id, name: companies.name, status: companies.status })
     .from(companies)
-    .where(eq(companies.slug, slug))
+    .where(isId ? eq(companies.id, key) : sql`lower(${companies.slug}) = ${key}`)
     .limit(1);
   if (!company) throw notFound("Bunday biznes manzili topilmadi");
   if (company.status === "suspended" || company.status === "cancelled") {

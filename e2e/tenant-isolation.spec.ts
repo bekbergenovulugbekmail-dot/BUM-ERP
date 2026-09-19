@@ -106,8 +106,15 @@ test("3) kirgandan keyin URL'ni begona biznesga almashtirish bloklanadi", async 
   await login(page, "owner");
   await page.goto(`/${SECOND.slug}/dashboard`);
   await page.waitForLoadState("networkidle");
-  await expect(page.getByText(/kirishingiz yo'q/i), "begona biznes sahifasi berilmaydi").toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("heading", { name: /Bosh sahifa|Dashboard/i })).toHaveCount(0);
+
+  // Begona biznes manzili: sessiya o'sha biznesga tegishli emas — ma'lumot emas, kirish sahifasi
+  await expect(page.getByRole("heading", { name: /Bosh sahifa|Dashboard/i }), "begona biznes sahifasi berilmaydi").toHaveCount(0);
+  const login_or_denied = page.locator("#password").or(page.getByText(/kirishingiz yo'q/i));
+  await expect(login_or_denied.first()).toBeVisible({ timeout: 30_000 });
+
+  // O'z biznesi esa ochiq qoladi
+  await page.goto(appPath("dashboard"));
+  await expect(page.locator("#password"), "o'z biznesida kirish so'ralmaydi").toHaveCount(0);
 });
 
 test("4) kontekst (tenantId) va tanadagi companyId manipulyatsiyasi bloklanadi", async ({ page }) => {
@@ -118,24 +125,28 @@ test("4) kontekst (tenantId) va tanadagi companyId manipulyatsiyasi bloklanadi",
     async (slug) => (await fetch("/api/sales/customers", { headers: { "x-bum-company": slug } })).status,
     SECOND.slug,
   );
-  expect(bySlug, "begona slug konteksti").toBe(403);
+  // Begona biznesga sessiya yo'q → 401; sessiya bo'lib, biznes mos kelmasa → 403. Ikkalasi ham to'siq.
+  expect([401, 403], `begona slug konteksti: ${bySlug}`).toContain(bySlug);
 
   const foreignId = await page.evaluate(async () => (await (await fetch("/api/public/companies/anor-market-e2e")).json()).company.id as string);
   const byId = await page.evaluate(
     async (id) => (await fetch("/api/sales/customers", { headers: { "x-bum-company": id } })).status,
     foreignId,
   );
-  expect(byId, "begona id konteksti").toBe(403);
+  expect([401, 403], `begona id konteksti: ${byId}`).toContain(byId);
 
-  // So'rov tanasidagi companyId — server qabul qilmaydi
-  const injected = await page.evaluate(async (id) => {
-    const res = await fetch("/api/sales/customers", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Manipulyatsiya", companyId: id }),
-    });
-    return res.status;
-  }, foreignId);
+  // So'rov tanasidagi companyId — o'z biznesida autentifikatsiyadan o'tgan holda ham qabul qilinmaydi
+  const injected = await page.evaluate(
+    async ({ id, slug }) => {
+      const res = await fetch("/api/sales/customers", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-bum-company": slug },
+        body: JSON.stringify({ name: "Manipulyatsiya", companyId: id }),
+      });
+      return res.status;
+    },
+    { id: foreignId, slug: SLUG },
+  );
   expect(injected, "tanadagi companyId rad etiladi").toBe(400);
 });
 
@@ -144,9 +155,10 @@ test("5) chiqqandan keyin orqaga qaytish ma'lumot bermaydi", async ({ page }) =>
   await page.goto(appPath("products"));
   await expect(page.getByPlaceholder(/Nomi, SKU, barcode/i).first()).toBeVisible({ timeout: 30_000 });
 
-  await page.evaluate(async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-  });
+  // Ilova chiqishda ham biznes kontekstini yuboradi (faqat shu biznes sessiyasi bekor qilinadi)
+  await page.evaluate(async (slug) => {
+    await fetch("/api/auth/logout", { method: "POST", headers: { "x-bum-company": slug } });
+  }, SLUG);
   await page.goto(appPath("products"));
   await page.waitForLoadState("networkidle");
   await expect(page.locator("#password"), "kirish formasi ko'rinadi").toBeVisible({ timeout: 30_000 });
@@ -155,6 +167,89 @@ test("5) chiqqandan keyin orqaga qaytish ma'lumot bermaydi", async ({ page }) =>
   await page.waitForLoadState("networkidle");
   const status = await page.evaluate(async () => (await fetch("/api/catalog/products?limit=1")).status);
   expect(status, "chiqqandan keyin API yopiq").toBe(401);
+});
+
+test("7) KO'P TAB: ikki biznes bir vaqtda ochiq, biridan chiqish ikkinchisiga tegmaydi", async ({ browser }) => {
+  test.setTimeout(180_000);
+  // Bitta brauzer konteksti = bitta cookie ombori (haqiqiy foydalanuvchidagidek)
+  const context = await browser.newContext();
+  await context.addInitScript((value) => {
+    try {
+      localStorage.setItem("bum:device-id", value);
+    } catch {
+      /* xususiy rejim */
+    }
+  }, OWNER_DEVICE);
+
+  try {
+    const tab1 = await context.newPage();
+    const tab2 = await context.newPage();
+
+    /**
+     * Kirish: sahifa orqali (brauzerdagi qurilma identifikatori bilan).
+     * Har foydalanuvchining O'Z ishonchli qurilmasi bor, brauzer esa bitta — shuning uchun ikkinchi
+     * foydalanuvchi uchun qurilma identifikatori so'rovda ko'rsatiladi (sessiya cookie'si baribir
+     * shu brauzer omborida qoladi: test aynan sessiya izolyatsiyasini tekshiradi).
+     */
+    const signIn = async (page: Page, slug: string, phone: string, device: string) => {
+      await page.goto(`/${slug}`);
+      await expect(page.locator("#phone")).toBeVisible({ timeout: 30_000 });
+      const status = await page.evaluate(
+        async ({ phone: value, password, companySlug, deviceId }) => {
+          const res = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-device-id": deviceId },
+            body: JSON.stringify({ phone: value, password, companySlug }),
+          });
+          return res.status;
+        },
+        { phone, password: PASSWORD, companySlug: slug, deviceId: device },
+      );
+      expect(status, `${slug} kirishi`).toBe(200);
+      await page.goto(`/${slug}/dashboard`);
+      await expect(page.locator("#password"), `${slug} kirdi`).toHaveCount(0);
+    };
+
+    // TAB 1 — demo biznes, TAB 2 — ikkinchi biznes
+    await signIn(tab1, SLUG, ACCOUNTS.owner.phone, OWNER_DEVICE);
+    await signIn(tab2, SECOND.slug, SECOND.phone, SECOND.device);
+
+    // Ikkalasi ham bir vaqtda ishlaydi va HAR BIRI O'Z biznesini ko'rsatadi
+    // So'rov qaysi biznesdan kelgani sarlavhada (ilova ham shunday yuboradi)
+    const whoAmI = (page: Page, slug: string) =>
+      page.evaluate(async (companySlug) => {
+        const res = await fetch("/api/auth/me", { headers: { "x-bum-company": companySlug } });
+        return res.ok ? ((await res.json()).user.companySlug as string) : `HTTP ${res.status}`;
+      }, slug);
+    await tab1.goto(`/${SLUG}/dashboard`);
+    await tab2.goto(`/${SECOND.slug}/dashboard`);
+    expect(await whoAmI(tab1, SLUG), "TAB 1 — demo").toBe(SLUG);
+    expect(await whoAmI(tab2, SECOND.slug), "TAB 2 — ikkinchi biznes").toBe(SECOND.slug);
+
+    // TAB 1 dan chiqamiz
+    await tab1.evaluate(async (slug) => {
+      await fetch("/api/auth/logout", { method: "POST", headers: { "x-bum-company": slug } });
+    }, SLUG);
+
+    // TAB 2 yangilangandan keyin ham ishlaydi
+    await tab2.reload();
+    await tab2.waitForLoadState("networkidle");
+    expect(await whoAmI(tab2, SECOND.slug), "TAB 2 sessiyasi saqlanadi").toBe(SECOND.slug);
+    await expect(tab2.locator("#password"), "TAB 2 da kirish formasi yo'q").toHaveCount(0);
+
+    // TAB 1 esa chiqib ketgan — orqaga qaytish ham sessiyani tiklamaydi
+    expect(await whoAmI(tab1, SLUG), "TAB 1 chiqdi").toBe("HTTP 401");
+    await tab1.goBack();
+    await tab1.waitForLoadState("networkidle");
+    expect(await whoAmI(tab1, SLUG), "orqaga qaytish sessiyani tiklamaydi").toBe("HTTP 401");
+    await tab1.goto(`/${SLUG}/dashboard`);
+    await expect(tab1.locator("#password"), "TAB 1 da kirish formasi").toBeVisible({ timeout: 30_000 });
+
+    // TAB 2 hali ham ishlaydi (chiqish faqat bitta biznesga tegdi)
+    expect(await whoAmI(tab2, SECOND.slug)).toBe(SECOND.slug);
+  } finally {
+    await context.close();
+  }
 });
 
 test("6) universal kirish sahifasi yo'q: root va /uz/login biznes manzilini so'raydi", async ({ page }) => {

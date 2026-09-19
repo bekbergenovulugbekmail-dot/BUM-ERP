@@ -3,7 +3,8 @@
  *
  *  - Distribyutsiya → Marshrutlar: avval hudud qo'shiladi, keyin marshrut shu hudud tarkibida ochiladi
  *    va ro'yxatda hudud sarlavhasi ostida ko'rinadi;
- *  - Sozlamalar → Foydalanuvchilar: xodim bo'lim va lavozim bilan qo'shiladi va Kadrlar ro'yxatida chiqadi.
+ *  - Kadrlar: xodim bo'lim va lavozim bilan qo'shiladi va shu yerdagi ro'yxatda chiqadi
+ *    (xodim yaratishning yagona joyi — Sozlamalar → Foydalanuvchilar MAVJUD xodimga login beradi).
  */
 import { expect, test } from "@playwright/test";
 import { appPath, login } from "./_lib/accounts.ts";
@@ -47,8 +48,7 @@ test("qo'shilgan xodim Kadrlar ro'yxatida bo'lim va lavozimi bilan ko'rinadi", a
   const phone = `+99890${stamp}1`;
 
   await login(page, "owner");
-  await page.goto(appPath("settings"));
-  await page.getByRole("tab", { name: "Foydalanuvchilar" }).click();
+  await page.goto(appPath("hr"));
   await page.getByRole("button", { name: /Xodim qo'shish/ }).first().click();
 
   const dialog = page.getByTestId("new-employee-dialog");
@@ -70,6 +70,5 @@ test("qo'shilgan xodim Kadrlar ro'yxatida bo'lim va lavozimi bilan ko'rinadi", a
   await expect(dialog).toBeHidden({ timeout: 30_000 });
 
   // Kadrlar ro'yxatida ko'rinadi
-  await page.goto(appPath("hr"));
   await expect(page.getByText(name).first(), "yangi xodim Kadrlar ro'yxatida").toBeVisible({ timeout: 30_000 });
 });

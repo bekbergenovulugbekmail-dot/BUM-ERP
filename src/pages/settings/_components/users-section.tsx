@@ -1,7 +1,10 @@
 /**
  * Kompaniya xodimlari — `/api/company/employees`.
  *
- * Ko'rish — `users.view`. Xodim qo'shish, tahrirlash (ism, telefon, rol, filial, omborlar,
+ * Bu sahifa FOYDALANUVCHI (login, rol, litsenziya, kirish) bilan ishlaydi. Yangi XODIM bu yerda
+ * ochilmaydi — u faqat Kadrlar → "Xodim qo'shish" da yaratiladi; bu yerda mavjud xodimga login beriladi.
+ *
+ * Ko'rish — `users.view`. Foydalanuvchi qo'shish, tahrirlash (ism, telefon, rol, filial, omborlar,
  * mas'ul kategoriyalar), holat va parol — faqat kompaniya egasi (server ham tekshiradi).
  * To'liq huquqli rollar (Superadmin, Business Owner) tanlovda yo'q — o'z huquqini oshirib bo'lmaydi.
  *
@@ -28,7 +31,7 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { useActiveCompany } from "@/hooks/use-company.ts";
 import AdditionalLicensePicker from "@/components/subscription/additional-license-picker.tsx";
-import NewEmployeeDialog from "@/components/company/new-employee-dialog.tsx";
+import AddUserDialog from "@/components/company/add-user-dialog.tsx";
 import UserDevicesDialog from "./user-devices-dialog.tsx";
 import { LICENSE_STATUS_LABEL, LICENSE_TYPE_LABEL, formatDay, licenseLimitOf } from "@/lib/subscription.ts";
 import type { Branch, CompanyRole, Employee } from "../_lib/types.ts";
@@ -164,7 +167,7 @@ export default function UsersSection() {
         </div>
         {isOwner && (
           <Button size="sm" onClick={() => setCreateOpen(true)} className="shrink-0">
-            <UserPlus className="h-4 w-4 mr-1.5" /> Xodim qo'shish
+            <UserPlus className="h-4 w-4 mr-1.5" /> Foydalanuvchi qo'shish
           </Button>
         )}
       </div>
@@ -223,6 +226,17 @@ export default function UsersSection() {
                             <p className="text-xs text-muted-foreground">
                               <span className="font-mono">{employee.phone}</span>
                               {scoped > 0 && <span> · {scoped} ta mas'ul kategoriya</span>}
+                            </p>
+                            {/* Foydalanuvchi qaysi Kadrlar kartochkasiga bog'langan */}
+                            <p className="text-xs">
+                              {employee.employeeId ? (
+                                <span className="text-muted-foreground">
+                                  Xodim: <span className="text-foreground">{employee.employeeName}</span>
+                                  {employee.employeeCode ? <span className="font-mono"> · {employee.employeeCode}</span> : null}
+                                </span>
+                              ) : (
+                                <span className="text-amber-700 dark:text-amber-400">Xodim biriktirilmagan</span>
+                              )}
                             </p>
                           </div>
                         </div>
@@ -350,8 +364,8 @@ export default function UsersSection() {
         />
       )}
 
-      {/* Yangi foydalanuvchi — litsenziya qoidasi bilan (Obuna sahifasida ham shu oyna) */}
-      <NewEmployeeDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      {/* MAVJUD xodimga login berish — yangi xodim faqat Kadrlar bo'limida ochiladi */}
+      <AddUserDialog open={createOpen} onClose={() => setCreateOpen(false)} />
 
       {/* Qayta yoqish — litsenziya tugagan */}
       <Dialog open={reactivate !== null} onOpenChange={(o) => { if (!o) setReactivate(null); }}>

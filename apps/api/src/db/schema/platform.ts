@@ -95,6 +95,13 @@ export const sessions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
 
+    /**
+     * Sessiya AYNAN shu biznesga bog'langan (`app.bum-erp.uz/<biznes>` dan kirilgan).
+     * `null` — biznesga bog'lanmagan sessiya: desktop kassa, telefon ilovasi va platforma admini.
+     * Bog'langan sessiya bilan boshqa biznes so'ralsa — 403 (kontekst almashtirib bo'lmaydi).
+     */
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
+
     /** Cookie'dagi token xom saqlanmaydi — faqat SHA-256 hash. */
     tokenHash: varchar("token_hash", { length: 64 }).notNull(),
 

@@ -22,6 +22,13 @@ export type AccountKey = keyof typeof ACCOUNTS;
 export const SLUG = process.env.DEMO_SLUG ?? "bum-demo";
 export const appPath = (path: string) => `/${SLUG}/${path.replace(/^\//, "")}`;
 
+/**
+ * Biznes sarlavhasi — `page.request` kabi brauzerdan TASHQARI so'rovlar uchun.
+ * Sessiya cookie'si har biznesga alohida (`bum_s_<biznes>`), shuning uchun so'rov qaysi
+ * biznesdan kelganini aytishi shart; ilovaning o'zi buni `@/lib/api.ts` da qiladi.
+ */
+export const COMPANY_HEADERS = { "x-bum-company": SLUG } as const;
+
 /** Tizimga kirish; kirish sahifasidan chiqqanini tasdiqlaydi. */
 export async function login(page: Page, who: AccountKey) {
   if (!PASSWORD) throw new Error("DEMO_PASSWORD .env da yo'q — `pnpm --filter @bum/api db:seed-demo` va .env ni tekshiring");
@@ -41,6 +48,17 @@ export async function login(page: Page, who: AccountKey) {
     },
     `e2e${who}device0001`.replace(/[^A-Za-z0-9_-]/g, ""),
   );
+  // Testdagi XOM `fetch` ham ilovadek biznesni ko'rsatsin (sarlavha qo'yilgan bo'lsa — tegilmaydi)
+  await page.context().addInitScript((companySlug) => {
+    const original = window.fetch;
+    window.fetch = (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.pathname : input.url;
+      if (!url.startsWith("/api/")) return original(input, init);
+      const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+      if (!headers.has("x-bum-company")) headers.set("x-bum-company", companySlug);
+      return original(input, { ...init, headers });
+    };
+  }, SLUG);
   await page.goto("about:blank");
   // Kirish faqat biznes manzilidan (`app.bum-erp.uz/<biznes>`) — universal kirish sahifasi yo'q
   await page.goto(`/${SLUG}`);

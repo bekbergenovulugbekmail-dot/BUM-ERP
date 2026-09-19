@@ -32,7 +32,7 @@ import { changeOwnPassword, verifyCurrentPassword } from "../users/user-admin.se
 import { activateCompanyBySlug, assertCompanyLoginBySlug } from "../company/company.service.js";
 import { confirmPasswordReset, requestPasswordReset } from "./password-reset.service.js";
 import { authenticate, buildMe, startSession } from "./auth.service.js";
-import { authOf, requireAuth, requireSession } from "./guard.js";
+import { authOf, companyKeyOf, requireAuth, requireSession } from "./guard.js";
 import { listOwnSessions, revokeOtherSessions, revokeOwnSession } from "./sessions.service.js";
 import {
   changePin,
@@ -48,6 +48,7 @@ import {
 import {
   SESSION_COOKIE,
   clearSessionCookie,
+  tenantSessionCookie,
   createSession,
   revokeSession,
   setSessionCookie,
@@ -123,9 +124,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     // Biznes manzilidan kirilgan bo'lsa — SESSIYA OCHILISHIDAN OLDIN shu biznes xodimi ekani tekshiriladi:
     // rad etilgan urinish sessiya ham, "login_success" izi ham qoldirmaydi
+    let tenant: { id: string; name: string } | null = null;
     if (body.companySlug) {
       try {
-        await assertCompanyLoginBySlug(db, auth.user, body.companySlug);
+        tenant = await assertCompanyLoginBySlug(db, auth.user, body.companySlug);
       } catch (error) {
         await writeAuditLog({
           userId: auth.user.id,
@@ -142,7 +144,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    const { session, me } = await withTransaction((tx) => startSession(tx, auth, meta));
+    // Sessiya AYNAN shu biznesga bog'lanadi — bitta brauzerda bir nechta biznes mustaqil ishlaydi
+    const { session, me } = await withTransaction((tx) => startSession(tx, auth, meta, tenant?.id ?? null));
 
     // Endi shu biznes faollashtiriladi (a'zolik yuqorida tasdiqlangan)
     let user = me;
@@ -150,12 +153,14 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       user = await withTransaction((tx) => activateCompanyBySlug(tx, auth.user, body.companySlug!, meta));
     }
 
-    setSessionCookie(reply, session.token, session.expiresAt);
+    setSessionCookie(reply, session.token, session.expiresAt, body.companySlug ?? null);
     return { user };
   });
 
   app.post("/logout", async (req, reply) => {
-    const token = req.cookies[SESSION_COOKIE];
+    // Chiqish faqat SHU biznes manzilidagi sessiyani bekor qiladi; boshqa tabdagi biznes ochiq qoladi
+    const companyKey = companyKeyOf(req);
+    const token = companyKey ? (req.cookies[tenantSessionCookie(companyKey)] ?? req.cookies[SESSION_COOKIE]) : req.cookies[SESSION_COOKIE];
     if (token) {
       // Audit uchun kim chiqqani — sessiya bekor qilinishidan oldin
       const active = await validateSession(token);
@@ -172,7 +177,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         });
       }
     }
-    clearSessionCookie(reply);
+    clearSessionCookie(reply, companyKey && req.cookies[tenantSessionCookie(companyKey)] ? companyKey : null);
     return { ok: true };
   });
 

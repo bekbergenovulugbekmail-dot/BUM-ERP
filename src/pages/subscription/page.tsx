@@ -17,7 +17,7 @@ import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
-import NewEmployeeDialog from "@/components/company/new-employee-dialog.tsx";
+import AddUserDialog from "@/components/company/add-user-dialog.tsx";
 import {
   HISTORY_EVENT_LABEL,
   LICENSE_STATUS_LABEL,
@@ -279,7 +279,7 @@ function LicenseCountsCard({ counts, canAddUser }: { counts: LicenseCounts | nul
             </Button>
           </div>
         )}
-        <NewEmployeeDialog open={addOpen} onClose={() => setAddOpen(false)} />
+        <AddUserDialog open={addOpen} onClose={() => setAddOpen(false)} />
       </CardContent>
     </Card>
   );

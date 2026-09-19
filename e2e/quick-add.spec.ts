@@ -8,7 +8,7 @@
  *  - Xarid hujjati: nomi bo'yicha qidirib bir nechta mahsulotni belgilab qo'shish.
  */
 import { expect, test } from "@playwright/test";
-import { appPath, login } from "./_lib/accounts.ts";
+import { COMPANY_HEADERS, appPath, login } from "./_lib/accounts.ts";
 
 const stamp = Date.now().toString().slice(-6);
 
@@ -77,7 +77,7 @@ test("xaridda «Tezda qo'shish»: umumiy maydonlar bir marta, mahsulotlar bitta 
   await expect(page.getByTestId("quick-add").first()).toBeVisible({ timeout: 30_000 });
   type OrderRow = { id: string; itemCount: number; status: string };
   const orders = async (): Promise<OrderRow[]> => {
-    const res = await page.request.get("/api/purchase/orders?limit=100");
+    const res = await page.request.get("/api/purchase/orders?limit=100", { headers: COMPANY_HEADERS });
     expect(res.ok(), await res.text()).toBeTruthy();
     return (await res.json()).orders as OrderRow[];
   };

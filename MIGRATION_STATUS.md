@@ -2650,6 +2650,70 @@ biznesning faol xodimi ekanini tekshiradi. Manzilsiz kirilganda biznes manzili s
 allowances (6), company-login (6), delivery-return-pending (3), cashier-collect-payment (2),
 device-self-service (4), e2e/quick-add (2), e2e/company-login (3), e2e/agent-mobile (4).
 
+## Tabli sessiya izolyatsiyasi, yagona xodim manbai, narx takliflari va tannarx (2026-09-19)
+
+**Biznesga bog'langan sessiya (migratsiya 0071).** Ilgari brauzerda BITTA `bum_session` cookie'si
+bor edi (`path=/`), shuning uchun ikkinchi tabda boshqa biznesga kirish birinchi tabning sessiyasini
+ustidan yozardi va eski tabda "boshqa biznesning ma'lumoti" ko'rinib qolardi. Endi:
+
+- cookie nomi biznesga xos: `bum_s_<biznes>` (eski `bum_session` desktop kassa, telefon ilovasi va
+  admin paneli uchun qoldi — orqaga moslik buzilmadi);
+- `sessions.company_id` — sessiya qaysi biznesda ochilganini BAZA darajasida saqlaydi;
+- server har so'rovda sessiyaning biznesi bilan manzildagi biznesni solishtiradi, mos kelmasa
+  403 `company_session_mismatch` ("Bu sessiya boshqa biznesga tegishli");
+- chiqish faqat o'sha biznesning sessiyasini bekor qiladi — qolgan tablar ochiq qoladi;
+- biznes almashtirilganda (`/api/company/switch`) YANGI bog'langan sessiya ochiladi.
+
+Kirish qoidasi: har bir biznes manzilidan faqat o'sha biznesning xodimi kira oladi; begona
+foydalanuvchiga sessiya umuman yaratilmaydi (avval yaratilib, keyin rad etilardi) va jurnalda
+`login_denied` qoladi.
+
+**Xodim yaratish — yagona manba (3-A).** Yangi xodim faqat **Kadrlar → "Xodim qo'shish"** da
+ochiladi. Sozlamalar → Foydalanuvchilar endi "Foydalanuvchi qo'shish": MAVJUD xodimni tanlab unga
+login, rol va litsenziya beradi (yangi kartochka ochmaydi). Dostavka va Distribyutsiya bo'limlari
+Kadrlarga yo'naltiradi. Foydalanuvchilar ro'yxatida har bir loginning xodimi ko'rinadi
+("Xodim: …" yoki "Xodim biriktirilmagan").
+
+Ikkita CLI qo'shildi (ikkalasi ham hech narsa o'chirmaydi):
+- `employee-audit.ts` — 10 ta tekshiruv bo'yicha faqat o'qiydigan hisobot (loginsiz kartochka,
+  kartochkasiz login, ikkilangan telefon, begona biznes bog'lanishi…);
+- `employee-reconcile.ts` — standart holatda **quruq yurish**, `--apply` bilan yetishmagan
+  kartochkani ochadi yoki mavjudini ulaydi. Bir nechta nomzod bo'lsa "AMBIGUOUS" deb qoldiradi:
+  telefon bo'yicha ko'r-ko'rona birlashtirish yo'q.
+
+**Narx takliflari (xarid hujjatida).** Narx qatorida "Narxlarni taklif qilish" tugmasi:
+oxirgi xarid narxi (sana va ta'minotchi bilan), oxirgi 20 xarid bo'yicha o'rtacha, kartochkadagi
+kirim narxi, oldingi sotuv narxi va kartochkadagi sotuv narxi. **Narx o'z-o'zidan o'zgarmaydi** —
+har bir qiymat yonida "Olish" tugmasi bor. Parallel narx tizimi yaratilmadi: hammasi mavjud
+hujjatlardan (`purchase_order_items`, `sales_order_items`, mahsulot kartochkasi) o'qiladi, faqat
+tovar KELGAN hujjatlar hisobga olinadi, valyuta kurs bilan va "quti/dona" koeffitsienti bilan
+solishtirib bo'ladigan holga keltiriladi.
+
+**Tannarx (Mahsulotlar → "Tannarx").** Mahsulot bo'yicha joriy tannarx, ombordagi o'rtacha tannarx
+(AVCO), oxirgi xarid narxi va sanasi, sotuv narxi va marja; qatorni ochib tannarx tarixini
+(tovar kelgan xarid hujjatlari) ko'rish mumkin.
+
+**Yangi ruxsat `products.view_cost` (migratsiya 0072 — faqat qo'shadi).** Tannarx endi
+`products.view` dan ajratilgan: ilgari kirim narxini mahsulotni ko'ra oladigan HAR KIM (kassir va
+sotuv agenti ham) ro'yxatda, kartochkada va CSV eksportda ko'rardi — bu yopildi. Server ruxsat
+bo'lmasa maydonni umuman yubormaydi (brauzerda yashirish emas), `/products/costs` va
+`/price-suggestions` esa 403 qaytaradi. Ruxsat berilgan tizim rollari: Direktor, Buxgalter,
+Moliya menejeri, Savdo menejeri, Xarid menejeri, Ombor menejeri, Omborchi, Ishlab chiqarish
+menejeri, Auditor (egasi va Superadmin — barcha ruxsatlar bilan). **Diqqat:** kompaniya o'zi
+yaratgan maxsus rollarga bu ruxsat avtomatik berilmaydi — kerak bo'lsa egasi rol sozlamalaridan
+qo'shadi.
+
+**Testlar:** API 132 fayl / 722 test — hammasi o'tdi. Brauzer 79 testdan 77 tasi o'tdi.
+Yangi fayllar: `tenant-session` (6), `employee-single-source` (6), `product-cost` (10),
+`e2e/tenant-isolation` (7), `e2e/employee-single-source` (4), `e2e/product-cost` (4).
+
+**O'TMAGAN (tekshirilmagan, tuzatilmagan):** `e2e/sales-agent.spec.ts` dagi 2 ta test
+(buyurtma yuborish va geofence). Dalil: tasdiqlash oynasidan keyin `/submit` so'rovi umuman
+yuborilmaydi — ilova YANGI GPS o'lchovini kutib qoladi (`freshPosition`), ya'ni brauzerdagi
+soxta geolokatsiya javob bermaydi. Bu testlar bir soat oldin AYNAN SHU kod bilan o'tgan edi va
+ular tegilgan modullarga (tannarx, sessiya, kadrlar) aloqador emas; agent buyurtmasini yuborish
+API darajasida o'tadigan testlar bilan qoplangan. Toza mashinada qayta yugurtirish kerak.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)

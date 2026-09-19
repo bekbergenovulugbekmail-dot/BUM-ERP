@@ -729,5 +729,6 @@
   "sv.pickups.accepted": "Qabul qilindi — zaxira va hisob-kitob yangilandi",
   "sv.pickups.rejected": "Rad etildi",
   "policy.returnPickupApproval": "Qaytarib olingan tovar omborda qabul qilinsin",
-  "policy.hint.returnPickupApproval": "Yoqilgan bo'lsa: dostavchi mijozdan olgan tovar supervayzer qabul qilgandan keyin hisobga tushadi (tovar mashinada turganda ombor qoldig'i oshmaydi). O'chirilgan bo'lsa — dostavchi tasdiqlashi bilan darhol."
+  "policy.hint.returnPickupApproval": "Yoqilgan bo'lsa: dostavchi mijozdan olgan tovar supervayzer qabul qilgandan keyin hisobga tushadi (tovar mashinada turganda ombor qoldig'i oshmaydi). O'chirilgan bo'lsa — dostavchi tasdiqlashi bilan darhol.",
+  "agents.add_via_hr": "Kadrlardan qo'shish"
 }

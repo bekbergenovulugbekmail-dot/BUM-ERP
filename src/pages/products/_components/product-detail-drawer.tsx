@@ -39,10 +39,11 @@ export default function ProductDetailDrawer({ productId, canEdit, onClose, onEdi
 
   const currencies = useCurrencies();
 
-  // Marja asosiy valyutada (narxlar turli valyutada bo'lishi mumkin)
+  // Marja asosiy valyutada (narxlar turli valyutada bo'lishi mumkin); tannarx ko'rinmasa — marja ham
   const margin = (() => {
-    if (!product) return "0";
+    if (!product) return null;
     const sales = currencies.toBase(product.salesPrice, product.salesCurrency);
+    if (product.purchasePrice === undefined) return null;
     const purchase = currencies.toBase(product.purchasePrice, product.purchaseCurrency);
     return sales > 0 && Number.isFinite(purchase) ? (((sales - purchase) / sales) * 100).toFixed(1) : "0.0";
   })();
@@ -148,7 +149,10 @@ export default function ProductDetailDrawer({ productId, canEdit, onClose, onEdi
                 {/* Pricing */}
                 <div className="px-5 py-3">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Narxlar</p>
-                  <InfoRow label="Xarid narxi" value={formatMoney(product.purchasePrice, product.purchaseCurrency ?? currencies.base)} />
+                  {/* Tannarx — faqat `products.view_cost` bo'lganda (server ham shunda yuboradi) */}
+                  {product.purchasePrice !== undefined && (
+                    <InfoRow label="Xarid narxi" value={formatMoney(product.purchasePrice, product.purchaseCurrency ?? currencies.base)} />
+                  )}
                   <InfoRow label="Sotuv narxi" value={<span className="font-bold text-primary">{salesMoney(product.salesPrice)}</span>} />
                   {product.salesCurrency && product.salesCurrency !== currencies.base && (
                     <InfoRow
@@ -159,7 +163,9 @@ export default function ProductDetailDrawer({ productId, canEdit, onClose, onEdi
                   {product.wholesalePrice !== null && <InfoRow label="Ulgurji narx" value={salesMoney(product.wholesalePrice)} />}
                   {product.retailPrice !== null && <InfoRow label="Chakana narx" value={salesMoney(product.retailPrice)} />}
                   {product.promoPrice !== null && <InfoRow label="Aksiya narxi" value={<span className="text-destructive">{salesMoney(product.promoPrice)}</span>} />}
-                  <InfoRow label="Marja" value={<span className="text-green-600 font-bold">{margin}%</span>} />
+                  {margin !== null && (
+                    <InfoRow label="Marja" value={<span className="text-green-600 font-bold">{margin}%</span>} />
+                  )}
                   <InfoRow label="Soliq" value={`${formatQty(product.taxRate)}% ${product.taxIncluded ? "(narxga kiritilgan)" : ""}`} />
                 </div>
 

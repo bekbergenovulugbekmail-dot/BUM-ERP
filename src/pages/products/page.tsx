@@ -28,6 +28,7 @@ import { usePermissions } from "@/hooks/use-company.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import ProductFormDialog from "./_components/product-form-dialog.tsx";
 import ProductDetailDrawer from "./_components/product-detail-drawer.tsx";
+import CostsSection from "./_components/costs-section.tsx";
 import { ProductImage } from "./_lib/product-image.tsx";
 import {
   formatQty,
@@ -67,6 +68,10 @@ export default function ProductsPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [labelItems, setLabelItems] = useState<LabelItem[] | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
+  /** "Tannarx" — shu bo'limning ichki sahifasi; ruxsatsiz rolda tab umuman ko'rinmaydi. */
+  const canViewCost = can("products.view_cost");
+  const [tab, setTab] = useState<"catalog" | "costs">("catalog");
+  const activeTab = canViewCost ? tab : "catalog";
 
   const categories = useApiQuery<{ categories: Category[] }>("/api/catalog/categories").data?.categories;
   const removeProduct = useApiMutation((id: string) => api.delete(`/api/catalog/products/${id}`));
@@ -161,7 +166,34 @@ export default function ProductsPage() {
           </div>
         </div>
 
+        {canViewCost && (
+          <div className="mt-4 flex items-center gap-1 border-b border-border" role="tablist">
+            {([
+              { id: "catalog", label: "Mahsulotlar" },
+              { id: "costs", label: "Tannarx" },
+            ] as const).map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === item.id}
+                data-testid={`products-tab-${item.id}`}
+                onClick={() => setTab(item.id)}
+                className={cn(
+                  "-mb-px cursor-pointer border-b-2 px-3 py-1.5 text-sm transition-colors",
+                  activeTab === item.id
+                    ? "border-primary font-medium text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Filters */}
+        {activeTab === "catalog" && (
         <div className="flex items-center gap-3 mt-4 flex-wrap">
           <div className="relative flex-1 min-w-[200px] max-w-xs">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -211,9 +243,13 @@ export default function ProductsPage() {
             </button>
           </div>
         </div>
+        )}
       </div>
 
       {/* Content */}
+      {activeTab === "costs" ? (
+        <CostsSection />
+      ) : (
       <div className="flex-1 overflow-auto p-6">
         {productsQuery.isPending ? (
           <div className="space-y-2">
@@ -245,6 +281,7 @@ export default function ProductsPage() {
           <ProductTable
             products={results}
             perms={perms}
+            showCost={canViewCost}
             onView={(id) => setDetailId(id)}
             onEdit={openEdit}
             onDelete={handleDelete}
@@ -274,6 +311,7 @@ export default function ProductsPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* Form Dialog */}
       <ProductFormDialog
@@ -364,13 +402,15 @@ function ProductActions({ product, perms, onView, onEdit, onDelete, onLabel }: P
 type ListProps = {
   products: ProductListItem[];
   perms: Perms;
+  /** Tannarx ustuni ko'rsatiladimi (`products.view_cost`). */
+  showCost?: boolean;
   onView: (id: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onLabel: (p: ProductListItem) => void;
 };
 
-function ProductTable({ products, perms, onView, onEdit, onDelete, onLabel }: ListProps) {
+function ProductTable({ products, perms, showCost, onView, onEdit, onDelete, onLabel }: ListProps) {
   const { base } = useCurrencies();
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -380,7 +420,7 @@ function ProductTable({ products, perms, onView, onEdit, onDelete, onLabel }: Li
             <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs">Mahsulot</th>
             <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs hidden md:table-cell">SKU / Barcode</th>
             <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs hidden lg:table-cell">Kategoriya</th>
-            <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs">Xarid narxi</th>
+            {showCost && <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs">Xarid narxi</th>}
             <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs">Sotuv narxi</th>
             <th className="text-center px-4 py-3 font-medium text-muted-foreground text-xs hidden lg:table-cell">Min. zaxira</th>
             <th className="text-center px-4 py-3 font-medium text-muted-foreground text-xs">Holat</th>
@@ -436,9 +476,11 @@ function ProductTable({ products, perms, onView, onEdit, onDelete, onLabel }: Li
                   <span className="text-muted-foreground text-xs">—</span>
                 )}
               </td>
-              <td className="px-4 py-3 text-right">
-                <span className="text-xs font-medium">{formatMoney(p.purchasePrice, p.purchaseCurrency ?? base)}</span>
-              </td>
+              {showCost && (
+                <td className="px-4 py-3 text-right">
+                  <span className="text-xs font-medium">{formatMoney(p.purchasePrice ?? 0, p.purchaseCurrency ?? base)}</span>
+                </td>
+              )}
               <td className="px-4 py-3 text-right">
                 <span className="text-sm font-bold text-primary">{formatMoney(p.salesPrice, p.salesCurrency ?? base)}</span>
               </td>

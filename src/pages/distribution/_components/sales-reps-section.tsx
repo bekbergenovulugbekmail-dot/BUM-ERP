@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Plus, Target, Percent, Phone, Mail, MapPin, Pencil, Trash2, KeyRound, Wallet, Loader2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -11,7 +12,7 @@ import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
-import NewEmployeeDialog from "@/components/company/new-employee-dialog.tsx";
+
 import { useTranslation } from "react-i18next";
 import { num, type SalesRep } from "../_lib/types.ts";
 
@@ -118,6 +119,8 @@ function RepCashDialog({ rep, onClose }: { rep: SalesRep; onClose: () => void })
 type EmployeeOption = { id: string; name: string | null; phone: string; companyRole: string; membershipActive: boolean };
 
 export default function SalesRepsSection() {
+  // Manzilning birinchi bo'lagi (biznes yoki til) — Kadrlar havolasi uchun
+  const { lng } = useParams<{ lng: string }>();
   const { t } = useTranslation("distribution");
   const { can } = usePermissions();
   const reps = useApiQuery<{ salesReps: SalesRep[] }>("/api/distribution/sales-reps", { includeInactive: true }).data?.salesReps;
@@ -136,7 +139,6 @@ export default function SalesRepsSection() {
   const [editRep, setEditRep] = useState<string | null>(null);
   const [cashRep, setCashRep] = useState<SalesRep | null>(null);
   /** Yagona "Xodim qo'shish" oynasi. */
-  const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
   const resetForm = () => setForm(emptyForm());
@@ -206,9 +208,11 @@ export default function SalesRepsSection() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">Savdo vakillari</h3>
-        {/* Savdo agenti yagona "Xodim qo'shish" formasidan: rol "Sotuv agenti" bo'lsa profil ham yaratiladi */}
-        <Button size="sm" onClick={() => setAddOpen(true)}>
-          <Plus className="h-3.5 w-3.5 mr-1" /> Xodim qo'shish
+        {/* Xodim FAQAT Kadrlar bo'limida ochiladi; rol "Sotuv agenti" bo'lsa profil avtomatik yaratiladi */}
+        <Button size="sm" asChild>
+          <Link to={`/${lng ?? "uz"}/hr`} data-testid="reps-add-via-hr">
+            <Plus className="h-3.5 w-3.5 mr-1" /> Kadrlardan qo'shish
+          </Link>
         </Button>
       </div>
 
@@ -222,8 +226,10 @@ export default function SalesRepsSection() {
           <p className="mt-1 text-xs">
             Xodim "Sotuv agenti" roli bilan qo'shilsa, profili shu yerda paydo bo'ladi.
           </p>
-          <Button size="sm" className="mt-3" onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4 mr-1" /> Xodim qo'shish
+          <Button size="sm" className="mt-3" asChild>
+            <Link to={`/${lng ?? "uz"}/hr`}>
+              <Plus className="h-4 w-4 mr-1" /> Kadrlardan qo'shish
+            </Link>
           </Button>
         </div>
       ) : (
@@ -302,7 +308,6 @@ export default function SalesRepsSection() {
         </div>
       )}
 
-      <NewEmployeeDialog open={addOpen} onClose={() => setAddOpen(false)} />
       {cashRep && <RepCashDialog rep={cashRep} onClose={() => setCashRep(null)} />}
 
       {/* Create / Edit dialog */}

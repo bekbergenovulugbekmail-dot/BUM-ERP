@@ -10,6 +10,14 @@
  *
  * Biznes konteksti (tab): `x-bum-company` / `bumCompany` — foydalanuvchining faol a'zoligi bo'lgan kompaniya shu so'rov
  * uchun aktiv bo'ladi (company/company-context.ts); boshqa biznes — 403.
+ *
+ * HAR BIR BIZNES MANZILI O'Z SESSIYASI: so'rovdagi biznes bo'lagi bo'yicha AYNAN o'sha biznesning
+ * cookie'si (`bum_s_<biznes>`) o'qiladi. Shu sababli bitta brauzerda bir nechta biznes bir vaqtda
+ * ochiq tura oladi va bir tabdagi chiqish boshqasiga ta'sir qilmaydi. Bog'lanmagan sessiya (kassa,
+ * telefon ilovasi, platforma admini) umumiy `bum_session` cookie'sida qoladi.
+ *
+ * Sessiya biznesga bog'langan bo'lsa, so'rovdagi biznes boshqa bo'lsa — 403 COMPANY_SESSION_MISMATCH:
+ * manzildagi slug'ni almashtirib boshqa biznesga o'tib bo'lmaydi.
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { AppError, forbidden, unauthenticated } from "@bum/shared";
@@ -23,6 +31,7 @@ import {
 import {
   SESSION_COOKIE,
   clearSessionCookie,
+  tenantSessionCookie,
   validateSession,
   type ActiveSession,
 } from "./session.js";
@@ -34,20 +43,44 @@ declare module "fastify" {
   }
 }
 
+/** So'rov qaysi biznes manzilidan kelgani (`x-bum-company` sarlavhasi yoki `bumCompany` parametri). */
+export function companyKeyOf(req: FastifyRequest): string | null {
+  const query = req.query && typeof req.query === "object" ? (req.query as Record<string, unknown>) : null;
+  return companyKeyFrom(req.headers[COMPANY_CONTEXT_HEADER]) ?? companyKeyFrom(query?.[COMPANY_CONTEXT_QUERY]);
+}
+
 /** Yaroqli sessiya (qulflangan bo'lsa ham) + so'rovdagi biznes konteksti. */
 export async function requireSession(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const token = req.cookies[SESSION_COOKIE];
+  const query = req.query && typeof req.query === "object" ? (req.query as Record<string, unknown>) : null;
+  const key = companyKeyOf(req);
+  // Parametr marshrut sxemalariga yetib bormaydi (qat'iy sxemalar noma'lum maydonni rad etadi)
+  if (query) Reflect.deleteProperty(query, COMPANY_CONTEXT_QUERY);
+
+  // Biznes manzilidan kelgan so'rov — o'sha biznesning cookie'si; bo'lmasa bog'lanmagan sessiya (kassa/ilova/admin)
+  const tenantToken = key ? req.cookies[tenantSessionCookie(key)] : undefined;
+  const token = tenantToken ?? req.cookies[SESSION_COOKIE];
   const session = token ? await validateSession(token) : null;
   if (!session) {
     // Yaroqsiz cookie brauzerda qolib ketmasin
-    if (token) clearSessionCookie(reply);
+    if (tenantToken) clearSessionCookie(reply, key);
+    else if (token) clearSessionCookie(reply);
     throw unauthenticated();
   }
-  const query = req.query && typeof req.query === "object" ? (req.query as Record<string, unknown>) : null;
-  const key = companyKeyFrom(req.headers[COMPANY_CONTEXT_HEADER]) ?? companyKeyFrom(query?.[COMPANY_CONTEXT_QUERY]);
-  // Parametr marshrut sxemalariga yetib bormaydi (qat'iy sxemalar noma'lum maydonni rad etadi)
-  if (query) Reflect.deleteProperty(query, COMPANY_CONTEXT_QUERY);
-  req.auth = key ? { ...session, user: await resolveCompanyContext(db, session.user, key) } : session;
+
+  if (!key) {
+    // Biznes ko'rsatilmagan so'rov: bog'langan sessiya o'z biznesida qoladi
+    req.auth = session;
+    return;
+  }
+
+  const user = await resolveCompanyContext(db, session.user, key);
+  // Sessiya biznesga bog'langan bo'lsa — faqat o'sha biznes (slug almashtirish ishlamaydi)
+  if (session.companyId && session.companyId !== user.activeCompanyId) {
+    throw new AppError("FORBIDDEN", "Bu sessiya boshqa biznesga tegishli — o'sha biznes manzilidan kiring", {
+      reason: "company_session_mismatch",
+    });
+  }
+  req.auth = { ...session, user };
 }
 
 export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Promise<void> {

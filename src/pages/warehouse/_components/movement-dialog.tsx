@@ -92,8 +92,9 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
   const info = MOVEMENT_INFO[type];
   const currencies = useCurrencies();
   // Kirim narxi boshqa valyutada bo'lsa — joriy kurs bilan asosiy valyutada (tannarx so'mda)
-  const baseCost = (product: { purchasePrice: string; purchaseCurrency: string | null }) =>
-    currencies.toBase(toNumber(product.purchasePrice), product.purchaseCurrency) || 0;
+  // Tannarxni ko'rish ruxsati bo'lmasa server narxni yubormaydi — maydon bo'sh qoladi, 0 taxmin qilinmaydi
+  const baseCost = (product: { purchasePrice?: string; purchaseCurrency: string | null }) =>
+    currencies.toBase(toNumber(product.purchasePrice ?? 0), product.purchaseCurrency) || 0;
   // Tanlash ro'yxati: faol mahsulotlar, API chegarasi 200 ta
   const products = useApiQuery<ProductListResponse>("/api/catalog/products", { isActive: true, limit: 200 }).data
     ?.products;

@@ -205,6 +205,11 @@ export function permissionsFromRoles(
   return role.permissions.filter(isPermission);
 }
 
+/** Ruxsat bor-yo'qligi — xato tashlamay (maydonni yashirish kabi qismiy ko'rinishlar uchun). */
+export async function hasPermission(conn: DbOrTx, tenant: TenantContext, permission: Permission): Promise<boolean> {
+  return (await effectivePermissions(conn, tenant)).includes(permission);
+}
+
 export async function requirePermission(
   conn: DbOrTx,
   tenant: TenantContext,

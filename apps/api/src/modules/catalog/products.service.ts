@@ -89,11 +89,22 @@ function productWhere(tenant: TenantContext, f: ProductFilters, scope: string[] 
   );
 }
 
+/**
+ * Kirim narxi (tannarx) `products.view_cost` ruxsatisiz QAYTARILMAYDI: kassir va sotuv agenti
+ * mahsulotni ko'radi, lekin firma uni qanchaga olganini ko'rmaydi. Filtrlash serverda — brauzerdagi
+ * yashirish himoya emas.
+ */
+function stripCost<T extends { purchasePrice?: string }>(row: T, canViewCost: boolean): T {
+  if (canViewCost) return row;
+  const { purchasePrice: _hidden, ...rest } = row;
+  return rest as T;
+}
+
 /** Nom bo'yicha tartib, `(name, id)` kursori. */
 export async function listProducts(
   conn: DbOrTx,
   tenant: TenantContext,
-  options: ProductFilters & { limit: number; cursor?: string },
+  options: ProductFilters & { limit: number; cursor?: string; canViewCost?: boolean },
 ) {
   let after: { name: string; id: string } | null = null;
   if (options.cursor) {
@@ -127,12 +138,17 @@ export async function listProducts(
   const page = rows.slice(0, options.limit);
   const last = page.at(-1);
   return {
-    products: page,
+    products: page.map((row) => stripCost(row, options.canViewCost === true)),
     nextCursor: rows.length > options.limit && last ? encodeCursor([last.name, last.id]) : null,
   };
 }
 
-export async function getProduct(conn: DbOrTx, tenant: TenantContext, productId: string) {
+export async function getProduct(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  productId: string,
+  options: { canViewCost?: boolean } = {},
+) {
   const [row] = await conn
     .select({
       ...productFields,
@@ -164,10 +180,15 @@ export async function getProduct(conn: DbOrTx, tenant: TenantContext, productId:
     .where(and(eq(batches.productId, productId), eq(batches.companyId, tenant.company.id)))
     .orderBy(asc(batches.expiryDate), asc(batches.createdAt));
 
-  return { ...row, batches: productBatches };
+  return { ...stripCost(row, options.canViewCost === true), batches: productBatches };
 }
 
-export async function getProductByBarcode(conn: DbOrTx, tenant: TenantContext, barcode: string) {
+export async function getProductByBarcode(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  barcode: string,
+  options: { canViewCost?: boolean } = {},
+) {
   const [row] = await conn
     .select({ ...productFields, baseUnitName: units.shortName })
     .from(products)
@@ -182,7 +203,7 @@ export async function getProductByBarcode(conn: DbOrTx, tenant: TenantContext, b
     .orderBy(asc(products.createdAt))
     .limit(1);
   if (!row) throw notFound("Mahsulot topilmadi");
-  return row;
+  return stripCost(row, options.canViewCost === true);
 }
 
 // ─── Yozish ──────────────────────────────────────────────────────────────────
@@ -602,6 +623,8 @@ export async function importProducts(
 }
 
 const CSV_HEADER = ["Nomi", "SKU", "Shtrix-kod", "Kategoriya", "Brend", "O'lchov birligi", "Kirim narxi", "Sotuv narxi", "Min. qoldiq", "Faol"];
+/** Tannarx ruxsatisiz eksportda "Kirim narxi" ustuni butunlay bo'lmaydi. */
+const CSV_HEADER_NO_COST = CSV_HEADER.filter((title) => title !== "Kirim narxi");
 
 /** Excel formula injection'dan himoya: =, +, -, @ bilan boshlangan matn apostrof bilan. */
 function csvText(value: string | null | undefined): string {
@@ -610,7 +633,13 @@ function csvText(value: string | null | undefined): string {
   return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
-export async function exportProductsCsv(conn: DbOrTx, tenant: TenantContext, filters: ProductFilters): Promise<string> {
+export async function exportProductsCsv(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  filters: ProductFilters,
+  options: { canViewCost?: boolean } = {},
+): Promise<string> {
+  const canViewCost = options.canViewCost === true;
   const rows = await conn
     .select({
       name: products.name,
@@ -633,7 +662,7 @@ export async function exportProductsCsv(conn: DbOrTx, tenant: TenantContext, fil
     .limit(MAX_EXPORT_ROWS);
 
   const lines = [
-    CSV_HEADER.map(csvText).join(","),
+    (canViewCost ? CSV_HEADER : CSV_HEADER_NO_COST).map(csvText).join(","),
     ...rows.map((r) =>
       [
         csvText(r.name),
@@ -642,7 +671,7 @@ export async function exportProductsCsv(conn: DbOrTx, tenant: TenantContext, fil
         csvText(r.categoryName),
         csvText(r.brandName),
         csvText(r.unit),
-        r.purchasePrice,
+        ...(canViewCost ? [r.purchasePrice] : []),
         r.salesPrice,
         r.minStock,
         r.isActive ? "ha" : "yo'q",

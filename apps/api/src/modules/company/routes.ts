@@ -39,6 +39,7 @@ import { requestMeta, writeAuditLog } from "../../shared/audit.js";
 import { listAuditLogs } from "../audit/audit-log.service.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 import { listUserDevices, setDeviceStatus } from "../auth/devices.service.js";
+import { createSession, setSessionCookie } from "../auth/session.js";
 import {
   createEmployee,
   listCompanyMembers,
@@ -266,11 +267,19 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/mine", async (req) => ({ companies: await listMyCompanies(db, authOf(req).user) }));
 
-  app.post("/switch", async (req) => {
+  /**
+   * Boshqa biznesga o'tish: maqsad biznesga BOG'LANGAN yangi sessiya ochiladi va o'sha biznesning
+   * cookie'si qo'yiladi. Joriy biznesdagi (boshqa tabdagi) sessiya tegilmaydi.
+   */
+  app.post("/switch", async (req, reply) => {
     const { companyId } = switchBody.parse(req.body);
     const { user } = authOf(req);
-    await withTransaction((tx) => switchCompany(tx, user, companyId, requestMeta(req)));
-    return { ok: true, activeCompanyId: companyId };
+    const meta = requestMeta(req);
+    const company = await withTransaction((tx) => switchCompany(tx, user, companyId, meta));
+    const key = company.slug ?? company.id;
+    const session = await withTransaction((tx) => createSession(tx, { userId: user.id, companyId, ...meta }));
+    setSessionCookie(reply, session.token, session.expiresAt, key);
+    return { ok: true, activeCompanyId: companyId, companyKey: key };
   });
 
   // ─── Filiallar ───────────────────────────────────────────────────────────

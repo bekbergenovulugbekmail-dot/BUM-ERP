@@ -22,6 +22,7 @@ import {
   num, todayLocal,
   type ProductOption, type Supplier, type WarehouseOption,
 } from "../_lib/types.ts";
+import PriceSuggestions from "./price-suggestions.tsx";
 import QuickSupplierDialog from "./quick-supplier-dialog.tsx";
 import QuickProductDialog from "./quick-product-dialog.tsx";
 
@@ -102,9 +103,13 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const [productDialogLine, setProductDialogLine] = useState<number | null>(null);
   const [extraSuppliers, setExtraSuppliers] = useState<Supplier[]>([]);
   const [extraProducts, setExtraProducts] = useState<ProductOption[]>([]);
+  /** Qaysi qatorda narx takliflari ochiq (bittada — bittasi). */
+  const [suggestFor, setSuggestFor] = useState<number | null>(null);
   const supplierOptions = mergeById(suppliers, extraSuppliers);
   const productOptions = mergeById(products, extraProducts);
   const canCreateProduct = can("products.create");
+  // Narx takliflari tannarxni ochadi — ruxsatsiz rolda tugma umuman ko'rinmaydi (server ham 403 beradi)
+  const canSuggestPrices = can("products.view_cost");
 
   // Auto-set default warehouse
   if (!warehouseId && warehouses?.length) {
@@ -501,9 +506,23 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                           </td>
                         )}
                         <td className="px-2 py-2">
-                          <Input type="number" min="0" step="any" className="h-8 text-xs text-right"
-                            value={line.unitPrice}
-                            onChange={(e) => updateLine(i, "unitPrice", e.target.valueAsNumber || 0)} />
+                          <div className="flex items-center gap-1">
+                            <Input type="number" min="0" step="any" className="h-8 text-xs text-right"
+                              value={line.unitPrice}
+                              onChange={(e) => updateLine(i, "unitPrice", e.target.valueAsNumber || 0)} />
+                            {canSuggestPrices && (
+                              <PriceSuggestions
+                                productId={line.productId}
+                                unitId={line.unitId}
+                                currency={code}
+                                rate={currencies.rateOf(code)}
+                                open={suggestFor === i}
+                                onOpenChange={(next) => setSuggestFor(next ? i : null)}
+                                onPickPurchase={(value) => updateLine(i, "unitPrice", value)}
+                                onPickSales={(value) => updateLine(i, "salesPrice", String(value))}
+                              />
+                            )}
+                          </div>
                         </td>
                         {taxEnabled && (
                           <td className="px-2 py-2">
