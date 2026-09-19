@@ -40,7 +40,7 @@ import { notifyCustomerPaymentReceived, notifyOrderPurchase } from "../telegram/
 import { alertBigDiscount, alertShiftDifference } from "../telegram/alerts.service.js";
 import { decimalSchema, moneySchema, percentSchema, priceSchema } from "../../shared/decimal.js";
 import { authOf, requireAuth } from "../auth/guard.js";
-import { requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
+import { requireAnyPermission, requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import { autoCreateDeliveryTask } from "../delivery/tasks.service.js";
 import { createCustomer, getCustomer, listCustomers, updateCustomer } from "./customers.service.js";
 import {
@@ -351,6 +351,25 @@ function writeInTenant<T>(
   });
 }
 
+/**
+ * Mijozdan to'lov qabul qilish: kassir va savdo menejerida `sales.collect_payment`,
+ * moliya xodimlarida (buxgalter, moliya menejeri, direktor, ega) `finance.manage`.
+ */
+const PAYMENT_PERMISSIONS = ["sales.collect_payment", "finance.manage"] as const satisfies readonly [Permission, ...Permission[]];
+
+/** Mijozdan to'lov qabul qilish kabi amallar: ruxsatlardan biri yetarli. */
+function writeInTenantAny<T>(
+  req: FastifyRequest,
+  permissions: readonly [Permission, ...Permission[]],
+  fn: (tx: Tx, tenant: TenantContext) => Promise<T>,
+): Promise<T> {
+  return withTransaction(async (tx) => {
+    const tenant = await requireTenantForWrite(tx, authOf(req).user);
+    await requireAnyPermission(tx, tenant, permissions);
+    return fn(tx, tenant);
+  });
+}
+
 export async function salesRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", requireAuth);
 
@@ -527,7 +546,7 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     let companyId = "";
     if (req.body && typeof req.body === "object" && "parts" in req.body) {
       const body = mixedPaymentBody.parse(req.body);
-      const result = await writeInTenant(req, "finance.manage", (tx, tenant) => {
+      const result = await writeInTenantAny(req, PAYMENT_PERMISSIONS, (tx, tenant) => {
         companyId = tenant.company.id;
         return recordMixedCustomerPayment(
           tx,
@@ -557,7 +576,7 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
       return result;
     }
     const body = paymentBody.parse(req.body);
-    const result = await writeInTenant(req, "finance.manage", (tx, tenant) => {
+    const result = await writeInTenantAny(req, PAYMENT_PERMISSIONS, (tx, tenant) => {
       companyId = tenant.company.id;
       return recordSalesPayment(tx, tenant, body, requestMeta(req));
     });

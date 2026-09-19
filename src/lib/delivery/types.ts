@@ -100,6 +100,8 @@ export type DeliveryTaskRow = {
   returnedAt: string | null;
   createdAt: string;
   overdue: boolean;
+  /** Tovar yetkazuvchida — omborga qabul qilinmagan (yetkazilmagan yoki qisman). */
+  returnPending?: boolean;
   /** Agent ro'yxatida: server hisoblagan masofa (joy berilgan bo'lsa). */
   distanceMeters?: number | null;
 };

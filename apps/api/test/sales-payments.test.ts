@@ -128,8 +128,16 @@ describe("Mijoz to'lovlari", () => {
     expect(await cashBalance()).toBe("30000.00");
 
     expect((await sales("POST", "/payments", { customerId, amount: "1" })).statusCode).toBe(400);
+
+    // Savdo menejerida `sales.collect_payment` bor: ruxsat bor, lekin chek to'liq to'langani uchun 400
     const salesManager = await addEmployee(app, company, "Savdo menejeri");
-    expect((await sales("POST", "/payments", { orderId, amount: "1" }, salesManager.cookie)).statusCode).toBe(403);
+    const managerOverpay = await sales("POST", "/payments", { orderId, amount: "1" }, salesManager.cookie);
+    expect(managerOverpay.statusCode, managerOverpay.body).toBe(400);
+    expect(managerOverpay.json().message).not.toContain("ruxsat");
+
+    // Ruxsati yo'q xodim (omborchi) — 403
+    const keeper = await addEmployee(app, company, "Omborchi");
+    expect((await sales("POST", "/payments", { customerId, amount: "1000" }, keeper.cookie)).statusCode).toBe(403);
     expect((await sales("GET", `/payments?customerId=${customerId}`)).json().payments).toHaveLength(2);
   });
 });

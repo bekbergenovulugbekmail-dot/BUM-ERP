@@ -840,7 +840,7 @@ export async function failDelivery(
     title: "Yetkazib bo'lmadi",
     message: `${context.deliveryAgent.name}: ${task.number} — ${DELIVERY_FAILURE_LABELS[input.reason]}${comment ? ` (${comment})` : ""}${
       collected > 0n ? `; yig'ilgan to'lov ${fromMinor(collected)}` : ""
-    }`,
+    }. Tovar yetkazuvchida — omborga qabul qiling, aks holda sotuv yakunlangan bo'lib qoladi va mijozda qarz turadi.`,
     taskId: task.id,
   });
 }

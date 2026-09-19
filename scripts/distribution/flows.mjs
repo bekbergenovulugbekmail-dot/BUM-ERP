@@ -436,14 +436,17 @@ export async function sectionCustomerB() {
     return expect(debt, state.debtB, "mijoz B qarzi");
   });
 
-  await check("TOPILMA: kassir ERP 'To'lovlar' orqali qarz yopa olmaydi (finance.manage)", async () => {
+  await check("F-03 TUZATILDI: kassir ERP 'To'lovlar' orqali qarz yopa oladi", async () => {
+    const before = await debtOf(state.customers.b);
     const res = await raw("cashier", "POST", "/api/sales/payments", {
       customerId: state.customers.b,
       parts: [{ method: "cash", amount: "1000" }],
       paymentDate: today(),
-      reference: `sim-cashier-denied-${RUN}`,
+      reference: `sim-cashier-${RUN}`,
     });
-    return expect(res.status, 403, "kassirning ERP to'lovi");
+    assert(res.status === 201, `kassir to'lovi rad etildi: ${res.status} ${res.body?.message ?? ""}`);
+    const after = await debtOf(state.customers.b);
+    return expect(before - after, 1000, "kassir to'lovidan keyin qarz kamayishi");
   });
 
   await check("mijoz 200 000 naqd to'laydi → qarz kamayadi (buxgalter)", async () => {
@@ -453,7 +456,7 @@ export async function sectionCustomerB() {
       paymentDate: today(),
       reference: `sim-b-cash-${RUN}`,
     });
-    return expect(await debtOf(state.customers.b), state.debtB - 200_000, "qarz");
+    return expect(await debtOf(state.customers.b), state.debtB - 201_000, "qarz");
   });
 
   await check("qolganini UZCARD bilan to'laydi → qarz 0", async () => {

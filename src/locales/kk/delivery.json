@@ -7,7 +7,6 @@
   "nav.customers": "Клиенттер",
   "nav.debts": "Қарыз/Төлем",
   "nav.reports": "Есептер",
-
   "common.cancel": "Бас тарту",
   "common.save": "Сақтау",
   "common.close": "Жабу",
@@ -15,14 +14,12 @@
   "common.yes": "Иә",
   "common.no": "Жоқ",
   "common.refresh": "Жаңарту",
-
   "not_linked.title": "Курьер профилі жоқ",
   "not_linked.message": "Есептік жазбаңыз белсенді курьерге байланыстырылмаған. Басшыңызға хабарласыңыз.",
   "error.title": "Деректер жүктелмеді",
   "error.retry": "Қайталау",
   "offline.banner": "Интернет жоқ — деректер кэштен, әрекеттер кезекке қойылады",
   "offline.banner_no_queue": "Интернет жоқ — компания саясатында офлайн әрекеттер өшірілген",
-
   "location.locating": "Орналасу анықталуда…",
   "location.denied": "Геолокацияға рұқсат жоқ. Жұмыс уақытында жеткізу үшін GPS қажет.",
   "location.enable": "Геолокацияны қосу",
@@ -32,7 +29,6 @@
   "location.status.off": "Геолокация өшірулі",
   "location.status.active": "Геолокация белсенді",
   "location.status.problem": "Сервер геолокацияны қабылдамады",
-
   "queue.badge": "Кезекте",
   "queue.pending": "{{count}} әрекет интернетті күтуде",
   "queue.failed": "{{count}} әрекет қабылданбады — тексеріңіз",
@@ -57,7 +53,6 @@
   "queue.synced": "{{count}} әрекет жіберілді",
   "queue.rejected": "Сервер {{count}} әрекетті қабылдамады",
   "queue.full": "Құрылғы жады толы — әрекетті интернетпен орындаңыз",
-
   "work.off_duty": "Жұмыс басталмаған. Жеткізулерді орындау үшін жұмысты бастаңыз.",
   "work.required": "Бұл әрекет үшін алдымен жұмысты бастаңыз",
   "work.start": "ЖҰМЫСТЫ БАСТАУ",
@@ -68,7 +63,6 @@
   "work.end_confirm": "Жұмысты аяқтайсыз ба? Геолокация бақылауы тоқтайды.",
   "work.privacy": "Геолокация тек жұмыс уақытында (жұмыс басталғаннан аяқталғанға дейін) бақыланады.",
   "work.tracking_note": "Геолокация қолданба ашық тұрғанда жіберіледі. Телефон бұғатталса немесе басқа қолданбаға өтсе, браузер орналасуды бермеуі мүмкін.",
-
   "dash.route_progress": "Бүгінгі маршрут барысы",
   "dash.remaining": "Қалды",
   "dash.on_route": "Жолда",
@@ -81,7 +75,6 @@
   "dash.mismatch": "Төлем айырмасы",
   "dash.customers_debt": "Клиенттерімнің қарызы",
   "dash.open_tasks": "Барлық жеткізулер",
-
   "tasks.title": "Жеткізулер",
   "tasks.scope.today": "Бүгін",
   "tasks.scope.upcoming": "Келесі",
@@ -91,7 +84,6 @@
   "tasks.empty.upcoming": "Келесі күндерге жеткізу жоқ",
   "tasks.empty.history": "Соңғы 30 күнде аяқталған жеткізу жоқ",
   "tasks.late": "Кешікті",
-
   "task.not_found": "Жеткізу табылмады немесе сізге тағайындалмаған",
   "task.customer": "Клиент",
   "task.contact": "Байланыс тұлғасы",
@@ -116,13 +108,11 @@
   "task.delivered_at": "Жеткізілген уақыт",
   "task.failure": "Себеп",
   "task.cancel_reason": "Бас тарту себебі",
-
   "step.accepted": "Қабылдау",
   "step.out_for_delivery": "Жолда",
   "step.arrived": "Жетті",
   "step.delivering": "Тапсыру",
   "step.delivered": "Нәтиже",
-
   "action.accept": "ҚАБЫЛДАУ",
   "action.start": "ЖОЛҒА ШЫҒУ",
   "action.navigate": "КАРТАДА АШУ",
@@ -139,16 +129,13 @@
   "action.done_arrive": "Клиентке жеттіңіз",
   "action.done_delivering": "Тапсыру басталды",
   "action.done_fail": "«Жеткізілмеді» деп белгіленді",
-
   "geofence.approx": "Клиентке дейін шамамен {{distance}} (рұқсат {{radius}} м)",
-
   "handover.title": "Тапсыру",
   "handover.photo": "Тапсыру фотосы ({{count}})",
   "handover.signature": "Клиент қолтаңбасы",
   "handover.payment": "Төлем: {{collected}} / {{expected}}",
   "handover.otp_issued": "Клиент коды (OTP) берілген — растау кезінде енгізіледі",
   "handover.otp_missing": "OTP коды берілмеген — супервайзерден сұраңыз",
-
   "photo.saved": "Фото сақталды",
   "signature.title": "Клиент қолтаңбасы",
   "signature.hint": "Клиент саусағымен қол қояды",
@@ -157,7 +144,6 @@
   "signature.signer": "Қол қойған тұлға",
   "signature.save": "Қолтаңбаны сақтау",
   "signature.saved": "Қолтаңба сақталды",
-
   "payment.title": "Төлем қабылдау",
   "payment.remaining": "Қалдық: {{amount}}",
   "payment.amount": "Сома",
@@ -174,7 +160,6 @@
   "payment.fill": "+Қалдық",
   "payment.duplicate": "Бір тәсіл екі рет енгізілген",
   "payment.not_confirmed": "Терминал төлемі автоматты расталмайды — терминал чегін тексеріңіз",
-
   "otp.sms_sent": "Код клиентке SMS арқылы жіберілді",
   "otp.ask_supervisor": "SMS жіберілмеді — кодты супервайзерден сұраңыз",
   "otp.resent": "Жаңа код клиентке жіберілді",
@@ -183,7 +168,6 @@
   "otp.issue_hint": "Код тек қазір көрсетіледі және сақталмайды. Жаңа код ескісін жояды.",
   "otp.valid_until": "{{time}} дейін жарамды",
   "otp.tell_customer": "SMS бапталмаған — кодты клиентке телефонмен айтыңыз, ол курьерге айтады",
-
   "confirm.title": "Жеткізуді растау",
   "confirm.items_hint": "Клиент қабылдаған санды тексеріңіз. Аз болса — ішінара жеткізу, қалғаны қоймаға қайтарылады.",
   "confirm.planned": "Жоспар бойынша: {{qty}} {{unit}}",
@@ -203,7 +187,6 @@
   "confirm.mismatch.block": "Төлем толық жиналмайынша растау мүмкін емес.",
   "confirm.submit": "Растау",
   "confirm.submit_partial": "Ішінара жеткізілді",
-
   "success.title": "Жеткізілді",
   "success.partial_title": "Ішінара жеткізілді",
   "success.queued": "Растау құрылғыда сақталды және интернет пайда болғанда жіберіледі. Сервер тексергеннен кейін аяқталады.",
@@ -217,14 +200,12 @@
   "success.customer_debt": "Клиенттің жалпы қарызы",
   "success.next": "КЕЛЕСІ ЖЕТКІЗУ",
   "success.back": "Жеткізулер тізімі",
-
   "fail.title": "Жеткізу мүмкін болмады",
   "fail.hint": "Себепті таңдаңыз — супервайзерге хабарланады",
   "fail.reason": "Себеп",
   "fail.comment": "Түсініктеме",
   "fail.collected_warning": "Бұл жеткізуде {{amount}} төлем жиналған — супервайзермен шешіңіз",
   "fail.submit": "Растау",
-
   "customers.title": "Клиенттер",
   "customers.search": "Аты, телефоны немесе мекенжайы",
   "customers.empty": "Клиент табылмады",
@@ -232,7 +213,6 @@
   "customers.deliveries": "{{count}} жеткізілді",
   "customers.pending_payments": "{{count}} төлем күтілуде",
   "customers.tasks": "Жеткізулер",
-
   "debts.title": "Қарыз және төлемдер",
   "debts.collections": "Бүгін жиналды",
   "debts.empty_collections": "Бүгін төлем жиналмады",
@@ -240,7 +220,6 @@
   "debts.empty_shortfalls": "Төлем айырмасы жоқ",
   "debts.debtors": "Қарызы бар клиенттер",
   "debts.empty_debtors": "Қарызы бар клиент жоқ",
-
   "reports.title": "Есеп",
   "reports.preset.today": "Бүгін",
   "reports.preset.week": "7 күн",
@@ -258,7 +237,6 @@
   "reports.failure_reasons": "Жеткізілмеу себептері",
   "reports.none": "Жоқ",
   "reports.empty": "Кезеңде дерек жоқ",
-
   "status.ready": "Дайын",
   "status.assigned": "Тағайындалды",
   "status.accepted": "Қабылданды",
@@ -270,12 +248,10 @@
   "status.failed": "Жеткізілмеді",
   "status.returned": "Қайтарылды",
   "status.cancelled": "Бас тартылды",
-
   "priority.low": "Төмен",
   "priority.normal": "Қалыпты",
   "priority.high": "Жоғары",
   "priority.urgent": "Шұғыл",
-
   "failure.customer_absent": "Клиент орнында жоқ",
   "failure.address_not_found": "Мекенжай табылмады",
   "failure.no_answer": "Телефонға жауап бермеді",
@@ -284,42 +260,34 @@
   "failure.customer_refused": "Клиент бас тартты",
   "failure.vehicle_issue": "Көлік мәселесі",
   "failure.other": "Басқа",
-
   "payment_type.cash": "Қолма-қол",
   "payment_type.card": "Карта",
   "payment_type.bank": "Банк аударымы",
   "payment_type.credit": "Несие",
-
   "method.cash": "Қолма-қол",
   "method.card": "Карта",
   "method.bank": "Банк",
-
   "payment_status.not_required": "Төлем талап етілмейді",
   "payment_status.pending": "Күтілуде",
   "payment_status.paid": "Төленді",
   "payment_status.partial": "Ішінара (қарызға)",
   "payment_status.mismatch": "Айырма бар",
-
   "review.none": "—",
   "review.pending": "Қаралуда",
   "review.approved": "Мақұлданды",
   "review.rejected": "Жетіспеушілік тіркелді",
-
   "vehicle.foot": "Жаяу",
   "vehicle.bicycle": "Велосипед",
   "vehicle.motorcycle": "Мотоцикл",
   "vehicle.car": "Жеңіл көлік",
   "vehicle.van": "Фургон",
   "vehicle.truck": "Жүк көлігі",
-
   "refund.balance": "Клиент балансына",
   "refund.cash": "Қолма-қол қайтару",
   "refund.card": "Картаға",
   "refund.bank": "Банк арқылы",
-
   "proof.photo": "Фото",
   "proof.signature": "Қолтаңба",
-
   "event.CREATED": "Құрылды",
   "event.ASSIGNED": "Тағайындалды",
   "event.REASSIGNED": "Басқа курьерге берілді",
@@ -343,7 +311,6 @@
   "event.RETURNED": "Тауар қоймаға қайтарылды",
   "event.PAYMENT_REVIEWED": "Төлем айырмасы қаралды",
   "event.GEOFENCE_BLOCK": "Геоаймақ: клиенттен алыс",
-
   "error.network": "Сервермен байланыс жоқ. Интернетті тексеріңіз",
   "error.location_denied": "Геолокацияға рұқсат жоқ — браузер баптауларында қосыңыз",
   "error.location_unavailable": "Орналасу анықталмады. Ашық жерге шығып, қайталаңыз",
@@ -382,7 +349,6 @@
   "error.not_assigned": "Жеткізу курьерге тағайындалмаған",
   "error.on_route": "Жолдағы жеткізуде сома мен уақыт аралығы өзгермейді",
   "error.recipient_invalid": "Хабарлама алушы компанияның белсенді мүшесі емес",
-
   "sv.title": "Жеткізу",
   "sv.subtitle": "Жеткізулер, курьерлер және бақылау",
   "sv.tab.today": "Бүгін",
@@ -423,6 +389,8 @@
   "sv.filter.unassigned": "Тағайындалмаған",
   "sv.filter.overdue": "Кешігуде",
   "sv.filter.review_pending": "Төлем айырмасы",
+  "sv.filter.return_pending": "Tauar qaytarylmaǵan",
+  "sv.badge.return_pending": "Tauar qoymaǵa qabyldanbaǵan — qabyldań",
   "sv.filter.reset": "Тазалау",
   "sv.table.number": "Жеткізу",
   "sv.table.date": "Күні",
@@ -454,7 +422,6 @@
   "sv.control.empty_returns": "Қайтарылатын тауар жоқ",
   "sv.control.overdue": "Кешігіп жатқан жеткізулер",
   "sv.control.empty_overdue": "Кешігіп жатқан жеткізу жоқ",
-
   "drawer.title": "Жеткізу",
   "drawer.subtitle": "Толығырақ, дәлелдер, тарих және басқару",
   "drawer.assign": "Курьерге тағайындау",
@@ -485,7 +452,6 @@
   "drawer.saved_review": "Шешім сақталды",
   "drawer.saved_return": "Тауар қоймаға қайтарылды",
   "drawer.saved_cancel": "Жеткізуден бас тартылды",
-
   "assign.hint": "Белсенді курьерді таңдаңыз. Реттік нөмір бос болса — күннің соңына қосылады.",
   "assign.submit": "Тағайындау",
   "assign.choose": "Таңдаңыз",
@@ -513,7 +479,6 @@
   "return.reason": "Түсініктеме",
   "cancel.hint": "Бас тартылған жеткізу қайта ашылмайды. Тапсырыстың өзі өзгермейді.",
   "cancel.reason": "Себеп",
-
   "ready.hint": "Расталған, клиенті бар және аяқталмаған немесе жеткізілген жеткізуі жоқ тапсырыстар",
   "ready.search_hint": "Тапсырыс № немесе клиент",
   "ready.empty": "Жеткізу құрылатын тапсырыс жоқ",
@@ -571,7 +536,6 @@
   "tasks.route.hint": "Ашық жеткізулер қазіргі орныңыздан ең қысқа жол ретімен. Навигаторда ашу үшін батырманы басыңыз.",
   "tasks.route.empty": "Маршрут үшін ашық жеткізу жоқ",
   "tasks.route.error": "Маршрут есептелмеді — интернетті тексеріңіз",
-
   "agents.add": "Курьер қосу",
   "agents.subtitle": "Курьерлер: логин (телефон), рөл, HR қызметкері және профиль",
   "agents.hint": "Логин телефон нөмірі болады, құпиясөз қауіпсіз хэштеледі. «Dostavka agenti» рөлі, HR қызметкері (Логистика) және профиль бір әрекетте құрылады.",
@@ -644,7 +608,6 @@
   "agents.day_short.4": "Бс",
   "agents.day_short.5": "Жм",
   "agents.day_short.6": "Сб",
-
   "policy.title": "Жеткізу саясаты",
   "policy.subtitle": "Геоаймақ, GPS сапасы, растау, төлем айырмасы, офлайн жұмыс және хабарламалар",
   "policy.section.location": "Геолокация және геоаймақ",
@@ -696,7 +659,6 @@
   "policy.save": "Сақтау",
   "policy.saved": "Саясат сақталды",
   "policy.invalid": "«{{field}}» {{min}}–{{max}} аралығындағы бүтін сан болсын",
-
   "policy.section.auto": "Автоматты тағайындау",
   "policy.auto.hint": "Курьер таңдау ережелері. Тауардың салмағы мен оның бірлігі (кг, г, т) көрсетілмесе, жүк сыйымдылығы тексерілмейді.",
   "policy.auto.enabled": "Автоматты тағайындау қосулы",
@@ -710,7 +672,6 @@
   "policy.auto.maxTasksPerAgent_hint": "Осы күнгі ашық жеткізулер саны",
   "policy.auto.maxDistanceKm": "Макс. қашықтық (км)",
   "policy.auto.maxDistanceKm_hint": "0 — шектеусіз",
-
   "auto.button": "Автотағайындау",
   "auto.title": "Автоматты тағайындау",
   "auto.hint": "Таңдалған күннің тағайындалмаған жеткізулері саясат ережелері бойынша белсенді курьерлерге бөлінеді. Алдымен жоспарды қараңыз — қолданғанда сервер әр жұпты қайта тексереді.",
@@ -735,7 +696,6 @@
   "auto.reason.task_not_ready": "Жеткізу енді дайын емес",
   "auto.reason.agent_unavailable": "Курьер қолжетімсіз",
   "error.auto_assign_disabled": "Автоматты тағайындау саясатта өшірілген — Баптауларда қосыңыз",
-
   "sv.realtime.live": "Тікелей",
   "sv.realtime.connecting": "Қосылуда",
   "sv.realtime.offline": "Кезеңдік жаңарту",

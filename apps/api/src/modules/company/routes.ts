@@ -85,6 +85,7 @@ import {
 import { listCompanySettings, upsertCompanySetting } from "./settings.service.js";
 import {
   effectivePermissions,
+  requireAnyPermission,
   requirePermission,
   requireTenant,
   requireTenantForWrite,
@@ -223,6 +224,9 @@ const settingBody = z.strictObject({
   group: z.string().trim().min(1).max(50),
   description: z.string().trim().max(500).optional(),
 });
+
+/** Qurilmani tasdiqlash: rahbar (`users.manage`) yoki qurilmalarga mas'ul xodim (`devices.manage`). */
+const DEVICE_PERMISSIONS = ["devices.manage", "users.manage"] as const satisfies readonly [Permission, ...Permission[]];
 
 export async function companyRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", requireAuth);
@@ -464,12 +468,13 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
   // ─── Sozlamalar ──────────────────────────────────────────────────────────
 
   // ─── Xodimning ishonchli qurilmalari ─────────────────────────────────────
-  // Login va parolni bilgan begona odam kira olmasligi uchun: yangi qurilmani egasi tasdiqlaydi.
+  // Login va parolni bilgan begona odam kira olmasligi uchun: yangi qurilmani rahbar yoki
+  // qurilmalarni boshqarish ruxsati berilgan xodim (masalan, HR menejeri) tasdiqlaydi.
 
   app.get("/employees/:userId/devices", async (req) => {
     const { userId } = userParams.parse(req.params);
     const tenant = await requireTenant(db, authOf(req).user);
-    await requirePermission(db, tenant, "users.manage");
+    await requireAnyPermission(db, tenant, DEVICE_PERMISSIONS);
     await assertMember(db, tenant.company.id, userId);
     return { devices: await listUserDevices(db, userId) };
   });
@@ -480,7 +485,7 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
     const { user } = authOf(req);
     const device = await withTransaction(async (tx) => {
       const tenant = await requireTenantForWrite(tx, user);
-      await requirePermission(tx, tenant, "users.manage");
+      await requireAnyPermission(tx, tenant, DEVICE_PERMISSIONS);
       await assertMember(tx, tenant.company.id, userId);
       const updated = await setDeviceStatus(tx, { deviceRowId, userId, status: body.status, name: body.name, actorId: user.id });
       if (!updated) throw badRequest("Qurilma topilmadi");

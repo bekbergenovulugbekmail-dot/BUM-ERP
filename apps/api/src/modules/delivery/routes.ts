@@ -252,6 +252,8 @@ const tasksQuery = z.object({
   search: z.string().trim().min(1).max(100).optional(),
   overdue: boolQuery,
   reviewPending: boolQuery,
+  /** Tovari omborga qaytarilmagan yetkazmalar (yetkazilmagan yoki qisman). */
+  returnPending: boolQuery,
   limit: z.coerce.number().int().min(1).max(200).default(50),
   cursor: z.string().max(500).optional(),
 });
@@ -495,6 +497,7 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
       search: query.search,
       overdue: query.overdue,
       reviewPending: query.reviewPending,
+      returnPending: query.returnPending,
       limit: query.limit,
       cursor: query.cursor,
     });

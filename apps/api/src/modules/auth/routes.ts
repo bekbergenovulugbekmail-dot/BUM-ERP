@@ -16,13 +16,17 @@
  *   (yangi)                   → POST /lock         ekranni qulflash (sessiya saqlanadi; PIN o'rnatilgan bo'lishi shart)
  *   (yangi)                   → POST /unlock       shu sessiyani PIN bilan ochish (doim 200, { success, reason })
  *   (yangi)                   -> GET  /sessions, POST /sessions/revoke-others, DELETE /sessions/:sessionId — o'z qurilmalari
+ *   (yangi)                   -> GET  /devices, POST /devices/:deviceRowId — O'ZINING ishonchli qurilmalari
+ *                                (bir odamda bir nechta telefon/noutbuk bo'lishi mumkin: ishonchli qurilmadan
+ *                                 turib yangisini o'zi tasdiqlaydi — rahbarni kutmaydi)
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { badRequest } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { requestMeta, writeAuditLog } from "../../shared/audit.js";
-import { deviceCheckRequired, deviceError, registerDevice } from "./devices.service.js";
+import { deviceCheckRequired, deviceError, listUserDevices, registerDevice, setDeviceStatus } from "./devices.service.js";
 import { smsProvider } from "../../shared/sms.js";
 import { changeOwnPassword, verifyCurrentPassword } from "../users/user-admin.service.js";
 import { confirmPasswordReset, requestPasswordReset } from "./password-reset.service.js";
@@ -87,6 +91,12 @@ const verifyPinBody = z.object({
 const autoLockBody = z.object({ seconds: z.number() });
 const unlockBody = z.object({ pin: z.string().max(16) });
 const sessionParams = z.object({ sessionId: z.uuid() });
+const ownDeviceParams = z.object({ deviceRowId: z.uuid() });
+/** O'z qurilmasini tasdiqlash yoki bekor qilish (nomini ham o'zgartirish mumkin). */
+const ownDeviceBody = z.strictObject({
+  status: z.enum(["approved", "revoked"]),
+  name: z.string().trim().min(1).max(100).optional(),
+});
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post("/login", async (req, reply) => {
@@ -171,6 +181,43 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ─── SMS orqali parol tiklash ────────────────────────────────────────────
+
+  // ─── O'zining ishonchli qurilmalari ──────────────────────────────────────
+  // Rahbarning ham 2-3 qurilmasi bo'ladi: ishonchli qurilmadan turib yangisini o'zi tasdiqlaydi.
+  app.get("/devices", { preHandler: requireAuth }, async (req) => {
+    return { devices: await listUserDevices(db, authOf(req).user.id) };
+  });
+
+  app.post("/devices/:deviceRowId", { preHandler: requireAuth }, async (req) => {
+    const { deviceRowId } = ownDeviceParams.parse(req.params);
+    const body = ownDeviceBody.parse(req.body);
+    const { user } = authOf(req);
+    const device = await withTransaction(async (tx) => {
+      const updated = await setDeviceStatus(tx, {
+        deviceRowId,
+        userId: user.id,
+        status: body.status,
+        name: body.name,
+        actorId: user.id,
+      });
+      if (!updated) throw badRequest("Qurilma topilmadi");
+      await writeAuditLog(
+        {
+          userId: user.id,
+          userName: user.name,
+          companyId: user.activeCompanyId ?? null,
+          action: body.status === "approved" ? "DEVICE_APPROVED" : "DEVICE_REVOKED",
+          resource: "user_devices",
+          resourceId: deviceRowId,
+          details: { self: true, name: updated.name },
+          ...requestMeta(req),
+        },
+        tx,
+      );
+      return updated;
+    });
+    return { device };
+  });
 
   // Faol sessiyalar (o'z qurilmalari): ro'yxat, bittasini yoki joriydan boshqa hammasini tugatish
   app.get("/sessions", { preHandler: requireAuth }, async (req) => {

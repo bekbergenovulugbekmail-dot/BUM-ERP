@@ -215,3 +215,18 @@ export async function requirePermission(
     throw forbidden(`Bu amal uchun ruxsat yo'q: ${permission}`);
   }
 }
+
+/**
+ * Sanab o'tilganlardan BIRORTASI yetarli bo'lgan amallar uchun (masalan, mijozdan to'lov qabul qilish:
+ * kassirda `sales.collect_payment`, moliya xodimida `finance.manage`).
+ */
+export async function requireAnyPermission(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  allowed: readonly [Permission, ...Permission[]],
+): Promise<void> {
+  const permissions = await effectivePermissions(conn, tenant);
+  if (!allowed.some((permission) => permissions.includes(permission))) {
+    throw forbidden(`Bu amal uchun ruxsat yo'q: ${allowed.join(" yoki ")}`);
+  }
+}

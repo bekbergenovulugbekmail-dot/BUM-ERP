@@ -125,11 +125,13 @@ export async function sectionDeliveryFailure() {
     return expect(order.totalAmount, state.failOrder.totalAmount, "buyurtma summasi");
   });
 
-  await check("TOPILMA: yetkazilmagan bo'lsa ham sotuv 'completed' va mijozda qarz qoladi", async () => {
+  await check("F-01 TUZATILDI: yetkazilmagan yetkazma 'qaytarish kutilmoqda' deb belgilanadi", async () => {
+    const list = await call("owner", "GET", "/api/delivery/tasks?returnPending=true&limit=200");
+    const pending = list.tasks.find((task) => task.id === state.failTask.id);
+    assert(pending, "yetkazma 'qaytarish kutilmoqda' ro'yxatida yo'q");
+    assert(pending.returnPending === true, "returnPending belgisi qo'yilmagan");
     const order = await orderOf(state.failOrder.id);
-    const debt = await debtOf(state.customers.a);
-    assert(order.status === "completed", `kutilgan completed, olingan ${order.status}`);
-    return `sotuv=${order.status}, mijoz qarzi=${debt} (tovar yetkazilmagan) — supervayzer qaytarishi shart`;
+    return `belgi=returnPending, sotuv=${order.status} — boshqaruvchi ro'yxatda ko'radi va yopadi`;
   });
 
   await check("supervayzer qaytarishi holatni tiklaydi (sotuv=returned, qarz 0 ga qaytadi)", async () => {

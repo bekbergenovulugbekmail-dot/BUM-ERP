@@ -4,7 +4,9 @@
  * Located: Settings → Xavfsizlik
  *
  * API: `POST /api/auth/password` — boshqa qurilmalardagi sessiyalar yopiladi; `GET /api/auth/sessions`,
- * `DELETE /api/auth/sessions/:id`, `POST /api/auth/sessions/revoke-others` — o'z qurilmalari.
+ * `DELETE /api/auth/sessions/:id`, `POST /api/auth/sessions/revoke-others` — o'z sessiyalari;
+ * `GET /api/auth/devices`, `POST /api/auth/devices/:id` — O'ZINING ishonchli qurilmalari
+ * (bir odamda bir nechta telefon/noutbuk bo'ladi: ishonchli qurilmadan turib yangisini o'zi tasdiqlaydi).
  * Avtomatik bloklash (qulf ekrani) va PIN foydalanuvchi talabi bilan olib tashlangan (2026-09-11).
  */
 import { useState } from "react";
@@ -31,6 +33,7 @@ export default function SecuritySection() {
       </div>
 
       <PasswordCard />
+      <MyDevicesCard />
       <SessionsCard />
 
       {/* Security info */}
@@ -148,6 +151,95 @@ function deviceName(userAgent: string | null): string {
 }
 
 const when = (value: string | null) => (value ? new Date(value).toLocaleString("uz-UZ") : "—");
+
+type OwnDevice = {
+  id: string;
+  name: string;
+  status: "approved" | "pending" | "revoked";
+  userAgent: string | null;
+  lastIp: string | null;
+  lastSeenAt: string | null;
+  approvedAt: string | null;
+};
+
+const DEVICE_STATUS: Record<OwnDevice["status"], { label: string; className: string }> = {
+  approved: { label: "Ishonchli", className: "text-emerald-600" },
+  pending: { label: "Tasdiq kutilmoqda", className: "text-amber-600" },
+  revoked: { label: "Bekor qilingan", className: "text-destructive" },
+};
+
+/** O'zining ishonchli qurilmalari: yangi telefon/noutbukni shu yerdan tasdiqlaydi. */
+function MyDevicesCard() {
+  const devices = useApiQuery<{ devices: OwnDevice[] }>("/api/auth/devices").data?.devices;
+  const setStatus = useApiMutation(
+    ({ id, status }: { id: string; status: "approved" | "revoked" }) => api.post(`/api/auth/devices/${id}`, { status }),
+    { invalidate: ["/api/auth/devices"] },
+  );
+
+  const change = async (id: string, status: "approved" | "revoked") => {
+    try {
+      await setStatus.mutateAsync({ id, status });
+      toast.success(status === "approved" ? "Qurilma tasdiqlandi" : "Qurilma bekor qilindi");
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Mening qurilmalarim</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Yangi telefon yoki noutbukdan kirganda u «tasdiq kutilmoqda» bo'ladi. Ishonchli qurilmadan turib shu yerda
+          tasdiqlang — rahbarni kutish shart emas.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {!devices ? (
+          <p className="text-sm text-muted-foreground">Yuklanmoqda...</p>
+        ) : devices.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Qurilma yo'q</p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {devices.map((device) => (
+              <li key={device.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">
+                    {device.name}
+                    <span className={`ml-2 text-xs font-semibold ${DEVICE_STATUS[device.status].className}`}>
+                      {DEVICE_STATUS[device.status].label}
+                    </span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {deviceName(device.userAgent)} · {device.lastIp ?? "IP noma'lum"} · oxirgi faollik {when(device.lastSeenAt)}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  {device.status !== "approved" && (
+                    <Button size="sm" disabled={setStatus.isPending} onClick={() => void change(device.id, "approved")}>
+                      Tasdiqlash
+                    </Button>
+                  )}
+                  {device.status === "approved" && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive"
+                      disabled={setStatus.isPending}
+                      onClick={() => void change(device.id, "revoked")}
+                    >
+                      Bekor qilish
+                    </Button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function SessionsCard() {
   const sessions = useApiQuery<{ sessions: OwnSession[] }>("/api/auth/sessions").data?.sessions;

@@ -18,7 +18,7 @@ ular alohida "Test xatolari" bo'limida sanab o'tilgan.
 |---|---|---|
 | **BLOCKER** | **0** | — |
 | **HIGH** | **0** | — |
-| **MEDIUM** | **2** | F-01, F-03 |
+| **MEDIUM** | **2 (ikkalasi TUZATILDI — 2026-09-19)** | F-01, F-03 |
 | **LOW** | **4** | F-02, F-04, F-05, F-06 |
 | INFO (to'g'ri xatti-harakat, hujjatlashtirildi) | 3 | F-07, F-08, F-09 |
 
@@ -29,7 +29,7 @@ yoki autentifikatsiyani chetlab o'tish **topilmadi**.
 
 ## MEDIUM
 
-### F-01 — Yetkazib bo'lmaganda sotuv "completed" bo'lib qoladi va mijozda qarz turadi
+### F-01 — Yetkazib bo'lmaganda sotuv "completed" bo'lib qoladi va mijozda qarz turadi — **TUZATILDI**
 
 **FAIL:** Yetkazma `failed` bo'lgandan keyin ham sotuv holati `completed`, mijoz qarzi 45 000 so'm —
 holbuki tovar mijozga topshirilmagan (u yetkazuvchida qoldi).
@@ -52,18 +52,31 @@ qaytarilmaydi — buni supervayzer alohida amal bilan bajaradi:
 **Yumshatuvchi holat (tekshirildi):** o'sha amal hamma narsani to'g'ri tiklaydi —
 `sotuv=returned, mijoz qarzi 45 000 → 0, tovar omborga qaytadi`.
 
-**SEVERITY: MEDIUM** — ma'lumot buzilmaydi, lekin supervayzer qadamini unutса:
+**SEVERITY: MEDIUM** — ma'lumot buzilmaydi, lekin supervayzer qadamini unutsa:
 mijoz olmagan tovari uchun qarzdor ko'rinadi va daromad hisobotida "yakunlangan sotuv" sifatida turadi.
 
 **EVIDENCE:** `scripts/distribution/probe.mjs` → "A. Yetkazib bo'lmaganda sotuv holati";
 simulyatsiya 12-bosqich (`e2e/.artifacts/distribution/sim-log.md`).
 
-**Tavsiya (tuzatish emas, taklif):** `failed` holatidagi yetkazmalar uchun supervayzer paneliga
-majburiy ro'yxat/eslatma (yoki avtomatik `returned`) — hozir bu faqat qo'lda esda tutilishi kerak.
+**TUZATISH (2026-09-19):** tovar omborga qabul qilinmagan yetkazmalar endi ko'rinadi va yo'qolmaydi:
+
+- `GET /api/delivery/tasks` har yetkazmada **`returnPending`** belgisini qaytaradi
+  (holat `failed` yoki `partially_delivered`, `returnedAt` esa bo'sh).
+- Yangi filtr: **`GET /api/delivery/tasks?returnPending=true`** — faqat qaytarish kutayotganlar.
+- Yetkazmalar sahifasida **"Tovar qaytarilmagan"** filtri va qator yonida sariq nishon.
+- Xato haqidagi bildirishnoma matni keyingi qadamni aytadi: *"Tovar yetkazuvchida — omborga qabul
+  qiling, aks holda sotuv yakunlangan bo'lib qoladi va mijozda qarz turadi."*
+
+Zaxira va pul mantig'i **ataylab o'zgartirilmadi**: tovar jismonan yetkazuvchida bo'lgani uchun uni
+avtomatik omborga kiritish zaxirani buzgan bo'lar edi. Qabul qilingach (mavjud "qaytarish" amali)
+sotuv `returned` bo'ladi va qarz yopiladi — bu testda tasdiqlangan.
+
+**Testlar:** `apps/api/test/delivery-return-pending.test.ts` (3 test — yetkazilmagan, qisman
+yetkazilgan va yetkazilgan holatlar).
 
 ---
 
-### F-03 — Kassir ERP "To'lovlar" bo'limidan mijoz qarzini yopa olmaydi
+### F-03 — Kassir ERP "To'lovlar" bo'limidan mijoz qarzini yopa olmaydi — **TUZATILDI**
 
 **FAIL:** `POST /api/sales/payments` kassir uchun **403 FORBIDDEN** (`finance.manage` talab qilinadi).
 
@@ -75,8 +88,21 @@ majburiy ro'yxat/eslatma (yoki avtomatik `returned`) — hozir bu faqat qo'lda e
 **Mavjud yo'l:** kassir qarzni **kassa (POS) orqali** yopa oladi —
 `POST /api/sales/pos/customers/:customerId/payments` (`pos.use`, ochiq smena kerak).
 
-**SEVERITY: MEDIUM** — distributsiya kompaniyasida kassirdan qarz yig'ish kutiladi; hozir buni
-buxgalter/ega qiladi yoki kassir majburan POS smenasini ochishi kerak.
+**SEVERITY: MEDIUM** — distributsiya kompaniyasida kassirdan qarz yig'ish kutiladi.
+
+**TUZATISH (2026-09-19):**
+
+- Yangi ruxsat **`sales.collect_payment`** ("Mijozdan to'lov qabul qilish", guruh "Savdo").
+- **Kassir** va **Savdo menejeri** rollariga berildi; moliya xodimlarida (buxgalter, moliya menejeri,
+  direktor, ega) `finance.manage` orqali avvalgidek ochiq.
+- `POST /api/sales/payments` endi **`sales.collect_payment` YOKI `finance.manage`** ni qabul qiladi
+  (`requireAnyPermission`).
+- Migratsiya **0064** mavjud kompaniyalardagi "Kassir" va "Savdo menejeri" tizim rollariga shu
+  ruxsatni qo'shadi (faqat qo'shadi — boshqa ruxsatlar o'zgarmaydi).
+- Kassirda moliyani boshqarish **ochilmadi**: yangi kassa ochish hamon 403.
+
+**Testlar:** `apps/api/test/cashier-collect-payment.test.ts` (2 test — kassir bitta usul va aralash
+to'lov bilan qarzni yopadi, takroriy so'rov yangi yozuv yaratmaydi, kassa ocha olmaydi; omborchi 403).
 
 **EVIDENCE:** simulyatsiya 9-bosqich: "TOPILMA: kassir ERP 'To'lovlar' orqali qarz yopa olmaydi = 403";
 buxgalter bilan o'sha to'lov 200 bo'ldi.
@@ -117,7 +143,7 @@ va'da qilib qo'yishi mumkin, muammo faqat jo'natishda ma'lum bo'ladi.
 
 ### F-05 — Mijozning "qarzi" va "balansi" alohida ko'rsatkichlar, netto ko'rsatilmaydi
 
-**FAIL (kutilmagan holat):** To'langan chekdan tovar qaytarilгач mijozda bir vaqtda
+**FAIL (kutilmagan holat):** To'langan chekdan tovar qaytarilgach mijozda bir vaqtda
 `totalDebt=45 000` (boshqa buyurtma bo'yicha) va `balance=28 000` (qaytarilgan pul krediti) turadi.
 
 **ROOT CAUSE:** Qaytarilgan pul `balance` (oldindan to'lov/kredit) sifatida yoziladi, `totalDebt`

@@ -7,7 +7,6 @@
   "nav.customers": "Mijozlar",
   "nav.debts": "Qarz/To'lov",
   "nav.reports": "Hisobotlar",
-
   "common.cancel": "Bekor qilish",
   "common.save": "Saqlash",
   "common.close": "Yopish",
@@ -15,14 +14,12 @@
   "common.yes": "Ha",
   "common.no": "Yo'q",
   "common.refresh": "Yangilash",
-
   "not_linked.title": "Yetkazuvchi profili yo'q",
   "not_linked.message": "Hisobingiz faol yetkazuvchi agentga bog'lanmagan. Rahbaringizga murojaat qiling.",
   "error.title": "Ma'lumot yuklanmadi",
   "error.retry": "Qayta urinish",
   "offline.banner": "Internet yo'q — ma'lumotlar keshdan, amallar navbatga qo'yiladi",
   "offline.banner_no_queue": "Internet yo'q — kompaniya siyosatida oflayn amallar o'chirilgan",
-
   "location.locating": "Joylashuv aniqlanmoqda…",
   "location.denied": "Joylashuvga ruxsat berilmagan. Ish vaqtida yetkazish uchun GPS kerak.",
   "location.enable": "Joylashuvni yoqish",
@@ -32,7 +29,6 @@
   "location.status.off": "Lokatsiya o'chiq",
   "location.status.active": "Lokatsiya faol",
   "location.status.problem": "Lokatsiya server tomonidan rad etildi",
-
   "queue.badge": "Navbatda",
   "queue.pending": "{{count}} ta amal internet kutmoqda",
   "queue.failed": "{{count}} ta amal rad etildi — ko'rib chiqing",
@@ -57,7 +53,6 @@
   "queue.synced": "{{count}} ta amal yuborildi",
   "queue.rejected": "{{count}} ta amal server tomonidan rad etildi",
   "queue.full": "Qurilma xotirasi to'lgan — amalni internet bilan bajaring",
-
   "work.off_duty": "Ish boshlanmagan. Yetkazmalarni bajarish uchun ishni boshlang.",
   "work.required": "Bu amal uchun avval ishni boshlang",
   "work.start": "ISHNI BOSHLASH",
@@ -68,7 +63,6 @@
   "work.end_confirm": "Ishni yakunlaysizmi? Lokatsiya kuzatuvi to'xtaydi.",
   "work.privacy": "Lokatsiya faqat ish vaqtida (ish boshlangandan yakunlanguncha) kuzatiladi.",
   "work.tracking_note": "Lokatsiya ilova ochiq bo'lganda yuboriladi. Telefon qulflansa yoki boshqa ilovaga o'tilsa brauzer lokatsiya bermasligi mumkin.",
-
   "dash.route_progress": "Bugungi yo'l progressi",
   "dash.remaining": "Qolgan",
   "dash.on_route": "Yo'lda",
@@ -81,7 +75,6 @@
   "dash.mismatch": "To'lov farqi",
   "dash.customers_debt": "Mijozlarim qarzi",
   "dash.open_tasks": "Barcha yetkazmalar",
-
   "tasks.title": "Yetkazmalar",
   "tasks.scope.today": "Bugun",
   "tasks.scope.upcoming": "Keyingi",
@@ -91,7 +84,6 @@
   "tasks.empty.upcoming": "Keyingi kunlarga yetkazma yo'q",
   "tasks.empty.history": "So'nggi 30 kunda yakunlangan yetkazma yo'q",
   "tasks.late": "Kechikdi",
-
   "task.not_found": "Yetkazma topilmadi yoki sizga biriktirilmagan",
   "task.customer": "Mijoz",
   "task.contact": "Mas'ul shaxs",
@@ -116,13 +108,11 @@
   "task.delivered_at": "Yetkazilgan vaqt",
   "task.failure": "Sabab",
   "task.cancel_reason": "Bekor qilish sababi",
-
   "step.accepted": "Qabul",
   "step.out_for_delivery": "Yo'lda",
   "step.arrived": "Yetdi",
   "step.delivering": "Topshirish",
   "step.delivered": "Yakun",
-
   "action.accept": "QABUL QILISH",
   "action.start": "YO'LGA CHIQISH",
   "action.navigate": "XARITADA OCHISH",
@@ -139,16 +129,13 @@
   "action.done_arrive": "Mijozga yetib keldingiz",
   "action.done_delivering": "Topshirish boshlandi",
   "action.done_fail": "Yetkazib bo'lmadi deb belgilandi",
-
   "geofence.approx": "Mijozgacha taxminan {{distance}} (ruxsat {{radius}} m)",
-
   "handover.title": "Topshirish",
   "handover.photo": "Topshirish rasmi ({{count}})",
   "handover.signature": "Mijoz imzosi",
   "handover.payment": "To'lov: {{collected}} / {{expected}}",
   "handover.otp_issued": "Mijoz kodi (OTP) berilgan — tasdiqlashda kiritiladi",
   "handover.otp_missing": "OTP kod berilmagan — supervayzerdan so'rang",
-
   "photo.saved": "Rasm saqlandi",
   "signature.title": "Mijoz imzosi",
   "signature.hint": "Mijoz barmoq bilan imzo qo'yadi",
@@ -157,7 +144,6 @@
   "signature.signer": "Imzo qo'ygan shaxs",
   "signature.save": "Imzoni saqlash",
   "signature.saved": "Imzo saqlandi",
-
   "payment.title": "To'lov qabul qilish",
   "payment.remaining": "Qoldiq: {{amount}}",
   "payment.amount": "Summa",
@@ -174,7 +160,6 @@
   "payment.fill": "+Qoldiq",
   "payment.duplicate": "Bir xil usul ikki marta kiritilgan",
   "payment.not_confirmed": "Terminal to'lovi avtomatik tasdiqlanmaydi — terminal chekini tekshiring",
-
   "otp.sms_sent": "Kod mijozga SMS bilan yuborildi",
   "otp.ask_supervisor": "SMS yuborilmadi — kodni supervayzerdan so'rang",
   "otp.resent": "Yangi kod mijozga yuborildi",
@@ -183,7 +168,6 @@
   "otp.issue_hint": "Kod faqat hozir ko'rsatiladi va saqlanmaydi. Yangi kod eskisini bekor qiladi.",
   "otp.valid_until": "{{time}} gacha amal qiladi",
   "otp.tell_customer": "SMS sozlanmagan — kodni mijozga telefonda ayting, u yetkazuvchiga aytadi",
-
   "confirm.title": "Yetkazishni tasdiqlash",
   "confirm.items_hint": "Mijoz qabul qilgan miqdorni tekshiring. Kam bo'lsa — qisman yetkazish, qolgani omborga qaytariladi.",
   "confirm.planned": "Rejada: {{qty}} {{unit}}",
@@ -203,7 +187,6 @@
   "confirm.mismatch.block": "To'lov to'liq yig'ilmaguncha tasdiqlab bo'lmaydi.",
   "confirm.submit": "Tasdiqlash",
   "confirm.submit_partial": "Qisman yetkazildi",
-
   "success.title": "Yetkazildi",
   "success.partial_title": "Qisman yetkazildi",
   "success.queued": "Tasdiqlash qurilmada saqlandi va internet bo'lganda yuboriladi. Server tekshiruvidan so'ng yakunlanadi.",
@@ -217,14 +200,12 @@
   "success.customer_debt": "Mijozning umumiy qarzi",
   "success.next": "KEYINGI YETKAZMA",
   "success.back": "Yetkazmalar ro'yxati",
-
   "fail.title": "Yetkazib bo'lmadi",
   "fail.hint": "Sababni tanlang — supervayzerga xabar beriladi",
   "fail.reason": "Sabab",
   "fail.comment": "Izoh",
   "fail.collected_warning": "Bu yetkazmada {{amount}} to'lov yig'ilgan — supervayzer bilan hal qiling",
   "fail.submit": "Tasdiqlash",
-
   "customers.title": "Mijozlar",
   "customers.search": "Ism, telefon yoki manzil",
   "customers.empty": "Mijoz topilmadi",
@@ -232,7 +213,6 @@
   "customers.deliveries": "{{count}} ta yetkazilgan",
   "customers.pending_payments": "{{count}} ta to'lov kutilmoqda",
   "customers.tasks": "Yetkazmalar",
-
   "debts.title": "Qarz va to'lovlar",
   "debts.collections": "Bugun yig'ilgan",
   "debts.empty_collections": "Bugun to'lov yig'ilmagan",
@@ -240,7 +220,6 @@
   "debts.empty_shortfalls": "To'lov farqi yo'q",
   "debts.debtors": "Qarzdor mijozlar",
   "debts.empty_debtors": "Qarzdor mijoz yo'q",
-
   "reports.title": "Hisobot",
   "reports.preset.today": "Bugun",
   "reports.preset.week": "7 kun",
@@ -258,7 +237,6 @@
   "reports.failure_reasons": "Yetkazilmaslik sabablari",
   "reports.none": "Yo'q",
   "reports.empty": "Davrda ma'lumot yo'q",
-
   "status.ready": "Tayyor",
   "status.assigned": "Biriktirilgan",
   "status.accepted": "Qabul qilingan",
@@ -270,12 +248,10 @@
   "status.failed": "Yetkazilmadi",
   "status.returned": "Qaytarildi",
   "status.cancelled": "Bekor qilingan",
-
   "priority.low": "Past",
   "priority.normal": "Oddiy",
   "priority.high": "Yuqori",
   "priority.urgent": "Shoshilinch",
-
   "failure.customer_absent": "Mijoz joyida yo'q",
   "failure.address_not_found": "Manzil topilmadi",
   "failure.no_answer": "Telefonga javob bermadi",
@@ -284,42 +260,34 @@
   "failure.customer_refused": "Mijoz rad etdi",
   "failure.vehicle_issue": "Transport muammosi",
   "failure.other": "Boshqa",
-
   "payment_type.cash": "Naqd",
   "payment_type.card": "Karta",
   "payment_type.bank": "Bank o'tkazmasi",
   "payment_type.credit": "Nasiya",
-
   "method.cash": "Naqd",
   "method.card": "Karta",
   "method.bank": "Bank",
-
   "payment_status.not_required": "To'lov talab qilinmaydi",
   "payment_status.pending": "Kutilmoqda",
   "payment_status.paid": "To'langan",
   "payment_status.partial": "Qisman (qarzda)",
   "payment_status.mismatch": "Farq bor",
-
   "review.none": "—",
   "review.pending": "Ko'rib chiqilmoqda",
   "review.approved": "Tasdiqlangan",
   "review.rejected": "Kamomad qayd etilgan",
-
   "vehicle.foot": "Piyoda",
   "vehicle.bicycle": "Velosiped",
   "vehicle.motorcycle": "Mototsikl",
   "vehicle.car": "Yengil avtomobil",
   "vehicle.van": "Furgon",
   "vehicle.truck": "Yuk mashinasi",
-
   "refund.balance": "Mijoz balansiga",
   "refund.cash": "Naqd qaytarish",
   "refund.card": "Kartaga",
   "refund.bank": "Bank orqali",
-
   "proof.photo": "Rasm",
   "proof.signature": "Imzo",
-
   "event.CREATED": "Yaratildi",
   "event.ASSIGNED": "Biriktirildi",
   "event.REASSIGNED": "Boshqa agentga o'tkazildi",
@@ -343,7 +311,6 @@
   "event.RETURNED": "Mahsulot omborga qaytdi",
   "event.PAYMENT_REVIEWED": "To'lov farqi ko'rib chiqildi",
   "event.GEOFENCE_BLOCK": "Geofence: mijozdan uzoqda",
-
   "error.network": "Server bilan aloqa yo'q. Internetni tekshiring",
   "error.location_denied": "Joylashuvga ruxsat berilmagan — brauzer sozlamalarida yoqing",
   "error.location_unavailable": "Joylashuv aniqlanmadi. Ochiq joyga chiqib qayta urinib ko'ring",
@@ -382,7 +349,6 @@
   "error.not_assigned": "Yetkazma agentga biriktirilmagan",
   "error.on_route": "Yo'ldagi yetkazmada to'lov summasi va vaqt oynasi o'zgarmaydi",
   "error.recipient_invalid": "Bildirishnoma oluvchi kompaniyaning faol a'zosi emas",
-
   "sv.title": "Dostavka",
   "sv.subtitle": "Yetkazmalar, yetkazuvchilar va nazorat",
   "sv.tab.today": "Bugun",
@@ -423,6 +389,8 @@
   "sv.filter.unassigned": "Biriktirilmagan",
   "sv.filter.overdue": "Kechikkan",
   "sv.filter.review_pending": "To'lov farqi",
+  "sv.filter.return_pending": "Tovar qaytarilmagan",
+  "sv.badge.return_pending": "Tovar omborga qaytarilmagan — qabul qiling",
   "sv.filter.reset": "Tozalash",
   "sv.table.number": "Yetkazma",
   "sv.table.date": "Sana",
@@ -454,7 +422,6 @@
   "sv.control.empty_returns": "Qaytariladigan mahsulot yo'q",
   "sv.control.overdue": "Kechikkan yetkazmalar",
   "sv.control.empty_overdue": "Kechikkan yetkazma yo'q",
-
   "drawer.title": "Yetkazma",
   "drawer.subtitle": "Tafsilot, isbotlar, tarix va boshqaruv",
   "drawer.assign": "Agentga biriktirish",
@@ -485,7 +452,6 @@
   "drawer.saved_review": "Qaror saqlandi",
   "drawer.saved_return": "Mahsulot omborga qaytarildi",
   "drawer.saved_cancel": "Yetkazma bekor qilindi",
-
   "assign.hint": "Faol yetkazuvchini tanlang. Tartib raqami bo'sh bo'lsa — kun oxiriga qo'shiladi.",
   "assign.submit": "Biriktirish",
   "assign.choose": "Tanlang",
@@ -513,7 +479,6 @@
   "return.reason": "Izoh",
   "cancel.hint": "Bekor qilingan yetkazma qayta ochilmaydi. Buyurtmaning o'zi o'zgarmaydi.",
   "cancel.reason": "Sabab",
-
   "ready.hint": "Tasdiqlangan, mijozli va yakunlanmagan yoki yetkazilgan yetkazmasi yo'q buyurtmalar",
   "ready.search_hint": "Buyurtma № yoki mijoz",
   "ready.empty": "Yetkazma yaratiladigan buyurtma yo'q",
@@ -571,7 +536,6 @@
   "tasks.route.hint": "Ochiq yetkazmalar hozirgi joyingizdan eng qisqa yo'l tartibida. Navigatorda ochish uchun tugmani bosing.",
   "tasks.route.empty": "Marshrut uchun ochiq yetkazma yo'q",
   "tasks.route.error": "Marshrut hisoblanmadi — internetni tekshiring",
-
   "agents.add": "Dostavka agenti qo'shish",
   "agents.subtitle": "Yetkazuvchilar: login (telefon), rol, HR xodimi va profil",
   "agents.hint": "Login telefon raqami bo'ladi, parol xavfsiz hash qilinadi. «Dostavka agenti» roli, HR xodimi (Logistika) va profil bitta amalda yaratiladi.",
@@ -644,7 +608,6 @@
   "agents.day_short.4": "Pa",
   "agents.day_short.5": "Ju",
   "agents.day_short.6": "Sh",
-
   "policy.title": "Dostavka siyosati",
   "policy.subtitle": "Geofence, GPS sifati, tasdiqlash, to'lov farqi, oflayn ish va bildirishnomalar",
   "policy.section.location": "Lokatsiya va geofence",
@@ -696,7 +659,6 @@
   "policy.save": "Saqlash",
   "policy.saved": "Siyosat saqlandi",
   "policy.invalid": "«{{field}}» {{min}}–{{max}} oralig'ida butun son bo'lsin",
-
   "policy.section.auto": "Avtomatik biriktirish",
   "policy.auto.hint": "Yetkazuvchi tanlash qoidalari. Mahsulotda og'irlik va uning birligi (kg, g, t) kiritilmagan bo'lsa, yuk sig'imi tekshirilmaydi.",
   "policy.auto.enabled": "Avtomatik biriktirish yoqilgan",
@@ -710,7 +672,6 @@
   "policy.auto.maxTasksPerAgent_hint": "Shu kundagi ochiq yetkazmalar soni",
   "policy.auto.maxDistanceKm": "Maks. masofa (km)",
   "policy.auto.maxDistanceKm_hint": "0 — cheklanmagan",
-
   "auto.button": "Avtomatik biriktirish",
   "auto.title": "Avtomatik biriktirish",
   "auto.hint": "Tanlangan kundagi biriktirilmagan yetkazmalar faol yetkazuvchilarga siyosat qoidalari bo'yicha taqsimlanadi. Avval rejani ko'rib chiqing — qo'llashda server har juftlikni qayta tekshiradi.",
@@ -735,7 +696,6 @@
   "auto.reason.task_not_ready": "Yetkazma endi tayyor emas",
   "auto.reason.agent_unavailable": "Yetkazuvchi mavjud emas",
   "error.auto_assign_disabled": "Avtomatik biriktirish siyosatda o'chirilgan — Sozlamalarda yoqing",
-
   "sv.realtime.live": "Jonli",
   "sv.realtime.connecting": "Ulanmoqda",
   "sv.realtime.offline": "Davriy yangilanish",

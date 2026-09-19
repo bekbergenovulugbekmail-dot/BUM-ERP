@@ -7,7 +7,6 @@
   "nav.customers": "Клиенты",
   "nav.debts": "Долги/Оплаты",
   "nav.reports": "Отчёты",
-
   "common.cancel": "Отмена",
   "common.save": "Сохранить",
   "common.close": "Закрыть",
@@ -15,14 +14,12 @@
   "common.yes": "Да",
   "common.no": "Нет",
   "common.refresh": "Обновить",
-
   "not_linked.title": "Нет профиля курьера",
   "not_linked.message": "Ваша учётная запись не привязана к активному курьеру. Обратитесь к руководителю.",
   "error.title": "Не удалось загрузить данные",
   "error.retry": "Повторить",
   "offline.banner": "Нет интернета — данные из кэша, действия ставятся в очередь",
   "offline.banner_no_queue": "Нет интернета — офлайн-действия отключены политикой компании",
-
   "location.locating": "Определение местоположения…",
   "location.denied": "Нет доступа к геолокации. Для доставки в рабочее время нужен GPS.",
   "location.enable": "Включить геолокацию",
@@ -32,7 +29,6 @@
   "location.status.off": "Геолокация выключена",
   "location.status.active": "Геолокация активна",
   "location.status.problem": "Сервер отклонил геолокацию",
-
   "queue.badge": "В очереди",
   "queue.pending": "{{count}} действий ждут интернета",
   "queue.failed": "Отклонено действий: {{count}} — проверьте",
@@ -57,7 +53,6 @@
   "queue.synced": "Отправлено действий: {{count}}",
   "queue.rejected": "Сервер отклонил действий: {{count}}",
   "queue.full": "Память устройства заполнена — выполните действие при наличии интернета",
-
   "work.off_duty": "Смена не начата. Начните смену, чтобы выполнять доставки.",
   "work.required": "Для этого действия сначала начните смену",
   "work.start": "НАЧАТЬ СМЕНУ",
@@ -68,7 +63,6 @@
   "work.end_confirm": "Завершить смену? Отслеживание геолокации остановится.",
   "work.privacy": "Геолокация отслеживается только в рабочее время (от начала до завершения смены).",
   "work.tracking_note": "Геолокация отправляется, пока приложение открыто. При блокировке телефона или переходе в другое приложение браузер может не передавать местоположение.",
-
   "dash.route_progress": "Прогресс маршрута за сегодня",
   "dash.remaining": "Осталось",
   "dash.on_route": "В пути",
@@ -81,7 +75,6 @@
   "dash.mismatch": "Расхождение оплаты",
   "dash.customers_debt": "Долг моих клиентов",
   "dash.open_tasks": "Все доставки",
-
   "tasks.title": "Доставки",
   "tasks.scope.today": "Сегодня",
   "tasks.scope.upcoming": "Далее",
@@ -91,7 +84,6 @@
   "tasks.empty.upcoming": "На ближайшие дни доставок нет",
   "tasks.empty.history": "За последние 30 дней завершённых доставок нет",
   "tasks.late": "Опоздание",
-
   "task.not_found": "Доставка не найдена или не назначена вам",
   "task.customer": "Клиент",
   "task.contact": "Контактное лицо",
@@ -116,13 +108,11 @@
   "task.delivered_at": "Время доставки",
   "task.failure": "Причина",
   "task.cancel_reason": "Причина отмены",
-
   "step.accepted": "Принято",
   "step.out_for_delivery": "В пути",
   "step.arrived": "На месте",
   "step.delivering": "Передача",
   "step.delivered": "Итог",
-
   "action.accept": "ПРИНЯТЬ",
   "action.start": "ВЫЕХАТЬ",
   "action.navigate": "ОТКРЫТЬ НА КАРТЕ",
@@ -139,16 +129,13 @@
   "action.done_arrive": "Вы прибыли к клиенту",
   "action.done_delivering": "Передача начата",
   "action.done_fail": "Отмечено как «не доставлено»",
-
   "geofence.approx": "До клиента примерно {{distance}} (допустимо {{radius}} м)",
-
   "handover.title": "Передача",
   "handover.photo": "Фото передачи ({{count}})",
   "handover.signature": "Подпись клиента",
   "handover.payment": "Оплата: {{collected}} / {{expected}}",
   "handover.otp_issued": "Код клиента (OTP) выдан — вводится при подтверждении",
   "handover.otp_missing": "OTP-код не выдан — запросите у супервайзера",
-
   "photo.saved": "Фото сохранено",
   "signature.title": "Подпись клиента",
   "signature.hint": "Клиент расписывается пальцем",
@@ -157,7 +144,6 @@
   "signature.signer": "Кто подписал",
   "signature.save": "Сохранить подпись",
   "signature.saved": "Подпись сохранена",
-
   "payment.title": "Приём оплаты",
   "payment.remaining": "Остаток: {{amount}}",
   "payment.amount": "Сумма",
@@ -174,7 +160,6 @@
   "payment.fill": "+Остаток",
   "payment.duplicate": "Один и тот же способ указан дважды",
   "payment.not_confirmed": "Оплата по терминалу не подтверждается автоматически — проверьте чек терминала",
-
   "otp.sms_sent": "Код отправлен клиенту по SMS",
   "otp.ask_supervisor": "SMS не отправлено — запросите код у супервайзера",
   "otp.resent": "Новый код отправлен клиенту",
@@ -183,7 +168,6 @@
   "otp.issue_hint": "Код показывается только сейчас и не сохраняется. Новый код отменяет прежний.",
   "otp.valid_until": "Действует до {{time}}",
   "otp.tell_customer": "SMS не настроены — сообщите код клиенту по телефону, он назовёт его курьеру",
-
   "confirm.title": "Подтверждение доставки",
   "confirm.items_hint": "Проверьте количество, принятое клиентом. Если меньше — частичная доставка, остаток вернётся на склад.",
   "confirm.planned": "По плану: {{qty}} {{unit}}",
@@ -203,7 +187,6 @@
   "confirm.mismatch.block": "Подтвердить нельзя, пока оплата не собрана полностью.",
   "confirm.submit": "Подтвердить",
   "confirm.submit_partial": "Доставлено частично",
-
   "success.title": "Доставлено",
   "success.partial_title": "Доставлено частично",
   "success.queued": "Подтверждение сохранено на устройстве и будет отправлено при появлении интернета. Завершится после проверки сервером.",
@@ -217,14 +200,12 @@
   "success.customer_debt": "Общий долг клиента",
   "success.next": "СЛЕДУЮЩАЯ ДОСТАВКА",
   "success.back": "Список доставок",
-
   "fail.title": "Не удалось доставить",
   "fail.hint": "Выберите причину — супервайзер получит уведомление",
   "fail.reason": "Причина",
   "fail.comment": "Комментарий",
   "fail.collected_warning": "По этой доставке собрано {{amount}} — согласуйте с супервайзером",
   "fail.submit": "Подтвердить",
-
   "customers.title": "Клиенты",
   "customers.search": "Имя, телефон или адрес",
   "customers.empty": "Клиенты не найдены",
@@ -232,7 +213,6 @@
   "customers.deliveries": "Доставлено: {{count}}",
   "customers.pending_payments": "Ожидают оплаты: {{count}}",
   "customers.tasks": "Доставки",
-
   "debts.title": "Долги и оплаты",
   "debts.collections": "Собрано сегодня",
   "debts.empty_collections": "Сегодня оплат не было",
@@ -240,7 +220,6 @@
   "debts.empty_shortfalls": "Расхождений нет",
   "debts.debtors": "Клиенты-должники",
   "debts.empty_debtors": "Должников нет",
-
   "reports.title": "Отчёт",
   "reports.preset.today": "Сегодня",
   "reports.preset.week": "7 дней",
@@ -258,7 +237,6 @@
   "reports.failure_reasons": "Причины недоставки",
   "reports.none": "Нет",
   "reports.empty": "Нет данных за период",
-
   "status.ready": "Готово",
   "status.assigned": "Назначено",
   "status.accepted": "Принято",
@@ -270,12 +248,10 @@
   "status.failed": "Не доставлено",
   "status.returned": "Возвращено",
   "status.cancelled": "Отменено",
-
   "priority.low": "Низкий",
   "priority.normal": "Обычный",
   "priority.high": "Высокий",
   "priority.urgent": "Срочно",
-
   "failure.customer_absent": "Клиента нет на месте",
   "failure.address_not_found": "Адрес не найден",
   "failure.no_answer": "Не отвечает на звонки",
@@ -284,42 +260,34 @@
   "failure.customer_refused": "Клиент отказался",
   "failure.vehicle_issue": "Проблема с транспортом",
   "failure.other": "Другое",
-
   "payment_type.cash": "Наличные",
   "payment_type.card": "Карта",
   "payment_type.bank": "Банковский перевод",
   "payment_type.credit": "В долг",
-
   "method.cash": "Наличные",
   "method.card": "Карта",
   "method.bank": "Банк",
-
   "payment_status.not_required": "Оплата не требуется",
   "payment_status.pending": "Ожидается",
   "payment_status.paid": "Оплачено",
   "payment_status.partial": "Частично (в долг)",
   "payment_status.mismatch": "Есть расхождение",
-
   "review.none": "—",
   "review.pending": "На рассмотрении",
   "review.approved": "Одобрено",
   "review.rejected": "Зафиксирована недостача",
-
   "vehicle.foot": "Пешком",
   "vehicle.bicycle": "Велосипед",
   "vehicle.motorcycle": "Мотоцикл",
   "vehicle.car": "Легковой автомобиль",
   "vehicle.van": "Фургон",
   "vehicle.truck": "Грузовик",
-
   "refund.balance": "На баланс клиента",
   "refund.cash": "Наличными",
   "refund.card": "На карту",
   "refund.bank": "Через банк",
-
   "proof.photo": "Фото",
   "proof.signature": "Подпись",
-
   "event.CREATED": "Создано",
   "event.ASSIGNED": "Назначено",
   "event.REASSIGNED": "Передано другому курьеру",
@@ -343,7 +311,6 @@
   "event.RETURNED": "Товар возвращён на склад",
   "event.PAYMENT_REVIEWED": "Расхождение рассмотрено",
   "event.GEOFENCE_BLOCK": "Геозона: далеко от клиента",
-
   "error.network": "Нет связи с сервером. Проверьте интернет",
   "error.location_denied": "Нет доступа к геолокации — включите в настройках браузера",
   "error.location_unavailable": "Местоположение не определено. Выйдите на открытое место и повторите",
@@ -382,7 +349,6 @@
   "error.not_assigned": "Доставка не назначена курьеру",
   "error.on_route": "Для доставки в пути нельзя менять сумму и временное окно",
   "error.recipient_invalid": "Получатель уведомлений не является активным участником компании",
-
   "sv.title": "Доставка",
   "sv.subtitle": "Доставки, курьеры и контроль",
   "sv.tab.today": "Сегодня",
@@ -423,6 +389,8 @@
   "sv.filter.unassigned": "Не назначено",
   "sv.filter.overdue": "Опаздывают",
   "sv.filter.review_pending": "Расхождение оплаты",
+  "sv.filter.return_pending": "Товар не возвращён",
+  "sv.badge.return_pending": "Товар не принят на склад — примите возврат",
   "sv.filter.reset": "Сбросить",
   "sv.table.number": "Доставка",
   "sv.table.date": "Дата",
@@ -454,7 +422,6 @@
   "sv.control.empty_returns": "Нет товара для возврата",
   "sv.control.overdue": "Опаздывающие доставки",
   "sv.control.empty_overdue": "Опаздывающих доставок нет",
-
   "drawer.title": "Доставка",
   "drawer.subtitle": "Детали, подтверждения, история и управление",
   "drawer.assign": "Назначить курьера",
@@ -485,7 +452,6 @@
   "drawer.saved_review": "Решение сохранено",
   "drawer.saved_return": "Товар возвращён на склад",
   "drawer.saved_cancel": "Доставка отменена",
-
   "assign.hint": "Выберите активного курьера. Если номер не указан — доставка встанет в конец дня.",
   "assign.submit": "Назначить",
   "assign.choose": "Выберите",
@@ -513,7 +479,6 @@
   "return.reason": "Комментарий",
   "cancel.hint": "Отменённая доставка не открывается снова. Сам заказ не меняется.",
   "cancel.reason": "Причина",
-
   "ready.hint": "Подтверждённые заказы с клиентом без незавершённой или выполненной доставки",
   "ready.search_hint": "№ заказа или клиент",
   "ready.empty": "Нет заказов для создания доставки",
@@ -571,7 +536,6 @@
   "tasks.route.hint": "Открытые доставки в порядке кратчайшего пути от вашего местоположения. Нажмите кнопку, чтобы открыть в навигаторе.",
   "tasks.route.empty": "Нет открытых доставок для маршрута",
   "tasks.route.error": "Маршрут не рассчитан — проверьте интернет",
-
   "agents.add": "Добавить курьера",
   "agents.subtitle": "Курьеры: логин (телефон), роль, сотрудник HR и профиль",
   "agents.hint": "Логином будет номер телефона, пароль надёжно хешируется. Роль «Dostavka agenti», сотрудник HR (Логистика) и профиль создаются одним действием.",
@@ -644,7 +608,6 @@
   "agents.day_short.4": "Чт",
   "agents.day_short.5": "Пт",
   "agents.day_short.6": "Сб",
-
   "policy.title": "Политика доставки",
   "policy.subtitle": "Геозона, качество GPS, подтверждение, расхождения оплаты, офлайн-работа и уведомления",
   "policy.section.location": "Геолокация и геозона",
@@ -696,7 +659,6 @@
   "policy.save": "Сохранить",
   "policy.saved": "Политика сохранена",
   "policy.invalid": "«{{field}}» — целое число от {{min}} до {{max}}",
-
   "policy.section.auto": "Автоматическое назначение",
   "policy.auto.hint": "Правила выбора курьера. Если у товара не указаны вес и его единица (кг, г, т), грузоподъёмность не проверяется.",
   "policy.auto.enabled": "Автоназначение включено",
@@ -710,7 +672,6 @@
   "policy.auto.maxTasksPerAgent_hint": "Открытые доставки за этот день",
   "policy.auto.maxDistanceKm": "Макс. расстояние (км)",
   "policy.auto.maxDistanceKm_hint": "0 — без ограничения",
-
   "auto.button": "Автоназначение",
   "auto.title": "Автоматическое назначение",
   "auto.hint": "Неназначенные доставки выбранного дня распределяются между активными курьерами по правилам политики. Сначала проверьте план — при применении сервер заново проверяет каждую пару.",
@@ -735,7 +696,6 @@
   "auto.reason.task_not_ready": "Доставка уже не готова",
   "auto.reason.agent_unavailable": "Курьер недоступен",
   "error.auto_assign_disabled": "Автоназначение отключено в политике — включите в Настройках",
-
   "sv.realtime.live": "В реальном времени",
   "sv.realtime.connecting": "Подключение",
   "sv.realtime.offline": "Периодическое обновление",

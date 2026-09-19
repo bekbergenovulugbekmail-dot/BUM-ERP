@@ -87,7 +87,8 @@ export default function PurchasePage() {
               { key: "orderDate", aliases: ["Sana", "orderDate"], required: true, example: "2026-09-01" },
               { key: "supplier", aliases: ["Ta'minotchi", "Ta'minotchi kodi", "supplier"], required: true, example: "Nestle Uzbekistan" },
               { key: "warehouse", aliases: ["Ombor", "warehouse"], required: true, example: "Asosiy ombor" },
-              { key: "product", aliases: ["SKU", "Mahsulot", "product"], required: true, example: "COLA-1L" },
+              // Mahsulot NOMI bilan qidiriladi (SKU ham qabul qilinadi); bunday tovar bo'lmasa avtomatik ochiladi
+              { key: "product", aliases: ["Mahsulot", "Mahsulot nomi", "SKU", "product"], required: true, example: "Coca-Cola 1L" },
               { key: "quantity", aliases: ["Miqdor", "quantity"], required: true, example: "24" },
               { key: "unit", aliases: ["Birlik", "unit"], example: "Dona" },
               { key: "price", aliases: ["Narx", "price"], required: true, example: "8000" },

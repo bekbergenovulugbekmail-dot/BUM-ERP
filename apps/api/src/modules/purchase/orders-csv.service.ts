@@ -24,7 +24,8 @@ import {
   type ImportError,
   type ImportOutcome,
 } from "../../shared/csv.js";
-import type { TenantContext } from "../company/tenant.js";
+import { createProduct } from "../catalog/products.service.js";
+import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { createOrder } from "./orders.service.js";
 
 const CSV_HEADER = [
@@ -215,7 +216,11 @@ export async function importPurchaseOrders(
   const productBySku = new Map(productRows.map((row) => [row.sku.trim().toLowerCase(), row]));
   const productByName = new Map(productRows.map((row) => [row.name.trim().toLowerCase(), row]));
 
+  // Yangi mahsulot ochish uchun ruxsat bormi (bo'lmasa — tushunarli xato, import to'xtamaydi)
+  const canCreateProducts = (await effectivePermissions(tx, tenant)).includes("products.create");
   const unitRows = await tx.select({ id: units.id, name: units.name, shortName: units.shortName }).from(units);
+  /** Faylda birlik ko'rsatilmasa — "dona" (yoki birinchi birlik). */
+  const defaultUnitId = unitRows.find((unit) => unit.shortName.trim().toLowerCase() === "d")?.id ?? unitRows[0]?.id ?? null;
   const unitByName = new Map<string, string>();
   for (const unit of unitRows) {
     unitByName.set(unit.shortName.trim().toLowerCase(), unit.id);
@@ -298,23 +303,52 @@ export async function importPurchaseOrders(
     for (const { line, row } of group.rows) {
       const productText = row.product?.trim();
       if (!productText) {
-        fail(line, "Mahsulot majburiy (SKU yoki nomi)");
+        fail(line, "Mahsulot nomi majburiy");
         broken = true;
         continue;
       }
-      const product = productBySku.get(productText.toLowerCase()) ?? productByName.get(productText.toLowerCase());
-      if (!product) {
-        fail(line, `Mahsulot topilmadi: ${productText} (import yangi mahsulot ochmaydi)`);
-        broken = true;
-        continue;
-      }
+      // Avval nomi bo'yicha, keyin SKU bo'yicha: fayl odatda mahsulot NOMI bilan to'ldiriladi
+      let product = productByName.get(productText.toLowerCase()) ?? productBySku.get(productText.toLowerCase());
       const unitText = row.unit?.trim();
-      const unitId = unitText ? unitByName.get(unitText.toLowerCase()) : product.baseUnitId;
-      if (!unitId) {
-        fail(line, `O'lchov birligi topilmadi: ${unitText ?? ""}`);
+      const rowUnitId = unitText ? unitByName.get(unitText.toLowerCase()) : undefined;
+      if (unitText && !rowUnitId) {
+        fail(line, `O'lchov birligi topilmadi: ${unitText}`);
         broken = true;
         continue;
       }
+
+      // Yangi mahsulot: xaridda birinchi marta uchragan tovar avtomatik ochiladi (SKU o'zi beriladi)
+      if (!product) {
+        if (!canCreateProducts) {
+          fail(line, `Mahsulot topilmadi: ${productText} (yangi mahsulot ochish uchun "products.create" ruxsati kerak)`);
+          broken = true;
+          continue;
+        }
+        const baseUnitId = rowUnitId ?? defaultUnitId;
+        if (!baseUnitId) {
+          fail(line, `O'lchov birligi aniqlanmadi: ${productText} — faylda birlik ustunini to'ldiring`);
+          broken = true;
+          continue;
+        }
+        if (dryRun) {
+          // Tekshiruvda baza o'zgarmaydi — faqat nima ochilishini ko'rsatamiz
+          warnings.push({ row: line, key: group.number, message: `Yangi mahsulot ochiladi: ${productText}` });
+          product = { id: `dry-run:${productText.toLowerCase()}`, name: productText, sku: "", baseUnitId };
+        } else {
+          const createdProduct = await createProduct(
+            tx,
+            tenant,
+            { name: productText, baseUnitId, purchasePrice: cleanNumber(row.price) || "0", salesPrice: "0" },
+            meta,
+          );
+          product = { id: createdProduct.id, name: createdProduct.name, sku: createdProduct.sku, baseUnitId: createdProduct.baseUnitId };
+          warnings.push({ row: line, key: group.number, message: `Yangi mahsulot ochildi: ${createdProduct.name} (SKU ${createdProduct.sku})` });
+        }
+        productByName.set(productText.toLowerCase(), product);
+        if (product.sku) productBySku.set(product.sku.trim().toLowerCase(), product);
+      }
+
+      const unitId = rowUnitId ?? product.baseUnitId;
       const quantity = Number(cleanNumber(row.quantity));
       if (!Number.isFinite(quantity) || quantity <= 0) {
         fail(line, "Miqdor musbat son bo'lishi kerak");

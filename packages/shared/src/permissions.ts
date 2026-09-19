@@ -25,6 +25,11 @@ export const PERMISSIONS = {
   "sales.approve":        { label: "Savdoni tasdiqlash",           group: "Savdo" },
   "sales.cancel":         { label: "Savdoni bekor qilish",         group: "Savdo" },
   "sales.refund":         { label: "Qaytarish",                    group: "Savdo" },
+  /**
+   * Mijozdan qarz/buyurtma to'lovini qabul qilish (kassa oynasidan tashqari, ERP "To'lovlar" bo'limida ham).
+   * Pulni hisoblarga taqsimlash va kassa sozlamalari — bu emas, `finance.manage`.
+   */
+  "sales.collect_payment": { label: "Mijozdan to'lov qabul qilish", group: "Savdo" },
   "pos.use":              { label: "Kassa (POS) ishlatish",        group: "Savdo" },
   /** Desktop kassa qurilmasini ro'yxatdan o'tkazish va o'chirish. */
   "pos.devices.manage":   { label: "Kassa qurilmalarini boshqarish", group: "Savdo" },
@@ -136,6 +141,11 @@ export const PERMISSIONS = {
   "warehouses.manage":    { label: "Omborlarni boshqarish",        group: "Admin" },
   "users.view":           { label: "Foydalanuvchilarni ko'rish",   group: "Admin" },
   "users.manage":         { label: "Foydalanuvchilarni boshqarish", group: "Admin" },
+  /**
+   * Xodimlarning ishonchli qurilmalarini tasdiqlash va bekor qilish. Foydalanuvchi yaratish yoki
+   * bloklashdan (`users.manage`) alohida: rahbar yo'qda ham yangi qurilmani kimdir ochishi kerak.
+   */
+  "devices.manage":       { label: "Qurilmalarni tasdiqlash",      group: "Admin" },
   "users.invite":         { label: "Foydalanuvchi taklif qilish",  group: "Admin" },
   "roles.manage":         { label: "Rollarni boshqarish",          group: "Admin" },
   "modules.manage":       { label: "Modullarni boshqarish",        group: "Admin" },
@@ -243,6 +253,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     permissions: [
       "products.view", "products.create", "products.edit", "products.manage",
       "sales.view", "sales.create", "sales.edit", "sales.approve", "sales.cancel", "sales.refund",
+      "sales.collect_payment",
       "pos.use",
       "scale.view", "scale.sync",
       "warehouse.view",
@@ -304,6 +315,8 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     permissions: [
       "products.view",
       "sales.view", "sales.create",
+      // Kassir mijoz qarzini kassa oynasida ham, "To'lovlar" bo'limida ham qabul qila oladi
+      "sales.collect_payment",
       "pos.use",
       "warehouse.view",
       // Kassada kursni ko'radi; o'zgartirish (`currency_rates.manage`) — rahbar beradi
@@ -322,6 +335,8 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     permissions: [
       "hr.view", "hr.manage", "hr.salary", "hr.attendance",
       "sales_agent.agents.manage",
+      // Rahbar yo'qda ham yangi xodimning telefoni/noutbuki ochilishi kerak
+      "devices.manage",
       "analytics.view",
       "settings.view",
     ],

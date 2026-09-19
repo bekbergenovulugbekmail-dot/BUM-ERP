@@ -20,6 +20,8 @@ export type TaskFilters = {
   unassigned: boolean;
   overdue: boolean;
   reviewPending: boolean;
+  /** Tovari omborga qaytarilmagan yetkazmalar (yetkazilmagan yoki qisman). */
+  returnPending: boolean;
   search: string;
 };
 
@@ -31,6 +33,7 @@ export const EMPTY_FILTERS: TaskFilters = {
   unassigned: false,
   overdue: false,
   reviewPending: false,
+  returnPending: false,
   search: "",
 };
 
@@ -50,6 +53,7 @@ export function filtersToQuery(filters: TaskFilters): QueryParams {
     unassigned: filters.unassigned ? "true" : undefined,
     overdue: filters.overdue ? "true" : undefined,
     reviewPending: filters.reviewPending ? "true" : undefined,
+    returnPending: filters.returnPending ? "true" : undefined,
     search: filters.search.trim() || undefined,
   };
 }

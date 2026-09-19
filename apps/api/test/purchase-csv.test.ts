@@ -9,7 +9,7 @@ import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
-import { units } from "../src/db/schema/catalog.js";
+import { products as productsTable, units } from "../src/db/schema/catalog.js";
 import { journalEntries } from "../src/db/schema/finance.js";
 import { stockLevels, warehouses } from "../src/db/schema/inventory.js";
 import { purchaseOrderItems, purchaseOrders, suppliers } from "../src/db/schema/purchase.js";
@@ -159,22 +159,70 @@ describe("Xaridlar CSV: import", () => {
     expect(await orderCount()).toBe(before);
   });
 
-  it("noma'lum ta'minotchi, ombor, mahsulot va noto'g'ri son — qator xatosi (yangi yozuv ochilmaydi)", async () => {
+  it("noma'lum ta'minotchi, ombor va noto'g'ri son — qator xatosi; import yangi ta'minotchi ochmaydi", async () => {
     const res = await call(owner(), "POST", "/api/purchase/orders/import", {
       rows: [
         { number: "A-1", orderDate: "2026-09-12", supplier: "Yo'q ta'minotchi", warehouse: warehouseName, product: "SHK-1", quantity: "1", price: "100" },
         { number: "A-2", orderDate: "2026-09-12", supplier: "Ta'minotchi A", warehouse: "Yo'q ombor", product: "SHK-1", quantity: "1", price: "100" },
-        { number: "A-3", orderDate: "2026-09-12", supplier: "Ta'minotchi A", warehouse: warehouseName, product: "YO'Q-SKU", quantity: "1", price: "100" },
         { number: "A-4", orderDate: "2026-09-12", supplier: "Ta'minotchi A", warehouse: warehouseName, product: "SHK-1", quantity: "0", price: "100" },
         { number: "A-5", supplier: "Ta'minotchi A", warehouse: warehouseName, product: "SHK-1", quantity: "1", price: "100" },
       ],
     });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toMatchObject({ created: 0 });
-    expect(res.json().errors).toHaveLength(5);
+    expect(res.json().errors).toHaveLength(4);
     expect(await orderCount()).toBe(0);
-    // Import yangi ta'minotchi yoki mahsulot ochmaydi
+    // Import yangi ta'minotchi ochmaydi (mahsulot esa ochiladi — pastdagi testga qarang)
     expect((await db.select({ id: suppliers.id }).from(suppliers).where(eq(suppliers.companyId, company.companyId))).length).toBe(1);
+  });
+
+  it("yangi mahsulot: fayldagi NOM bo'yicha topiladi, bo'lmasa avtomatik ochiladi (SKU shart emas)", async () => {
+    const before = (await db.select({ id: productsTable.id }).from(productsTable).where(eq(productsTable.companyId, company.companyId))).length;
+
+    // dryRun: nima ochilishi ko'rsatiladi, lekin baza o'zgarmaydi
+    const preview = await call(owner(), "POST", "/api/purchase/orders/import", {
+      dryRun: true,
+      rows: [
+        { number: "N-1", orderDate: "2026-09-12", supplier: "Ta'minotchi A", warehouse: warehouseName, product: "Yangi tovar 1", quantity: "3", price: "5000" },
+      ],
+    });
+    expect(preview.statusCode, preview.body).toBe(200);
+    expect(preview.json().errors).toHaveLength(0);
+    expect((preview.json().warnings as { message: string }[]).some((w) => w.message.includes("Yangi mahsulot ochiladi"))).toBe(true);
+    expect((await db.select({ id: productsTable.id }).from(productsTable).where(eq(productsTable.companyId, company.companyId))).length).toBe(before);
+
+    // Haqiqiy import: mahsulot ochiladi va hujjatga tushadi
+    const res = await call(owner(), "POST", "/api/purchase/orders/import", {
+      rows: [
+        { number: "N-1", orderDate: "2026-09-12", supplier: "Ta'minotchi A", warehouse: warehouseName, product: "Yangi tovar 1", quantity: "3", price: "5000" },
+        { number: "N-1", orderDate: "2026-09-12", supplier: "Ta'minotchi A", warehouse: warehouseName, product: "Shakar", quantity: "2", price: "11000" },
+      ],
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ created: 1, documents: 1 });
+    expect(res.json().errors).toHaveLength(0);
+    expect((res.json().warnings as { message: string }[]).some((w) => w.message.includes("Yangi mahsulot ochildi"))).toBe(true);
+
+    const created = await db
+      .select({ id: productsTable.id, name: productsTable.name, sku: productsTable.sku, baseUnitId: productsTable.baseUnitId })
+      .from(productsTable)
+      .where(and(eq(productsTable.companyId, company.companyId), eq(productsTable.name, "Yangi tovar 1")));
+    expect(created, "yangi mahsulot ochilishi kerak").toHaveLength(1);
+    expect(created[0]!.sku, "SKU avtomatik beriladi").toBeTruthy();
+
+    const [order] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.number, "N-1"));
+    const items = await db.select().from(purchaseOrderItems).where(eq(purchaseOrderItems.orderId, order!.id));
+    expect(items).toHaveLength(2);
+    expect(items.some((item) => item.productId === created[0]!.id)).toBe(true);
+
+    // Ikkinchi importda o'sha nom yangi mahsulot ochmaydi
+    const again = await call(owner(), "POST", "/api/purchase/orders/import", {
+      rows: [{ number: "N-2", orderDate: "2026-09-12", supplier: "Ta'minotchi A", warehouse: warehouseName, product: "Yangi tovar 1", quantity: "1", price: "5000" }],
+    });
+    expect(again.json().errors).toHaveLength(0);
+    expect(
+      (await db.select({ id: productsTable.id }).from(productsTable).where(and(eq(productsTable.companyId, company.companyId), eq(productsTable.name, "Yangi tovar 1")))).length,
+    ).toBe(1);
   });
 
   it("begona kompaniya ta'minotchisi bilan import o'tmaydi", async () => {

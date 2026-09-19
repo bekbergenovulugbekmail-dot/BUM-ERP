@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Loader2, RotateCcw, Search } from "lucide-react";
 import { DELIVERY_STATUSES } from "@bum/shared";
-import { LateBadge, PriorityBadge, StatusBadge } from "@/components/delivery/badges.tsx";
+import { LateBadge, PriorityBadge, ReturnPendingBadge, StatusBadge } from "@/components/delivery/badges.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -115,6 +115,7 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
               ["unassigned", "sv.filter.unassigned"],
               ["overdue", "sv.filter.overdue"],
               ["reviewPending", "sv.filter.review_pending"],
+              ["returnPending", "sv.filter.return_pending"],
             ] as const
           ).map(([key, label]) => (
             <label key={key} htmlFor={`tasks-${key}`} className="flex cursor-pointer items-center gap-2 text-sm">
@@ -175,6 +176,7 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
                         <p className="font-medium">{task.number}</p>
                         <div className="flex flex-wrap gap-1">
                           {task.overdue && <LateBadge />}
+                          {task.returnPending && <ReturnPendingBadge />}
                           <PriorityBadge priority={task.priority} />
                         </div>
                       </td>

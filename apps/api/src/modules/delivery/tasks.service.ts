@@ -527,11 +527,26 @@ export function overdueCondition(now = new Date()): SQL {
   )!;
 }
 
+/**
+ * Tovar yetkazuvchida qolgan va hali omborga qabul qilinmagan yetkazma: yetkazilmagan (`failed`) yoki
+ * qisman yetkazilgan, lekin qaytarish hujjati yo'q. Bunday holatda sotuv "yakunlangan" bo'lib turadi
+ * va mijozda qarz qoladi — shuning uchun boshqaruvchi ro'yxatda buni ko'rishi va yopishi shart.
+ */
+export function isReturnPending(row: { status: DeliveryStatus; returnedAt: Date | string | null }) {
+  return (row.status === "failed" || row.status === "partially_delivered") && row.returnedAt === null;
+}
+
+/** Ro'yxatda: qaytarish kutayotganlar (tovar yetkazuvchida, omborga qabul qilinmagan). */
+export function returnPendingCondition(): SQL {
+  return and(inArray(deliveryTasks.status, ["failed", "partially_delivered"]), isNull(deliveryTasks.returnedAt))!;
+}
+
 export const presentTask = <T extends ListRow>(row: T) => ({
   ...row,
   windowStart: hhmm(row.windowStart),
   windowEnd: hhmm(row.windowEnd),
   overdue: isOverdue(row),
+  returnPending: isReturnPending(row),
 });
 
 export type DeliveryTaskFilters = {
@@ -546,6 +561,8 @@ export type DeliveryTaskFilters = {
   search?: string;
   overdue?: boolean;
   reviewPending?: boolean;
+  /** Tovari omborga qaytarilmagan (yetkazilmagan yoki qisman) yetkazmalar. */
+  returnPending?: boolean;
   limit: number;
   cursor?: string;
 };
@@ -575,6 +592,7 @@ export async function listDeliveryTasks(conn: DbOrTx, tenant: TenantContext, fil
   if (filters.customerId) conditions.push(eq(deliveryTasks.customerId, filters.customerId));
   if (filters.overdue) conditions.push(overdueCondition());
   if (filters.reviewPending) conditions.push(eq(deliveryTasks.paymentReview, "pending"));
+  if (filters.returnPending) conditions.push(returnPendingCondition());
   if (filters.search) {
     const pattern = likePattern(filters.search);
     conditions.push(or(ilike(deliveryTasks.number, pattern), ilike(salesOrders.number, pattern), ilike(customers.name, pattern)));

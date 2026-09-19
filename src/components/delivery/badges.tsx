@@ -24,6 +24,16 @@ export function LateBadge() {
   return <span className={cn(PILL, "bg-red-600 uppercase tracking-wide text-white")}>{t("tasks.late")}</span>;
 }
 
+/** Tovar yetkazuvchida qolgan: omborga qabul qilinmaguncha sotuv yakunlangan bo'lib turadi. */
+export function ReturnPendingBadge() {
+  const { t } = useTranslation("delivery");
+  return (
+    <span className={cn(PILL, "bg-amber-500/15 text-amber-700 dark:text-amber-400")} title={t("sv.badge.return_pending")}>
+      {t("sv.filter.return_pending")}
+    </span>
+  );
+}
+
 /** Amal qurilmada navbatda — server hali tasdiqlamagan. */
 export function QueuedBadge() {
   const { t } = useTranslation("delivery");
