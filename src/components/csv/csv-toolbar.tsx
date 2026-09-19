@@ -19,11 +19,12 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import Papa from "papaparse";
-import { AlertTriangle, Copy, Download, FileDown, Upload } from "lucide-react";
+import { AlertTriangle, Copy, Download, FileDown, Plus, TableProperties, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
+import { Input } from "@/components/ui/input.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation } from "@/lib/query.ts";
 
@@ -138,6 +139,8 @@ export default function CsvToolbar({
   /** Preview'dan "Ustunlarni o'zgartirish" bilan qaytish uchun oxirgi moslama. */
   const [lastMapping, setLastMapping] = useState<Mapping | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
+  /** "Tezda qo'shish": fayl tayyorlamasdan, kataklarga yozib saqlash. */
+  const [quickRows, setQuickRows] = useState<Record<string, string>[] | null>(null);
   const importRows = useApiMutation(
     ({ rows, dryRun }: { rows: Record<string, string>[]; dryRun: boolean }) =>
       api.post<ImportOutcome>(importUrl, { rows, dryRun }),
@@ -290,6 +293,47 @@ export default function CsvToolbar({
     }
   };
 
+  /** Bo'sh qator — barcha ustunlar bo'sh matn. */
+  const emptyRow = () => Object.fromEntries(columns.map((column) => [column.key, ""])) as Record<string, string>;
+
+  const openQuick = () => setQuickRows([emptyRow(), emptyRow(), emptyRow()]);
+
+  /** Kataklarga yozilgan qatorlarni import endpointiga yuboradi (import bilan bir xil tekshiruv). */
+  const handleQuickSave = async () => {
+    if (!quickRows) return;
+    const filled = quickRows.filter((row) => Object.values(row).some((value) => value.trim() !== ""));
+    if (filled.length === 0) {
+      toast.error("Kamida bitta qatorni to'ldiring");
+      return;
+    }
+    const missing = filled.findIndex((row) => columns.some((column) => column.required && !row[column.key]?.trim()));
+    if (missing >= 0) {
+      toast.error(`${missing + 1}-qatorda majburiy maydon bo'sh`);
+      return;
+    }
+    setBusy("import");
+    try {
+      const outcome = await send(filled, false);
+      if (outcome.created > 0) {
+        toast.success(`${outcome.created} ta qator qo'shildi`);
+        setQuickRows(null);
+      } else {
+        toast.error("Hech narsa qo'shilmadi");
+      }
+      const failed = [...outcome.errors, ...outcome.duplicates];
+      if (failed.length > 0) {
+        toast.error(`${failed.length} ta qator o'tmadi`, {
+          description: failed.slice(0, 3).map((issue) => `${issue.row}-qator: ${issue.message}`).join("; "),
+          duration: 8000,
+        });
+      }
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <>
       {/* Telefonda uchala tugma bitta qatorni bo'lib oladi, kompyuterda avvalgidek yonma-yon */}
@@ -305,6 +349,15 @@ export default function CsvToolbar({
         </Button>
         {canImport && (
           <>
+            <Button
+              size="sm"
+              className="flex-1 sm:flex-none"
+              data-testid="quick-add"
+              disabled={busy !== null}
+              onClick={openQuick}
+            >
+              <TableProperties className="h-3.5 w-3.5 mr-1" /> Tezda qo'shish
+            </Button>
             <Button size="sm" variant="ghost" className="flex-1 sm:flex-none" data-testid="csv-template" onClick={handleTemplate}>
               <FileDown className="h-3.5 w-3.5 mr-1" /> Shablon
             </Button>
@@ -322,6 +375,90 @@ export default function CsvToolbar({
           </>
         )}
       </div>
+
+      {/* Tezda qo'shish: import shablonidagi kataklar, fayl tayyorlamasdan */}
+      {quickRows && (
+        <Dialog open onOpenChange={(open) => !open && busy === null && setQuickRows(null)}>
+          <DialogContent className="max-w-5xl">
+            <DialogHeader>
+              <DialogTitle>Tezda qo'shish</DialogTitle>
+              <DialogDescription>
+                Kataklarga to'ldiring va saqlang — fayl tayyorlash shart emas. Tekshiruv importdagi bilan bir xil:
+                xato qator qo'shilmaydi va sababi ko'rsatiladi. <b>*</b> — majburiy maydon.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="max-h-[55vh] overflow-auto rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-muted/60 backdrop-blur">
+                  <tr>
+                    <th className="w-10 px-2 py-2 text-left text-xs text-muted-foreground">#</th>
+                    {columns.map((column) => (
+                      <th key={column.key} className="px-2 py-2 text-left text-xs font-medium whitespace-nowrap">
+                        {column.aliases[0] ?? column.key}
+                        {column.required && <span className="text-destructive"> *</span>}
+                      </th>
+                    ))}
+                    <th className="w-10" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {quickRows.map((row, index) => (
+                    <tr key={index} className="border-t border-border">
+                      <td className="px-2 py-1 text-xs text-muted-foreground">{index + 1}</td>
+                      {columns.map((column) => (
+                        <td key={column.key} className="px-1 py-1">
+                          <Input
+                            className="h-8 min-w-32 text-sm"
+                            value={row[column.key] ?? ""}
+                            placeholder={column.example ?? ""}
+                            onChange={(event) =>
+                              setQuickRows((current) =>
+                                (current ?? []).map((item, position) =>
+                                  position === index ? { ...item, [column.key]: event.target.value } : item,
+                                ),
+                              )
+                            }
+                          />
+                        </td>
+                      ))}
+                      <td className="px-1 py-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-destructive"
+                          aria-label="Qatorni o'chirish"
+                          onClick={() => setQuickRows((current) => (current ?? []).filter((_, position) => position !== index))}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setQuickRows((current) => [...(current ?? []), emptyRow()])}>
+                <Plus className="h-3.5 w-3.5 mr-1" /> Qator qo'shish
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                To'ldirilgan qatorlar: {quickRows.filter((row) => Object.values(row).some((value) => value.trim() !== "")).length}
+              </p>
+            </div>
+
+            <DialogFooter>
+              <Button variant="secondary" disabled={busy !== null} onClick={() => setQuickRows(null)}>
+                Bekor
+              </Button>
+              <Button disabled={busy !== null} onClick={() => void handleQuickSave()}>
+                {busy === "import" ? "Saqlanmoqda..." : "Saqlash"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {mapping && (
         <Dialog open onOpenChange={(open) => !open && setMapping(null)}>

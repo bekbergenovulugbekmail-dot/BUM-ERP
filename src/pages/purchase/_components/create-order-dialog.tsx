@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, ShoppingCart } from "lucide-react";
+import { Plus, ScanLine, Trash2, ShoppingCart } from "lucide-react";
 import { currencySymbol } from "@bum/shared";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog.tsx";
 import { Button } from "@/components/ui/button.tsx";
+import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -121,6 +122,74 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   };
 
   const addLine = () => setLines((p) => [...p, emptyLine()]);
+
+  // ── Mahsulot qidirish: nomi/SKU bo'yicha ko'p tanlash yoki barkod bilan darhol qo'shish ──
+  const [productSearch, setProductSearch] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+  const [scanBusy, setScanBusy] = useState(false);
+
+  const searchTerm = productSearch.trim().toLowerCase();
+  const matches = searchTerm.length < 2
+    ? []
+    : productOptions.filter((product) =>
+        [product.name, product.sku].some((field) => field?.toLowerCase().includes(searchTerm)),
+      ).slice(0, 50);
+
+  /** Tanlangan mahsulotlarni qatorlarga qo'shadi (allaqachon bor bo'lsa takrorlamaydi). */
+  const addPicked = (ids: string[]) => {
+    if (ids.length === 0) return;
+    setLines((current) => {
+      const existing = new Set(current.map((line) => line.productId).filter(Boolean));
+      const fresh = ids.filter((id) => !existing.has(id));
+      if (fresh.length === 0) return current;
+      const created = fresh.map((id) => {
+        const line = emptyLine();
+        const product = productOptions.find((option) => option.id === id);
+        if (product) {
+          line.productId = id;
+          line.unitId = product.baseUnitId;
+          line.taxRate = num(product.taxRate);
+          const productCurrency = product.purchaseCurrency ?? currencies.base;
+          if (selectedCurrencies.includes(productCurrency)) {
+            line.currency = productCurrency;
+            line.unitPrice = num(product.purchasePrice);
+          }
+        }
+        return line;
+      });
+      // Bo'sh (mahsulotsiz) qatorlar o'rniga yoziladi
+      const kept = current.filter((line) => line.productId);
+      return [...kept, ...created];
+    });
+    setPicked([]);
+    setProductSearch("");
+  };
+
+  /** Barkod: aniq mos kelgan mahsulot darhol qo'shiladi (skaner ham shu maydonga yozadi). */
+  const handleBarcode = async (code: string) => {
+    const value = code.trim();
+    if (!value) return;
+    setScanBusy(true);
+    try {
+      const { product } = await api.get<{ product: { id: string; name: string } | null }>(
+        `/api/catalog/products/by-barcode/${encodeURIComponent(value)}`,
+      );
+      if (!product) {
+        toast.error("Bu barkod bo'yicha mahsulot topilmadi");
+        return;
+      }
+      if (!productOptions.some((option) => option.id === product.id)) {
+        toast.error(`${product.name} — xarid uchun ochiq emas`);
+        return;
+      }
+      addPicked([product.id]);
+      toast.success(`${product.name} qo'shildi`);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setScanBusy(false);
+    }
+  };
 
   const removeLine = (i: number) => setLines((p) => p.filter((_, idx) => idx !== i));
 
@@ -300,6 +369,59 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
               <Button size="sm" variant="secondary" onClick={addLine}>
                 <Plus className="h-3.5 w-3.5 mr-1" /> Qo'shish
               </Button>
+            </div>
+
+            {/* Qidirish: nomi bo'yicha ro'yxatdan belgilab qo'shish yoki barkod bilan darhol */}
+            <div className="mb-3 rounded-xl border border-border p-3 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  className="h-9 flex-1 min-w-48"
+                  placeholder="Mahsulot nomi, SKU yoki barkod (skaner ham shu yerga)"
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    // Barkod odatda raqamlardan iborat — aniq mos kelsa darhol qo'shamiz
+                    if (/^[0-9]{6,}$/.test(productSearch.trim())) void handleBarcode(productSearch);
+                    else if (matches.length === 1) addPicked([matches[0]!.id]);
+                  }}
+                />
+                <Button size="sm" variant="secondary" disabled={scanBusy || !productSearch.trim()} onClick={() => void handleBarcode(productSearch)}>
+                  <ScanLine className="h-3.5 w-3.5 mr-1" /> Barkod
+                </Button>
+                {picked.length > 0 && (
+                  <Button size="sm" onClick={() => addPicked(picked)}>
+                    Tanlanganlarni qo'shish ({picked.length})
+                  </Button>
+                )}
+              </div>
+              {searchTerm.length >= 2 && (
+                matches.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Mahsulot topilmadi</p>
+                ) : (
+                  <div className="max-h-44 overflow-y-auto rounded-lg border border-border">
+                    {matches.map((product) => (
+                      <label
+                        key={product.id}
+                        className="flex cursor-pointer items-center gap-2 border-b border-border px-2 py-1.5 text-sm last:border-0 hover:bg-accent/40"
+                      >
+                        <Checkbox
+                          checked={picked.includes(product.id)}
+                          onCheckedChange={(checked) =>
+                            setPicked((current) =>
+                              checked === true ? [...current, product.id] : current.filter((id) => id !== product.id),
+                            )
+                          }
+                        />
+                        <span className="font-mono text-[11px] text-muted-foreground">{product.sku}</span>
+                        <span className="min-w-0 flex-1 truncate">{product.name}</span>
+                        <span className="text-xs text-muted-foreground">{num(product.purchasePrice).toLocaleString("uz-UZ")}</span>
+                      </label>
+                    ))}
+                  </div>
+                )
+              )}
             </div>
 
             <div className="rounded-xl border border-border overflow-x-auto">
