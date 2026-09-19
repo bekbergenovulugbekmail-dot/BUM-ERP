@@ -44,7 +44,11 @@ import SettingsPage from "./pages/settings/page.tsx";
 import SubscriptionPage from "./pages/subscription/page.tsx";
 import OnboardingPage from "./pages/onboarding/page.tsx";
 import AdminPage from "./pages/admin/page.tsx";
+import { useCurrentUser, useMeError } from "@/hooks/use-auth.ts";
+import { ApiError } from "@/lib/api.ts";
+import { companyPathKey } from "@bum/shared";
 import TenantPortalPage from "./pages/tenant/page.tsx";
+import { BusinessAddressPage } from "./pages/login/company-login.tsx";
 import SelectCompanyPage from "./pages/select-company/page.tsx";
 import LoginPage from "./pages/login/page.tsx";
 import NotFound from "./pages/NotFound.tsx";
@@ -58,8 +62,20 @@ const FullPageSpinner = () => (
 );
 
 // ─── Locale-aware root redirect ───────────────────────────────────────────────
+/**
+ * `app.bum-erp.uz` — manzilsiz kirish: sessiyasi bor foydalanuvchi o'z biznesiga,
+ * sessiyasi yo'q foydalanuvchi esa biznes manzilini kiritish sahifasiga tushadi.
+ */
 function RootRedirect() {
   const location = useLocation();
+  const me = useCurrentUser();
+  const meError = useMeError();
+
+  if (me === undefined && !meError) return <FullPageSpinner />;
+  // Kirilmagan (`/me` → null): biznes manzilini so'raymiz
+  if (me === null) return <BusinessAddressPage />;
+  const key = me ? companyPathKey(me.companySlug, me.activeCompanyId) : null;
+  if (key) return <Navigate to={`/${key}/dashboard${location.search}${location.hash}`} replace />;
   return (
     <Navigate
       to={setLocaleInPath(SAVED_OR_DEFAULT_LOCALE, "/", location.search, location.hash)}
@@ -126,6 +142,9 @@ function MainApp() {
             </BaseSegment>
           }
         >
+          {/* Biznes manzili ildizi (/bonnu-market) — kirilgan foydalanuvchi boshqaruv paneliga */}
+          <Route index element={<Navigate to="dashboard" replace />} />
+
           {/* Onboarding: outside ERPLayout */}
           <Route path="onboarding" element={<OnboardingPage />} />
 

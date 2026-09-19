@@ -29,6 +29,7 @@ import { requestMeta, writeAuditLog } from "../../shared/audit.js";
 import { deviceCheckRequired, deviceError, listUserDevices, registerDevice, setDeviceStatus } from "./devices.service.js";
 import { smsProvider } from "../../shared/sms.js";
 import { changeOwnPassword, verifyCurrentPassword } from "../users/user-admin.service.js";
+import { activateCompanyBySlug } from "../company/company.service.js";
 import { confirmPasswordReset, requestPasswordReset } from "./password-reset.service.js";
 import { authenticate, buildMe, startSession } from "./auth.service.js";
 import { authOf, requireAuth, requireSession } from "./guard.js";
@@ -68,6 +69,11 @@ function deviceIdOf(req: FastifyRequest): string | null {
 const loginBody = z.object({
   phone: z.string().min(1).max(32),
   password: z.string().min(1).max(256),
+  /**
+   * Biznes manzili (`app.bum-erp.uz/bonnu-market`): kirish AYNAN shu biznesga bo'ladi.
+   * Foydalanuvchi bu biznesning faol xodimi bo'lmasa — kirish berilmaydi.
+   */
+  companySlug: z.string().trim().toLowerCase().min(1).max(100).optional(),
 });
 const changePasswordBody = z.object({
   currentPassword: z.string().min(1).max(256),
@@ -117,8 +123,14 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     const { session, me } = await withTransaction((tx) => startSession(tx, auth, meta));
 
+    // Biznes manzilidan kirilgan bo'lsa — aynan shu biznes faollashtiriladi
+    let user = me;
+    if (body.companySlug) {
+      user = await withTransaction((tx) => activateCompanyBySlug(tx, auth.user, body.companySlug!, meta));
+    }
+
     setSessionCookie(reply, session.token, session.expiresAt);
-    return { user: me };
+    return { user };
   });
 
   app.post("/logout", async (req, reply) => {

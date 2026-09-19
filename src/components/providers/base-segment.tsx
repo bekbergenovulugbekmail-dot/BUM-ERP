@@ -16,6 +16,7 @@ import { api, ApiError, setCompanyContext } from "@/lib/api.ts";
 import { SAVED_OR_DEFAULT_LOCALE, changeLocale, isSupportedLocale, setLocaleInPath, type SupportedLocale } from "@/i18n.ts";
 import { useCurrentUser, useMeError } from "@/hooks/use-auth.ts";
 import type { MyCompany } from "@/hooks/use-company.ts";
+import CompanyLoginPage from "@/pages/login/company-login.tsx";
 
 /** Biznesdan tashqari, til bilan qoladigan sahifalar. */
 const LOCALE_PAGES = new Set(["login", "onboarding", "select-company", "admin"]);
@@ -30,7 +31,14 @@ function Spinner() {
 
 export default function BaseSegment({ children }: { children: ReactNode }) {
   const { lng = "" } = useParams<{ lng: string }>();
+  const location = useLocation();
   const lower = lng.toLowerCase();
+
+  // `/login` kabi tilsiz manzillar biznes manzili emas — tilli ko'rinishga (`/uz/login`) o'tkaziladi
+  if (LOCALE_PAGES.has(lower)) {
+    return <Navigate to={`/${SAVED_OR_DEFAULT_LOCALE}/${lower}${location.search}${location.hash}`} replace />;
+  }
+
   return isSupportedLocale(lower) ? (
     <LocaleSegment lng={lng}>{children}</LocaleSegment>
   ) : (
@@ -66,6 +74,10 @@ function CompanySegment({ companyKey, children }: { companyKey: string; children
   const location = useLocation();
   const me = useCurrentUser();
   const meError = useMeError();
+
+  // Biznes manzili sessiyasiz ochilsa — aynan shu biznesning kirish sahifasi (app.bum-erp.uz/bonnu-market)
+  if (me === undefined && !meError) return <Spinner />;
+  if (me === null) return <CompanyLoginPage slug={companyKey} />;
 
   if (meError instanceof ApiError && (meError.details as { reason?: string } | undefined)?.reason === "company_access_denied") {
     return <CompanyAccessDenied companyKey={companyKey} />;

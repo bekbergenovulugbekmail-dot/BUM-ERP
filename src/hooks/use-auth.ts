@@ -105,12 +105,19 @@ export function useAuth() {
     [queryClient],
   );
 
-  /** Telefon + parol bilan kirish. Xato bo'lsa qayta tashlaydi. */
+  /**
+   * Telefon + parol bilan kirish. Xato bo'lsa qayta tashlaydi.
+   * `companySlug` berilsa (biznes manzilidan kirish) — aynan shu biznesga kiriladi.
+   */
   const signInWithPassword = useCallback(
-    async (phone: string, password: string) => {
+    async (phone: string, password: string, companySlug?: string) => {
       setError(undefined);
       try {
-        const { user } = await api.post<{ user: Me }>("/api/auth/login", { phone, password });
+        const { user } = await api.post<{ user: Me }>("/api/auth/login", {
+          phone,
+          password,
+          ...(companySlug ? { companySlug } : {}),
+        });
         replaceSession(user);
         return user;
       } catch (e) {

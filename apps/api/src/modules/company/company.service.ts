@@ -16,6 +16,7 @@ import { badRequest, forbidden, notFound } from "@bum/shared";
 import { branches, companies, companyMembers, users } from "../../db/schema/platform.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
+import { buildMe } from "../auth/auth.service.js";
 import type { SessionUser } from "../auth/session.js";
 import type { TenantContext } from "./tenant.js";
 
@@ -118,6 +119,46 @@ export async function switchCompany(tx: Tx, user: SessionUser, companyId: string
     companyId,
     details: { from: user.activeCompanyId },
   });
+}
+
+/**
+ * Biznes manzili (slug) bo'yicha kirishda shu biznesni faollashtiradi:
+ * `app.bum-erp.uz/bonnu-market` — faqat Bonnu Marketga kirish.
+ * Platforma admini istalgan biznesni ocha oladi; boshqalar faqat faol a'zoligi bo'lsa.
+ */
+export async function activateCompanyBySlug(tx: Tx, user: SessionUser, slug: string, meta: RequestMeta) {
+  const [company] = await tx
+    .select({ id: companies.id, name: companies.name, status: companies.status })
+    .from(companies)
+    .where(eq(companies.slug, slug))
+    .limit(1);
+  if (!company) throw notFound("Bunday biznes manzili topilmadi");
+  if (company.status === "suspended" || company.status === "cancelled") {
+    throw forbidden(`${company.name} vaqtincha to'xtatilgan — administratorga murojaat qiling`);
+  }
+
+  if (!user.isPlatformAdmin) {
+    const [membership] = await tx
+      .select({ isActive: companyMembers.isActive })
+      .from(companyMembers)
+      .where(and(eq(companyMembers.companyId, company.id), eq(companyMembers.userId, user.id)))
+      .limit(1);
+    if (!membership || !membership.isActive) {
+      throw forbidden(`Siz ${company.name} xodimi emassiz — o'z biznesingiz manzilidan kiring`);
+    }
+  }
+
+  if (user.activeCompanyId !== company.id) {
+    await tx.update(users).set({ activeCompanyId: company.id }).where(eq(users.id, user.id));
+    await audit(tx, user, meta, {
+      action: "COMPANY_SWITCHED",
+      resource: "companies",
+      resourceId: company.id,
+      companyId: company.id,
+      details: { from: user.activeCompanyId, via: "login_slug" },
+    });
+  }
+  return buildMe(tx, { ...user, activeCompanyId: company.id });
 }
 
 export type CompanyPatch = {

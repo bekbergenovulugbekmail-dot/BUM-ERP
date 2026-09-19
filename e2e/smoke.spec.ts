@@ -21,5 +21,8 @@ test("chiqishdan keyin himoyalangan sahifa ochilmaydi", async ({ page }) => {
   await login(page, "owner");
   await logout(page);
   await page.goto(appPath("sales"));
-  await expect(page).toHaveURL(/\/login/);
+  // Biznes manzilida chiqilgan bo'lsa — o'sha biznesning kirish sahifasi ko'rinadi (sahifa mazmuni emas)
+  await expect(page.locator("#phone")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/Xodimlar uchun kirish/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Sotuv|Savdo/ })).toHaveCount(0);
 });
