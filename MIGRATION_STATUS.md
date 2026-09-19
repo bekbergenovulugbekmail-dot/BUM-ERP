@@ -2512,6 +2512,35 @@ cashier-collect-payment (2), device-self-service (4); purchase-csv (9).
 **Deploy (2026-09-19):** `bum-api` va `bum-web` — tekshirildi: `/api/auth/devices` 401 (mavjud),
 `?returnPending=true` 401, bundle `index-BemJjLKO.js` da yangi matnlar bor.
 
+## Maosh, tezda qo'shish va biznes manzili (2026-09-19, deploy qilindi)
+
+**Maosh (migratsiya 0066):** xodim qo'shish oynasidan ish haqi turi va miqdori olib tashlandi —
+endi Kadrlar -> Maosh bo'limidagi "Maosh va qo'shimcha to'lovlar" kartochkasida. Yangi
+`employee_allowances` jadvali: yo'l puli, ovqat puli, aloqa, turar joy yoki boshqa to'lov xodimga
+va davrga ("qaysi oydan qaysi oygacha") biriktiriladi; maosh tayyorlanganda shu oyga tushganlari
+avtomatik qo'shiladi (soliq faqat hisoblangan maoshdan, kompensatsiya qo'lga qo'shiladi —
+`salary_payments.allowances`). Xarajatda `employee_id` va `payout_kind`: xodim tanlansa
+to'lov turi (maosh / yo'l / ovqat / aloqa / turar joy / boshqa) majburiy.
+
+**Xodim kartochkasi:** tahrirlash oynasida "Dasturga kirish" bo'limi — import qilingan xodimni ham
+shu yerdan dasturga ulash yoki uzish mumkin (avval faqat sichqoncha olib borilganda ko'rinardi).
+
+**Tezda qo'shish:** import/eksport yonida yangi tugma — importdagi kabi kataklarga yozib saqlash
+(fayl shart emas), tekshiruv importdagi bilan bir xil. CsvToolbar'da bo'lgani uchun mahsulot,
+xodim, xarid, mijoz, ta'minotchi, xarajat va marshrut bo'limlarida ishlaydi.
+
+**Xaridda mahsulot qidirish:** barkod bilan darhol qo'shish (skaner ham) va nomi/SKU bo'yicha
+ro'yxatdan bir nechta mahsulotni belgilab qo'shish.
+
+**Biznes manzili bilan kirish:** `app.bum-erp.uz/bonnu-market` — aynan shu biznesning kirish
+sahifasi (nomi va logotipi bilan); login `companySlug` bilan yuboriladi va server foydalanuvchi shu
+biznesning faol xodimi ekanini tekshiradi. Manzilsiz kirilganda biznes manzili so'raladi.
+`/login`, `/onboarding`, `/select-company`, `/admin` biznes manzili deb qabul qilinmaydi.
+
+**Testlar:** API 126 fayl / 665 test, brauzer 58 test — hammasi o'tdi. Yangi fayllar:
+allowances (6), company-login (6), delivery-return-pending (3), cashier-collect-payment (2),
+device-self-service (4), e2e/quick-add (2), e2e/company-login (3), e2e/agent-mobile (4).
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
