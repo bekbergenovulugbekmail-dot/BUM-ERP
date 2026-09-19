@@ -496,7 +496,13 @@ export async function saveAgentDraft(tx: Tx, context: AgentContext, clientReques
   // Bir agentning parallel so'rovlari navbatma-navbat (bir identifikator — bitta buyurtma)
   await tx.select({ id: salesReps.id }).from(salesReps).where(eq(salesReps.id, context.agent.id)).for("update");
   const [existing] = await tx
-    .select({ orderId: agentOrders.orderId, customerId: agentOrders.customerId, submittedAt: agentOrders.submittedAt, status: salesOrders.status })
+    .select({
+      orderId: agentOrders.orderId,
+      customerId: agentOrders.customerId,
+      submittedAt: agentOrders.submittedAt,
+      status: salesOrders.status,
+      warehouseId: salesOrders.warehouseId,
+    })
     .from(agentOrders)
     .innerJoin(salesOrders, eq(salesOrders.id, agentOrders.orderId))
     .where(
@@ -524,6 +530,8 @@ export async function saveAgentDraft(tx: Tx, context: AgentContext, clientReques
   let orderId: string;
   if (existing) {
     orderId = existing.orderId;
+    // Qoralamada ham bo'sh qoldiq tekshiriladi: boshqa agent band qilgan tovarni yozib bo'lmaydi
+    await assertStock(tx, companyId, existing.warehouseId, priced.items);
     await updateOrder(tx, context, orderId, { items: priced.items, deliveryDate, notes }, meta, { trustedPricing: true });
     await tx
       .update(agentOrders)
@@ -532,6 +540,7 @@ export async function saveAgentDraft(tx: Tx, context: AgentContext, clientReques
   } else {
     const warehouseId = await agentWarehouseId(tx, companyId);
     if (!warehouseId) throw badRequest("Kompaniyada faol ombor yo'q");
+    await assertStock(tx, companyId, warehouseId, priced.items);
     const order = await createOrder(
       tx,
       context,

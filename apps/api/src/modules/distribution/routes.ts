@@ -47,6 +47,12 @@ import {
   updateVisit,
 } from "./distribution.service.js";
 import { createSalesRep, deleteSalesRep, listSalesReps, salesRepStats, updateSalesRep } from "./sales-reps.service.js";
+import {
+  createTerritory,
+  deleteTerritory,
+  listTerritories,
+  updateTerritory,
+} from "./territories.service.js";
 import { handoverRepCash, repCashSummary } from "../sales-agent/agent-cash.service.js";
 
 const nullableText = (max: number) =>
@@ -74,8 +80,20 @@ const repBody = z.strictObject({
 });
 const repPatch = repBody.partial().extend({ isActive: z.boolean().optional() });
 
+const territoryBody = z.strictObject({
+  name: z.string().trim().min(1).max(200),
+  description: nullableText(2000),
+});
+const territoryPatch = territoryBody.partial().extend({ isActive: z.boolean().optional() });
+const territoryParams = z.object({ territoryId: z.uuid() });
+
 const routeBody = z.strictObject({
   name: z.string().trim().min(1).max(200),
+  /**
+   * Marshrut hudud tarkibida bo'ladi — ilovada va CSV importda hudud majburiy.
+   * API'da ixtiyoriy: hududlar joriy qilinishidan oldin ochilgan marshrutlar "Hududsiz" bo'lib qoladi.
+   */
+  territoryId: z.uuid().nullable().optional(),
   salesRepId: z.uuid().nullable().optional(),
   description: nullableText(2000),
   /** 0 = yakshanba … 6 = shanba */
@@ -92,6 +110,8 @@ const routeImportBody = z.strictObject({
     .array(
       z.strictObject({
         name: z.string().max(300).optional(),
+        /** Hudud nomi — marshrut shu hudud tarkibida ochiladi. */
+        territory: z.string().max(200).optional(),
         salesRep: z.string().max(200).optional(),
         days: z.string().max(100).optional(),
         description: z.string().max(2000).optional(),
@@ -215,6 +235,32 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ─── Marshrutlar ─────────────────────────────────────────────────────────
+
+  // ─── Hududlar (marshrutlar shular tarkibida) ──────────────────────────────
+
+  app.get("/territories", async (req) => {
+    const { includeInactive } = z.object({ includeInactive: boolQuery }).parse(req.query);
+    return { territories: await listTerritories(db, await readTenant(req), includeInactive ?? false) };
+  });
+
+  app.post("/territories", async (req, reply) => {
+    const body = territoryBody.parse(req.body);
+    const territory = await writeInTenant(req, (tx, tenant) => createTerritory(tx, tenant, body, requestMeta(req)));
+    reply.status(201);
+    return { territory };
+  });
+
+  app.patch("/territories/:territoryId", async (req) => {
+    const { territoryId } = territoryParams.parse(req.params);
+    const body = territoryPatch.parse(req.body);
+    return { territory: await writeInTenant(req, (tx, tenant) => updateTerritory(tx, tenant, territoryId, body, requestMeta(req))) };
+  });
+
+  app.delete("/territories/:territoryId", async (req, reply) => {
+    const { territoryId } = territoryParams.parse(req.params);
+    await writeInTenant(req, (tx, tenant) => deleteTerritory(tx, tenant, territoryId, requestMeta(req)));
+    reply.status(204);
+  });
 
   app.get("/routes", async (req) => {
     const { includeInactive } = includeInactiveQuery.parse(req.query);

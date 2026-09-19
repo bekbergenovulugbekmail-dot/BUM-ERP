@@ -78,7 +78,8 @@ describe("Sotuv agenti qo'shish", () => {
     // Takror telefon — hech narsa qo'shimcha yaratilmaydi
     expect((await call(supervisor.cookie, "POST", "/api/sales-agent/team", { ...body, name: "Boshqa" })).statusCode).toBe(409);
     expect(await db.$count(salesReps, eq(salesReps.companyId, company.companyId))).toBe(1);
-    expect(await db.$count(employees, eq(employees.companyId, company.companyId))).toBe(1);
+    // Har bir login ochilgan xodimda HR kartochkasi bor: supervayzer, agentlar menejeri va agentning o'zi
+    expect(await db.$count(employees, eq(employees.companyId, company.companyId))).toBe(3);
 
     const auditRows = await db.select().from(auditLogs).where(eq(auditLogs.companyId, company.companyId));
     expect(auditRows.some((row) => row.action === "SALES_AGENT_CREATED")).toBe(true);
@@ -89,12 +90,14 @@ describe("Sotuv agenti qo'shish", () => {
     expect(session.res.statusCode).toBe(200);
     expect((await call(session.cookie, "GET", "/api/sales-agent/me")).json().agent).toMatchObject({ id: agent.id, name: "Ali Valiyev" });
 
-    const hrList = (await call(company.ownerCookie, "GET", "/api/hr/employees")).json().employees;
-    // Xodimlar ro'yxatida: lavozim, holat, hudud va supervayzer
-    expect(hrList).toEqual([
-      expect.objectContaining({ name: "Ali Valiyev", positionName: "Sotuv agenti", status: "active", salesRepId: agent.id, agentRegion: "Chilonzor" }),
-    ]);
-    expect(hrList[0].supervisorName).toEqual(expect.any(String));
+    // Ro'yxatda login ochilgan barcha xodimlar bor; agentning kartochkasida lavozim, holat, hudud va supervayzer
+    const hrList = (await call(company.ownerCookie, "GET", "/api/hr/employees")).json().employees as {
+      name: string;
+      supervisorName: string | null;
+    }[];
+    const card = hrList.find((row) => row.name === "Ali Valiyev");
+    expect(card).toMatchObject({ positionName: "Sotuv agenti", status: "active", salesRepId: agent.id, agentRegion: "Chilonzor" });
+    expect(card!.supervisorName).toEqual(expect.any(String));
     const supervisors = (await call(supervisor.cookie, "GET", "/api/sales-agent/team/supervisors")).json().supervisors;
     expect(supervisors.map((s: { userId: string }) => s.userId)).toContain(supervisor.id);
     expect((await call(supervisor.cookie, "GET", "/api/sales-agent/team")).json().agents).toHaveLength(1);

@@ -2512,6 +2512,58 @@ cashier-collect-payment (2), device-self-service (4); purchase-csv (9).
 **Deploy (2026-09-19):** `bum-api` va `bum-web` — tekshirildi: `/api/auth/devices` 401 (mavjud),
 `?returnPending=true` 401, bundle `index-BemJjLKO.js` da yangi matnlar bor.
 
+## Xodim kartochkasi, hududlar va zaxirani band qilish (2026-09-19)
+
+**Xodim qo'shish (0068 gacha o'zgarishsiz, faqat xizmat qatlami):** endi har bir yangi xodim Kadrlar
+ro'yxatida ham ko'rinadi — login ochilgan xodimga ham HR kartochkasi yaratiladi (avval faqat agent,
+yetkazuvchi va "dasturga kirmaydi" holatida ochilardi). "Xodim qo'shish" oynasiga bo'lim, lavozim va
+ishga kirgan sana maydonlari qo'shildi; tanlanmasa "Asosiy" bo'limi va rol nomidagi lavozim ochiladi.
+Kadrlardagi tahrir/o'chirish amallari ro'yxatni darhol yangilaydi. Maosh varaqasiga to'lanadigan
+hech narsasi yo'q xodim (maoshi kiritilmagan, KPI va qo'shimcha to'lovi ham yo'q) tushmaydi.
+
+**Hududlar (migratsiya 0069):** yangi `territories` jadvali va `distribution_routes.territory_id`.
+Marshrutlar hudud tarkibida: "Urganch" hududida "Luchevoy", "Nadmes bozor". Distribyutsiya →
+Marshrutlar bo'limida "Hududlar" oynasi (qo'shish/o'chirish), marshrut oynasida hudud tanlovi majburiy,
+ro'yxat hudud bo'yicha guruhlangan. CSV import/eksportda "Hudud" ustuni — importda majburiy, yo'q
+hudud avtomatik ochiladi. API'da maydon ixtiyoriy: hududlar joriy qilinishidan oldingi marshrutlar
+"Hududsiz" bo'lib qoladi (ma'lumot o'zgartirilmaydi).
+
+**Zaxirani band qilish (migratsiya 0070):** tasdiqlangan buyurtma omborda tovarni band qiladi
+(`stock_levels.reserved_qty`, `sales_orders.stock_reserved`). Omborda 50 dona bo'lsa va bir agent
+40 donaga buyurtma olsa, boshqalarga 10 dona ko'rinadi — ortig'ini na qoralamaga yozib, na
+tasdiqlab bo'ladi. Band jo'natishda (tovar chiqadi) va bekor qilishda bo'shaydi. Ombor qoldig'i
+jadvalidagi "band" va "mavjud" ustunlari endi haqiqiy son ko'rsatadi.
+
+Yo'l-yo'lakay tuzatildi: hududlar ro'yxatidagi marshrut soni har doim 0 chiqardi — qo'shilmasiz
+so'rovda drizzle tashqi ustunga jadval nomini qo'shmaydi va ichki jadvalning "id" ustuni bilan
+chalkashib ketardi (marshrutlar ro'yxatidagi mijoz soni qo'shilma tufayli to'g'ri ishlagan).
+
+## Dostavchi qaytarib olgan tovar; modullar ro'yxati (2026-09-19)
+
+**Qaytarib olish (migratsiya 0067, 0068):** dostavchi mijozdan ILGARI SOTILGAN tovarni ham qaytarib
+oladi. Mijoz kartochkasida uning oldingi xaridlari chek bo'yicha ko'rinadi — qachon olgani, qanday
+narxda olgani va qanchasini qaytarish mumkinligi; kerakli qatorlarni belgilab, miqdor va sabab
+yoziladi. Yangi `delivery_return_pickups` (+ qatorlari) jadvali va `delivery.return_pickup` ruxsati
+(Dostavka agenti va Direktor rollariga qo'shildi).
+
+Ikki rejim — Dostavka → Siyosat bo'limidagi "Qaytarib olingan tovar omborda qabul qilinsin":
+- yoqilgan (standart): so'rov "qabul kutilmoqda" bo'lib turadi, tovar mashinada ekan ombor qoldig'i
+  oshmaydi; supervayzer Dostavka → Nazorat bo'limida qabul qilganda savdo qaytarish hujjati yoziladi
+  (zaxira qaytadi, qarz kamayadi yoki pul tanlangan usulda qaytariladi), rad etilsa hech narsa yozilmaydi;
+- o'chirilgan: dostavchi tasdiqlashi bilan darhol rasmiylashtiriladi.
+
+Kutilayotgan so'rov chekdagi qoldiqni band qiladi — bir tovarni ikki marta qaytarib bo'lmaydi. Pul,
+zaxira va jurnal faqat mavjud savdo qaytarish oqimida harakatlanadi (yangi hisob-kitob yozilmagan).
+Buyurtmani to'liq yoki qisman qaytarish avvalgidek: dostavchi topshirishda har bir mahsulot uchun
+miqdor kiritadi, yetkazilmagani supervayzer qabul qilguncha "qaytarish kutilmoqda" bo'lib turadi.
+
+**Modullar:** Sozlamalar → Modullar ro'yxatida endi faqat YOQILGAN modullar turadi (o'chirilgani
+biznes egasi uchun yo'q hisoblanadi; pastda nechtasini ulash mumkinligi eslatiladi).
+
+**Testlar:** API 127 fayl / 686 test, brauzer 62 test, frontend 21 fayl / 89 test. Yangi:
+`delivery-return-pickup` 9 ta API testi, `e2e/delivery-return-pickup` (dostavchi → qabul → zaxira
+qaytdi), `modules-section` 2 ta komponent testi.
+
 ## Tezda qo'shish: hujjat sarlavhasi + qatorlar (2026-09-19)
 
 "Tezda qo'shish" endi importdagi kabi barcha kataklarni takrorlamaydi: hujjatga xos, bir marta

@@ -200,6 +200,28 @@ export const customerSegmentMembers = pgTable(
 
 // ─── distribution ────────────────────────────────────────────────────────────
 
+/**
+ * Hudud (Urganch, Xiva ...) — marshrutlar shu hudud tarkibida bo'ladi.
+ * Hudud o'chirilmaydi, faqat faolsizlantiriladi; marshruti bor hudud o'chirilmaydi (`restrict`).
+ */
+export const territories = pgTable(
+  "territories",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 200 }).notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").notNull().default(true),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("terr_company_name_key").on(t.companyId, t.name),
+    index("terr_company_active_idx").on(t.companyId, t.isActive),
+  ],
+);
+
 export const distributionRoutes = pgTable(
   "distribution_routes",
   {
@@ -210,6 +232,8 @@ export const distributionRoutes = pgTable(
       .references(() => companies.id, { onDelete: "restrict" }),
 
     name: varchar("name", { length: 200 }).notNull(),
+    /** Qaysi hudud tarkibida (eski marshrutlarda bo'sh bo'lishi mumkin). */
+    territoryId: uuid("territory_id").references(() => territories.id, { onDelete: "restrict" }),
     salesRepId: uuid("sales_rep_id").references(() => salesReps.id, { onDelete: "set null" }),
     description: text("description"),
     /** Hafta kunlari: 0 = yakshanba … 6 = shanba. */
@@ -221,6 +245,7 @@ export const distributionRoutes = pgTable(
   (t) => [
     index("dr_company_active_idx").on(t.companyId, t.isActive),
     index("dr_company_rep_idx").on(t.companyId, t.salesRepId),
+    index("dr_company_territory_idx").on(t.companyId, t.territoryId),
   ],
 );
 

@@ -30,7 +30,7 @@ import { products } from "./catalog.js";
 import { employees } from "./hr.js";
 import { warehouses } from "./inventory.js";
 import { branches, companies, users } from "./platform.js";
-import { customerPayments, customers, salesOrderItems, salesOrders } from "./sales.js";
+import { customerPayments, customers, salesOrderItems, salesOrders, salesReturns } from "./sales.js";
 import { workSessionEndReason, workSessionStatus } from "./sales-agent.js";
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
@@ -65,6 +65,7 @@ export const deliveryPaymentStatus = pgEnum("delivery_payment_status", ["not_req
 export const deliveryPaymentReview = pgEnum("delivery_payment_review", ["none", "pending", "approved", "rejected"]);
 export const deliveryCollectionMethod = pgEnum("delivery_collection_method", ["cash", "card", "bank"]);
 export const deliveryProofKind = pgEnum("delivery_proof_kind", ["photo", "signature"]);
+export const deliveryReturnPickupStatus = pgEnum("delivery_return_pickup_status", ["pending", "accepted", "rejected"]);
 
 /** Yakunlanmagan holatlar — bitta buyurtmada bittadan ortiq ochiq yetkazma bo'lmaydi. */
 const OPEN_STATUSES_SQL = sql.raw(`'ready', 'assigned', 'accepted', 'out_for_delivery', 'arrived', 'delivering'`);
@@ -235,6 +236,81 @@ export const deliveryTaskItems = pgTable(
  * Yetkazma tarixi: har holat o'zgarishi va muhim amal (to'lov, isbot, geofence rad etilishi, OTP xatosi).
  * `client_request_id` — agent amali idempotentligi (takroriy bosish yoki oflayn navbat qayta yuborilishi).
  */
+/**
+ * Dostavchi mijozdan QAYTARIB OLGAN tovar (ilgari sotilgan chek bo'yicha).
+ *
+ * Tovar hali mashinada — shuning uchun standart holatda yozuv `pending` bo'lib turadi va supervayzer/omborchi
+ * qabul qilganda `sales_returns` hujjati yoziladi (zaxira qaytadi, qarz kamayadi yoki pul qaytariladi).
+ * Siyosatda `returnPickupApproval: false` bo'lsa — dostavchining o'zi tasdiqlashi bilan darhol yoziladi.
+ * Pul va zaxira faqat savdo qaytarish oqimida harakatlanadi; bu jadval — jarayon va havola.
+ */
+export const deliveryReturnPickups = pgTable(
+  "delivery_return_pickups",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    number: varchar("number", { length: 32 }).notNull(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => salesOrders.id, { onDelete: "restrict" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    /** Qaytarib olgan yetkazuvchi (o'chirilsa yozuv qoladi). */
+    agentId: uuid("agent_id").references(() => deliveryAgents.id, { onDelete: "set null" }),
+    /** Shu tashrifdagi yetkazma (bo'lsa). */
+    taskId: uuid("task_id").references(() => deliveryTasks.id, { onDelete: "set null" }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    status: deliveryReturnPickupStatus("status").notNull().default("pending"),
+    /** Dostavchi ko'rsatgan sabab. */
+    reason: text("reason"),
+    /** Pul qanday qaytishi taklif qilinadi: naqd/karta/bank/balans. */
+    refundMethod: varchar("refund_method", { length: 16 }).notNull().default("balance"),
+    /** Taxminiy summa (chek narxlari bo'yicha) — aniq summa qaytarish hujjatida. */
+    amount: money("amount").notNull().default("0"),
+    /** Qabul qilgan yoki rad etgan kishining izohi. */
+    note: text("note"),
+    returnId: uuid("return_id").references(() => salesReturns.id, { onDelete: "set null" }),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("drp_company_number_key").on(t.companyId, t.number),
+    index("drp_company_status_idx").on(t.companyId, t.status, t.createdAt),
+    index("drp_agent_idx").on(t.agentId, t.createdAt),
+    index("drp_customer_idx").on(t.customerId, t.createdAt),
+    check("drp_refund_method", sql`${t.refundMethod} in ('cash', 'card', 'bank', 'balance')`),
+  ],
+);
+
+export const deliveryReturnPickupItems = pgTable(
+  "delivery_return_pickup_items",
+  {
+    id: pk(),
+    pickupId: uuid("pickup_id")
+      .notNull()
+      .references(() => deliveryReturnPickups.id, { onDelete: "cascade" }),
+    orderItemId: uuid("order_item_id")
+      .notNull()
+      .references(() => salesOrderItems.id, { onDelete: "restrict" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "restrict" }),
+    /** Chek birligida. */
+    quantity: qty("quantity").notNull(),
+    /** Mijoz shu tovarni qanday narxda olgan (chekdagi narx). */
+    unitPrice: money("unit_price").notNull().default("0"),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("drpi_pickup_item_key").on(t.pickupId, t.orderItemId),
+    check("drpi_quantity_positive", sql`${t.quantity} > 0`),
+  ],
+);
+
 export const deliveryEvents = pgTable(
   "delivery_events",
   {

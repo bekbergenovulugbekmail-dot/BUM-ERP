@@ -147,8 +147,11 @@ const employeeBody = z.object({
   additionalLicensePlanId: z.uuid().optional(),
   /** Qurilma tasdig'i shu xodimga qo'llanadimi (standart — ha). */
   deviceCheck: z.boolean().optional(),
-  /** Ishga kirgan sana (agent va yetkazuvchi uchun HR kartochkasiga yoziladi). */
+  /** Ishga kirgan sana (HR kartochkasiga yoziladi). */
   hireDate: z.iso.date().optional(),
+  /** HR kartochkasi uchun bo'lim va lavozim (tanlanmasa "Asosiy" va rol nomidagi lavozim). */
+  departmentId: z.uuid().optional(),
+  positionId: z.uuid().optional(),
   /** Savdo agenti: hudud va oylik plan. */
   region: z.string().trim().max(100).optional(),
   monthlyTarget: moneySchema.optional(),
@@ -323,7 +326,15 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
         return createHrCard(
           tx,
           tenant,
-          { name: body.name!.trim(), phone: body.phone, userId: null, role: body.role ?? "Xodim", hireDate: body.hireDate },
+          {
+            name: body.name!.trim(),
+            phone: body.phone,
+            userId: null,
+            role: body.role ?? "Xodim",
+            hireDate: body.hireDate,
+            departmentId: body.departmentId ?? null,
+            positionId: body.positionId ?? null,
+          },
           meta,
         );
       });
@@ -366,9 +377,24 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
 
     const { user: employee, role, license } = await withTransaction(async (tx) => {
       const company = await resolveOwnedCompany(tx, user);
-      // HR kartochkasi faqat kerakli rollarda (agent, yetkazuvchi) yoki "dasturga kirmaydi" holatida
-      // yaratiladi — boshqa xodimni HR bo'limida mavjud kartochkaga bog'lash yo'li ochiq qoladi.
-      return createEmployee(tx, user, company, { ...body, password: body.password! }, meta);
+      const created = await createEmployee(tx, user, company, { ...body, password: body.password! }, meta);
+      // Har bir yangi xodim Kadrlar ro'yxatida ham ko'rinadi (bo'lim va lavozim bilan)
+      const tenant = await requireTenantForWrite(tx, user);
+      await createHrCard(
+        tx,
+        tenant,
+        {
+          name: created.user.name ?? body.name?.trim() ?? body.phone,
+          phone: created.user.phone,
+          userId: created.user.id,
+          role: created.role,
+          hireDate: body.hireDate,
+          departmentId: body.departmentId ?? null,
+          positionId: body.positionId ?? null,
+        },
+        meta,
+      );
+      return created;
     });
 
     reply.status(201);

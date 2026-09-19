@@ -109,6 +109,8 @@ export const PERMISSIONS = {
   "delivery.fail":            { label: "Yetkazib bo'lmadi deb belgilash",      group: "Dostavka" },
   /** Qaytgan mahsulotni omborga qabul qilish (zaxira va qarz qaytadi). */
   "delivery.return":          { label: "Qaytgan mahsulotni qabul qilish",      group: "Dostavka" },
+  /** Dostavchi mijozdan ilgari sotilgan tovarni qaytarib oladi (siyosatga ko'ra — qabuldan keyin yoki darhol). */
+  "delivery.return_pickup":   { label: "Mijozdan tovarni qaytarib olish",      group: "Dostavka" },
   "delivery.collect_payment": { label: "Yetkazishda to'lov qabul qilish",      group: "Dostavka" },
   "delivery.view_debt":       { label: "Agent mijoz qarzini ko'radi",          group: "Dostavka" },
   /** Lokatsiya — maxfiy operatsion ma'lumot: faqat o'qish rollariga avtomatik berilmaydi. */
@@ -389,7 +391,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     // Faqat o'ziga biriktirilgan yetkazmalar — ERP bo'limlari, boshqa agentlar va sozlamalar ko'rinmaydi
     permissions: [
       "delivery.accept", "delivery.start", "delivery.arrive", "delivery.confirm", "delivery.fail",
-      "delivery.collect_payment", "delivery.view_debt",
+      "delivery.collect_payment", "delivery.view_debt", "delivery.return_pickup",
     ],
   },
   {

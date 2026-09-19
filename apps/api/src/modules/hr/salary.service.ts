@@ -180,6 +180,8 @@ export async function generateSalaries(
   const allowanceTotals = await allowanceTotalsForMonth(tx, companyId, input.month);
   const rate = toMinor(taxRate, 2);
   let kpiTotal = 0n;
+  /** Haqiqatda yozilgan varaqalar soni (to'lovi yo'q xodimlar o'tkazib yuboriladi). */
+  let created = 0;
   for (const employee of pending) {
     let days = 0n;
     let hours = 0n;
@@ -226,7 +228,11 @@ export async function generateSalaries(
     // Kompensatsiya (yo'l, ovqat) soliqqa kirmaydi — qo'lga beriladigan summaga qo'shiladi
     const allowances = allowanceTotals.get(employee.id) ?? 0n;
 
-    const [created] = await tx.insert(salaryPayments).values({
+    // To'lanadigan hech narsasi yo'q xodim (maoshi kiritilmagan, KPI va qo'shimcha to'lovi ham yo'q)
+    // varaqaga tushmaydi — maoshi belgilangach keyingi hisobda paydo bo'ladi
+    if (gross === 0n && allowances === 0n) continue;
+
+    const [row] = await tx.insert(salaryPayments).values({
       companyId,
       employeeId: employee.id,
       month: input.month,
@@ -243,13 +249,14 @@ export async function generateSalaries(
       netSalary: fromMinor(gross - tax + allowances),
       createdBy: tenant.user.id,
     }).returning({ id: salaryPayments.id });
+    created += 1;
 
     // KPI qanday chiqqani saqlanadi — oylik varaqasida "nega shuncha" ko'rinadi
-    if (created && kpi.lines.length > 0) {
+    if (row && kpi.lines.length > 0) {
       await tx.insert(salaryKpiLines).values(
         kpi.lines.map((line) => ({
           companyId,
-          salaryPaymentId: created.id,
+          salaryPaymentId: row.id,
           metric: line.metric,
           metricValue: line.metricValue,
           amount: line.amount,
@@ -263,9 +270,9 @@ export async function generateSalaries(
     action: "SALARY_GENERATED",
     resource: "salary_payments",
     resourceId: companyId,
-    details: { month: input.month, created: pending.length, attendanceBased, taxRate, kpiTotal: fromMinor(kpiTotal) },
+    details: { month: input.month, created, attendanceBased, taxRate, kpiTotal: fromMinor(kpiTotal) },
   });
-  return { created: pending.length, attendanceBased };
+  return { created, attendanceBased };
 }
 
 export async function updateSalary(

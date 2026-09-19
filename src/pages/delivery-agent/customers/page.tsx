@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MapPin, Phone, Search, Users } from "lucide-react";
+import { MapPin, PackageCheck, Phone, Search, Users } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet.tsx";
@@ -9,6 +9,7 @@ import { coordsOf, formatDateTime } from "@/lib/delivery/format.ts";
 import { num, type AgentCustomer, type DeliveryTaskRow } from "@/lib/delivery/types.ts";
 import { mapAppUrl } from "@/lib/maps/index.ts";
 import { useApiQuery } from "@/lib/query.ts";
+import ReturnPickupDialog from "../_components/return-pickup-dialog.tsx";
 import TaskCard from "../_components/task-card.tsx";
 import { useDeliveryAgent } from "../_lib/context.ts";
 
@@ -20,8 +21,11 @@ type CustomerDetail = {
 function CustomerSheet({ customerId, onClose }: { customerId: string; onClose: () => void }) {
   const { t } = useTranslation("delivery");
   const { money } = useDeliveryAgent();
+  const { can } = useDeliveryAgent();
   const detail = useApiQuery<CustomerDetail>(`/api/delivery/agent/customers/${customerId}`).data;
   const customer = detail?.customer;
+  /** Mijozdan ilgari sotilgan tovarni qaytarib olish. */
+  const [returning, setReturning] = useState(false);
   const target = customer ? coordsOf(customer.latitude, customer.longitude) : null;
 
   return (
@@ -65,6 +69,11 @@ function CustomerSheet({ customerId, onClose }: { customerId: string; onClose: (
                 <span className="font-semibold tabular-nums">{money(customer.totalDebt)}</span>
               </div>
             )}
+            {can("delivery.return_pickup") && (
+              <Button variant="secondary" className="h-12 w-full" data-testid="return-pickup-open" onClick={() => setReturning(true)}>
+                <PackageCheck className="mr-2 h-4 w-4" /> {t("return_pickup.title")}
+              </Button>
+            )}
             <p className="text-sm font-semibold">{t("customers.tasks")}</p>
             <div className="space-y-3">
               {detail.tasks.map((task) => (
@@ -74,6 +83,9 @@ function CustomerSheet({ customerId, onClose }: { customerId: string; onClose: (
           </div>
         )}
       </SheetContent>
+      {returning && customer && (
+        <ReturnPickupDialog customerId={customerId} customerName={customer.name} onClose={() => setReturning(false)} />
+      )}
     </Sheet>
   );
 }

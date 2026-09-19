@@ -168,17 +168,21 @@ describe("CSV eksport va import", () => {
   it("marshrutlar: kunlar tekshiriladi, noma'lum agent rad etiladi", async () => {
     const res = await call(owner(), "POST", "/api/distribution/routes/import", {
       rows: [
-        { name: "Chorsu", days: "1,3,5", description: "Bozor atrofi" },
-        { name: "Yakkasaroy", days: "9" },
-        { name: "Sergeli", salesRep: "Yo'q agent" },
+        { name: "Chorsu", territory: "Toshkent", days: "1,3,5", description: "Bozor atrofi" },
+        { name: "Yakkasaroy", territory: "Toshkent", days: "9" },
+        { name: "Sergeli", territory: "Toshkent", salesRep: "Yo'q agent" },
+        // Hududsiz qator o'tmaydi — marshrut hudud tarkibida bo'ladi
+        { name: "Hududsiz", days: "1" },
       ],
     });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toMatchObject({ created: 1 });
-    expect(res.json().errors).toHaveLength(2);
+    expect(res.json().errors).toHaveLength(3);
+    expect((res.json().errors as { message: string }[]).some((row) => row.message.includes("Hudud majburiy"))).toBe(true);
 
     const csv = (await call(owner(), "GET", "/api/distribution/routes/export")).body;
     expect(csv).toContain("Chorsu");
+    expect(csv).toContain("Toshkent");
     expect(csv).toContain("1 3 5");
   });
 });

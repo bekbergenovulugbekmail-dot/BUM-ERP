@@ -14,7 +14,7 @@
  */
 import { and, asc, desc, eq, getTableColumns, gte, isNotNull, lte, notExists, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
-import { distributionRoutes, routeAssignments, routeCustomers, routeVisits, salesReps } from "../../db/schema/crm.js";
+import { distributionRoutes, routeAssignments, routeCustomers, routeVisits, salesReps, territories } from "../../db/schema/crm.js";
 import { customers } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
@@ -23,6 +23,7 @@ import type { TenantContext } from "../company/tenant.js";
 import { assertCustomer } from "../crm/leads.service.js";
 import { planRoute, type RoutePlan } from "../routing/routing.service.js";
 import { assertSalesRep, distributionAudit } from "./sales-reps.service.js";
+import { assertTerritory } from "./territories.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...routeFields } = getTableColumns(distributionRoutes);
 const { legacyId: _l2, companyId: _c2, ...routeCustomerFields } = getTableColumns(routeCustomers);
@@ -39,6 +40,8 @@ const VISIT_TRANSITIONS: Record<VisitStatus, VisitStatus[]> = {
 
 export type RouteInput = {
   name: string;
+  /** Marshrut qaysi hudud tarkibida (ilova va import majburiy qiladi; eski marshrutlarda bo'sh). */
+  territoryId?: string | null;
   salesRepId?: string | null;
   description?: string | null;
   days: number[];
@@ -63,24 +66,27 @@ export async function listRoutes(conn: DbOrTx, tenant: TenantContext, includeIna
     .select({
       ...routeFields,
       salesRepName: salesReps.name,
+      territoryName: territories.name,
       customerCount: sql<number>`(select count(*)::int from ${routeCustomers} where ${routeCustomers.routeId} = ${distributionRoutes.id})`,
     })
     .from(distributionRoutes)
     .leftJoin(salesReps, eq(salesReps.id, distributionRoutes.salesRepId))
+    .leftJoin(territories, eq(territories.id, distributionRoutes.territoryId))
     .where(
       and(
         eq(distributionRoutes.companyId, tenant.company.id),
         includeInactive ? undefined : eq(distributionRoutes.isActive, true),
       ),
     )
-    .orderBy(asc(distributionRoutes.name));
+    .orderBy(asc(territories.name), asc(distributionRoutes.name));
 }
 
 export async function getRoute(conn: DbOrTx, tenant: TenantContext, routeId: string) {
   const [route] = await conn
-    .select({ ...routeFields, salesRepName: salesReps.name })
+    .select({ ...routeFields, salesRepName: salesReps.name, territoryName: territories.name })
     .from(distributionRoutes)
     .leftJoin(salesReps, eq(salesReps.id, distributionRoutes.salesRepId))
+    .leftJoin(territories, eq(territories.id, distributionRoutes.territoryId))
     .where(and(eq(distributionRoutes.id, routeId), eq(distributionRoutes.companyId, tenant.company.id)))
     .limit(1);
   if (!route) throw notFound("Marshrut topilmadi");
@@ -107,6 +113,8 @@ export async function getRoute(conn: DbOrTx, tenant: TenantContext, routeId: str
 export async function createRoute(tx: Tx, tenant: TenantContext, input: RouteInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
   if (input.salesRepId) await assertSalesRep(tx, companyId, input.salesRepId);
+  // Marshrut hudud tarkibida bo'ladi — hudud ko'rsatilgan bo'lsa shu kompaniyaniki ekani tekshiriladi
+  if (input.territoryId) await assertTerritory(tx, companyId, input.territoryId);
 
   const [route] = await tx
     .insert(distributionRoutes)
@@ -130,6 +138,7 @@ export async function updateRoute(
 ) {
   await lockRoute(tx, tenant, routeId);
   if (patch.salesRepId) await assertSalesRep(tx, tenant.company.id, patch.salesRepId);
+  if (patch.territoryId) await assertTerritory(tx, tenant.company.id, patch.territoryId);
 
   const [route] = await tx
     .update(distributionRoutes)

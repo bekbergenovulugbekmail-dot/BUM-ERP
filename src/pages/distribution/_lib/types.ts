@@ -28,9 +28,20 @@ export type SalesRepStats = SalesRep & {
   visitSalesThisMonth: string;
 };
 
+/** Hudud (Urganch, Xiva ...) — marshrutlar shu hudud tarkibida. */
+export type Territory = {
+  id: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  routeCount: number;
+};
+
 export type DistributionRoute = {
   id: string;
   name: string;
+  territoryId: string | null;
+  territoryName: string | null;
   salesRepId: string | null;
   description: string | null;
   /** 0 = yakshanba … 6 = shanba (API qoidasi). */

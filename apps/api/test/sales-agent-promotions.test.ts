@@ -206,10 +206,10 @@ describe("Aksiyalar", () => {
     expect(sent.json().order.promotions).toHaveLength(2);
     expect(await actionCount("PROMOTION_APPLIED")).toBe(2);
 
-    // 95 + 9 bepul = 104 > 100
-    const big = (await save([{ productId: cola, pieces: "95" }])).json().order;
-    expect(big.items.find((item: { unitPrice: string }) => item.unitPrice === "0.0000").quantity).toBe("9.0000");
-    expect((await submit(big.id)).json().details).toMatchObject({ reason: "out_of_stock", productId: cola, available: "100.0000" });
+    // 95 + 9 bepul = 104 > 100 — qoralamaning o'zida rad etiladi (bepul miqdor ham qoldiqdan olinadi)
+    const big = await save([{ productId: cola, pieces: "95" }]);
+    expect(big.statusCode).toBe(400);
+    expect(big.json().details).toMatchObject({ reason: "out_of_stock", productId: cola });
 
     const off = await call(supervisor.cookie, "PATCH", `/api/sales-agent/supervisor/promotions/${bxgyId}`, { isActive: false });
     expect(off.json().promotion.isActive).toBe(false);

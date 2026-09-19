@@ -28,7 +28,13 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 type NumericField = keyof typeof DELIVERY_POLICY_LIMITS;
 type AutoNumericField = keyof typeof DELIVERY_AUTO_ASSIGN_LIMITS;
 type Options = Omit<DeliveryPolicy, NumericField>;
-type SwitchField = "deliveryRequiredByDefault" | "collectOnDelivery" | "requireCustomerLocation" | "offlineActionsAllowed" | "geofenceAlerts";
+type SwitchField =
+  | "deliveryRequiredByDefault"
+  | "collectOnDelivery"
+  | "requireCustomerLocation"
+  | "offlineActionsAllowed"
+  | "geofenceAlerts"
+  | "returnPickupApproval";
 type AutoSwitchField = "enabled" | "onCreate" | "respectSchedule" | "requireOnDuty" | "respectCapacity" | "respectBranch";
 type Recipient = { userId: string; name: string; role: string };
 
@@ -194,7 +200,9 @@ function PolicyForm({ initial }: { initial: DeliveryPolicy }) {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {switchRow("deliveryRequiredByDefault")}
           {switchRow("collectOnDelivery")}
+          {switchRow("returnPickupApproval")}
         </div>
+        <p className="text-[11px] text-muted-foreground">{t("policy.hint.returnPickupApproval")}</p>
         <div className="space-y-2">
           <Label>{t("policy.collectionMethods")}</Label>
           <div className="flex flex-wrap gap-3">

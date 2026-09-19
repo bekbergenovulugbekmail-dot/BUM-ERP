@@ -88,6 +88,13 @@ import { recipientCandidates } from "../sales-agent/policy.service.js";
 import { agentCashSummary, handoverAgentCash } from "./agent-cash.service.js";
 import { notifyCustomerPaymentReceived } from "../telegram/notify.service.js";
 import { requireDeliveryAgent, type DeliveryAgentContext } from "./agent-context.js";
+import {
+  acceptReturnPickup,
+  createReturnPickup,
+  customerPurchases,
+  listReturnPickups,
+  rejectReturnPickup,
+} from "./return-pickup.service.js";
 import { applyAutoAssign, planAutoAssign } from "./auto-assign.service.js";
 import { DISPATCH_ASSIGN_MAX, assignDispatch, dispatchBoard } from "./dispatch.service.js";
 import { planAgentDay, tasksInOrder } from "./route-plan.service.js";
@@ -274,6 +281,29 @@ const agentTasksQuery = z
   .object({ scope: z.enum(["today", "upcoming", "history"]).default("today"), lat: z.coerce.number().min(-90).max(90).optional(), lng: z.coerce.number().min(-180).max(180).optional() })
   .refine((query) => (query.lat === undefined) === (query.lng === undefined), { message: "lat va lng birga beriladi" });
 const agentCustomersQuery = z.object({ search: z.string().trim().min(1).max(100).optional() });
+
+/** Dostavchi mijozdan qaytarib olgan tovar. */
+const pickupParams = z.object({ pickupId: z.uuid() });
+const pickupBody = z.strictObject({
+  customerId: z.uuid(),
+  orderId: z.uuid(),
+  items: z
+    .array(z.strictObject({ orderItemId: z.uuid(), quantity: qtySchema }))
+    .min(1)
+    .max(200),
+  reason: optionalText(500),
+  refundMethod: z.enum(["cash", "card", "bank", "balance"]).default("balance"),
+  taskId: z.uuid().nullable().optional(),
+});
+const pickupAcceptBody = z.strictObject({
+  refundMethod: z.enum(["cash", "card", "bank", "balance"]).optional(),
+  note: optionalText(500),
+});
+const pickupRejectBody = z.strictObject({ note: z.string().trim().min(3).max(500) });
+const pickupQuery = z.object({
+  status: z.enum(["pending", "accepted", "rejected"]).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
 
 const acceptBody = z.strictObject(actionFields);
 const startBody = z.strictObject({ ...actionFields, ...optionalPlaceFields }).refine(pairedPlace, pairMessage);
@@ -583,6 +613,30 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
       return returnDeliveryGoods(tx, tenant, taskId, body, requestMeta(req));
     });
     return managerTask(req, taskId);
+  });
+
+  // ─── Dostavchi qaytarib olgan tovar (supervayzer) ──────────────────────────
+
+  app.get("/returns/pickups", async (req) => {
+    const query = pickupQuery.parse(req.query);
+    const tenant = await readTenantWith(req, "delivery.view");
+    return listReturnPickups(db, tenant.company.id, query);
+  });
+
+  app.post("/returns/pickups/:pickupId/accept", async (req) => {
+    const { pickupId } = pickupParams.parse(req.params);
+    const body = pickupAcceptBody.parse(req.body);
+    return writeTenantWith(req, "delivery.return", async (tx, tenant) => {
+      // Balansdan boshqa usulda pul qaytarish — kassa/bank chiqimi: savdo qaytarish ruxsati ham kerak
+      if (body.refundMethod && body.refundMethod !== "balance") await requirePermission(tx, tenant, "sales.refund");
+      return acceptReturnPickup(tx, tenant, pickupId, body, requestMeta(req));
+    });
+  });
+
+  app.post("/returns/pickups/:pickupId/reject", async (req) => {
+    const { pickupId } = pickupParams.parse(req.params);
+    const body = pickupRejectBody.parse(req.body);
+    return writeTenantWith(req, "delivery.return", (tx, tenant) => rejectReturnPickup(tx, tenant, pickupId, body, requestMeta(req)));
   });
 
   app.post("/tasks/:taskId/payment-review", async (req) => {
@@ -986,6 +1040,29 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Dostavshik to'lov oynasi: siyosatda ruxsat etilgan usullar va faol karta terminallari (bank hisobi ma'lumotisiz)
+  app.get("/agent/customers/:customerId/purchases", async (req) => {
+    const { customerId } = customerParams.parse(req.params);
+    const { context } = await readAgent(req);
+    return customerPurchases(db, context, customerId);
+  });
+
+  app.get("/agent/returns", async (req) => {
+    const query = pickupQuery.parse(req.query);
+    const { context } = await readAgent(req);
+    return listReturnPickups(db, context.company.id, { ...query, agentId: context.deliveryAgent.id });
+  });
+
+  app.post("/agent/returns", async (req, reply) => {
+    const body = pickupBody.parse(req.body);
+    const result = await writeAgent(req, "delivery.return_pickup", async (tx, context) => {
+      // Tasdiqsiz rejimda dostavchi pulni darhol qaytaradi — balansdan boshqasi uchun savdo qaytarish ruxsati
+      if (body.refundMethod !== "balance") await requirePermission(tx, context, "sales.refund");
+      return createReturnPickup(tx, context, body, requestMeta(req));
+    });
+    reply.status(201);
+    return result;
+  });
+
   app.get("/agent/payment-options", async (req) => {
     const { context } = await readAgent(req);
     const policy = await getDeliveryPolicy(db, context.company.id);

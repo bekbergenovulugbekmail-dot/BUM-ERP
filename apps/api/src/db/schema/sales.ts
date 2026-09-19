@@ -245,6 +245,12 @@ export const salesOrders = pgTable(
     totalAmount: money("total_amount").notNull().default("0"),
     paidAmount: money("paid_amount").notNull().default("0"),
 
+    /**
+     * Tasdiqlangan buyurtma omborda tovarni BAND qilgan (`stock_levels.reserved_qty`).
+     * Jo'natilganda yoki bekor qilinganda bo'shatiladi.
+     */
+    stockReserved: boolean("stock_reserved").notNull().default(false),
+
     isPos: boolean("is_pos").notNull().default(false),
     posShiftId: uuid("pos_shift_id").references(() => posShifts.id, { onDelete: "set null" }),
     /** Desktop kassa qurilmasi (offline chek); `created_at` — chek qurilmada yopilgan vaqt. */

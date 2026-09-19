@@ -2,6 +2,10 @@
  * Sozlamalar → Modullar (`GET /api/company/modules`, `PUT /api/company/modules/:key` — `modules.manage`).
  * Modul o'chirilsa ma'lumot o'chirilmaydi: menyu yashiriladi va API yopiladi, qayta yoqilganda hammasi avvalgidek.
  * Bog'liqliklar serverda tekshiriladi (masalan, Dostavka — Savdoga, Savdo — Mahsulot va Omborga bog'liq).
+ *
+ * Ro'yxatda FAQAT yoqilgan modullar turadi — o'chirilganlari kompaniya uchun yo'q hisoblanadi (ularni
+ * kompaniyaning o'zi yoqa olmaydi, bu platforma administratori qarori). Nechtasi ochilishi mumkinligi
+ * pastda bitta qatorda eslatiladi.
  */
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -68,8 +72,11 @@ export default function ModulesSection() {
     { invalidate: ["/api/company"] },
   );
 
-  const modules = query.data?.modules;
-  const enabledKeys = new Set(modules?.filter((module) => module.enabled).map((module) => module.key));
+  const allModules = query.data?.modules;
+  const enabledKeys = new Set(allModules?.filter((module) => module.enabled).map((module) => module.key));
+  // O'chirilgan modul ro'yxatda turmaydi — faqat nechtasi ochilishi mumkinligi eslatiladi
+  const modules = allModules?.filter((module) => module.enabled);
+  const disabledCount = (allModules?.length ?? 0) - (modules?.length ?? 0);
 
   const toggle = async (module: CompanyModuleRow) => {
     try {
@@ -98,43 +105,27 @@ export default function ModulesSection() {
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3">
           {modules.map((module) => {
             const Icon = ICON_MAP[module.icon] ?? Package;
-            const missing = module.dependsOn.filter((key) => !enabledKeys.has(key));
+            // Ro'yxatda faqat yoqilganlari — o'chirish uchun unga bog'liq modullar avval o'chiriladi
             const activeDependents = module.dependents.filter((key) => enabledKeys.has(key));
-            // Server ham rad etadi — tugma oldindan bloklanadi va sababi ko'rsatiladi
-            const blockedReason = module.enabled
-              ? activeDependents.length > 0 ? `Avval o'chiring: ${activeDependents.map(nameOf).join(", ")}` : null
-              : missing.length > 0 ? `Avval yoqing: ${missing.map(nameOf).join(", ")}` : null;
+            const blockedReason = activeDependents.length > 0 ? `Avval o'chiring: ${activeDependents.map(nameOf).join(", ")}` : null;
             return (
-              <div
-                key={module.key}
-                className={cn(
-                  "flex flex-col gap-2 rounded-xl border px-4 py-3 transition-colors",
-                  module.enabled ? "border-border bg-card" : "border-dashed border-border bg-muted/30",
-                )}
-              >
+              <div key={module.key} className="flex flex-col gap-2 rounded-xl border border-border bg-card px-4 py-3 transition-colors">
                 <div className="flex items-start gap-3">
-                  <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", module.enabled ? "bg-primary/10" : "bg-muted")}>
-                    <Icon className={cn("h-4 w-4", module.enabled ? "text-primary" : "text-muted-foreground")} />
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                    <Icon className="h-4 w-4 text-primary" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium">{module.name}</p>
-                      <span
-                        className={cn(
-                          "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
-                          module.enabled
-                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                            : "bg-muted text-muted-foreground",
-                        )}
-                      >
-                        {module.enabled ? "Yoqilgan" : "O'chirilgan"}
+                      <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                        Yoqilgan
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground">{module.description}</p>
                   </div>
                   <Switch
-                    aria-label={`${module.name} modulini ${module.enabled ? "o'chirish" : "yoqish"}`}
-                    checked={module.enabled}
+                    aria-label={`${module.name} modulini o'chirish`}
+                    checked
                     disabled={!canManage || save.isPending || blockedReason !== null}
                     onCheckedChange={() => void toggle(module)}
                     className="cursor-pointer"
@@ -152,6 +143,12 @@ export default function ModulesSection() {
             );
           })}
         </div>
+      )}
+
+      {disabledCount > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Yana {disabledCount} ta modulni ulash mumkin — kerak bo'lsa platforma administratoriga murojaat qiling.
+        </p>
       )}
 
       <div className="flex items-start gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">

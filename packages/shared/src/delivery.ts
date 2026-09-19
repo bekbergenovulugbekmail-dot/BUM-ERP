@@ -228,6 +228,12 @@ export type DeliveryPolicy = {
   offlineMaxAgeHours: number;
   /** Geofence buzilishida supervayzerga bildirishnoma. */
   geofenceAlerts: boolean;
+  /**
+   * Dostavchi mijozdan qaytarib olgan tovar QACHON hisobga tushadi:
+   *  - `true` (standart) — supervayzer/omborchi tovarni qabul qilganda (tovar mashinada turganda qoldiq oshmaydi);
+   *  - `false` — dostavchi tasdiqlashi bilan darhol (qoldiq qaytadi, qarz kamayadi).
+   */
+  returnPickupApproval: boolean;
   notificationRecipients: DeliveryNotificationRecipients;
   autoAssign: DeliveryAutoAssignPolicy;
 };
@@ -264,6 +270,7 @@ export const DEFAULT_DELIVERY_POLICY: DeliveryPolicy = {
   offlineActionsAllowed: true,
   offlineMaxAgeHours: 24,
   geofenceAlerts: true,
+  returnPickupApproval: true,
   notificationRecipients: { failed: [], mismatch: [], geofence: [] },
   autoAssign: {
     enabled: false,

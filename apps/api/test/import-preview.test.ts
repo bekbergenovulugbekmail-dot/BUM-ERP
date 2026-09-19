@@ -146,9 +146,11 @@ describe("Dublikat nazorati (CREATE ONLY)", () => {
   });
 
   it("marshrut — nom bo'yicha", async () => {
-    expect((await post("/api/distribution/routes/import", { rows: [{ name: "Chorsu", days: "1,3" }] })).json()).toMatchObject({ created: 1 });
+    expect(
+      (await post("/api/distribution/routes/import", { rows: [{ name: "Chorsu", territory: "Toshkent", days: "1,3" }] })).json(),
+    ).toMatchObject({ created: 1 });
 
-    const again = await post("/api/distribution/routes/import", { rows: [{ name: " chorsu " }] });
+    const again = await post("/api/distribution/routes/import", { rows: [{ name: " chorsu ", territory: "Toshkent" }] });
     expect(again.json()).toMatchObject({ created: 0 });
     expect(again.json().duplicates).toHaveLength(1);
     expect(await countOf(distributionRoutes)).toBe(1);

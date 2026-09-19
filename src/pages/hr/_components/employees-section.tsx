@@ -109,11 +109,14 @@ export default function EmployeesSection() {
   const roles = useApiQuery<{ roles: RoleOption[] }>(canSoftware ? "/api/company/roles" : null).data?.roles;
   const assignableRoles = (roles ?? []).filter((role) => role.isActive && !FULL_ACCESS.has(role.name));
 
-  const updateEmployee = useApiMutation(({ id, ...body }: EmployeeBody & { id: string; status: EmployeeStatus }) =>
-    api.patch(`/api/hr/employees/${id}`, body),
+  // Ro'yxat o'zgarishdan keyin darhol yangilanadi
+  const HR_INVALIDATE = { invalidate: ["/api/hr", "/api/company"] };
+  const updateEmployee = useApiMutation(
+    ({ id, ...body }: EmployeeBody & { id: string; status: EmployeeStatus }) => api.patch(`/api/hr/employees/${id}`, body),
+    HR_INVALIDATE,
   );
-  const deleteEmployee = useApiMutation((id: string) => api.delete(`/api/hr/employees/${id}`));
-  const disableAccess = useApiMutation((id: string) => api.delete(`/api/hr/employees/${id}/software-access`));
+  const deleteEmployee = useApiMutation((id: string) => api.delete(`/api/hr/employees/${id}`), HR_INVALIDATE);
+  const disableAccess = useApiMutation((id: string) => api.delete(`/api/hr/employees/${id}/software-access`), HR_INVALIDATE);
 
   const [localEditForm, setLocalEditForm] = useState<FormState>(emptyForm);
 

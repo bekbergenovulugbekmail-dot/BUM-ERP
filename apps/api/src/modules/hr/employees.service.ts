@@ -314,34 +314,66 @@ async function resolveReferences(
 
 /**
  * Har qanday rolda ochilgan login uchun HR kartochkasi — xodim ro'yxatda ko'rinib tursin.
- * Bo'lim "Asosiy", lavozim esa rol nomi bilan ochiladi (bo'lmasa yaratiladi).
+ *
+ * Bo'lim va lavozim tanlangan bo'lsa o'shalar olinadi (lavozim tanlansa — bo'lim o'zidan aniqlanadi);
+ * tanlanmagan bo'lsa "Asosiy" bo'limi va rol nomidagi lavozim ochiladi.
  */
 export async function createHrCard(
   tx: Tx,
   tenant: TenantContext,
-  input: { name: string; phone: string | null; userId: string | null; role: string; hireDate?: string },
+  input: {
+    name: string;
+    phone: string | null;
+    userId: string | null;
+    role: string;
+    hireDate?: string;
+    departmentId?: string | null;
+    positionId?: string | null;
+  },
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
-  let [department] = await tx
-    .select({ id: departments.id })
-    .from(departments)
-    .where(and(eq(departments.companyId, companyId), eq(departments.code, "ASOSIY")))
-    .limit(1);
-  if (!department) {
-    [department] = await tx.insert(departments).values({ companyId, code: "ASOSIY", name: "Asosiy" }).returning({ id: departments.id });
+
+  // Tanlangan lavozim — o'z bo'limi bilan (begona kompaniyaniki bo'lsa rad etiladi)
+  let departmentId = input.departmentId ?? null;
+  let positionId = input.positionId ?? null;
+  if (positionId) {
+    const [chosen] = await tx
+      .select({ id: positions.id, departmentId: positions.departmentId })
+      .from(positions)
+      .where(and(eq(positions.companyId, companyId), eq(positions.id, positionId)))
+      .limit(1);
+    if (!chosen) throw notFound("Lavozim topilmadi");
+    departmentId = chosen.departmentId;
   }
-  let [position] = await tx
-    .select({ id: positions.id })
-    .from(positions)
-    .where(and(eq(positions.companyId, companyId), eq(positions.departmentId, department!.id), eq(positions.name, input.role)))
-    .limit(1);
-  if (!position) {
-    [position] = await tx
-      .insert(positions)
-      .values({ companyId, departmentId: department!.id, name: input.role })
-      .returning({ id: positions.id });
+
+  if (!departmentId) {
+    let [department] = await tx
+      .select({ id: departments.id })
+      .from(departments)
+      .where(and(eq(departments.companyId, companyId), eq(departments.code, "ASOSIY")))
+      .limit(1);
+    if (!department) {
+      [department] = await tx.insert(departments).values({ companyId, code: "ASOSIY", name: "Asosiy" }).returning({ id: departments.id });
+    }
+    departmentId = department!.id;
   }
+
+  if (!positionId) {
+    let [position] = await tx
+      .select({ id: positions.id })
+      .from(positions)
+      .where(and(eq(positions.companyId, companyId), eq(positions.departmentId, departmentId), eq(positions.name, input.role)))
+      .limit(1);
+    if (!position) {
+      [position] = await tx
+        .insert(positions)
+        .values({ companyId, departmentId, name: input.role })
+        .returning({ id: positions.id });
+    }
+    positionId = position!.id;
+  }
+
   return createEmployee(
     tx,
     tenant,
@@ -349,8 +381,8 @@ export async function createHrCard(
       name: input.name,
       phone: input.phone,
       ...(input.userId ? { userId: input.userId } : {}),
-      departmentId: department!.id,
-      positionId: position!.id,
+      departmentId,
+      positionId,
       hireDate: input.hireDate ?? new Date().toISOString().slice(0, 10),
       baseSalary: "0",
       salaryType: "monthly",

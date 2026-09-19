@@ -174,8 +174,8 @@ describe("QABUL: import (CSV qatorlari)", () => {
   it("marshrutlar va xarajatlar: noto'g'ri qator sababi bilan, to'g'risi yoziladi", async () => {
     const routes = await call(owner(), "POST", "/api/distribution/routes/import", {
       rows: [
-        { name: "Sergeli", days: "1,3,5" },
-        { name: "Xato kun", days: "9" },
+        { name: "Sergeli", territory: "Toshkent", days: "1,3,5" },
+        { name: "Xato kun", territory: "Toshkent", days: "9" },
       ],
     });
     expect(routes.statusCode, routes.body).toBe(200);

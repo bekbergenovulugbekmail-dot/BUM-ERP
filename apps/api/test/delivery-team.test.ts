@@ -52,6 +52,9 @@ beforeEach(async () => {
 const role = (name: string) => DEFAULT_ROLES.find((r) => r.name === name)!.permissions as string[];
 const DELIVERY_PERMISSIONS = Object.keys(PERMISSIONS).filter((p) => p.startsWith("delivery."));
 
+/** 0042 migratsiyasidan keyin katalogga qo'shilgan dostavka ruxsatlari (alohida migratsiya bilan tarqaladi). */
+const AFTER_0042: string[] = ["delivery.return_pickup"];
+
 describe("Dostavka agenti: rol, xodimdan yaratish, kirish", () => {
   it("DELIVERY_AGENT roli faqat agent amallari; lokatsiya faqat nazorat rollarida; sxema enumlari shared bilan bir xil", () => {
     expect(role("Dostavka agenti")).toEqual([
@@ -62,8 +65,9 @@ describe("Dostavka agenti: rol, xodimdan yaratish, kirish", () => {
       "delivery.fail",
       "delivery.collect_payment",
       "delivery.view_debt",
+      "delivery.return_pickup",
     ]);
-    expect(DELIVERY_PERMISSIONS).toHaveLength(15);
+    expect(DELIVERY_PERMISSIONS).toHaveLength(16);
     expect(role("Direktor")).toEqual(expect.arrayContaining(DELIVERY_PERMISSIONS));
     expect(role("Supervayzer")).toEqual(
       expect.arrayContaining([
@@ -211,7 +215,9 @@ describe("Dostavka agenti: rol, xodimdan yaratish, kirish", () => {
     const rows = await db.select().from(roles).where(eq(roles.companyId, company.companyId));
     const byName = new Map(rows.map((r) => [r.name, r]));
     for (const name of [...touched, "Dostavka agenti"]) {
-      expect([...byName.get(name)!.permissions].sort(), name).toEqual([...role(name)].sort());
+      // 0042 dan KEYIN qo'shilgan ruxsatlar o'z migratsiyasi bilan keladi (0068 — qaytarib olish)
+      const expected = role(name).filter((permission) => !AFTER_0042.includes(permission));
+      expect([...byName.get(name)!.permissions].sort(), name).toEqual([...expected].sort());
     }
     expect(byName.get("Dostavka agenti")).toMatchObject({ isSystem: true });
   });

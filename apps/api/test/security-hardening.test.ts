@@ -58,7 +58,17 @@ const memberActive = async (userId: string) =>
     .isActive;
 const userActive = async (userId: string) => (await db.select({ isActive: users.isActive }).from(users).where(eq(users.id, userId)))[0]!.isActive;
 
+/**
+ * Xodimning HR kartochkasi: login ochilganda u avtomatik yaratiladi, shuning uchun avval mavjudi
+ * qidiriladi (ega kabi kartochkasi yo'qlar uchun yangisi ochiladi).
+ */
 async function hrEmployee(cookie: string, userId: string, name = "Xodim") {
+  const list = await call(cookie, "GET", "/api/hr/employees");
+  const found = (list.json().employees as { id: string; userId: string | null }[]).find((row) => row.userId === userId);
+  if (found) {
+    await call(cookie, "PATCH", `/api/hr/employees/${found.id}`, { baseSalary: "1000000", salaryType: "monthly" });
+    return found.id;
+  }
   const res = await call(cookie, "POST", "/api/hr/employees", { name, hireDate: today, baseSalary: "1000000", salaryType: "monthly", userId });
   expect(res.statusCode, res.body).toBe(201);
   return res.json().employee.id as string;

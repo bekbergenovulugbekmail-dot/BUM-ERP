@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_SALES_AGENT_POLICY } from "@bum/shared";
 import { closeDb, db } from "../src/db/client.js";
 import { unitConversions, units } from "../src/db/schema/catalog.js";
-import { warehouses } from "../src/db/schema/inventory.js";
+import { stockLevels, warehouses } from "../src/db/schema/inventory.js";
 import { notifications } from "../src/db/schema/notifications.js";
 import { auditLogs } from "../src/db/schema/platform.js";
 import { salesOrders } from "../src/db/schema/sales.js";
@@ -170,13 +170,13 @@ describe("Agent buyurtmalari", () => {
     const megaOrder = (await save({ customerId: mega, items: [{ productId, pieces: "1" }] }, randomUUID())).json().order;
     expect((await submit(megaOrder.id)).json().details).toEqual({ reason: "store_location_missing" });
 
-    // Qoldiq: 20 blok = 200 dona > 100
-    const big = (await save({ items: [{ productId, boxes: "20" }] }, randomUUID())).json().order;
-    const short = await submit(big.id);
-    expect(short.statusCode).toBe(400);
-    expect(short.json().details).toMatchObject({ reason: "out_of_stock", productId });
+    // Qoldiq: 20 blok = 200 dona > 100 — qoralamaning o'zida rad etiladi (agent darhol biladi)
+    const big = await save({ items: [{ productId, boxes: "20" }] }, randomUUID());
+    expect(big.statusCode).toBe(400);
+    expect(big.json().details).toMatchObject({ reason: "out_of_stock", productId });
 
-    const cancelled = await call(ali.cookie, "POST", `/api/sales-agent/orders/${big.id}/cancel`, {});
+    const extra = (await save({ items: [{ productId, pieces: "1" }] }, randomUUID())).json().order;
+    const cancelled = await call(ali.cookie, "POST", `/api/sales-agent/orders/${extra.id}/cancel`, {});
     expect(cancelled.json().order.status).toBe("cancelled");
     expect(await actionCount("ORDER_CANCEL")).toBe(1);
     expect((await call(ali.cookie, "POST", `/api/sales-agent/orders/${order.id}/cancel`, {})).statusCode).toBe(409);
@@ -189,6 +189,47 @@ describe("Agent buyurtmalari", () => {
     expect((await submit(megaOrder.id, near, 15, vali.cookie)).statusCode).toBe(404);
     const kassir = await addEmployee(app, company, "Kassir");
     expect((await call(kassir.cookie, "GET", "/api/sales-agent/catalog")).statusCode).toBe(403);
+  });
+
+  it("bir agent olgan zakaz omborda band qilinadi — ikkinchi agent qolganidan ortig'ini ololmaydi", async () => {
+    // Omborda 100 dona; Bekzod 80 dona zakaz oladi, Mansurga 20 dona qoladi
+    const bekzod = await agent("Bekzod");
+    const mansur = await agent("Mansur");
+    const baraka = await store({ name: "Baraka", ...shop, creditLimit: "100000000" });
+    const mega = await store({ name: "Mega", ...shop, creditLimit: "100000000" });
+    await route(bekzod.repId, [baraka]);
+    await route(mansur.repId, [mega]);
+
+    const draft = (cookie: string, customerId: string, pieces: string, id = randomUUID()) =>
+      call(cookie, "PUT", `/api/sales-agent/orders/drafts/${id}`, {
+        customerId,
+        paymentType: "cash",
+        items: [{ productId, pieces }],
+      });
+    const submit = (cookie: string, id: string) =>
+      call(cookie, "POST", `/api/sales-agent/orders/${id}/submit`, { ...near, accuracy: 15, recordedAt: iso() });
+
+    const first = (await draft(bekzod.cookie, baraka, "80")).json().order;
+    expect((await submit(bekzod.cookie, first.id)).json().order.status).toBe("confirmed");
+
+    // Tovar hali omborda, lekin 80 donasi band
+    const [level] = await db
+      .select({ quantity: stockLevels.quantity, reservedQty: stockLevels.reservedQty })
+      .from(stockLevels)
+      .where(eq(stockLevels.productId, productId));
+    expect(level).toMatchObject({ quantity: "100.0000", reservedQty: "80.0000" });
+
+    // Mansur 30 dona ololmaydi — bo'sh qoldiq 20 ta
+    const tooMuch = await draft(mansur.cookie, mega, "30");
+    expect(tooMuch.statusCode, tooMuch.body).toBe(400);
+    expect(tooMuch.json().details).toMatchObject({ reason: "out_of_stock", available: "20.0000" });
+
+    // 20 dona — o'tadi
+    const second = (await draft(mansur.cookie, mega, "20")).json().order;
+    expect((await submit(mansur.cookie, second.id)).json().order.status).toBe("confirmed");
+    expect(
+      (await db.select({ reservedQty: stockLevels.reservedQty }).from(stockLevels).where(eq(stockLevels.productId, productId)))[0]!.reservedQty,
+    ).toBe("100.0000");
   });
 
   it("nasiya muddati, kredit limiti (rad va tasdiq), yetkazish kuni siyosati, tashrif natijasi", async () => {

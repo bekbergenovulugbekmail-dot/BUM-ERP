@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, Route, Users, Calendar, ChevronDown, ChevronUp, Trash2, UserPlus, Sparkles, MapPinOff } from "lucide-react";
+import { Plus, Route, Users, Calendar, ChevronDown, ChevronUp, Trash2, UserPlus, Sparkles, MapPin, MapPinOff } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -18,6 +18,7 @@ import {
   type RouteDetail,
   type RouteVisit,
   type SalesRep,
+  type Territory,
   type VisitStatus,
 } from "../_lib/types.ts";
 
@@ -38,9 +39,20 @@ const STATUS_COLORS: Record<VisitStatus, string> = {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+/** Marshrutlarni hudud bo'yicha guruhlaydi (hududsiz eski marshrutlar oxirida). */
+function groupByTerritory(routes: DistributionRoute[]): [string, DistributionRoute[]][] {
+  const groups = new Map<string, DistributionRoute[]>();
+  for (const route of routes) {
+    const key = route.territoryName ?? "Hududsiz";
+    groups.set(key, [...(groups.get(key) ?? []), route]);
+  }
+  return [...groups.entries()].sort(([a], [b]) => (a === "Hududsiz" ? 1 : b === "Hududsiz" ? -1 : a.localeCompare(b)));
+}
+
 export default function RoutesSection() {
   const routes = useApiQuery<{ routes: DistributionRoute[] }>("/api/distribution/routes").data?.routes;
   const salesReps = useApiQuery<{ salesReps: SalesRep[] }>("/api/distribution/sales-reps").data?.salesReps;
+  const territories = useApiQuery<{ territories: Territory[] }>("/api/distribution/territories").data?.territories;
   const customers = useApiQuery<{ customers: CustomerOption[] }>("/api/sales/customers", { limit: 500 }).data?.customers;
   const visits = useApiQuery<{ visits: RouteVisit[] }>("/api/distribution/visits", { limit: 20 }).data?.visits;
 
@@ -58,12 +70,14 @@ export default function RoutesSection() {
     api.post<{ plan: { totalMeters: number; stops: unknown[] } }>(`/api/distribution/routes/${id}/optimize`, { apply: true }), { invalidate: ["/api/distribution"] });
 
   const [createOpen, setCreateOpen] = useState(false);
+  /** Hududlar oynasi: marshrut hudud tarkibida bo'ladi, shuning uchun avval hudud ochiladi. */
+  const [territoriesOpen, setTerritoriesOpen] = useState(false);
   const [expandedRoute, setExpandedRoute] = useState<string | null>(null);
   const [addCustOpen, setAddCustOpen] = useState<string | null>(null);
   const [selectedDays, setSelectedDays] = useState<number[]>([]);
   const [visitDialogRoute, setVisitDialogRoute] = useState<string | null>(null);
 
-  const [form, setForm] = useState({ name: "", salesRepId: "", description: "", color: ROUTE_COLORS[0] });
+  const [form, setForm] = useState({ name: "", territoryId: "", salesRepId: "", description: "", color: ROUTE_COLORS[0] });
   const [addCustId, setAddCustId] = useState("");
   const [visitDate, setVisitDate] = useState(today());
   const [visitNotes, setVisitNotes] = useState("");
@@ -85,8 +99,10 @@ export default function RoutesSection() {
 
   const handleCreate = async () => {
     if (!form.name.trim()) { toast.error("Nom kiritilishi shart"); return; }
+    if (!form.territoryId) { toast.error("Avval hududni tanlang — marshrut hudud tarkibida bo'ladi"); return; }
     const ok = await run(() => createRoute.mutateAsync({
       name: form.name,
+      territoryId: form.territoryId,
       salesRepId: form.salesRepId && form.salesRepId !== "none" ? form.salesRepId : null,
       description: form.description || null,
       // UI dushanbadan boshlanadi, API — yakshanbadan
@@ -95,7 +111,7 @@ export default function RoutesSection() {
     }), "Marshrut qo'shildi");
     if (ok) {
       setCreateOpen(false);
-      setForm({ name: "", salesRepId: "", description: "", color: ROUTE_COLORS[0] });
+      setForm({ name: "", territoryId: "", salesRepId: "", description: "", color: ROUTE_COLORS[0] });
       setSelectedDays([]);
     }
   };
@@ -129,7 +145,9 @@ export default function RoutesSection() {
             invalidate={["/api/distribution/routes"]}
             canImport
             columns={[
-              { key: "name", aliases: ["Nomi", "name"], required: true, example: "Urganch markaz" },
+              { key: "name", aliases: ["Nomi", "name"], required: true, example: "Luchevoy" },
+              // Hudud majburiy: marshrut shu hudud tarkibida ochiladi (yo'q bo'lsa hudud yaratiladi)
+              { key: "territory", aliases: ["Hudud", "territory"], required: true, example: "Urganch", shared: true },
               { key: "salesRep", aliases: ["Sotuv agenti", "salesRep"], example: "Bekzod Bekzod", shared: true },
               // 0 - yakshanba, 1 - dushanba ... 6 - shanba; bo'sh joy bilan ajratiladi
               { key: "days", aliases: ["Kunlar (0-6)", "Kunlar", "days"], example: "1 3 5", shared: true },
@@ -137,6 +155,9 @@ export default function RoutesSection() {
               { key: "color", aliases: ["Rang", "color"], example: "#2563eb", shared: true },
             ]}
           />
+          <Button size="sm" variant="secondary" data-testid="territories-open" onClick={() => setTerritoriesOpen(true)}>
+            <MapPin className="h-3.5 w-3.5 mr-1" /> Hududlar
+          </Button>
           <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" /> Marshrut qo'shish
           </Button>
@@ -152,8 +173,14 @@ export default function RoutesSection() {
           <Button size="sm" className="mt-3" onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4 mr-1" /> Yaratish</Button>
         </div>
       ) : (
-        <div className="space-y-3">
-          {routes.map((route) => (
+        <div className="space-y-5">
+          {groupByTerritory(routes).map(([territoryName, list]) => (
+            <div key={territoryName} className="space-y-3">
+              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <MapPin className="h-3.5 w-3.5" /> {territoryName}
+                <span className="font-normal normal-case tabular-nums">· {list.length} ta marshrut</span>
+              </p>
+              {list.map((route) => (
             <div key={route.id} className="bg-card border border-border rounded-2xl overflow-hidden">
               <div
                 className="flex items-center gap-3 p-4 cursor-pointer hover:bg-muted/20"
@@ -237,6 +264,8 @@ export default function RoutesSection() {
                   )}
                 </div>
               )}
+                </div>
+              ))}
             </div>
           ))}
         </div>
@@ -292,6 +321,9 @@ export default function RoutesSection() {
         </div>
       )}
 
+      {/* Hududlar: avval hudud ochiladi, keyin unga marshrut qo'shiladi */}
+      {territoriesOpen && <TerritoriesDialog onClose={() => setTerritoriesOpen(false)} />}
+
       {/* Create Route dialog */}
       {createOpen && (
         <Dialog open onOpenChange={(o) => !o && setCreateOpen(false)}>
@@ -301,6 +333,20 @@ export default function RoutesSection() {
               <div>
                 <Label>Nomi *</Label>
                 <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Shimoliy marshrut" />
+              </div>
+              <div>
+                <Label>Hudud *</Label>
+                <Select value={form.territoryId} onValueChange={(v) => setForm({ ...form, territoryId: v })}>
+                  <SelectTrigger data-testid="route-territory"><SelectValue placeholder="Tanlang" /></SelectTrigger>
+                  <SelectContent>
+                    {(territories ?? []).map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {(territories?.length ?? 0) === 0 && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Hudud yo'q — avval «Hududlar» dan qo'shing (masalan, Urganch).
+                  </p>
+                )}
               </div>
               <div>
                 <Label>Savdo vakili</Label>
@@ -395,5 +441,95 @@ export default function RoutesSection() {
         </Dialog>
       )}
     </div>
+  );
+}
+
+/** Hududlar ro'yxati: qo'shish, nomini o'zgartirish va o'chirish (marshruti borini o'chirib bo'lmaydi). */
+function TerritoriesDialog({ onClose }: { onClose: () => void }) {
+  const query = useApiQuery<{ territories: Territory[] }>("/api/distribution/territories");
+  const create = useApiMutation((body: { name: string }) => api.post("/api/distribution/territories", body), {
+    invalidate: ["/api/distribution"],
+  });
+  const remove = useApiMutation((id: string) => api.delete(`/api/distribution/territories/${id}`), {
+    invalidate: ["/api/distribution"],
+  });
+  const [name, setName] = useState("");
+
+  const add = async () => {
+    const value = name.trim();
+    if (!value) { toast.error("Hudud nomini kiriting"); return; }
+    try {
+      await create.mutateAsync({ name: value });
+      setName("");
+      toast.success("Hudud qo'shildi");
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
+
+  const territories = query.data?.territories;
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent data-testid="territories-dialog">
+        <DialogHeader>
+          <DialogTitle>Hududlar</DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-muted-foreground">
+          Marshrutlar hudud tarkibida bo'ladi. Masalan, «Urganch» hududida «Luchevoy» va «Nadmes bozor» marshrutlari.
+        </p>
+
+        <div className="flex gap-2">
+          <Input
+            value={name}
+            placeholder="Urganch"
+            data-testid="territory-name"
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && void add()}
+          />
+          <Button disabled={create.isPending} onClick={() => void add()}>
+            <Plus className="mr-1 h-4 w-4" /> Qo'shish
+          </Button>
+        </div>
+
+        {!territories ? (
+          <Skeleton className="h-24 rounded-xl" />
+        ) : territories.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">Hudud yo'q — birinchisini qo'shing</p>
+        ) : (
+          <ul className="divide-y divide-border rounded-xl border border-border">
+            {territories.map((territory) => (
+              <li key={territory.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+                <span className="min-w-0 truncate">{territory.name}</span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="text-xs text-muted-foreground tabular-nums">{territory.routeCount} ta marshrut</span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 w-7 p-0 text-destructive"
+                    aria-label={`${territory.name} hududini o'chirish`}
+                    disabled={remove.isPending}
+                    onClick={async () => {
+                      try {
+                        await remove.mutateAsync(territory.id);
+                        toast.success("Hudud o'chirildi");
+                      } catch (error) {
+                        toast.error(errorMessage(error));
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose}>Yopish</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

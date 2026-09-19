@@ -76,6 +76,7 @@ const policyShape = {
   offlineActionsAllowed: z.boolean(),
   offlineMaxAgeHours: bounded("offlineMaxAgeHours"),
   geofenceAlerts: z.boolean(),
+  returnPickupApproval: z.boolean(),
   notificationRecipients: z.strictObject({ failed: recipientList, mismatch: recipientList, geofence: recipientList }),
   autoAssign: z.strictObject(autoAssignShape),
 } satisfies Record<keyof DeliveryPolicy, z.ZodType>;

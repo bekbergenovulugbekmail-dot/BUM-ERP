@@ -57,6 +57,93 @@ describe("Bitta joydan qo'shish", () => {
     expect(members.some((row) => row.phone === "+998901110001" && row.companyRole === "Kassir")).toBe(true);
   });
 
+  it("oddiy xodim Kadrlar ro'yxatida ham ko'rinadi (bo'lim va lavozim bilan)", async () => {
+    const created = await addEmployee({ phone: "+998901110011", password: PASSWORD, name: "Kassir Vali", role: "Kassir", hireDate: "2026-03-02" });
+    expect(created.statusCode, created.body).toBe(201);
+
+    const employees = (await get("/api/hr/employees")).json().employees as {
+      name: string;
+      phone: string | null;
+      departmentName: string | null;
+      positionName: string | null;
+      hireDate: string;
+      userId: string | null;
+    }[];
+    const card = employees.find((row) => row.phone === "+998901110011");
+    expect(card, "yangi xodim Kadrlar ro'yxatida").toBeTruthy();
+    expect(card).toMatchObject({ name: "Kassir Vali", departmentName: "Asosiy", positionName: "Kassir", hireDate: "2026-03-02" });
+    expect(card!.userId, "kartochka loginga bog'langan").toBeTruthy();
+  });
+
+  it("tanlangan bo'lim va lavozim bilan qo'shiladi", async () => {
+    const department = await app.inject({
+      method: "POST",
+      url: "/api/hr/departments",
+      headers: { cookie: company.ownerCookie },
+      payload: { name: "Savdo bo'limi", code: "SAVDO" },
+    });
+    expect(department.statusCode, department.body).toBe(201);
+    const departmentId = department.json().department.id as string;
+
+    const position = await app.inject({
+      method: "POST",
+      url: "/api/hr/positions",
+      headers: { cookie: company.ownerCookie },
+      payload: { name: "Katta sotuvchi", departmentId },
+    });
+    expect(position.statusCode, position.body).toBe(201);
+    const positionId = position.json().position.id as string;
+
+    const created = await addEmployee({
+      phone: "+998901110012",
+      password: PASSWORD,
+      name: "Sotuvchi Guli",
+      role: "Kassir",
+      departmentId,
+      positionId,
+    });
+    expect(created.statusCode, created.body).toBe(201);
+
+    const employees = (await get("/api/hr/employees")).json().employees as {
+      phone: string | null;
+      departmentName: string | null;
+      positionName: string | null;
+    }[];
+    const card = employees.find((row) => row.phone === "+998901110012");
+    expect(card).toMatchObject({ departmentName: "Savdo bo'limi", positionName: "Katta sotuvchi" });
+  });
+
+  it("dasturga kirmaydigan xodim ham tanlangan lavozim bilan tushadi", async () => {
+    const department = await app.inject({
+      method: "POST",
+      url: "/api/hr/departments",
+      headers: { cookie: company.ownerCookie },
+      payload: { name: "Ombor bo'limi", code: "OMB" },
+    });
+    const departmentId = department.json().department.id as string;
+    const position = await app.inject({
+      method: "POST",
+      url: "/api/hr/positions",
+      headers: { cookie: company.ownerCookie },
+      payload: { name: "Yuk tashuvchi", departmentId },
+    });
+    const positionId = position.json().position.id as string;
+
+    const created = await addEmployee({
+      phone: "+998901110013",
+      softwareAccess: false,
+      name: "Yuk tashuvchi Aziz",
+      role: "Xodim",
+      positionId,
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const employees = (await get("/api/hr/employees")).json().employees as { phone: string | null; positionName: string | null; departmentName: string | null }[];
+    expect(employees.find((row) => row.phone === "+998901110013")).toMatchObject({
+      positionName: "Yuk tashuvchi",
+      departmentName: "Ombor bo'limi",
+    });
+  });
+
   it("\"Sotuv agenti\" roli savdo agenti profilini ham yaratadi", async () => {
     const created = await addEmployee({
       phone: "+998901110002",

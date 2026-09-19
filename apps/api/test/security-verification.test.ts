@@ -150,10 +150,12 @@ describe("Obuna va boshqa xodim loginini bloklash", () => {
     expect(await active()).toBe(true);
     expect((await me(app, storekeeper.cookie)).statusCode).toBe(200);
 
-    const hrRecord = await call(a.ownerCookie, "POST", "/api/hr/employees", { name: "Omborchi", hireDate: "2026-01-01", baseSalary: "1000000", salaryType: "monthly", userId: storekeeper.id });
-    expect(hrRecord.statusCode, hrRecord.body).toBe(201);
+    // Login ochilganda HR kartochkasi avtomatik yaratilgan — o'sha ishlatiladi
+    const cards = (await call(a.ownerCookie, "GET", "/api/hr/employees")).json().employees as { id: string; userId: string | null }[];
+    const hrRecordId = cards.find((row) => row.userId === storekeeper.id)!.id;
+    expect(hrRecordId, "omborchining kartochkasi").toBeTruthy();
     const hr = await addEmployee(app, a, "HR menejeri");
-    const removed = await call(hr.cookie, "DELETE", `/api/hr/employees/${hrRecord.json().employee.id}`);
+    const removed = await call(hr.cookie, "DELETE", `/api/hr/employees/${hrRecordId}`);
     expect(removed.statusCode, removed.body).toBe(403);
     expect(await active()).toBe(true);
     expect((await me(app, storekeeper.cookie)).statusCode).toBe(200);

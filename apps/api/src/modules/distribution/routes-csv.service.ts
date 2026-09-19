@@ -5,7 +5,7 @@
  * marshrutga do'konlar keyin "Mijoz qo'shish" orqali biriktiriladi (fayl bilan emas — tartib va geografiya muhim).
  */
 import { and, asc, eq } from "drizzle-orm";
-import { distributionRoutes, salesReps } from "../../db/schema/crm.js";
+import { distributionRoutes, salesReps, territories } from "../../db/schema/crm.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import {
@@ -18,13 +18,15 @@ import {
 } from "../../shared/csv.js";
 import type { TenantContext } from "../company/tenant.js";
 import { createRoute } from "./distribution.service.js";
+import { findOrCreateTerritory } from "./territories.service.js";
 
-const CSV_HEADER = ["Nomi", "Sotuv agenti", "Kunlar (0-6)", "Tavsif", "Rang", "Faol"];
+const CSV_HEADER = ["Nomi", "Hudud", "Sotuv agenti", "Kunlar (0-6)", "Tavsif", "Rang", "Faol"];
 
 export async function exportRoutesCsv(conn: DbOrTx, tenant: TenantContext, options: { includeInactive?: boolean } = {}) {
   const rows = await conn
     .select({
       name: distributionRoutes.name,
+      territoryName: territories.name,
       salesRepName: salesReps.name,
       days: distributionRoutes.days,
       description: distributionRoutes.description,
@@ -33,6 +35,7 @@ export async function exportRoutesCsv(conn: DbOrTx, tenant: TenantContext, optio
     })
     .from(distributionRoutes)
     .leftJoin(salesReps, eq(salesReps.id, distributionRoutes.salesRepId))
+    .leftJoin(territories, eq(territories.id, distributionRoutes.territoryId))
     .where(
       and(
         eq(distributionRoutes.companyId, tenant.company.id),
@@ -46,6 +49,7 @@ export async function exportRoutesCsv(conn: DbOrTx, tenant: TenantContext, optio
     CSV_HEADER,
     rows.map((row) => [
       row.name,
+      row.territoryName,
       row.salesRepName,
       (row.days ?? []).join(" "),
       row.description,
@@ -57,6 +61,8 @@ export async function exportRoutesCsv(conn: DbOrTx, tenant: TenantContext, optio
 
 export type RouteImportRow = {
   name?: string;
+  /** Hudud nomi — marshrut shu hudud tarkibida ochiladi (bo'lmasa hudud yaratiladi). */
+  territory?: string;
   salesRep?: string;
   days?: string;
   description?: string;
@@ -91,6 +97,11 @@ export async function importRoutes(
       .map((row) => [row.name.trim().toLowerCase(), row.id]),
   );
 
+  const knownTerritories = new Set(
+    (await tx.select({ name: territories.name }).from(territories).where(eq(territories.companyId, companyId)))
+      .map((row) => row.name.trim().toLowerCase()),
+  );
+
   // Dublikat kaliti — marshrut nomi (kompaniya ichida)
   const takenNames = new Set(
     (await tx.select({ name: distributionRoutes.name }).from(distributionRoutes).where(eq(distributionRoutes.companyId, companyId)))
@@ -123,6 +134,17 @@ export async function importRoutes(
       continue;
     }
 
+    // Hudud majburiy: marshrut hudud tarkibida bo'ladi (faylda yangi hudud bo'lsa — ochiladi)
+    const territoryName = row.territory?.trim();
+    if (!territoryName) {
+      fail("Hudud majburiy — marshrut hudud tarkibida bo'ladi");
+      continue;
+    }
+    if (territoryName.length > 200) {
+      fail("Hudud nomi juda uzun (200 belgidan ko'p)");
+      continue;
+    }
+
     const repName = row.salesRep?.trim();
     const salesRepId = repName ? repIndex.get(repName.toLowerCase()) : undefined;
     if (repName && !salesRepId) {
@@ -139,12 +161,20 @@ export async function importRoutes(
 
     valid += 1;
     if (nameKey) takenNames.add(nameKey);
-    if (dryRun) continue;
+    if (dryRun) {
+      if (!knownTerritories.has(territoryName.toLowerCase())) {
+        warnings.push({ row: line, key: name, message: `Yangi hudud ochiladi: ${territoryName}` });
+      }
+      continue;
+    }
+    const territoryId = await findOrCreateTerritory(tx, tenant, territoryName, meta);
+    knownTerritories.add(territoryName.toLowerCase());
     await createRoute(
       tx,
       tenant,
       {
         name,
+        territoryId,
         salesRepId: salesRepId ?? null,
         days,
         description: optionalText(row.description, 2000),

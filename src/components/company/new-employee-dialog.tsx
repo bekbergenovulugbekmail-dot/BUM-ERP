@@ -35,6 +35,9 @@ const INVALIDATE = ["/api/company", "/api/subscription", "/api/distribution", "/
 const SALES_AGENT_ROLE = "Sotuv agenti";
 const DELIVERY_AGENT_ROLE = "Dostavka agenti";
 
+type NamedRow = { id: string; name: string };
+type PositionRow = { id: string; name: string; departmentId: string };
+
 const VEHICLES = [
   { value: "car", label: "Yengil avtomobil" },
   { value: "motorcycle", label: "Mototsikl" },
@@ -61,6 +64,9 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }: Props) {
 function NewEmployeeForm({ onClose, onCreated }: Omit<Props, "open">) {
   const roles = useApiQuery<{ roles: CompanyRole[] }>("/api/company/roles").data?.roles;
   const assignable = (roles ?? []).filter((role) => role.isActive && !FULL_ACCESS.has(role.name));
+  // Kadrlar bo'limida ochilgan bo'lim va lavozimlar (ruxsat bo'lmasa — bo'sh, maydonlar ko'rinmaydi)
+  const departments = useApiQuery<{ departments: NamedRow[] }>("/api/hr/departments").data?.departments ?? [];
+  const positions = useApiQuery<{ positions: PositionRow[] }>("/api/hr/positions").data?.positions ?? [];
 
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
@@ -72,6 +78,9 @@ function NewEmployeeForm({ onClose, onCreated }: Omit<Props, "open">) {
   /** Qurilma tasdig'i: yangi telefon/kompyuterdan kirish egasining tasdig'ini talab qiladimi. */
   const [deviceCheck, setDeviceCheck] = useState(true);
   const [hireDate, setHireDate] = useState("");
+  /** Kadrlar kartochkasi uchun: tanlanmasa "Asosiy" bo'limi va rol nomidagi lavozim ochiladi. */
+  const [departmentId, setDepartmentId] = useState("");
+  const [positionId, setPositionId] = useState("");
   const [region, setRegion] = useState("");
   const [vehicleType, setVehicleType] = useState("");
   const [vehicleNumber, setVehicleNumber] = useState("");
@@ -118,6 +127,8 @@ function NewEmployeeForm({ onClose, onCreated }: Omit<Props, "open">) {
         name: name.trim() || undefined,
         role: role || undefined,
         ...(hireDate ? { hireDate } : {}),
+        ...(departmentId ? { departmentId } : {}),
+        ...(positionId ? { positionId } : {}),
         ...(isSalesAgent && region.trim() ? { region: region.trim() } : {}),
         ...(isDeliveryAgent && vehicleType ? { vehicleType } : {}),
         ...(isDeliveryAgent && vehicleNumber.trim() ? { vehicleNumber: vehicleNumber.trim() } : {}),
@@ -209,18 +220,60 @@ function NewEmployeeForm({ onClose, onCreated }: Omit<Props, "open">) {
             {(isSalesAgent || isDeliveryAgent) && (
               <p className="text-xs text-muted-foreground">
                 {isSalesAgent
-                  ? "Savdo agenti profili va HR kartochkasi avtomatik yaratiladi."
-                  : "Yetkazuvchi profili va HR kartochkasi avtomatik yaratiladi."}
+                  ? "Savdo agenti profili ham yaratiladi."
+                  : "Yetkazuvchi profili ham yaratiladi."}
               </p>
             )}
           </div>
 
+          {/* Kadrlar kartochkasi: bo'lim, lavozim va ishga kirgan sana (xodim Kadrlar ro'yxatida shular bilan chiqadi) */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {departments.length > 0 && (
+              <div className="space-y-1.5">
+                <Label htmlFor="new-employee-department">Bo'lim</Label>
+                <Select
+                  value={departmentId || "none"}
+                  onValueChange={(value) => {
+                    setDepartmentId(value === "none" ? "" : value);
+                    setPositionId("");
+                  }}
+                >
+                  <SelectTrigger className="w-full" id="new-employee-department">
+                    <SelectValue placeholder="Asosiy" />
+                  </SelectTrigger>
+                  <SelectContent position="popper">
+                    <SelectItem value="none">— Asosiy —</SelectItem>
+                    {departments.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {positions.length > 0 && (
+              <div className="space-y-1.5">
+                <Label htmlFor="new-employee-position">Lavozim</Label>
+                <Select value={positionId || "none"} onValueChange={(value) => setPositionId(value === "none" ? "" : value)}>
+                  <SelectTrigger className="w-full" id="new-employee-position">
+                    <SelectValue placeholder="Rol nomi bilan" />
+                  </SelectTrigger>
+                  <SelectContent position="popper">
+                    <SelectItem value="none">— Rol nomi bilan —</SelectItem>
+                    {(departmentId ? positions.filter((item) => item.departmentId === departmentId) : positions).map((item) => (
+                      <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="new-employee-hire-date">Ishga kirgan sana</Label>
+              <Input id="new-employee-hire-date" type="date" value={hireDate} onChange={(event) => setHireDate(event.target.value)} />
+            </div>
+          </div>
+
           {(isSalesAgent || isDeliveryAgent) && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="new-employee-hire-date">Ishga kirgan sana</Label>
-                <Input id="new-employee-hire-date" type="date" value={hireDate} onChange={(event) => setHireDate(event.target.value)} />
-              </div>
               {isSalesAgent && (
                 <div className="space-y-1.5">
                   <Label htmlFor="new-employee-region">Hudud (ixtiyoriy)</Label>

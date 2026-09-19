@@ -7,6 +7,7 @@ import { usePermissions } from "@/hooks/use-company.ts";
 import { useLiveInterval } from "@/lib/delivery/realtime.ts";
 import { num, type DeliveryTaskRow } from "@/lib/delivery/types.ts";
 import { useApiQuery } from "@/lib/query.ts";
+import ReturnPickupsPanel from "./return-pickups-panel.tsx";
 
 type Money = (value: string | number) => string;
 type TaskPage = { tasks: DeliveryTaskRow[]; nextCursor: string | null };
@@ -100,6 +101,8 @@ export default function ControlSection({ money, onOpenTask }: { money: Money; on
           )}
         />
       )}
+      {/* Dostavchi mijozdan qaytarib olgan tovar — omborda qabul qilinishi kutilmoqda */}
+      <ReturnPickupsPanel money={money} />
       <Panel
         title={t("sv.control.overdue")}
         icon={<AlarmClock className="h-4 w-4 text-destructive" />}

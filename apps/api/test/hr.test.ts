@@ -93,7 +93,8 @@ describe("Bo'limlar, lavozimlar va xodimlar", () => {
 
     expect((await hr("DELETE", `/departments/${salesId}`)).statusCode).toBe(409);
     expect((await hr("DELETE", `/positions/${seller}`)).statusCode).toBe(409);
-    expect((await hr("GET", "/employees/stats")).json()).toMatchObject({ total: 3, active: 3, totalSalary: "3000000.00" });
+    // Login ochilgan xodimlarga ham Kadrlar kartochkasi ochiladi (maoshsiz): 3 ta kartochka + 3 ta login xodim
+    expect((await hr("GET", "/employees/stats")).json()).toMatchObject({ total: 6, active: 6, totalSalary: "3000000.00" });
     expect((await hr("PATCH", `/employees/${first.id}`, { status: "terminated" })).json().employee.status).toBe("terminated");
     expect((await hr("GET", `/employees/${first.id}`, undefined, other.ownerCookie)).statusCode).toBe(404);
   });
