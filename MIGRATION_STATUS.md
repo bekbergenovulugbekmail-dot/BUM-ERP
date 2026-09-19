@@ -2703,16 +2703,20 @@ menejeri, Auditor (egasi va Superadmin — barcha ruxsatlar bilan). **Diqqat:** 
 yaratgan maxsus rollarga bu ruxsat avtomatik berilmaydi — kerak bo'lsa egasi rol sozlamalaridan
 qo'shadi.
 
-**Testlar:** API 132 fayl / 722 test — hammasi o'tdi. Brauzer 79 testdan 77 tasi o'tdi.
+**Testlar:** API 132 fayl / 722 test va brauzer 79 test — **hammasi o'tdi**.
 Yangi fayllar: `tenant-session` (6), `employee-single-source` (6), `product-cost` (10),
 `e2e/tenant-isolation` (7), `e2e/employee-single-source` (4), `e2e/product-cost` (4).
 
-**O'TMAGAN (tekshirilmagan, tuzatilmagan):** `e2e/sales-agent.spec.ts` dagi 2 ta test
-(buyurtma yuborish va geofence). Dalil: tasdiqlash oynasidan keyin `/submit` so'rovi umuman
-yuborilmaydi — ilova YANGI GPS o'lchovini kutib qoladi (`freshPosition`), ya'ni brauzerdagi
-soxta geolokatsiya javob bermaydi. Bu testlar bir soat oldin AYNAN SHU kod bilan o'tgan edi va
-ular tegilgan modullarga (tannarx, sessiya, kadrlar) aloqador emas; agent buyurtmasini yuborish
-API darajasida o'tadigan testlar bilan qoplangan. Toza mashinada qayta yugurtirish kerak.
+**Soxta GPS oqimi (`e2e/_lib/geo.ts`).** Sotuv agenti brauzer testlari beqaror edi: buyurtma
+yuborilmasdi va geofence ogohlantirishi chiqmasdi. Sabab ilovada emas — Playwright'ning
+`setGeolocation` i BITTA statik nuqta beradi: `watchPosition` uni bir marta oladi, keyin yangi
+o'lchov kelmaydi. Ilova esa (to'g'ri qilib) 15 soniyadan eski nuqta bilan ish qilmaydi va yangisini
+so'raydi — statik mock'da bu so'rov javobsiz qoladi va 20 soniyadan keyin "Joylashuvni aniqlab
+bo'lmadi" xatosi chiqadi. O'lchov: kuzatuv yoqilgan zahoti `getCurrentPosition` 1 ms da javob
+beradi, 16 soniyadan keyin esa osilib qoladi; `setGeolocation` qayta chaqirilganda yana 0 ms da
+javob beradi. Shuning uchun testda nuqta har 5 soniyada qayta e'lon qilinadi — haqiqiy qurilmadagi
+GPS oqimi kabi. Koordinata o'zgarmaydi: geofence, masofa va aniqlik tekshiruvlari (UI va server)
+o'z kuchida qoladi, ilova kodi o'zgarmadi.
 
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi

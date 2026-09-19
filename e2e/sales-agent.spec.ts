@@ -5,11 +5,15 @@
  * tashrif (vitrina rasmi majburiy, taymer), buyurtma (mahsulot, miqdor, yetkazish kuni,
  * to'lov turi) va buyurtmasiz tashrifda sabab majburiyligi — server tomon tekshiruvi bilan.
  *
- * GPS brauzer ruxsati bilan qo'yiladi (`context.setGeolocation`) — HAQIQIY QURILMA GPS'i EMAS.
+ * GPS brauzer ruxsati bilan qo'yiladi (`startGeoFeed` → `context.setGeolocation`) — HAQIQIY QURILMA
+ * GPS'i EMAS. Nuqta davriy qayta e'lon qilinadi: statik mock'da ilova (to'g'ri qilib) eskirgan nuqtani
+ * rad etadi va yangisini so'raydi, mock esa yangisini bermaydi. Koordinata o'zgarmaydi — geofence va
+ * masofa tekshiruvlari o'z kuchida.
  * Skrinshotlar: e2e/.screenshots/agent-*.png
  */
 import { expect, test, type Page } from "@playwright/test";
 import { appPath, login } from "./_lib/accounts.ts";
+import { startGeoFeed } from "./_lib/geo.ts";
 
 /** Demo seeder yaratadigan do'kon (koordinatali). */
 const STORE = { name: "Baraka do'koni", latitude: 41.311081, longitude: 69.240562 };
@@ -110,6 +114,13 @@ async function takePhoto(page: Page, buttonName: RegExp) {
 }
 
 test.describe("Sotuv agenti ish joyi (brauzer)", () => {
+  /** Ochiq GPS oqimi — har test oxirida to'xtatiladi. */
+  let stopGps: (() => void) | null = null;
+  test.afterEach(() => {
+    stopGps?.();
+    stopGps = null;
+  });
+
   test("menyu, ERP yopiq, ish sessiyasi, tashrif (rasm majburiy) va buyurtma", async ({ page, context }) => {
     // Siyosatni egasi o'rnatadi (brauzerdan, haqiqiy sessiya bilan)
     await login(page, "owner");
@@ -119,7 +130,7 @@ test.describe("Sotuv agenti ish joyi (brauzer)", () => {
 
     // ── Agent: GPS do'kon yonida ────────────────────────────────────────
     await context.grantPermissions(["geolocation"]);
-    await context.setGeolocation({ latitude: STORE.latitude, longitude: STORE.longitude, accuracy: 10 });
+    stopGps = await startGeoFeed(context, { latitude: STORE.latitude, longitude: STORE.longitude, accuracy: 10 });
     await login(page, "agent");
     await page.goto(appPath("sales-agent/dashboard"));
 
@@ -208,7 +219,7 @@ test.describe("Sotuv agenti ish joyi (brauzer)", () => {
     await page.goto(appPath("dashboard"));
     await ensureRoute(page);
     await context.grantPermissions(["geolocation"]);
-    await context.setGeolocation({ latitude: FAR.latitude, longitude: FAR.longitude, accuracy: 10 });
+    stopGps = await startGeoFeed(context, { latitude: FAR.latitude, longitude: FAR.longitude, accuracy: 10 });
     await login(page, "agent");
     await startWork(page);
     await page.goto(appPath("sales-agent/customers"));
