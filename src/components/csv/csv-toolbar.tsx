@@ -86,6 +86,11 @@ type Preview = {
   warnings: ImportIssue[];
 };
 
+/** Bir saqlashdagi qatorlarni bitta hujjatga bog'laydigan tasodifiy kalit (komponentdan tashqarida — render toza). */
+function newGroupKey(): string {
+  return `quick-${crypto.randomUUID()}`;
+}
+
 /** Shablondagi izoh/namuna qatori — import qilinmaydi. */
 const isExampleRow = (row: Record<string, string>, fields: string[]) =>
   (row[fields[0] ?? ""] ?? "").trim().startsWith("#");
@@ -372,7 +377,7 @@ export default function CsvToolbar({
     }
 
     // Bir saqlash = bir hujjat: qatorlarni bog'lash uchun tasodifiy kalit
-    const groupKey = quickGroupField ? `quick-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}` : null;
+    const groupKey = quickGroupField ? newGroupKey() : null;
     const payload = filled.map((row) => {
       const mapped: Record<string, string> = { ...sharedValues };
       for (const column of rowColumns) {

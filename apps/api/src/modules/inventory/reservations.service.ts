@@ -10,7 +10,8 @@
  *  - buyurtma bekor qilinganda.
  * Takroriy band qilish yoki bo'shatishdan `sales_orders.stock_reserved` belgisi saqlaydi.
  */
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { badRequest } from "@bum/shared";
 import { products } from "../../db/schema/catalog.js";
 import { stockLevels } from "../../db/schema/inventory.js";
 import { salesOrderItems, salesOrders } from "../../db/schema/sales.js";
@@ -47,10 +48,13 @@ async function baseQuantities(tx: Tx, companyId: string, orderId: string) {
 }
 
 /**
- * Buyurtma tovarini band qiladi. Buyurtma miqdori TO'LIQ band qilinadi: qoldiq yetmasa "mavjud"
- * (`quantity - reserved_qty`) manfiy bo'lib qoladi va bu omborda yetishmovchilik borligini ko'rsatadi
- * (buyurtmani tovar kelishidan oldin tasdiqlash yo'li yopilmaydi). Agentlar oqimida esa mavjud
- * miqdordan ortig'ini yozishga ruxsat berilmaydi — tekshiruv `sales-agent` tomonida.
+ * Buyurtma tovarini band qiladi.
+ *
+ * Qoldiq qatori QULFLANADI (`for update`) — parallel tasdiqlashda band summasi yo'qolmaydi.
+ * `requireAvailable: true` (agent buyurtmasi) bo'lsa mavjud miqdor AYNAN QULF OSTIDA qayta
+ * tekshiriladi: ikki agent bir vaqtda yozsa ham jami band qoldiqdan oshmaydi. Aks holda (qo'lda
+ * kiritilgan buyurtma) miqdor to'liq band qilinadi va "mavjud" manfiy bo'lib yetishmovchilikni
+ * ko'rsatadi — tovar kelishidan oldin buyurtma tasdiqlash yo'li ochiq qoladi.
  *
  * Bir buyurtma ikki marta band qilinmaydi (`sales_orders.stock_reserved`).
  */
@@ -58,15 +62,19 @@ export async function reserveOrderStock(
   tx: Tx,
   companyId: string,
   order: { id: string; number: string; warehouseId: string; stockReserved: boolean },
+  options: { requireAvailable?: boolean } = {},
 ) {
   if (order.stockReserved) return;
   const totals = await baseQuantities(tx, companyId, order.id);
   if (totals.size === 0) return;
 
-  for (const [productId, { baseQty }] of totals) {
+  // Deadlock bo'lmasligi uchun qatorlar doim bir xil tartibda qulflanadi
+  const ordered = [...totals.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+
+  for (const [productId, { baseQty, name }] of ordered) {
     if (baseQty <= 0n) continue;
     const [level] = await tx
-      .select({ id: stockLevels.id })
+      .select({ id: stockLevels.id, quantity: stockLevels.quantity, reservedQty: stockLevels.reservedQty })
       .from(stockLevels)
       .where(
         and(
@@ -75,8 +83,21 @@ export async function reserveOrderStock(
           eq(stockLevels.warehouseId, order.warehouseId),
         ),
       )
+      .orderBy(asc(stockLevels.id))
       .limit(1)
       .for("update");
+
+    if (options.requireAvailable) {
+      const available = level ? toMinor(level.quantity, SCALE) - toMinor(level.reservedQty, SCALE) : 0n;
+      if (baseQty > available) {
+        const left = fromMinor(available > 0n ? available : 0n, SCALE);
+        throw badRequest(`${name}: omborda yetarli emas (mavjud ${left})`, {
+          reason: "out_of_stock",
+          productId,
+          available: left,
+        });
+      }
+    }
 
     if (level) {
       await tx

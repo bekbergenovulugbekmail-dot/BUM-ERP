@@ -42,17 +42,18 @@ export async function login(page: Page, who: AccountKey) {
     `e2e${who}device0001`.replace(/[^A-Za-z0-9_-]/g, ""),
   );
   await page.goto("about:blank");
-  await page.goto("/login");
+  // Kirish faqat biznes manzilidan (`app.bum-erp.uz/<biznes>`) — universal kirish sahifasi yo'q
+  await page.goto(`/${SLUG}`);
   await expect(page.locator("#phone")).toBeVisible({ timeout: 30_000 });
   await page.locator("#phone").fill(ACCOUNTS[who].phone);
   await page.locator("#password").fill(PASSWORD);
   await page.getByRole("button", { name: /kirish/i }).click();
-  await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 });
+  await expect(page.locator("#password"), "kirish formasi yopilishi kerak").toBeHidden({ timeout: 30_000 });
 }
 
 /** Tizimdan chiqish (menyu joylashuvi o'zgarishi mumkin — sessiyani tozalash ishonchli yo'l). */
 export async function logout(page: Page) {
   await page.context().clearCookies();
-  await page.goto("/login");
-  await expect(page).toHaveURL(/\/login/);
+  await page.goto(`/${SLUG}`);
+  await expect(page.locator("#password"), "biznes kirish sahifasi").toBeVisible({ timeout: 30_000 });
 }

@@ -73,7 +73,8 @@ function AdminDashboardGuarded() {
   const currentUser = useCurrentUser();
 
   if (currentUser === undefined) return <AdminSkeleton />;
-  if (currentUser === null) return <Navigate to={`/${lng}/login`} replace />;
+  // Platforma admini uchun alohida kirish sahifasi — shu yerning o'zida
+  if (currentUser === null) return <Navigate to={`/${lng}/admin`} replace />;
 
   if (!currentUser.isPlatformAdmin) {
     return <AccessDenied lng={lng} showBack />;
@@ -153,7 +154,7 @@ function AdminDashboard() {
                 // Sessiyani tozalashning o'zi sahifani almashtirmaydi — admin panelida foydalanuvchi
                 // o'sha yerda qolib ketardi. Chiqishdan keyin ochiq kirish sahifasiga o'tkazamiz.
                 signout();
-                window.location.assign(onAdminSurface ? "/" : `/${lng ?? "uz"}/login`);
+                window.location.assign(onAdminSurface ? "/" : `/${lng ?? "uz"}/admin`);
               }}
               data-testid="admin-logout"
               className="flex items-center gap-1.5 rounded-md border border-white/20 px-2.5 py-1 text-xs text-white/80 hover:bg-white/10 hover:text-white transition-colors cursor-pointer"

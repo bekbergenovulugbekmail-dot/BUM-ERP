@@ -29,7 +29,7 @@ import { requestMeta, writeAuditLog } from "../../shared/audit.js";
 import { deviceCheckRequired, deviceError, listUserDevices, registerDevice, setDeviceStatus } from "./devices.service.js";
 import { smsProvider } from "../../shared/sms.js";
 import { changeOwnPassword, verifyCurrentPassword } from "../users/user-admin.service.js";
-import { activateCompanyBySlug } from "../company/company.service.js";
+import { activateCompanyBySlug, assertCompanyLoginBySlug } from "../company/company.service.js";
 import { confirmPasswordReset, requestPasswordReset } from "./password-reset.service.js";
 import { authenticate, buildMe, startSession } from "./auth.service.js";
 import { authOf, requireAuth, requireSession } from "./guard.js";
@@ -121,9 +121,30 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     // Xodim kartochkasida qurilma tasdig'i o'chirilgan bo'lsa — qurilma yoziladi, lekin kirish to'silmaydi
     if (decision !== "allowed" && (await deviceCheckRequired(db, auth.user))) throw deviceError(decision === "revoked");
 
+    // Biznes manzilidan kirilgan bo'lsa — SESSIYA OCHILISHIDAN OLDIN shu biznes xodimi ekani tekshiriladi:
+    // rad etilgan urinish sessiya ham, "login_success" izi ham qoldirmaydi
+    if (body.companySlug) {
+      try {
+        await assertCompanyLoginBySlug(db, auth.user, body.companySlug);
+      } catch (error) {
+        await writeAuditLog({
+          userId: auth.user.id,
+          userName: auth.user.name,
+          companyId: auth.user.activeCompanyId,
+          action: "login_denied",
+          resource: "users",
+          resourceId: auth.user.id,
+          severity: "warning",
+          details: { reason: "tenant_mismatch", companySlug: body.companySlug },
+          ...meta,
+        });
+        throw error;
+      }
+    }
+
     const { session, me } = await withTransaction((tx) => startSession(tx, auth, meta));
 
-    // Biznes manzilidan kirilgan bo'lsa — aynan shu biznes faollashtiriladi
+    // Endi shu biznes faollashtiriladi (a'zolik yuqorida tasdiqlangan)
     let user = me;
     if (body.companySlug) {
       user = await withTransaction((tx) => activateCompanyBySlug(tx, auth.user, body.companySlug!, meta));

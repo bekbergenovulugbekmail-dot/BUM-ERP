@@ -232,6 +232,45 @@ describe("Agent buyurtmalari", () => {
     ).toBe("100.0000");
   });
 
+  it("PARALLEL: ikki agent bir vaqtda yuborsa — faqat qoldiq yetadigani o'tadi", async () => {
+    // Omborda 100 dona; ikkala agent ham 80 donadan yuboradi — faqat bittasi o'tishi kerak
+    const bekzod = await agent("Bekzod");
+    const mansur = await agent("Mansur");
+    const baraka = await store({ name: "Baraka", ...shop, creditLimit: "100000000" });
+    const mega = await store({ name: "Mega", ...shop, creditLimit: "100000000" });
+    await route(bekzod.repId, [baraka]);
+    await route(mansur.repId, [mega]);
+
+    const draft = async (cookie: string, customerId: string) => {
+      const res = await call(cookie, "PUT", `/api/sales-agent/orders/drafts/${randomUUID()}`, {
+        customerId,
+        paymentType: "cash",
+        items: [{ productId, pieces: "80" }],
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      return res.json().order.id as string;
+    };
+    // Qoralamalar ketma-ket yoziladi (ikkalasi ham hali band qilmaydi)
+    const first = await draft(bekzod.cookie, baraka);
+    const second = await draft(mansur.cookie, mega);
+
+    const submit = (cookie: string, id: string) =>
+      call(cookie, "POST", `/api/sales-agent/orders/${id}/submit`, { ...near, accuracy: 15, recordedAt: iso() });
+    const [a, b] = await Promise.all([submit(bekzod.cookie, first), submit(mansur.cookie, second)]);
+
+    const statuses = [a.statusCode, b.statusCode].sort();
+    expect(statuses, "bittasi o'tadi, ikkinchisi qoldiq yetmagani uchun rad etiladi").toEqual([200, 400]);
+    const rejected = a.statusCode === 400 ? a : b;
+    expect(rejected.json().details).toMatchObject({ reason: "out_of_stock" });
+
+    const [level] = await db
+      .select({ quantity: stockLevels.quantity, reservedQty: stockLevels.reservedQty })
+      .from(stockLevels)
+      .where(eq(stockLevels.productId, productId));
+    expect(Number(level!.reservedQty), "band qoldiqdan oshmaydi").toBeLessThanOrEqual(Number(level!.quantity));
+    expect(level!.reservedQty).toBe("80.0000");
+  });
+
   it("nasiya muddati, kredit limiti (rad va tasdiq), yetkazish kuni siyosati, tashrif natijasi", async () => {
     const ali = await agent("Ali");
     const supervisor = await addEmployee(app, company, "Supervayzer");

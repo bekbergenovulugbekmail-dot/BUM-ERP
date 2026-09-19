@@ -53,9 +53,10 @@ test("qo'shilgan xodim Kadrlar ro'yxatida bo'lim va lavozimi bilan ko'rinadi", a
 
   const dialog = page.getByTestId("new-employee-dialog");
   await expect(dialog).toBeVisible({ timeout: 30_000 });
+  // "Dasturga kiradi" o'chiriladi: test litsenziya band qilmaydi (to'plam qayta-qayta yugurtiriladi)
+  await dialog.locator("#new-employee-software").click();
   await dialog.getByLabel("Telefon").fill(phone);
   await dialog.getByLabel("Ism-familiya", { exact: false }).fill(name);
-  await dialog.getByLabel("Parol", { exact: false }).first().fill("Xodim-parol-2026");
 
   // Bo'lim va lavozim tanlovi — Kadrlarda ochilgan ro'yxatdan
   const department = dialog.locator("#new-employee-department");
@@ -66,6 +67,7 @@ test("qo'shilgan xodim Kadrlar ro'yxatida bo'lim va lavozimi bilan ko'rinadi", a
 
   await dialog.getByRole("button", { name: /Qo'shish|Saqlash/ }).last().click();
   await expect(page.getByText(/Xodim qo'shildi/)).toBeVisible({ timeout: 30_000 });
+  await expect(dialog).toBeHidden({ timeout: 30_000 });
 
   // Kadrlar ro'yxatida ko'rinadi
   await page.goto(appPath("hr"));

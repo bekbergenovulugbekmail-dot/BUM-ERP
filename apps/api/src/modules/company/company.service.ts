@@ -122,12 +122,11 @@ export async function switchCompany(tx: Tx, user: SessionUser, companyId: string
 }
 
 /**
- * Biznes manzili (slug) bo'yicha kirishda shu biznesni faollashtiradi:
- * `app.bum-erp.uz/bonnu-market` — faqat Bonnu Marketga kirish.
- * Platforma admini istalgan biznesni ocha oladi; boshqalar faqat faol a'zoligi bo'lsa.
+ * Biznes manzili (slug) bo'yicha KIRISH HUQUQINI tekshiradi — sessiya ochilishidan OLDIN chaqiriladi.
+ * Noto'g'ri manzil — 404, to'xtatilgan yoki begona biznes — 403. Hech narsa yozilmaydi.
  */
-export async function activateCompanyBySlug(tx: Tx, user: SessionUser, slug: string, meta: RequestMeta) {
-  const [company] = await tx
+export async function assertCompanyLoginBySlug(conn: DbOrTx, user: SessionUser, slug: string) {
+  const [company] = await conn
     .select({ id: companies.id, name: companies.name, status: companies.status })
     .from(companies)
     .where(eq(companies.slug, slug))
@@ -138,7 +137,7 @@ export async function activateCompanyBySlug(tx: Tx, user: SessionUser, slug: str
   }
 
   if (!user.isPlatformAdmin) {
-    const [membership] = await tx
+    const [membership] = await conn
       .select({ isActive: companyMembers.isActive })
       .from(companyMembers)
       .where(and(eq(companyMembers.companyId, company.id), eq(companyMembers.userId, user.id)))
@@ -147,6 +146,16 @@ export async function activateCompanyBySlug(tx: Tx, user: SessionUser, slug: str
       throw forbidden(`Siz ${company.name} xodimi emassiz — o'z biznesingiz manzilidan kiring`);
     }
   }
+  return company;
+}
+
+/**
+ * Biznes manzili (slug) bo'yicha kirishda shu biznesni faollashtiradi:
+ * `app.bum-erp.uz/bonnu-market` — faqat Bonnu Marketga kirish.
+ * Huquq `assertCompanyLoginBySlug` da tekshirilgan bo'lishi kerak (sessiyadan oldin).
+ */
+export async function activateCompanyBySlug(tx: Tx, user: SessionUser, slug: string, meta: RequestMeta) {
+  const company = await assertCompanyLoginBySlug(tx, user, slug);
 
   if (user.activeCompanyId !== company.id) {
     await tx.update(users).set({ activeCompanyId: company.id }).where(eq(users.id, user.id));

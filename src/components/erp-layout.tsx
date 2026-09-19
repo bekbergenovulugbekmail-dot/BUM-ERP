@@ -749,7 +749,7 @@ export default function ERPLayout({ children }: { children: React.ReactNode }) {
   // Guard: unauthenticated user → BUM ERP branded login page
   // currentUser===undefined means still loading — don't redirect yet.
   if (currentUser === null) {
-    return <Navigate to={`/${lng ?? "uz"}/login`} replace state={{ from: location }} />;
+    return <Navigate to="/" replace state={{ from: location }} />;
   }
 
   // Ekran qulflangan — sessiya saqlangan, faqat PIN bilan ochiladi

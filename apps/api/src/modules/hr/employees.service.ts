@@ -11,7 +11,7 @@
  *  - `update` / `delete` to'xtatilgan kompaniyada ham yozardi; o'qish ruxsatsiz edi
  */
 import { and, asc, eq, getTableColumns, ilike, isNull, ne, or, sql } from "drizzle-orm";
-import { PIN_PATTERN, badRequest, conflict, forbidden, notFound } from "@bum/shared";
+import { PIN_PATTERN, badRequest, conflict, forbidden, normalizePhone, notFound } from "@bum/shared";
 import { salesReps } from "../../db/schema/crm.js";
 import { attendances, departments, employees, leaves, positions, salaryPayments } from "../../db/schema/hr.js";
 import { companyMembers, users } from "../../db/schema/platform.js";
@@ -374,6 +374,12 @@ export async function createHrCard(
     positionId = position!.id;
   }
 
+  // Import qilingan (loginsiz) kartochka bo'lsa — yangisini ochmasdan o'shani loginga ulaymiz
+  if (input.userId) {
+    const linked = await linkExistingCard(tx, tenant, { userId: input.userId, phone: input.phone, departmentId, positionId }, meta);
+    if (linked) return linked;
+  }
+
   return createEmployee(
     tx,
     tenant,
@@ -389,6 +395,61 @@ export async function createHrCard(
     },
     meta,
   );
+}
+
+/**
+ * Login ochilayotgan odamning Kadrlardagi kartochkasi allaqachon bormi (masalan, Excel'dan import qilingan).
+ *
+ * Telefon raqamga KO'R-KO'RONA ishonilmaydi:
+ *  - faqat SHU kompaniyaning kartochkalari;
+ *  - faqat hali hech kimning loginiga bog'lanmagan (`user_id is null`) kartochka;
+ *  - ishdan bo'shagan kartochka olinmaydi (qayta ishga olishda yangi kartochka ochiladi);
+ *  - bir xil telefonli bir nechta mos kartochka bo'lsa — avtomatik ulanmaydi, aniq xato qaytariladi
+ *    (qaysi biri ekanini odam hal qiladi).
+ * Kartochka topilmasa `null` qaytadi — chaqiruvchi yangisini ochadi.
+ */
+async function linkExistingCard(
+  tx: Tx,
+  tenant: TenantContext,
+  input: { userId: string; phone: string | null; departmentId: string; positionId: string },
+  meta: RequestMeta,
+) {
+  const raw = input.phone?.trim() ?? "";
+  const phone = normalizePhone(raw);
+  if (!phone) return null;
+
+  // Kartochkada telefon kiritilgan ko'rinishda saqlangan bo'lishi mumkin — ikkalasi bo'yicha qidiriladi
+  const candidates = await tx
+    .select({ id: employees.id, name: employees.name, status: employees.status })
+    .from(employees)
+    .where(
+      and(
+        eq(employees.companyId, tenant.company.id),
+        or(eq(employees.phone, phone), raw ? eq(employees.phone, raw) : undefined),
+        isNull(employees.userId),
+        ne(employees.status, "terminated"),
+      ),
+    )
+    .for("update");
+  if (candidates.length === 0) return null;
+  if (candidates.length > 1) {
+    throw conflict(
+      `Kadrlarda shu telefon bilan ${candidates.length} ta xodim kartochkasi bor — avval keraksizini o'chiring yoki telefonini to'g'rilang`,
+    );
+  }
+
+  const card = candidates[0]!;
+  await tx
+    .update(employees)
+    .set({ userId: input.userId, departmentId: input.departmentId, positionId: input.positionId, updatedAt: new Date() })
+    .where(eq(employees.id, card.id));
+  await hrAudit(tx, tenant, meta, {
+    action: "EMPLOYEE_LINKED_TO_USER",
+    resource: "employees",
+    resourceId: card.id,
+    details: { name: card.name, userId: input.userId, via: "login_created" },
+  });
+  return getEmployee(tx, tenant, card.id);
 }
 
 export async function createEmployee(

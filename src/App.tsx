@@ -50,7 +50,6 @@ import { companyPathKey } from "@bum/shared";
 import TenantPortalPage from "./pages/tenant/page.tsx";
 import { BusinessAddressPage } from "./pages/login/company-login.tsx";
 import SelectCompanyPage from "./pages/select-company/page.tsx";
-import LoginPage from "./pages/login/page.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import { isAdminSubdomain } from "./lib/subdomain.ts";
 
@@ -148,8 +147,8 @@ function MainApp() {
           {/* Onboarding: outside ERPLayout */}
           <Route path="onboarding" element={<OnboardingPage />} />
 
-          {/* Login page: BUM ERP branded login */}
-          <Route path="login" element={<LoginPage />} />
+          {/* Universal kirish yo'q: kirish faqat biznes manzilidan (`/bonnu-market`), admin esa `/uz/admin` dan */}
+          <Route path="login" element={<Navigate to="/" replace />} />
 
           {/* Company selector: outside ERPLayout */}
           <Route path="select-company" element={<SelectCompanyPage />} />

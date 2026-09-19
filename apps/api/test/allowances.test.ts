@@ -2,10 +2,11 @@
  * Qo'shimcha to'lovlar (yo'l puli, ovqat puli): xodimga va davrga biriktiriladi,
  * maosh tayyorlashda avtomatik qo'shiladi (soliqqa kirmaydi), xarajatda esa to'lov turi majburiy.
  */
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
+import { accounts, cashAccounts, journalEntries, journalLines } from "../src/db/schema/finance.js";
 import { salaryPayments } from "../src/db/schema/hr.js";
 import { buildServer } from "../src/server.js";
 import { createCompany, resetDatabase, signedIn } from "./helpers.js";
@@ -139,6 +140,73 @@ describe("Xodimning qo'shimcha to'lovlari", () => {
     expect(salary!.grossSalary).toBe("3000000.00");
     expect(salary!.tax).toBe("360000.00");
     expect(salary!.netSalary, "2 640 000 + 500 000").toBe("3140000.00");
+  });
+
+  it("qo'shimchasi bor maosh to'lanadi va jurnal balanslangan bo'ladi", async () => {
+    await call(owner(), "POST", "/api/hr/allowances", {
+      employeeId,
+      kind: "transport",
+      amount: "300000",
+      startMonth: "2026-03",
+      endMonth: "2026-03",
+    });
+    expect((await call(owner(), "POST", "/api/hr/salaries/generate", { month: "2026-03", taxRate: "12", workDays: "26" })).statusCode).toBe(200);
+    const [salary] = await db.select().from(salaryPayments).where(eq(salaryPayments.employeeId, employeeId));
+    expect(salary!.netSalary, "2 640 000 + 300 000").toBe("2940000.00");
+
+    // Kassaga pul kiritamiz (maosh naqd to'lanadi)
+    const [cash] = await db.select({ id: cashAccounts.id }).from(cashAccounts).where(eq(cashAccounts.companyId, company.companyId));
+    const [capital] = await db
+      .select({ id: accounts.id })
+      .from(accounts)
+      .where(and(eq(accounts.companyId, company.companyId), eq(accounts.code, "3000")));
+    expect(
+      (await call(owner(), "POST", "/api/finance/cash-transactions", {
+        cashAccountId: cash!.id,
+        type: "in",
+        amount: "10000000",
+        description: "Kassaga kirim",
+        counterAccountId: capital!.id,
+      })).statusCode,
+    ).toBe(201);
+
+    expect((await call(owner(), "POST", `/api/hr/salaries/${salary!.id}/approve`)).statusCode).toBe(200);
+    const paid = await call(owner(), "POST", `/api/hr/salaries/${salary!.id}/pay`, { method: "cash" });
+    expect(paid.statusCode, paid.body).toBe(200);
+
+    // Jurnal: debet (ish haqi 3 000 000 + kompensatsiya 300 000) = kredit (qo'lga 2 940 000 + soliq 360 000)
+    const [entry] = await db.select({ id: journalEntries.id }).from(journalEntries).where(eq(journalEntries.referenceId, salary!.id));
+    expect(entry, "to'lov jurnali yozilishi kerak").toBeTruthy();
+    const lines = await db
+      .select({ debit: journalLines.debit, credit: journalLines.credit })
+      .from(journalLines)
+      .where(eq(journalLines.entryId, entry!.id));
+    const debit = lines.reduce((sum, line) => sum + Number(line.debit ?? 0), 0);
+    const credit = lines.reduce((sum, line) => sum + Number(line.credit ?? 0), 0);
+    expect(debit, "DEBIT = CREDIT").toBe(credit);
+    expect(debit, "ish haqi + kompensatsiya").toBe(3_300_000);
+
+    // Kassadan aynan qo'lga beriladigan summa chiqdi
+    const [cashAfter] = await db.select({ balance: cashAccounts.balance }).from(cashAccounts).where(eq(cashAccounts.id, cash!.id));
+    expect(cashAfter!.balance).toBe("7060000.00");
+  });
+
+  it("tahrirlashda qo'shimcha to'lov yo'qolmaydi", async () => {
+    await call(owner(), "POST", "/api/hr/allowances", {
+      employeeId,
+      kind: "meal",
+      amount: "200000",
+      startMonth: "2026-03",
+      endMonth: "2026-03",
+    });
+    await call(owner(), "POST", "/api/hr/salaries/generate", { month: "2026-03", taxRate: "12", workDays: "26" });
+    const [salary] = await db.select().from(salaryPayments).where(eq(salaryPayments.employeeId, employeeId));
+
+    const updated = await call(owner(), "PATCH", `/api/hr/salaries/${salary!.id}`, { deductions: "100000" });
+    expect(updated.statusCode, updated.body).toBe(200);
+    // 3 000 000 − 360 000 soliq − 100 000 ushlab qolish + 200 000 ovqat puli
+    expect(updated.json().salary.netSalary).toBe("2740000.00");
+    expect(updated.json().salary.allowances).toBe("200000.00");
   });
 
   it("davridan tashqari oyda qo'shilmaydi", async () => {

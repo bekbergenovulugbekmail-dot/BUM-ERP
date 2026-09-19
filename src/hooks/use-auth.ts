@@ -58,7 +58,8 @@ export type AppUser = {
 function loginPath(): string {
   const seg = window.location.pathname.split("/").filter(Boolean)[0];
   const lng = seg && ["uz", "ru", "kz"].includes(seg) ? seg : "uz";
-  return `/${lng}/login`;
+  // Universal kirish sahifasi yo'q — biznes manzili so'raladi
+  return "/";
 }
 
 async function fetchMe(signal: AbortSignal | undefined, company: string | null): Promise<Me | null> {

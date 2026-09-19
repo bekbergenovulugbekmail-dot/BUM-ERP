@@ -737,13 +737,14 @@ export async function confirmOrder(tx: Tx, tenant: TenantContext, orderId: strin
   await assertOrderInScope(tx, tenant, orderId);
 
   await tx.update(salesOrders).set({ status: "confirmed", updatedAt: new Date() }).where(eq(salesOrders.id, orderId));
-  // Tovar omborda band qilinadi: boshqa agent shu qoldiqni qayta sota olmaydi
-  await reserveOrderStock(tx, tenant.company.id, {
-    id: orderId,
-    number: order.number,
-    warehouseId: order.warehouseId,
-    stockReserved: order.stockReserved,
-  });
+  // Tovar omborda band qilinadi: boshqa agent shu qoldiqni qayta sota olmaydi.
+  // Agent buyurtmasida mavjud miqdor qulf ostida qayta tekshiriladi (parallel zakaz poygasi).
+  await reserveOrderStock(
+    tx,
+    tenant.company.id,
+    { id: orderId, number: order.number, warehouseId: order.warehouseId, stockReserved: order.stockReserved },
+    { requireAvailable: order.source === "sales_agent" },
+  );
   await salesAudit(tx, tenant, meta, {
     action: "SALES_ORDER_CONFIRMED",
     resource: "sales_orders",

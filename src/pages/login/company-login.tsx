@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import { AlertTriangle, ArrowRight, Loader2, Lock, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
+import { PasswordResetForm } from "./_components/password-reset-form.tsx";
 import BrandLogo from "@/components/brand-logo.tsx";
 import { PasswordToggle } from "@/components/password-toggle.tsx";
 import { useAuth } from "@/hooks/use-auth.ts";
@@ -28,6 +29,8 @@ export default function CompanyLoginPage({ slug }: { slug: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  /** Parolni SMS kod bilan tiklash (universal kirish sahifasi o'rniga shu yerda). */
+  const [mode, setMode] = useState<"login" | "reset">("login");
 
   // Biznes nomi va logotipi — sessiyasiz ochiq ma'lumot
   const companyQuery = useApiQuery<{ company: CompanyPublic }>(`/api/public/companies/${encodeURIComponent(slug)}`, undefined, {
@@ -107,6 +110,16 @@ export default function CompanyLoginPage({ slug }: { slug: string }) {
           </div>
         </div>
 
+        {mode === "reset" ? (
+          <PasswordResetForm
+            initialPhone={phone}
+            onCancel={() => setMode("login")}
+            onDone={(resetPhone) => {
+              setPhone(resetPhone);
+              setMode("login");
+            }}
+          />
+        ) : (
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="relative">
             <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -144,10 +157,17 @@ export default function CompanyLoginPage({ slug }: { slug: string }) {
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Kirish <ArrowRight className="ml-1 h-4 w-4" /></>}
           </Button>
         </form>
+        )}
 
-        <p className="text-center text-xs text-muted-foreground">
-          Parolni unutdingizmi? Rahbaringiz yoki kadrlar bo'limiga murojaat qiling.
-        </p>
+        {mode === "login" && (
+          <p className="text-center text-xs text-muted-foreground">
+            Parolni unutdingizmi?{" "}
+            <button type="button" className="text-primary hover:underline" onClick={() => setMode("reset")}>
+              SMS kod bilan tiklash
+            </button>{" "}
+            yoki rahbaringizga murojaat qiling.
+          </p>
+        )}
       </motion.div>
     </div>
   );

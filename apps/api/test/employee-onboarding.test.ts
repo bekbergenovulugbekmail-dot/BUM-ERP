@@ -75,6 +75,77 @@ describe("Bitta joydan qo'shish", () => {
     expect(card!.userId, "kartochka loginga bog'langan").toBeTruthy();
   });
 
+  it("import qilingan xodimga login ochilsa — kartochka ULANADI, ikkinchisi ochilmaydi", async () => {
+    const phone = "+998901110021";
+    const imported = await app.inject({
+      method: "POST",
+      url: "/api/hr/employees",
+      headers: { cookie: company.ownerCookie },
+      payload: { name: "Import Xodim", phone, hireDate: "2026-01-10", baseSalary: "2500000", salaryType: "monthly" },
+    });
+    expect(imported.statusCode, imported.body).toBe(201);
+    const cardId = imported.json().employee.id as string;
+
+    const created = await addEmployee({ phone, password: PASSWORD, name: "Import Xodim", role: "Kassir" });
+    expect(created.statusCode, created.body).toBe(201);
+
+    const employees = (await get("/api/hr/employees")).json().employees as {
+      id: string;
+      phone: string | null;
+      userId: string | null;
+      baseSalary: string;
+    }[];
+    const cards = employees.filter((row) => row.phone === phone);
+    expect(cards, "AYNAN BITTA kartochka").toHaveLength(1);
+    expect(cards[0]!.id, "mavjud kartochka ulanadi").toBe(cardId);
+    expect(cards[0]!.userId, "loginga bog'landi").toBeTruthy();
+    expect(cards[0]!.baseSalary, "maosh saqlanadi").toBe("2500000.00");
+    expect((await login(phone)).statusCode, "xodim tizimga kiradi").toBe(200);
+  });
+
+  it("bir xil telefonli bir nechta kartochka bo'lsa — avtomatik ulanmaydi", async () => {
+    const phone = "+998901110022";
+    for (const name of ["Birinchi", "Ikkinchi"]) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/hr/employees",
+        headers: { cookie: company.ownerCookie },
+        payload: { name, phone, hireDate: "2026-01-10", baseSalary: "1000000", salaryType: "monthly" },
+      });
+      expect(res.statusCode, res.body).toBe(201);
+    }
+
+    const created = await addEmployee({ phone, password: PASSWORD, name: "Uchinchi", role: "Kassir" });
+    expect(created.statusCode, "noaniq holat — xavfsiz xato").toBe(409);
+    expect(created.json().message).toContain("telefon");
+
+    const employees = (await get("/api/hr/employees")).json().employees as { phone: string | null }[];
+    expect(employees.filter((row) => row.phone === phone), "yangi kartochka ochilmaydi").toHaveLength(2);
+  });
+
+  it("ishdan bo'shagan kartochka qayta ishga olishda ulanmaydi", async () => {
+    const phone = "+998901110023";
+    const card = await app.inject({
+      method: "POST",
+      url: "/api/hr/employees",
+      headers: { cookie: company.ownerCookie },
+      payload: { name: "Eski Xodim", phone, hireDate: "2025-01-10", baseSalary: "1000000", salaryType: "monthly" },
+    });
+    const cardId = card.json().employee.id as string;
+    expect(
+      (await app.inject({
+        method: "PATCH",
+        url: `/api/hr/employees/${cardId}`,
+        headers: { cookie: company.ownerCookie },
+        payload: { status: "terminated" },
+      })).statusCode,
+    ).toBe(200);
+
+    expect((await addEmployee({ phone, password: PASSWORD, name: "Eski Xodim", role: "Kassir" })).statusCode).toBe(201);
+    const employees = (await get("/api/hr/employees?status=active")).json().employees as { phone: string | null }[];
+    expect(employees.filter((row) => row.phone === phone), "qayta ishga olishda yangi kartochka").toHaveLength(1);
+  });
+
   it("tanlangan bo'lim va lavozim bilan qo'shiladi", async () => {
     const department = await app.inject({
       method: "POST",

@@ -123,7 +123,7 @@ function CompanyAccessDenied({ companyKey }: { companyKey: string }) {
             ))}
           </div>
         )}
-        <Link to={`/${SAVED_OR_DEFAULT_LOCALE}/login`} className="inline-block text-sm text-primary hover:underline">
+        <Link to="/" className="inline-block text-sm text-primary hover:underline">
           Boshqa hisob bilan kirish
         </Link>
       </div>

@@ -4,9 +4,11 @@
  * Login `companySlug` bilan yuborilsa: shu biznes faollashtiriladi; foydalanuvchi bu biznesning
  * faol xodimi bo'lmasa — kirish berilmaydi (sessiya ochilsa ham boshqa biznesga o'tib ketmaydi).
  */
+import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { closeDb } from "../src/db/client.js";
+import { closeDb, db } from "../src/db/client.js";
+import { auditLogs, sessions, users } from "../src/db/schema/platform.js";
 import { buildServer } from "../src/server.js";
 import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
 
@@ -45,6 +47,27 @@ describe("Biznes manzili bilan kirish", () => {
     const res = await login({ phone: first.owner.phone, password: first.owner.password, companySlug: second.slug });
     expect(res.statusCode, "boshqa biznesning xodimi emas").toBe(403);
     expect(res.json().message).toContain("Anor Market");
+  });
+
+  it("begona manzildagi urinish sessiya ham, login_success izi ham qoldirmaydi", async () => {
+    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.phone, first.owner.phone));
+    const before = await db.$count(sessions, eq(sessions.userId, user!.id));
+
+    const res = await login({ phone: first.owner.phone, password: first.owner.password, companySlug: second.slug });
+    expect(res.statusCode).toBe(403);
+    expect(res.headers["set-cookie"], "cookie berilmaydi").toBeUndefined();
+
+    expect(await db.$count(sessions, eq(sessions.userId, user!.id)), "yangi sessiya ochilmaydi").toBe(before);
+
+    const actions = (
+      await db.select({ action: auditLogs.action }).from(auditLogs).where(eq(auditLogs.userId, user!.id))
+    ).map((row) => row.action);
+    expect(actions, "rad etilgan urinish login_denied bo'lib yoziladi").toContain("login_denied");
+    expect(actions.filter((action) => action === "login_success"), "faqat haqiqiy kirishlar").toHaveLength(1);
+
+    // Faol biznes ham o'zgarmaydi
+    const [after] = await db.select({ activeCompanyId: users.activeCompanyId }).from(users).where(eq(users.id, user!.id));
+    expect(after!.activeCompanyId).toBe(first.companyId);
   });
 
   it("noto'g'ri manzil — tushunarli xato", async () => {

@@ -290,7 +290,9 @@ export async function updateSalary(
   const deductions = toMinor(input.deductions ?? salary.deductions);
   const gross = earned + toMinor(salary.overtimePay) + bonus;
   const tax = mulDivRound(gross, toMinor(salary.taxRate, 2), 10000n);
-  const net = gross - tax - deductions;
+  // Kompensatsiya (yo'l, ovqat) soliqqa kirmaydi, lekin qo'lga beriladigan summada qoladi
+  const allowances = toMinor(salary.allowances);
+  const net = gross - tax - deductions + allowances;
   if (net < 0n) throw badRequest("Ushlab qolish qo'lga beriladigan summadan katta");
 
   const [updated] = await tx
@@ -386,9 +388,16 @@ export async function paySalary(
   const description = `Maosh ${salary.month}: ${employee?.name ?? ""}`.trim();
   const net = toMinor(salary.netSalary);
   const tax = toMinor(salary.tax);
+  /** Soliq solinadigan ish haqi xarajati (5100) — soliq bazasi shu summadan hisoblangan. */
   const expense = toMinor(salary.grossSalary) - toMinor(salary.deductions);
+  /**
+   * Kompensatsiya (yo'l puli, ovqat puli, aloqa ...) — ish haqi emas: soliqqa kirmaydi va soliq
+   * bazasini buzmasligi uchun ish haqi hisobiga (5100) qo'shilmaydi, "Boshqa xarajatlar" (5500)
+   * hisobiga alohida qator bo'lib tushadi. Tafsiloti `employee_allowances` da qoladi.
+   */
+  const compensation = toMinor(salary.allowances);
 
-  const lines: { accountId: string; debit?: string; credit?: string }[] = [];
+  const lines: { accountId: string; debit?: string; credit?: string; description?: string }[] = [];
   let paidAccountId: string | null = null;
   if (net > 0n) {
     const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
@@ -410,11 +419,21 @@ export async function paySalary(
       credit: salary.tax,
     });
   }
+  if (compensation > 0n) {
+    lines.unshift({
+      accountId: await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"),
+      debit: fromMinor(compensation),
+      description: "Xodimga kompensatsiya (yo'l, ovqat va boshqa)",
+    });
+  }
   if (expense > 0n) {
     lines.unshift({
       accountId: await requireAccountBySubtype(tx, companyId, "salary", "expense", "Ish haqi xarajatlari"),
       debit: fromMinor(expense),
     });
+  }
+  // Debet (ish haqi + kompensatsiya) = kredit (qo'lga berilgan + soliq) — invariant postJournalEntry da ham tekshiriladi
+  if (lines.length >= 2) {
     await postJournalEntry(tx, companyId, tenant.user.id, {
       entryDate: paidDate,
       description,

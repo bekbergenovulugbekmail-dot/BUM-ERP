@@ -2538,6 +2538,39 @@ Yo'l-yo'lakay tuzatildi: hududlar ro'yxatidagi marshrut soni har doim 0 chiqardi
 so'rovda drizzle tashqi ustunga jadval nomini qo'shmaydi va ichki jadvalning "id" ustuni bilan
 chalkashib ketardi (marshrutlar ro'yxatidagi mijoz soni qo'shilma tufayli to'g'ri ishlagan).
 
+## Audit tuzatishlari: maosh jurnali, kartochka, bron poygasi, tenant kirish (2026-09-19)
+
+Mustaqil auditdan keyingi tuzatishlar (migratsiyasiz — faqat xizmat qatlami va UI):
+
+**Maosh + kompensatsiya (H-1).** Qo'shimcha to'lovi (yo'l/ovqat puli) bor xodimga maosh TO'LAB
+BO'LMASDI: jurnal balanssiz chiqib, to'lov 400 xato bilan qaytardi. Endi kompensatsiya alohida
+xarajat qatori bo'lib "Boshqa xarajatlar" (5500) hisobiga tushadi — ish haqi hisobi (5100) soliq
+bazasi bilan bir xil qoladi. Tahrirlashda ham qo'shimcha yo'qolmaydi (avval `netSalary` dan tushib
+qolardi). Debet = kredit invarianti test bilan qotirildi.
+
+**Kartochka takrorlanishi (M-4).** Import qilingan xodimga login ochilganda ikkinchi HR kartochkasi
+yaratilardi. Endi shu kompaniyadagi, hali hech kimga bog'lanmagan va ishdan bo'shamagan kartochka
+telefon bo'yicha topilib LOGINGA ULANADI (maoshi va ma'lumotlari saqlanadi). Bir xil telefonli bir
+nechta kartochka bo'lsa — avtomatik ulanmaydi, aniq xato qaytadi.
+
+**Bron poygasi (M-1).** Ikki agent bir vaqtda yuborganda ikkalasi ham bron qilib, qoldiqdan ortiq
+sotilardi. Endi agent buyurtmasida mavjud miqdor qoldiq qatori QULFI ostida qayta tekshiriladi —
+faqat bittasi o'tadi. Qo'lda kiritilgan buyurtma avvalgidek tovar kelishidan oldin ham tasdiqlanadi.
+
+**Tenant kirish (M-2).** Biznes a'zoligi endi SESSIYA OCHILISHIDAN OLDIN tekshiriladi: begona biznes
+manzilidagi urinish sessiya ham, `login_success` izi ham qoldirmaydi; audit izida `login_denied`
+(sabab: tenant_mismatch) yoziladi.
+
+**Universal kirish sahifasi olib tashlandi.** `/uz/login` haqiqiy universal kirish edi: tenant
+ko'rsatilmasdan sessiya ochib, foydalanuvchining oxirgi faol biznesiga kiritardi. Endi u biznes
+manzilini so'raydigan sahifaga yo'naltiradi; kirish faqat `app.bum-erp.uz/<biznes>` dan. Parolni SMS
+bilan tiklash biznes kirish sahifasiga ko'chdi. Platforma admini uchun alohida kirish — `/uz/admin`.
+API (`POST /api/auth/login`) `companySlug` siz ham ishlaydi — desktop kassa va Android ilovasi shunga
+tayanadi.
+
+**Testlar:** API 129 fayl / 700 test, brauzer 70 test (yangi `e2e/tenant-isolation.spec.ts` — 6 ta
+cross-tenant ssenariy), frontend 21 fayl / 87 test. Lint va build toza.
+
 ## Dostavchi qaytarib olgan tovar; modullar ro'yxati (2026-09-19)
 
 **Qaytarib olish (migratsiya 0067, 0068):** dostavchi mijozdan ILGARI SOTILGAN tovarni ham qaytarib

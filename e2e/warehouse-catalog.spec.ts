@@ -75,5 +75,6 @@ async function runAdminLogout(page: Page) {
 
   await page.screenshot({ path: "e2e/.screenshots/admin-logout.png" });
   await logout.click();
-  await expect(page).toHaveURL(/\/login/, { timeout: 30_000 });
+  // Admin panelidan chiqish — platforma admini kirish sahifasiga (universal kirish yo'q)
+  await expect(page).toHaveURL(/\/admin|^[^?#]*\/$/, { timeout: 30_000 });
 }
