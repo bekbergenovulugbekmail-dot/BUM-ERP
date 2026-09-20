@@ -158,11 +158,28 @@ export async function moveStock(tx: Tx, companyId: string, performedBy: string |
     .where(
       and(
         eq(stockLevels.id, level!.id),
-        move.allowNegative && !incoming ? undefined : sql`${stockLevels.quantity} + ${delta}::numeric >= 0`,
+        // Chiqim BAND QILINGAN tovarga tegmaydi: boshqa buyurtma uchun ajratilgan miqdorni sotib
+        // bo'lmaydi. Shu shart tufayli `reserved_qty <= quantity` invarianti buzilmaydi.
+        // Offline kassa sinxroni (`allowNegative`) istisno — chek allaqachon yozilgan, nomuvofiqlik
+        // `pos_sync_conflicts` ga tushadi.
+        move.allowNegative && !incoming ? undefined : sql`${stockLevels.quantity} + ${delta}::numeric >= ${stockLevels.reservedQty}`,
       ),
     )
     .returning({ quantity: stockLevels.quantity, avgCostPrice: stockLevels.avgCostPrice });
-  if (!updated) throw badRequest("Yetarli zaxira mavjud emas");
+  if (!updated) {
+    // Qoldiq yetmadimi yoki qolgani band qilinganmi — xabar aniq bo'lsin
+    const [current] = await tx
+      .select({ quantity: stockLevels.quantity, reservedQty: stockLevels.reservedQty })
+      .from(stockLevels)
+      .where(eq(stockLevels.id, level!.id));
+    const reserved = current ? toMinor(current.reservedQty, 4) : 0n;
+    throw badRequest(
+      reserved > 0n
+        ? `Yetarli zaxira mavjud emas: ${current!.quantity} dan ${current!.reservedQty} dona boshqa buyurtma uchun band qilingan`
+        : "Yetarli zaxira mavjud emas",
+      { reason: "insufficient_stock", productId: product.id, warehouseId: warehouse.id },
+    );
+  }
 
   // Hech qachon kirim bo'lmagan mahsulot offline sotilsa — tannarx xarid narxidan (asosiy valyutada bo'lsa)
   let issueCost = level!.avgCostPrice;

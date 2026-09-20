@@ -512,6 +512,13 @@
       "when": 1789829346441,
       "tag": "0072_product_view_cost_role",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1789829406441,
+      "tag": "0073_order_item_reserved_qty",
+      "breakpoints": true
     }
   ]
 }

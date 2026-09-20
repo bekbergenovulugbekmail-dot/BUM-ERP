@@ -634,14 +634,8 @@ describe("PHASE 14 — zaxira: o'tkazma, parallel buyurtma, band qilish", () => 
     await assertEveryEntryBalanced();
   });
 
-  /**
-   * AUDIT-1 TOPILMASI (hisobotda qayd etilgan, tuzatilmagan): ERP buyurtmasi tasdiqlanganda tovar
-   * MAVJUD miqdordan ortiq band qilinadi (qat'iy tekshiruv faqat agent buyurtmasida). Shu sababli
-   * jo'natilgandan keyin `reserved > quantity` bo'lib qoladi va ombor ro'yxatidagi "mavjud"
-   * ustuni MANFIY ko'rinadi. Haqiqiy qoldiq buzilmaydi.
-   * Tuzatilgach `it.fails` ni oddiy `it` ga o'zgartiring.
-   */
-  it.fails("band qilingan miqdor qoldiqdan oshmaydi (hozir bajarilmaydi — AUDIT-1)", async () => {
+  /** AUDIT-1 yopildi: band qilingan miqdor hech qachon ombordagi qoldiqdan oshmaydi. */
+  it("band qilingan miqdor qoldiqdan oshmaydi (AUDIT-1)", async () => {
     expect(await overReservedRows()).toEqual([]);
   });
 });

@@ -3,9 +3,9 @@
 #
 #   DATABASE_URL=postgresql://... BACKUP_DIR=/backups RETENTION_DAYS=14 BACKUP_PASSPHRASE=... sh pg-backup.sh
 #
-# Natija: $BACKUP_DIR/bum-erp-YYYYMMDDTHHMMSSZ.dump (pg_dump custom format, siqilgan) va .sha256 fayli.
-# BACKUP_PASSPHRASE berilsa — nusxa AES-256 bilan shifrlanadi (openssl, PBKDF2): .dump.enc (+ .sha256); ochiq .dump
-# diskda qolmaydi. Parol berilmasa — ogohlantirish (volume shifrlanmagan bo'lsa, nusxada mijoz va moliya ma'lumoti ochiq).
+# Natija: $BACKUP_DIR/bum-erp-YYYYMMDDTHHMMSSZ.dump.enc (pg_dump custom format, siqilgan, AES-256/PBKDF2) va .sha256.
+# BACKUP_PASSPHRASE MAJBURIY: nusxada mijoz, xodim va moliya ma'lumoti bor — shifrlanmagan nusxa uzoq
+# saqlanmasligi kerak. Faqat lokal sinov uchun BACKUP_ALLOW_PLAINTEXT=1 bilan shifrsiz ruxsat etiladi.
 # Arxiv yozilgach `pg_restore --list` bilan o'qib tekshiriladi — buzilgan nusxa "tayyor" deb qoldirilmaydi.
 # RETENTION_DAYS dan eski nusxalar o'chiriladi. Fayllar faqat egasi o'qiy oladi (umask 077).
 # Parol logga chiqmaydi: ulanish satri va shifr paroli faqat muhit o'zgaruvchisidan olinadi.
@@ -13,7 +13,7 @@ set -eu
 
 : "${DATABASE_URL:?DATABASE_URL kerak}"
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
-RETENTION_DAYS="${RETENTION_DAYS:-14}"
+RETENTION_DAYS="${RETENTION_DAYS:-30}"
 
 case "$RETENTION_DAYS" in
   ''|*[!0-9]*) echo "RETENTION_DAYS butun son bo'lishi kerak" >&2; exit 2 ;;
@@ -35,6 +35,12 @@ if [ "${entries:-0}" -eq 0 ]; then
   echo "[backup] XATO: arxivda jadval ma'lumoti topilmadi" >&2
   rm -f "$partial"
   exit 1
+fi
+
+if [ -z "${BACKUP_PASSPHRASE:-}" ] && [ "${BACKUP_ALLOW_PLAINTEXT:-0}" != "1" ]; then
+  echo "[backup] XATO: BACKUP_PASSPHRASE kerak (shifrsiz nusxa uchun BACKUP_ALLOW_PLAINTEXT=1)" >&2
+  rm -f "$partial"
+  exit 2
 fi
 
 if [ -n "${BACKUP_PASSPHRASE:-}" ]; then

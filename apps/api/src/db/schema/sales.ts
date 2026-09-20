@@ -303,6 +303,13 @@ export const salesOrderItems = pgTable(
     currencyTotal: money("currency_total").notNull().default("0"),
     /** Qisman qaytarishlar bilan qaytarilgan miqdor (qator birligida). */
     returnedQty: qty("returned_qty").notNull().default("0"),
+    /**
+     * Shu qator uchun omborda HAQIQATDA band qilingan miqdor — ASOSIY birlikda.
+     * Buyurtma miqdoridan kam bo'lishi mumkin: qoldiq yetmasa farqi band qilinmaydi (oldindan
+     * buyurtma), chunki band qilingan miqdor hech qachon ombordagi qoldiqdan oshmaydi.
+     * Bo'shatish aynan shu qiymat bo'yicha bajariladi — qayta hisoblashda og'ish bo'lmaydi.
+     */
+    reservedQty: qty("reserved_qty").notNull().default("0"),
 
     notes: text("notes"),
     ...timestamps(),
@@ -312,6 +319,7 @@ export const salesOrderItems = pgTable(
     index("soi_company_product_idx").on(t.companyId, t.productId),
     check("soi_qty_positive", sql`${t.quantity} > 0`),
     check("soi_returned_qty_range", sql`${t.returnedQty} >= 0 AND ${t.returnedQty} <= ${t.quantity}`),
+    check("soi_reserved_qty_non_negative", sql`${t.reservedQty} >= 0`),
     check("soi_price_non_negative", sql`${t.unitPrice} >= 0 AND ${t.costPrice} >= 0`),
   ],
 );

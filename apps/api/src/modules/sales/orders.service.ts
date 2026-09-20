@@ -738,12 +738,15 @@ export async function confirmOrder(tx: Tx, tenant: TenantContext, orderId: strin
 
   await tx.update(salesOrders).set({ status: "confirmed", updatedAt: new Date() }).where(eq(salesOrders.id, orderId));
   // Tovar omborda band qilinadi: boshqa agent shu qoldiqni qayta sota olmaydi.
-  // Agent buyurtmasida mavjud miqdor qulf ostida qayta tekshiriladi (parallel zakaz poygasi).
+  // Band qilingan miqdor HECH QACHON qoldiqdan oshmaydi (`reservations.service.ts` invarianti).
+  //   - agent va kassa: qoldiq yetmasa tasdiqlanmaydi (agent bor tovarni sotadi);
+  //   - qo'lda/import/bot: bor miqdor band qilinadi, yetmagani band EMAS — bu oldindan buyurtma
+  //     (tovar keyin keladi), shuning uchun u band qilish deb hisoblanmaydi.
   await reserveOrderStock(
     tx,
     tenant.company.id,
     { id: orderId, number: order.number, warehouseId: order.warehouseId, stockReserved: order.stockReserved },
-    { requireAvailable: order.source === "sales_agent" },
+    { policy: order.source === "sales_agent" || order.source === "pos" ? "strict" : "best_effort" },
   );
   await salesAudit(tx, tenant, meta, {
     action: "SALES_ORDER_CONFIRMED",
@@ -913,6 +916,13 @@ export async function shipOrder(tx: Tx, tenant: TenantContext, orderId: string, 
   assertWarehouseAccess(tenant, order.warehouseId);
   await assertOrderInScope(tx, tenant, orderId);
 
+  // QULFLASH TARTIBI butun tizimda bitta: buyurtma → MIJOZ → ombor qoldig'i.
+  // Band bo'shatish ombor qatorini qulflaydi, `dispatchOrder` esa avval mijozni — shuning uchun
+  // mijoz shu yerda oldin qulflanadi. Aks holda bandi bor va bandi yo'q ikki buyurtma bir vaqtda
+  // jo'natilganda qulflar teskari tartibda olinib, deadlock (500) bo'lardi.
+  if (order.customerId) {
+    await tx.select({ id: customers.id }).from(customers).where(eq(customers.id, order.customerId)).limit(1).for("update");
+  }
   // Band qilish chiqim bilan almashadi — avval bo'shatiladi, keyin haqiqiy chiqim yoziladi
   await releaseOrderStock(tx, tenant.company.id, { id: orderId, warehouseId: order.warehouseId, stockReserved: order.stockReserved });
   const { cogs } = await dispatchOrder(tx, tenant, order, todayIso());

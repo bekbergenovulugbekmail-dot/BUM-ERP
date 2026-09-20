@@ -6,6 +6,13 @@
 migratsiya bajarilmadi, ilova kodi o'zgartirilmadi. Faqat sinov ma'lumoti va yangi test fayli
 qo'shildi. Topilmalar tuzatilmadi — avval hisobot.
 
+> **YANGILANISH 2026-09-20 (blocker fix).** Egasining alohida topshirigi bilan **AUDIT-1
+> tuzatildi** (zaxira band qilish invarianti DB tranzaksiyasi darajasida) va **zaxira
+> arxitekturasi loyihalashtirildi** (AUDIT-2 uchun kod + hujjat; production'ga o'rnatilmadi).
+> Tuzatishdan keyingi regressiya: **API 134 fayl / 763 test PASS**, **brauzer E2E 79/79 PASS**.
+> Production'ga deploy qilinmadi, production bazasiga tegilmadi. Batafsil — quyidagi
+> TOPILMALAR bo'limi.
+
 ---
 
 ## 0. Baza holati
@@ -16,7 +23,9 @@ qo'shildi. Topilmalar tuzatilmadi — avval hisobot.
 | Ishchi daraxt | toza | toza (audit testidan tashqari) | PASS |
 | Migratsiyalar | 0072 gacha | 0072 (`products.view_cost`) | PASS |
 | API testlar | 132 fayl / 722 test | **133 fayl / 747 test** (+1 kutilgan xato) | PASS |
+| API testlar (blocker fix'dan keyin) | — | **134 fayl / 763 test** (kutilgan xato yo'q) | PASS |
 | Brauzer E2E | 79/79 | 79/79 (o'sha commit, oldingi yugurish) | PASS |
+| Brauzer E2E (blocker fix'dan keyin) | 79/79 | **79/79** (17.5 daqiqa, to'liq qayta yugurtirildi) | PASS |
 
 Baza o'zgardi: shu audit uchun `apps/api/test/final-acceptance.test.ts` qo'shildi (+25 test).
 
@@ -118,29 +127,48 @@ butun dev bazasi (1129 jurnal yozuvi, 466 307 033.62 debet = kredit) solishtiril
 
 ## TOPILMALAR
 
-### AUDIT-1 — Band qilingan miqdor qoldiqdan oshib ketadi · **MEDIUM**
+### AUDIT-1 — Band qilingan miqdor qoldiqdan oshib ketadi · **TUZATILDI (2026-09-20)**
 
-**Muammo.** ERP buyurtmasi tasdiqlanganda tovar mavjud miqdordan ORTIQ band qilinadi. Bittasi
-jo'natilgach `stock_levels.reserved_qty > quantity` bo'lib qoladi.
+**Muammo (audit paytida).** ERP buyurtmasi tasdiqlanganda tovar mavjud miqdordan ORTIQ band
+qilinardi. Bittasi jo'natilgach `stock_levels.reserved_qty > quantity` bo'lib qolardi va ombor
+ro'yxatida "mavjud" ustuni manfiy ko'rinardi.
 
-**Root cause.** `sales/orders.service.ts` → `reserveOrderStock(..., { requireAvailable: order.source === "sales_agent" })`:
-qat'iy tekshiruv faqat **agent** buyurtmasida. `inventory/stock.service.ts:219`
-`availableQty = quantity - reservedQty` — natijada ombor ro'yxatida **"mavjud" ustuni manfiy**
-ko'rinadi. Bazada faqat `reserved_qty >= 0` cheklovi bor, `reserved <= quantity` cheklovi yo'q.
+**Root cause.** Ikkita alohida sabab:
+1. `reserveOrderStock` qat'iy tekshiruvni faqat `sales_agent` manbasida qilardi va band qilishni
+   mavjud miqdor bilan umuman cheklamasdi — `FOR UPDATE` qulf yo'q edi, ikki parallel tasdiq
+   bir xil qoldiqni ikki marta band qilishi mumkin edi.
+2. Chiqim harakati (`moveStock`) band qilingan miqdorni umuman hisobga olmasdi: qoldiq
+   `reserved_qty` dan pastga tushib ketardi.
 
-**Ta'siri.** Pul va haqiqiy qoldiq buzilmaydi (jo'natishda aniq xato bilan rad etiladi), lekin
-foydalanuvchi noto'g'ri "mavjud" raqamini ko'radi va rejalashtirishda yanglishadi.
+**Tuzatish (UI'da yashirilmadi — invariant DB darajasida).**
+- `inventory/reservations.service.ts` qayta yozildi: mahsulotlar tartiblangan holda
+  `select … for update` bilan qulflanadi, `available = quantity − reserved` hisoblanadi va
+  band qilish shartli `UPDATE … WHERE reserved + take <= quantity` bilan yoziladi — ya'ni
+  invariant qator darajasida himoyalangan, race'da ikkinchi tranzaksiya yoza olmaydi.
+- **Siyosat ajratildi:** `strict` (`pos`, `sales_agent`) — yetmasa `400 out_of_stock`;
+  `best_effort` (`manual`, `import`, `bot`) — mavjudi band qilinadi, **yetishmagan qism
+  PRE-ORDER**, u band qilingan deb HISOBLANMAYDI.
+- Har bir satr uchun haqiqatda band qilingan miqdor `sales_order_items.reserved_qty` da
+  saqlanadi (migratsiya `0073`, faqat qo'shimcha: `add column if not exists` + `>= 0` check).
+  Shu sababli bekor qilish/jo'natishda aynan o'sha miqdor bo'shatiladi va boshqa buyurtmaning
+  bandi "o'g'irlanmaydi". 0073 dan oldingi buyurtmalar uchun eski hisoblash fallback sifatida qoldi.
+- `inventory/stock.service.ts`: chiqim sharti `quantity + delta >= 0` dan
+  `quantity + delta >= reserved_qty` ga o'zgartirildi (offline POS sinxroni uchun
+  `allowNegative` bundan mustasno). Xato matni endi nechta dona boshqa buyurtma uchun band
+  qilinganini aytadi.
+- `sales/orders.service.ts`: `shipOrder` avval **mijozni** qulflaydi, keyin zaxirani bo'shatadi.
+  Bu deadlock'ni yopdi: qulf tartibi butun tizimda **buyurtma → mijoz → qoldiq**.
 
-**Dalil.** `final-acceptance.test.ts` → `it.fails("band qilingan miqdor qoldiqdan oshmaydi — AUDIT-1")`.
-O'lchov: qoldiq 0, band 90.
+**Natija.** `quantity >= 0` va `reserved_qty <= quantity` har doim saqlanadi;
+`availableQty = quantity − reservedQty` hech qachon manfiy emas — `greatest(..., 0)` kabi
+niqoblash ISHLATILMADI.
 
-**Tavsiya (tasdiqdan keyin).** Bir nechta variant bor, egasi tanlaydi:
-1. `requireAvailable` ni barcha manbalar uchun yoqish (eng qat'iy; mavjud ish oqimini o'zgartiradi);
-2. band qilishni mavjud miqdor bilan cheklash (`min(kerak, mavjud)`) va farqni ogohlantirish sifatida ko'rsatish;
-3. eng kam o'zgarish: `availableQty` ni `greatest(quantity - reserved, 0)` qilib ko'rsatish va
-   ombor ro'yxatida "ortiqcha band" belgisini chiqarish.
+**Dalil.** `apps/api/test/stock-reservation-policy.test.ts` — 15 doimiy test (11 talab qilingan
+holat + agent qat'iy rejimi + parallel jo'natish). Har bir testda `assertInvariant()` butun
+`stock_levels` jadvalini tekshiradi. `final-acceptance.test.ts` dagi `it.fails(...)` oddiy
+o'tuvchi testga aylantirildi. Parallel 90+90 (qoldiq 100) → `[200, 400]`, band 90, mavjud 10.
 
-### AUDIT-2 — Production zaxirasi ishlamayapti · **HIGH (operatsion)**
+### AUDIT-2 — Production zaxirasi ishlamayapti · **HIGH (operatsion) — LOYIHA TAYYOR, O'RNATILMAGAN**
 
 **Muammo.** Zaxira vositasi tayyor va sinalgan, lekin Railway'da **cron xizmati qo'yilmagan** —
 ya'ni production bazasining avtomatik nusxasi **yo'q**. Fayl (rasm) zaxirasi umuman ko'zda tutilmagan.
@@ -148,8 +176,28 @@ ya'ni production bazasining avtomatik nusxasi **yo'q**. Fayl (rasm) zaxirasi umu
 **Root cause.** Xizmatni yaratish egasining Railway panelida bajariladigan qadam
 (`MIGRATION_STATUS.md`: BLOCKED — USER ACTION REQUIRED).
 
-**Tavsiya.** `deploy/backup/Dockerfile` dan alohida xizmat + volume + `Cron Schedule`,
-`BACKUP_PASSPHRASE` majburiy, oyiga bir marta tiklash sinovi.
+**Holat (2026-09-20).** Zaxira arxitekturasi to'liq loyihalashtirildi va `deploy/backup/` ga
+izolyatsiya qilindi — lekin **production'ga o'rnatilmadi** (egasining qarori):
+- `pg-backup.sh` — `pg_dump` (custom) → `pg_restore --list` tekshiruvi → SHA-256 →
+  AES-256-CBC/PBKDF2 shifrlash → saqlash muddati. `BACKUP_PASSPHRASE` **majburiy**: parolsiz
+  nusxa umuman yozilmaydi (faqat lokal sinov uchun `BACKUP_ALLOW_PLAINTEXT=1`).
+- `files-backup.sh` (yangi) — `rclone sync` bilan inkremental fayl nusxasi + `rclone check`
+  (xesh solishtiruvi); o'chirilgan fayllar `archive/<sana>/` ga suriladi.
+- `files-restore-test.sh` (yangi) — nusxadan namuna obyektlarni yuklab, hajmi va SHA-256 ini
+  tekshiradi; production saqlagichga umuman tegmaydi.
+- `README.md` — arxitektura, siyosat jadvali (kunlik baza + kunlik fayl, haftalik tekshiruv,
+  oylik alohida muhitda tiklash sinovi), saqlash muddati ≥ 30 kun (`RETENTION_DAYS`), RTO/RPO
+  va egasi bajaradigan Railway qadamlari.
+- **Sirlar:** barcha kalitlar faqat muhit o'zgaruvchisidan; repoda hech qanday sir yo'q; loglarda
+  parol, ulanish satri yoki token chop etilmaydi; fayllar `umask 077`.
+
+**Muhim xulosa.** Production'da S3 hali yoqilmagan, shuning uchun BUGUN tashrif/mijoz/yetkazma
+rasmlari baza dump'i ichida (`bytea`). **S3 yoqilgan kundan boshlab baza nusxasi yetarli emas** —
+mahsulot rasmi, xodim surati va xarajat cheki faqat S3 da bo'ladi, shuning uchun `files-backup.sh`
+S3 dan OLDIN ishga tushirilishi shart.
+
+**Qolgan qadam (egasi).** Railway'da `bum-backup` xizmati + volume + `Cron Schedule` +
+`BACKUP_PASSPHRASE`, so'ng birinchi oyda bir marta qo'lda to'liq tiklash sinovi.
 
 ### AUDIT-3 — Deploy va production tekshiruvi bloklandi · **BLOCKED**
 
@@ -165,7 +213,8 @@ production holati (migratsiya soni, `features.storage`, `features.sms`) tekshiri
 |---|---|---|---|---|
 | 1 | Backup (mexanizm) | PASS | 123 jadval, SHA-256, arxiv tekshiruvi | Parolsiz nusxa shifrlanmaydi |
 | 2 | Restore | PASS | 14 jadval + 12 moliyaviy ko'rsatkich aynan mos | Faqat dev bazada |
-| 2b | Production backup | NOT VERIFIED | cron xizmati yo'q | **Ma'lumot yo'qolishi** |
+| 2b | Production backup | NOT VERIFIED | loyiha tayyor, cron xizmati hali yo'q | **Ma'lumot yo'qolishi** |
+| 2c | Fayl zaxirasi (loyiha) | PASS (kod) / NOT VERIFIED (production) | `files-backup.sh` + `files-restore-test.sh` | S3 yoqilgunicha baza dump'i qamraydi |
 | 3 | File storage | PASS (mantiq) / NOT VERIFIED (production) | `files.test.ts` | Rasm 503 bo'lishi mumkin |
 | 4 | SMS / OTP | NOT VERIFIED | env bilan yoqiladi | Parol tiklash ishlamasligi |
 | 5 | Android (real) | NOT VERIFIED | qurilma yo'q | GPS, kamera, fon rejimi |
@@ -178,7 +227,8 @@ production holati (migratsiya soni, `features.storage`, `features.sms`) tekshiri
 | 12 | Delivery | PASS | yetkazildi / nasiya / uch usulli / FAILED | Qisman yetkazish alohida testda |
 | 13 | Debt | PASS | 50% → qolgani, sotuv holati o'zgarmaydi | — |
 | 14 | Payment | PASS | naqd, UZCARD, HUMO, bank, aralash | — |
-| 15 | Inventory | PASS | o'tkazma, parallel, manfiy emas | **AUDIT-1** |
+| 15 | Inventory | PASS | o'tkazma, parallel, manfiy emas | — (AUDIT-1 tuzatildi) |
+| 15b | Zaxira invarianti | PASS | `stock-reservation-policy.test.ts` 15 test, `reserved <= quantity` | Pre-order alohida tushuncha |
 | 16 | Accounting | PASS | har yozuv balansli; 466 307 033.62 debet = kredit | — |
 | 17 | Cross-module | PASS | `acceptance-cross-module` + yangi test | — |
 | 18 | Tenant isolation | PASS | API + brauzer 7/7 | — |
@@ -196,7 +246,8 @@ production holati (migratsiya soni, `features.storage`, `features.sms`) tekshiri
 ## HUKM: **NOT READY**
 
 Sabab kodda emas. Kod tomondan barcha o'lchangan biznes oqimlari o'tdi
-(API 133 fayl / 747 test, brauzer 79/79, har bir jurnal yozuvi balansli, tiklash aynan mos).
+(blocker fix'dan keyin: API 134 fayl / 763 test, brauzer 79/79, har bir jurnal yozuvi balansli,
+tiklash aynan mos).
 
 Tayyor emasligining sababi — **tekshirilmagan haqiqiy dunyo qismlari va bitta operatsion xavf**:
 
@@ -206,7 +257,8 @@ Tayyor emasligining sababi — **tekshirilmagan haqiqiy dunyo qismlari va bitta 
 3. Haqiqiy kassa kompyuterida o'rnatuvchi va jihozlar sinalmagan.
 4. Haqiqiy UZCARD/HUMO terminali ulanmagan.
 5. Production'da fayl saqlash va SMS holati tasdiqlanmagan.
-6. AUDIT-1 (MEDIUM) — "mavjud" ustuni manfiy ko'rinishi.
+6. ~~AUDIT-1 (MEDIUM) — "mavjud" ustuni manfiy ko'rinishi.~~ **2026-09-20 da tuzatildi** —
+   invariant DB tranzaksiyasi darajasida himoyalangan, 15 doimiy test qo'shildi.
 
 Shulardan 1-band bajarilib, 2–5 bandlar egasi tomonidan real qurilmalarda tasdiqlangach,
 hukm **PARTIALLY VERIFIED → READY** ga o'tishi mumkin.

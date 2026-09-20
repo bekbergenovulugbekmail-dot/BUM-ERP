@@ -2745,6 +2745,63 @@ production'ga tashqi so'rov avtomatik rejim klassifikatori tomonidan rad etildi,
 **Hukm: NOT READY** — sabab kodda emas: production zaxirasi yo'q va haqiqiy Android/kassa
 kompyuteri/UZCARD-HUMO terminali hamon sinalmagan.
 
+## AUDIT-1 tuzatildi va zaxira arxitekturasi (2026-09-20)
+
+Egasining topshirigi: auditdagi blocker'ni yopish, yangi biznes funksiyasi qo'shmasdan.
+Production'ga deploy qilinmadi, production bazasiga tegilmadi.
+
+**Zaxirani band qilish (AUDIT-1) — endi invariant DB darajasida.** Muammo: buyurtma tasdiqlanganda
+mavjud miqdordan ortiq band qilinardi (`reserved_qty > quantity`) va ombordagi "mavjud" ustuni
+manfiy chiqardi. Tuzatish UI'da niqoblash emas (`greatest(..., 0)` ISHLATILMADI):
+
+- `inventory/reservations.service.ts` qayta yozildi. Mahsulotlar **tartiblangan** holda
+  `select … for update` bilan qulflanadi (deadlock bo'lmasin), `available = quantity − reserved`
+  hisoblanadi, yozuv esa shartli: `update … set reserved = reserved + N where reserved + N <= quantity`.
+  Ya'ni invariant qator darajasida himoyalangan — parallel ikki tasdiqda ikkinchisi yoza olmaydi.
+- **Siyosat ajratildi:** `strict` (`pos`, `sales_agent`) — yetmasa `400 out_of_stock`;
+  `best_effort` (`manual`, `import`, `bot`) — mavjudi band qilinadi, yetishmagan qism **PRE-ORDER**
+  bo'lib qoladi va band qilingan deb hisoblanmaydi (buyurtma tasdiqlanadi, lekin qoldiq "o'g'irlanmaydi").
+- Migratsiya **0073** (faqat qo'shimcha, `add column if not exists`): `sales_order_items.reserved_qty`
+  + `>= 0` check. Har satr uchun haqiqatda band qilingan miqdor saqlanadi, shuning uchun bekor
+  qilish/jo'natishda aynan o'sha miqdor bo'shatiladi. 0073 gacha yaratilgan buyurtmalar uchun eski
+  hisoblash fallback sifatida qoldirildi.
+- `inventory/stock.service.ts`: chiqim sharti `quantity + delta >= 0` → **`quantity + delta >= reserved_qty`**
+  (offline POS sinxroni uchun `allowNegative` bundan mustasno). Xato matni nechta dona boshqa
+  buyurtma uchun band qilinganini aytadi.
+- `sales/orders.service.ts`: `shipOrder` avval **mijozni** qulflaydi, keyin zaxirani bo'shatadi —
+  bu topilgan deadlock'ni yopdi. Butun tizimda qulf tartibi: **buyurtma → mijoz → qoldiq**.
+
+**Testlar:** `apps/api/test/stock-reservation-policy.test.ts` — 15 doimiy test (buyurtmaning barcha
+manbalari, parallel 90+90 qoldiq 100 → `[200, 400]`, qisman band, bekor qilish, jo'natish, qaytarish,
+idempotentlik, pre-order). Har bir testda `assertInvariant()` butun `stock_levels` jadvalini
+tekshiradi: `quantity >= 0` va `reserved_qty <= quantity`. `final-acceptance.test.ts` dagi
+`it.fails(… AUDIT-1)` oddiy o'tuvchi testga aylantirildi.
+
+**Regressiya (tuzatishdan keyin, to'liq):** API **134 fayl / 763 test PASS** (42 daqiqa),
+brauzer E2E **79/79 PASS** (17.5 daqiqa), `tsc --noEmit` va `eslint --max-warnings=0` toza.
+Buxgalteriya va qoldiq solishtiruvi o'zgarmadi — jurnal yozuvlari balansli, tannarx mantig'iga
+tegilmadi.
+
+**Zaxira arxitekturasi (AUDIT-2) — faqat kod va hujjat, production'ga o'rnatilmadi.**
+`deploy/backup/` izolyatsiya qilingan xizmat (`postgres:18-alpine` + `openssl` + `rclone`):
+
+- `pg-backup.sh` — `pg_dump` (custom) → `pg_restore --list` bilan o'qib tekshirish → SHA-256 →
+  AES-256-CBC/PBKDF2 shifrlash → saqlash muddati. `BACKUP_PASSPHRASE` **majburiy**: parolsiz nusxa
+  yozilmaydi (`BACKUP_ALLOW_PLAINTEXT=1` faqat lokal sinov uchun). `RETENTION_DAYS` standart **30**.
+- `files-backup.sh` (yangi) — S3 → mustaqil S3 ga inkremental `rclone sync` + `rclone check`
+  (xesh solishtiruvi); o'chirilgan/almashgan fayllar `archive/<sana>/` ga suriladi.
+- `files-restore-test.sh` (yangi) — nusxadan namuna obyektlarni yuklab, hajmi va SHA-256 ini
+  manba bilan solishtiradi; production saqlagichga umuman tegmaydi.
+- `README.md` — arxitektura, siyosat (kunlik baza + kunlik fayl, haftalik yaxlitlik tekshiruvi,
+  oylik ALOHIDA muhitda tiklash sinovi), RTO/RPO va egasi bajaradigan Railway qadamlari.
+- **Sirlar:** faqat muhit o'zgaruvchilari (`DATABASE_URL`, `BACKUP_PASSPHRASE`, `*_S3_*`); repoda
+  hech qanday sir yo'q; loglarda parol, ulanish satri va token chop etilmaydi; fayllar `umask 077`.
+
+**Fayl zaxirasi haqida muhim xulosa:** productionda S3 hali yoqilmagan, shuning uchun bugun tashrif
+rasmlari, mijoz vitrinasi va yetkazma dalillari baza dump'i ichida (`bytea`). **S3 yoqilgan kundan
+boshlab baza nusxasi YETARLI EMAS** — mahsulot rasmi, xodim surati va xarajat cheki faqat S3 da
+bo'ladi. Shuning uchun `files-backup.sh` S3 dan OLDIN ishga tushirilishi shart.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
@@ -2769,6 +2826,7 @@ kompyuteri/UZCARD-HUMO terminali hamon sinalmagan.
 12. Railway'dagi eski xizmatlar (`BUM-ERP`, `logto`, logto'ning Postgres'i) hali bo'lsa — egasi o'chiradi (tasdiqsiz o'chirilmaydi)
 
 ### Blockerlar
+- **Production zaxira xizmati (AUDIT-2, HIGH):** kod va hujjat tayyor (`deploy/backup/`), lekin Railway'da `bum-backup` xizmati, volume va `Cron Schedule` egasi tomonidan yaratilmagan; `BACKUP_PASSPHRASE` ham egasi kiritadi (parol repoda yo'q va hech qayerda chop etilmaydi). Shu qadamgacha production bazasining avtomatik nusxasi YO'Q
 - **Android real qurilma:** `adb devices` bo'sh, emulyator uchun xotira yetmaydi — telefon ulash kerak
 - **Release imzo kaliti:** egasi yaratadi va xavfsiz joyda saqlaydi (yo'qolsa ilovani yangilab bo'lmaydi); `android/keystore.properties` ga yo'li va parollar
 - **Build/test xotirasi:** 8 GB mashinada Docker va Gradle birga ishlasa tizim fon vazifalarini to'xtatadi — APK Docker to'xtatilib qurildi

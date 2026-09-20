@@ -101,13 +101,16 @@ describe("Tasdiqlangan buyurtma zaxirani band qiladi", () => {
     expect((await level()).reservedQty).toBe("50.0000");
   });
 
-  it("tovar kelishidan oldin tasdiqlangan buyurtma yetishmovchilikni ko'rsatadi", async () => {
+  it("tovar kelishidan oldin tasdiqlangan buyurtma: bor miqdor band, qolgani oldindan buyurtma", async () => {
     const big = await order("80");
     expect((await confirm(big)).statusCode, "qoldiq yetmasa ham tasdiqlanadi (tovar keyin keladi)").toBe(200);
 
+    const after = await level();
+    expect(after.reservedQty, "band ombordagi 50 donada to'xtaydi — qoldiqdan oshmaydi").toBe("50.0000");
+
     const stock = await call("GET", `/api/inventory/stock?warehouseId=${warehouseId}`);
     const row = (stock.json().stock as { productId: string; availableQty: string }[]).find((item) => item.productId === colaId);
-    expect(Number(row!.availableQty), "50 − 80 = −30: omborda 30 dona yetmaydi").toBe(-30);
+    expect(Number(row!.availableQty), "mavjud MANFIY emas — yetishmovchilik band emas, oldindan buyurtma").toBe(0);
   });
 
   it("jo'natilganda band bo'shaydi va tovar chiqadi", async () => {
