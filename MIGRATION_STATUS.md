@@ -6,7 +6,7 @@
 | | |
 |---|---|
 | Branch | `feat/postgres-migration` |
-| Oxirgi yangilanish | 2026-09-11 |
+| Oxirgi yangilanish | 2026-09-20 |
 | Umumiy holat | 16 / 16 PHASE — kod tayyor; qolgan: brauzerda qo'lda sinov, production deploy va ma'lumot importi |
 | Ishlab turgan ilova | Yangi versiya Railway'da ishlayapti: https://bum-web-production.up.railway.app (bum-erp.uz DNS o'zgarishini kutmoqda). Eski Convex versiyasi `main` da |
 
@@ -2802,6 +2802,91 @@ rasmlari, mijoz vitrinasi va yetkazma dalillari baza dump'i ichida (`bytea`). **
 boshlab baza nusxasi YETARLI EMAS** — mahsulot rasmi, xodim surati va xarajat cheki faqat S3 da
 bo'ladi. Shuning uchun `files-backup.sh` S3 dan OLDIN ishga tushirilishi shart.
 
+## Production deploy va tashqi tekshiruv (2026-09-20)
+
+Egasining topshirigi: kechagi va undan oldingi barcha o'zgarishlarni GitHub va Railway
+production'ga chiqarish, keyin productionda haqiqatan ishlayotganini tekshirish. Yangi
+funksiya qo'shilmadi; UZCARD/HUMO terminal integratsiyasi, SMS va AI'ga tegilmadi.
+
+**Deploydan oldingi holat.** Ishchi daraxt toza, HEAD `0946490`. Production bazasida **71**
+migratsiya (oxirgisi `0070`), ya'ni productionda `1fbb37e` gacha bo'lgan kod turgan edi —
+`0b7b4ce`, `2b5f696`, `0e06624`, `0946490` hali chiqmagan. Buni marshrut diskriminatori
+tasdiqladi: `/api/distribution/territories` va `/api/delivery/returns/pickups` allaqachon
+**401** (mavjud), `/api/catalog/products/:id/price-suggestions` esa **404** (yo'q).
+Chiqarilmagan 7 migratsiya (`0067`–`0073`) **faqat qo'shuvchi**: `create table`,
+`add column ... default`, `add constraint`, va `roles.permissions` ga `array_append`.
+Hech qanday `drop`, `delete`, `truncate` yoki ustun turini o'zgartirish yo'q.
+
+**Testlar (deploydan oldin, hammasi lokal).** API `tsc --noEmit` toza, web `tsc -b` toza,
+`eslint --max-warnings=0` toza. API to'plami 8 GB mashinada 7 qismga bo'lib ishga tushirildi
+(`--maxWorkers=2`): **134 fayl / 763 test PASS** (22+20+20+20+20+16+16 fayl;
+181+83+124+84+93+46+152 test). Frontend unit: **21 fayl / 87 test PASS**. Brauzer E2E
+(Playwright, 3 shard): **79 test PASS** (44+12+23). Topshiriqda alohida so'ralgan to'plamlar
+shu ichida: `stock-reservation`, `stock-reservation-policy`, `tenant-isolation`,
+`tenant-session`, `acceptance-payment-architecture`, `employee-single-source`,
+`product-cost`, `final-acceptance`.
+
+**GitHub.** `git push origin feat/postgres-migration` — **o'tdi**: `fc047ac..0946490`,
+162 commit. Avvalgi sessiyalardagi "avtomatik rejimda push rad etildi" blokeri **yopildi**.
+
+**Railway production deploy.** `bum-api` (deployment `252dd3ea`, SUCCESS 10:52 UTC) va
+`bum-web` (deployment `8cc72d9e`, SUCCESS 10:55 UTC) — ikkalasi ham RUNNING. `railway up`
+dastlab ikki marta tarmoq xatosi bilan uzildi (backboard "operation timed out"), uchinchi
+urinish o'zgarishsiz o'tdi — kodda emas, tarmoqda (avval ham shunday bo'lgan). Mavjud
+muhit o'zgaruvchilariga, baza ulanishiga va production ma'lumotiga tegilmadi.
+
+**Migratsiya natijasi.** API loglarida bitta `Migratsiyalar qo'llandi (35ms)` va bitta
+`Server listening` — crash-loop yo'q, `ERROR`/`FATAL` yo'q. Bazada **71 → 74**:
+`sessions.company_id` (0071), `roles` da `products.view_cost` — **36 rolda** (0072),
+`sales_order_items.reserved_qty` (0073). Ma'lumot butun: kompaniya **3**, foydalanuvchi
+**10** — deploydan oldin ham, keyin ham bir xil.
+
+**Yangi kod jonli ekanining dalili.** Deploydan keyin 404 → 401 ga o'tgan marshrutlar:
+`/api/catalog/products/:id/price-suggestions`, `/api/catalog/products/:id/cost-history`.
+Web bundle almashdi: `index-OyhtHdrr.js` → `index-Ca7itN0K.js`.
+
+### Productionda tekshirilgani (tizimga kirmasdan)
+
+- **A) Root** — `app.bum-erp.uz/` login KO'RSATMAYDI: "Biznes manzili" sahifasi,
+  parol maydoni **0 ta**. PASS
+- **B) Tenant** — `app.bum-erp.uz/bonnu-market` aynan shu biznesning kirish sahifasi
+  ("BONNU MARKET · Xodimlar uchun kirish · bonnu-market"), parol maydoni 1 ta. Noto'g'ri
+  manzil (`/zzz-no-such-business`) — "Bunday biznes manzili yo'q", login formasi
+  ko'rsatilmaydi. PASS
+- **B2) Tenant almashtirish** — sessiyasiz `X-Company-Id`, `x-company-slug`, `X-Tenant`
+  sarlavhalari va `POST /api/company/switch` `companyId` tanasi bilan — to'rttasi ham
+  **401**, ya'ni sarlavha yoki tana bilan tenant tanlab bo'lmaydi. PASS
+- **Xizmat sog'lig'i** — `/api/auth/me`, `/api/company/mine`, `/api/inventory/stock`,
+  `/api/finance/accounts`, `/api/hr/employees`, `/api/purchase/orders`,
+  `/api/catalog/products`, `/api/analytics/dashboard`, `/api/distribution/territories`,
+  `/api/delivery/returns/pickups` — hammasi **401** (jonli va himoyalangan);
+  `POST /api/sales/pos/sales`, `/api/sales/pos/payment-options`,
+  `/api/sales/pos/shifts/open` — **401**. Sahifalar 200. Sessiyasiz cookie yozilmaydi.
+
+### Productionda TEKSHIRILMAGANI (tizimga kirish kerak)
+
+Topshiriqdagi **C (sessiya izolyatsiyasi), D (xodim), E (sotuv), F (zaxira),
+G (to'lovlar), H (narx takliflari), I (tannarx)** bandlari haqiqiy hisob bilan kirishni
+talab qiladi. Bular **BAJARILMADI** — production bootstrap admin paroli ishlatilmaydi
+(uzoq vaqtdan beri amaldagi qoida), egasining sinov hisobi esa yo'q. Bu mantiqlarning
+hammasi lokal to'plamda qoplangan va o'tgan (`tenant-session`, `employee-single-source`,
+`final-acceptance`, `stock-reservation`, `acceptance-payment-architecture`,
+`product-cost`), lekin bu **production dalili emas**.
+
+### Zaxira (backup)
+
+Railway production'da xizmatlar: `bum-api`, `bum-web`, `Postgres--bSX` (ilova bazasi),
+`logto`, `Postgres` (logto'niki), `BUM-ERP` (bo'sh). **`bum-backup` xizmati YO'Q**, hech
+bir xizmatda `Cron Schedule` qo'yilmagan (17 ta konfiguratsiyaning hammasida `null`).
+Topshiriqqa muvofiq o'zboshimchalik bilan qo'shilmadi. Kod `deploy/backup/` da tayyor.
+
+Egasi bajaradigan Railway qadamlari:
+1. `bum-backup` nomli yangi xizmat (repodan, `RAILWAY_DOCKERFILE_PATH=deploy/backup/Dockerfile`)
+2. Volume: `/backups` ga ulanadi (kamida 10 GB)
+3. O'zgaruvchilar: `DATABASE_URL` (Postgres--bSX dan referens), `BACKUP_PASSPHRASE` (egasi
+   o'ylab topadi, hech qayerda chop etilmaydi), `RETENTION_DAYS=30`; S3 yoqilgach
+   `*_S3_*` (R2) kalitlari — **hech qaysi biri repoga yozilmaydi**
+4. `Cron Schedule`: kunlik (masalan `0 1 * * *`)
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
@@ -2837,7 +2922,7 @@ bo'ladi. Shuning uchun `files-backup.sh` S3 dan OLDIN ishga tushirilishi shart.
 - **Kod imzolash sertifikati (CLI-1):** yangilanish o'rnatuvchisi imzosiz — sertifikat kerak (pullik, taxminiy)
 - **Terminal ekvayringi (UZCARD/HUMO API):** bank yoki processing protokoli va kalitlari kerak — hozir terminal to'lovi kassir tomonidan chekka qarab kiritiladi
 - **Payme / Click:** merchant ID va kalitlari kerak — integratsiya boshlanmagan
-- **GitHub push / PR:** avtomatik rejimda `git push` rad etildi — egasi `git push -u origin feat/postgres-migration` va PR ochadi
+- **GitHub push:** ~~avtomatik rejimda rad etildi~~ — **yopildi** (2026-09-20): `feat/postgres-migration` GitHub'ga chiqarildi (`fc047ac..0946490`, 162 commit). Qolgani: `main` ga PR — o'tish kuni kelishilgach
 - **OSRM:** Public OSRM cheklovi bor; foydalanuvchilar soni oshsa self-hosted OSRM kerak. Taxminiy talab (tekshirilmagan): O'zbekiston xaritasi uchun ~2 vCPU, 4 GB RAM, 10 GB disk; ulash — `ROUTING_OSRM_URL`, egasining tasdig'i bilan
 
 ### Eng muhim keyingi qadam
