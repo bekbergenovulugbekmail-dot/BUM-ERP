@@ -6,7 +6,9 @@
  * faqat yangi mijoz ochadi: har qator alohida tekshiriladi, xato qator `errors` ga tushadi va qolganlari yoziladi.
  */
 import { and, asc, eq } from "drizzle-orm";
+import { distributionRoutes, salesReps, territories } from "../../db/schema/crm.js";
 import { customers } from "../../db/schema/sales.js";
+import { addRouteCustomer } from "../distribution/distribution.service.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import {
@@ -115,6 +117,11 @@ export type CustomerImportRow = {
   discountPercent?: string;
   creditLimit?: string;
   paymentTermDays?: string;
+  notes?: string;
+  /** Distributsiya: hudud nomi — marshrut orqali bog'lanadi (`customers` da hudud ustuni yo'q). */
+  territory?: string;
+  /** Distributsiya: savdo agenti nomi yoki kodi — marshrut orqali bog'lanadi. */
+  salesRep?: string;
 };
 
 /** "Yuridik shaxs", "legal", "yuridik" → legal; qolgani — jismoniy. */
@@ -123,20 +130,65 @@ function partyTypeOf(value: string | undefined): "individual" | "legal" {
   return text.startsWith("yuridik") || text === "legal" ? "legal" : "individual";
 }
 
+/** Solishtirish uchun: bo'shliqlar bir xil, registr past. */
+const foldName = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
+
+/**
+ * Hudud va/yoki savdo agenti bo'yicha mos FAOL marshrutni topadi.
+ *
+ * `customers` jadvalida hudud va agent ustuni YO'Q — bog'lanish `route_customers` → `distribution_routes`
+ * orqali ketadi, marshrutda esa hudud ham, agent ham bor. Shuning uchun parallel jadval ochilmaydi:
+ * mijoz mos marshrutga biriktiriladi (aynan `convertProspect` dagi naqsh).
+ *
+ * Aniq bitta marshrut topilmasa mijoz baribir yaratiladi — faqat ogohlantirish qaytadi.
+ */
+async function loadRouteIndex(tx: Tx, companyId: string) {
+  const rows = await tx
+    .select({
+      routeId: distributionRoutes.id,
+      routeName: distributionRoutes.name,
+      territoryName: territories.name,
+      repName: salesReps.name,
+      repCode: salesReps.code,
+    })
+    .from(distributionRoutes)
+    .leftJoin(territories, eq(distributionRoutes.territoryId, territories.id))
+    .leftJoin(salesReps, eq(distributionRoutes.salesRepId, salesReps.id))
+    .where(and(eq(distributionRoutes.companyId, companyId), eq(distributionRoutes.isActive, true)));
+
+  return (territory: string, salesRep: string) => {
+    const wantTerritory = foldName(territory);
+    const wantRep = foldName(salesRep);
+    return rows.filter(
+      (route) =>
+        (!wantTerritory || foldName(route.territoryName ?? "") === wantTerritory) &&
+        (!wantRep || foldName(route.repName ?? "") === wantRep || foldName(route.repCode ?? "") === wantRep),
+    );
+  };
+}
+
 export async function importCustomers(
   tx: Tx,
   tenant: TenantContext,
   rows: CustomerImportRow[],
   meta: RequestMeta,
-  options: { dryRun?: boolean } = {},
+  options: { dryRun?: boolean; requirePhone?: boolean } = {},
 ): Promise<ImportOutcome> {
   const dryRun = options.dryRun === true;
+  // "Tezda qo'shish" (bitta mijoz) telefonni talab qiladi; fayl importida telefon ixtiyoriy bo'lib qoladi
+  const requirePhone = options.requirePhone === true;
   // Dublikat kaliti — telefon raqami (kompaniya ichida): bazadagilar va fayl ichidagilar
+  const existing = await tx
+    .select({ phone: customers.phone, name: customers.name })
+    .from(customers)
+    .where(eq(customers.companyId, tenant.company.id));
   const takenPhones = new Set(
-    (await tx.select({ phone: customers.phone }).from(customers).where(eq(customers.companyId, tenant.company.id)))
-      .map((row) => normalizePhone(row.phone))
-      .filter((phone): phone is string => Boolean(phone)),
+    existing.map((row) => normalizePhone(row.phone)).filter((phone): phone is string => Boolean(phone)),
   );
+  // Telefonsiz qatorlar uchun zaxira kalit — nom (telefon bo'lsa, dublikat FAQAT telefon bo'yicha aniqlanadi:
+  // bir xil nomli, lekin boshqa telefonli ikkita do'kon butunlay qonuniy)
+  const takenNames = new Set(existing.map((row) => foldName(row.name)));
+  const matchRoutes = await loadRouteIndex(tx, tenant.company.id);
   const errors: ImportError[] = [];
   const duplicates: ImportError[] = [];
   const warnings: ImportError[] = [];
@@ -173,17 +225,40 @@ export async function importCustomers(
       continue;
     }
 
-    // CREATE ONLY: bir xil telefonli mijoz bo'lsa yangi yozuv ochilmaydi (keyinchalik UPDATE rejimi qo'shilishi mumkin)
+    // CREATE ONLY: bir xil telefonli mijoz bo'lsa yangi yozuv ochilmaydi (mavjud mijoz O'ZGARTIRILMAYDI)
     const phone = normalizePhone(row.phone);
-    if (phone && takenPhones.has(phone)) {
-      duplicates.push({ row: line, key: name, message: `Bu telefon bilan mijoz allaqachon bor: ${row.phone?.trim() ?? ""}` });
+    if (requirePhone && !phone) {
+      fail(row.phone?.trim() ? "Telefon raqami noto'g'ri" : "Telefon majburiy");
       continue;
     }
+    if (phone && takenPhones.has(phone)) {
+      duplicates.push({ row: line, key: name, message: `Bu mijoz allaqachon mavjud (telefon: ${row.phone?.trim() ?? ""})` });
+      continue;
+    }
+    // Telefon berilmagan bo'lsa — nom bo'yicha: aks holda har importda bir xil do'kon qayta-qayta ochilaveradi
+    if (!phone && takenNames.has(foldName(name))) {
+      duplicates.push({ row: line, key: name, message: "Bu mijoz allaqachon mavjud (shu nomli mijoz bor, telefon ko'rsatilmagan)" });
+      continue;
+    }
+
+    // Hudud/agent — mos marshrut (mijoz yaratilgandan keyin biriktiriladi)
+    const territory = row.territory?.trim() ?? "";
+    const salesRep = row.salesRep?.trim() ?? "";
+    let routeId: string | null = null;
+    if (territory || salesRep) {
+      const asked = [territory && `hudud "${territory}"`, salesRep && `agent "${salesRep}"`].filter(Boolean).join(", ");
+      const hits = matchRoutes(territory, salesRep);
+      if (hits.length === 1) routeId = hits[0]!.routeId;
+      else if (hits.length === 0) warnings.push({ row: line, key: name, message: `Marshrut topilmadi (${asked}) — mijoz marshrutsiz yaratildi` });
+      else warnings.push({ row: line, key: name, message: `Bir nechta marshrut mos keldi (${asked}): ${hits.map((h) => h.routeName).join(", ")} — mijoz marshrutsiz yaratildi` });
+    }
+
     if (phone) takenPhones.add(phone);
+    takenNames.add(foldName(name));
 
     valid += 1;
     if (dryRun) continue;
-    await createCustomer(
+    const customer = await createCustomer(
       tx,
       tenant,
       {
@@ -201,9 +276,11 @@ export async function importCustomers(
         discountPercent: cleanNumber(row.discountPercent),
         creditLimit: cleanNumber(row.creditLimit),
         paymentTermDays: termDays,
+        notes: optionalText(row.notes, 2000),
       },
       meta,
     );
+    if (routeId) await addRouteCustomer(tx, tenant, routeId, { customerId: customer.id }, meta);
     created += 1;
   }
 

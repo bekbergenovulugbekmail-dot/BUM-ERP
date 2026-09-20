@@ -293,6 +293,8 @@ const customersExportQuery = z.object({ includeInactive: boolQuery });
 const customerImportBody = z.strictObject({
   /** Preview: faqat tekshirish — bazaga hech narsa yozilmaydi. */
   dryRun: z.boolean().optional(),
+  /** "Tezda qo'shish" (bitta mijoz): telefon majburiy. Fayl importida ixtiyoriy bo'lib qoladi. */
+  requirePhone: z.boolean().optional(),
   rows: z
     .array(
       z.strictObject({
@@ -310,6 +312,10 @@ const customerImportBody = z.strictObject({
         discountPercent: z.string().max(50).optional(),
         creditLimit: z.string().max(50).optional(),
         paymentTermDays: z.string().max(50).optional(),
+        notes: z.string().max(2000).optional(),
+        /** Distributsiya: mos marshrut orqali bog'lanadi (parallel jadval ochilmaydi). */
+        territory: z.string().max(200).optional(),
+        salesRep: z.string().max(200).optional(),
       }),
     )
     .min(1)
@@ -391,8 +397,10 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/customers/import", async (req) => {
-    const { rows, dryRun } = customerImportBody.parse(req.body);
-    return writeInTenant(req, "crm.manage", (tx, tenant) => importCustomers(tx, tenant, rows, requestMeta(req), { dryRun }));
+    const { rows, dryRun, requirePhone } = customerImportBody.parse(req.body);
+    return writeInTenant(req, "crm.manage", (tx, tenant) =>
+      importCustomers(tx, tenant, rows, requestMeta(req), { dryRun, requirePhone }),
+    );
   });
 
   app.get("/customers/:customerId", async (req) => {

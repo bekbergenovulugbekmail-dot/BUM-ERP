@@ -21,7 +21,7 @@
  * qo'shiladi; jadvalda faqat yozuvga (mahsulotga) tegishli kataklar qoladi. Har bir umumiy maydonni
  * "har qatorda" bilan jadvalga ko'chirish mumkin. Tekshiruv — import bilan bir xil endpoint.
  */
-import { useRef, useState } from "react";
+import { useImperativeHandle, useRef, useState } from "react";
 import { toast } from "sonner";
 import Papa from "papaparse";
 import { AlertTriangle, Copy, Download, FileDown, Maximize2, Minimize2, Plus, TableProperties, Trash2, Upload } from "lucide-react";
@@ -31,6 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
+import { buildIssuesXlsx, buildTemplateXlsx, downloadBlob, isExcelFile, parseXlsx, type SheetIssue } from "./xlsx.ts";
 import { useApiMutation } from "@/lib/query.ts";
 
 /** Bir so'rovda yuboriladigan qator soni (server chegarasi — 500). */
@@ -39,6 +40,9 @@ const IMPORT_BATCH = 500;
 const MAX_ISSUES_SHOWN = 50;
 /** Moslashda "bu maydon olinmasin" tanlovi (Radix Select bo'sh qiymatni qabul qilmaydi). */
 const SKIP = "__skip__";
+/** Import qabul qiladigan fayl turlari: CSV (papaparse) va Excel (exceljs, dinamik yuklanadi). */
+const FILE_ACCEPT =
+  ".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
 
 export type CsvColumn = {
   /** So'rov tanasidagi kalit (`name`, `phone` ...). */
@@ -126,6 +130,13 @@ function IssueTable({ title, tone, issues }: { title: string; tone: string; issu
   );
 }
 
+/** Tashqi tugmalardan (masalan "Yangi mijoz" oynasi) boshqarish uchun. */
+export type CsvToolbarHandle = {
+  openQuick: () => void;
+  openImport: () => void;
+  downloadTemplate: () => void;
+};
+
 export default function CsvToolbar({
   exportUrl,
   exportParams,
@@ -137,6 +148,9 @@ export default function CsvToolbar({
   importLabel = "Import",
   exportLabel = "Eksport",
   quickGroupField,
+  templateFormat = "csv",
+  hideToolbar = false,
+  ref,
 }: {
   exportUrl: string;
   exportParams?: Record<string, string | number | boolean | undefined>;
@@ -153,6 +167,11 @@ export default function CsvToolbar({
    * "Tezda qo'shish"da bir saqlash = bir hujjat: barcha qatorlarga bir xil tasodifiy kalit qo'yiladi.
    */
   quickGroupField?: string;
+  /** Shablon ko'rinishi: `csv` (standart, mavjud bo'limlar) yoki `xlsx` (Excel). */
+  templateFormat?: "csv" | "xlsx";
+  /** Tugmalar chizilmasin — faqat oynalar; ochish `ref` orqali (tashqi "Yangi mijoz" oynasi uchun). */
+  hideToolbar?: boolean;
+  ref?: React.Ref<CsvToolbarHandle>;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<"export" | "preview" | "import" | null>(null);
@@ -160,6 +179,8 @@ export default function CsvToolbar({
   /** Preview'dan "Ustunlarni o'zgartirish" bilan qaytish uchun oxirgi moslama. */
   const [lastMapping, setLastMapping] = useState<Mapping | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
+  /** Import tugagandan keyingi hisobot (jami / yaratildi / dublikat / xato). */
+  const [result, setResult] = useState<(Omit<Preview, "rows"> & { created: number }) | null>(null);
   /** "Tezda qo'shish": fayl tayyorlamasdan, kataklarga yozib saqlash. */
   const [quickRows, setQuickRows] = useState<Record<string, string>[] | null>(null);
   /** Hujjatga xos maydonlar — bir marta kiritiladi va har qatorga qo'shiladi. */
@@ -199,20 +220,42 @@ export default function CsvToolbar({
    * ajratgich `;` (vergul emas) — vergulli fayl bitta katakka tushib qoladi.
    */
   const handleTemplate = () => {
+    // Excel shabloni: qalin sarlavha, ustun kengligi, muzlatilgan qator va kulrang namuna (`exceljs` dinamik)
+    if (templateFormat === "xlsx") {
+      setBusy("export");
+      void buildTemplateXlsx(columns, filename)
+        .then((blob) => {
+          downloadBlob(blob, `${filename}-shablon.xlsx`);
+          toast.success("Excel shablon yuklab olindi");
+        })
+        .catch((err: unknown) => toast.error(errorMessage(err)))
+        .finally(() => setBusy(null));
+      return;
+    }
     const header = columns.map((column) => `${column.aliases[0] ?? column.key}${column.required ? "*" : ""}`);
     // Namuna qatori `#` bilan boshlanadi — foydalanuvchi o'chirmasa ham import qilinmaydi
     const sample = columns.map((column, index) => (index === 0 ? `# ${column.example ?? ""}` : (column.example ?? "")));
     // UTF-8 BOM — Excel o'zbekcha harflarni to'g'ri ochadi
     const csv = "\uFEFF" + Papa.unparse([header, sample], { delimiter: ";" }) + "\r\n";
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${filename}-shablon.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${filename}-shablon.csv`);
     toast.success("Shablon yuklab olindi");
+  };
+
+  /** Preview yoki natijadagi xato va dublikat qatorlarni Excelga yozib beradi. */
+  const handleIssuesDownload = (issueList: ImportIssue[], duplicateList: ImportIssue[]) => {
+    const issues: SheetIssue[] = [
+      ...issueList.map((issue) => ({ row: issue.row, key: issueKey(issue), message: issue.message, kind: "Xato" })),
+      ...duplicateList.map((issue) => ({ row: issue.row, key: issueKey(issue), message: issue.message, kind: "Dublikat" })),
+    ].sort((a, b) => a.row - b.row);
+    if (issues.length === 0) return;
+    setBusy("export");
+    void buildIssuesXlsx(issues)
+      .then((blob) => {
+        downloadBlob(blob, `${filename}-xatolar.xlsx`);
+        toast.success("Xatolar yuklab olindi");
+      })
+      .catch((err: unknown) => toast.error(errorMessage(err)))
+      .finally(() => setBusy(null));
   };
 
   /** Qatorlarni bo'laklab yuborish; natijalar yig'iladi (qator raqamlari fayl bo'yicha to'g'rilanadi). */
@@ -237,31 +280,44 @@ export default function CsvToolbar({
   /** Fayl ustuni nomini maydon nomlari bilan solishtiradi (bo'shliq, registr va `*` ga befarq). */
   const norm = (value: string) => value.trim().replace(/\*+$/, "").trim().toLowerCase().replace(/\s+/g, " ");
 
+  /** O'qilgan fayl (CSV ham, Excel ham) shu yerga keladi: namuna qatori tashlanadi va ustunlar avtomat moslanadi. */
+  const acceptParsed = (fields: string[], rows: Record<string, string>[]) => {
+    const clean = fields.filter((field) => field.trim() !== "");
+    // Shablondagi namuna qatori foydalanuvchida qolib ketsa ham import qilinmaydi
+    const raw = rows.filter((row) => !isExampleRow(row, clean));
+    if (raw.length === 0 || clean.length === 0) {
+      toast.error("Faylda qator topilmadi");
+      return;
+    }
+    // Avtomat moslash: maydon nomlari (o'zbekcha/inglizcha) fayl sarlavhalari bilan solishtiriladi
+    const byName = new Map(clean.map((field) => [norm(field), field]));
+    const choice: Record<string, string> = {};
+    for (const column of columns) {
+      const hit = column.aliases.map((alias) => byName.get(norm(alias))).find(Boolean);
+      choice[column.key] = hit ?? SKIP;
+    }
+    setMapping({ fields: clean, raw, choice });
+  };
+
   const handleFile = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = ""; // bir xil faylni qayta tanlash mumkin bo'lsin
     if (!file) return;
 
+    // Excel — `exceljs` dinamik yuklanadi; CSV yo'li o'zgarmagan (papaparse)
+    if (isExcelFile(file.name)) {
+      setBusy("preview");
+      void parseXlsx(file)
+        .then(({ fields, raw }) => acceptParsed(fields, raw))
+        .catch(() => toast.error("Excel faylni o'qib bo'lmadi"))
+        .finally(() => setBusy(null));
+      return;
+    }
+
     Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
-      complete: (parsed) => {
-        const fields = (parsed.meta.fields ?? []).filter((field) => field.trim() !== "");
-        // Shablondagi namuna qatori foydalanuvchida qolib ketsa ham import qilinmaydi
-        const raw = parsed.data.filter((row) => !isExampleRow(row, fields));
-        if (raw.length === 0 || fields.length === 0) {
-          toast.error("Faylda qator topilmadi");
-          return;
-        }
-        // Avtomat moslash: maydon nomlari (o'zbekcha/inglizcha) fayl sarlavhalari bilan solishtiriladi
-        const byName = new Map(fields.map((field) => [norm(field), field]));
-        const choice: Record<string, string> = {};
-        for (const column of columns) {
-          const hit = column.aliases.map((alias) => byName.get(norm(alias))).find(Boolean);
-          choice[column.key] = hit ?? SKIP;
-        }
-        setMapping({ fields, raw, choice });
-      },
+      complete: (parsed) => acceptParsed(parsed.meta.fields ?? [], parsed.data),
       error: () => {
         toast.error("CSV faylni o'qib bo'lmadi");
       },
@@ -299,20 +355,14 @@ export default function CsvToolbar({
     if (!preview) return;
     setBusy("import");
     try {
+      const total = preview.total;
       const outcome = await send(preview.rows, false);
       setPreview(null);
       setLastMapping(null);
       if (outcome.created > 0) toast.success(`${outcome.created} ta qator import qilindi`);
       else toast.error("Hech qanday qator import qilinmadi");
-      if (outcome.errors.length + outcome.duplicates.length > 0) {
-        toast.error(`${outcome.errors.length + outcome.duplicates.length} ta qator o'tmadi`, {
-          description: [...outcome.errors, ...outcome.duplicates]
-            .slice(0, 3)
-            .map((issue) => `${issue.row}-qator: ${issue.message}`)
-            .join("; "),
-          duration: 8000,
-        });
-      }
+      // Yakuniy hisobot: jami / yaratildi / dublikat / xato va xatolarni Excelga olish
+      setResult({ total, ...outcome });
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
@@ -341,6 +391,13 @@ export default function CsvToolbar({
     setQuickShared({});
     setPerRowKeys([]);
   };
+
+  // Tashqi tugmalar ("Yangi mijoz" oynasi) shu oynalarni ocha olsin
+  useImperativeHandle(ref, () => ({
+    openQuick,
+    openImport: () => fileInputRef.current?.click(),
+    downloadTemplate: handleTemplate,
+  }));
 
   /** Qatorda biror katak to'ldirilganmi (faqat jadval ustunlari bo'yicha). */
   const rowFilled = (row: Record<string, string>) => rowColumns.some((column) => (row[column.key] ?? "").trim() !== "");
@@ -416,7 +473,11 @@ export default function CsvToolbar({
 
   return (
     <>
-      {/* Telefonda uchala tugma bitta qatorni bo'lib oladi, kompyuterda avvalgidek yonma-yon */}
+      {/* `hideToolbar` — tugmalar tashqarida ("Yangi mijoz" oynasi), bu yerda faqat fayl tanlagich va oynalar */}
+      {hideToolbar ? (
+        canImport && <input ref={fileInputRef} type="file" accept={FILE_ACCEPT} className="hidden" onChange={handleFile} />
+      ) : (
+      /* Telefonda uchala tugma bitta qatorni bo'lib oladi, kompyuterda avvalgidek yonma-yon */
       <div className="flex w-full items-center gap-2 sm:w-auto">
         <Button
           size="sm"
@@ -439,7 +500,7 @@ export default function CsvToolbar({
               <TableProperties className="h-3.5 w-3.5 mr-1" /> Tezda qo'shish
             </Button>
             <Button size="sm" variant="ghost" className="flex-1 sm:flex-none" data-testid="csv-template" onClick={handleTemplate}>
-              <FileDown className="h-3.5 w-3.5 mr-1" /> Shablon
+              <FileDown className="h-3.5 w-3.5 mr-1" /> {templateFormat === "xlsx" ? "Excel shablon" : "Shablon"}
             </Button>
             <Button
               size="sm"
@@ -451,10 +512,11 @@ export default function CsvToolbar({
             >
               <Upload className="h-3.5 w-3.5 mr-1" /> {busy === "preview" ? "Tekshirilmoqda..." : importLabel}
             </Button>
-            <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleFile} />
+            <input ref={fileInputRef} type="file" accept={FILE_ACCEPT} className="hidden" onChange={handleFile} />
           </>
         )}
       </div>
+      )}
 
       {/* Tezda qo'shish: umumiy maydonlar bir marta yuqorida, yozuvga xos maydonlar jadvalda */}
       {quickRows && (
@@ -716,6 +778,16 @@ export default function CsvToolbar({
               <Button variant="secondary" onClick={() => setPreview(null)} disabled={busy === "import"}>
                 Bekor
               </Button>
+              {preview.errors.length + preview.duplicates.length > 0 && (
+                <Button
+                  variant="outline"
+                  data-testid="csv-issues-download"
+                  disabled={busy !== null}
+                  onClick={() => handleIssuesDownload(preview.errors, preview.duplicates)}
+                >
+                  <FileDown className="h-3.5 w-3.5 mr-1" /> Xatolarni yuklab olish
+                </Button>
+              )}
               {lastMapping && (
                 <Button
                   variant="outline"
@@ -729,6 +801,54 @@ export default function CsvToolbar({
               <Button onClick={() => void handleCommit()} disabled={preview.valid === 0 || busy === "import"}>
                 {busy === "import" ? "..." : `Importni boshlash (${preview.valid})`}
               </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Import yakuni: jami / yaratildi / dublikat / xato va xatolarni Excelga olish */}
+      {result && (
+        <Dialog open onOpenChange={(open) => !open && setResult(null)}>
+          <DialogContent className="sm:max-w-xl" data-testid="csv-result">
+            <DialogHeader>
+              <DialogTitle>Import yakunlandi</DialogTitle>
+              <DialogDescription>Faqat to'g'ri qatorlar yozildi; mavjud yozuvlar o'zgartirilmadi.</DialogDescription>
+            </DialogHeader>
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {[
+                { label: "Jami", value: result.total, tone: "" },
+                { label: "Yaratildi", value: result.created, tone: "text-emerald-600 dark:text-emerald-400" },
+                { label: "Dublikat", value: result.duplicates.length, tone: "text-amber-600 dark:text-amber-400" },
+                { label: "Xato", value: result.errors.length, tone: "text-destructive" },
+              ].map((card) => (
+                <div key={card.label} className="rounded-xl border border-border p-3">
+                  <p className="text-xs text-muted-foreground">{card.label}</p>
+                  <p className={`text-xl font-bold tabular-nums ${card.tone}`} data-testid={`csv-result-${card.label.toLowerCase()}`}>
+                    {card.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-3">
+              <IssueTable title="Xato qatorlar" tone="text-destructive" issues={result.errors} />
+              <IssueTable title="Dublikatlar (yozilmadi)" tone="text-amber-600 dark:text-amber-400" issues={result.duplicates} />
+              <IssueTable title="Ogohlantirishlar" tone="text-muted-foreground" issues={result.warnings} />
+            </div>
+
+            <DialogFooter>
+              {result.errors.length + result.duplicates.length > 0 && (
+                <Button
+                  variant="outline"
+                  data-testid="csv-result-issues-download"
+                  disabled={busy !== null}
+                  onClick={() => handleIssuesDownload(result.errors, result.duplicates)}
+                >
+                  <FileDown className="h-3.5 w-3.5 mr-1" /> Xatolarni yuklab olish
+                </Button>
+              )}
+              <Button onClick={() => setResult(null)}>Yopish</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

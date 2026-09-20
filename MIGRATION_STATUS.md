@@ -2887,6 +2887,68 @@ Egasi bajaradigan Railway qadamlari:
    o'ylab topadi, hech qayerda chop etilmaydi), `RETENTION_DAYS=30`; S3 yoqilgach
    `*_S3_*` (R2) kalitlari — **hech qaysi biri repoga yozilmaydi**
 4. `Cron Schedule`: kunlik (masalan `0 1 * * *`)
+
+## Distributsiya → Mijozlar: tezda qo'shish, import va Excel shablon (2026-09-20)
+
+Egasining topshirigi: distributsiyada mijoz qo'shishni professional ERP darajasiga yetkazish.
+Yangi biznes funksiyasi qo'shilmadi; UZCARD/HUMO, SMS va AI'ga tegilmadi.
+
+**Muammo:** distributsiyada "Mijozlar" bo'limi umuman yo'q edi — mijoz faqat marshrut ichidan
+MAVJUDLARI orasidan tanlanardi. Tezda qo'shish, import va shablon yo'q edi (ular Savdo → Mijozlar
+da bor, lekin distributsiya foydalanuvchisi u yerga bormaydi).
+
+**Yangi tab — Distributsiya → Mijozlar** (`_components/customers-section.tsx`). Ro'yxat + qidiruv va
+bitta `[Yangi mijoz]` tugmasi; u uchta sodda tanlov oynasini ochadi: **Tezda qo'shish**,
+**Import qilish**, **Excel shablon**. Telefonda ham qulay (tugmalar to'liq kenglikda).
+
+**Yangi jadval OCHILMADI.** Mijoz o'sha `customers` jadvalida (Savdo → Mijozlar bilan bir xil manba).
+"Hudud" va "Savdo agenti" uchun ham yangi ustun qo'shilmadi: `customers` da ular yo'q, bog'lanish
+`route_customers` → `distribution_routes` orqali ketadi (marshrutda hudud ham, agent ham bor).
+Shuning uchun hudud/agent berilganda mos **faol marshrut** topiladi va mijoz o'sha marshrutga
+biriktiriladi — aynan `convertProspect` dagi naqsh. Mos marshrut topilmasa yoki bir nechta bo'lsa,
+mijoz **baribir yaratiladi** va ogohlantirish qaytadi (xato emas).
+
+**Uchala yo'l bitta serverdan o'tadi** — `POST /api/sales/customers/import`. "Tezda qo'shish" —
+bu bitta qatorli import (`requirePhone: true`), shuning uchun tekshiruv va dublikat qoidasi
+hamma joyda bir xil. Ruxsat — `crm.manage`, tenant kontekstdan (`writeInTenant`); tanadagi
+`companyId` qabul qilinmaydi (`z.strictObject` uni 400 bilan rad etadi).
+
+**Dublikat (create-only, mavjud yozuv O'ZGARTIRILMAYDI):** telefon bo'yicha, mavjud
+`normalizePhone` bilan (faqat raqamlar solishtiriladi). Telefon berilmagan qatorlarda zaxira
+kalit — nom (registr va bo'shliqqa befarq), aks holda har importda bir xil do'kon qayta ochilaverardi.
+Xabar: "Bu mijoz allaqachon mavjud".
+
+**`.xlsx` qo'llab-quvvatlash** (`src/components/csv/xlsx.ts`, yangi `exceljs` bog'liqligi):
+- import endi `.xlsx` ham, `.csv` ham qabul qiladi (kengaytma bo'yicha ajratiladi; CSV yo'li tegilmagan);
+- **Excel shablon** — qalin sarlavha, ustun kengligi, muzlatilgan qator, kulrang namuna. 1-qator
+  sarlavha (majburiyda `*`), 2-qator `#` bilan boshlanadigan NAMUNA — parser uni tashlab ketadi;
+- **"Xatolarni yuklab olish"** — preview'da ham, yakuniy hisobotda ham xato/dublikat qatorlar `.xlsx` bo'lib tushadi;
+- `exceljs` **dinamik `import()`** bilan yuklanadi: build'da alohida bo'lak (`exceljs.min-*.js`,
+  930 kB / 256 kB gz) — asosiy bundle kattalashmadi.
+
+**Import oqimi o'zgarmadi** (3 bosqich): fayl → ustunlarni moslash → **preview** (`dryRun`, bazaga
+yozilmaydi: jami / yangi / dublikat / xato) → "Importni boshlash". Yangi qo'shilgani — oxirida
+**"Import yakunlandi"** hisoboti (Jami / Yaratildi / Dublikat / Xato + xatolarni yuklab olish).
+
+**Mavjud bo'limlar buzilmadi:** `CsvToolbar` ga qo'shilgan `templateFormat` (standart `csv`),
+`hideToolbar` va `ref` — hammasi ixtiyoriy, shuning uchun mahsulot, xodim, xarid, ta'minotchi,
+xarajat va marshrut bo'limlari avvalgidek CSV shablon beradi (`csv-import.spec.ts` shuni pinlaydi).
+
+**Testlar:** yangi `apps/api/test/distribution-customer-import.test.ts` — **12 test**
+(tezda yaratish; nom va telefon majburiyligi — lekin fayl importida telefon ixtiyoriyligicha
+qoladi; telefon dublikati; telefonsizda nom dublikati; `dryRun` hech narsa yozmasligi; 120 ta
+mijoz; xato qatorlar raqami va sababi; hudud+agent bo'yicha marshrutga biriktirish; marshrut
+topilmasa ogohlantirish; tenant izolyatsiyasi va soxta `companyId`; kassirga 403 va sessiyasizga 401;
+qisman xato tranzaksiyani buzmasligi). Yangi `src/components/csv/xlsx.test.ts` — **7 test**
+(shablon ↔ parser aylanishi, raqam katagi, bo'sh varaq, xatolar fayli). Yangi
+`e2e/distribution-customers.spec.ts` — **4 test** (uchta tanlov; tezda qo'shish validatsiyasi va
+ro'yxatda darhol chiqishi; `.xlsx` shablon haqiqiy ZIP bo'lishi; `.xlsx` import — moslash →
+preview → hisobot, dublikat yozilmasligi).
+
+**To'liq regressiya:** API **135 fayl / 775 test PASS** (avval 763 edi, +12), frontend unit
+**22 fayl / 94 test PASS** (avval 87, +7), brauzer E2E **83 test PASS** (avval 79, +4),
+`tsc` (API va web) va `eslint --max-warnings=0` toza, `vite build` o'tdi. Production'ga
+deploy qilinmadi, production ma'lumotiga tegilmadi.
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)

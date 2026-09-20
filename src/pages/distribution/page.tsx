@@ -3,13 +3,14 @@ import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import {
   Truck, Route, Users, CalendarRange, Radar, SlidersHorizontal, ClipboardCheck, ShoppingCart, BadgePercent, UserPlus,
-  MapPinned, UserCheck, CalendarCheck, CircleDollarSign,
+  MapPinned, UserCheck, CalendarCheck, CircleDollarSign, Store,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import PageTabs from "@/components/page-tabs.tsx";
 import { useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import RoutesSection from "./_components/routes-section.tsx";
+import CustomersSection from "./_components/customers-section.tsx";
 import AssignmentsSection from "./_components/assignments-section.tsx";
 import SalesRepsSection from "./_components/sales-reps-section.tsx";
 import MonitoringSection from "./_components/monitoring-section.tsx";
@@ -23,7 +24,7 @@ import { num, type DistributionRoute, type SalesRepStats } from "./_lib/types.ts
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
-type TabKey = "routes" | "map" | "assignments" | "reps" | "orders" | "visits" | "prospects" | "promotions" | "monitoring" | "policy";
+type TabKey = "routes" | "map" | "customers" | "assignments" | "reps" | "orders" | "visits" | "prospects" | "promotions" | "monitoring" | "policy";
 
 export default function DistributionPage() {
   const { t } = useTranslation("distribution");
@@ -33,6 +34,7 @@ export default function DistributionPage() {
   const tabs = [
     { key: "routes" as const, icon: Route, visible: true },
     { key: "map" as const, icon: MapPinned, visible: true },
+    { key: "customers" as const, icon: Store, visible: true },
     { key: "assignments" as const, icon: CalendarRange, visible: true },
     { key: "reps" as const, icon: Users, visible: true },
     // Tashriflar va siyosat — nazorat ruxsati; lokatsiya — alohida ruxsat (Supervayzer)
@@ -147,6 +149,7 @@ export default function DistributionPage() {
       >
         {activeTab === "routes" && <RoutesSection />}
         {activeTab === "map" && <StoresMapSection />}
+        {activeTab === "customers" && <CustomersSection />}
         {activeTab === "assignments" && <AssignmentsSection />}
         {activeTab === "reps" && <SalesRepsSection />}
         {activeTab === "orders" && <OrdersSection />}
