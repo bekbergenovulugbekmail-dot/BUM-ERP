@@ -2947,8 +2947,16 @@ preview → hisobot, dublikat yozilmasligi).
 
 **To'liq regressiya:** API **135 fayl / 775 test PASS** (avval 763 edi, +12), frontend unit
 **22 fayl / 94 test PASS** (avval 87, +7), brauzer E2E **83 test PASS** (avval 79, +4),
-`tsc` (API va web) va `eslint --max-warnings=0` toza, `vite build` o'tdi. Production'ga
-deploy qilinmadi, production ma'lumotiga tegilmadi.
+`tsc` (API va web) va `eslint --max-warnings=0` toza, `vite build` o'tdi.
+
+**Production (2026-09-20):** commit `6ef98a7`, GitHub'ga chiqarildi (`e9c3b29..6ef98a7`);
+`bum-api` (deployment `d9952a6f`) va `bum-web` (deployment `217cac2f`) deploy qilindi.
+API toza ko'tarildi — bitta `Migratsiyalar qo'llandi (27ms)` va bitta `Server listening`,
+`ERROR`/`FATAL` yo'q (bu bosqichda YANGI migratsiya yo'q, sxema o'zgarmadi). Web bundle
+`index-Ca7itN0K.js` → **`index-B9s0rsSh.js`** — lokal `vite build` chiqargan nom bilan AYNAN bir xil,
+ya'ni productionda shu build turibdi. Sahifalar 200, marshrutlar sessiyasiz 401. Production
+ma'lumotiga va o'zgaruvchilariga tegilmadi. Tizimga kirgan holda sinov — NOT VERIFIED
+(production paroli ishlatilmaydi; egasining sinov hisobi kerak).
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
