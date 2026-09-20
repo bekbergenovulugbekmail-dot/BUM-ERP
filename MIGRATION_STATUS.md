@@ -2718,6 +2718,33 @@ javob beradi. Shuning uchun testda nuqta har 5 soniyada qayta e'lon qilinadi —
 GPS oqimi kabi. Koordinata o'zgarmaydi: geofence, masofa va aniqlik tekshiruvlari (UI va server)
 o'z kuchida qoladi, ilova kodi o'zgarmadi.
 
+## Yakuniy qabul auditi (2026-09-20)
+
+Egasining topshirigi bo'yicha `2b5f696` ustida real-world qabul auditi: **`FINAL-ACCEPTANCE-AUDIT-v3.md`**
+(26 soha, har biri PASS / NOT VERIFIED / PARTIAL / BLOCKED). Production'ga deploy qilinmadi,
+production ma'lumotiga tegilmadi, ilova kodi o'zgartirilmadi.
+
+**Yangi:** `apps/api/test/final-acceptance.test.ts` — bitta kompaniya 0 dan 100% gacha
+(7 rol, 2 ombor, 3 pul hisobi, UZCARD va HUMO, 10 mahsulot, 4 mijoz, ta'minotchi): xarid →
+aralash to'lov → 4 xil sotuv va yetkazish → kassa (naqd/UZCARD/HUMO/uch usulli/nasiya/qaytarish) →
+qarzni bo'lib to'lash → ombor o'tkazmasi va parallel jo'natish → kun oxiri solishtiruvi.
+**API endi 133 fayl / 747 test** (+1 ataylab "kutilgan xato" — AUDIT-1).
+
+**Zaxira va tiklash HAQIQATAN sinaldi** (Docker + repodagi `deploy/backup` skriptlari): nusxa
+123 jadval ma'lumoti bilan olindi, alohida `bumerp_restore_test` bazasiga tiklandi va manba bilan
+solishtirildi — 14 jadval qatori va 12 moliyaviy ko'rsatkich (jumladan jurnal debet = kredit
+466 307 033.62 va balanslanmagan yozuv 0) **aynan mos**. Bu dev bazasi; **production zaxirasi
+hali yo'q**.
+
+**Topilmalar:** AUDIT-1 (MEDIUM) — ERP buyurtmasi mavjud miqdordan ortiq band qiladi, natijada
+ombordagi "mavjud" ustuni manfiy ko'rinadi (haqiqiy qoldiq buzilmaydi); AUDIT-2 (HIGH, operatsion) —
+production bazasining avtomatik zaxirasi qo'yilmagan; AUDIT-3 (BLOCKED) — `railway up` va
+production'ga tashqi so'rov avtomatik rejim klassifikatori tomonidan rad etildi, shuning uchun
+`2b5f696` **deploy qilinmadi**.
+
+**Hukm: NOT READY** — sabab kodda emas: production zaxirasi yo'q va haqiqiy Android/kassa
+kompyuteri/UZCARD-HUMO terminali hamon sinalmagan.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
