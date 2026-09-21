@@ -3221,6 +3221,30 @@ chiqib ketishi (`includeInactive=true` bilan qaytishi) — **5/5 PASS**. Qo'shim
 tashqaridan tasdiqlandi: `/api/sales/customers/regions` → **401** (mavjud), `/api/sales/zzz` → 404.
 Web bundle `index-CbWwwKGg.js` → **`index-DVL7Tv3M.js`**.
 
+## Saralash paneli marshrutga mijoz qo'shishda ham (2026-09-21)
+
+Saralash (hudud, mahalla, tartib, "Qarzi borlar") alohida komponentga chiqarildi va endi mijoz ro'yxati
+chiqadigan ikkinchi joyda — **marshrutga mijoz qo'shish** oynasida ham ishlaydi.
+
+- `src/components/customers/customer-filter.ts` — holat, so'rov parametrlari (`customerFilterParams`,
+  standart qiymatlar so'rovga qo'shilmaydi) va hudud tanlovlarini yig'ish (`cityTotals`, `districtTotals`).
+- `src/components/customers/customer-filters.tsx` — panel UI (hudud, mahalla, tartib, "Qarzi borlar",
+  "Tozalash" va o'ngdagi qo'shimcha matn uchun `trailing`).
+- Sotuv → Mijozlar shu komponentga o'tkazildi — xatti-harakati o'zgarmagan.
+- Distributsiya → Marshrutlar → "Mijoz qo'shish" oynasida panel qo'shildi (`showDebt={false}` — marshrut
+  tanlashda qarz ahamiyatsiz). Oqim: hududni tanlash → ro'yxat qisqaradi → "Hammasi" bilan belgilash →
+  bir marta "Qo'shish". Oyna yopilganda filtr tozalanadi.
+
+**Test:** yangi `customer-filter.test.ts` (4 ta) — standart holatda parametr yuborilmasligi, tanlovlar
+parametrga aylanishi, shahar/mahalla ro'yxatlari va hududsizlar tanlovga tushmasligi. Frontend to'plami:
+**25 fayl / 105 test PASS**. `tsc` va `eslint --max-warnings=0` toza.
+
+**Production (2026-09-21):** commit `f15ba94`; faqat `bum-web` (deployment `5e7a95e1`) — API kodi
+o'zgarmagan. Bundle `index-DVL7Tv3M.js` → **`index-Bc_aSJM_.js`**.
+
+**Keyingi qadam (egasi so'rovi bo'yicha):** kerak bo'lsa shu panelni mijoz tanlanadigan boshqa joylarga
+ham qo'shish — sotuv buyurtmasi va kassadagi mijoz tanlovi, dostavka va CRM ro'yxatlari.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
