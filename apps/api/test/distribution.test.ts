@@ -102,6 +102,31 @@ describe("Savdo agentlari", () => {
 });
 
 describe("Marshrutlar va tashriflar", () => {
+  it("ro'yxatdan ko'p mijozni birdan qo'shish: marshrutdagilari o'tkazib yuboriladi", async () => {
+    const routeRes = await dist("POST", "/routes", { name: "Ko'p tanlov", days: [1] });
+    expect(routeRes.statusCode, routeRes.body).toBe(201);
+    const routeId = routeRes.json().route.id as string;
+    const [a, b, c] = [await customer("Ko'p A"), await customer("Ko'p B"), await customer("Ko'p C")];
+
+    const first = await dist("POST", `/routes/${routeId}/customers`, { customerIds: [a, b] });
+    expect(first.statusCode, first.body).toBe(201);
+    expect(first.json()).toMatchObject({ added: 2, skipped: 0 });
+    expect(first.json().members.map((m: { sortOrder: number }) => m.sortOrder)).toEqual([1, 2]);
+
+    // Takroriy tanlov xato bermaydi — bori o'tkazib yuboriladi, yangisi tartib oxiriga tushadi
+    const second = await dist("POST", `/routes/${routeId}/customers`, { customerIds: [a, b, c, c] });
+    expect(second.statusCode, second.body).toBe(201);
+    expect(second.json()).toMatchObject({ added: 1, skipped: 2 });
+
+    const route = (await dist("GET", `/routes/${routeId}`)).json().route;
+    expect(route.customers.map((m: { customerName: string }) => m.customerName)).toEqual(["Ko'p A", "Ko'p B", "Ko'p C"]);
+
+    // Begona kompaniya mijozi — 400; ikkala maydon birga — 400
+    expect((await dist("POST", `/routes/${routeId}/customers`, { customerIds: [await customer("Begona ko'p", other)] })).statusCode).toBe(400);
+    expect((await dist("POST", `/routes/${routeId}/customers`, { customerId: a, customerIds: [a] })).statusCode).toBe(400);
+    expect((await dist("POST", `/routes/${routeId}/customers`, {})).statusCode).toBe(400);
+  });
+
   it("kunlar, mijozlar tartibi, tashrif holatlari va ko'rsatkichlar, o'chirish qoidalari", async () => {
     const rep = (await dist("POST", "/sales-reps", { name: "Agent" })).json().salesRep.id;
     expect((await dist("POST", "/routes", { name: "X", days: [7] })).statusCode).toBe(400);

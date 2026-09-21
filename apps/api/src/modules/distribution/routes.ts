@@ -9,7 +9,8 @@
  *   POST   /routes, PATCH / DELETE /routes/:routeId                       distribution.manage
  *   GET    /routes/export (?includeInactive=)                             distribution.view (CSV)
  *   POST   /routes/import                                                 distribution.manage (CSV qatorlari)
- *   POST   /routes/:routeId/customers, PUT /routes/:routeId/customers/order,
+ *   POST   /routes/:routeId/customers ({ customerId } yoki { customerIds } — ro'yxatdan ko'p tanlash),
+ *          PUT /routes/:routeId/customers/order,
  *          DELETE /routes/:routeId/customers/:memberId                   distribution.manage
  *   POST   /routes/:routeId/optimize ({ apply })                          distribution.view (apply — distribution.manage) — eng qisqa yo'l tartibi
  *   GET    /map                                                           distribution.view — marshrutlar va do'konlar xaritada
@@ -30,6 +31,7 @@ import { requirePermission, requireTenant, requireTenantForWrite, type TenantCon
 import { exportRoutesCsv, importRoutes } from "./routes-csv.service.js";
 import {
   addRouteCustomer,
+  addRouteCustomers,
   assignRoute,
   createRoute,
   createVisit,
@@ -101,7 +103,18 @@ const routeBody = z.strictObject({
   color,
 });
 const routePatch = routeBody.partial().extend({ isActive: z.boolean().optional() });
-const routeCustomerBody = z.strictObject({ customerId: z.uuid(), visitNotes: nullableText(1000) });
+/** Marshrutga mijoz qo'shish: bitta (`customerId`) yoki ro'yxatdan belgilab ko'pi (`customerIds`). */
+const routeCustomerBody = z
+  .strictObject({
+    customerId: z.uuid().optional(),
+    /** Ro'yxatdan belgilab qo'shish; marshrutda bori o'tkazib yuboriladi. */
+    customerIds: z.array(z.uuid()).min(1).max(500).optional(),
+    visitNotes: nullableText(1000),
+  })
+  .refine(
+    (body) => (body.customerId === undefined) !== (body.customerIds === undefined),
+    "customerId yoki customerIds dan faqat bittasi yuboriladi",
+  );
 /** CSV import: fayl brauzerda o'qiladi, qatorlar shu yerda tekshiriladi. Do'konlar fayl bilan biriktirilmaydi. */
 const routeImportBody = z.strictObject({
   /** Preview: faqat tekshirish — bazaga hech narsa yozilmaydi. */
@@ -309,7 +322,17 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
   app.post("/routes/:routeId/customers", async (req, reply) => {
     const { routeId } = routeParams.parse(req.params);
     const body = routeCustomerBody.parse(req.body);
-    const member = await writeInTenant(req, (tx, tenant) => addRouteCustomer(tx, tenant, routeId, body, requestMeta(req)));
+    // Ro'yxatdan belgilab qo'shish: marshrutda bori xato bermaydi, `skipped` bo'lib qaytadi
+    if (body.customerIds) {
+      const result = await writeInTenant(req, (tx, tenant) =>
+        addRouteCustomers(tx, tenant, routeId, { customerIds: body.customerIds!, visitNotes: body.visitNotes }, requestMeta(req)),
+      );
+      reply.status(201);
+      return result;
+    }
+    const member = await writeInTenant(req, (tx, tenant) =>
+      addRouteCustomer(tx, tenant, routeId, { customerId: body.customerId!, visitNotes: body.visitNotes }, requestMeta(req)),
+    );
     reply.status(201);
     return { member };
   });

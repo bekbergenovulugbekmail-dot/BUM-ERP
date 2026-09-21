@@ -6,7 +6,8 @@ import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog.tsx";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog.tsx";
+import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
@@ -58,8 +59,9 @@ export default function RoutesSection() {
 
   const createRoute = useApiMutation((body: Record<string, unknown>) => api.post("/api/distribution/routes", body));
   const deleteRoute = useApiMutation((id: string) => api.delete(`/api/distribution/routes/${id}`));
-  const addCustomer = useApiMutation(({ routeId, customerId }: { routeId: string; customerId: string }) =>
-    api.post(`/api/distribution/routes/${routeId}/customers`, { customerId }));
+  /** Ro'yxatdan belgilangan mijozlar bitta so'rovda qo'shiladi; marshrutda bori `skipped` bo'lib qaytadi. */
+  const addCustomers = useApiMutation(({ routeId, customerIds }: { routeId: string; customerIds: string[] }) =>
+    api.post<{ added: number; skipped: number }>(`/api/distribution/routes/${routeId}/customers`, { customerIds }));
   const removeCustomer = useApiMutation(({ routeId, memberId }: { routeId: string; memberId: string }) =>
     api.delete(`/api/distribution/routes/${routeId}/customers/${memberId}`));
   const createVisit = useApiMutation((body: Record<string, unknown>) => api.post("/api/distribution/visits", body));
@@ -78,7 +80,9 @@ export default function RoutesSection() {
   const [visitDialogRoute, setVisitDialogRoute] = useState<string | null>(null);
 
   const [form, setForm] = useState({ name: "", territoryId: "", salesRepId: "", description: "", color: ROUTE_COLORS[0] });
-  const [addCustId, setAddCustId] = useState("");
+  /** Qo'shish oynasi: qidiruv matni va belgilangan mijozlar. */
+  const [custSearch, setCustSearch] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
   const [visitDate, setVisitDate] = useState(today());
   const [visitNotes, setVisitNotes] = useState("");
 
@@ -116,11 +120,42 @@ export default function RoutesSection() {
     }
   };
 
-  const handleAddCustomer = async () => {
-    if (!addCustOpen || !addCustId || addCustId === "none") return;
-    const ok = await run(() => addCustomer.mutateAsync({ routeId: addCustOpen, customerId: addCustId }), "Mijoz qo'shildi");
-    if (ok) { setAddCustOpen(null); setAddCustId(""); }
+  const closeAddCustomers = () => { setAddCustOpen(null); setCustSearch(""); setPicked([]); };
+
+  const handleAddCustomers = async () => {
+    if (!addCustOpen || picked.length === 0) return;
+    const routeId = addCustOpen;
+    const ok = await run(async () => {
+      const result = await addCustomers.mutateAsync({ routeId, customerIds: picked });
+      toast.success(
+        result.skipped > 0
+          ? `${result.added} ta mijoz qo'shildi, ${result.skipped} tasi marshrutda bor edi`
+          : `${result.added} ta mijoz qo'shildi`,
+      );
+    });
+    if (ok) closeAddCustomers();
   };
+
+  /**
+   * Qo'shish oynasidagi ro'yxat: qidiruv nomi, kodi, telefoni va manzili bo'yicha filtrlaydi.
+   * Marshrutda bor mijozlar ko'rinadi, lekin belgilanmaydi — takror qo'shish ma'nosiz.
+   */
+  const inRoute = new Set(
+    addCustOpen && expandedRouteData?.id === addCustOpen
+      ? expandedRouteData.customers.map((member) => member.customerId)
+      : [],
+  );
+  const custQuery = custSearch.trim().toLowerCase();
+  const filteredCustomers = (customers ?? []).filter(
+    (customer) =>
+      !custQuery ||
+      [customer.name, customer.code, customer.phone, customer.address, customer.city, customer.district].some((field) =>
+        (field ?? "").toLowerCase().includes(custQuery),
+      ),
+  );
+  /** "Hammasi" faqat shu filtrda belgilanadigan (marshrutda bo'lmagan) mijozlarga tegishli. */
+  const selectable = filteredCustomers.filter((customer) => !inRoute.has(customer.id));
+  const allPicked = selectable.length > 0 && selectable.every((customer) => picked.includes(customer.id));
 
   const handleCreateVisit = async () => {
     if (!visitDialogRoute) return;
@@ -395,24 +430,106 @@ export default function RoutesSection() {
         </Dialog>
       )}
 
-      {/* Add customer dialog */}
+      {/* Marshrutga mijoz qo'shish: qidiruv, belgilash va "hammasi" — bir necha mijoz birdan qo'shiladi */}
       {addCustOpen && (
-        <Dialog open onOpenChange={(o) => !o && setAddCustOpen(null)}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Marshrut ga mijoz qo'shish</DialogTitle></DialogHeader>
-            <div>
-              <Label>Mijoz</Label>
-              <Select value={addCustId} onValueChange={setAddCustId}>
-                <SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">—</SelectItem>
-                  {customers?.map((c) => <SelectItem key={c.id} value={c.id}>{c.name} — {c.phone ?? ""}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+        <Dialog open onOpenChange={(open) => !open && closeAddCustomers()}>
+          <DialogContent className="sm:max-w-xl">
+            <DialogHeader>
+              <DialogTitle>Marshrutga mijoz qo'shish</DialogTitle>
+              <DialogDescription>
+                Kerakli mijozlarni belgilang — hammasi bitta so'rovda qo'shiladi. Marshrutda bor mijoz
+                ro'yxatda "marshrutda" deb turadi va qayta qo'shilmaydi.
+              </DialogDescription>
+            </DialogHeader>
+
+            <Input
+              autoFocus
+              data-testid="route-customer-search"
+              placeholder="Qidirish: nomi, telefon, manzil yoki kod..."
+              value={custSearch}
+              onChange={(event) => setCustSearch(event.target.value)}
+            />
+
+            {!customers ? (
+              <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 rounded-lg" />)}</div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm font-medium" htmlFor="route-customer-all">
+                    <Checkbox
+                      id="route-customer-all"
+                      data-testid="route-customer-all"
+                      checked={allPicked}
+                      disabled={selectable.length === 0}
+                      onCheckedChange={(checked) =>
+                        setPicked((current) =>
+                          checked === true
+                            ? [...new Set([...current, ...selectable.map((customer) => customer.id)])]
+                            : current.filter((id) => !selectable.some((customer) => customer.id === id)),
+                        )
+                      }
+                    />
+                    Hammasi
+                    <span className="font-normal text-muted-foreground">({selectable.length} ta)</span>
+                  </label>
+                  <span className="text-xs text-muted-foreground">Belgilangan: {picked.length}</span>
+                </div>
+
+                <div className="max-h-[45vh] space-y-1 overflow-y-auto rounded-lg border border-border p-1">
+                  {filteredCustomers.length === 0 ? (
+                    <p className="px-3 py-6 text-center text-sm text-muted-foreground">Mijoz topilmadi</p>
+                  ) : (
+                    filteredCustomers.map((customer) => {
+                      const already = inRoute.has(customer.id);
+                      const place = [customer.city, customer.district, customer.address].filter(Boolean).join(" · ");
+                      return (
+                        <label
+                          key={customer.id}
+                          htmlFor={`route-customer-${customer.id}`}
+                          className={cn(
+                            "flex items-start gap-3 rounded-lg px-2 py-2",
+                            already ? "opacity-60" : "cursor-pointer hover:bg-muted/50",
+                          )}
+                        >
+                          <Checkbox
+                            id={`route-customer-${customer.id}`}
+                            className="mt-0.5"
+                            disabled={already}
+                            checked={already || picked.includes(customer.id)}
+                            onCheckedChange={(checked) =>
+                              setPicked((current) =>
+                                checked === true
+                                  ? [...current, customer.id]
+                                  : current.filter((id) => id !== customer.id),
+                              )
+                            }
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-2">
+                              <span className="truncate text-sm font-medium">{customer.name}</span>
+                              {already && <span className="shrink-0 text-[11px] text-muted-foreground">marshrutda</span>}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {[customer.code, customer.phone, place].filter(Boolean).join(" · ")}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </>
+            )}
+
             <DialogFooter>
-              <Button variant="secondary" onClick={() => setAddCustOpen(null)}>Bekor</Button>
-              <Button onClick={handleAddCustomer} disabled={addCustomer.isPending}>Qo'shish</Button>
+              <Button variant="secondary" onClick={closeAddCustomers} disabled={addCustomers.isPending}>Bekor</Button>
+              <Button
+                data-testid="route-customer-add"
+                onClick={() => { void handleAddCustomers(); }}
+                disabled={picked.length === 0 || addCustomers.isPending}
+              >
+                {addCustomers.isPending ? "..." : `Qo'shish (${picked.length})`}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

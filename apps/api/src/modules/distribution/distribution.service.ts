@@ -199,6 +199,66 @@ export async function addRouteCustomer(
   return member!;
 }
 
+/**
+ * Bir nechta mijozni bitta so'rovda marshrutga qo'shadi ("ro'yxatdan belgilab qo'shish").
+ *
+ * Allaqachon marshrutda bo'lganlar XATO EMAS — ular o'tkazib yuboriladi va `skipped` da qaytadi
+ * (bitta mijoz qo'shiladigan `addRouteCustomer` esa avvalgidek takrorga `409` beradi).
+ * Tartib raqami mavjud oxirgisidan davom etadi — qo'shilganlar ro'yxat oxiriga tushadi.
+ */
+export async function addRouteCustomers(
+  tx: Tx,
+  tenant: TenantContext,
+  routeId: string,
+  input: { customerIds: string[]; visitNotes?: string | null },
+  meta: RequestMeta,
+) {
+  const companyId = tenant.company.id;
+  await lockRoute(tx, tenant, routeId);
+  // Bir xil id ikki marta kelsa — bir marta
+  const wanted = [...new Set(input.customerIds)];
+  // Har bir mijoz shu kompaniyaga tegishlimi (begona id — 400)
+  for (const customerId of wanted) await assertCustomer(tx, companyId, customerId);
+
+  const present = new Set(
+    (
+      await tx
+        .select({ customerId: routeCustomers.customerId })
+        .from(routeCustomers)
+        .where(eq(routeCustomers.routeId, routeId))
+    ).map((row) => row.customerId),
+  );
+  const fresh = wanted.filter((customerId) => !present.has(customerId));
+  if (fresh.length === 0) return { added: 0, skipped: wanted.length, members: [] };
+
+  const [last] = await tx
+    .select({ max: sql<number>`coalesce(max(${routeCustomers.sortOrder}), 0)::int` })
+    .from(routeCustomers)
+    .where(eq(routeCustomers.routeId, routeId));
+  let order = last?.max ?? 0;
+  const members = await tx
+    .insert(routeCustomers)
+    .values(
+      fresh.map((customerId) => ({
+        companyId,
+        routeId,
+        customerId,
+        visitNotes: input.visitNotes ?? null,
+        sortOrder: (order += 1),
+      })),
+    )
+    .returning(routeCustomerFields);
+
+  await distributionAudit(tx, tenant, meta, {
+    action: "ROUTE_CUSTOMERS_ADDED",
+    resource: "distribution_routes",
+    resourceId: routeId,
+    // Juda uzun ro'yxat audit yozuvini shishirmasin
+    details: { added: members.length, skipped: wanted.length - fresh.length, customerIds: fresh.slice(0, 100) },
+  });
+  return { added: members.length, skipped: wanted.length - fresh.length, members };
+}
+
 export async function removeRouteCustomer(tx: Tx, tenant: TenantContext, routeId: string, memberId: string, meta: RequestMeta) {
   await lockRoute(tx, tenant, routeId);
   const [deleted] = await tx

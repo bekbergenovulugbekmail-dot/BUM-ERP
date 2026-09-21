@@ -116,7 +116,16 @@ export type RouteAssignment = {
   salesRepName: string;
 };
 
-export type CustomerOption = { id: string; name: string; phone: string | null };
+/** Marshrutga qo'shish ro'yxati uchun: qidiruv nomi, telefoni va manzili bo'yicha ishlaydi. */
+export type CustomerOption = {
+  id: string;
+  code: string;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  city: string | null;
+  district: string | null;
+};
 
 // ─── Supervayzer: /api/sales-agent/supervisor/* ─────────────────────────────
 
