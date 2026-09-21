@@ -3094,10 +3094,12 @@ Mijozlar` bo'limlarida), preview va yakunda "Yangilanadi / Yangilandi" ko'rsatki
 bilan va BOMsiz, UTF-16LE, sof ASCII, `File` orqali o'qish) **PASS**; `tsc` (web va API) va
 `eslint --max-warnings=0` toza. API testiga 2 ta yangi holat yozildi
 (`csv-import-export.test.ts`: yangilash rejimi mavjud yozuvni tuzatadi va bo'sh katak eski qiymatga
-tegmaydi; telefonsiz qator nom bo'yicha yangilanadi, fayl ichidagi takror dublikat bo'ladi) — lekin
-ular **ishga tushirilmagan (NOT VERIFIED)**: bu mashinada lokal PostgreSQL yo'q (`erp-postgresql-dev`
-xizmatining data katalogi o'chirilgan, `initdb` ham ishlamadi), productionga esa test suite
-ishlatilmaydi.
+tegmaydi; telefonsiz qator nom bo'yicha yangilanadi, fayl ichidagi takror dublikat bo'ladi) —
+`csv-import-export.test.ts` **7/7 PASS**. Importga tegishli qolgan fayllar ham qaytadan ishlatildi:
+`acceptance-import-export`, `distribution-customer-import`, `import-preview`, `purchase-csv`
+(**39 test PASS**) va `crm`, `distribution`, `customer-balance`, `sales-agent-stores`
+(**10 test PASS**). To'liq API to'plami **ishlatilmadi** — fonda ishga tushirilgani xotira
+yetishmovchiligidan to'xtatildi (Docker + Postgres konteyneri bilan birga 8 GB yetmaydi).
 
 **Production (2026-09-21):** commit `1be9fcc`; `bum-api` (deployment `df9e1c8f`) va `bum-web`
 (deployment `4859c9fa`) deploy qilindi. API toza ko'tarildi — bitta `Migratsiyalar qo'llandi (70ms)`
