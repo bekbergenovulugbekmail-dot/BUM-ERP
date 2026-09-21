@@ -3167,6 +3167,27 @@ Yangi jadval yoki migratsiya **yo'q**.
 `Migratsiyalar qo'llandi (91ms)` va bitta `Server listening`, `ERROR`/`FATAL` yo'q. Web bundle
 `index-DA6qFg8j.js` → **`index-BGeuOErI.js`**.
 
+## Import: tekshirish oynasida qatorlar jadvali (2026-09-21)
+
+"Tekshirish" bosqichi faqat sonlar (jami, to'g'ri, xato, dublikat) va muammo ro'yxatini ko'rsatardi —
+qiymat qaysi maydonga tushganini yozishdan OLDIN ko'rib bo'lmasdi. Ustun noto'g'ri moslangani faqat
+import qilingandan keyin, mijoz kartasida bilinardi.
+
+**Web (barcha CSV importlari — mijoz, mahsulot, hodim, ta'minotchi, xarajat, marshrut):** preview
+oynasida jadval qo'shildi — sarlavhada faqat MOSLANGAN maydonlar (o'tkazib yuborilgani chiqmaydi),
+qatorlarda fayldagi qator raqami (muammo ro'yxatidagi raqam bilan bir xil) va har bir katak qiymati
+(bo'shi — `—`). Xato qator qizil, dublikat sariq fonda ajralib turadi. Avval birinchi 10 qator,
+"Hammasini ko'rsatish (N)" bilan hammasi; ustun ko'p bo'lsa jadval yon tomonga suriladi. Oyna kengaytirildi
+(`sm:max-w-4xl`). Server yoki endpoint o'zgarmagan — jadval brauzerdagi moslangan qatorlardan chiziladi.
+
+**Test:** yangi `src/components/csv/csv-toolbar.test.tsx` — Windows-1251 dagi TSV fayl berilganda
+ustunlar avtomat moslanadi, jadval sarlavhasi va kataklari to'g'ri joyda chiqadi (kirill matn buzilmaydi),
+va serverga aynan shu qatorlar `dryRun: true` bilan yuboriladi. Frontend to'plami: **24 fayl / 101 test
+PASS** (avval 23/100), `tsc` va `eslint --max-warnings=0` toza.
+
+**Production (2026-09-21):** commit `f2ac180`; faqat `bum-web` deploy qilindi (deployment `dcf496c3`),
+bundle `index-BGeuOErI.js` → **`index-CbWwwKGg.js`**. API kodi o'zgarmagan.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
