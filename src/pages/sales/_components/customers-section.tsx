@@ -1,12 +1,16 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet } from "lucide-react";
+import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog.tsx";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
@@ -73,14 +77,41 @@ export default function CustomersSection() {
   const canAdjustBalance = can("finance.approve");
   const [adjusting, setAdjusting] = useState<Customer | null>(null);
 
-  const customers = useApiQuery<{ customers: Customer[] }>(
+  /** Arxiv ko'rinishi: nofaol qilingan mijozlar (ro'yxatdan chiqarilgan, lekin tarixi saqlanadi). */
+  const [showArchive, setShowArchive] = useState(false);
+  /** Arxivga ko'chirish yoki qaytarish tasdig'i. */
+  const [archiving, setArchiving] = useState<Customer | null>(null);
+
+  const loaded = useApiQuery<{ customers: Customer[] }>(
     "/api/sales/customers",
-    { search: debouncedSearch || undefined },
+    // Arxiv ko'rinishida server faol va nofaolni birga qaytaradi — nofaollari shu yerda ajratiladi
+    { search: debouncedSearch || undefined, includeInactive: showArchive || undefined },
     { placeholderData: (previous) => previous },
   ).data?.customers;
+  const customers = loaded && (showArchive ? loaded.filter((customer) => !customer.isActive) : loaded);
   const saveCustomer = useApiMutation(({ id, body }: { id?: string; body: Record<string, unknown> }) =>
     id ? api.patch(`/api/sales/customers/${id}`, body) : api.post("/api/sales/customers", body),
   );
+  const setArchived = useApiMutation(
+    ({ id, isActive }: { id: string; isActive: boolean }) => api.patch(`/api/sales/customers/${id}`, { isActive }),
+    { invalidate: ["/api/sales/customers", "/api/distribution"] },
+  );
+
+  /**
+   * Arxivga ko'chirish — yozuv o'chirilmaydi: mijoz ro'yxatlardan (sotuv, kassa, marshrut tanlovi) chiqadi,
+   * hujjatlari va tarixi joyida qoladi. Qarzi bor mijozni server arxivlamaydi.
+   */
+  const handleArchive = async () => {
+    if (!archiving) return;
+    const restore = !archiving.isActive;
+    try {
+      await setArchived.mutateAsync({ id: archiving.id, isActive: restore });
+      toast.success(restore ? "Mijoz arxivdan qaytarildi" : "Mijoz arxivga ko'chirildi");
+      setArchiving(null);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
 
   const set = (patch: Partial<CustomerForm>) => setForm((previous) => ({ ...previous, ...patch }));
   const openCreate = () => { setForm(emptyForm()); setDialog({ mode: "create" }); };
@@ -154,6 +185,8 @@ export default function CustomersSection() {
         <div className="flex flex-wrap items-center gap-2">
           <CsvToolbar
             exportUrl="/api/sales/customers/export"
+            // Arxiv ko'rinishida eksport arxivdagilarni ham oladi
+            exportParams={{ includeInactive: showArchive || undefined }}
             filename="mijozlar"
             importUrl="/api/sales/customers/import"
             invalidate={["/api/sales/customers"]}
@@ -176,7 +209,15 @@ export default function CustomersSection() {
               { key: "paymentTermDays", aliases: ["To'lov muddati (kun)", "paymentTermDays"], example: "14", shared: true },
             ]}
           />
-          {canManage && (
+          <Button
+            size="sm"
+            variant={showArchive ? "default" : "secondary"}
+            data-testid="customers-archive-toggle"
+            onClick={() => setShowArchive((current) => !current)}
+          >
+            <Archive className="h-3.5 w-3.5 mr-1" /> {showArchive ? "Faol mijozlar" : "Arxiv"}
+          </Button>
+          {canManage && !showArchive && (
             <Button onClick={openCreate}>
               <UserPlus className="h-4 w-4 mr-1.5" /> Mijoz qo'shish
             </Button>
@@ -190,9 +231,9 @@ export default function CustomersSection() {
         </div>
       ) : customers.length === 0 ? (
         <div className="flex flex-col items-center py-16 text-center">
-          <UserPlus className="h-12 w-12 text-muted-foreground/30 mb-3" />
-          <p className="text-muted-foreground">Mijozlar yo'q</p>
-          {canManage && (
+          {showArchive ? <Archive className="h-12 w-12 text-muted-foreground/30 mb-3" /> : <UserPlus className="h-12 w-12 text-muted-foreground/30 mb-3" />}
+          <p className="text-muted-foreground">{showArchive ? "Arxivda mijoz yo'q" : "Mijozlar yo'q"}</p>
+          {canManage && !showArchive && (
             <Button className="mt-4" onClick={openCreate}>
               <Plus className="h-4 w-4 mr-1" /> Birinchi mijozni qo'shing
             </Button>
@@ -203,13 +244,17 @@ export default function CustomersSection() {
           {customers.map((c) => {
             const debt = num(c.totalDebt);
             return (
-              <div key={c.id} className="bg-card border border-border rounded-2xl p-4 space-y-2">
+              <div
+                key={c.id}
+                className={`bg-card border border-border rounded-2xl p-4 space-y-2 ${c.isActive ? "" : "opacity-70"}`}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="font-semibold truncate">{c.name}</p>
                     <p className="text-xs font-mono text-muted-foreground">
                       {c.code}
                       {c.partyType === "legal" && <span className="ml-2 font-sans text-primary">Yuridik shaxs</span>}
+                      {!c.isActive && <span className="ml-2 font-sans text-muted-foreground">Arxivda</span>}
                     </p>
                   </div>
                   <div className="flex items-start gap-1">
@@ -245,6 +290,19 @@ export default function CustomersSection() {
                     {canManage && (
                       <Button variant="ghost" size="icon" className="h-7 w-7" title="Tahrirlash" onClick={() => openEdit(c)}>
                         <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                    {canManage && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        data-testid={`customer-archive-${c.code}`}
+                        title={c.isActive ? "Arxivga ko'chirish" : "Arxivdan qaytarish"}
+                        aria-label={`${c.name} — ${c.isActive ? "arxivga ko'chirish" : "arxivdan qaytarish"}`}
+                        onClick={() => setArchiving(c)}
+                      >
+                        {c.isActive ? <Archive className="h-3.5 w-3.5" /> : <ArchiveRestore className="h-3.5 w-3.5" />}
                       </Button>
                     )}
                     {adjusting?.id === c.id && (
@@ -300,6 +358,41 @@ export default function CustomersSection() {
           })}
         </div>
       )}
+
+      {/* Arxivga ko'chirish / qaytarish tasdig'i — yozuv o'chirilmaydi, tarixi saqlanadi */}
+      <AlertDialog open={archiving !== null} onOpenChange={(open) => !open && setArchiving(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {archiving?.isActive ? "Mijozni arxivga ko'chirish" : "Mijozni arxivdan qaytarish"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {archiving?.isActive ? (
+                <>
+                  <b>{archiving.name}</b> ro'yxatlardan (sotuv, kassa, marshrut tanlovi) chiqadi, lekin
+                  o'chirilmaydi: hujjatlari, to'lovlari va tarixi joyida qoladi. Keyin istalgan vaqtda
+                  arxivdan qaytarish mumkin. Qarzi bor mijoz arxivlanmaydi — avval hisob-kitob yopiladi.
+                </>
+              ) : (
+                <>
+                  <b>{archiving?.name}</b> yana faol mijozlar ro'yxatiga qaytadi va hujjatlarda tanlanadigan
+                  bo'ladi.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={setArchived.isPending}>Bekor qilish</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="customer-archive-confirm"
+              disabled={setArchived.isPending}
+              onClick={(event) => { event.preventDefault(); void handleArchive(); }}
+            >
+              {setArchived.isPending ? "..." : archiving?.isActive ? "Arxivga ko'chirish" : "Qaytarish"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {dialog && (
         <Dialog open onOpenChange={(o) => !o && setDialog(null)}>

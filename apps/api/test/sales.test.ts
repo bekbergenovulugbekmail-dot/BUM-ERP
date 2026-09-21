@@ -123,6 +123,28 @@ describe("Mijozlar", () => {
     expect((await sales("POST", "/customers", { name: "X" }, kassir.cookie)).statusCode).toBe(403);
     expect((await sales("GET", `/customers/${id}`, undefined, other.ownerCookie)).statusCode).toBe(404);
   });
+
+  it("arxiv: qarzsiz mijoz ro'yxatdan chiqadi, `includeInactive` bilan ko'rinadi va qaytariladi", async () => {
+    const created = await sales("POST", "/customers", { name: "Arxiv do'koni", phone: "+998901234599" });
+    expect(created.statusCode).toBe(201);
+    const id = created.json().customer.id as string;
+    const codes = async (query = "") =>
+      ((await sales("GET", `/customers${query}`)).json().customers as { id: string; isActive: boolean }[]);
+
+    // Arxivga: yozuv o'chirilmaydi, faqat nofaol bo'ladi
+    const archived = await sales("PATCH", `/customers/${id}`, { isActive: false });
+    expect(archived.statusCode, archived.body).toBe(200);
+    expect(archived.json().customer.isActive).toBe(false);
+    expect((await codes()).some((row) => row.id === id)).toBe(false);
+    // Arxiv ko'rinishi (web shu parametr bilan so'raydi)
+    expect((await codes("?includeInactive=true")).find((row) => row.id === id)).toMatchObject({ isActive: false });
+    // Hujjat sahifasi ochiladi — tarix yo'qolmaydi
+    expect((await sales("GET", `/customers/${id}`)).statusCode).toBe(200);
+
+    const restored = await sales("PATCH", `/customers/${id}`, { isActive: true });
+    expect(restored.statusCode, restored.body).toBe(200);
+    expect((await codes()).some((row) => row.id === id)).toBe(true);
+  });
 });
 
 describe("Savdo buyurtmalari", () => {
