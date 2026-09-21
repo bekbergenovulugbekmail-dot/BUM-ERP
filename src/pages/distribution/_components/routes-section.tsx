@@ -3,6 +3,12 @@ import { toast } from "sonner";
 import { Plus, Route, Users, Calendar, ChevronDown, ChevronUp, Trash2, UserPlus, Sparkles, MapPin, MapPinOff } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
+import CustomerFilters from "@/components/customers/customer-filters.tsx";
+import {
+  customerFilterParams,
+  emptyCustomerFilter,
+  type CustomerFilter,
+} from "@/components/customers/customer-filter.ts";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -54,7 +60,12 @@ export default function RoutesSection() {
   const routes = useApiQuery<{ routes: DistributionRoute[] }>("/api/distribution/routes").data?.routes;
   const salesReps = useApiQuery<{ salesReps: SalesRep[] }>("/api/distribution/sales-reps").data?.salesReps;
   const territories = useApiQuery<{ territories: Territory[] }>("/api/distribution/territories").data?.territories;
-  const customers = useApiQuery<{ customers: CustomerOption[] }>("/api/sales/customers", { limit: 500 }).data?.customers;
+  /** Marshrutga qo'shish oynasidagi ro'yxat: hudud va tartib SERVERDA saralanadi. */
+  const [custFilter, setCustFilter] = useState<CustomerFilter>(emptyCustomerFilter);
+  const customers = useApiQuery<{ customers: CustomerOption[] }>("/api/sales/customers", {
+    limit: 500,
+    ...customerFilterParams(custFilter),
+  }).data?.customers;
   const visits = useApiQuery<{ visits: RouteVisit[] }>("/api/distribution/visits", { limit: 20 }).data?.visits;
 
   const createRoute = useApiMutation((body: Record<string, unknown>) => api.post("/api/distribution/routes", body));
@@ -120,7 +131,12 @@ export default function RoutesSection() {
     }
   };
 
-  const closeAddCustomers = () => { setAddCustOpen(null); setCustSearch(""); setPicked([]); };
+  const closeAddCustomers = () => {
+    setAddCustOpen(null);
+    setCustSearch("");
+    setPicked([]);
+    setCustFilter(emptyCustomerFilter);
+  };
 
   const handleAddCustomers = async () => {
     if (!addCustOpen || picked.length === 0) return;
@@ -449,6 +465,9 @@ export default function RoutesSection() {
               value={custSearch}
               onChange={(event) => setCustSearch(event.target.value)}
             />
+
+            {/* Hudud va tartib — Sotuv → Mijozlar dagi bilan bir xil panel (qarz bu yerda ahamiyatsiz) */}
+            <CustomerFilters value={custFilter} onChange={setCustFilter} showDebt={false} />
 
             {!customers ? (
               <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 rounded-lg" />)}</div>
