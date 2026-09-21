@@ -3067,6 +3067,50 @@ Production ma'lumotiga va o'zgaruvchilariga tegilmadi. Bildirishnomaning haqiqiy
 ko'rinishi — NOT VERIFIED: davriy vazifa soatlik ishlaydi va hozir tugashiga 10 kundan kam qolgan
 qo'shimcha litsenziya yo'q (testlarda to'liq qoplangan).
 
+## Import: fayl kodlashi va mavjud mijozni yangilash (2026-09-21)
+
+Egasi mijozlarni CSV bilan import qilgach, ro'yxatdagi barcha nomlar romb belgilarga aylanib qolgan edi
+(`C-0015 ??? ??????` ko'rinishida). Sabab kodda: fayl Excel'ning **ANSI (Windows-1251)** eksporti
+edi, `papaparse` ga esa `File` berilardi — u faylni doim **UTF-8** deb o'qiydi. Har bir kirill harfi
+`U+FFFD` ga aylanib bazaga shunday yozilgan; bunday matn tiklanmaydi (asl baytlar yo'qolgan).
+
+**1) Kodlashni aniqlash** — yangi `src/components/csv/encoding.ts`: fayl baytlari o'qiladi va kodlash
+tartib bilan aniqlanadi — BOM (UTF-8, UTF-16LE/BE) → sof ASCII → qat'iy UTF-8 tekshiruvi → aks holda
+Windows-1251. UTF-8 dan boshqa kodlash aniqlansa foydalanuvchiga xabar chiqadi. Bu **barcha** CSV
+importlariga tegishli (mijoz, mahsulot, hodim, ta'minotchi, xarajat, marshrut). `.xlsx` yo'li avvalgidek
+(`exceljs` o'zi to'g'ri o'qiydi).
+
+**2) "Mavjudlarini yangilash"** — import CREATE ONLY edi, ya'ni allaqachon buzuq yozilgan mijozlarni
+qayta import TUZATA olmas edi (telefon dublikat bo'lib o'tkazib yuborilardi), mijozni o'chirish
+endpointi esa yo'q. `POST /api/sales/customers/import` ga `updateExisting` qo'shildi: qator mavjud
+mijozga (telefon bo'yicha; telefonsiz qatorda — nom bo'yicha) mos kelsa, u faylda **to'ldirilgan**
+ustunlar bo'yicha yangilanadi. Bo'sh katak eski qiymatni o'chirmaydi; qarz, balans va keshbekka
+tegilmaydi (ular ilgarigidek faqat hujjat yoki "Balansni to'g'rilash" orqali). Fayl ichidagi takror
+qator bu rejimda ham dublikat bo'lib qoladi. Marshrutga biriktirish takror a'zolik yaratmaydi
+(`rc_route_customer_key` tekshiriladi). Web: import oynasida belgi (`Mijozlar` va `Distributsiya →
+Mijozlar` bo'limlarida), preview va yakunda "Yangilanadi / Yangilandi" ko'rsatkichi.
+
+**Testlar:** `src/components/csv/encoding.test.ts` — 5 ta yangi test (1251 kirill matni, UTF-8 BOM
+bilan va BOMsiz, UTF-16LE, sof ASCII, `File` orqali o'qish) **PASS**; `tsc` (web va API) va
+`eslint --max-warnings=0` toza. API testiga 2 ta yangi holat yozildi
+(`csv-import-export.test.ts`: yangilash rejimi mavjud yozuvni tuzatadi va bo'sh katak eski qiymatga
+tegmaydi; telefonsiz qator nom bo'yicha yangilanadi, fayl ichidagi takror dublikat bo'ladi) — lekin
+ular **ishga tushirilmagan (NOT VERIFIED)**: bu mashinada lokal PostgreSQL yo'q (`erp-postgresql-dev`
+xizmatining data katalogi o'chirilgan, `initdb` ham ishlamadi), productionga esa test suite
+ishlatilmaydi.
+
+**Production (2026-09-21):** commit `1be9fcc`; `bum-api` (deployment `df9e1c8f`) va `bum-web`
+(deployment `4859c9fa`) deploy qilindi. API toza ko'tarildi — bitta `Migratsiyalar qo'llandi (70ms)`
+va bitta `Server listening`. Web bundle `index-Rn4yLOY9.js` → **`index-6nq_pXkQ.js`** (yangi matn
+bundle ichida topildi). Migratsiya yo'q, ma'lumotga tegilmadi.
+
+**Egasi uchun keyingi qadam:** buzuq yozilgan mijozlarni tuzatish — Sotuv → Mijozlar → **Import**,
+o'sha `mijozlar-shablon.csv` faylni tanlash, "Ustunlarni moslash" oynasida **"Mavjudlarini yangilash"**
+ni belgilash → **"Tekshirish"** (bu bosqichda bazaga hech narsa yozilmaydi, "Yangilanadi" soni
+ko'rinadi) → "Importni boshlash". Fayldagi telefonsiz 2 qator (`Муслима Маркет`, `Тинчлик Бобожонов
+Комил`) nomi bazada buzuq bo'lgani uchun mos kelmaydi — ular YANGI mijoz bo'lib qo'shiladi,
+eski buzuq yozuvini qo'lda tahrirlash yoki nofaol qilish kerak.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
@@ -3080,7 +3124,7 @@ qo'shimcha litsenziya yo'q (testlarda to'liq qoplangan).
 2. Kassa **0.4.6** ni (Naqd/Karta/Bank + UZCARD, HUMO va bank hisoblari bo'yicha to'lov, xavfsizlik: yangilanish tokeni faqat API'ga, chek oynasi CSP, token shifrlashsiz saqlanmaydi, Electron fuses; 0.4.1–0.4.5 o'rniga) platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi, terminal cheki) qo'lda sinov; sinovdan keyin asar yaxlitligi fuse'larini yoqish
 3a. Yangi APK'ni telefonga o'rnatib, ish kunida Android "Batareya" bo'limida BUM ERP sarfini oldingi versiya bilan solishtirish; bonnu-market'da UZCARD/HUMO terminallarini "Uzcard"/"Humo" bank hisoblariga komissiya bilan qo'shish (egasi)
 3. Production'da tizimga kirgan holda qo'lda smoke (egasi hisobi bilan): kirish, Dostavka → "Hudud bo'yicha" → biriktirish, "Kunlik marshrut", distribyutsiya xaritasi
-4. Mavjud mijozlarga shahar/mahalla kiritish (avtomatik to'ldirilmaydi)
+4. Mavjud mijozlarga shahar/mahalla kiritish (avtomatik to'ldirilmaydi); noto'g'ri kodlashda import qilingan mijozlar nomini "Mavjudlarini yangilash" bilan qayta import qilib tuzatish (egasi)
 5. Apex `bum-erp.uz` ni ishlaydigan manzilga yo'naltirish; ixtiyoriy — `WEB_ORIGIN=https://app.bum-erp.uz` (o'zgaruvchi endi productionda majburiy, hozir `https://bum-erp.uz`)
 6. Production'da fayl saqlash (S3), SMS (Eskiz — OTP) va AI kalitlari sozlanmagan — tegishli funksiyalar o'chiq
 7. ~~Buxgalteriya: ombordagi qo'lda kirim jurnal yozuvi yaratmaydi~~ — **eskirgan, hal qilingan**: qo'lda kirim DR 1200 / CR 3000 (yoki tanlangan qarshi hisob) yozadi, `inventory-journal.test.ts` bilan tasdiqlangan (2026-09-14 audit)
