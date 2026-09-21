@@ -124,6 +124,51 @@ describe("Mijozlar", () => {
     expect((await sales("GET", `/customers/${id}`, undefined, other.ownerCookie)).statusCode).toBe(404);
   });
 
+  it("saralash: hudud, qarz va tartib (oxirgi qo'shilganlar) serverda ishlaydi", async () => {
+    const make = async (name: string, extra: object = {}) => {
+      const res = await sales("POST", "/customers", { name, ...extra });
+      expect(res.statusCode, res.body).toBe(201);
+      return res.json().customer.id as string;
+    };
+    // Yaratilish tartibi: Alfa → Beta → Gamma (nom bo'yicha tartib ham shunday, shuning uchun farqi ko'rinadi)
+    const alfa = await make("Alfa do'kon", { city: "Urganch", district: "Luchevoy" });
+    await make("Beta do'kon", { city: "Urganch", district: "Gulobod" });
+    await make("Gamma do'kon", { city: "Xiva" });
+    await db.update(customers).set({ totalDebt: "50000" }).where(eq(customers.id, alfa));
+
+    const names = async (query: string) =>
+      ((await sales("GET", `/customers${query}`)).json().customers as { name: string }[]).map((row) => row.name);
+
+    // Standart — nomi bo'yicha; `sort=newest` — oxirgi qo'shilganlar birinchi
+    expect(await names("")).toEqual(["Alfa do'kon", "Beta do'kon", "Gamma do'kon"]);
+    expect(await names("?sort=newest")).toEqual(["Gamma do'kon", "Beta do'kon", "Alfa do'kon"]);
+    expect(await names("?sort=oldest")).toEqual(["Alfa do'kon", "Beta do'kon", "Gamma do'kon"]);
+    expect(await names("?sort=debt")).toEqual(["Alfa do'kon", "Beta do'kon", "Gamma do'kon"]);
+
+    // Hudud: shahar registrga befarq, mahalla alohida; qarz bo'yicha saralash
+    expect(await names("?city=urganch")).toEqual(["Alfa do'kon", "Beta do'kon"]);
+    expect(await names("?city=Urganch&district=Gulobod")).toEqual(["Beta do'kon"]);
+    expect(await names("?withDebt=true")).toEqual(["Alfa do'kon"]);
+    expect(await names("?city=Xiva&withDebt=true")).toEqual([]);
+
+    // Hududlar ro'yxati (tanlov uchun): hududsizlar ham chiqadi
+    const regions = (await sales("GET", "/customers/regions")).json().regions as { city: string | null; district: string | null; count: number }[];
+    expect(regions).toEqual(
+      expect.arrayContaining([
+        { city: "Urganch", district: "Gulobod", count: 1 },
+        { city: "Urganch", district: "Luchevoy", count: 1 },
+        { city: "Xiva", district: null, count: 1 },
+      ]),
+    );
+
+    // Arxivlangan mijoz hududlar ro'yxatidan ham chiqib ketadi (tanlovda "bo'sh hudud" qolmaydi)
+    const gamma = (await sales("GET", "/customers?city=Xiva")).json().customers[0].id as string;
+    expect((await sales("PATCH", `/customers/${gamma}`, { isActive: false })).statusCode).toBe(200);
+    const afterArchive = (await sales("GET", "/customers/regions")).json().regions as { city: string | null }[];
+    expect(afterArchive.some((region) => region.city === "Xiva")).toBe(false);
+    expect((await sales("GET", "/customers/regions?includeInactive=true")).json().regions.some((region: { city: string | null }) => region.city === "Xiva")).toBe(true);
+  });
+
   it("arxiv: qarzsiz mijoz ro'yxatdan chiqadi, `includeInactive` bilan ko'rinadi va qaytariladi", async () => {
     const created = await sales("POST", "/customers", { name: "Arxiv do'koni", phone: "+998901234599" });
     expect(created.statusCode).toBe(201);

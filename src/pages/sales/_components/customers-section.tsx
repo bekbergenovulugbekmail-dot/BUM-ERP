@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore } from "lucide-react";
+import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, X } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -21,6 +22,20 @@ import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import { num, type Customer } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
+
+/** Radix Select bo'sh qiymatni qabul qilmaydi — "barchasi" uchun sentinel. */
+const ALL = "__all__";
+/** Hududi ko'rsatilmagan mijozlar (ro'yxatda alohida tanlov). */
+type Region = { city: string | null; district: string | null; count: number };
+
+const SORTS = [
+  { value: "name", label: "Nomi (A–Z)" },
+  { value: "newest", label: "Oxirgi qo'shilganlar" },
+  { value: "oldest", label: "Avval qo'shilganlar" },
+  { value: "debt", label: "Qarzi ko'p" },
+  { value: "purchases", label: "Xaridi ko'p" },
+] as const;
+type SortValue = (typeof SORTS)[number]["value"];
 
 type CustomerForm = {
   name: string;
@@ -82,10 +97,28 @@ export default function CustomersSection() {
   /** Arxivga ko'chirish yoki qaytarish tasdig'i. */
   const [archiving, setArchiving] = useState<Customer | null>(null);
 
+  /** Saralash: hudud, tartib va "qarzi borlar" — hammasi serverda (ro'yxat chegarasi 200 ta). */
+  const [city, setCity] = useState(ALL);
+  const [district, setDistrict] = useState(ALL);
+  const [sort, setSort] = useState<SortValue>("name");
+  const [withDebt, setWithDebt] = useState(false);
+
+  const regions = useApiQuery<{ regions: Region[] }>(
+    "/api/sales/customers/regions",
+    { includeInactive: showArchive || undefined },
+  ).data?.regions;
+
   const loaded = useApiQuery<{ customers: Customer[] }>(
     "/api/sales/customers",
-    // Arxiv ko'rinishida server faol va nofaolni birga qaytaradi — nofaollari shu yerda ajratiladi
-    { search: debouncedSearch || undefined, includeInactive: showArchive || undefined },
+    {
+      search: debouncedSearch || undefined,
+      // Arxiv ko'rinishida server faol va nofaolni birga qaytaradi — nofaollari shu yerda ajratiladi
+      includeInactive: showArchive || undefined,
+      city: city === ALL ? undefined : city,
+      district: district === ALL ? undefined : district,
+      withDebt: withDebt || undefined,
+      sort: sort === "name" ? undefined : sort,
+    },
     { placeholderData: (previous) => previous },
   ).data?.customers;
   const customers = loaded && (showArchive ? loaded.filter((customer) => !customer.isActive) : loaded);
@@ -173,6 +206,28 @@ export default function CustomersSection() {
 
   const canManage = can("crm.manage");
 
+  /** Shahar/tuman ro'yxati (mijozlar soni bilan) — hududsizlar hisobga olinmaydi. */
+  const cityOptions = (() => {
+    const totals = new Map<string, number>();
+    for (const region of regions ?? []) {
+      if (!region.city) continue;
+      totals.set(region.city, (totals.get(region.city) ?? 0) + region.count);
+    }
+    return [...totals.entries()].sort(([a], [b]) => a.localeCompare(b));
+  })();
+  /** Mahallalar: shahar tanlangan bo'lsa — o'shaniki, aks holda hammasi. */
+  const districtOptions = (() => {
+    const totals = new Map<string, number>();
+    for (const region of regions ?? []) {
+      if (!region.district) continue;
+      if (city !== ALL && region.city !== city) continue;
+      totals.set(region.district, (totals.get(region.district) ?? 0) + region.count);
+    }
+    return [...totals.entries()].sort(([a], [b]) => a.localeCompare(b));
+  })();
+  const filtersOn = city !== ALL || district !== ALL || withDebt || sort !== "name";
+  const resetFilters = () => { setCity(ALL); setDistrict(ALL); setWithDebt(false); setSort("name"); };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -223,6 +278,69 @@ export default function CustomersSection() {
             </Button>
           )}
         </div>
+      </div>
+
+      {/* Saralash: hudud, tartib va qarz — serverda bajariladi, ya'ni 200 ta chegarasidan tashqaridagilar ham topiladi */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Select
+          value={city}
+          onValueChange={(next) => { setCity(next); setDistrict(ALL); }}
+        >
+          <SelectTrigger className="h-9 w-full sm:w-52" data-testid="customers-city">
+            <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+            <SelectValue placeholder="Hudud" />
+          </SelectTrigger>
+          <SelectContent position="popper">
+            <SelectItem value={ALL}>Barcha hududlar</SelectItem>
+            {cityOptions.map(([name, count]) => (
+              <SelectItem key={name} value={name}>{name} ({count})</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={district} onValueChange={setDistrict} disabled={districtOptions.length === 0}>
+          <SelectTrigger className="h-9 w-full sm:w-52" data-testid="customers-district">
+            <SelectValue placeholder="Mahalla" />
+          </SelectTrigger>
+          <SelectContent position="popper">
+            <SelectItem value={ALL}>Barcha mahallalar</SelectItem>
+            {districtOptions.map(([name, count]) => (
+              <SelectItem key={name} value={name}>{name} ({count})</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={sort} onValueChange={(next) => setSort(next as SortValue)}>
+          <SelectTrigger className="h-9 w-full sm:w-52" data-testid="customers-sort">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent position="popper">
+            {SORTS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Button
+          size="sm"
+          variant={withDebt ? "default" : "secondary"}
+          data-testid="customers-with-debt"
+          onClick={() => setWithDebt((current) => !current)}
+        >
+          Qarzi borlar
+        </Button>
+
+        {filtersOn && (
+          <Button size="sm" variant="ghost" data-testid="customers-reset-filters" onClick={resetFilters}>
+            <X className="h-3.5 w-3.5 mr-1" /> Tozalash
+          </Button>
+        )}
+
+        {customers && (
+          <span className="text-xs text-muted-foreground">
+            {customers.length} ta mijoz{customers.length === 200 && " (birinchi 200 ta — qidiruvni aniqlashtiring)"}
+          </span>
+        )}
       </div>
 
       {!customers ? (

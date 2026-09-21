@@ -8,7 +8,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 
 const outcome = { created: 0, valid: 2, updated: 0, errors: [], duplicates: [], warnings: [], dryRun: true };
-const mutateAsync = vi.fn(async () => outcome);
+const mutateAsync = vi.fn(async (_body: { rows: Record<string, string>[]; dryRun: boolean }) => outcome);
 
 vi.mock("@/lib/query.ts", () => ({
   useApiQuery: () => ({ data: undefined }),

@@ -1,7 +1,8 @@
 /**
  * /api/sales — mijozlar, savdo buyurtmalari, mijoz to'lovlari, POS (convex/sales/*).
  *
- *   GET    /customers (?search=&includeInactive=&limit=), /customers/:customerId   sales.view
+ *   GET    /customers (?search=&includeInactive=&city=&district=&withDebt=&sort=&limit=),
+ *          /customers/regions (?includeInactive=), /customers/:customerId              sales.view
  *   POST   /customers, PATCH /customers/:customerId       crm.manage
  *   GET    /orders (?status=&customerId=&warehouseId=&isPos=&shiftId=&dateFrom=&dateTo=&search=&limit=&cursor=)   sales.view
  *   GET    /orders/stats, /orders/:orderId                sales.view
@@ -43,7 +44,7 @@ import { decimalSchema, moneySchema, percentSchema, priceSchema } from "../../sh
 import { authOf, requireAuth } from "../auth/guard.js";
 import { requireAnyPermission, requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import { autoCreateDeliveryTask } from "../delivery/tasks.service.js";
-import { createCustomer, getCustomer, listCustomers, updateCustomer } from "./customers.service.js";
+import { createCustomer, getCustomer, listCustomerRegions, listCustomers, updateCustomer } from "./customers.service.js";
 import {
   cancelOrder,
   confirmOrder,
@@ -124,8 +125,16 @@ const customerPatch = customerBody.partial().extend({ isActive: z.boolean().opti
 const customersQuery = z.object({
   search: z.string().trim().min(1).max(100).optional(),
   includeInactive: boolQuery,
+  /** Hudud bo'yicha saralash — qiymatlar `/customers/regions` dan keladi. */
+  city: z.string().trim().min(1).max(100).optional(),
+  district: z.string().trim().min(1).max(100).optional(),
+  /** Faqat qarzi borlar. */
+  withDebt: boolQuery,
+  /** Tartib: nomi (standart), oxirgi qo'shilganlar, eskilari, qarzi yoki xaridi ko'plari. */
+  sort: z.enum(["name", "newest", "oldest", "debt", "purchases"]).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
+const customerRegionsQuery = z.object({ includeInactive: boolQuery });
 
 const salesItem = z.strictObject({
   productId: z.uuid(),
@@ -387,6 +396,12 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   app.get("/customers", async (req) => {
     const query = customersQuery.parse(req.query);
     return { customers: await listCustomers(db, await readTenant(req, "sales.view"), query) };
+  });
+
+  /** Saralash tanlovlari uchun: mavjud shahar/tuman va mahalla juftliklari va mijozlar soni. */
+  app.get("/customers/regions", async (req) => {
+    const { includeInactive } = customerRegionsQuery.parse(req.query);
+    return { regions: await listCustomerRegions(db, await readTenant(req, "sales.view"), { includeInactive }) };
   });
 
   app.get("/customers/export", async (req, reply) => {

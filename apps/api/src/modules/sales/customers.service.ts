@@ -100,10 +100,32 @@ function customerSearch(search: string) {
   );
 }
 
+/** Ro'yxat tartibi: nomi (standart), oxirgi qo'shilganlar, eskilari, qarzi va xaridi ko'plari. */
+export type CustomerSort = "name" | "newest" | "oldest" | "debt" | "purchases";
+
+/** Har bir tartib uchun ikkinchi ustun ham beriladi — teng qiymatlarda sahifa "sakramasin". */
+const CUSTOMER_ORDER = {
+  name: [asc(customers.name), asc(customers.id)],
+  newest: [desc(customers.createdAt), desc(customers.id)],
+  oldest: [asc(customers.createdAt), asc(customers.id)],
+  debt: [desc(customers.totalDebt), asc(customers.name)],
+  purchases: [desc(customers.totalPurchased), asc(customers.name)],
+} as const;
+
 export async function listCustomers(
   conn: DbOrTx,
   tenant: TenantContext,
-  options: { search?: string; includeInactive?: boolean; limit: number },
+  options: {
+    search?: string;
+    includeInactive?: boolean;
+    limit: number;
+    /** Hudud bo'yicha saralash: shahar/tuman va mahalla (registr farq qilmaydi). */
+    city?: string;
+    district?: string;
+    /** Faqat qarzi borlar. */
+    withDebt?: boolean;
+    sort?: CustomerSort;
+  },
 ) {
   return conn
     .select(customerFields)
@@ -113,10 +135,40 @@ export async function listCustomers(
         eq(customers.companyId, tenant.company.id),
         options.includeInactive ? undefined : eq(customers.isActive, true),
         options.search ? customerSearch(options.search) : undefined,
+        // `ilike` joker belgisiz — registrga befarq TENGLIK (hudud ro'yxatidan tanlanadi)
+        options.city ? ilike(customers.city, options.city) : undefined,
+        options.district ? ilike(customers.district, options.district) : undefined,
+        options.withDebt ? sql`${customers.totalDebt} > 0` : undefined,
       ),
     )
-    .orderBy(asc(customers.name))
+    .orderBy(...CUSTOMER_ORDER[options.sort ?? "name"])
     .limit(options.limit);
+}
+
+/**
+ * Hudud ro'yxati — saralash tanlovlari uchun: mavjud shahar/tuman va mahalla juftliklari va har birida
+ * nechta mijoz borligi. Hududi ko'rsatilmagan mijozlar ham chiqadi (`city: null`) — ularni to'ldirish kerak.
+ */
+export async function listCustomerRegions(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  options: { includeInactive?: boolean } = {},
+) {
+  return conn
+    .select({
+      city: customers.city,
+      district: customers.district,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(customers)
+    .where(
+      and(
+        eq(customers.companyId, tenant.company.id),
+        options.includeInactive ? undefined : eq(customers.isActive, true),
+      ),
+    )
+    .groupBy(customers.city, customers.district)
+    .orderBy(asc(customers.city), asc(customers.district));
 }
 
 export async function getCustomer(conn: DbOrTx, tenant: TenantContext, customerId: string) {
