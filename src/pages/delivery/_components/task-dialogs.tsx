@@ -1,7 +1,7 @@
 /**
  * Supervayzer amallari: biriktirish / boshqa agentga o'tkazish, biriktirishni olib tashlash, qayta rejalash, tahrirlash
- * (yo'lga chiqquncha summa va vaqt oynasi), OTP berish, to'lov farqini ko'rib chiqish, qaytgan mahsulotni omborga qabul
- * qilish, bekor qilish. Holat o'tishi va ruxsat — serverda.
+ * (yo'lga chiqquncha summa va vaqt oynasi), OTP berish, to'lov farqini ko'rib chiqish, qoldiqni qayta yetkazish,
+ * qaytgan mahsulotni omborga qabul qilish, bekor qilish. Holat o'tishi va ruxsat — serverda.
  */
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
+import { usePermissions } from "@/hooks/use-company.ts";
 import { api } from "@/lib/api.ts";
 import { deliveryErrorMessage } from "@/lib/delivery/errors.ts";
 import { formatDateTime } from "@/lib/delivery/format.ts";
@@ -21,7 +22,7 @@ import { num, type DeliveryAgentRow, type DeliveryTaskDetail } from "@/lib/deliv
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { todayLocal } from "@/pages/sales/_lib/types.ts";
 
-export type TaskDialogKind = "assign" | "unassign" | "reschedule" | "edit" | "otp" | "review" | "return" | "cancel";
+export type TaskDialogKind = "assign" | "unassign" | "reschedule" | "edit" | "otp" | "review" | "redeliver" | "return" | "cancel";
 type Money = (value: string | number) => string;
 type DialogProps = { task: DeliveryTaskDetail; money: Money; onClose: () => void };
 
@@ -479,6 +480,90 @@ function ReturnDialog({ task, onClose }: DialogProps) {
   );
 }
 
+/**
+ * Qoldiqni qayta yetkazish: qisman yetkazilgan yetkazmaning qolgan miqdori uchun YANGI yetkazma.
+ * Buyurtma, zaxira va qarz o'zgarmaydi — tovar allaqachon jo'natilgan va yetkazuvchida.
+ */
+function RedeliverDialog({ task, money, onClose }: DialogProps) {
+  const { t } = useTranslation("delivery");
+  const { can } = usePermissions();
+  const today = todayLocal();
+  const canAssign = can("delivery.assign");
+  const agents = useApiQuery<{ agents: DeliveryAgentRow[] }>("/api/delivery/agents", { activeOnly: true }, { enabled: canAssign }).data?.agents;
+  const [date, setDate] = useState(today);
+  const [agentId, setAgentId] = useState(task.deliveryAgentId ?? "");
+  const [reason, setReason] = useState("");
+  const { submit, pending } = useTaskAction();
+  const remaining = task.items
+    .map((item) => ({ item, qty: num(item.quantity) - num(item.deliveredQty) - num(item.returnedQty) }))
+    .filter((line) => line.qty > 0);
+  // Chegirma qatorda hisobga olingan: qator qiymatining qoldiqqa to'g'ri keladigan ulushi
+  const value = remaining.reduce((sum, line) => sum + (num(line.item.value) * line.qty) / num(line.item.quantity), 0);
+  const valid = remaining.length > 0 && date >= today;
+
+  const save = async () => {
+    const body = {
+      scheduledDate: date,
+      ...(canAssign && agentId ? { deliveryAgentId: agentId } : {}),
+      reason: reason.trim() || null,
+    };
+    if (await submit(() => api.post(`/api/delivery/tasks/${task.id}/redeliver`, body), "drawer.saved_redeliver")) onClose();
+  };
+
+  return (
+    <Shell
+      title={t("drawer.redeliver")}
+      description={t("redeliver.hint")}
+      onClose={onClose}
+      pending={pending}
+      footer={<Actions onClose={onClose} pending={pending} disabled={!valid} label={t("redeliver.submit")} onSubmit={() => void save()} />}
+    >
+      <div className="space-y-3">
+        <ul className="divide-y divide-border rounded-xl border border-border text-sm">
+          {remaining.length === 0 ? (
+            <li className="p-3 text-muted-foreground">{t("error.nothing_to_redeliver")}</li>
+          ) : (
+            remaining.map((line) => (
+              <li key={line.item.id} className="flex justify-between gap-2 p-2">
+                <span>{line.item.productName}</span>
+                <span className="font-medium tabular-nums">
+                  {Math.round(line.qty * 10_000) / 10_000} {line.item.unitName}
+                </span>
+              </li>
+            ))
+          )}
+        </ul>
+        {remaining.length > 0 && <p className="text-xs text-muted-foreground">{t("redeliver.expected", { amount: money(value) })}</p>}
+        <div className="space-y-1">
+          <Label htmlFor="redeliver-date">{t("sv.table.date")}</Label>
+          <Input id="redeliver-date" type="date" min={today} value={date} onChange={(e) => setDate(e.target.value)} />
+        </div>
+        {canAssign && (
+          <div className="space-y-1">
+            <Label>{t("sv.table.agent")}</Label>
+            <Select value={agentId} onValueChange={setAgentId}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("redeliver.later_agent")} />
+              </SelectTrigger>
+              <SelectContent>
+                {agents?.map((agent) => (
+                  <SelectItem key={agent.id} value={agent.id}>
+                    {agent.name ?? agent.phone} · {agent.code}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        <div className="space-y-1">
+          <Label htmlFor="redeliver-reason">{t("redeliver.reason")}</Label>
+          <Textarea id="redeliver-reason" rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
 function CancelDialog({ task, onClose }: DialogProps) {
   const { t } = useTranslation("delivery");
   const [reason, setReason] = useState("");
@@ -516,6 +601,8 @@ export default function TaskDialog({ kind, ...props }: DialogProps & { kind: Tas
       return <OtpDialog {...props} />;
     case "review":
       return <ReviewDialog {...props} />;
+    case "redeliver":
+      return <RedeliverDialog {...props} />;
     case "return":
       return <ReturnDialog {...props} />;
     case "cancel":

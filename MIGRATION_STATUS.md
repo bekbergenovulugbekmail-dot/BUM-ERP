@@ -1234,7 +1234,7 @@ Talab: "BUM ERP — DOSTAVKA / DELIVERY MASTER PROMPT" (1–62 bo'lim). Asosiy p
 - "faqat kamera" — `capture` atributi; ba'zi brauzerlar galereyani ham taklif qiladi
 - SMS orqali OTP — production'da SMS provayder yo'q
 - filial va hudud jadvallari yo'q — hudud matn, filial `branchId`
-- qisman yetkazilgan qoldiqni qayta yetkazish yo'q (faqat omborga qaytarish)
+- ~~qisman yetkazilgan qoldiqni qayta yetkazish yo'q (faqat omborga qaytarish)~~ — **2026-09-21 da qo'shildi** (pastda "Dostavka: qisman yetkazilgan qoldiqni qayta yetkazish")
 
 ## Obuna va litsenziya tizimi (2026-09-13)
 
@@ -2957,6 +2957,63 @@ API toza ko'tarildi — bitta `Migratsiyalar qo'llandi (27ms)` va bitta `Server 
 ya'ni productionda shu build turibdi. Sahifalar 200, marshrutlar sessiyasiz 401. Production
 ma'lumotiga va o'zgaruvchilariga tegilmadi. Tizimga kirgan holda sinov — NOT VERIFIED
 (production paroli ishlatilmaydi; egasining sinov hisobi kerak).
+
+## Dostavka: qisman yetkazilgan qoldiqni qayta yetkazish (2026-09-21)
+
+Dostavka modulidagi ochiq kamchilik yopildi: shu paytgacha qisman yetkazilgan yetkazmaning qoldig'i
+uchun **yagona yo'l omborga qaytarish** edi (sotuv va qarz kamayadi, jurnal teskari yoziladi). Mijoz
+"qolganini ertaga olib keling" desa, tizimda buni yozadigan joy yo'q edi.
+
+**Yangi amal — «Qoldiqni qayta yetkazish»** (`POST /api/delivery/tasks/:taskId/redeliver`, ruxsat
+`delivery.manage`, agent bilan yaratilsa — qo'shimcha `delivery.assign`). Qoldiq uchun **yangi yetkazma**
+ochiladi: faqat qolgan qatorlar va miqdorlar, yangi kun va (ixtiyoriy) agent. **Buyurtma, zaxira, qarz
+va jurnal o'zgarmaydi** — tovar allaqachon jo'natilgan (`shipOrder` yo'lga chiqishda bir marta) va
+yetkazuvchida; yangi yetkazma faqat jarayon obyekti (ORDER ≠ DELIVERY).
+
+**Asosiy invariant: qoldiq bir vaqtda faqat BITTA tirik yetkazmada.**
+- qayta yetkazma ochiq (bekor qilinmagan) bo'lsa — asl yetkazmadan omborga qabul qilib bo'lmaydi
+  (409 `redelivery_open`), ya'ni bir miqdor ikki marta qaytmaydi;
+- qoldiq omborga qabul qilingan bo'lsa — qayta yetkazma ochilmaydi (409 `already_returned`);
+- bitta yetkazmaga ikkinchi qayta yetkazma ochilmaydi (409 `redelivery_exists`);
+- qayta yetkazma bekor qilinsa — qoldiq yana omborni kutadi (`returnPending` qaytadi);
+- qayta yetkazmaning o'zi qisman bo'lsa — zanjir davom etadi (uning qoldig'i o'z navbatida
+  qaytariladi yoki yana qayta yetkaziladi).
+
+**Migratsiya 0074** — faqat qo'shadi: `delivery_tasks.origin_task_id` (o'ziga havola, `on delete set null`)
+va shartli indeks. Ma'lumot o'zgarmaydi, mavjud yetkazmalarda `null`.
+
+**Yo'l-yo'lakay tuzatilgan ikkita eski kamchilik** (ikkalasi ham API darajasida ochiq edi, UI ularni
+taklif qilmasdi):
+- qisman yetkazilgan va qoldig'i hal qilinmagan buyurtmaga `POST /tasks` orqali oddiy yetkazma ochish
+  mumkin edi — u buyurtmaning TO'LIQ miqdorini olardi; endi 409 `redelivery_required`;
+- yetkazma rejalashda ilgari **mijozga topshirilgan** miqdor hisobga olinmasdi (faqat qaytarilgani) —
+  qoldiq omborga qabul qilingach, o'sha buyurtmaga yana yetkazma ochilib, allaqachon yetkazilgan
+  miqdorni rejalashtirardi; endi `delivered_qty` ham chegiriladi.
+
+**Ko'rsatkichlar mosligi:** `returnPending` belgisi, `?returnPending=true` filtri, Nazorat bo'limidagi
+"Qaytarish kutilmoqda" paneli va Bugun sahifasidagi `pendingReturns` sanog'i endi bitta shartdan
+(`returnPendingCondition`) hisoblanadi va qayta yetkazishga berilgan qoldiqni ko'rsatmaydi.
+
+**Web:** yetkazma oynasida (supervayzer) yangi «Qoldiqni qayta yetkazish» tugmasi — qoldiq qatorlari,
+yig'iladigan summa, sana va agent tanlovi; «Omborga qabul qilish» qayta yetkazma ochiq bo'lsa
+ko'rinmaydi. Tafsilotda zanjir ko'rinadi: "Asl yetkazma" va "Qoldiq yetkazmasi". Tillar: uz, ru, kk
+(14 tadan yangi kalit).
+
+**Testlar:** yangi `apps/api/test/delivery-redelivery.test.ts` — **10 test** (qoldiq uchun yangi
+yetkazma: faqat qolgan miqdor, qoldiq summasi, buyurtma/zaxira/qarz o'zgarmasligi, ikki tomonlama
+havola va tarix; qayta yetkazma ochiq ekan omborga qabul qilinmasligi va bekor qilingach yana
+mumkinligi; ikkinchi qayta yetkazma va qaytarilgandan keyingi urinish; faqat `partially_delivered`
+dan; agent qayta yetkazmani yetkazishi — zaxira qayta kamaymaydi, to'lov qarzni yopadi; zanjir
+(qayta yetkazma ham qisman) va qoldiqning bir marta omborga qaytishi; oddiy yetkazma ochilmasligi;
+qat'iy tana, o'tgan sana va qoldiqdan katta summa; ruxsatlar 403/401 va boshqa kompaniya 404;
+marshrut tartibi bilan boshqa agentga biriktirish). `src/lib/delivery/errors.test.ts` ga yangi
+sabab kodlari qo'shildi (+1 test).
+
+**To'liq regressiya:** API **136 fayl / 785 test PASS** (avval 135 / 775, +10), frontend unit
+**22 fayl / 95 test PASS** (avval 94, +1), `tsc` (API va web) va `eslint --max-warnings=0` toza.
+Brauzer E2E bu bosqichda ishga tushirilmadi (dostavka supervayzer sahifasi E2E qamrovida emas —
+modulning boshlanishidan beri shunday).
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
@@ -2976,7 +3033,7 @@ ma'lumotiga va o'zgaruvchilariga tegilmadi. Tizimga kirgan holda sinov — NOT V
 7. ~~Buxgalteriya: ombordagi qo'lda kirim jurnal yozuvi yaratmaydi~~ — **eskirgan, hal qilingan**: qo'lda kirim DR 1200 / CR 3000 (yoki tanlangan qarshi hisob) yozadi, `inventory-journal.test.ts` bilan tasdiqlangan (2026-09-14 audit)
 8. Desktop: kod imzolash sertifikati (`CSC_LINK`, `CSC_KEY_PASSWORD`); Shtrix-M, YES POS, Rongta tarozilari uchun ishlab chiqaruvchining almashinuv protokoli hujjati
 9. Obuna: to'lov shlyuzi (Payme / Click) — hozir admin qo'lda tasdiqlaydi; qo'shimcha litsenziya tugashi ogohlantirishi
-10. Dostavka: SMS OTP, qisman qoldiqni qayta yetkazish, hudud poligonlari ma'lumotnomasi
+10. Dostavka: SMS OTP (provayder kerak), hudud poligonlari ma'lumotnomasi (~~qisman qoldiqni qayta yetkazish~~ — 2026-09-21 da bajarildi)
 11. PR `feat/postgres-migration` → `main` — o'tish kuni kelishilgach
 12. Railway'dagi eski xizmatlar (`BUM-ERP`, `logto`, logto'ning Postgres'i) hali bo'lsa — egasi o'chiradi (tasdiqsiz o'chirilmaydi)
 

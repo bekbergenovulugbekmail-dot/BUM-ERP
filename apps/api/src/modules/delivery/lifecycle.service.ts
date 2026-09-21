@@ -859,6 +859,19 @@ export async function returnDeliveryGoods(
   meta: RequestMeta,
 ) {
   const task = await lockTask(tx, tenant.company.id, taskId);
+  // Qoldiq qayta yetkazishga berilgan bo'lsa — omborga qabul qilinmaydi (aks holda bir miqdor ikki marta qaytardi)
+  const [redelivery] = await tx
+    .select({ id: deliveryTasks.id, number: deliveryTasks.number })
+    .from(deliveryTasks)
+    .where(and(eq(deliveryTasks.originTaskId, task.id), sql`${deliveryTasks.status} <> 'cancelled'`))
+    .limit(1);
+  if (redelivery) {
+    throw new AppError("CONFLICT", `Qoldiq qayta yetkazishga berilgan (${redelivery.number}) — avval o'sha yetkazmani bekor qiling`, {
+      reason: "redelivery_open",
+      taskId: redelivery.id,
+      number: redelivery.number,
+    });
+  }
   if (task.status === "failed") assertTransition(task.status, "returned");
   else if (task.status === "partially_delivered") {
     if (task.returnedAt) throw new AppError("CONFLICT", "Qolgan mahsulot allaqachon qaytarilgan", { reason: "already_returned" });

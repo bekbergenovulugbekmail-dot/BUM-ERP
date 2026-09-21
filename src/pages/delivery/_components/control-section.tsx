@@ -60,9 +60,10 @@ export default function ControlSection({ money, onOpenTask }: { money: Money; on
   const interval = useLiveInterval(60_000);
   const reviews = useApiQuery<TaskPage>(can("delivery.manage") ? "/api/delivery/tasks" : null, { reviewPending: true, limit: 200 }, { refetchInterval: interval }).data
     ?.tasks;
-  const returns = useApiQuery<TaskPage>(can("delivery.return") ? "/api/delivery/tasks" : null, { status: "failed,partially_delivered", limit: 200 }, {
+  // Server filtri: yetkazilmagan yoki qisman, omborga qabul qilinmagan VA qoldig'i qayta yetkazilmayotgan
+  const returns = useApiQuery<TaskPage>(can("delivery.return") ? "/api/delivery/tasks" : null, { returnPending: true, limit: 200 }, {
     refetchInterval: interval,
-  }).data?.tasks.filter((task) => task.status === "failed" || task.returnedAt === null);
+  }).data?.tasks;
   const overdue = useApiQuery<TaskPage>("/api/delivery/tasks", { overdue: true, limit: 200 }, { refetchInterval: interval }).data?.tasks;
 
   return (

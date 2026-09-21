@@ -100,11 +100,18 @@ export type DeliveryTaskRow = {
   returnedAt: string | null;
   createdAt: string;
   overdue: boolean;
-  /** Tovar yetkazuvchida — omborga qabul qilinmagan (yetkazilmagan yoki qisman). */
+  /** Tovar yetkazuvchida — omborga qabul qilinmagan (yetkazilmagan yoki qisman) va qayta yetkazilmayotgan. */
   returnPending?: boolean;
+  /** Qaysi yetkazmaning qoldig'i (qayta yetkazish bo'lsa). */
+  originTaskId?: string | null;
+  /** Shu yetkazmaning qoldig'i uchun ochilgan yetkazma. */
+  redeliveryTaskId?: string | null;
+  redeliveryNumber?: string | null;
   /** Agent ro'yxatida: server hisoblagan masofa (joy berilgan bo'lsa). */
   distanceMeters?: number | null;
 };
+
+export type DeliveryTaskLink = { id: string; number: string; status: DeliveryStatus; scheduledDate: string };
 
 export type DeliveryTaskItem = {
   id: string;
@@ -167,6 +174,9 @@ export type DeliveryTaskDetail = Omit<DeliveryTaskRow, "agentCode" | "agentName"
     balance?: string;
   };
   agent: { id: string; code: string; name: string | null; phone: string } | null;
+  /** Qoldiq zanjiri: bu yetkazma kimning qoldig'i va qoldig'i qayerda qayta yetkazilmoqda. */
+  originTask: DeliveryTaskLink | null;
+  redelivery: DeliveryTaskLink | null;
   items: DeliveryTaskItem[];
   payments: { id: string; method: DeliveryCollectionMethod; amount: string; collectedAt: string; collectedByName: string | null; offline: boolean }[];
   proofs: { id: string; kind: DeliveryProofKind; contentType: string; sizeBytes: number; signerName: string | null; distanceMeters: number | null; takenAt: string }[];

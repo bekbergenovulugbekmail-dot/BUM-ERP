@@ -1,9 +1,10 @@
 /**
  * Yetkazma vazifalari (boshqaruv): yaratish (qo'lda yoki buyurtma tasdiqlanganda avtomatik), biriktirish, boshqa agentga
- * o'tkazish, qayta rejalash, bekor qilish, ustuvorlik va izohlar, yetkazish tartibi, ro'yxat (server filtrlari va
- * sahifalash) va tafsilot. Buyurtmaning o'zi (miqdor, narx, holat) bu yerda o'zgartirilmaydi — ORDER ≠ DELIVERY.
+ * o'tkazish, qayta rejalash, qoldiqni qayta yetkazish, bekor qilish, ustuvorlik va izohlar, yetkazish tartibi, ro'yxat
+ * (server filtrlari va sahifalash) va tafsilot. Buyurtmaning o'zi (miqdor, narx, holat) bu yerda o'zgartirilmaydi —
+ * ORDER ≠ DELIVERY.
  */
-import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, lt, max, notExists, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, lt, max, ne, notExists, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import {
   AppError,
@@ -46,6 +47,15 @@ function assertWindow(start: string | null | undefined, end: string | null | und
 function assertNotPast(date: string) {
   if (date < localDate()) throw badRequest("Yetkazish sanasi o'tgan kun bo'lmasin", { reason: "date_in_past" });
 }
+
+/**
+ * Shu yetkazmaning qoldig'i uchun ochilgan va bekor qilinmagan QAYTA yetkazma bormi.
+ * Bor bo'lsa — qoldiq o'sha yetkazmada hisoblanadi: bu yetkazmadan omborga qaytarilmaydi va ro'yxatda
+ * "tovar qaytarilmagan" deb belgilanmaydi (aks holda bir xil miqdor ikki marta hisoblanardi).
+ */
+export const activeRedeliveryExists = sql`exists (
+  select 1 from delivery_tasks rd where rd.origin_task_id = ${deliveryTasks.id} and rd.status <> 'cancelled'
+)`;
 
 /** Buyurtmaning yig'ilmagan qoldig'i: jami − qaytarilgan − to'langan (manfiy bo'lmaydi). */
 export async function orderOutstanding(conn: DbOrTx, order: { id: string; totalAmount: string; paidAmount: string }) {
@@ -135,13 +145,40 @@ export async function createDeliveryTask(
     .where(and(eq(deliveryTasks.orderId, order.id), inArray(deliveryTasks.status, OPEN)))
     .limit(1);
   if (open) throw new AppError("CONFLICT", `Buyurtmada yakunlanmagan yetkazma bor (${open.number})`, { reason: "task_exists", taskId: open.id });
+  // Qisman yetkazilgan va qoldig'i hal qilinmagan yetkazma — yangi yetkazma buyurtmaning TO'LIQ miqdorini olardi
+  const [unsettled] = await tx
+    .select({ id: deliveryTasks.id, number: deliveryTasks.number })
+    .from(deliveryTasks)
+    .where(
+      and(
+        eq(deliveryTasks.orderId, order.id),
+        eq(deliveryTasks.status, "partially_delivered"),
+        isNull(deliveryTasks.returnedAt),
+        sql`not ${activeRedeliveryExists}`,
+      ),
+    )
+    .limit(1);
+  if (unsettled) {
+    throw new AppError("CONFLICT", `Buyurtmada qisman yetkazilgan yetkazma bor (${unsettled.number}) — qoldiq uchun «Qayta yetkazish» yoki omborga qabul qilish`, {
+      reason: "redelivery_required",
+      taskId: unsettled.id,
+    });
+  }
 
   const orderItems = await tx
     .select({ id: salesOrderItems.id, productId: salesOrderItems.productId, quantity: salesOrderItems.quantity, returnedQty: salesOrderItems.returnedQty })
     .from(salesOrderItems)
     .where(eq(salesOrderItems.orderId, order.id));
+  // Ilgarigi yetkazmalarda mijozga TOPSHIRILGAN miqdor qayta rejalanmaydi (qaytarilgani `returnedQty` da)
+  const already = await tx
+    .select({ orderItemId: deliveryTaskItems.orderItemId, delivered: sql<string>`coalesce(sum(${deliveryTaskItems.deliveredQty}), 0)::numeric(18,4)` })
+    .from(deliveryTaskItems)
+    .innerJoin(deliveryTasks, eq(deliveryTasks.id, deliveryTaskItems.taskId))
+    .where(and(eq(deliveryTasks.orderId, order.id), inArray(deliveryTasks.status, ["delivered", "partially_delivered"])))
+    .groupBy(deliveryTaskItems.orderItemId);
+  const deliveredByItem = new Map(already.map((row) => [row.orderItemId, toMinor(row.delivered, 4)]));
   const plannable = orderItems
-    .map((item) => ({ ...item, remaining: toMinor(item.quantity, 4) - toMinor(item.returnedQty, 4) }))
+    .map((item) => ({ ...item, remaining: toMinor(item.quantity, 4) - toMinor(item.returnedQty, 4) - (deliveredByItem.get(item.id) ?? 0n) }))
     .filter((item) => item.remaining > 0n);
   if (plannable.length === 0) throw badRequest("Buyurtmada yetkaziladigan mahsulot qolmagan");
 
@@ -374,6 +411,175 @@ export async function cancelDeliveryTask(tx: Tx, tenant: TenantContext, taskId: 
   await deliveryAudit(tx, tenant, meta, "DELIVERY_CANCELLED", task.id, { number: task.number, reason, agentId: task.deliveryAgentId }, "warning");
 }
 
+/**
+ * Qisman yetkazilgan yetkazmaning QOLDIG'I uchun yangi yetkazma (qayta yetkazish).
+ *
+ * Buyurtma o'zgarmaydi (ORDER ≠ DELIVERY) va zaxira, qarz, jurnal QAYTA yozilmaydi — tovar allaqachon jo'natilgan
+ * va yetkazuvchida. Yangi yetkazma faqat jarayon: qoldiq qatorlari, yig'iladigan summa (qoldiq qiymati, buyurtma
+ * qoldig'idan oshmaydi) va yangi kun. Qoldiq bir vaqtda bitta tirik yetkazmada bo'ladi: qayta yetkazma ochiq bo'lsa,
+ * asl yetkazmadan omborga qabul qilinmaydi va aksincha.
+ */
+export type RedeliveryInput = {
+  scheduledDate?: string;
+  windowStart?: string | null;
+  windowEnd?: string | null;
+  priority?: DeliveryPriority;
+  paymentType?: DeliveryPaymentType;
+  expectedAmount?: string;
+  deliveryNote?: string | null;
+  supervisorNote?: string | null;
+  deliveryAgentId?: string | null;
+  routeOrder?: number | null;
+  reason?: string | null;
+};
+
+export async function redeliverRemainder(
+  tx: Tx,
+  tenant: TenantContext,
+  taskId: string,
+  input: RedeliveryInput,
+  meta: RequestMeta,
+  options: { allowAssign?: boolean } = {},
+): Promise<string> {
+  const companyId = tenant.company.id;
+  const origin = await lockTask(tx, companyId, taskId);
+  if (origin.status !== "partially_delivered") {
+    throw new AppError("CONFLICT", "Faqat qisman yetkazilgan yetkazmaning qoldig'i qayta yetkaziladi", { reason: "invalid_transition", from: origin.status });
+  }
+  if (origin.returnedAt) throw new AppError("CONFLICT", "Qoldiq omborga qabul qilingan — qayta yetkazilmaydi", { reason: "already_returned" });
+  const [existing] = await tx
+    .select({ id: deliveryTasks.id, number: deliveryTasks.number })
+    .from(deliveryTasks)
+    .where(and(eq(deliveryTasks.originTaskId, origin.id), ne(deliveryTasks.status, "cancelled")))
+    .limit(1);
+  if (existing) {
+    throw new AppError("CONFLICT", `Qoldiq uchun yetkazma allaqachon ochilgan (${existing.number})`, { reason: "redelivery_exists", taskId: existing.id });
+  }
+  const [open] = await tx
+    .select({ id: deliveryTasks.id, number: deliveryTasks.number })
+    .from(deliveryTasks)
+    .where(and(eq(deliveryTasks.orderId, origin.orderId), inArray(deliveryTasks.status, OPEN)))
+    .limit(1);
+  if (open) throw new AppError("CONFLICT", `Buyurtmada yakunlanmagan yetkazma bor (${open.number})`, { reason: "task_exists", taskId: open.id });
+
+  const [order] = await tx
+    .select({
+      id: salesOrders.id,
+      number: salesOrders.number,
+      status: salesOrders.status,
+      totalAmount: salesOrders.totalAmount,
+      paidAmount: salesOrders.paidAmount,
+    })
+    .from(salesOrders)
+    .where(eq(salesOrders.id, origin.orderId))
+    .limit(1)
+    .for("update");
+  if (!isCompletedSale(order!.status) && order!.status !== "confirmed") {
+    throw badRequest("Buyurtma holati yetkazishga yaramaydi", { reason: "order_not_deliverable", status: order!.status });
+  }
+
+  const rows = await tx
+    .select({
+      orderItemId: deliveryTaskItems.orderItemId,
+      productId: deliveryTaskItems.productId,
+      quantity: deliveryTaskItems.quantity,
+      deliveredQty: deliveryTaskItems.deliveredQty,
+      returnedQty: deliveryTaskItems.returnedQty,
+      orderQuantity: salesOrderItems.quantity,
+      orderReturnedQty: salesOrderItems.returnedQty,
+      lineTotal: salesOrderItems.lineTotal,
+    })
+    .from(deliveryTaskItems)
+    .innerJoin(salesOrderItems, eq(salesOrderItems.id, deliveryTaskItems.orderItemId))
+    .where(eq(deliveryTaskItems.taskId, origin.id))
+    .for("update", { of: deliveryTaskItems });
+  const remainder = rows
+    .map((row) => {
+      const left = toMinor(row.quantity, 4) - toMinor(row.deliveredQty ?? "0", 4) - toMinor(row.returnedQty, 4);
+      // Buyurtma qatori boshqa yo'l bilan qaytarilgan bo'lsa — qaytarilmagan qismidan oshmaydi
+      const onOrder = toMinor(row.orderQuantity, 4) - toMinor(row.orderReturnedQty, 4);
+      return { ...row, remaining: left < onOrder ? left : onOrder };
+    })
+    .filter((row) => row.remaining > 0n);
+  if (remainder.length === 0) throw badRequest("Qayta yetkaziladigan qoldiq yo'q", { reason: "nothing_to_redeliver" });
+
+  const remainderValue = remainder.reduce((sum, row) => {
+    const orderQty = toMinor(row.orderQuantity, 4);
+    return orderQty === 0n ? sum : sum + mulDivRound(toMinor(row.lineTotal), row.remaining, orderQty);
+  }, 0n);
+  const outstanding = await orderOutstanding(tx, order!);
+  const paymentType = input.paymentType ?? origin.paymentType;
+  let expected = paymentType === "credit" ? 0n : remainderValue < outstanding ? remainderValue : outstanding;
+  if (input.expectedAmount !== undefined) {
+    expected = toMinor(input.expectedAmount);
+    if (expected > outstanding) throw badRequest(`Yig'iladigan summa buyurtma qoldig'idan ortiq (qoldiq ${fromMinor(outstanding)})`);
+  }
+
+  const today = localDate();
+  const scheduledDate = input.scheduledDate ?? today;
+  if (input.scheduledDate) assertNotPast(input.scheduledDate);
+  const windowStart = input.windowStart !== undefined ? input.windowStart : hhmm(origin.windowStart);
+  const windowEnd = input.windowEnd !== undefined ? input.windowEnd : hhmm(origin.windowEnd);
+  assertWindow(windowStart, windowEnd);
+
+  const number = await nextDocumentNumber(tx, {
+    table: deliveryTasks,
+    column: deliveryTasks.number,
+    companyColumn: deliveryTasks.companyId,
+    companyId,
+    prefix: `DL-${today.slice(0, 4)}-`,
+    width: 4,
+  });
+  const [task] = await tx
+    .insert(deliveryTasks)
+    .values({
+      companyId,
+      number,
+      orderId: origin.orderId,
+      customerId: origin.customerId,
+      warehouseId: origin.warehouseId,
+      originTaskId: origin.id,
+      status: "ready",
+      priority: input.priority ?? origin.priority,
+      scheduledDate,
+      windowStart,
+      windowEnd,
+      paymentType,
+      expectedAmount: fromMinor(expected),
+      paymentStatus: expected > 0n ? "pending" : "not_required",
+      customerNote: origin.customerNote,
+      deliveryNote: input.deliveryNote !== undefined ? input.deliveryNote : origin.deliveryNote,
+      supervisorNote: input.supervisorNote ?? null,
+      createdBy: tenant.user.id,
+    })
+    .returning();
+  await tx.insert(deliveryTaskItems).values(
+    remainder.map((row) => ({ taskId: task!.id, orderItemId: row.orderItemId, productId: row.productId, quantity: fromMinor(row.remaining, 4) })),
+  );
+
+  const items = remainder.map((row) => ({ orderItemId: row.orderItemId, quantity: fromMinor(row.remaining, 4) }));
+  const details = { originTaskId: origin.id, originNumber: origin.number, orderNumber: order!.number, items, expectedAmount: fromMinor(expected) };
+  await insertDeliveryEvent(tx, task!, { action: "CREATED", toStatus: "ready", actorUserId: tenant.user.id, details: { source: "redelivery", ...details } });
+  await insertDeliveryEvent(tx, origin, {
+    action: "REDELIVERY_CREATED",
+    actorUserId: tenant.user.id,
+    note: input.reason ?? null,
+    details: { taskId: task!.id, number, items },
+  });
+  await deliveryAudit(tx, tenant, meta, "DELIVERY_REDELIVERY_CREATED", task!.id, { number, reason: input.reason ?? null, ...details });
+
+  if (input.deliveryAgentId) {
+    if (options.allowAssign === false) throw forbidden("Agentga biriktirish uchun ruxsat kerak (delivery.assign)");
+    await assignDeliveryTask(tx, tenant, task!.id, { deliveryAgentId: input.deliveryAgentId, routeOrder: input.routeOrder ?? null }, meta, { allowReassign: false });
+  } else {
+    const policy = await getDeliveryPolicy(tx, companyId);
+    if (policy.autoAssign.enabled && policy.autoAssign.onCreate && scheduledDate >= today) {
+      await applyAutoAssign(tx, tenant, policy, { date: scheduledDate, taskIds: [task!.id] }, meta, "on_create");
+    }
+  }
+  return task!.id;
+}
+
 export type DeliveryTaskPatch = {
   priority?: DeliveryPriority;
   deliveryNote?: string | null;
@@ -458,6 +664,8 @@ export async function setDeliveryRouteOrder(
 // ─── Ro'yxat va tafsilot ─────────────────────────────────────────────────────
 
 const agentUser = alias(users, "delivery_agent_user");
+/** Shu yetkazmaning qoldig'i uchun ochilgan qayta yetkazma (bekor qilinganlari hisobga olinmaydi). */
+const redeliveryTask = alias(deliveryTasks, "delivery_redelivery");
 
 export const taskListFields = {
   id: deliveryTasks.id,
@@ -495,6 +703,9 @@ export const taskListFields = {
   failedAt: deliveryTasks.failedAt,
   returnedAt: deliveryTasks.returnedAt,
   createdAt: deliveryTasks.createdAt,
+  originTaskId: deliveryTasks.originTaskId,
+  redeliveryTaskId: redeliveryTask.id,
+  redeliveryNumber: redeliveryTask.number,
 };
 
 export function taskListQuery(conn: DbOrTx) {
@@ -504,7 +715,9 @@ export function taskListQuery(conn: DbOrTx) {
     .innerJoin(salesOrders, eq(salesOrders.id, deliveryTasks.orderId))
     .innerJoin(customers, eq(customers.id, deliveryTasks.customerId))
     .leftJoin(deliveryAgents, eq(deliveryAgents.id, deliveryTasks.deliveryAgentId))
-    .leftJoin(agentUser, eq(agentUser.id, deliveryAgents.userId));
+    .leftJoin(agentUser, eq(agentUser.id, deliveryAgents.userId))
+    // Bitta yetkazmada bittadan ortiq bekor qilinmagan qayta yetkazma bo'lmaydi (xizmat qatlami tekshiradi)
+    .leftJoin(redeliveryTask, and(eq(redeliveryTask.originTaskId, deliveryTasks.id), ne(redeliveryTask.status, "cancelled")));
 }
 
 type ListRow = Awaited<ReturnType<ReturnType<typeof taskListQuery>["execute"]>>[number];
@@ -532,13 +745,18 @@ export function overdueCondition(now = new Date()): SQL {
  * qisman yetkazilgan, lekin qaytarish hujjati yo'q. Bunday holatda sotuv "yakunlangan" bo'lib turadi
  * va mijozda qarz qoladi — shuning uchun boshqaruvchi ro'yxatda buni ko'rishi va yopishi shart.
  */
-export function isReturnPending(row: { status: DeliveryStatus; returnedAt: Date | string | null }) {
+export function isReturnPending(row: { status: DeliveryStatus; returnedAt: Date | string | null; redeliveryTaskId?: string | null }) {
+  if (row.redeliveryTaskId) return false; // qoldiq qayta yetkazmaga o'tkazilgan — omborga qaytarilmaydi
   return (row.status === "failed" || row.status === "partially_delivered") && row.returnedAt === null;
 }
 
-/** Ro'yxatda: qaytarish kutayotganlar (tovar yetkazuvchida, omborga qabul qilinmagan). */
+/** Ro'yxatda: qaytarish kutayotganlar (tovar yetkazuvchida, omborga qabul qilinmagan va qayta yetkazilmayotgan). */
 export function returnPendingCondition(): SQL {
-  return and(inArray(deliveryTasks.status, ["failed", "partially_delivered"]), isNull(deliveryTasks.returnedAt))!;
+  return and(
+    inArray(deliveryTasks.status, ["failed", "partially_delivered"]),
+    isNull(deliveryTasks.returnedAt),
+    sql`not ${activeRedeliveryExists}`,
+  )!;
 }
 
 export const presentTask = <T extends ListRow>(row: T) => ({
@@ -657,6 +875,17 @@ export async function getDeliveryTask(conn: DbOrTx, companyId: string, taskId: s
         .limit(1)
     : [];
 
+  // Qoldiq zanjiri: bu yetkazma kimning qoldig'i va qoldig'i qaysi yetkazmada qayta yetkazilmoqda
+  const chain = { id: deliveryTasks.id, number: deliveryTasks.number, status: deliveryTasks.status, scheduledDate: deliveryTasks.scheduledDate };
+  const [originTask] = task.originTaskId
+    ? await conn.select(chain).from(deliveryTasks).where(eq(deliveryTasks.id, task.originTaskId)).limit(1)
+    : [];
+  const [redelivery] = await conn
+    .select(chain)
+    .from(deliveryTasks)
+    .where(and(eq(deliveryTasks.originTaskId, task.id), ne(deliveryTasks.status, "cancelled")))
+    .limit(1);
+
   const itemRows = await conn
     .select({
       id: deliveryTaskItems.id,
@@ -745,6 +974,9 @@ export async function getDeliveryTask(conn: DbOrTx, companyId: string, taskId: s
     windowStart: hhmm(task.windowStart),
     windowEnd: hhmm(task.windowEnd),
     overdue: isOverdue(task),
+    returnPending: isReturnPending({ ...task, redeliveryTaskId: redelivery?.id ?? null }),
+    originTask: originTask ?? null,
+    redelivery: redelivery ?? null,
     otpIssued: otpHash !== null,
     otpVerified: task.otpVerifiedAt !== null,
     order: order!,

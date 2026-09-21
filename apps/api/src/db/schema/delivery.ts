@@ -7,6 +7,7 @@
  * bu jadvallar ularning nusxasi emas, faqat yetkazish jarayoni va havolalar.
  */
 import { sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   boolean,
   check,
@@ -131,6 +132,12 @@ export const deliveryTasks = pgTable(
       .notNull()
       .references(() => warehouses.id, { onDelete: "restrict" }),
     deliveryAgentId: uuid("delivery_agent_id").references(() => deliveryAgents.id, { onDelete: "restrict" }),
+    /**
+     * Qisman yetkazilgan (yoki yetkazilmagan) yetkazmaning QOLGAN qismi shu yetkazmada qayta yetkazilmoqda.
+     * Qoldiq bir vaqtda faqat bitta tirik yetkazmada bo'ladi: qayta yetkazma ochilsa, asl yetkazmadan omborga
+     * qaytarib bo'lmaydi (va aksincha) — shuning uchun miqdor ikki marta hisoblanmaydi.
+     */
+    originTaskId: uuid("origin_task_id").references((): AnyPgColumn => deliveryTasks.id, { onDelete: "set null" }),
 
     status: deliveryTaskStatus("status").notNull().default("ready"),
     priority: deliveryPriority("priority").notNull().default("normal"),
@@ -195,6 +202,7 @@ export const deliveryTasks = pgTable(
     index("dt_company_agent_date_idx").on(t.companyId, t.deliveryAgentId, t.scheduledDate),
     index("dt_company_date_idx").on(t.companyId, t.scheduledDate),
     index("dt_company_order_idx").on(t.companyId, t.orderId),
+    index("dt_origin_task_idx").on(t.originTaskId).where(sql`${t.originTaskId} is not null`),
     index("dt_company_customer_idx").on(t.companyId, t.customerId),
     index("dt_company_review_idx").on(t.companyId, t.paymentReview).where(sql`${t.paymentReview} = 'pending'`),
     check("dt_window_pair", sql`(${t.windowStart} is null) = (${t.windowEnd} is null) and (${t.windowStart} is null or ${t.windowStart} < ${t.windowEnd})`),

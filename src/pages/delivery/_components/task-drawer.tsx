@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Ban, CalendarClock, KeyRound, MapPin, Pencil, Phone, RotateCcw, Scale, UserMinus, UserPlus,
+  Ban, CalendarClock, KeyRound, MapPin, Pencil, Phone, RotateCcw, Scale, Truck, UserMinus, UserPlus,
   type LucideIcon,
 } from "lucide-react";
 import { canDeliveryTransition, isOpenDeliveryStatus } from "@bum/shared";
@@ -71,10 +71,20 @@ function DrawerBody({ taskId, money }: { taskId: string; money: Money }) {
     { kind: "otp", label: t("drawer.otp"), icon: KeyRound, visible: can("delivery.manage") && ON_ROUTE.includes(task.status) },
     { kind: "review", label: t("drawer.review"), icon: Scale, visible: can("delivery.manage") && task.paymentReview === "pending" },
     {
+      // Qoldiq qayta yetkazishga berilgan bo'lsa — omborga qabul qilish serverda ham rad etiladi
+      kind: "redeliver",
+      label: t("drawer.redeliver"),
+      icon: Truck,
+      visible: can("delivery.manage") && task.status === "partially_delivered" && task.returnedAt === null && task.redelivery === null,
+    },
+    {
       kind: "return",
       label: t("drawer.return"),
       icon: RotateCcw,
-      visible: can("delivery.return") && (task.status === "failed" || (task.status === "partially_delivered" && task.returnedAt === null)),
+      visible:
+        can("delivery.return") &&
+        task.redelivery === null &&
+        (task.status === "failed" || (task.status === "partially_delivered" && task.returnedAt === null)),
     },
     { kind: "cancel", label: t("drawer.cancel"), icon: Ban, visible: can("delivery.manage") && canDeliveryTransition(task.status, "cancelled"), destructive: true },
   ];
@@ -135,6 +145,16 @@ function DrawerBody({ taskId, money }: { taskId: string; money: Money }) {
         {task.failureReason && <Field label={t("task.failure")}>{t(`failure.${task.failureReason}`)}</Field>}
         {task.failureComment && <p className="text-sm text-muted-foreground">{task.failureComment}</p>}
         {task.cancelReason && <Field label={t("task.cancel_reason")}>{task.cancelReason}</Field>}
+        {task.originTask && (
+          <Field label={t("drawer.origin_task")}>
+            {task.originTask.number} · {t(`status.${task.originTask.status}`)}
+          </Field>
+        )}
+        {task.redelivery && (
+          <Field label={t("drawer.redelivery")}>
+            {task.redelivery.number} · {task.redelivery.scheduledDate} · {t(`status.${task.redelivery.status}`)}
+          </Field>
+        )}
       </Block>
 
       <Block title={t("task.customer")}>

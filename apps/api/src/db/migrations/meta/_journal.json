@@ -519,6 +519,13 @@
       "when": 1789829406441,
       "tag": "0073_order_item_reserved_qty",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1789829466441,
+      "tag": "0074_delivery_redelivery",
+      "breakpoints": true
     }
   ]
 }

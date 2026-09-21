@@ -16,7 +16,7 @@ import { distanceMeters, pointOf, type GeoPoint } from "../../shared/geo.js";
 import type { TenantContext } from "../company/tenant.js";
 import type { DeliveryAgentContext } from "./agent-context.js";
 import { hhmm, localDate, localDayStart } from "./task.repo.js";
-import { isOverdue, overdueCondition, presentTask, taskListQuery } from "./tasks.service.js";
+import { isOverdue, overdueCondition, presentTask, returnPendingCondition, taskListQuery } from "./tasks.service.js";
 import { currentDeliverySession } from "./tracking.service.js";
 
 const OPEN = [...OPEN_DELIVERY_STATUSES] as DeliveryStatus[];
@@ -387,12 +387,7 @@ export async function supervisorDashboard(conn: DbOrTx, tenant: TenantContext, d
   const [returnsPending] = await conn
     .select({ count: sql<number>`count(*)::int` })
     .from(deliveryTasks)
-    .where(
-      and(
-        eq(deliveryTasks.companyId, companyId),
-        or(eq(deliveryTasks.status, "failed"), and(eq(deliveryTasks.status, "partially_delivered"), sql`${deliveryTasks.returnedAt} is null`)),
-      ),
-    );
+    .where(and(eq(deliveryTasks.companyId, companyId), returnPendingCondition()));
   const dayStart = localDayStart(date);
   const payments = await conn
     .select({ deliveryAgentId: deliveryTasks.deliveryAgentId, method: deliveryPayments.method, total: sql<string>`coalesce(sum(${deliveryPayments.amount}), 0)::numeric(18,2)` })

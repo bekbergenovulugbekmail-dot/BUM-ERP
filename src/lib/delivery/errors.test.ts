@@ -32,6 +32,12 @@ describe("dostavka xatolari", () => {
     }
   });
 
+  it("qayta yetkazish sabablari ham tarjima kalitiga tushadi (server xabari ko'rsatilmaydi)", () => {
+    for (const reason of ["nothing_to_redeliver", "redelivery_exists", "redelivery_open", "redelivery_required"]) {
+      expect(deliveryErrorMessage(new ApiError(409, "CONFLICT", "server matni", { reason }), t)).toBe(`error.${reason}`);
+    }
+  });
+
   it("noma'lum sabab — server xabari", () => {
     expect(deliveryErrorMessage(new ApiError(409, "CONFLICT", "Server xabari", { reason: "boshqa" }), t)).toBe("Server xabari");
     expect(deliveryErrorMessage(new ApiError(500, "INTERNAL", "Xatolik"), t)).toBe("Xatolik");

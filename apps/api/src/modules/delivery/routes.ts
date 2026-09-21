@@ -23,6 +23,7 @@
  *   POST /tasks/:taskId/reschedule, /cancel        delivery.manage
  *   PUT  /route-order                              delivery.manage_routes
  *   POST /tasks/:taskId/return                     delivery.return — qaytgan mahsulot omborga (zaxira, qarz, jurnal)
+ *   POST /tasks/:taskId/redeliver                  delivery.manage (+ delivery.assign — agent bilan) — qoldiq uchun yangi yetkazma
  *   POST /tasks/:taskId/payment-review             delivery.manage — to'lov farqini ko'rib chiqish
  *   POST /tasks/:taskId/otp                        delivery.manage — OTP berish (kod javobda bir marta)
  *   POST /auto-assign/preview                      delivery.assign — avtomatik biriktirish rejasi (hech narsa yozilmaydi)
@@ -126,6 +127,7 @@ import {
   getDeliveryTask,
   listDeliveryTasks,
   readyOrdersForDelivery,
+  redeliverRemainder,
   rescheduleDeliveryTask,
   setDeliveryRouteOrder,
   unassignDeliveryTask,
@@ -217,6 +219,20 @@ const taskCreateBody = z.strictObject({
   supervisorNote: optionalText(1000),
   deliveryAgentId: z.uuid().nullable().optional(),
   routeOrder: z.number().int().min(1).max(10_000).nullable().optional(),
+});
+/** Qoldiqni qayta yetkazish: buyurtma emas, ASL yetkazma ko'rsatiladi (qatorlar undan olinadi). */
+const redeliverBody = z.strictObject({
+  scheduledDate: isoDate.optional(),
+  windowStart: timeOfDay.nullable().optional(),
+  windowEnd: timeOfDay.nullable().optional(),
+  priority: z.enum(DELIVERY_PRIORITIES).optional(),
+  paymentType: z.enum(DELIVERY_PAYMENT_TYPES).optional(),
+  expectedAmount: moneySchema.optional(),
+  deliveryNote: optionalText(1000),
+  supervisorNote: optionalText(1000),
+  deliveryAgentId: z.uuid().nullable().optional(),
+  routeOrder: z.number().int().min(1).max(10_000).nullable().optional(),
+  reason: optionalText(500),
 });
 const taskPatchBody = z.strictObject({
   priority: z.enum(DELIVERY_PRIORITIES).optional(),
@@ -613,6 +629,17 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
       return returnDeliveryGoods(tx, tenant, taskId, body, requestMeta(req));
     });
     return managerTask(req, taskId);
+  });
+
+  app.post("/tasks/:taskId/redeliver", async (req, reply) => {
+    const { taskId } = taskParams.parse(req.params);
+    const body = redeliverBody.parse(req.body);
+    const newTaskId = await writeTenantWith(req, "delivery.manage", async (tx, tenant) => {
+      const permissions = await effectivePermissions(tx, tenant);
+      return redeliverRemainder(tx, tenant, taskId, body, requestMeta(req), { allowAssign: permissions.includes("delivery.assign") });
+    });
+    reply.status(201);
+    return managerTask(req, newTaskId);
   });
 
   // ─── Dostavchi qaytarib olgan tovar (supervayzer) ──────────────────────────
