@@ -3245,6 +3245,28 @@ o'zgarmagan. Bundle `index-DVL7Tv3M.js` → **`index-Bc_aSJM_.js`**.
 **Keyingi qadam (egasi so'rovi bo'yicha):** kerak bo'lsa shu panelni mijoz tanlanadigan boshqa joylarga
 ham qo'shish — sotuv buyurtmasi va kassadagi mijoz tanlovi, dostavka va CRM ro'yxatlari.
 
+## Mijoz tanlash: qidiruvli ro'yxat va saralash qolgan joylarda (2026-09-21)
+
+Mijoz ro'yxati chiqadigan hamma joy ko'rib chiqildi va kerakli joyiga saralash yoki qidiruv qo'shildi.
+
+- **Distributsiya → Mijozlar:** hudud/mahalla/tartib paneli (Sotuv → Mijozlar dagi bilan aynan bir xil
+  komponent) va topilgan mijozlar soni.
+- **Sotuv → "Yangi sotuv buyurtmasi"** va **CRM → Faoliyat:** mijoz oddiy `Select` da edi — 200–500 ta
+  mijoz qidiruvsiz ochilardi va butun ro'yxat sahifa bilan birga yuklanardi. Endi yangi
+  `src/components/customers/customer-combobox.tsx`: qidiruv SERVERDA (`GET /api/sales/customers?search=`
+  — nomi, kodi, telefoni; 30 tadan), ro'yxat faqat oyna ochilganda so'raladi, qatorda kodi, telefoni va
+  shahri ko'rinadi. "Anonim" (buyurtma) va "—" (CRM) variantlari saqlandi. Buyurtma oynasi endi
+  tanlangan mijozning o'zini holatda saqlaydi — chegirma avvalgidek qo'llanadi.
+- **Kassa (POS)** mijoz tanlagichiga tegilmadi: u allaqachon qidiruvli va kassa ekrani uchun ixcham.
+- **Mahsulotlar ro'yxati** — saralash QO'SHILMADI: u keyset kursor bilan sahifalanadi (`name`, `id`), ya'ni
+  tartibni o'zgartirish kursorni ham qayta qurishni talab qiladi. Kerak bo'lsa alohida ish sifatida.
+
+**Testlar:** frontend to'plami **25 fayl / 105 test PASS**, `tsc` va butun `src` bo'yicha
+`eslint --max-warnings=0` toza. API kodi bu qadamda o'zgarmagan.
+
+**Production (2026-09-21):** commit `b7a128f`; faqat `bum-web` (deployment `28714490`).
+Bundle `index-Bc_aSJM_.js` → **`index-CH8cjoMx.js`**, qidiruvli tanlagich matni bundle ichida topildi.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
