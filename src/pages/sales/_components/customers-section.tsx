@@ -158,6 +158,7 @@ export default function CustomersSection() {
             importUrl="/api/sales/customers/import"
             invalidate={["/api/sales/customers"]}
             canImport={canManage}
+            canUpdateExisting
             columns={[
               { key: "name", aliases: ["Nomi", "name"], required: true, example: "Anvar aka do'koni" },
               { key: "partyType", aliases: ["Turi", "partyType"], example: "Jismoniy shaxs", shared: true },

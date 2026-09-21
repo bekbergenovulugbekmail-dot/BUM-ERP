@@ -14,11 +14,14 @@ export type ImportError = { row: number; key: string | null; message: string };
 
 /**
  * Import natijasi — preview (`dryRun: true`) va haqiqiy import uchun bitta shakl.
- * Preview'da bazaga hech narsa yozilmaydi: `created` doim 0, `valid` — yozilishga tayyor qatorlar soni.
+ * Preview'da bazaga hech narsa yozilmaydi: `created` doim 0, `valid` — yozilishga tayyor qatorlar soni
+ * (`updated` esa preview'da ham yangilanishi KUTILAYOTGAN qatorlarni ko'rsatadi).
  * Dublikat (CREATE ONLY rejimi) alohida ro'yxatda: u xato emas, lekin yangi yozuv ochilmaydi.
  */
 export type ImportOutcome = {
   created: number;
+  /** Yangilash rejimi bor bo'limlarda (mijozlar): mavjud yozuv ustiga yozilgan qatorlar soni. */
+  updated?: number;
   valid: number;
   errors: ImportError[];
   duplicates: ImportError[];

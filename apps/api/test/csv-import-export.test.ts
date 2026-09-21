@@ -66,6 +66,69 @@ describe("CSV eksport va import", () => {
     expect(csv.body).toContain("Do'kon A");
   });
 
+  it("mijozlar: `updateExisting` mavjud yozuvni yangilaydi (bo'sh katak eski qiymatni o'chirmaydi)", async () => {
+    // Noto'g'ri kodlashda import qilingan yozuv — aynan foydalanuvchining holati
+    const first = await call(owner(), "POST", "/api/sales/customers/import", {
+      rows: [{ name: "????? ??????", phone: "+99899 508 68 66", address: "eski manzil", creditLimit: "500000" }],
+    });
+    expect(first.statusCode, first.body).toBe(200);
+    expect(first.json()).toMatchObject({ created: 1 });
+
+    // Standart rejim (CREATE ONLY): bir xil telefon — dublikat, yozuv tegilmaydi
+    const skipped = await call(owner(), "POST", "/api/sales/customers/import", {
+      rows: [{ name: "Имона Маркет", phone: "+99899 508 68 66" }],
+    });
+    expect(skipped.json()).toMatchObject({ created: 0, updated: 0 });
+    expect(skipped.json().duplicates).toHaveLength(1);
+
+    // Tekshiruv (dryRun): yangilanadigan qator ko'rinadi, bazaga yozilmaydi
+    const preview = await call(owner(), "POST", "/api/sales/customers/import", {
+      rows: [{ name: "Имона Маркет", phone: "+99899 508 68 66", address: "Гўлд бургер ёни" }],
+      updateExisting: true,
+      dryRun: true,
+    });
+    expect(preview.json()).toMatchObject({ created: 0, updated: 1, valid: 1 });
+    const [beforeWrite] = await db.select().from(customers).where(eq(customers.companyId, company.companyId));
+    expect(beforeWrite?.name).toBe("????? ??????");
+
+    const updatedRes = await call(owner(), "POST", "/api/sales/customers/import", {
+      rows: [{ name: "Имона Маркет", phone: "+99899 508 68 66", address: "Гўлд бургер ёни", contactName: "Шарипова Санобар" }],
+      updateExisting: true,
+    });
+    expect(updatedRes.statusCode, updatedRes.body).toBe(200);
+    expect(updatedRes.json()).toMatchObject({ created: 0, updated: 1 });
+    expect(updatedRes.json().duplicates).toHaveLength(0);
+
+    const rows = await db.select().from(customers).where(eq(customers.companyId, company.companyId));
+    expect(rows).toHaveLength(1);
+    // Nom va manzil yangilandi; faylda bo'sh bo'lgan kredit limiti eski qiymatida qoldi
+    expect(rows[0]).toMatchObject({
+      name: "Имона Маркет",
+      address: "Гўлд бургер ёни",
+      contactName: "Шарипова Санобар",
+      creditLimit: "500000.00",
+    });
+  });
+
+  it("mijozlar: telefonsiz qator nom bo'yicha yangilanadi, fayl ichidagi takror esa dublikat", async () => {
+    await call(owner(), "POST", "/api/sales/customers/import", { rows: [{ name: "Муслима Маркет", address: "eski" }] });
+
+    const res = await call(owner(), "POST", "/api/sales/customers/import", {
+      rows: [
+        { name: "Муслима Маркет", address: "3-Лицейни ёни" },
+        { name: "Муслима Маркет", address: "yana bir marta" },
+      ],
+      updateExisting: true,
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ created: 0, updated: 1 });
+    expect(res.json().duplicates).toMatchObject([{ row: 2, message: "Bu qator fayl ichida takrorlangan" }]);
+
+    const rows = await db.select().from(customers).where(eq(customers.companyId, company.companyId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ name: "Муслима Маркет", address: "3-Лицейни ёни" });
+  });
+
   it("ta'minotchilar: mavjud kod bilan qator rad etiladi, qolganlari yoziladi", async () => {
     expect((await call(owner(), "POST", "/api/purchase/suppliers", { name: "Eski", code: "S-100" })).statusCode).toBe(201);
 

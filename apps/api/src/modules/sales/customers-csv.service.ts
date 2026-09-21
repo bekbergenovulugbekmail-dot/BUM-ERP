@@ -4,9 +4,14 @@
  * Eksportda qarz, balans va keshbek ham chiqadi — lekin import ularni O'ZGARTIRMAYDI: pul qiymatlari faqat hujjat
  * (to'lov, sotuv) yoki "Balansni to'g'rilash" (`/customers/:customerId/balance-adjust`) orqali o'zgaradi. Import
  * faqat yangi mijoz ochadi: har qator alohida tekshiriladi, xato qator `errors` ga tushadi va qolganlari yoziladi.
+ *
+ * `updateExisting: true` bo'lsa mavjud mijoz (telefon bo'yicha, telefonsiz qatorda — nom bo'yicha) o'tkazib
+ * yuborilmaydi, balki faylda TO'LDIRILGAN ustunlar bo'yicha yangilanadi (bo'sh katak eski qiymatni o'chirmaydi).
+ * Bu — noto'g'ri kodlashda import qilingan (matni `U+FFFD` belgilariga aylangan) yozuvlarni bir marta
+ * qayta import bilan tuzatish yo'li.
  */
 import { and, asc, eq } from "drizzle-orm";
-import { distributionRoutes, salesReps, territories } from "../../db/schema/crm.js";
+import { distributionRoutes, routeCustomers, salesReps, territories } from "../../db/schema/crm.js";
 import { customers } from "../../db/schema/sales.js";
 import { addRouteCustomer } from "../distribution/distribution.service.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -21,7 +26,7 @@ import {
   type ImportOutcome,
 } from "../../shared/csv.js";
 import type { TenantContext } from "../company/tenant.js";
-import { createCustomer } from "./customers.service.js";
+import { createCustomer, updateCustomer, type CustomerInput } from "./customers.service.js";
 
 const CSV_HEADER = [
   "Nomi",
@@ -167,32 +172,78 @@ async function loadRouteIndex(tx: Tx, companyId: string) {
   };
 }
 
+/**
+ * Yangilash rejimi uchun patch: faqat faylda TO'LDIRILGAN ustunlar.
+ * Bo'sh katak — "tegilmasin" degani (aks holda qisman to'ldirilgan fayl mavjud ma'lumotni o'chirib yuborardi).
+ */
+function providedFields(row: CustomerImportRow): Partial<CustomerInput> {
+  const filled = (value: string | undefined) => (value ?? "").trim() !== "";
+  const patch: Partial<CustomerInput> = {};
+  if (filled(row.partyType)) patch.partyType = partyTypeOf(row.partyType);
+  if (filled(row.phone)) patch.phone = optionalText(row.phone, 20);
+  if (filled(row.email)) patch.email = optionalText(row.email, 255);
+  if (filled(row.address)) patch.address = optionalText(row.address, 1000);
+  if (filled(row.contactName)) patch.contactName = optionalText(row.contactName, 200);
+  if (filled(row.taxId)) patch.taxId = optionalText(row.taxId, 32);
+  if (filled(row.bankAccount)) patch.bankAccount = optionalText(row.bankAccount, 64);
+  if (filled(row.bankMfo)) patch.bankMfo = optionalText(row.bankMfo, 16);
+  if (filled(row.city)) patch.city = optionalText(row.city, 100);
+  if (filled(row.district)) patch.district = optionalText(row.district, 100);
+  if (filled(row.discountPercent)) patch.discountPercent = cleanNumber(row.discountPercent);
+  if (filled(row.creditLimit)) patch.creditLimit = cleanNumber(row.creditLimit);
+  if (filled(row.paymentTermDays)) patch.paymentTermDays = Number(cleanNumber(row.paymentTermDays));
+  if (filled(row.notes)) patch.notes = optionalText(row.notes, 2000);
+  return patch;
+}
+
+/** Mijozni marshrutga biriktiradi; allaqachon a'zo bo'lsa — tegmaydi (`rc_route_customer_key` unikal). */
+async function attachRoute(tx: Tx, tenant: TenantContext, routeId: string, customerId: string, meta: RequestMeta) {
+  const [member] = await tx
+    .select({ id: routeCustomers.id })
+    .from(routeCustomers)
+    .where(and(eq(routeCustomers.routeId, routeId), eq(routeCustomers.customerId, customerId)))
+    .limit(1);
+  if (member) return;
+  await addRouteCustomer(tx, tenant, routeId, { customerId }, meta);
+}
+
 export async function importCustomers(
   tx: Tx,
   tenant: TenantContext,
   rows: CustomerImportRow[],
   meta: RequestMeta,
-  options: { dryRun?: boolean; requirePhone?: boolean } = {},
+  options: { dryRun?: boolean; requirePhone?: boolean; updateExisting?: boolean } = {},
 ): Promise<ImportOutcome> {
   const dryRun = options.dryRun === true;
   // "Tezda qo'shish" (bitta mijoz) telefonni talab qiladi; fayl importida telefon ixtiyoriy bo'lib qoladi
   const requirePhone = options.requirePhone === true;
+  // Mavjud mijozni o'tkazib yubormasdan yangilash (aks holda CREATE ONLY)
+  const updateExisting = options.updateExisting === true;
   // Dublikat kaliti — telefon raqami (kompaniya ichida): bazadagilar va fayl ichidagilar
   const existing = await tx
-    .select({ phone: customers.phone, name: customers.name })
+    .select({ id: customers.id, phone: customers.phone, name: customers.name })
     .from(customers)
     .where(eq(customers.companyId, tenant.company.id));
-  const takenPhones = new Set(
-    existing.map((row) => normalizePhone(row.phone)).filter((phone): phone is string => Boolean(phone)),
-  );
-  // Telefonsiz qatorlar uchun zaxira kalit — nom (telefon bo'lsa, dublikat FAQAT telefon bo'yicha aniqlanadi:
-  // bir xil nomli, lekin boshqa telefonli ikkita do'kon butunlay qonuniy)
-  const takenNames = new Set(existing.map((row) => foldName(row.name)));
+  // Bazadagi mijozlar: telefon → id va nom → id (yangilash rejimida qaysi yozuvga tegish kerakligi shundan)
+  const idByPhone = new Map<string, string>();
+  const idByName = new Map<string, string>();
+  for (const row of existing) {
+    const phone = normalizePhone(row.phone);
+    // Telefonsiz qatorlar uchun zaxira kalit — nom (telefon bo'lsa, dublikat FAQAT telefon bo'yicha aniqlanadi:
+    // bir xil nomli, lekin boshqa telefonli ikkita do'kon butunlay qonuniy)
+    if (phone && !idByPhone.has(phone)) idByPhone.set(phone, row.id);
+    const name = foldName(row.name);
+    if (!idByName.has(name)) idByName.set(name, row.id);
+  }
+  // Fayl ICHIDAGI takrorlar: yangilash rejimida ham bitta mijoz ikki marta yozilmaydi
+  const seenPhones = new Set<string>();
+  const seenNames = new Set<string>();
   const matchRoutes = await loadRouteIndex(tx, tenant.company.id);
   const errors: ImportError[] = [];
   const duplicates: ImportError[] = [];
   const warnings: ImportError[] = [];
   let created = 0;
+  let updated = 0;
   let valid = 0;
 
   for (const [index, row] of rows.entries()) {
@@ -225,19 +276,29 @@ export async function importCustomers(
       continue;
     }
 
-    // CREATE ONLY: bir xil telefonli mijoz bo'lsa yangi yozuv ochilmaydi (mavjud mijoz O'ZGARTIRILMAYDI)
+    // Mavjud mijoz telefon bo'yicha topiladi; telefon berilmagan qatorda — nom bo'yicha (aks holda har
+    // importda bir xil do'kon qayta-qayta ochilaveradi)
     const phone = normalizePhone(row.phone);
+    const nameKey = foldName(name);
     if (requirePhone && !phone) {
       fail(row.phone?.trim() ? "Telefon raqami noto'g'ri" : "Telefon majburiy");
       continue;
     }
-    if (phone && takenPhones.has(phone)) {
-      duplicates.push({ row: line, key: name, message: `Bu mijoz allaqachon mavjud (telefon: ${row.phone?.trim() ?? ""})` });
+    // Fayl ichida bir xil mijoz ikki marta — yangilash rejimida ham ikkinchisi o'tkazib yuboriladi
+    if (phone ? seenPhones.has(phone) : seenNames.has(nameKey)) {
+      duplicates.push({ row: line, key: name, message: "Bu qator fayl ichida takrorlangan" });
       continue;
     }
-    // Telefon berilmagan bo'lsa — nom bo'yicha: aks holda har importda bir xil do'kon qayta-qayta ochilaveradi
-    if (!phone && takenNames.has(foldName(name))) {
-      duplicates.push({ row: line, key: name, message: "Bu mijoz allaqachon mavjud (shu nomli mijoz bor, telefon ko'rsatilmagan)" });
+    const existingId = phone ? idByPhone.get(phone) : idByName.get(nameKey);
+    // CREATE ONLY (standart): mavjud mijoz O'ZGARTIRILMAYDI
+    if (existingId && !updateExisting) {
+      duplicates.push({
+        row: line,
+        key: name,
+        message: phone
+          ? `Bu mijoz allaqachon mavjud (telefon: ${row.phone?.trim() ?? ""})`
+          : "Bu mijoz allaqachon mavjud (shu nomli mijoz bor, telefon ko'rsatilmagan)",
+      });
       continue;
     }
 
@@ -249,14 +310,24 @@ export async function importCustomers(
       const asked = [territory && `hudud "${territory}"`, salesRep && `agent "${salesRep}"`].filter(Boolean).join(", ");
       const hits = matchRoutes(territory, salesRep);
       if (hits.length === 1) routeId = hits[0]!.routeId;
-      else if (hits.length === 0) warnings.push({ row: line, key: name, message: `Marshrut topilmadi (${asked}) — mijoz marshrutsiz yaratildi` });
-      else warnings.push({ row: line, key: name, message: `Bir nechta marshrut mos keldi (${asked}): ${hits.map((h) => h.routeName).join(", ")} — mijoz marshrutsiz yaratildi` });
+      else if (hits.length === 0) warnings.push({ row: line, key: name, message: `Marshrut topilmadi (${asked}) — mijoz marshrutga biriktirilmadi` });
+      else warnings.push({ row: line, key: name, message: `Bir nechta marshrut mos keldi (${asked}): ${hits.map((h) => h.routeName).join(", ")} — mijoz marshrutga biriktirilmadi` });
     }
 
-    if (phone) takenPhones.add(phone);
-    takenNames.add(foldName(name));
+    if (phone) seenPhones.add(phone);
+    seenNames.add(nameKey);
 
     valid += 1;
+
+    // Yangilash rejimi: faqat faylda TO'LDIRILGAN ustunlar yoziladi (bo'sh katak eski qiymatni o'chirmaydi)
+    if (existingId) {
+      updated += 1;
+      if (dryRun) continue;
+      await updateCustomer(tx, tenant, existingId, { name, ...providedFields(row) }, meta);
+      if (routeId) await attachRoute(tx, tenant, routeId, existingId, meta);
+      continue;
+    }
+
     if (dryRun) continue;
     const customer = await createCustomer(
       tx,
@@ -284,5 +355,5 @@ export async function importCustomers(
     created += 1;
   }
 
-  return { created, valid, errors, duplicates, warnings, dryRun };
+  return { created, updated, valid, errors, duplicates, warnings, dryRun };
 }

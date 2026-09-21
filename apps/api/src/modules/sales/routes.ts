@@ -26,7 +26,8 @@
  *   GET    /customers/:customerId/cashback (?limit=)      sales.view (keshbek tarixi)
  *   POST   /customers/:customerId/balance-adjust          finance.approve (balans, qarz, keshbekni to'g'rilash)
  *   GET    /customers/export (?includeInactive=)          sales.view (CSV)
- *   POST   /customers/import                              crm.manage (CSV qatorlari; pul qiymatlari o'zgarmaydi)
+ *   POST   /customers/import                              crm.manage (CSV qatorlari; pul qiymatlari o'zgarmaydi,
+ *                                                         `updateExisting` bilan mavjud mijoz yangilanadi)
  *   GET    /cashback/settings                             sales.view
  *   PUT    /cashback/settings                             settings.manage
  */
@@ -295,6 +296,8 @@ const customerImportBody = z.strictObject({
   dryRun: z.boolean().optional(),
   /** "Tezda qo'shish" (bitta mijoz): telefon majburiy. Fayl importida ixtiyoriy bo'lib qoladi. */
   requirePhone: z.boolean().optional(),
+  /** Mavjud mijoz (telefon, telefonsiz qatorda — nom bo'yicha) o'tkazib yuborilmasdan yangilanadi. */
+  updateExisting: z.boolean().optional(),
   rows: z
     .array(
       z.strictObject({
@@ -397,9 +400,9 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/customers/import", async (req) => {
-    const { rows, dryRun, requirePhone } = customerImportBody.parse(req.body);
+    const { rows, dryRun, requirePhone, updateExisting } = customerImportBody.parse(req.body);
     return writeInTenant(req, "crm.manage", (tx, tenant) =>
-      importCustomers(tx, tenant, rows, requestMeta(req), { dryRun, requirePhone }),
+      importCustomers(tx, tenant, rows, requestMeta(req), { dryRun, requirePhone, updateExisting }),
     );
   });
 

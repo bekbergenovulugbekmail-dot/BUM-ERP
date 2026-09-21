@@ -178,6 +178,7 @@ export default function CustomersSection() {
         importUrl="/api/sales/customers/import"
         invalidate={["/api/sales/customers", "/api/distribution/routes"]}
         canImport={canManage}
+        canUpdateExisting
         columns={CUSTOMER_COLUMNS}
       />
 

@@ -9,7 +9,8 @@
  * u import paytida o'tkazib yuboriladi, ya'ni o'chirish shart emas.
  *
  * Import uch bosqichli:
- *   1) fayl brauzerda `papaparse` bilan o'qiladi; sarlavhalar `columns` dagi nomlar bo'yicha avtomat moslanadi
+ *   1) fayl brauzerda o'qiladi — kodlash avtomat aniqlanadi (`encoding.ts`: UTF-8, UTF-16, Windows-1251),
+ *      so'ng `papaparse` bilan ajratiladi; sarlavhalar `columns` dagi nomlar bo'yicha avtomat moslanadi
  *      (o'zbekcha va inglizcha), so'ng foydalanuvchi har bir maydon uchun fayl ustunini O'ZI o'zgartira oladi;
  *   2) moslangan qatorlar serverga **`dryRun: true`** bilan yuboriladi — server hech narsa yozmasdan har qatorni
  *      tekshiradi va xato, dublikat va ogohlantirishlarni qaytaradi (preview);
@@ -30,8 +31,10 @@ import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
 import { Input } from "@/components/ui/input.tsx";
+import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { buildIssuesXlsx, buildTemplateXlsx, downloadBlob, isExcelFile, parseXlsx, type SheetIssue } from "./xlsx.ts";
+import { readTextFile } from "./encoding.ts";
 import { useApiMutation } from "@/lib/query.ts";
 
 /** Bir so'rovda yuboriladigan qator soni (server chegarasi — 500). */
@@ -64,6 +67,8 @@ type ImportIssue = { row: number; key?: string | null; sku?: string | null; mess
 
 type ImportOutcome = {
   created: number;
+  /** "Mavjudlarini yangilash" rejimi qo'llab-quvvatlanadigan bo'limlarda (mijozlar). */
+  updated?: number;
   valid?: number;
   errors: ImportIssue[];
   duplicates?: ImportIssue[];
@@ -85,6 +90,7 @@ type Preview = {
   rows: Record<string, string>[];
   total: number;
   valid: number;
+  updated: number;
   errors: ImportIssue[];
   duplicates: ImportIssue[];
   warnings: ImportIssue[];
@@ -150,6 +156,7 @@ export default function CsvToolbar({
   quickGroupField,
   templateFormat = "csv",
   hideToolbar = false,
+  canUpdateExisting = false,
   ref,
 }: {
   exportUrl: string;
@@ -171,6 +178,12 @@ export default function CsvToolbar({
   templateFormat?: "csv" | "xlsx";
   /** Tugmalar chizilmasin — faqat oynalar; ochish `ref` orqali (tashqi "Yangi mijoz" oynasi uchun). */
   hideToolbar?: boolean;
+  /**
+   * Import oynasida "Mavjudlarini yangilash" belgisi ko'rsatilsin (endpoint `updateExisting` ni qo'llasa).
+   * Belgilansa — fayldagi qator mavjud yozuvga to'g'ri kelganda u o'tkazib yuborilmaydi, balki faylda
+   * to'ldirilgan ustunlar bo'yicha yangilanadi.
+   */
+  canUpdateExisting?: boolean;
   ref?: React.Ref<CsvToolbarHandle>;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -189,9 +202,11 @@ export default function CsvToolbar({
   const [perRowKeys, setPerRowKeys] = useState<string[]>([]);
   /** Oyna butun ekranga yoyilganmi. */
   const [quickFull, setQuickFull] = useState(false);
+  /** "Mavjudlarini yangilash" — faqat `canUpdateExisting` bo'limlarda so'rovga qo'shiladi. */
+  const [updateExisting, setUpdateExisting] = useState(false);
   const importRows = useApiMutation(
     ({ rows, dryRun }: { rows: Record<string, string>[]; dryRun: boolean }) =>
-      api.post<ImportOutcome>(importUrl, { rows, dryRun }),
+      api.post<ImportOutcome>(importUrl, { rows, dryRun, ...(canUpdateExisting ? { updateExisting } : {}) }),
     { invalidate },
   );
 
@@ -264,17 +279,19 @@ export default function CsvToolbar({
     const duplicates: ImportIssue[] = [];
     const warnings: ImportIssue[] = [];
     let created = 0;
+    let updated = 0;
     let valid = 0;
 
     for (let offset = 0; offset < rows.length; offset += IMPORT_BATCH) {
       const result = await importRows.mutateAsync({ rows: rows.slice(offset, offset + IMPORT_BATCH), dryRun });
       created += result.created;
+      updated += result.updated ?? 0;
       valid += result.valid ?? result.created;
       for (const issue of result.errors) errors.push({ ...issue, row: fileLine(offset, issue) });
       for (const issue of result.duplicates ?? []) duplicates.push({ ...issue, row: fileLine(offset, issue) });
       for (const issue of result.warnings ?? []) warnings.push({ ...issue, row: fileLine(offset, issue) });
     }
-    return { created, valid, errors, duplicates, warnings };
+    return { created, updated, valid, errors, duplicates, warnings };
   };
 
   /** Fayl ustuni nomini maydon nomlari bilan solishtiradi (bo'shliq, registr va `*` ga befarq). */
@@ -314,14 +331,19 @@ export default function CsvToolbar({
       return;
     }
 
-    Papa.parse<Record<string, string>>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (parsed) => acceptParsed(parsed.meta.fields ?? [], parsed.data),
-      error: () => {
-        toast.error("CSV faylni o'qib bo'lmadi");
-      },
-    });
+    // CSV faylni O'ZIMIZ o'qiymiz: `papaparse` ga fayl berilsa u doim UTF-8 deb o'qiydi va Excel'ning
+    // "ANSI" (Windows-1251) eksportidagi kirill matn `U+FFFD` ga aylanib, tiklab bo'lmas holga keladi.
+    setBusy("preview");
+    void readTextFile(file)
+      .then(({ text, encoding }) => {
+        const parsed = Papa.parse<Record<string, string>>(text, { header: true, skipEmptyLines: true });
+        if (encoding !== "utf-8") {
+          toast.info(`Fayl ${encoding.toUpperCase()} kodlashida o'qildi — matn to'g'ri ko'rinishiga ishonch hosil qiling`);
+        }
+        acceptParsed(parsed.meta.fields ?? [], parsed.data);
+      })
+      .catch(() => toast.error("CSV faylni o'qib bo'lmadi"))
+      .finally(() => setBusy(null));
   };
 
   /** Moslangan ustunlar bo'yicha qatorlarni yig'ib, serverda tekshiradi (bazaga yozilmaydi). */
@@ -359,7 +381,11 @@ export default function CsvToolbar({
       const outcome = await send(preview.rows, false);
       setPreview(null);
       setLastMapping(null);
-      if (outcome.created > 0) toast.success(`${outcome.created} ta qator import qilindi`);
+      const done = [
+        outcome.created > 0 && `${outcome.created} ta qator qo'shildi`,
+        outcome.updated > 0 && `${outcome.updated} ta mavjud yozuv yangilandi`,
+      ].filter(Boolean);
+      if (done.length > 0) toast.success(done.join(", "));
       else toast.error("Hech qanday qator import qilinmadi");
       // Yakuniy hisobot: jami / yaratildi / dublikat / xato va xatolarni Excelga olish
       setResult({ total, ...outcome });
@@ -713,6 +739,25 @@ export default function CsvToolbar({
               })}
             </div>
 
+            {canUpdateExisting && (
+              <label className="flex items-start gap-2 rounded-lg border border-border p-3 text-xs" htmlFor="csv-update-existing">
+                <Checkbox
+                  id="csv-update-existing"
+                  data-testid="csv-update-existing"
+                  checked={updateExisting}
+                  onCheckedChange={(checked) => setUpdateExisting(checked === true)}
+                />
+                <span className="space-y-0.5">
+                  <span className="block font-medium">Mavjudlarini yangilash</span>
+                  <span className="block text-muted-foreground">
+                    Telefoni (telefonsiz qatorda — nomi) mos keladigan yozuv o'tkazib yuborilmaydi, balki faylda
+                    to'ldirilgan ustunlar bo'yicha yangilanadi. Bo'sh katak eski qiymatni o'chirmaydi; qarz va
+                    balansga tegilmaydi.
+                  </span>
+                </span>
+              </label>
+            )}
+
             <p className="text-xs text-muted-foreground">
               Faylda {mapping.raw.length} ta qator, {mapping.fields.length} ta ustun topildi.
             </p>
@@ -744,10 +789,11 @@ export default function CsvToolbar({
             </DialogHeader>
 
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className={`grid grid-cols-2 gap-2 ${updateExisting ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}>
                 {[
                   { label: "Jami qator", value: preview.total, tone: "" },
                   { label: "To'g'ri", value: preview.valid, tone: "text-emerald-600 dark:text-emerald-400" },
+                  ...(updateExisting ? [{ label: "Yangilanadi", value: preview.updated, tone: "text-sky-600 dark:text-sky-400" }] : []),
                   { label: "Xato", value: preview.errors.length, tone: "text-destructive" },
                   { label: "Dublikat", value: preview.duplicates.length, tone: "text-amber-600 dark:text-amber-400" },
                 ].map((cell) => (
@@ -770,6 +816,11 @@ export default function CsvToolbar({
               {preview.duplicates.length > 0 && (
                 <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <Copy className="size-3.5" /> Dublikat qatorlar mavjud yozuvni o'zgartirmaydi — ular o'tkazib yuboriladi
+                  {canUpdateExisting && !updateExisting && (
+                    <>
+                      . Ularni yangilash uchun «Ustunlarni o'zgartirish» → «Mavjudlarini yangilash» ni belgilang
+                    </>
+                  )}
                 </p>
               )}
             </div>
@@ -812,13 +863,18 @@ export default function CsvToolbar({
           <DialogContent className="sm:max-w-xl" data-testid="csv-result">
             <DialogHeader>
               <DialogTitle>Import yakunlandi</DialogTitle>
-              <DialogDescription>Faqat to'g'ri qatorlar yozildi; mavjud yozuvlar o'zgartirilmadi.</DialogDescription>
+              <DialogDescription>
+                {updateExisting
+                  ? "Faqat to'g'ri qatorlar yozildi; mos kelgan mavjud yozuvlar faylda to'ldirilgan ustunlar bo'yicha yangilandi."
+                  : "Faqat to'g'ri qatorlar yozildi; mavjud yozuvlar o'zgartirilmadi."}
+              </DialogDescription>
             </DialogHeader>
 
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className={`grid grid-cols-2 gap-2 ${updateExisting ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}>
               {[
                 { label: "Jami", value: result.total, tone: "" },
                 { label: "Yaratildi", value: result.created, tone: "text-emerald-600 dark:text-emerald-400" },
+                ...(updateExisting ? [{ label: "Yangilandi", value: result.updated, tone: "text-sky-600 dark:text-sky-400" }] : []),
                 { label: "Dublikat", value: result.duplicates.length, tone: "text-amber-600 dark:text-amber-400" },
                 { label: "Xato", value: result.errors.length, tone: "text-destructive" },
               ].map((card) => (
