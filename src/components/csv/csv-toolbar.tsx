@@ -41,6 +41,8 @@ import { useApiMutation } from "@/lib/query.ts";
 const IMPORT_BATCH = 500;
 /** Oynada ko'rsatiladigan muammolar soni (qolgani "va yana N ta" bo'lib chiqadi). */
 const MAX_ISSUES_SHOWN = 50;
+/** Tekshirish oynasidagi jadvalda birinchi bo'lib shuncha qator ko'rsatiladi ("hammasi" bilan ochiladi). */
+const PREVIEW_ROWS_SHOWN = 10;
 /** Moslashda "bu maydon olinmasin" tanlovi (Radix Select bo'sh qiymatni qabul qilmaydi). */
 const SKIP = "__skip__";
 /** Import qabul qiladigan fayl turlari: CSV (papaparse) va Excel (exceljs, dinamik yuklanadi). */
@@ -88,6 +90,8 @@ type Mapping = {
 
 type Preview = {
   rows: Record<string, string>[];
+  /** Moslangan maydonlar (jadval sarlavhasi shu tartibda chiqadi). */
+  keys: string[];
   total: number;
   valid: number;
   updated: number;
@@ -193,7 +197,7 @@ export default function CsvToolbar({
   const [lastMapping, setLastMapping] = useState<Mapping | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   /** Import tugagandan keyingi hisobot (jami / yaratildi / dublikat / xato). */
-  const [result, setResult] = useState<(Omit<Preview, "rows"> & { created: number }) | null>(null);
+  const [result, setResult] = useState<(Omit<Preview, "rows" | "keys"> & { created: number }) | null>(null);
   /** "Tezda qo'shish": fayl tayyorlamasdan, kataklarga yozib saqlash. */
   const [quickRows, setQuickRows] = useState<Record<string, string>[] | null>(null);
   /** Hujjatga xos maydonlar — bir marta kiritiladi va har qatorga qo'shiladi. */
@@ -204,6 +208,8 @@ export default function CsvToolbar({
   const [quickFull, setQuickFull] = useState(false);
   /** "Mavjudlarini yangilash" — faqat `canUpdateExisting` bo'limlarda so'rovga qo'shiladi. */
   const [updateExisting, setUpdateExisting] = useState(false);
+  /** Tekshirish oynasidagi jadval: avval birinchi qatorlar, so'rovga ko'ra hammasi. */
+  const [showAllRows, setShowAllRows] = useState(false);
   const importRows = useApiMutation(
     ({ rows, dryRun }: { rows: Record<string, string>[]; dryRun: boolean }) =>
       api.post<ImportOutcome>(importUrl, { rows, dryRun, ...(canUpdateExisting ? { updateExisting } : {}) }),
@@ -364,7 +370,10 @@ export default function CsvToolbar({
       const outcome = await send(rows, true);
       setLastMapping(current);
       setMapping(null);
-      setPreview({ rows, total: rows.length, ...outcome });
+      // Jadvalda faqat moslangan ustunlar ko'rsatiladi (o'tkazib yuborilganlari emas)
+      const keys = columns.filter((column) => (current.choice[column.key] ?? SKIP) !== SKIP).map((column) => column.key);
+      setShowAllRows(false);
+      setPreview({ rows, keys, total: rows.length, ...outcome });
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
@@ -400,6 +409,16 @@ export default function CsvToolbar({
   const emptyRow = () => Object.fromEntries(columns.map((column) => [column.key, ""])) as Record<string, string>;
 
   const label = (column: CsvColumn) => column.aliases[0] ?? column.key;
+  /** Tekshirish jadvali sarlavhasi: maydon kaliti → foydalanuvchi ko'radigan nom. */
+  const labelOf = (key: string) => {
+    const column = columns.find((item) => item.key === key);
+    return column ? label(column) : key;
+  };
+  /** Jadvalda xato va dublikat qatorlarni ajratib ko'rsatish uchun: fayl qator raqami → turi. */
+  const issueLines = new Map<number, "error" | "duplicate">();
+  for (const issue of preview?.duplicates ?? []) issueLines.set(issue.row, "duplicate");
+  for (const issue of preview?.errors ?? []) issueLines.set(issue.row, "error");
+  const rowIssue = (line: number) => issueLines.get(line);
   /** Yuqorida bir marta kiritiladigan maydonlar (foydalanuvchi qatorlarga ko'chirmaganlari). */
   const sharedColumns = columns.filter((column) => column.shared && !perRowKeys.includes(column.key));
   /** Jadval ustunlari — mahsulotga (yozuvga) xos maydonlar. */
@@ -780,11 +799,12 @@ export default function CsvToolbar({
 
       {preview && (
         <Dialog open onOpenChange={(open) => !open && setPreview(null)}>
-          <DialogContent className="sm:max-w-2xl">
+          <DialogContent className="sm:max-w-4xl">
             <DialogHeader>
               <DialogTitle>Importni tekshirish</DialogTitle>
               <DialogDescription>
-                Bu bosqichda bazaga hech narsa yozilmagan. "Importni boshlash" bosilsa — faqat to'g'ri qatorlar yoziladi.
+                Bu bosqichda bazaga hech narsa yozilmagan: quyidagi jadvalda har bir qiymat qaysi maydonga
+                tushganini tekshiring. "Importni boshlash" bosilsa — faqat to'g'ri qatorlar yoziladi.
               </DialogDescription>
             </DialogHeader>
 
@@ -803,6 +823,60 @@ export default function CsvToolbar({
                   </div>
                 ))}
               </div>
+
+              {/* Ma'lumot qaysi maydonga tushgani — yozishdan OLDIN ko'rinadi */}
+              {preview.keys.length > 0 && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold">Qatorlar — qaysi maydonga tushgani</p>
+                    {preview.rows.length > PREVIEW_ROWS_SHOWN && (
+                      <button
+                        type="button"
+                        data-testid="csv-preview-toggle-rows"
+                        className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+                        onClick={() => setShowAllRows((current) => !current)}
+                      >
+                        {showAllRows ? "Faqat birinchi qatorlar" : `Hammasini ko'rsatish (${preview.rows.length})`}
+                      </button>
+                    )}
+                  </div>
+                  {/* Ustun ko'p bo'lishi mumkin — jadval o'zi yon tomonga suriladi */}
+                  <div className="max-h-64 overflow-auto rounded-lg border border-border" data-testid="csv-preview-table">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-muted/60 backdrop-blur">
+                        <tr>
+                          <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">#</th>
+                          {preview.keys.map((key) => (
+                            <th key={key} className="px-2 py-1.5 text-left font-medium whitespace-nowrap">
+                              {labelOf(key)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {(showAllRows ? preview.rows : preview.rows.slice(0, PREVIEW_ROWS_SHOWN)).map((row, index) => {
+                          const line = index + 2; // 1-qator — sarlavha
+                          const issue = rowIssue(line);
+                          return (
+                            <tr key={index} className={issue === "error" ? "bg-destructive/10" : issue === "duplicate" ? "bg-amber-500/10" : undefined}>
+                              <td className="px-2 py-1 text-muted-foreground tabular-nums">{line}</td>
+                              {preview.keys.map((key) => (
+                                <td key={key} className="max-w-56 truncate px-2 py-1" title={row[key] ?? ""}>
+                                  {row[key] ?? <span className="text-muted-foreground">—</span>}
+                                </td>
+                              ))}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Ustun noto'g'ri tushgan bo'lsa — «Ustunlarni o'zgartirish» bilan qaytib moslang.
+                    {!showAllRows && preview.rows.length > PREVIEW_ROWS_SHOWN && ` Birinchi ${PREVIEW_ROWS_SHOWN} ta qator ko'rsatildi.`}
+                  </p>
+                </div>
+              )}
 
               <IssueTable title="Xato qatorlar" tone="text-destructive" issues={preview.errors} />
               <IssueTable title="Dublikatlar (yozilmaydi)" tone="text-amber-600 dark:text-amber-400" issues={preview.duplicates} />
