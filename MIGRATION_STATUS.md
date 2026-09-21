@@ -3014,6 +3014,16 @@ sabab kodlari qo'shildi (+1 test).
 Brauzer E2E bu bosqichda ishga tushirilmadi (dostavka supervayzer sahifasi E2E qamrovida emas —
 modulning boshlanishidan beri shunday).
 
+**Production (2026-09-21):** commit `149fde2`, GitHub'ga chiqarildi (`7012f8b..149fde2`);
+`bum-api` (deployment `4db1a563`) va `bum-web` (deployment `17ad9905`) deploy qilindi.
+API toza ko'tarildi — bitta `Migratsiyalar qo'llandi (34ms)` (0074 qo'llandi) va bitta
+`Server listening`, `ERROR`/`FATAL` yo'q. Yangi marshrut tekshirildi: sessiyasiz
+`POST /api/delivery/tasks/<id>/redeliver` → **401** (marshrut bor), mavjud bo'lmagan marshrut →
+**404** — ya'ni 401 umumiy javob emas. Web bundle `index-B9s0rsSh.js` → **`index-C7srWsIe.js`** —
+lokal `vite build` chiqargan nom bilan aynan bir xil. Production ma'lumotiga va o'zgaruvchilariga
+tegilmadi. Tizimga kirgan holda qo'lda sinov (qoldiqni qayta yetkazish oynasi) — NOT VERIFIED,
+egasining hisobi kerak.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
