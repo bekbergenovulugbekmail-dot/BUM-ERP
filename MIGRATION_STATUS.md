@@ -3188,6 +3188,39 @@ PASS** (avval 23/100), `tsc` va `eslint --max-warnings=0` toza.
 **Production (2026-09-21):** commit `f2ac180`; faqat `bum-web` deploy qilindi (deployment `dcf496c3`),
 bundle `index-BGeuOErI.js` → **`index-CbWwwKGg.js`**. API kodi o'zgarmagan.
 
+## Mijozlar: hudud, qarz va tartib bo'yicha saralash (2026-09-21)
+
+Mijozlar ro'yxatida faqat matnli qidiruv bor edi: hudud bo'yicha ajratish ham, "oxirgi qo'shilganlar"ni
+ko'rish ham mumkin emasdi (ro'yxat doim nomi bo'yicha, 200 talik chegara bilan — import qilingan yangi
+mijozlar ro'yxat o'rtasiga tushib ketardi).
+
+**API:** `GET /api/sales/customers` ga `city`, `district` (registrga befarq TENGLIK — qiymat tanlov
+ro'yxatidan keladi), `withDebt` va `sort` (`name` | `newest` | `oldest` | `debt` | `purchases`)
+qo'shildi; har bir tartibda ikkinchi ustun ham beriladi (teng qiymatlarda tartib sakramaydi).
+Yangi `GET /api/sales/customers/regions` (`sales.view`, `?includeInactive=`) — mavjud shahar/mahalla
+juftliklari va har birida nechta mijoz borligi; hududi ko'rsatilmagan mijozlar `city: null` bo'lib chiqadi
+(ularni to'ldirish kerakligi ko'rinib turadi). Saralash SERVERDA bajariladi — 200 talik ro'yxat
+chegarasidan tashqaridagi mijoz ham topiladi. Migratsiya kerak emas: `customers_company_region_idx`
+(company + city + district) allaqachon bor.
+
+**Web (Sotuv → Mijozlar):** qidiruv ostida hudud va mahalla tanlovlari (mijozlar soni bilan), tartib
+tanlovi, "Qarzi borlar" tugmasi, "Tozalash" va topilgan mijozlar soni (200 ta bo'lsa — qidiruvni
+aniqlashtirish haqida eslatma). Mahalla ro'yxati tanlangan shaharga qarab qisqaradi; arxiv ko'rinishida
+hududlar ham arxivdagilardan yig'iladi.
+
+**Testlar:** `sales.test.ts` — yangi holat: `newest`/`oldest`/`debt` tartiblari, hudud bo'yicha saralash
+(registrga befarq), `district`, `withDebt`, hududlar ro'yxati va arxivlangan mijoz hududlar ro'yxatidan
+chiqib ketishi (`includeInactive=true` bilan qaytishi) — **5/5 PASS**. Qo'shimcha: `csv-import-export`,
+`crm`, `pos` (**11 PASS**), frontend `src/components/csv` (**13 PASS**). `tsc` (web va API) va
+`eslint --max-warnings=0` toza.
+
+**Production (2026-09-21):** commit `036c1f4`; `bum-api` (deployment `5d97e313`) va `bum-web`
+(deployment `5c266b4c`) deploy qilindi — har ikkalasida `railway up` bir martadan xato berdi
+(`os error 10054` va "operation timed out"), qayta urinishda o'tdi. API toza ko'tarildi: yangi konteyner
+`e1ed8280475f`, bitta `Migratsiyalar qo'llandi (56ms)` va bitta `Server listening`. Yangi endpoint
+tashqaridan tasdiqlandi: `/api/sales/customers/regions` → **401** (mavjud), `/api/sales/zzz` → 404.
+Web bundle `index-CbWwwKGg.js` → **`index-DVL7Tv3M.js`**.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
@@ -3201,7 +3234,7 @@ bundle `index-BGeuOErI.js` → **`index-CbWwwKGg.js`**. API kodi o'zgarmagan.
 2. Kassa **0.4.6** ni (Naqd/Karta/Bank + UZCARD, HUMO va bank hisoblari bo'yicha to'lov, xavfsizlik: yangilanish tokeni faqat API'ga, chek oynasi CSP, token shifrlashsiz saqlanmaydi, Electron fuses; 0.4.1–0.4.5 o'rniga) platforma admini orqali e'lon qilish; haqiqiy kassada (printer, tarozi, terminal cheki) qo'lda sinov; sinovdan keyin asar yaxlitligi fuse'larini yoqish
 3a. Yangi APK'ni telefonga o'rnatib, ish kunida Android "Batareya" bo'limida BUM ERP sarfini oldingi versiya bilan solishtirish; bonnu-market'da UZCARD/HUMO terminallarini "Uzcard"/"Humo" bank hisoblariga komissiya bilan qo'shish (egasi)
 3. Production'da tizimga kirgan holda qo'lda smoke (egasi hisobi bilan): kirish, Dostavka → "Hudud bo'yicha" → biriktirish, "Kunlik marshrut", distribyutsiya xaritasi
-4. Mavjud mijozlarga shahar/mahalla kiritish (avtomatik to'ldirilmaydi); noto'g'ri kodlashda import qilingan mijozlar nomini "Mavjudlarini yangilash" bilan qayta import qilib tuzatish (egasi)
+4. Mavjud mijozlarga shahar/mahalla kiritish (avtomatik to'ldirilmaydi — `GET /customers/regions` da `city: null` bo'lib ko'rinadi); noto'g'ri kodlashda import qilingan mijozlar nomini "Mavjudlarini yangilash" bilan qayta import qilib tuzatish (egasi)
 5. Apex `bum-erp.uz` ni ishlaydigan manzilga yo'naltirish; ixtiyoriy — `WEB_ORIGIN=https://app.bum-erp.uz` (o'zgaruvchi endi productionda majburiy, hozir `https://bum-erp.uz`)
 6. Production'da fayl saqlash (S3), SMS (Eskiz — OTP) va AI kalitlari sozlanmagan — tegishli funksiyalar o'chiq
 7. ~~Buxgalteriya: ombordagi qo'lda kirim jurnal yozuvi yaratmaydi~~ — **eskirgan, hal qilingan**: qo'lda kirim DR 1200 / CR 3000 (yoki tanlangan qarshi hisob) yozadi, `inventory-journal.test.ts` bilan tasdiqlangan (2026-09-14 audit)
