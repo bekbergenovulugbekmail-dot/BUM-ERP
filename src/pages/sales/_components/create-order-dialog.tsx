@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import CustomerCombobox from "@/components/customers/customer-combobox.tsx";
 import { useTaxEnabled } from "@/hooks/use-tax.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
@@ -42,7 +43,6 @@ type Props = {
   onCreated: (id: string) => void;
 };
 
-const ANONYMOUS = "anon";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
@@ -65,14 +65,14 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const currencies = useCurrencies();
   // Narx va chegirmani o'zgartirish — faqat sales.edit (aks holda server rad etadi)
   const canOverride = can("sales.edit");
-  const customers = useApiQuery<{ customers: Customer[] }>("/api/sales/customers").data?.customers;
   const warehouses = useApiQuery<{ warehouses: WarehouseOption[] }>("/api/inventory/warehouses").data?.warehouses;
   // API chegarasi: 200 ta faol mahsulot
   const products = useApiQuery<{ products: ProductOption[] }>("/api/catalog/products", { limit: 200, isActive: true })
     .data?.products.filter((p) => p.isSaleable);
   const createOrder = useApiMutation((body: object) => api.post<{ order: { id: string } }>("/api/sales/orders", body));
 
-  const [customerId, setCustomerId] = useState("");
+  /** Mijoz qidiruvli ro'yxatdan tanlanadi; `null` — anonim. */
+  const [customer, setCustomer] = useState<Customer | null>(null);
   const [warehouseId, setWarehouseId] = useState("");
   const [orderDate, setOrderDate] = useState(todayLocal);
   const [deliveryDate, setDeliveryDate] = useState("");
@@ -89,7 +89,6 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
     setWarehouseId(def.id);
   }
 
-  const customer = customers?.find((c) => c.id === customerId);
   const customerDiscount = num(customer?.discountPercent);
 
   const addLine = () => setLines((p) => [...p, emptyLine()]);
@@ -160,7 +159,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
     setLoading(true);
     try {
       const { order } = await createOrder.mutateAsync({
-        customerId: customerId && customerId !== ANONYMOUS ? customerId : null,
+        customerId: customer?.id ?? null,
         warehouseId,
         orderDate,
         deliveryDate: deliveryDate || null,
@@ -197,15 +196,12 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div>
               <Label>Mijoz</Label>
-              <Select value={customerId} onValueChange={setCustomerId}>
-                <SelectTrigger><SelectValue placeholder="Anonim mijoz" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ANONYMOUS}>Anonim</SelectItem>
-                  {customers?.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CustomerCombobox
+                testId="order-customer"
+                selected={customer}
+                onSelect={setCustomer}
+                clearLabel="Anonim"
+              />
               {customerDiscount > 0 && (
                 <p className="text-[11px] text-muted-foreground mt-1">Mijoz chegirmasi: {customerDiscount}%</p>
               )}

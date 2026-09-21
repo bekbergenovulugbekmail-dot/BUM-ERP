@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import CustomerCombobox from "@/components/customers/customer-combobox.tsx";
 import type { Activity, ActivityType, CustomerOption } from "../_lib/types.ts";
 
 const ACTIVITY_TYPES = [
@@ -34,7 +35,8 @@ const emptyForm = () => ({
 
 export default function ActivitiesSection() {
   const recent = useApiQuery<{ activities: Activity[] }>("/api/crm/activities", { limit: 30 }).data?.activities;
-  const customers = useApiQuery<{ customers: CustomerOption[] }>("/api/sales/customers", { limit: 500 }).data?.customers;
+  /** Tanlangan mijoz — qidiruvli ro'yxatdan (butun ro'yxat yuklanmaydi). */
+  const [customer, setCustomer] = useState<CustomerOption | null>(null);
 
   const createActivity = useApiMutation((body: Record<string, unknown>) => api.post("/api/crm/activities", body));
   const removeActivity = useApiMutation((id: string) => api.delete(`/api/crm/activities/${id}`));
@@ -56,6 +58,7 @@ export default function ActivitiesSection() {
       toast.success("Faoliyat qo'shildi");
       setOpen(false);
       setForm(emptyForm());
+      setCustomer(null);
     } catch (e) { toast.error(errorMessage(e)); }
   };
 
@@ -150,13 +153,12 @@ export default function ActivitiesSection() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Mijoz</Label>
-                  <Select value={form.customerId} onValueChange={(v) => setForm({ ...form, customerId: v })}>
-                    <SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">—</SelectItem>
-                      {customers?.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <CustomerCombobox
+                    testId="activity-customer"
+                    selected={customer}
+                    onSelect={(next) => { setCustomer(next); setForm({ ...form, customerId: next?.id ?? "none" }); }}
+                    clearLabel="—"
+                  />
                 </div>
                 <div>
                   <Label>Sana</Label>

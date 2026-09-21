@@ -28,6 +28,12 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import CsvToolbar, { type CsvToolbarHandle } from "@/components/csv/csv-toolbar.tsx";
+import CustomerFilters from "@/components/customers/customer-filters.tsx";
+import {
+  customerFilterParams,
+  emptyCustomerFilter,
+  type CustomerFilter,
+} from "@/components/customers/customer-filter.ts";
 import type { DistributionRoute, Territory } from "../_lib/types.ts";
 
 /** Import/tezda qo'shish ustunlari — shablon, fayl moslash va tezda qo'shish shu ro'yxatdan quriladi. */
@@ -86,9 +92,12 @@ export default function CustomersSection() {
   const [quick, setQuick] = useState<QuickForm | null>(null);
   const toolbarRef = useRef<CsvToolbarHandle>(null);
 
+  /** Hudud va tartib bo'yicha saralash — Sotuv → Mijozlar dagi bilan bir xil panel. */
+  const [filter, setFilter] = useState<CustomerFilter>(emptyCustomerFilter);
   const customersQuery = useApiQuery<{ customers: CustomerRow[] }>("/api/sales/customers", {
     limit: 200,
     ...(debounced ? { search: debounced } : {}),
+    ...customerFilterParams(filter),
   });
   const customers = customersQuery.data?.customers;
 
@@ -167,6 +176,18 @@ export default function CustomersSection() {
           </Button>
         )}
       </div>
+
+      <CustomerFilters
+        value={filter}
+        onChange={setFilter}
+        trailing={
+          customers && (
+            <span className="text-xs text-muted-foreground">
+              {customers.length} ta mijoz{customers.length === 200 && " (birinchi 200 ta — qidiruvni aniqlashtiring)"}
+            </span>
+          )
+        }
+      />
 
       {/* Tugmalari yashirilgan CsvToolbar: import va shablon "Yangi mijoz" oynasidan ochiladi */}
       <CsvToolbar
