@@ -3138,6 +3138,35 @@ arxivlab bo'lmasligi ilgaridan shu faylda tekshirilgan (`409`).
 test qo'shildi). Bundle `index-6nq_pXkQ.js` → **`index-DA6qFg8j.js`**, "Arxivga ko'chirish" matni bundle
 ichida topildi.
 
+## Marshrut: mijozlarni ro'yxatdan belgilab qo'shish (2026-09-21)
+
+"Marshrutga mijoz qo'shish" oynasida bitta ochiladigan ro'yxat (Select) bor edi: qidirib bo'lmasdi,
+har bir do'konni alohida-alohida qo'shishga to'g'ri kelardi (10 marshrut × o'nlab do'kon).
+
+**Web (Distributsiya → Marshrutlar → mijoz qo'shish):** qidiruv maydoni (nomi, kodi, telefoni, shahri,
+mahallasi, manzili bo'yicha — mijozlar ro'yxati baribir bitta so'rovda kelgani uchun filtr brauzerda),
+har bir qator oldida belgilash katakchasi, tepada **"Hammasi"** (joriy filtrdagilarni belgilaydi yoki
+bo'shatadi — boshqa filtrda belgilangani saqlanadi) va "Qo'shish (N)" tugmasi. Marshrutda bor mijoz
+ro'yxatda ko'rinadi, lekin "marshrutda" belgisi bilan va belgilab bo'lmaydi.
+
+**API:** `POST /api/distribution/routes/:routeId/customers` endi `{ customerIds: [...] }` (1–500 ta) ni
+ham qabul qiladi va `{ added, skipped, members }` qaytaradi — bitta tranzaksiyada, marshrut qulflangan
+holda, tartib raqami mavjud oxirgisidan davom etadi; marshrutda bori **xato bermaydi**, `skipped` bo'lib
+qaytadi (bitta mijoz uchun `{ customerId }` avvalgidek ishlaydi va takrorga `409` beradi). Ikkala maydon
+birga yuborilsa — `400`. Audit: `ROUTE_CUSTOMERS_ADDED` (qo'shilgan va o'tkazib yuborilgan soni).
+Yangi jadval yoki migratsiya **yo'q**.
+
+**Testlar:** `distribution.test.ts` — yangi holat: ko'p tanlov qo'shiladi va tartiblanadi, takroriy tanlov
+`skipped`, begona kompaniya mijozi `400`, `customerId` + `customerIds` birga `400`, bo'sh tana `400`
+(**5/5 PASS**). Endpointdan foydalanadigan qolgan testlar ham qayta ishlatildi: `delivery-dispatch`,
+`sales-agent-boundaries`, `csv-import-export` (**16 test PASS**). `tsc` (web va API) va
+`eslint --max-warnings=0` toza.
+
+**Production (2026-09-21):** commit `a0b162e`; `bum-api` (deployment `1fb6c812`) va `bum-web`
+(deployment `09e98e1d`) deploy qilindi. API toza ko'tarildi — yangi konteyner `cfeaa5c5482c`, bitta
+`Migratsiyalar qo'llandi (91ms)` va bitta `Server listening`, `ERROR`/`FATAL` yo'q. Web bundle
+`index-DA6qFg8j.js` → **`index-BGeuOErI.js`**.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
