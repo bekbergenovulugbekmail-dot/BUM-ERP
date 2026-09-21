@@ -3113,6 +3113,31 @@ ko'rinadi) → "Importni boshlash". Fayldagi telefonsiz 2 qator (`Муслима
 Комил`) nomi bazada buzuq bo'lgani uchun mos kelmaydi — ular YANGI mijoz bo'lib qo'shiladi,
 eski buzuq yozuvini qo'lda tahrirlash yoki nofaol qilish kerak.
 
+## Mijozlar: arxivga ko'chirish (2026-09-21)
+
+Import tuzatilgandan keyin ochiq qolgan kamchilik: noto'g'ri kodlashda yozilgan ikkita telefonsiz mijoz
+(`C-0006`, `C-0035`) ro'yxatda qoldi, mijozni **o'chirish yoki yashirish** esa web'da umuman yo'q edi.
+
+Bazada `customers.is_active` va `PATCH /api/sales/customers/:customerId { isActive }` allaqachon bor edi
+(qarzli mijoz arxivlanmaydi — `409`, `listCustomers` esa `includeInactive` ni qo'llaydi) — faqat UI yo'q edi.
+Yangi endpoint yoki migratsiya **qo'shilmadi**.
+
+**Web (Sotuv → Mijozlar):**
+- har bir kartada "Arxivga ko'chirish" tugmasi va tasdiq oynasi — yozuv o'chirilmaydi, hujjat, to'lov va
+  tarix joyida qoladi, mijoz esa sotuv, kassa va marshrut tanlovlaridan chiqadi;
+- "Arxiv" tugmasi — arxivdagilar ro'yxati (`includeInactive=true` bilan so'raladi, nofaollari ajratiladi),
+  kartada "Arxivda" belgisi va "Arxivdan qaytarish" tugmasi;
+- arxiv ko'rinishida eksport ham arxivdagilarni oladi; arxivda "Mijoz qo'shish" ko'rinmaydi.
+
+**Test:** `sales.test.ts` — yangi holat: arxivlangan mijoz standart ro'yxatdan chiqadi,
+`includeInactive=true` bilan `isActive: false` bo'lib ko'rinadi, hujjat sahifasi ochiladi va qaytarilganda
+ro'yxatga tushadi (`sales.test.ts` **4/4 PASS**). `tsc` va `eslint --max-warnings=0` toza. Qarzli mijozni
+arxivlab bo'lmasligi ilgaridan shu faylda tekshirilgan (`409`).
+
+**Production (2026-09-21):** commit `5754871`; faqat `bum-web` deploy qilindi (API kodi o'zgarmagan —
+test qo'shildi). Bundle `index-6nq_pXkQ.js` → **`index-DA6qFg8j.js`**, "Arxivga ko'chirish" matni bundle
+ichida topildi.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
