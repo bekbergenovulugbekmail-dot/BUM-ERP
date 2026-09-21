@@ -1305,7 +1305,7 @@ Talab: "BUM ERP — SUBSCRIPTION & LICENSE SYSTEM MASTER IMPLEMENTATION PROMPT" 
 - kassada kassir litsenziyasi sinxron o'rtasida tugaganda butun so'rovni 403 qilish yo'li alohida test bilan qoplanmagan (obuna tugashi qoplangan); desktop kassa ilovasi obuna sababini alohida ekran bilan emas, sinxron xatosi matni bilan ko'rsatadi
 - sotuv agenti va yetkazuvchi mobil ish joylarida qulf ekrani yo'q (ERP'da qulflangan sessiya u yerda 423 oladi)
 - migratsiyaning production ma'lumotidagi natijasi deploydan keyin tekshiriladi (test bazasida mavjud ma'lumot bilan tekshirilgan)
-- qo'shimcha litsenziya muddati tugashiga yaqin ogohlantirish yo'q (faqat trial uchun)
+- ~~qo'shimcha litsenziya muddati tugashiga yaqin ogohlantirish yo'q (faqat trial uchun)~~ — **2026-09-21 da qo'shildi** (pastda "Obuna: qo'shimcha litsenziya tugashi ogohlantirishi")
 
 ### Obuna (`/api/subscription`)
 
@@ -3024,6 +3024,39 @@ lokal `vite build` chiqargan nom bilan aynan bir xil. Production ma'lumotiga va 
 tegilmadi. Tizimga kirgan holda qo'lda sinov (qoldiqni qayta yetkazish oynasi) — NOT VERIFIED,
 egasining hisobi kerak.
 
+## Obuna: qo'shimcha litsenziya tugashi ogohlantirishi (2026-09-21)
+
+Ochiq kamchilik yopildi: trial tugashiga 10/5/3/1 kun qolganda egasiga bildirishnoma borardi, **pullik
+qo'shimcha litsenziya esa jim tugardi** — kompaniya egasi xodim tizimga kira olmay qolgandan keyin bilardi.
+
+**Nima qo'shildi** (yangi parallel tizim emas — mavjud `processSubscriptionExpiry` davriy vazifasi kengaytirildi):
+- **Oldindan ogohlantirish:** faol `additional` litsenziya tugashiga 10/5/3/1 kun qolganda kompaniya
+  egasiga bildirishnoma. Matnda kimning litsenziyasi ekani aytiladi; 3 kun va undan kam qolganda
+  `severity: warning`, aks holda `info`. Havola — `/subscription`.
+- **Tugaganda xabar:** ilgari faqat holat, tarix va audit yozilardi — endi egasiga ham bildirishnoma
+  («… tizimga kira olmaydi»). Takror ishga tushirilsa ikkinchisi yozilmaydi (litsenziya allaqachon `expired`).
+- **Har chegara bir marta:** `licenses.warning_days` — `subscriptions.trial_warning_days` bilan bir xil naqsh.
+  Litsenziya uzaytirilganda `null` ga qaytadi, ya'ni yangi muddat uchun ogohlantirish qaytadan boshlanadi.
+
+**Migratsiya 0075** — faqat qo'shadi: `licenses.warning_days` (integer, null). Ma'lumot o'zgarmaydi.
+
+**API:** `GET /api/subscription/licenses` javobida har litsenziya uchun `daysLeft` va `expiryWarning`
+(included — ikkalasi ham `null`, chunki u obuna bilan ketadi), hisobda esa `additionalExpiringSoon`.
+Ogohlantirish chegarasi serverda hisoblanadi (`licenseWarning` — `@bum/shared`), frontend faqat ko'rsatadi.
+
+**Web:** Obuna → Litsenziyalar bo'limida tugash sanasi yonida «N kun qoldi» belgisi va bo'lim tepasida
+umumiy ogohlantirish satri (nechta litsenziya tugayapti, nima qilish kerak).
+
+**Testlar:** `subscription-rules.test.ts` — `licenseWarning` sof funksiyasi (chegaralar; `expired` va
+`pending_payment` ogohlantirilmaydi; included — hech qachon; muddatsiz va o'tgan sana — null).
+`subscription.test.ts` — 2 ta yangi integratsiya testi: 5 kun chegarasi bir marta va 3 kunda yana
+(bildirishnoma matni, `severity`, `relatedId`, ro'yxatdagi `daysLeft`/`expiryWarning` va
+`additionalExpiringSoon`), uzaytirilgandan keyin hisoblagich tozalanishi va included ogohlantirilmasligi;
+mavjud "litsenziya tugadi" testiga egaga bildirishnoma va takrorlanmaslik tekshiruvi qo'shildi.
+
+**To'liq regressiya:** API **136 fayl / 788 test PASS** (avval 785, +3), frontend unit
+**22 fayl / 95 test PASS**, `tsc` (API va web) va `eslint --max-warnings=0` toza.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
@@ -3042,7 +3075,7 @@ egasining hisobi kerak.
 6. Production'da fayl saqlash (S3), SMS (Eskiz — OTP) va AI kalitlari sozlanmagan — tegishli funksiyalar o'chiq
 7. ~~Buxgalteriya: ombordagi qo'lda kirim jurnal yozuvi yaratmaydi~~ — **eskirgan, hal qilingan**: qo'lda kirim DR 1200 / CR 3000 (yoki tanlangan qarshi hisob) yozadi, `inventory-journal.test.ts` bilan tasdiqlangan (2026-09-14 audit)
 8. Desktop: kod imzolash sertifikati (`CSC_LINK`, `CSC_KEY_PASSWORD`); Shtrix-M, YES POS, Rongta tarozilari uchun ishlab chiqaruvchining almashinuv protokoli hujjati
-9. Obuna: to'lov shlyuzi (Payme / Click) — hozir admin qo'lda tasdiqlaydi; qo'shimcha litsenziya tugashi ogohlantirishi
+9. Obuna: to'lov shlyuzi (Payme / Click) — hozir admin qo'lda tasdiqlaydi (~~qo'shimcha litsenziya tugashi ogohlantirishi~~ — 2026-09-21 da bajarildi)
 10. Dostavka: SMS OTP (provayder kerak), hudud poligonlari ma'lumotnomasi (~~qisman qoldiqni qayta yetkazish~~ — 2026-09-21 da bajarildi)
 11. PR `feat/postgres-migration` → `main` — o'tish kuni kelishilgach
 12. Railway'dagi eski xizmatlar (`BUM-ERP`, `logto`, logto'ning Postgres'i) hali bo'lsa — egasi o'chiradi (tasdiqsiz o'chirilmaydi)

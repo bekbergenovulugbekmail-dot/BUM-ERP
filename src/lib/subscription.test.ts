@@ -25,7 +25,16 @@ describe("obuna UI yordamchilari", () => {
   });
 
   it("litsenziya limiti xatosi taniladi", () => {
-    const counts = { includedTotal: 3, includedUsed: 3, includedAvailable: 0, additionalActive: 0, additionalPending: 0, additionalExpired: 0, totalActive: 3 };
+    const counts = {
+      includedTotal: 3,
+      includedUsed: 3,
+      includedAvailable: 0,
+      additionalActive: 0,
+      additionalPending: 0,
+      additionalExpired: 0,
+      additionalExpiringSoon: 0,
+      totalActive: 3,
+    };
     const limit = new ApiError(403, "FORBIDDEN", "3 ta included foydalanuvchi litsenziyasi ishlatilgan.", { reason: "license_limit_reached", counts });
     expect(licenseLimitOf(limit)).toEqual({ message: limit.message, counts });
     expect(licenseLimitOf(new ApiError(403, "FORBIDDEN", "x", { reason: "subscription_expired" }))).toBeNull();

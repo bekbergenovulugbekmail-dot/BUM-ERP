@@ -45,6 +45,7 @@ const STATUS_TONE: Record<string, string> = {
   cancelled: "bg-muted text-muted-foreground",
   pending_payment: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
   revoked: "bg-muted text-muted-foreground",
+  expiring: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
 };
 
 function Pill({ tone, children }: { tone: string; children: React.ReactNode }) {
@@ -336,6 +337,12 @@ function LicensesSection({ plans, canManage }: { plans: PlansResponse | undefine
   return (
     <section className="space-y-3">
       <h2 className="text-lg font-semibold">Litsenziyalar</h2>
+      {query.data && query.data.counts.additionalExpiringSoon > 0 && (
+        <p className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200">
+          {query.data.counts.additionalExpiringSoon} ta qo&#39;shimcha litsenziya muddati tugayapti. Muddat tugagach xodim tizimga kira olmaydi — quyida
+          &laquo;Uzaytirish&raquo; tugmasi bilan tarif tanlang.
+        </p>
+      )}
       <Card>
         <CardContent className="p-0 overflow-x-auto">
           {query.error ? (
@@ -369,7 +376,19 @@ function LicensesSection({ plans, canManage }: { plans: PlansResponse | undefine
                       </td>
                       <td className="px-4 py-2">{LICENSE_TYPE_LABEL[license.licenseType]}{license.planName ? <span className="text-xs text-muted-foreground"> · {license.planName}</span> : null}</td>
                       <td className="px-4 py-2"><Pill tone={status}>{LICENSE_STATUS_LABEL[status]}</Pill></td>
-                      <td className="px-4 py-2 text-xs">{license.licenseType === "included" ? "Obuna bilan" : formatDay(license.expiresAt)}</td>
+                      <td className="px-4 py-2 text-xs">
+                        {license.licenseType === "included" ? (
+                          "Obuna bilan"
+                        ) : (
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            {formatDay(license.expiresAt)}
+                            {/* Ogohlantirish chegarasi serverda hisoblanadi — egaga bildirishnoma ham o'shandan ketadi */}
+                            {!expired && license.expiryWarning !== null && (
+                              <Pill tone="expiring">{license.daysLeft} kun qoldi</Pill>
+                            )}
+                          </span>
+                        )}
+                      </td>
                       {canManage && (
                         <td className="px-4 py-2">
                           {license.licenseType === "additional" && plans && (

@@ -13,6 +13,8 @@ export const TRIAL_DAYS = 25;
 export const TRIAL_INCLUDED_LICENSES = 3;
 /** Trial tugashiga shuncha kun qolganda ogohlantirish. */
 export const TRIAL_WARNING_DAYS = [10, 5, 3, 1] as const;
+/** Qo'shimcha litsenziya tugashiga shuncha kun qolganda ogohlantirish (trial bilan bir xil bosqichlar). */
+export const LICENSE_WARNING_DAYS = [10, 5, 3, 1] as const;
 
 export const SUBSCRIPTION_STATUSES = ["trial", "active", "expired", "cancelled"] as const;
 export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
@@ -124,16 +126,29 @@ export function daysLeft(expiresAt: Date | string | null, now = new Date()): num
   return date === null ? null : Math.ceil((date.getTime() - now.getTime()) / DAY_MS);
 }
 
+/** Qolgan kunga mos ogohlantirish chegarasi (eng kichigi) — muddatsiz yoki tugagan bo'lsa null. */
+function warningThreshold(thresholds: readonly number[], expiresAt: Date | string | null, now: Date): number | null {
+  const left = daysLeft(expiresAt, now);
+  if (left === null || left <= 0) return null;
+  return [...thresholds].sort((a, b) => a - b).find((threshold) => left <= threshold) ?? null;
+}
+
 /** Trial ogohlantirish chegarasi (10, 5, 3 yoki 1) — ogohlantirish kerak bo'lmasa null. */
 export function trialWarning(status: SubscriptionStatus, expiresAt: Date | string | null, now = new Date()): number | null {
   if (status !== "trial") return null;
-  const left = daysLeft(expiresAt, now);
-  if (left === null || left <= 0) return null;
-  const thresholds = [...TRIAL_WARNING_DAYS].sort((a, b) => a - b);
-  return thresholds.find((threshold) => left <= threshold) ?? null;
+  return warningThreshold(TRIAL_WARNING_DAYS, expiresAt, now);
 }
 
 export type LicenseSnapshot = { type: LicenseType; status: LicenseStatus; expiresAt: Date | string | null };
+
+/**
+ * Qo'shimcha litsenziya ogohlantirish chegarasi (10, 5, 3 yoki 1) — kerak bo'lmasa null.
+ * Included litsenziya kompaniya obunasi bilan ketadi, alohida ogohlantirilmaydi.
+ */
+export function licenseWarning(license: LicenseSnapshot, now = new Date()): number | null {
+  if (license.type !== "additional" || license.status !== "active") return null;
+  return warningThreshold(LICENSE_WARNING_DAYS, license.expiresAt, now);
+}
 
 /**
  * Foydalanuvchi litsenziyasi bo'yicha rad etish sababi (null — yaroqli). Included litsenziya kompaniya obunasiga

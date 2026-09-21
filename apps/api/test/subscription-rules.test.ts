@@ -8,6 +8,7 @@ import {
   effectiveMonths,
   effectiveSubscriptionStatus,
   licenseDenial,
+  licenseWarning,
   renewalWindow,
   trialWarning,
 } from "@bum/shared";
@@ -71,6 +72,22 @@ describe("Muddat hisobi", () => {
     expect(trialWarning("trial", at(-1), now)).toBeNull();
     expect(daysLeft(at(0.2), now)).toBe(1);
     expect(daysLeft(null, now)).toBeNull();
+  });
+
+  it("qo'shimcha litsenziya ogohlantirishi: faqat faol additional, xuddi shu chegaralar", () => {
+    const now = utc("2026-03-10");
+    const at = (days: number) => new Date(now.getTime() + days * DAY);
+    const additional = (expiresAt: Date | null, status: "active" | "expired" | "pending_payment" = "active") =>
+      licenseWarning({ type: "additional" as const, status, expiresAt }, now);
+    expect(additional(at(12))).toBeNull();
+    expect([10, 6, 5, 4, 3, 2, 1, 0.2].map((days) => additional(at(days)))).toEqual([10, 10, 5, 5, 3, 3, 1, 1]);
+    // Tugagan yoki to'lovi tasdiqlanmagan litsenziya ogohlantirilmaydi — u boshqa xabar beradi
+    expect(additional(at(3), "expired")).toBeNull();
+    expect(additional(at(3), "pending_payment")).toBeNull();
+    expect(additional(at(-1))).toBeNull();
+    // Included litsenziya obuna bilan ketadi — alohida ogohlantirilmaydi (muddati bo'lsa ham)
+    expect(licenseWarning({ type: "included", status: "active", expiresAt: at(2) }, now)).toBeNull();
+    expect(additional(null)).toBeNull();
   });
 });
 

@@ -120,6 +120,8 @@ export const licenses = pgTable(
     /** Included — obuna muddati bilan; additional — o'z muddati. To'lov tasdiqlanmaguncha NULL. */
     startAt: timestamp("start_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
+    /** Oxirgi yuborilgan tugash ogohlantirishi (kun): har chegara bir marta, uzaytirilganda null. */
+    warningDays: integer("warning_days"),
     assignedBy: uuid("assigned_by").references(() => users.id, { onDelete: "set null" }),
     assignedAt: timestamp("assigned_at", { withTimezone: true }).notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),

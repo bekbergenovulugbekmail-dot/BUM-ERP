@@ -374,6 +374,79 @@ describe("Muddat tugashi", () => {
     const [license] = await db.select().from(licenses).where(eq(licenses.id, res.json().license.id));
     expect(license!.status).toBe("expired");
     expect(await auditCount("LICENSE_EXPIRED")).toBe(1);
+
+    // Ilgari jim tugardi: ega faqat xodim kira olmay qolgach bilardi
+    const notified = await db.select().from(notifications).where(eq(notifications.companyId, company.companyId));
+    expect(notified).toHaveLength(1);
+    expect(notified[0]).toMatchObject({ userId: company.owner.id, severity: "warning", relatedType: "license" });
+    expect(notified[0]!.title).toContain("tugadi");
+    // Takror ishga tushirilsa ikkinchi bildirishnoma yo'q (litsenziya allaqachon `expired`)
+    expect(await runSubscriptionExpiry()).toMatchObject({ licensesExpired: 0 });
+    expect(await db.select().from(notifications).where(eq(notifications.companyId, company.companyId))).toHaveLength(1);
+  });
+
+  it("qo'shimcha litsenziya ogohlantirishi: 5 kun chegarasi egasiga bir marta, 3 kunda yana", async () => {
+    const company = await trialCompany();
+    // 3 ta included band (egasi + 2) — keyingisi qo'shimcha litsenziya bilan ketadi
+    await addEmployee(app, company);
+    await addEmployee(app, company);
+    const { res, payload } = await newEmployee(company, { additionalLicensePlanId: await planId("license-1m") });
+    await confirm(res.json().payment.id);
+    const licenseId = res.json().license.id as string;
+    await db.update(licenses).set({ expiresAt: new Date(Date.now() + 4.5 * DAY) }).where(eq(licenses.id, licenseId));
+
+    expect(await runSubscriptionExpiry()).toMatchObject({ licenseWarnings: 1, licensesExpired: 0 });
+    expect(await runSubscriptionExpiry()).toMatchObject({ licenseWarnings: 0 });
+    const first = await db.select().from(notifications).where(eq(notifications.companyId, company.companyId));
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({ userId: company.owner.id, severity: "info", relatedType: "license", relatedId: licenseId });
+    expect(first[0]!.title).toContain("5 kun");
+    expect(first[0]!.message).toContain(payload.name);
+
+    // Keyingi chegara (3 kun) — yangi bildirishnoma, endi ogohlantirish darajasida
+    await db.update(licenses).set({ expiresAt: new Date(Date.now() + 2.5 * DAY) }).where(eq(licenses.id, licenseId));
+    expect(await runSubscriptionExpiry()).toMatchObject({ licenseWarnings: 1 });
+    const second = await db.select().from(notifications).where(eq(notifications.companyId, company.companyId));
+    expect(second).toHaveLength(2);
+    expect(second.some((row) => row.title.includes("3 kun") && row.severity === "warning")).toBe(true);
+
+    // Ro'yxat va hisobda ko'rinadi
+    const list = await call(company.ownerCookie, "GET", "/api/subscription/licenses");
+    expect(list.statusCode, list.body).toBe(200);
+    const row = (list.json().licenses as { id: string; daysLeft: number | null; expiryWarning: number | null }[]).find((item) => item.id === licenseId);
+    expect(row).toMatchObject({ daysLeft: 3, expiryWarning: 3 });
+    expect(list.json().counts.additionalExpiringSoon).toBe(1);
+  });
+
+  it("uzaytirilgan litsenziya ogohlantirishni qaytadan boshlaydi va included ogohlantirilmaydi", async () => {
+    const company = await trialCompany();
+    await addEmployee(app, company);
+    await addEmployee(app, company);
+    const { res } = await newEmployee(company, { additionalLicensePlanId: await planId("license-1m") });
+    await confirm(res.json().payment.id);
+    const licenseId = res.json().license.id as string;
+    await db.update(licenses).set({ expiresAt: new Date(Date.now() + 0.5 * DAY) }).where(eq(licenses.id, licenseId));
+    expect(await runSubscriptionExpiry()).toMatchObject({ licenseWarnings: 1 });
+    expect((await db.select().from(licenses).where(eq(licenses.id, licenseId)))[0]!.warningDays).toBe(1);
+
+    // Uzaytirish: hisoblagich tozalanadi, yangi muddat uzoq — ogohlantirish yo'q
+    const renew = await call(company.ownerCookie, "POST", `/api/subscription/licenses/${licenseId}/purchase`, {
+      planId: await planId("license-1m"),
+      idempotencyKey: key("renew"),
+    });
+    expect(renew.statusCode, renew.body).toBe(201);
+    await confirm(renew.json().payment.id, "KV-2");
+    const renewed = (await db.select().from(licenses).where(eq(licenses.id, licenseId)))[0]!;
+    expect(renewed.warningDays).toBeNull();
+    expect(await runSubscriptionExpiry()).toMatchObject({ licenseWarnings: 0 });
+
+    // Included litsenziya (egasi) muddatga ega bo'lsa ham alohida ogohlantirilmaydi — u obuna bilan ketadi
+    const list = await call(company.ownerCookie, "GET", "/api/subscription/licenses");
+    const owner = (list.json().licenses as { isOwner: boolean; licenseType: string; daysLeft: number | null; expiryWarning: number | null }[]).find(
+      (item) => item.isOwner,
+    );
+    expect(owner).toMatchObject({ licenseType: "included", daysLeft: null, expiryWarning: null });
+    expect(list.json().counts.additionalExpiringSoon).toBe(0);
   });
 
   it("trial ogohlantirishi: 5 kun chegarasi egasiga bir marta", async () => {

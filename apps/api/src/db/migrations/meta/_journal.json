@@ -526,6 +526,13 @@
       "when": 1789829466441,
       "tag": "0074_delivery_redelivery",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1789829526441,
+      "tag": "0075_license_expiry_warning",
+      "breakpoints": true
     }
   ]
 }

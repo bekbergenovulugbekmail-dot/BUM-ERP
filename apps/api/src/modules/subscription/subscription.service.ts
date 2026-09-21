@@ -5,11 +5,14 @@
  *  - Vaqt — faqat server soati; qurilma yoki so'rovdagi sanaga ishonilmaydi.
  *  - Uzaytirish (`renewalWindow`): amaldagi to'langan obuna / litsenziya — joriy tugash sanasidan; trial, tugagan yoki
  *    tizimdan oldingi muddatsiz obuna — hozirdan. Muddat = asosiy oylar + bonus.
+ *  - Ogohlantirish: trial ham, qo'shimcha (pullik) litsenziya ham tugashiga 10/5/3/1 kun qolganda kompaniya egasiga
+ *    bildirishnoma; har chegara bir marta (`trial_warning_days` / `licenses.warning_days`), uzaytirilganda qaytadan.
  *  - To'lov shlyuzi yo'q: egasi so'rov yuboradi, admin to'lovni tasdiqlaydi. Tasdiq: to'lov + obuna/litsenziya + tarix +
  *    audit — bitta tranzaksiyada, to'lov qatori qulflangan; takroriy tasdiq hech narsani ikki marta qo'llamaydi.
  */
 import { and, desc, eq, gt, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import {
+  LICENSE_WARNING_DAYS,
   TRIAL_DAYS,
   TRIAL_INCLUDED_LICENSES,
   badRequest,
@@ -17,6 +20,7 @@ import {
   daysLeft,
   effectiveMonths,
   effectiveSubscriptionStatus,
+  licenseWarning,
   notFound,
   renewalWindow,
   trialWarning,
@@ -517,6 +521,7 @@ export async function confirmPayment(
         price: payment.amount,
         startAt: continuing ? license.startAt : window.startAt,
         expiresAt: window.expiresAt,
+        warningDays: null,
         updatedAt: now,
       })
       .where(eq(licenses.id, license.id))
@@ -574,7 +579,18 @@ export async function setIncludedLicenses(
 
 // ─── Davriy: muddat tugashi va trial ogohlantirishlari ───────────────────────
 
-export type ExpiryResult = { subscriptionsExpired: number; licensesExpired: number; trialWarnings: number };
+export type ExpiryResult = { subscriptionsExpired: number; licensesExpired: number; trialWarnings: number; licenseWarnings: number };
+
+/** Bildirishnoma matni uchun: kompaniya egasi va litsenziya tegishli xodimning ismi. */
+async function licenseNotifyTarget(tx: Tx, license: { companyId: string; userId: string }) {
+  const [row] = await tx
+    .select({ ownerId: companies.ownerId, userName: users.name })
+    .from(companies)
+    .innerJoin(users, eq(users.id, license.userId))
+    .where(eq(companies.id, license.companyId))
+    .limit(1);
+  return row ?? null;
+}
 
 export async function processSubscriptionExpiry(tx: Tx, now = new Date()): Promise<ExpiryResult> {
   const dueSubscriptions = await tx
@@ -604,6 +620,20 @@ export async function processSubscriptionExpiry(tx: Tx, now = new Date()): Promi
     const [expired] = await tx.update(licenses).set({ status: "expired", updatedAt: now }).where(eq(licenses.id, license.id)).returning();
     await writeLicenseHistory(tx, expired!, "expired");
     await auditLicense(tx, null, undefined, "LICENSE_EXPIRED", expired!);
+    // Ilgari jim tugardi — ega xodim tizimga kira olmay qolgandan keyin bilardi
+    const target = await licenseNotifyTarget(tx, license);
+    if (!target?.ownerId) continue;
+    await tx.insert(notifications).values({
+      companyId: license.companyId,
+      userId: target.ownerId,
+      type: "system",
+      severity: "warning",
+      title: "Qo'shimcha litsenziya muddati tugadi",
+      message: `${target.userName} uchun qo'shimcha litsenziya tugadi — u tizimga kira olmaydi. Obuna sahifasida uzaytiring.`,
+      relatedType: "license",
+      relatedId: license.id,
+      link: "/subscription",
+    });
   }
 
   // Trial tugashiga 10/5/3/1 kun qolganda egasiga bildirishnoma — har chegara bir marta
@@ -638,5 +668,40 @@ export async function processSubscriptionExpiry(tx: Tx, now = new Date()): Promi
     trialWarnings += 1;
   }
 
-  return { subscriptionsExpired: dueSubscriptions.length, licensesExpired: dueLicenses.length, trialWarnings };
+  // Qo'shimcha litsenziya tugashiga 10/5/3/1 kun qolganda egasiga bildirishnoma — har chegara bir marta
+  const horizon = new Date(now.getTime() + Math.max(...LICENSE_WARNING_DAYS) * DAY_MS);
+  const expiringLicenses = await tx
+    .select({ license: licenses, ownerId: companies.ownerId, userName: users.name })
+    .from(licenses)
+    .innerJoin(companies, eq(companies.id, licenses.companyId))
+    .innerJoin(users, eq(users.id, licenses.userId))
+    .where(
+      and(
+        eq(licenses.licenseType, "additional"),
+        eq(licenses.status, "active"),
+        gt(licenses.expiresAt, now),
+        lte(licenses.expiresAt, horizon),
+      ),
+    );
+  let licenseWarnings = 0;
+  for (const { license, ownerId, userName } of expiringLicenses) {
+    const warning = licenseWarning({ type: license.licenseType, status: license.status, expiresAt: license.expiresAt }, now);
+    if (warning === null || (license.warningDays !== null && warning >= license.warningDays)) continue;
+    await tx.update(licenses).set({ warningDays: warning, updatedAt: now }).where(eq(licenses.id, license.id));
+    if (!ownerId) continue;
+    await tx.insert(notifications).values({
+      companyId: license.companyId,
+      userId: ownerId,
+      type: "system",
+      severity: warning <= 3 ? "warning" : "info",
+      title: `Qo'shimcha litsenziya tugashiga ${warning} kun qoldi`,
+      message: `${userName} uchun qo'shimcha litsenziya tugaydi. Muddat tugagach u tizimga kira olmaydi — obuna sahifasida uzaytiring.`,
+      relatedType: "license",
+      relatedId: license.id,
+      link: "/subscription",
+    });
+    licenseWarnings += 1;
+  }
+
+  return { subscriptionsExpired: dueSubscriptions.length, licensesExpired: dueLicenses.length, trialWarnings, licenseWarnings };
 }

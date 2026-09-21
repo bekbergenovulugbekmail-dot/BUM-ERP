@@ -28,6 +28,8 @@ export type LicenseCounts = {
   additionalActive: number;
   additionalPending: number;
   additionalExpired: number;
+  /** Amaldagi, lekin tugashiga 10 kundan kam qolgan qo'shimcha litsenziyalar. */
+  additionalExpiringSoon: number;
   totalActive: number;
 };
 
@@ -93,6 +95,10 @@ export type CompanyLicense = {
   employeeCode: string | null;
   pendingPaymentId: string | null;
   isOwner: boolean;
+  /** Qo'shimcha litsenziyada qolgan kunlar (included — null). */
+  daysLeft: number | null;
+  /** Server hisoblagan ogohlantirish chegarasi (10, 5, 3, 1) — kerak bo'lmasa null. */
+  expiryWarning: number | null;
 };
 
 export type SubscriptionHistory = {

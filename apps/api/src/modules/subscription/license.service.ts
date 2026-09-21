@@ -11,7 +11,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
-import { AppError, LICENSE_LIMIT_REACHED, forbidden } from "@bum/shared";
+import { AppError, LICENSE_LIMIT_REACHED, LICENSE_WARNING_DAYS, daysLeft, forbidden, licenseWarning } from "@bum/shared";
 import { employees } from "../../db/schema/hr.js";
 import { companyMembers, users } from "../../db/schema/platform.js";
 import { licenseHistory, licenses, subscriptionPayments, subscriptionPlans, subscriptions } from "../../db/schema/subscription.js";
@@ -33,6 +33,8 @@ export type LicenseCounts = {
   additionalActive: number;
   additionalPending: number;
   additionalExpired: number;
+  /** Amaldagi, lekin tugashiga 10 kundan kam qolgan qo'shimcha litsenziyalar. */
+  additionalExpiringSoon: number;
   /** Amaldagi (kira oladigan) litsenziyalar: included + muddati o'tmagan additional. */
   totalActive: number;
 };
@@ -45,12 +47,14 @@ export async function lockSubscription(tx: Tx, companyId: string): Promise<Subsc
 
 export async function licenseCounts(conn: DbOrTx, companyId: string, includedTotal: number, now = new Date()): Promise<LicenseCounts> {
   const at = now.toISOString();
+  const soon = new Date(now.getTime() + Math.max(...LICENSE_WARNING_DAYS) * 86_400_000).toISOString();
   const rows = await conn
     .select({
       type: licenses.licenseType,
       active: sql<number>`(count(*) filter (where ${licenses.status} = 'active' and (${licenses.licenseType} = 'included' or ${licenses.expiresAt} > ${at}::timestamptz)))::int`,
       pending: sql<number>`(count(*) filter (where ${licenses.status} = 'pending_payment'))::int`,
       expired: sql<number>`(count(*) filter (where ${licenses.status} = 'expired' or (${licenses.status} = 'active' and ${licenses.licenseType} = 'additional' and ${licenses.expiresAt} <= ${at}::timestamptz)))::int`,
+      expiringSoon: sql<number>`(count(*) filter (where ${licenses.status} = 'active' and ${licenses.licenseType} = 'additional' and ${licenses.expiresAt} > ${at}::timestamptz and ${licenses.expiresAt} <= ${soon}::timestamptz))::int`,
     })
     .from(licenses)
     .where(and(eq(licenses.companyId, companyId), ne(licenses.status, "revoked")))
@@ -67,6 +71,7 @@ export async function licenseCounts(conn: DbOrTx, companyId: string, includedTot
     additionalActive,
     additionalPending: additional?.pending ?? 0,
     additionalExpired: additional?.expired ?? 0,
+    additionalExpiringSoon: additional?.expiringSoon ?? 0,
     totalActive: includedUsed + additionalActive,
   };
 }
@@ -275,7 +280,7 @@ export async function releaseLicense(
 }
 
 /** Kompaniyaning joriy (bekor qilinmagan) litsenziyalari — kim, qaysi xodim, qaysi tarif, kutilayotgan to'lov. */
-export async function listLicenses(conn: DbOrTx, companyId: string, ownerId: string | null) {
+export async function listLicenses(conn: DbOrTx, companyId: string, ownerId: string | null, now = new Date()) {
   const rows = await conn
     .select({
       id: licenses.id,
@@ -304,5 +309,11 @@ export async function listLicenses(conn: DbOrTx, companyId: string, ownerId: str
     .leftJoin(subscriptionPlans, eq(subscriptionPlans.id, licenses.planId))
     .where(and(eq(licenses.companyId, companyId), ne(licenses.status, "revoked")))
     .orderBy(asc(licenses.licenseType), asc(licenses.assignedAt));
-  return rows.map((row) => ({ ...row, isOwner: row.userId === ownerId }));
+  return rows.map((row) => ({
+    ...row,
+    isOwner: row.userId === ownerId,
+    /** Qolgan kunlar va tugash ogohlantirishi (qo'shimcha litsenziya uchun; included — obuna bilan). */
+    daysLeft: row.licenseType === "additional" ? daysLeft(row.expiresAt, now) : null,
+    expiryWarning: licenseWarning({ type: row.licenseType, status: row.status, expiresAt: row.expiresAt }, now),
+  }));
 }
