@@ -3057,6 +3057,16 @@ mavjud "litsenziya tugadi" testiga egaga bildirishnoma va takrorlanmaslik tekshi
 **To'liq regressiya:** API **136 fayl / 788 test PASS** (avval 785, +3), frontend unit
 **22 fayl / 95 test PASS**, `tsc` (API va web) va `eslint --max-warnings=0` toza.
 
+**Production (2026-09-21):** commit `a6f9505`, GitHub'ga chiqarildi (`b8779d2..a6f9505`);
+`bum-api` (deployment `c9cd2a76`) va `bum-web` (deployment `e38646cc`) deploy qilindi. API toza
+ko'tarildi — bitta `Migratsiyalar qo'llandi (31ms)` va bitta `Server listening`, `ERROR`/`FATAL` yo'q.
+Sxema bazadan tekshirildi (faqat o'qish, `railway ssh`): `licenses.warning_days` va
+`delivery_tasks.origin_task_id` bor, jami **76 ta migratsiya** qo'llangan (0000–0075). Web bundle
+`index-C7srWsIe.js` → **`index-Rn4yLOY9.js`** — lokal `vite build` nomi bilan aynan bir xil.
+Production ma'lumotiga va o'zgaruvchilariga tegilmadi. Bildirishnomaning haqiqiy productionda
+ko'rinishi — NOT VERIFIED: davriy vazifa soatlik ishlaydi va hozir tugashiga 10 kundan kam qolgan
+qo'shimcha litsenziya yo'q (testlarda to'liq qoplangan).
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
