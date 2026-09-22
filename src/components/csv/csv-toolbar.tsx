@@ -35,6 +35,15 @@ import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { buildIssuesXlsx, buildTemplateXlsx, downloadBlob, isExcelFile, parseXlsx, type SheetIssue } from "./xlsx.ts";
 import { readTextFile } from "./encoding.ts";
+import {
+  DELIMITERS,
+  SKIP,
+  assignByColumn,
+  assignColumn,
+  columnOwner,
+  sampleValues,
+  type Choice,
+} from "./mapping.ts";
 import { useApiMutation } from "@/lib/query.ts";
 
 /** Bir so'rovda yuboriladigan qator soni (server chegarasi — 500). */
@@ -43,8 +52,8 @@ const IMPORT_BATCH = 500;
 const MAX_ISSUES_SHOWN = 50;
 /** Tekshirish oynasidagi jadvalda birinchi bo'lib shuncha qator ko'rsatiladi ("hammasi" bilan ochiladi). */
 const PREVIEW_ROWS_SHOWN = 10;
-/** Moslashda "bu maydon olinmasin" tanlovi (Radix Select bo'sh qiymatni qabul qilmaydi). */
-const SKIP = "__skip__";
+/** Ustunlarni moslash oynasidagi FAYL namunasida shuncha qator ko'rsatiladi. */
+const FILE_PREVIEW_ROWS = 4;
 /** Import qabul qiladigan fayl turlari: CSV (papaparse) va Excel (exceljs, dinamik yuklanadi). */
 const FILE_ACCEPT =
   ".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
@@ -85,7 +94,14 @@ type Mapping = {
   /** Fayl qatorlari — sarlavha bo'yicha. */
   raw: Record<string, string>[];
   /** Maydon kaliti → fayl ustuni (yoki SKIP). */
-  choice: Record<string, string>;
+  choice: Choice;
+  /**
+   * CSV faylning o'qilgan matni — ajratgich qo'lda o'zgartirilganda fayl SHU MATNDAN qayta ajratiladi
+   * (faylni yana o'qish va kodlashni aniqlash shart emas). Excel faylda bo'lmaydi.
+   */
+  text?: string;
+  /** Qo'lda tanlangan ajratgich (`null` — avtomatik aniqlash). */
+  delimiter?: string | null;
 };
 
 type Preview = {
@@ -306,7 +322,11 @@ export default function CsvToolbar({
   const norm = (value: string) => value.trim().replace(/\*+$/, "").trim().toLowerCase().replace(/\s+/g, " ");
 
   /** O'qilgan fayl (CSV ham, Excel ham) shu yerga keladi: namuna qatori tashlanadi va ustunlar avtomat moslanadi. */
-  const acceptParsed = (fields: string[], rows: Record<string, string>[]) => {
+  const acceptParsed = (
+    fields: string[],
+    rows: Record<string, string>[],
+    source?: { text: string; delimiter: string | null },
+  ) => {
     const clean = fields.filter((field) => field.trim() !== "");
     // Shablondagi namuna qatori foydalanuvchida qolib ketsa ham import qilinmaydi
     const raw = rows.filter((row) => !isExampleRow(row, clean));
@@ -316,12 +336,28 @@ export default function CsvToolbar({
     }
     // Avtomat moslash: maydon nomlari (o'zbekcha/inglizcha) fayl sarlavhalari bilan solishtiriladi
     const byName = new Map(clean.map((field) => [norm(field), field]));
-    const choice: Record<string, string> = {};
+    const choice: Choice = {};
     for (const column of columns) {
       const hit = column.aliases.map((alias) => byName.get(norm(alias))).find(Boolean);
       choice[column.key] = hit ?? SKIP;
     }
-    setMapping({ fields: clean, raw, choice });
+    setMapping({ fields: clean, raw, choice, text: source?.text, delimiter: source?.delimiter ?? null });
+  };
+
+  /** CSV matnini ajratgich bilan (yoki avtomatik) ustunlarga ajratadi. */
+  const parseCsvText = (text: string, delimiter: string | null) =>
+    Papa.parse<Record<string, string>>(text, {
+      header: true,
+      skipEmptyLines: true,
+      ...(delimiter ? { delimiter } : {}),
+    });
+
+  /** "Ajratgich" tugmalari: fayl SHU MATNDAN qayta ajratiladi va moslash qaytadan taklif qilinadi. */
+  const changeDelimiter = (delimiter: string | null) => {
+    const text = mapping?.text;
+    if (text === undefined) return;
+    const parsed = parseCsvText(text, delimiter);
+    acceptParsed(parsed.meta.fields ?? [], parsed.data, { text, delimiter });
   };
 
   const handleFile = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -344,11 +380,11 @@ export default function CsvToolbar({
     setBusy("preview");
     void readTextFile(file)
       .then(({ text, encoding }) => {
-        const parsed = Papa.parse<Record<string, string>>(text, { header: true, skipEmptyLines: true });
+        const parsed = parseCsvText(text, null);
         if (encoding !== "utf-8") {
           toast.info(`Fayl ${encoding.toUpperCase()} kodlashida o'qildi — matn to'g'ri ko'rinishiga ishonch hosil qiling`);
         }
-        acceptParsed(parsed.meta.fields ?? [], parsed.data);
+        acceptParsed(parsed.meta.fields ?? [], parsed.data, { text, delimiter: null });
       })
       .catch(() => toast.error("CSV faylni o'qib bo'lmadi"))
       .finally(() => setBusy(null));
@@ -712,7 +748,7 @@ export default function CsvToolbar({
 
       {mapping && (
         <Dialog open onOpenChange={(open) => !open && setMapping(null)}>
-          <DialogContent className="sm:max-w-xl" data-testid="csv-mapping">
+          <DialogContent className="sm:max-w-4xl" data-testid="csv-mapping">
             <DialogHeader>
               <DialogTitle>Ustunlarni moslash</DialogTitle>
               <DialogDescription>
@@ -725,7 +761,82 @@ export default function CsvToolbar({
               </p>
             </DialogHeader>
 
-            <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+            {/* Ajratgich: fayl ustunlarga ajralmagan bo'lsa shu yerdan qo'lda tanlanadi */}
+            {mapping.text !== undefined && (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Ajratgich:</span>
+                {DELIMITERS.map((option) => (
+                  <Button
+                    key={option.slug}
+                    size="sm"
+                    variant={(mapping.delimiter ?? null) === option.value ? "default" : "secondary"}
+                    className="h-7 text-xs"
+                    data-testid={`csv-delimiter-${option.slug}`}
+                    onClick={() => changeDelimiter(option.value)}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+                {mapping.fields.length <= 1 && (
+                  <span className="flex items-center gap-1 text-destructive">
+                    <AlertTriangle className="size-3.5" /> Fayl ustunlarga ajralmadi — ajratgichni tanlang
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Fayl namunasi: qaysi ustunda nima turgani ko'rinadi va shu yerdan belgilash mumkin */}
+            <div className="w-full max-h-52 overflow-auto rounded-lg border border-border" data-testid="csv-file-preview">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-muted/60 backdrop-blur">
+                  <tr>
+                    {mapping.fields.map((field) => {
+                      const owner = columnOwner(mapping.choice, field);
+                      return (
+                        <th key={field} className="min-w-40 px-2 py-1.5 text-left align-top font-medium">
+                          <span className="block truncate" title={field}>{field}</span>
+                          <Select
+                            value={owner ?? SKIP}
+                            onValueChange={(next) =>
+                              setMapping((current) =>
+                                current
+                                  ? { ...current, choice: assignByColumn(current.choice, field, next === SKIP ? null : next) }
+                                  : current,
+                              )
+                            }
+                          >
+                            <SelectTrigger className="mt-1 h-7 w-full text-xs" data-testid={`csv-column-${field}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent position="popper">
+                              <SelectItem value={SKIP}>— olinmasin —</SelectItem>
+                              {columns.map((column) => (
+                                <SelectItem key={column.key} value={column.key}>{label(column)}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {mapping.raw.slice(0, FILE_PREVIEW_ROWS).map((row, index) => (
+                    <tr key={index}>
+                      {mapping.fields.map((field) => (
+                        <td key={field} className="px-2 py-1 align-top" title={row[field] ?? ""}>
+                          <span className="block max-w-56 truncate">
+                            {row[field] ?? <span className="text-muted-foreground">—</span>}
+                          </span>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="max-h-[35vh] space-y-2 overflow-y-auto pr-1">
               {columns.map((column) => {
                 const label = column.aliases[0] ?? column.key;
                 const value = mapping.choice[column.key] ?? SKIP;
@@ -737,24 +848,32 @@ export default function CsvToolbar({
                         Qabul qilinadi: {column.aliases.join(", ")}
                       </p>
                     </div>
-                    <Select
-                      value={value}
-                      onValueChange={(next) =>
-                        setMapping((current) =>
-                          current ? { ...current, choice: { ...current.choice, [column.key]: next } } : current,
-                        )
-                      }
-                    >
-                      <SelectTrigger className="w-full" id={`csv-map-${column.key}`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent position="popper">
-                        <SelectItem value={SKIP}>— o'tkazib yuborish —</SelectItem>
-                        {mapping.fields.map((field) => (
-                          <SelectItem key={field} value={field}>{field}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="min-w-0">
+                      <Select
+                        value={value}
+                        onValueChange={(next) =>
+                          setMapping((current) =>
+                            current ? { ...current, choice: assignColumn(current.choice, column.key, next) } : current,
+                          )
+                        }
+                      >
+                        <SelectTrigger className="w-full" id={`csv-map-${column.key}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent position="popper">
+                          <SelectItem value={SKIP}>— o'tkazib yuborish —</SelectItem>
+                          {mapping.fields.map((field) => (
+                            <SelectItem key={field} value={field}>{field}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {/* Namuna qiymatlar: noto'g'ri ustun tanlansa darrov bilinadi */}
+                      {value !== SKIP && (
+                        <p className="mt-1 truncate text-[11px] text-muted-foreground" title={sampleValues(mapping.raw, value, 5).join(", ")}>
+                          {sampleValues(mapping.raw, value).join(", ") || "faylda bu ustun bo'sh"}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -781,6 +900,7 @@ export default function CsvToolbar({
 
             <p className="text-xs text-muted-foreground">
               Faylda {mapping.raw.length} ta qator, {mapping.fields.length} ta ustun topildi.
+              {mapping.raw.length > FILE_PREVIEW_ROWS && ` Jadvalda birinchi ${FILE_PREVIEW_ROWS} ta qator ko'rsatildi.`}
             </p>
 
             <DialogFooter>

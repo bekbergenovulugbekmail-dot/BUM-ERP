@@ -60,6 +60,50 @@ function renderToolbar() {
   return input as HTMLInputElement;
 }
 
+describe("Import — ustunlarni moslash oynasi", () => {
+  it("fayl namunasi ko'rinadi: ustunlar, birinchi qatorlar va maydon tagida namuna qiymat", async () => {
+    const input = renderToolbar();
+    fireEvent.change(input, { target: { files: [new File([cp1251(FILE)], "mijozlar.csv", { type: "text/csv" })] } });
+
+    await screen.findByTestId("csv-mapping");
+    expect(screen.getByTestId("csv-delimiter-semicolon")).toBeInTheDocument();
+    const preview = screen.getByTestId("csv-file-preview");
+
+    // Sarlavhalar — fayldagi ustunlar; har birida "bu ustun qaysi maydon" tanlovi bor
+    const headers = within(preview).getAllByRole("columnheader").map((cell) => cell.textContent);
+    expect(headers.map((text) => text?.split("Nomi")[0] ?? text)).toHaveLength(4);
+    expect(within(preview).getByTestId("csv-column-Telefon")).toBeInTheDocument();
+    expect(within(preview).getByTestId("csv-column-Manzil")).toBeInTheDocument();
+
+    // Fayl qatorlari aynan o'z ustunida ko'rinadi (kirill matn buzilmagan)
+    const rows = within(preview).getAllByRole("row").slice(1);
+    expect(rows.map((row) => within(row).getAllByRole("cell").map((cell) => cell.textContent))).toEqual([
+      ["Имона Маркет", "Yuridik Shaxs", "+998995086866", "Гулд бургер ёни"],
+      ["Нурия ун оптом", "Yuridik Shaxs", "+998999631212", "Асадбек тойхона ёни"],
+    ]);
+
+    // Maydon tagida o'sha ustunning namuna qiymatlari
+    expect(screen.getByText("+998995086866, +998999631212")).toBeInTheDocument();
+  });
+
+  it("ajratgichni qo'lda tanlash: fayl qayta ajratiladi", async () => {
+    const input = renderToolbar();
+    fireEvent.change(input, { target: { files: [new File([cp1251(FILE)], "mijozlar.csv", { type: "text/csv" })] } });
+    await screen.findByTestId("csv-mapping");
+    // Tab bilan ajratilgan fayl 4 ta ustunga bo'lindi
+    expect(within(screen.getByTestId("csv-file-preview")).getAllByRole("columnheader")).toHaveLength(4);
+
+    // Nuqtali vergul — bu faylda yo'q, ya'ni hamma narsa bitta ustunga tushadi va ogohlantirish chiqadi
+    fireEvent.click(screen.getByTestId("csv-delimiter-semicolon"));
+    expect(within(screen.getByTestId("csv-file-preview")).getAllByRole("columnheader")).toHaveLength(1);
+    expect(screen.getByText(/Fayl ustunlarga ajralmadi/)).toBeInTheDocument();
+
+    // Tabulyatsiyaga qaytarilsa — yana 4 ta ustun
+    fireEvent.click(screen.getByTestId("csv-delimiter-tab"));
+    expect(within(screen.getByTestId("csv-file-preview")).getAllByRole("columnheader")).toHaveLength(4);
+  });
+});
+
 describe("Import — tekshirish oynasidagi jadval", () => {
   it("qiymatlar moslangan maydonlar ostida ko'rinadi (kirill matn buzilmaydi)", async () => {
     const input = renderToolbar();
