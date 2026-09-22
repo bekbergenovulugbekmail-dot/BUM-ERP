@@ -8,7 +8,7 @@
  * Bootstrap sahifasi yo'q: birinchi (bootstrap) admin serverda `.env` + `db:seed` orqali yaratiladi.
  */
 import { useState } from "react";
-import { useParams, Link, Navigate } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { motion } from "motion/react";
 import {
   LayoutDashboard, Building2, Users, ListChecks,
@@ -69,16 +69,18 @@ function AdminSurface() {
 
 // ─── App subdomain: /admin route with simple guard ───────────────────────────
 function AdminDashboardGuarded() {
-  const { lng = "uz" } = useParams<{ lng: string }>();
   const currentUser = useCurrentUser();
 
   if (currentUser === undefined) return <AdminSkeleton />;
-  // Platforma admini uchun alohida kirish sahifasi — shu yerning o'zida
-  if (currentUser === null) return <Navigate to={`/${lng}/admin`} replace />;
-
-  if (!currentUser.isPlatformAdmin) {
-    return <AccessDenied lng={lng} showBack />;
-  }
+  /**
+   * Kirilmagan yoki platforma admini bo'lmagan hisob — SHU YERNING O'ZIDA admin kirish sahifasi
+   * (`AdminLoginPage` kirish formasini yoki "boshqa akkaunt bilan kiring" ni ko'rsatadi).
+   *
+   * Ilgari kirilmagan foydalanuvchi `/{lng}/admin` ga yo'naltirilardi — ya'ni O'ZIGA O'ZI: brauzer
+   * cheksiz aylanib, oq ekran chiqardi. Kompaniya egasi esa "Kirish taqiqlangan" da qolib ketardi,
+   * admin hisobiga o'tish tugmasi yo'q edi.
+   */
+  if (!currentUser?.isPlatformAdmin) return <AdminLoginPage />;
 
   return <AdminDashboard />;
 }
@@ -189,29 +191,6 @@ function AdminDashboard() {
 }
 
 // ─── Shared: Access Denied ────────────────────────────────────────────────────
-function AccessDenied({ lng, showBack = false }: { lng: string; showBack?: boolean }) {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-[oklch(0.10_0.02_255)]">
-      <div className="text-center space-y-4">
-        <div className="h-16 w-16 rounded-2xl bg-destructive/10 flex items-center justify-center mx-auto">
-          <Shield className="h-8 w-8 text-destructive" />
-        </div>
-        <h1 className="text-xl font-bold text-white">Kirish taqiqlangan</h1>
-        <p className="text-sm text-white/50">Bu sahifa faqat platforma adminlari uchun</p>
-        {showBack && (
-          <Link
-            to={`/${lng}/dashboard`}
-            className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Dashboardga qaytish
-          </Link>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ─── Loading skeleton ─────────────────────────────────────────────────────────
 function AdminSkeleton() {
   return (
