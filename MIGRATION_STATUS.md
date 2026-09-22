@@ -3443,6 +3443,37 @@ bo'yicha `eslint --max-warnings=0` toza.
 o'zgarmagan. Bundle `index--P2dwF5a.js` → **`index-DlsY21XF.js`**; yuklab olingan bundle ichida
 `csv-file-preview`, "Fayl ustunlarga ajralmadi" va "olinmasin" matnlari topildi.
 
+## Foydalanuvchini kompaniyadan chiqarish (2026-09-22)
+
+Egasining bildirgani: Sozlamalar → Foydalanuvchilarda Kadrlar kartochkasi bo'lmagan foydalanuvchi
+("Xodim biriktirilmagan") osilib qolgan — na o'chirib bo'ladi, na Xodimlar ro'yxatida ko'rinadi.
+Sabab: ro'yxat `company_members` dan chiqadi, Xodimlar esa `employees` dan; a'zolikni O'CHIRISH yo'li
+umuman yo'q edi (faqat "bloklash").
+
+**`DELETE /api/company/employees/:userId`** (kompaniya egasi, `ownerRemoveMember`):
+- a'zolik yozuvi o'chadi, sessiyalar bekor qilinadi, kassa qurilmasidagi kassir bog'lanishlari yopiladi;
+- litsenziya `revoke` rejimida bekor qilinadi — included o'rni bo'shaydi (to'langan `additional` ham yopiladi);
+- Kadrlar kartochkasi SAQLANADI, faqat `employees.user_id` uziladi (davomat va maosh tarixi yo'qolmaydi);
+  sotuv agenti va yetkazuvchi profillari nofaol bo'lib foydalanuvchidan uziladi;
+- hisobning o'zi (`users`) o'chirilmaydi — hujjatlar va auditdagi nomi joyida qoladi; boshqa faol
+  a'zoligi bo'lmasa hisob nofaol bo'ladi (login rad etiladi);
+- himoya `assertOwnerMayManage` da: o'zini, kompaniya egasini, to'liq huquqli rolni va platforma
+  adminini chiqarib bo'lmaydi. Audit: `MEMBER_REMOVED` (severity `warning`).
+
+**Web:** foydalanuvchi qatorida "O'chirish" tugmasi va tasdiq oynasi — nima bo'lishi aniq yozilgan
+(litsenziya bo'shaydi, tarix qoladi, Kadrlar kartochkasi saqlanadi).
+
+**Testlar:** `company.test.ts` — chiqarilgan foydalanuvchi ro'yxatdan yo'qolishi va kira olmasligi,
+`company_members` yozuvi o'chishi, hisob qolib nofaol bo'lishi, litsenziyaning `revoked` bo'lishi,
+takroriy so'rovda 404, himoya holatlari (o'zi 403, boshqa kompaniya 404, ega bo'lmagan Direktor 403) —
+**22/22 PASS**. Qo'shimcha: `hr`, `subscription`, `user-devices`, `company-owner` (**43 PASS**),
+frontend **27 fayl / 116 test PASS**; `tsc`, `eslint` (`src` va `apps/api/src`) toza.
+
+**Production (2026-09-22):** commit `9044402`; `bum-api` (deployment `203537f4`) va `bum-web`
+(deployment `500f2747`). API toza ko'tarildi (`Migratsiyalar qo'llandi (53ms)`, bitta `Server listening`,
+konteyner `878f3e0e3b18`). Web bundle `index-DlsY21XF.js` → **`index-BaVPqLfZ.js`** (tasdiq oynasi matni
+bundle ichida topildi). Migratsiya yo'q.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
