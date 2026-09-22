@@ -85,6 +85,38 @@ describe("Android orqaga tugmasi", () => {
     stop();
   });
 
+  it("kamera kabi to'liq ekranli oyna ham avval yopiladi", async () => {
+    document.body.innerHTML = '<div role="dialog" aria-modal="true"></div>';
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => undefined);
+    const keys: string[] = [];
+    document.addEventListener("keydown", (event) => keys.push(event.key));
+
+    const stop = listenAndroidBack({ onConfirmExit: () => undefined });
+    await pressBack(true);
+
+    expect(keys).toContain("Escape");
+    expect(back, "oyna ochiq ekan sahifa almashmaydi").not.toHaveBeenCalled();
+    back.mockRestore();
+    stop();
+  });
+
+  it("qaytadigan joy qolmasa — tarixga tegilmaydi, chiqish taklif qilinadi", async () => {
+    // `history.length` sessiya davomida o'sadi, lekin `canGoBack` false: bu holatda
+    // `history.back()` hech narsa qilmasdi va foydalanuvchi ilovadan chiqa olmasdi
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => undefined);
+    vi.spyOn(window.history, "length", "get").mockReturnValue(9);
+    const warnings: string[] = [];
+
+    const stop = listenAndroidBack({ onConfirmExit: (message) => warnings.push(message) });
+    await pressBack(false);
+
+    expect(back).not.toHaveBeenCalled();
+    expect(warnings, "ogohlantirish chiqadi").toHaveLength(1);
+    expect(exitApp).not.toHaveBeenCalled();
+    back.mockRestore();
+    stop();
+  });
+
   it("bosh sahifada: birinchi bosish ogohlantiradi, ikkinchisi chiqaradi", async () => {
     const back = vi.spyOn(window.history, "back").mockImplementation(() => undefined);
     vi.spyOn(window.history, "length", "get").mockReturnValue(1);

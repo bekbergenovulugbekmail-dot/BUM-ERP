@@ -15,10 +15,15 @@ import { hasNativePlugin } from "./platform.ts";
 /** Ikkinchi bosish shu vaqt ichida kelsa — ilovadan chiqiladi. */
 const EXIT_WINDOW_MS = 2000;
 
-/** Ochiq modal oyna bormi (Radix `data-state="open"` qo'yadi). */
+/**
+ * Ochiq modal oyna bormi. Radix `data-state="open"` qo'yadi; ilovaning o'z to'liq ekranli
+ * oynalari (masalan rasm olish kamerasi) esa `aria-modal="true"` bilan belgilanadi.
+ */
 function openOverlay(): Element | null {
   return document.querySelector(
-    '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-radix-popper-content-wrapper] [data-state="open"]',
+    '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"],' +
+      ' [data-radix-popper-content-wrapper] [data-state="open"],' +
+      ' [role="dialog"][aria-modal="true"]',
   );
 }
 
@@ -48,8 +53,11 @@ export function listenAndroidBack({ onConfirmExit }: Options): () => void {
         document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
         return;
       }
-      // 2) Tarixda orqaga
-      if (canGoBack || window.history.length > 1) {
+      // 2) Tarixda orqaga — WebView'ning o'z ro'yxati (`canGoBack`) yagona ishonchli manba.
+      //    `history.length` ni ishlatib bo'lmaydi: u sessiya davomida faqat o'sadi, shuning uchun
+      //    qaytadigan joy qolmaganda ham "bor" deb ko'rsatardi — foydalanuvchi tugmani bosaverar,
+      //    hech narsa bo'lmasdi va ilovadan chiqish ham taklif qilinmasdi.
+      if (canGoBack) {
         window.history.back();
         return;
       }

@@ -3902,6 +3902,43 @@ Test: `src/components/camera-capture.test.tsx` (6) — kamera orqa kamera bilan 
 tanlagich umuman yo'q, kadr olinadi va tasdiqlangach yuboriladi, qayta olish, ruxsat rad etilganda
 xato, yopilganda oqim to'xtaydi.
 
+## Android: orqaga tugmasi ilovadan chiqarib yuborardi (2026-09-23)
+
+Muammo (egasi bildirdi): telefondagi ilovada apparat "orqaga" tugmasi BARCHA sahifalarda ilovadan
+chiqarib yuborardi — oldingi sahifaga qaytish o'rniga.
+
+**Ildiz sabab:** `@capacitor/app` plagini 2026-09-17 da (`7721228`) qo'shilgan va web tomondagi
+`listenAndroidBack` o'shanda yozilgan, lekin **`npx cap sync android` ishlatilmagan** — shuning uchun
+plagin native loyihaga tushmagan. Telefondagi APK (2026-09-15) ichidagi `capacitor.plugins.json`
+da faqat `background-geolocation` va `local-notifications` bor edi.
+
+Aynan shu plagin `OnBackPressedCallback` ni ro'yxatdan o'tkazadi va tugmani JS'ga uzatadi. U
+bo'lmagach Android standart yo'ldan bordi: Activity yopiladi → ilovadan chiqish. Web tomondagi kod
+to'g'ri edi, lekin `hasNativePlugin("App")` to'g'ri `false` qaytargani uchun hech narsa qilmasdi.
+
+**Tuzatildi:**
+- `npx cap sync android` — `capacitor.settings.gradle` va `capacitor.build.gradle` ga `capacitor-app`
+  qo'shildi (shu ikki fayl commitda). Endi `cap sync` natijasi repoda.
+- Debug APK qayta qurildi (JDK 21 + SDK 36, `gradlew assembleDebug`): **5.1 MB**, ichidagi
+  `capacitor.plugins.json` da endi uchala plagin bor (`@capacitor/app` qo'shildi).
+- `back-button.ts`: qaytish qarori endi FAQAT `canGoBack` (WebView ro'yxati) bo'yicha. Ilgari
+  `|| window.history.length > 1` bor edi — u sessiya davomida faqat o'sadi, shuning uchun qaytadigan
+  joy qolmaganda ham "bor" deb ko'rsatardi: `history.back()` hech narsa qilmasdi va foydalanuvchiga
+  chiqish ham taklif qilinmasdi.
+- Ochiq oyna aniqlash `[role="dialog"][aria-modal="true"]` ni ham qamraydi, kamera oynasi esa
+  Escape'da yopiladi — orqaga tugmasi endi avval kamerani yopadi, sahifani almashtirmaydi.
+
+**MUHIM:** bu tuzatish web deploy bilan telefonlarga YETMAYDI — plagin APK ichida bo'lishi shart.
+Egasi yangi debug APK'ni telefonlarga o'rnatishi kerak:
+`apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk`.
+
+Qurish uchun (JDK 21 kerak, mashinadagi 17 va 25 yaramaydi — Capacitor `source release 21` talab
+qiladi, Gradle 8.14 esa 25 ni o'qiy olmaydi): `apps/mobile` → `pnpm apk:debug` (JAVA_HOME = JDK 21,
+ANDROID_HOME = Android SDK).
+
+Test: `back-button.test.ts` ikkita yangi holat bilan (kamera oynasi avval yopiladi; qaytadigan joy
+qolmaganda tarixga tegilmay chiqish taklif qilinadi).
+
 ### Qolgan ishlar
 1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
 1a. **Bootstrap admin parolini almashtirish** (egasi, Railway o'zgaruvchisi): hozirgi parol oddiy parollar qoidasiga tushadi. Tizimga kirgan holda production smoke: realtime (dostavka xaritasi) CSP ostida, kassada kassir kirishi va qaytarish

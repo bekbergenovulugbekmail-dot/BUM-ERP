@@ -90,6 +90,15 @@ export default function CameraCapture({ title, hint, onCapture, onClose, busy = 
     if (shot) URL.revokeObjectURL(shot.url);
   }, [shot]);
 
+  /** Escape bilan yopish — Android "orqaga" tugmasi ochiq oynaga aynan shu tugmani yuboradi. */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   /** Kadrni olish: video → kanvas → JPEG fayl (uzun tomoni `MAX_SIDE` gacha kichraytiriladi). */
   const capture = () => {
     const video = videoRef.current;
