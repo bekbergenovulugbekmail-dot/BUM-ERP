@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Camera, Loader2, MapPinned, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
+import CameraCapture from "@/components/camera-capture.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -90,7 +91,7 @@ export default function CustomerPanel({ store, history }: { store: StoreProfile;
   const { t } = useTranslation("agent");
   const { can } = usePermissions();
   const [editing, setEditing] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const locate = useApiMutation(async () => api.put(`/api/sales-agent/customers/${store.id}/location`, await freshPosition()), {
     invalidate: STORE_QUERIES,
   });
@@ -139,18 +140,25 @@ export default function CustomerPanel({ store, history }: { store: StoreProfile;
         )}
         {canPhoto && (
           <>
-            <input
-              ref={input}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void run(() => photo.mutateAsync(file), t("customer.photo_added")).finally(() => input.current && (input.current.value = ""));
-              }}
-            />
-            <Button variant="secondary" className="h-14 flex-col gap-1 text-[11px]" disabled={photo.isPending} onClick={() => input.current?.click()}>
+            {/* Do'kon rasmi AYNAN shu yerda olinadi — galereyadan eski rasm yuborilmasin */}
+            {cameraOpen && (
+              <CameraCapture
+                title={t("customer.photo_add")}
+                busy={photo.isPending}
+                onClose={() => setCameraOpen(false)}
+                onCapture={async (file) => {
+                  await run(() => photo.mutateAsync(file), t("customer.photo_added"));
+                  setCameraOpen(false);
+                }}
+              />
+            )}
+            <Button
+              variant="secondary"
+              className="h-14 flex-col gap-1 text-[11px]"
+              disabled={photo.isPending}
+              data-testid="customer-photo"
+              onClick={() => setCameraOpen(true)}
+            >
               {photo.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} {t("customer.photo_add")}
             </Button>
           </>

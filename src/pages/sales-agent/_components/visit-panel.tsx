@@ -1,10 +1,11 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AlertTriangle, Ban, Camera, CheckCircle2, Clock, Loader2, PlayCircle, ShoppingCart, XCircle } from "lucide-react";
 import type { SalesAgentPolicy } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
+import CameraCapture from "@/components/camera-capture.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { api } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
@@ -18,7 +19,13 @@ import CompleteVisitDialog from "./complete-visit-dialog.tsx";
 
 const VISIT_QUERIES = ["/api/sales-agent/visits", "/api/sales-agent/stores", "/api/sales-agent/today"];
 
-/** Bitta rasm qadami: faqat kamera (`capture`), joy bilan yuklanadi; server hudud va fayl turini tekshiradi. */
+/**
+ * Bitta rasm qadami: rasm ILOVA ICHIDAGI kamerada olinadi (galereya varianti yo'q) va joy bilan
+ * yuklanadi; server hudud va fayl turini tekshiradi.
+ *
+ * Ilgari `<input type="file" capture>` ishlatilardi — u faqat maslahat bo'lgani uchun Android
+ * WebView'da galereya ochilib ketardi va agent eski rasmni yuborishi mumkin edi.
+ */
 function PhotoButton({
   visit,
   kind,
@@ -33,38 +40,37 @@ function PhotoButton({
   compact?: boolean;
 }) {
   const { t } = useTranslation("agent");
-  const input = useRef<HTMLInputElement>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const upload = useApiMutation(async (file: File) => uploadVisitPhoto(visit.id, file, kind, await freshPosition()), {
     invalidate: VISIT_QUERIES,
   });
 
-  const handleFile = async (file: File | undefined) => {
-    if (!file) return;
+  const handleFile = async (file: File) => {
     try {
       await upload.mutateAsync(file);
+      setCameraOpen(false);
       toast.success(t("visit.photo.added"));
     } catch (err) {
       toast.error(visitErrorMessage(err, t));
-    } finally {
-      if (input.current) input.current.value = "";
     }
   };
 
   return (
     <>
-      <input
-        ref={input}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => void handleFile(e.target.files?.[0])}
-      />
+      {cameraOpen && (
+        <CameraCapture
+          title={t(`visit.step.${kind}`)}
+          onCapture={handleFile}
+          onClose={() => setCameraOpen(false)}
+          busy={upload.isPending}
+        />
+      )}
       <Button
         variant={done || compact ? "secondary" : "default"}
         className={cn("w-full justify-start", compact ? "h-10 text-xs" : "h-12")}
         disabled={disabled || upload.isPending}
-        onClick={() => input.current?.click()}
+        data-testid={`visit-photo-${kind}`}
+        onClick={() => setCameraOpen(true)}
       >
         {upload.isPending ? (
           <Loader2 className="h-5 w-5 mr-2 animate-spin" />

@@ -3871,6 +3871,37 @@ Holat: `new / duplicate / error` — xato va dublikat qatorlari sababi bilan ko'
 Yangi: `delivery-partial-return` (12), `import-units-prices` (18) — API;
 `order-detail-drawer` (6), `a4-documents` (10) — frontend. **Jami 46 ta yangi test.**
 
+## Do'kon rasmlari: faqat kamera (2026-09-23)
+
+Muammo (egasi bildirdi): agent ilovasida "Vitrina rasmi", "Polka rasmi", "Joylashuv rasmi" va
+"Aksiya rasmi" bosilganda kamera emas, GALEREYA ochilardi.
+
+Sababi: kodda `<input type="file" accept="image/*" capture="environment">` ishlatilardi. `capture`
+atributi — faqat MASLAHAT: Android WebView (Capacitor) uni e'tiborsiz qoldirib fayl tanlagichni
+ochishi mumkin. Natijada agent do'konda turib emas, istalgan joydan eski rasmni yuborishi mumkin edi
+— bu tashrif isbotining ma'nosini yo'qotadi (server rasm koordinatasini geofence bilan tekshiradi).
+
+Yechim — yangi `src/components/camera-capture.tsx`: rasm ILOVA ICHIDA `getUserMedia` orqali olinadi.
+- Galereya varianti umuman yo'q (fayl tanlagich element yaratilmaydi);
+- jonli ko'rinish → tugma → kadr → ko'rib chiqish ("Qayta olish" / "Yuborish");
+- kadr kanvasda 1600 px gacha kichraytirilib JPEG (0.85) qilinadi — mobil internet uchun;
+- kadr olingach va oyna yopilgach kamera oqimi to'xtatiladi (qurilmada yonib qolmaydi);
+- old/orqa kamerani almashtirish;
+- ruxsat berilmasa yoki kamera topilmasa — ANIQ xato va "Qayta urinish"; jim galereyaga tushmaydi.
+
+Uch joyda qo'llandi: tashrif rasmlari (`sales-agent/_components/visit-panel.tsx`), do'kon rasmi
+(`sales-agent/_components/customer-panel.tsx`), yetkazish isboti rasmi
+(`delivery-agent/tasks/task-page.tsx`). Mahsulot rasmi va chek logotipi (ERP, kompyuterdan
+yuklanadi) o'zgarmadi — ular maydon isboti emas.
+
+Native tomon tayyor edi: manifestda `CAMERA` ruxsati bor, ilova HTTPS manzilni ochadi (xavfsiz
+kontekst), Capacitor WebView `RESOURCE_VIDEO_CAPTURE` so'rovini o'zi hal qiladi — yangi plagin
+qo'shilmadi, APK qayta qurish shart emas (web deploy yetarli).
+
+Test: `src/components/camera-capture.test.tsx` (6) — kamera orqa kamera bilan so'raladi, fayl
+tanlagich umuman yo'q, kadr olinadi va tasdiqlangach yuboriladi, qayta olish, ruxsat rad etilganda
+xato, yopilganda oqim to'xtaydi.
+
 ### Qolgan ishlar
 1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
 1a. **Bootstrap admin parolini almashtirish** (egasi, Railway o'zgaruvchisi): hozirgi parol oddiy parollar qoidasiga tushadi. Tizimga kirgan holda production smoke: realtime (dostavka xaritasi) CSP ostida, kassada kassir kirishi va qaytarish

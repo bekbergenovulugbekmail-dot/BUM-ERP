@@ -4,7 +4,7 @@
  * (to'liq yoki qisman) → natija → keyingi yetkazma. Yoki "yetkazib bo'lmadi" (sabab bilan).
  * Summa va buyurtma miqdorini agent o'zgartira olmaydi. Internet yo'q bo'lsa (siyosat ruxsat bersa) amal navbatga tushadi.
  */
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -18,6 +18,7 @@ import type { SplitPart } from "@/components/payments/split-payment.ts";
 import { LateBadge, PriorityBadge, QueuedBadge, StatusBadge } from "@/components/delivery/badges.tsx";
 import SignatureDialog from "@/components/delivery/signature-dialog.tsx";
 import { Button } from "@/components/ui/button.tsx";
+import CameraCapture from "@/components/camera-capture.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { ApiError, api, apiUrl } from "@/lib/api.ts";
 import { deliveryErrorMessage } from "@/lib/delivery/errors.ts";
@@ -159,7 +160,8 @@ function TaskView({ taskId }: { taskId: string }) {
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [success, setSuccess] = useState<Success | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const photoInput = useRef<HTMLInputElement>(null);
+  /** Isbot rasmi ILOVA ICHIDAGI kamerada olinadi — galereyadan eski rasm yuborilmasin. */
+  const [cameraOpen, setCameraOpen] = useState(false);
   const queued = useMemo(() => queue.items.filter((item) => item.taskId === taskId), [queue.items, taskId]);
   const task = query.data?.task;
 
@@ -252,9 +254,8 @@ function TaskView({ taskId }: { taskId: string }) {
 
   const beginHandover = () => void run("delivering", () => performAction(taskId, "delivering", newRequestBody({}), options), "action.done_delivering");
 
-  const takePhoto = (file: File | undefined) => {
-    if (!file) return;
-    void run(
+  const takePhoto = async (file: File) => {
+    await run(
       "photo",
       async () => {
         const place = await freshPosition();
@@ -264,6 +265,7 @@ function TaskView({ taskId }: { taskId: string }) {
       },
       "photo.saved",
     );
+    setCameraOpen(false);
   };
 
   const saveSignature = (signerName: string, data: string) =>
@@ -440,7 +442,14 @@ function TaskView({ taskId }: { taskId: string }) {
                     required={policy.confirmation.photo}
                     label={t("handover.photo", { count: photos })}
                     action={
-                      <Button size="sm" variant="secondary" className="h-10" disabled={busy !== null || !onDuty} onClick={() => photoInput.current?.click()}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="h-10"
+                        disabled={busy !== null || !onDuty}
+                        data-testid="delivery-photo"
+                        onClick={() => setCameraOpen(true)}
+                      >
                         {busy === "photo" ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Camera className="mr-1.5 h-4 w-4" />}
                         {t("action.photo")}
                       </Button>
@@ -476,18 +485,14 @@ function TaskView({ taskId }: { taskId: string }) {
                 {policy.confirmation.otp && (
                   <CheckRow done={task.otpVerified} required label={task.otpIssued ? t("handover.otp_issued") : t("handover.otp_missing")} />
                 )}
-                <input
-                  ref={photoInput}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = "";
-                    takePhoto(file);
-                  }}
-                />
+                {cameraOpen && (
+                  <CameraCapture
+                    title={t("action.photo")}
+                    busy={busy === "photo"}
+                    onClose={() => setCameraOpen(false)}
+                    onCapture={takePhoto}
+                  />
+                )}
               </div>
               {can("delivery.confirm") && (
                 <BigButton
