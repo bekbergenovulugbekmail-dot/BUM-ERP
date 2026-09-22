@@ -3672,6 +3672,56 @@ boshlang'ich mablag' kerakligi) — ular tuzatilib qayta ishlatildi.
 - APK: debug 5.1 MB (debug imzo) va release 3.9 MB (imzosiz) — **qurildi**; release imzosi — **tayyor emas** (kalit yo'q)
 - real qurilmada test — **qilinmagan**
 
+## Real biznes qabul testi: ulgurji va distributor (2026-09-22)
+
+Egasining ikkinchi topshirig'i bo'yicha yana ikki biznes uchidan-uchigacha sinovdan o'tkazildi.
+**Production bazasiga tegilmadi**: lokal `bumerp_test` bazasida, ikki alohida test tenantida
+(`TEST-03-WHOLESALE`, `TEST-04-DISTRIBUTOR`) — yangi `apps/api/test/acceptance-wholesale.test.ts`
+(**19 faza, hammasi PASS**) va `apps/api/test/acceptance-distributor.test.ts` (**19 faza, hammasi PASS**).
+
+### BUSINESS 03 — ULGURJI SAVDO (`TEST-03-WHOLESALE`)
+Zanjir: ta'minotchi → ombor → ulgurji mijoz → kredit → to'lov → qarz → buxgalteriya → hisobot.
+Qamrov: 5 rol va ruxsat chegaralari; 3 ta'minotchi, 5 kredit limitli mijoz, 50 mahsulot va birlik
+konversiyasi; katta xaridlar; **AVCO** uch xil narxdan o'rtacha (tavsiya narxni o'zgartirmaydi);
+besh B2B buyurtma (tasdiq → zaxira → jo'natish); 1000+ donalik buyurtma; kredit limitidan oshiq
+buyurtma rad etiladi; qisman to'lov va bir xil `reference` bilan takroriy to'lov **200** (qarz ikki
+marta kamaymaydi); aralash naqd+bank to'lov; mijoz qaytarishi (takror qaytarish yo'q); ta'minotchiga
+qisman va aralash to'lov; besh xarajat moddasi; omborlararo o'tkazma (jami qoldiq o'zgarmaydi);
+inventar nazorati — qo'lda ERP buyurtmasi `best_effort` (yo'q tovar **oldindan buyurtma**, zaxira
+band qilinmaydi, jo'natish to'xtaydi, bekor qilish zaxirani bo'shatadi); jurnal, aylanma balans va
+kassa qoldig'i solishtirildi; hisobot summalari baza bilan AYNAN teng; kun yakuni.
+
+### BUSINESS 04 — DISTRIBUTOR (`TEST-04-DISTRIBUTOR`)
+Zanjir: ta'minotchi → ombor → savdo agenti → hudud → marshrut → mijoz → **tashrif** → buyurtma →
+ombor jo'natishi → yetkazuvchi → yetkazish → to'lov → qarz → buxgalteriya → hisobot.
+Qamrov: 6 rol; 50 mahsulot (dona/blok konversiyasi); 3 ta'minotchi; hudud ma'lumotnomasi
+(Xorazm viloyati → Urganch/Xiva/Xonqa/Shovot); 5 marshrut, 2 agent va hafta kuni; 20 mijoz +
+CSV import + tezkor qo'shish (hududi ko'rsatilgan import mijozi o'sha hudud marshrutiga tushadi);
+agent ish joyi izolyatsiyasi (o'z marshrutlari va do'konlari, purchase/finance/tannarx — 403).
+
+**To'liq tashrif oqimi standart siyosat bilan tekshirildi** (hech narsa o'chirilmadi): ish sessiyasi
+boshlanmasa tashrif yo'q (`work_session_required`); geofence tashqarisida tashrif yo'q (403);
+begona agentning do'koni — 404; buyurtma yuborishda ketma-ket **vitrina rasmi → polka rasmi →
+do'konda minimal 10 daqiqa** talab qilinadi; buyurtma yuborilgach tashrif `completed/ordered` bilan
+avtomatik yopiladi. Buyurtmasiz tashrif sabab bilan yopiladi va hisobotga tushadi.
+
+Yetkazish: READY → ASSIGNED → ACCEPTED → OUT → ARRIVED → DELIVERED to'liq o'tildi; yetkazuvchi
+ish sessiyasini boshlamasa yo'lga chiqa olmaydi (`work_session_required`); yetkazilmagan buyurtma
+**FAILED** — qoldiq va qarz o'zgarmaydi; **qisman yetkazish** (70/100) va qolgani uchun qayta
+yetkazma. SOTUV ≠ YETKAZISH ≠ TO'LOV har bosqichda tasdiqlandi.
+
+**Natija:** BUSINESS 03 — **ACCEPTED** (19/19), BUSINESS 04 — **ACCEPTED** (19/19).
+`reserved_qty <= quantity`, `quantity >= 0` va jurnalda debet = kredit (umumiy va HAR BIR yozuv
+ichida) har fazadan keyin tekshirildi. **Mahsulot kodida XATO TOPILMADI** — barcha dastlabki
+muvaffaqiyatsizliklar testning o'zidagi noto'g'ri API shakllari yoki noto'g'ri kutilgan qiymatlar
+edi (agent/kuryer ish sessiyasi, tashrif rasmlari va minimal vaqt, nasiya buyurtmasida to'lov
+muddati, `delivering` amali joysiz, import mijozining marshruti).
+
+Regressiya: `acceptance-real-world` (35), `acceptance-wholesale` (19), `acceptance-distributor` (19),
+`sales-agent-*` (visit-flow, orders, visits, work-session, stores, reports, security),
+`delivery-*` (flow, security, redelivery, tracking), `distribution`, `territories`,
+`distribution-customer-import`, `sales-payments` — **hammasi PASS**; `tsc` va `eslint` toza.
+
 ### Qolgan ishlar
 1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
 1a. **Bootstrap admin parolini almashtirish** (egasi, Railway o'zgaruvchisi): hozirgi parol oddiy parollar qoidasiga tushadi. Tizimga kirgan holda production smoke: realtime (dostavka xaritasi) CSP ostida, kassada kassir kirishi va qaytarish
