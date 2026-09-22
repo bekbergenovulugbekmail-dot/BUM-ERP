@@ -3579,6 +3579,18 @@ tashrif va tashrif savdosi esa alohida kartochkalarda.
 **Production (2026-09-22):** commit `bda8941`; faqat `bum-web` (deployment `e173a832`), bundle
 `index-DJa857Ky.js` → **`index-Dt2XeHtK.js`** — eski "Faol marshrutlar" matni bundle ichida yo'q.
 
+## Biznes manzili sahifasida namuna "bum" (2026-09-22)
+
+`app.bum-erp.uz` ochilganda "Biznes manzili" so'raladi va namuna sifatida `bonnu-market` — bitta
+mijoz biznesining nomi — ko'rsatilardi. Egasining so'rovi bo'yicha namuna **`bum`** ga o'zgartirildi
+(izoh matnida ham, maydon placeholder'ida ham). Faqat ko'rinish: manzilni tekshirish va yo'naltirish
+mantig'i o'zgarmagan.
+
+**Tekshirilgani:** frontend **28 fayl / 118 test PASS**, `tsc` va `eslint` toza.
+**Production (2026-09-22):** commit `62507ef`; faqat `bum-web` (deployment `cba8ee97`), bundle
+`index-Dt2XeHtK.js` → **`index-a8jxZSdv.js`**; bundle ichida `placeholder:`bum`` va izohdagi `bum`
+tasdiqlandi (`railway up` ikki marta "operation timed out" berdi, uchinchi urinishda o'tdi).
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
