@@ -3535,6 +3535,28 @@ Modullar → CRM. Mijozlar ro'yxati CRM ga ko'chirilgani uchun bu qadam **hozir 
 Ochiq taklif (bajarilmagan): kompaniya egasiga o'z tarifidagi modullarni yoqish huquqini berish — egasi
 xohlasa alohida ish sifatida qilinadi.
 
+## Admin panel: `/uz/admin` oq ekran tuzatildi (2026-09-22)
+
+Egasi `app.bum-erp.uz/uz/admin` ni ochganda OQ EKRAN chiqdi (ekran surati). Sabab `AdminDashboardGuarded`
+da: kirilmagan foydalanuvchi `/{lng}/admin` ga yo'naltirilardi — ya'ni O'ZIGA O'ZIGA; React Router cheksiz
+aylanib hech narsa chizmasdi. Kompaniya egasi (platforma admini emas) esa "Kirish taqiqlangan" ekranida
+qolib ketardi — admin hisobiga o'tish tugmasi yo'q edi.
+
+**Yechim:** ikkala holatda ham shu yerning o'zida `AdminLoginPage` ko'rsatiladi (admin subdomenidagi
+bilan bir xil): kirilmagan bo'lsa kirish formasi, kirgan bo'lsa "Kirish taqiqlangan" va
+"Boshqa akkaunt bilan kiring" tugmasi. Ishlatilmay qolgan `AccessDenied` olib tashlandi.
+
+**Test:** yangi `src/pages/admin/page.test.tsx` — kirilmagan holatda kirish formasi chiziladi (oq ekran
+emas), admin bo'lmagan hisob esa boshqa akkauntga o'tish tugmasini ko'radi. Frontend to'plami:
+**28 fayl / 118 test PASS**, `tsc` va `eslint` toza.
+
+**Production (2026-09-22):** commit (admin tuzatish) `bum-web` (deployment `633426b4`),
+bundle `index-CyXr6YGd.js` → **`index-DJa857Ky.js`**; `https://app.bum-erp.uz/uz/admin` → 200 va bundle
+ichida kirish formasi matni bor, eski "Bu sahifa faqat platforma adminlari uchun" matni yo'q.
+
+Endi CRM modulini yoqish yo'li ochiq: `/uz/admin` → platforma admini (`+998999635353`) bilan kirish →
+Kompaniyalar → Ezo → Modullar → CRM.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
