@@ -8,11 +8,15 @@
  * Ism va telefon — hisob darajasidagi ma'lumot: xodim boshqa kompaniyaga ham a'zo bo'lsa,
  * ularni faqat platforma admini o'zgartiradi. Telefon (login) o'zgarsa xodimning barcha sessiyalari yopiladi.
  */
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { badRequest, notFound } from "@bum/shared";
 import { categories } from "../../db/schema/catalog.js";
+import { salesReps } from "../../db/schema/crm.js";
+import { employees } from "../../db/schema/hr.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import { branches, companyMembers, roles, users } from "../../db/schema/platform.js";
+import { posDeviceCashiers } from "../../db/schema/pos.js";
+import { setDeliveryAgentsActiveForUser } from "../delivery/work-session.repo.js";
 import type { Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { revokeUserSessions, type SessionUser } from "../auth/session.js";
@@ -221,4 +225,95 @@ export async function ownerUpdateMember(
     },
   });
   return updated!;
+}
+
+/**
+ * Foydalanuvchini KOMPANIYADAN butunlay chiqarish (ro'yxatdan o'chirish).
+ *
+ * Ilgari faqat "nofaol" qilish bor edi: Kadrlar kartochkasisiz qolgan foydalanuvchi ro'yxatda abadiy
+ * osilib turardi — na o'chirib bo'lardi, na Xodimlarda ko'rinardi. Endi a'zolik yozuvi o'chiriladi.
+ *
+ * Hisobning O'ZI (`users`) o'chirilmaydi: uning nomi hujjatlar va audit tarixida qoladi. Boshqa faol
+ * a'zoligi bo'lmasa hisob nofaol bo'ladi — login rad etiladi. Litsenziya butunlay bekor qilinadi
+ * (included bo'shaydi), sessiyalar va kassa qurilmasidagi bog'lanishlar yopiladi, Kadrlar kartochkasi
+ * esa saqlanib, faqat login bog'lanishi uziladi.
+ *
+ * Himoya `assertOwnerMayManage` da: o'zini, kompaniya egasini, to'liq huquqli rolni va platforma
+ * adminini chiqarib bo'lmaydi.
+ */
+export async function ownerRemoveMember(
+  tx: Tx,
+  owner: SessionUser,
+  company: OwnedCompany,
+  userId: string,
+  meta: RequestMeta,
+) {
+  const target = await loadUserForUpdate(tx, userId);
+  await assertOwnerMayManage(tx, company, owner, target, "membership");
+
+  const [membership] = await tx
+    .select({ id: companyMembers.id, companyRole: companyMembers.companyRole })
+    .from(companyMembers)
+    .where(and(eq(companyMembers.companyId, company.id), eq(companyMembers.userId, target.id)))
+    .limit(1)
+    .for("update");
+  if (!membership) throw notFound("Xodim topilmadi");
+
+  await releaseLicense(tx, {
+    companyId: company.id,
+    userId: target.id,
+    actor: owner,
+    meta,
+    mode: "revoke",
+    reason: "Foydalanuvchi kompaniyadan chiqarildi",
+  });
+
+  // Kadrlar kartochkasi qoladi — faqat login bog'lanishi uziladi (davomat va maosh tarixi yo'qolmaydi)
+  const unlinked = await tx
+    .update(employees)
+    .set({ userId: null, updatedAt: new Date() })
+    .where(and(eq(employees.companyId, company.id), eq(employees.userId, target.id)))
+    .returning({ id: employees.id });
+
+  // Agent profillari loginsiz qolmasin: bog'lanish uziladi va profil nofaol bo'ladi
+  await tx
+    .update(salesReps)
+    .set({ userId: null, isActive: false, updatedAt: new Date() })
+    .where(and(eq(salesReps.companyId, company.id), eq(salesReps.userId, target.id)));
+  await setDeliveryAgentsActiveForUser(tx, company.id, target.id, false);
+
+  await tx
+    .update(posDeviceCashiers)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(posDeviceCashiers.companyId, company.id),
+        eq(posDeviceCashiers.userId, target.id),
+        isNull(posDeviceCashiers.revokedAt),
+      ),
+    );
+
+  await tx.delete(companyMembers).where(eq(companyMembers.id, membership.id));
+  await revokeUserSessions(tx, target.id);
+
+  // Boshqa kompaniyada faol a'zoligi bo'lmasa — hisob nofaol (yetim hisob login qila olmaydi)
+  const [otherMembership] = await tx
+    .select({ id: companyMembers.id })
+    .from(companyMembers)
+    .where(
+      and(eq(companyMembers.userId, target.id), ne(companyMembers.companyId, company.id), eq(companyMembers.isActive, true)),
+    )
+    .limit(1);
+  if (!otherMembership) {
+    await tx.update(users).set({ isActive: false, updatedAt: new Date() }).where(eq(users.id, target.id));
+  }
+
+  await auditUserAction(tx, owner, meta, {
+    action: "MEMBER_REMOVED",
+    targetId: target.id,
+    companyId: company.id,
+    severity: "warning",
+    details: { role: membership.companyRole, unlinkedEmployee: unlinked.length > 0 },
+  });
+  return { userId: target.id, unlinkedEmployee: unlinked.length > 0 };
 }

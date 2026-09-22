@@ -5,7 +5,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ALL_PERMISSIONS, DEFAULT_ROLES } from "@bum/shared";
 import { closeDb, db } from "../src/db/client.js";
 import { warehouses } from "../src/db/schema/inventory.js";
-import { auditLogs, branches, companies, companyMembers, roles } from "../src/db/schema/platform.js";
+import { auditLogs, branches, companies, companyMembers, roles, users } from "../src/db/schema/platform.js";
+import { licenses } from "../src/db/schema/subscription.js";
 import { buildServer } from "../src/server.js";
 import { createCompany, login, me, resetDatabase, signedIn, uniquePhone } from "./helpers.js";
 
@@ -32,7 +33,7 @@ beforeEach(async () => {
   companyB = await createCompany(app, admin.cookie, { name: "B kompaniya" });
 });
 
-const api = (cookie: string, method: "GET" | "POST" | "PATCH", url: string, payload?: object) =>
+const api = (cookie: string, method: "GET" | "POST" | "PATCH" | "DELETE", url: string, payload?: object) =>
   app.inject({ method, url: `/api/company${url}`, headers: { cookie }, ...(payload ? { payload } : {}) });
 
 /** Kompaniyaga berilgan roldagi xodim qo'shadi va uni tizimga kiritadi. */
@@ -250,6 +251,45 @@ describe("A'zoni yangilash", () => {
     expect((await api(xodim.cookie, "GET", "")).statusCode).toBe(403);
     expect((await api(companyA.ownerCookie, "PATCH", `/employees/${xodim.id}`, { isActive: true })).statusCode).toBe(200);
     expect((await api(xodim.cookie, "GET", "")).statusCode).toBe(200);
+  });
+
+  it("kompaniyadan chiqarish: a'zolik o'chadi, hisob va tarix qoladi, litsenziya bo'shaydi", async () => {
+    const xodim = await employeeOf(companyA, "Kassir");
+    expect((await api(xodim.cookie, "GET", "")).statusCode).toBe(200);
+
+    const removed = await api(companyA.ownerCookie, "DELETE", `/employees/${xodim.id}`);
+    expect(removed.statusCode, removed.body).toBe(200);
+
+    // Ro'yxatdan chiqdi va kira olmaydi
+    const list = (await api(companyA.ownerCookie, "GET", "/employees")).json().employees as { id: string }[];
+    expect(list.some((row) => row.id === xodim.id)).toBe(false);
+    expect((await api(xodim.cookie, "GET", "")).statusCode).toBe(401);
+    expect(await db.select().from(companyMembers).where(eq(companyMembers.userId, xodim.id))).toHaveLength(0);
+
+    // Hisob o'chirilmaydi (hujjatlardagi nomi yo'qolmasin), lekin nofaol
+    const [account] = await db.select().from(users).where(eq(users.id, xodim.id));
+    expect(account).toMatchObject({ isActive: false });
+
+    // Litsenziya bekor qilindi — o'rni bo'shadi
+    const userLicenses = await db.select().from(licenses).where(eq(licenses.userId, xodim.id));
+    expect(userLicenses.every((row) => row.status === "revoked")).toBe(true);
+
+    const [audit] = await audits("MEMBER_REMOVED");
+    expect(audit!.details).toMatchObject({ role: "Kassir" });
+
+    // Takroriy o'chirish — endi bunday a'zo yo'q
+    expect((await api(companyA.ownerCookie, "DELETE", `/employees/${xodim.id}`)).statusCode).toBe(404);
+  });
+
+  it("chiqarish himoyasi: o'zini, egalik rolini, boshqa kompaniya xodimini va ega bo'lmagan Direktor chiqara olmaydi", async () => {
+    expect((await api(companyA.ownerCookie, "DELETE", `/employees/${companyA.owner.id}`)).statusCode).toBe(403);
+
+    const other = await employeeOf(companyB);
+    expect((await api(companyA.ownerCookie, "DELETE", `/employees/${other.id}`)).statusCode).toBe(404);
+
+    const direktor = await employeeOf(companyA, "Direktor");
+    const xodim = await employeeOf(companyA);
+    expect((await api(direktor.cookie, "DELETE", `/employees/${xodim.id}`)).statusCode).toBe(403);
   });
 
   it("o'zini, boshqa kompaniya xodimini o'zgartirmaydi; ega bo'lmagan Direktor ham", async () => {

@@ -14,6 +14,7 @@
  *   GET    /employees                   a'zolar                           (users.view)
  *   POST   /employees                   xodim qo'shish                    (kompaniya egasi)
  *   PATCH  /employees/:userId           rol, filial, ombor, holat         (kompaniya egasi)
+ *   DELETE /employees/:userId           kompaniyadan chiqarish            (kompaniya egasi)
  *   POST   /employees/:userId/password  parolni tiklash                   (kompaniya egasi)
  *   GET    /roles                       kompaniya rollari                 (a'zo)
  *   POST   /roles                       rol yaratish                      (roles.manage)
@@ -55,7 +56,7 @@ import {
   updateBranch,
   updateCompany,
 } from "./company.service.js";
-import { ownerUpdateMember } from "./member.service.js";
+import { ownerRemoveMember, ownerUpdateMember } from "./member.service.js";
 import { moneySchema } from "../../shared/decimal.js";
 // Xodim qo'shish bitta joyda: rolga qarab agent yoki yetkazuvchi profili ham shu yerda yaratiladi
 import { SALES_AGENT_ROLE, createSalesAgent } from "../sales-agent/team.service.js";
@@ -433,6 +434,18 @@ export async function companyRoutes(app: FastifyInstance): Promise<void> {
         isActive: member.isActive,
       },
     };
+  });
+
+  /** Foydalanuvchini kompaniyadan butunlay chiqarish (a'zolik o'chadi, hisob va tarix qoladi). */
+  app.delete("/employees/:userId", async (req, reply) => {
+    const { userId } = userParams.parse(req.params);
+    const { user } = authOf(req);
+    const result = await withTransaction(async (tx) => {
+      const company = await resolveOwnedCompany(tx, user);
+      return ownerRemoveMember(tx, user, company, userId, requestMeta(req));
+    });
+    reply.status(200);
+    return result;
   });
 
   app.post("/employees/:userId/password", async (req) => {

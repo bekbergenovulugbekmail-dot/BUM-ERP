@@ -13,7 +13,7 @@
  */
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Search, UserCheck, UserX, UserPlus, KeyRound, Loader2, AlertTriangle, Pencil, Smartphone } from "lucide-react";
+import { Search, UserCheck, UserX, UserPlus, KeyRound, Loader2, AlertTriangle, Pencil, Smartphone, Trash2 } from "lucide-react";
 import { FULL_ACCESS_ROLES } from "@bum/shared";
 import { Input } from "@/components/ui/input.tsx";
 import { Button } from "@/components/ui/button.tsx";
@@ -25,6 +25,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog.tsx";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog.tsx";
 import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
@@ -101,6 +105,12 @@ export default function UsersSection() {
     ({ userId, patch }: { userId: string; patch: MemberPatch }) => api.patch(`/api/company/employees/${userId}`, patch),
     { invalidate: COMPANY },
   );
+  /** Kompaniyadan butunlay chiqarish: a'zolik o'chadi, hisob va tarix qoladi. */
+  const removeMember = useApiMutation(
+    (userId: string) => api.delete<{ unlinkedEmployee: boolean }>(`/api/company/employees/${userId}`),
+    { invalidate: COMPANY },
+  );
+  const [removeTarget, setRemoveTarget] = useState<Employee | null>(null);
   const resetPassword = useApiMutation(
     ({ userId, newPassword }: { userId: string; newPassword: string }) =>
       api.post(`/api/company/employees/${userId}/password`, { newPassword }),
@@ -139,6 +149,21 @@ export default function UsersSection() {
       setResetValue("");
     } catch (err) {
       setFormError(errorMessage(err));
+    }
+  };
+
+  const handleRemove = async () => {
+    if (!removeTarget) return;
+    try {
+      const result = await removeMember.mutateAsync(removeTarget.id);
+      toast.success(
+        result.unlinkedEmployee
+          ? "Foydalanuvchi kompaniyadan chiqarildi — Kadrlar kartochkasi saqlanib qoldi"
+          : "Foydalanuvchi kompaniyadan chiqarildi",
+      );
+      setRemoveTarget(null);
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
   };
 
@@ -333,6 +358,15 @@ export default function UsersSection() {
                               >
                                 <Smartphone className="h-3 w-3 mr-1" /> Qurilmalar
                               </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-xs text-destructive"
+                                data-testid={`remove-user-${employee.id}`}
+                                onClick={() => setRemoveTarget(employee)}
+                              >
+                                <Trash2 className="h-3 w-3 mr-1" /> O'chirish
+                              </Button>
                             </div>
                           )}
                         </td>
@@ -345,6 +379,32 @@ export default function UsersSection() {
           </div>
         )}
       </div>
+
+      {/* Kompaniyadan chiqarish tasdig'i */}
+      <AlertDialog open={removeTarget !== null} onOpenChange={(open) => !open && setRemoveTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Foydalanuvchini kompaniyadan chiqarish</AlertDialogTitle>
+            <AlertDialogDescription>
+              <b>{removeTarget?.name ?? removeTarget?.phone}</b> ro'yxatdan o'chiriladi va dasturga kira
+              olmaydi; litsenziyasi bo'shaydi. Uning hujjatlari va tarixi joyida qoladi
+              {removeTarget?.employeeId ? ", Kadrlar kartochkasi ham saqlanadi (faqat login bog'lanishi uziladi)" : ""}.
+              Kerak bo'lsa keyin qaytadan "Foydalanuvchi qo'shish" bilan kirish berasiz.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removeMember.isPending}>Bekor qilish</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="remove-user-confirm"
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={removeMember.isPending}
+              onClick={(event) => { event.preventDefault(); void handleRemove(); }}
+            >
+              {removeMember.isPending ? "O'chirilmoqda..." : "Chiqarish"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Xodimni tahrirlash */}
       {editTarget && (
