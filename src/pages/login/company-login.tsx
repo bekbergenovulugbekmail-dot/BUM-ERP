@@ -206,7 +206,7 @@ export function BusinessAddressPage() {
           <BrandLogo className="mx-auto h-12 w-auto" />
           <h1 className="text-xl font-bold">Biznes manzili</h1>
           <p className="text-sm text-muted-foreground">
-            O'z biznesingiz manzilini kiriting — masalan, <span className="font-mono">bonnu-market</span>
+            O'z biznesingiz manzilini kiriting — masalan, <span className="font-mono">bum</span>
           </p>
         </div>
         <form onSubmit={open} className="space-y-3">
@@ -214,7 +214,7 @@ export function BusinessAddressPage() {
             <span className="text-sm text-muted-foreground">app.bum-erp.uz/</span>
             <input
               className="h-11 flex-1 bg-transparent px-1 text-sm outline-none"
-              placeholder="bonnu-market"
+              placeholder="bum"
               value={value}
               onChange={(event) => setValue(event.target.value)}
               autoFocus
