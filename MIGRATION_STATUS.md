@@ -3316,6 +3316,33 @@ yozilaverishi. Frontend to'plami: **26 fayl / 109 test PASS**, `tsc` va butun `s
 **Production (2026-09-22):** commit `9a111d5`; faqat `bum-web` (deployment `5b14897a`),
 bundle `index-Dt53jYRJ.js` → **`index-C4Nniv1Y.js`**.
 
+## "Hudud" tushunchasi: hozirgi model va taklif takliflari (2026-09-22)
+
+Egasining savoli: Distributsiya → Hududlarda ikkita yozuv bor ("Urganch" — 10 marshrut, "Urganch tumani"
+— 0 marshrut), lekin mijoz oynasidagi "Shahar/tuman" taklifida faqat "Urganch" chiqadi — xatolikmi?
+
+**Xatolik emas, ikki xil narsa** (kodda tekshirilgan):
+- `territories` (Distributsiya → Hududlar) — MARSHRUTLAR guruhi. Jadvalga faqat
+  `distribution_routes.territory_id` bog'langan; mijoz jadvalida hudud ustuni yo'q, mijoz hududga
+  marshrut orqali tegishli bo'ladi. Geografik ma'lumotnoma emas (viloyat/tuman iyerarxiyasi yo'q).
+- `customers.city` / `customers.district` — mijozning o'z matn maydonlari ("Shahar/tuman", "Mahalla");
+  dostavkada shahar bo'yicha guruhlash va yangi saralash shulardan foydalanadi.
+  `GET /customers/regions` aynan MIJOZLARDAGI qiymatlarni yig'adi — shuning uchun hali birorta mijozda
+  yozilmagan "Urganch tumani" u yerda chiqmasdi.
+
+**Qilingan ish:** mijoz oynasidagi shahar taklifiga endi ikkala manba qo'shiladi — mijozlarda kiritilgan
+qiymatlar va hudud nomlari (`GET /api/distribution/territories`), ya'ni bir joy ikki xil yozilib
+ketmaydi. Ruxsat bo'lmasa (403) taklif avvalgidek faqat mijozlardagi qiymatlardan yig'iladi.
+
+**Ochiq qaror (egasi hal qiladi):** "Hudud" geografik ma'lumotnoma (Respublika → viloyat → shahar/tuman)
+bo'lishi kerakmi? Hozir u savdo hududi (marshrutlar guruhi). Geografik ma'lumotnomaga o'tkazish —
+alohida ish: `territories` ga ota-bola bog'lanishi va turi (viloyat/tuman) qo'shiladi, mijozdagi
+`city`/`district` matn maydonlari ma'lumotnomaga bog'lanadi, import va dostavka guruhlashi ham
+moslashtiriladi. Boshlanmagan.
+
+**Production (2026-09-22):** commit `72cfb97`; faqat `bum-web` (deployment `74a58c09`),
+bundle `index-C4Nniv1Y.js` → **`index-BObbwNQH.js`**.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
