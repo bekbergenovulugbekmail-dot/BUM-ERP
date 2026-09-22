@@ -76,6 +76,24 @@ export type CsvColumn = {
 
 type ImportIssue = { row: number; key?: string | null; sku?: string | null; message: string };
 
+/**
+ * Server hisoblab bergan qator ko'rinishi (mahsulot importida): faylda nima yozilgani va tizim
+ * uni QANDAY tushungani. Son formati noaniq bo'lsa ("10,500") foydalanuvchi shu yerdan ko'radi.
+ */
+type ServerPreviewRow = {
+  row: number;
+  status: "new" | "duplicate" | "error";
+  purchasePriceRaw?: string;
+  purchasePrice?: string;
+  salesPriceRaw?: string;
+  salesPrice?: string;
+  purchaseUnit?: string | null;
+  unitsPerPackage?: string | null;
+  /** Bitta asosiy birlikka tushadigan kirim narxi (qadoq bo'lsa bo'lingan). */
+  unitCost?: string;
+  message?: string | null;
+};
+
 type ImportOutcome = {
   created: number;
   /** "Mavjudlarini yangilash" rejimi qo'llab-quvvatlanadigan bo'limlarda (mijozlar). */
@@ -84,6 +102,8 @@ type ImportOutcome = {
   errors: ImportIssue[];
   duplicates?: ImportIssue[];
   warnings?: ImportIssue[];
+  /** Har qator bo'yicha server hisobi — bo'limda qo'llab-quvvatlansa keladi. */
+  preview?: ServerPreviewRow[];
   dryRun?: boolean;
 };
 
@@ -114,6 +134,8 @@ type Preview = {
   errors: ImportIssue[];
   duplicates: ImportIssue[];
   warnings: ImportIssue[];
+  /** Server hisobi — qator raqami bo'yicha (bo'lim qo'llab-quvvatlasa). */
+  computed: Map<number, ServerPreviewRow>;
 };
 
 /** Bir saqlashdagi qatorlarni bitta hujjatga bog'laydigan tasodifiy kalit (komponentdan tashqarida — render toza). */
@@ -302,6 +324,7 @@ export default function CsvToolbar({
     const errors: ImportIssue[] = [];
     const duplicates: ImportIssue[] = [];
     const warnings: ImportIssue[] = [];
+    const computed = new Map<number, ServerPreviewRow>();
     let created = 0;
     let updated = 0;
     let valid = 0;
@@ -314,8 +337,9 @@ export default function CsvToolbar({
       for (const issue of result.errors) errors.push({ ...issue, row: fileLine(offset, issue) });
       for (const issue of result.duplicates ?? []) duplicates.push({ ...issue, row: fileLine(offset, issue) });
       for (const issue of result.warnings ?? []) warnings.push({ ...issue, row: fileLine(offset, issue) });
+      for (const line of result.preview ?? []) computed.set(fileLine(offset, line), { ...line, row: fileLine(offset, line) });
     }
-    return { created, updated, valid, errors, duplicates, warnings };
+    return { created, updated, valid, errors, duplicates, warnings, computed };
   };
 
   /** Fayl ustuni nomini maydon nomlari bilan solishtiradi (bo'shliq, registr va `*` ga befarq). */
@@ -418,6 +442,11 @@ export default function CsvToolbar({
       setBusy(null);
     }
   };
+
+  /** Server hisoblagan qator (fayl qator raqami bo'yicha); bo'lim qo'llab-quvvatlamasa — undefined. */
+  const computedOf = (line: number) => preview?.computed.get(line);
+  /** Server hisobi umuman keldimi — ustunlar shunda qo'shiladi. */
+  const hasComputed = (preview?.computed.size ?? 0) > 0;
 
   /** 2-bosqich: foydalanuvchi tasdiqlagandan keyin yoziladi. */
   const handleCommit = async () => {
@@ -973,6 +1002,14 @@ export default function CsvToolbar({
                               {labelOf(key)}
                             </th>
                           ))}
+                          {/* Server hisobi: faylda yozilgani qanday tushunilgani (son formati noaniq bo'lsa shu yerdan ko'rinadi) */}
+                          {hasComputed && (
+                            <>
+                              <th className="px-2 py-1.5 text-right font-medium whitespace-nowrap text-primary">Kirim (tushunildi)</th>
+                              <th className="px-2 py-1.5 text-right font-medium whitespace-nowrap text-primary">Sotuv (tushunildi)</th>
+                              <th className="px-2 py-1.5 text-right font-medium whitespace-nowrap text-primary">1 birlik tannarx</th>
+                            </>
+                          )}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
@@ -1000,6 +1037,19 @@ export default function CsvToolbar({
                                   </span>
                                 </td>
                               ))}
+                              {hasComputed && (
+                                <>
+                                  <td className="px-2 py-1 text-right align-top tabular-nums" data-testid={`csv-computed-purchase-${line}`}>
+                                    {computedOf(line)?.purchasePrice ?? <span className="text-muted-foreground">—</span>}
+                                  </td>
+                                  <td className="px-2 py-1 text-right align-top tabular-nums">
+                                    {computedOf(line)?.salesPrice ?? <span className="text-muted-foreground">—</span>}
+                                  </td>
+                                  <td className="px-2 py-1 text-right align-top tabular-nums font-medium" title="Qadoq bo'lsa kirim narxi qadoqdagi miqdorga bo'linadi">
+                                    {computedOf(line)?.unitCost ?? <span className="text-muted-foreground">—</span>}
+                                  </td>
+                                </>
+                              )}
                             </tr>
                           );
                         })}

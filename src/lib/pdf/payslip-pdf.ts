@@ -6,7 +6,7 @@ import autoTable from "jspdf-autotable";
 import type { CompanyInfo } from "./pdf-utils.ts";
 import {
   PDF_COLORS,
-  drawCompanyHeader, drawInfoBox, drawFooter, fmtNum, fmtMoney,
+  A4, drawCompanyHeader, drawInfoBox, drawFooter, fmtNum, fmtMoney,
 } from "./pdf-utils.ts";
 
 export type PayslipData = {
@@ -83,7 +83,7 @@ export function generatePayslipPDF(data: PayslipData): void {
       3: { cellWidth: 40 },
       4: { cellWidth: 20, halign: "center" },
     },
-    margin: { left: 14, right: 14 },
+    margin: { left: 14, right: 14, bottom: A4.footerHeight },
   });
 
   y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;

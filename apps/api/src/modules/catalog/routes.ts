@@ -183,6 +183,10 @@ const importBody = z.strictObject({
         sku: z.string().max(1000).optional(),
         barcode: z.string().max(1000).optional(),
         unit: z.string().max(100).optional(),
+        /** Qadoq birliklari: "blok", "pachka" — `unitsPerPackage` bilan birga keladi. */
+        purchaseUnit: z.string().max(100).optional(),
+        saleUnit: z.string().max(100).optional(),
+        unitsPerPackage: importCell,
         purchasePrice: importCell,
         salesPrice: importCell,
         minStock: importCell,

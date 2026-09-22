@@ -18,7 +18,7 @@ import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import {
   PAYMENT_LABELS, companyInfo, newReference, num, todayLocal,
-  type PaymentMethod, type SalesOrderDetail,
+  type PaymentMethod, type SalesOrderDetail, type SalesOrderItem,
 } from "../_lib/types.ts";
 
 type Props = {
@@ -67,8 +67,9 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const confirmOrder = useApiMutation(() => api.post(`/api/sales/orders/${orderId}/confirm`));
   const shipOrder = useApiMutation(() => api.post(`/api/sales/orders/${orderId}/ship`));
   const cancelOrder = useApiMutation(() => api.post(`/api/sales/orders/${orderId}/cancel`));
-  const returnOrder = useApiMutation((body: object) =>
-    api.post<{ refunded: string }>(`/api/sales/orders/${orderId}/return`, body),
+  /** Qatorlar bo'yicha qaytarish — nakladnoydan aynan kerakli mahsulot va miqdor. */
+  const returnItems = useApiMutation((body: object) =>
+    api.post<{ return: { number: string; refundAmount: string } }>(`/api/sales/orders/${orderId}/return-items`, body),
   );
   const recordPayment = useApiMutation((body: object) =>
     api.post<{ created: boolean }>("/api/sales/payments", body),
@@ -88,6 +89,8 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const [returnReason, setReturnReason] = useState("");
   const [refund, setRefund] = useState(true);
   const [refundMethod, setRefundMethod] = useState<PaymentMethod>("cash");
+  /** Qator id → qaytariladigan miqdor (matn): nakladnoydan aynan kerakli mahsulotni qaytarish. */
+  const [returnQty, setReturnQty] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
   const handleConfirm = async () => {
@@ -128,21 +131,37 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
     finally { setLoading(false); }
   };
 
+  /** Qator bo'yicha yana qancha qaytarish mumkin (qator birligida). */
+  const remainingOf = (item: SalesOrderItem) => num(item.quantity) - num(item.returnedQty);
+
+  /** Foydalanuvchi belgilagan qatorlar — bo'sh yoki 0 bo'lganlari hisobga olinmaydi. */
+  const returnLines = (order?.items ?? [])
+    .map((item) => ({ item, quantity: Number(returnQty[item.id] ?? "") }))
+    .filter((line) => Number.isFinite(line.quantity) && line.quantity > 0);
+  /** Chegaradan oshgan qatorlar — tugma o'chiriladi va qator qizil bo'ladi. */
+  const overLimit = returnLines.filter((line) => line.quantity > remainingOf(line.item) + 1e-9);
+  const returnValue = returnLines.reduce(
+    (sum, line) => sum + (num(line.item.lineTotal) * line.quantity) / (num(line.item.quantity) || 1),
+    0,
+  );
+
   const handleReturn = async () => {
-    if (!order) return;
+    if (!order || returnLines.length === 0 || overLimit.length > 0) return;
     setLoading(true);
     try {
-      const result = await returnOrder.mutateAsync({
+      // Qatorlar bo'yicha qaytarish — mavjud `return-items` oqimi (zaxira, qarz va jurnal shu yerda)
+      const result = await returnItems.mutateAsync({
+        items: returnLines.map((line) => ({ orderItemId: line.item.id, quantity: String(line.quantity) })),
+        refundMethod: refund ? refundMethod : "balance",
         reason: returnReason.trim() || null,
-        refund,
-        method: refundMethod,
       });
-      const refunded = num(result.refunded);
+      const refunded = num(result.return?.refundAmount ?? "0");
       toast.success(refunded > 0
-        ? `Qaytarildi, ${fmt(refunded)} mijozga qaytarildi`
-        : "Qaytarildi, tovar omborga qaytdi");
+        ? `${result.return?.number ?? "Qaytarish"}: ${fmt(refunded)} mijozga qaytarildi`
+        : `${result.return?.number ?? "Qaytarish"}: tovar omborga qaytdi`);
       setShowReturn(false);
       setReturnReason("");
+      setReturnQty({});
     } catch (err) { toast.error(errorMessage(err)); }
     finally { setLoading(false); }
   };
@@ -348,13 +367,86 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                   </div>
                 )}
 
-                {/* Return form */}
+                {/* Qaytarish: nakladnoy ichidan qatorlar bo'yicha (hammasini qaytarish shart emas) */}
                 {showReturn && (
                   <div className="border border-destructive/30 rounded-xl p-4 space-y-3 bg-destructive/5">
-                    <p className="text-sm font-semibold">Buyurtmani qaytarish</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold">Nakladnoydan qaytarish</p>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs"
+                        onClick={() =>
+                          setReturnQty(
+                            Object.fromEntries(
+                              order.items
+                                .filter((item) => remainingOf(item) > 0)
+                                .map((item) => [item.id, String(remainingOf(item))]),
+                            ),
+                          )
+                        }
+                      >
+                        Hammasini tanlash
+                      </Button>
+                    </div>
                     <p className="text-xs text-muted-foreground">
-                      Barcha tovar omborga qaytadi, sotuv va tannarx yozuvlari teskari o'tkaziladi.
+                      Qaytariladigan miqdorni kiriting — tanlangan tovar omborga qaytadi, sotuv va tannarx
+                      yozuvlari shu qism uchun teskari o'tkaziladi.
                     </p>
+
+                    <div className="overflow-x-auto rounded-lg border border-border/60 bg-background">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/50">
+                          <tr className="text-left">
+                            <th className="px-2 py-2 font-medium text-muted-foreground">Mahsulot</th>
+                            <th className="px-2 py-2 text-right font-medium text-muted-foreground">Berilgan</th>
+                            <th className="px-2 py-2 text-right font-medium text-muted-foreground">Qaytarilgan</th>
+                            <th className="px-2 py-2 text-right font-medium text-muted-foreground">Qolgan</th>
+                            <th className="px-2 py-2 text-right font-medium text-muted-foreground w-28">Qaytarish</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {order.items.map((item) => {
+                            const remaining = remainingOf(item);
+                            const entered = Number(returnQty[item.id] ?? "");
+                            const invalid = Number.isFinite(entered) && entered > remaining + 1e-9;
+                            return (
+                              <tr key={item.id} className={cn("border-t border-border/40", remaining <= 0 && "opacity-50")}>
+                                <td className="px-2 py-1.5">
+                                  <p className="font-medium">{item.productName}</p>
+                                  <p className="font-mono text-[11px] text-muted-foreground">{item.productSku}</p>
+                                </td>
+                                <td className="px-2 py-1.5 text-right tabular-nums">{num(item.quantity)} {item.unitName}</td>
+                                <td className="px-2 py-1.5 text-right tabular-nums">{num(item.returnedQty) || "\u2014"}</td>
+                                <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{remaining}</td>
+                                <td className="px-2 py-1.5 text-right">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    max={remaining}
+                                    step="any"
+                                    disabled={remaining <= 0}
+                                    aria-label={`${item.productName} — qaytariladigan miqdor`}
+                                    data-testid={`return-qty-${item.productSku}`}
+                                    className={cn("h-7 text-right text-xs", invalid && "border-destructive text-destructive")}
+                                    value={returnQty[item.id] ?? ""}
+                                    onChange={(e) => setReturnQty((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                    placeholder="0"
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {overLimit.length > 0 && (
+                      <p className="text-xs text-destructive">
+                        {overLimit[0]!.item.productName}: qolganidan ko'p ({remainingOf(overLimit[0]!.item)} gacha)
+                      </p>
+                    )}
+
                     <div>
                       <Label className="text-xs">Sabab</Label>
                       <Input value={returnReason} onChange={(e) => setReturnReason(e.target.value)} placeholder="Ixtiyoriy..." />
@@ -363,7 +455,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                       <div className="grid grid-cols-2 gap-3 items-end">
                         <label className="flex items-center gap-2 text-xs cursor-pointer">
                           <input type="checkbox" checked={refund} onChange={(e) => setRefund(e.target.checked)} />
-                          {fmt(paid)} pulni qaytarish
+                          Pulni qaytarish
                         </label>
                         {refund && (
                           <Select value={refundMethod} onValueChange={(v) => setRefundMethod(v as PaymentMethod)}>
@@ -378,8 +470,19 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                         )}
                       </div>
                     )}
-                    <Button size="sm" variant="destructive" onClick={handleReturn} disabled={loading} className="w-full">
-                      {loading ? "..." : "Qaytarishni tasdiqlash"}
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={handleReturn}
+                      disabled={loading || returnLines.length === 0 || overLimit.length > 0}
+                      className="w-full"
+                      data-testid="submit-return"
+                    >
+                      {loading
+                        ? "..."
+                        : returnLines.length === 0
+                          ? "Miqdorni kiriting"
+                          : `${returnLines.length} qatorni qaytarish · ${fmt(returnValue)}`}
                     </Button>
                   </div>
                 )}
@@ -394,7 +497,14 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                       <div key={item.id} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium truncate">{item.productName}</p>
-                          <p className="text-xs text-muted-foreground font-mono">{item.productSku} · {num(item.quantity)} {item.unitName}</p>
+                          <p className="text-xs text-muted-foreground font-mono">
+                            {item.productSku} · {num(item.quantity)} {item.unitName}
+                            {num(item.returnedQty) > 0 && (
+                              <span className="ml-2 font-sans text-destructive">
+                                qaytarilgan {num(item.returnedQty)} · qolgan {remainingOf(item)}
+                              </span>
+                            )}
+                          </p>
                         </div>
                         <div className="text-right ml-4">
                           <p className="text-xs text-muted-foreground">{new Intl.NumberFormat("uz-UZ").format(num(item.unitPrice))} × {num(item.quantity)}</p>
@@ -406,6 +516,42 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                     ))}
                   </div>
                 </div>
+
+                {/* Qaytarish tarixi: qaysi hujjat, kim, qaysi mahsulotdan qancha */}
+                {order.returns.length > 0 && (
+                  <>
+                    <Separator />
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Qaytarishlar</p>
+                      <div className="space-y-2">
+                        {order.returns.map((record) => (
+                          <div key={record.id} className="rounded-lg border border-border/60 p-2.5">
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                              <span className="font-mono text-xs font-semibold">{record.number}</span>
+                              <span className="text-sm font-semibold text-destructive">{fmt(num(record.totalAmount))}</span>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground">
+                              {new Date(record.createdAt).toLocaleString("uz-UZ")}
+                              {record.createdByName ? ` · ${record.createdByName}` : ""}
+                              {num(record.refundAmount) > 0 ? ` · ${fmt(num(record.refundAmount))} qaytarildi` : ""}
+                              {record.reason ? ` · ${record.reason}` : ""}
+                            </p>
+                            <ul className="mt-1 space-y-0.5">
+                              {record.items.map((line) => (
+                                <li key={line.orderItemId + line.productId} className="flex justify-between text-xs">
+                                  <span className="truncate">{line.productName}</span>
+                                  <span className="ml-3 shrink-0 tabular-nums text-muted-foreground">
+                                    {num(line.quantity)} · {fmt(num(line.lineTotal))}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {/* Payments */}
                 {order.payments.length > 0 && (

@@ -117,6 +117,30 @@ export type SalesOrderItem = {
   productName: string;
   productSku: string;
   unitName: string;
+  /** Shu qatordan allaqachon qaytarilgan miqdor (qator birligida). */
+  returnedQty: string;
+  /** Omborda band qilingan miqdor (asosiy birlikda) — tasdiqlangan, jo'natilmagan buyurtmada. */
+  reservedQty: string;
+};
+
+/** Qaytarish hujjati va uning qatorlari (nakladnoy ichidan qisman qaytarish tarixi). */
+export type SalesReturnRecord = {
+  id: string;
+  number: string;
+  totalAmount: string;
+  refundMethod: string;
+  refundAmount: string;
+  reason: string | null;
+  createdAt: string;
+  /** Kim qabul qilgan (hisob o'chirilgan bo'lsa null). */
+  createdByName: string | null;
+  items: {
+    orderItemId: string;
+    productId: string;
+    productName: string;
+    quantity: string;
+    lineTotal: string;
+  }[];
 };
 
 export type CustomerPayment = {
@@ -139,6 +163,8 @@ export type SalesOrderDetail = Omit<SalesOrderRow, "itemCount"> & {
   cashbackEarned: string;
   items: SalesOrderItem[];
   payments: CustomerPayment[];
+  /** Qaytarish tarixi — eng eskisidan boshlab. */
+  returns: SalesReturnRecord[];
 };
 
 export type SalesStats = {

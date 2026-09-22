@@ -151,6 +151,11 @@ export default function ProductsPage() {
                 { key: "barcode", aliases: ["Shtrix-kod", "barcode"], example: "4780000000001" },
                 // Eksport `shortName` yozadi ("d"); to'liq nom ("Dona") ham qabul qilinadi
                 { key: "unit", aliases: ["O'lchov birligi", "unit"], example: "Dona", shared: true },
+                // Qadoq: "1 blok = 6 dona". Qadoq birligi ko'rsatilsa, nechtaligi ham majburiy —
+                // aks holda 10 blok 10 dona bo'lib tushib ketardi
+                { key: "purchaseUnit", aliases: ["Xarid birligi", "purchaseUnit"], example: "bl", shared: true },
+                { key: "saleUnit", aliases: ["Sotuv birligi", "saleUnit"], example: "Dona", shared: true },
+                { key: "unitsPerPackage", aliases: ["Qadoqdagi miqdor", "unitsPerPackage"], example: "6", shared: true },
                 { key: "purchasePrice", aliases: ["Kirim narxi", "purchasePrice"], example: "8000" },
                 { key: "salesPrice", aliases: ["Sotuv narxi", "salesPrice"], example: "10000" },
                 { key: "minStock", aliases: ["Min. qoldiq", "minStock"], example: "10" },

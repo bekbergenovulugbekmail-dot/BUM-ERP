@@ -3809,6 +3809,68 @@ Yangi: `agent-kpi-reconciliation` (6), `receivables-aging` (8), `credit-hold` (7
 Qayta ishlatildi: `acceptance-wholesale` (19/19) va `acceptance-distributor` (19/19) — yangi
 narx, qarz, kredit va backorder mantiqi bilan ham to'liq PASS.
 
+## Qisman qaytarish, A4 nakladnoylar va import auditi (2026-09-22)
+
+Egasining uchta aniq topshirig'i. Yangi tizim yaratilmadi — uchalasi ham MAVJUD oqimlar ustiga.
+Migratsiya kerak bo'lmadi.
+
+### 1. Nakladnoydan qisman qaytarish
+Muammo: dostavchi 5 tadan 2 tasini olib kelsa ham, UI'da faqat "Buyurtmani qaytarish" tugmasi bor
+edi va u BUTUN hujjatni qaytarardi. Qatorlar bo'yicha qaytarish API'si
+(`POST /api/sales/orders/:id/return-items`) allaqachon bor edi, lekin unga oyna yo'q edi.
+
+Qilingani:
+- Nakladnoy detalida jadval: **Mahsulot · Berilgan · Qaytarilgan · Qolgan · Qaytarish miqdori**;
+  "Hammasini tanlash" tugmasi, qolganidan ko'p kiritilsa qator qizil va tugma yopiq; tanlanган
+  qatorlar summasi tugmada ko'rinadi.
+- Mahsulot ro'yxatida "qaytarilgan N · qolgan M" ko'rsatiladi.
+- **Qaytarish tarixi** bo'limi: hujjat raqami, sana, KIM qabul qilgani, sabab va qaysi mahsulotdan
+  qancha qaytgani. Buning uchun `GET /api/sales/orders/:id` javobi boyitildi (`returns[].createdByName`
+  va `returns[].items`) — yangi endpoint qo'shilmadi.
+- Server qoidalari avvaldan to'g'ri ekani tasdiqlandi: 0/manfiy rad, qolganidan ko'p rad, takroriy
+  qator rad, begona hujjat qatori rad, faqat yakunlangan sotuvdan qaytariladi, zaxira va qarz aynan
+  qaytgan qism uchun qayta hisoblanadi, birlik — qator birligi (blok qaytarilsa omborga dona tushadi).
+
+### 2. Barcha nakladnoylar A4 standartiga
+Muammo (50+ qatorli hujjatda): kompaniya sarlavhasi faqat 1-sahifada chizilardi, jadval qatorlari
+footer tasmasi ustiga tushardi, jami qutisi va imzo joyi esa sahifa chetidan tashqariga chiqib
+umuman ko'rinmasdi.
+
+Qilingani — `src/lib/pdf/pdf-utils.ts` da umumiy A4 qatlami:
+- `A4` o'lchovlari va `contentBottom()`;
+- `tableOptions()` — har sahifada jadval sarlavhasi (`showHead: everyPage`), qator ikkiga
+  bo'linmaydi (`rowPageBreak: avoid`), `margin.top` sarlavha uchun, `margin.bottom` footer uchun,
+  `didDrawPage` har yangi sahifada kompaniya sarlavhasini qayta chizadi;
+- `ensureSpace()`, `drawTotalsBox()`, `drawSignatures()`, `drawNotes()` — blok sig'masa yangi
+  sahifaga o'tadi, shuning uchun jami va imzo HAR DOIM to'liq ko'rinadi;
+- Sotuv nakladnoyi (`invoice-pdf.ts`) va xarid buyurtmasi (`purchase-order-pdf.ts`) shu qatlamga
+  o'tkazildi; maosh varaqasida footer himoyasi qo'shildi. Kassa cheki (80 mm) va etiketka
+  (A4 varaq / rulon) o'z formatida qoldi — ular nakladnoy emas.
+- Hujjatda yo'q maydon ko'rsatilmaydi (chegirma 0 bo'lsa "Chegirma" qatori chiqmaydi).
+
+### 3. Mahsulot va xarid importi auditi
+**Eng xavfli xato topildi va tuzatildi** — `cleanNumber` (6 ta import shu funksiyadan foydalanadi):
+`"10,500"` → `10.5` va `"10.000"` → `10` bo'lib ketardi, ya'ni narx 1000 barobar buzilardi.
+Yangi qoida aniq va takrorlanadigan: ikkala ajratgich bo'lsa oxirgisi kasr; bitta ajratgich bir
+necha marta — mingliklar; bitta ajratgich ortidan aynan 3 raqam — mingliklar, aks holda kasr.
+Yaroqsiz qiymat (`abc`, `NaN`, `Infinity`, `--5`) endi jim 0 bo'lmaydi — sxema uni rad etadi.
+
+**Dona / blok / pachka:** mahsulot importiga `purchaseUnit`, `saleUnit`, `unitsPerPackage`
+ustunlari qo'shildi. Qadoq birligi ko'rsatilib, nechtaligi ko'rsatilmasa — XATO (ilgari 10 blok
+10 dona bo'lib tushib ketishi mumkin edi). Import `unit_conversions` yozuvini o'zi yaratadi.
+
+**Preview boyitildi:** har qator uchun faylda yozilgani va tizim tushungani yonma-yon, hamda
+bitta asosiy birlikka tushadigan tannarx (`unitCost`). Noaniq format foydalanuvchidan yashirilmaydi.
+Holat: `new / duplicate / error` — xato va dublikat qatorlari sababi bilan ko'rinadi.
+
+**Zanjir tasdiqlandi** (`import-units-prices.test.ts`): 1 blok = 6 dona, 10 blok × 60 000 →
+**60 dona qoldiq**, **10 000/dona tannarx**; 1 dona × 12 000 sotuvda marja 2 000; 1 blok sotuvda
+6 dona chiqadi, tannarx 60 000, marja 12 000. Konversiya ikki marta qo'llanmaydi (600 ham, 10 ham emas).
+
+### Testlar
+Yangi: `delivery-partial-return` (12), `import-units-prices` (18) — API;
+`order-detail-drawer` (6), `a4-documents` (10) — frontend. **Jami 46 ta yangi test.**
+
 ### Qolgan ishlar
 1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
 1a. **Bootstrap admin parolini almashtirish** (egasi, Railway o'zgaruvchisi): hozirgi parol oddiy parollar qoidasiga tushadi. Tizimga kirgan holda production smoke: realtime (dostavka xaritasi) CSP ostida, kassada kassir kirishi va qaytarish

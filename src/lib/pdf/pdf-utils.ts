@@ -21,6 +21,37 @@ export const PDF_COLORS = {
   footerBg: [240, 242, 255] as [number, number, number],
 };
 
+/**
+ * A4 (210 x 297 mm) hujjat o'lchovlari — barcha nakladnoy va hujjatlar shu chegaralarda chiziladi.
+ *
+ * `top` — har sahifadagi kompaniya sarlavhasi uchun ajratilgan joy (jadval shundan pastda boshlanadi),
+ * `bottom` — sahifa raqami va tagline bo'lgan footer tasmasi uchun (qator tasma ustiga tushmaydi).
+ */
+export const A4 = {
+  width: 210,
+  height: 297,
+  marginX: 14,
+  /** Sarlavha balandligi (46) + kichik bo'shliq. */
+  headerHeight: 46,
+  /** Footer tasmasi (12) + bo'shliq. */
+  footerHeight: 16,
+} as const;
+
+/** Sahifadagi ishchi maydon pastki chegarasi — bundan pastga hech narsa chizilmaydi. */
+export const contentBottom = () => A4.height - A4.footerHeight;
+
+/**
+ * Blok (jami qutisi, imzo, izoh) shu sahifaga sig'adimi; sig'masa yangi sahifa ochiladi va
+ * sarlavha qayta chiziladi. Qaytadi: blok chiziladigan Y.
+ *
+ * Shusiz uzun nakladnoyda jami va imzo sahifa chetidan tashqariga chiqib ketardi (ko'rinmasdi).
+ */
+export function ensureSpace(doc: jsPDF, y: number, needed: number, company?: CompanyInfo, header?: { title: string; number: string; date: string }): number {
+  if (y + needed <= contentBottom()) return y;
+  doc.addPage();
+  return company && header ? drawCompanyHeader(doc, company, header.title, header.number, header.date) : A4.marginX;
+}
+
 export type CompanyInfo = {
   name: string;
   legalName?: string;
@@ -84,6 +115,127 @@ export function drawCompanyHeader(
   }
 
   return 46;
+}
+
+/**
+ * Nakladnoy jadvali uchun umumiy sozlama: A4 chegaralari, har sahifada TAKRORLANADIGAN jadval
+ * sarlavhasi va kompaniya sarlavhasi, footer tasmasi ustiga chiqmaslik.
+ *
+ * `didDrawPage` har yangi sahifada kompaniya sarlavhasini qayta chizadi — 50+ qatorli hujjatda
+ * ikkinchi sahifa ham to'liq hujjat bo'lib qoladi.
+ */
+export function tableOptions(
+  doc: jsPDF,
+  company: CompanyInfo,
+  header: { title: string; number: string; date: string; rightLabel?: string; rightValue?: string },
+  columnStyles: Record<number, Record<string, unknown>>,
+) {
+  let firstPage = true;
+  return {
+    theme: "grid" as const,
+    headStyles: {
+      fillColor: PDF_COLORS.headerBg,
+      textColor: PDF_COLORS.headerText,
+      fontStyle: "bold" as const,
+      fontSize: 8.5,
+      halign: "center" as const,
+    },
+    bodyStyles: { fontSize: 8.5, textColor: PDF_COLORS.textDark },
+    alternateRowStyles: { fillColor: PDF_COLORS.rowAlt },
+    columnStyles,
+    /** Jadval sarlavhasi har sahifada — qator qaysi ustun ekani chalkashmaydi. */
+    showHead: "everyPage" as const,
+    /** Qator sahifa chegarasida ikkiga bo'linmaydi (matn kesilmaydi). */
+    rowPageBreak: "avoid" as const,
+    margin: { left: A4.marginX, right: A4.marginX, top: A4.headerHeight, bottom: A4.footerHeight },
+    styles: { lineColor: PDF_COLORS.border, lineWidth: 0.2, overflow: "linebreak" as const },
+    didDrawPage: () => {
+      // Birinchi sahifada sarlavha jadvaldan oldin chizilgan — faqat keyingilariga qo'shamiz
+      if (firstPage) {
+        firstPage = false;
+        return;
+      }
+      drawCompanyHeader(doc, company, header.title, header.number, header.date, header.rightLabel, header.rightValue);
+    },
+  };
+}
+
+/** Jadvaldan keyingi Y (autoTable natijasi). */
+export const afterTable = (doc: jsPDF, gap = 6) =>
+  (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + gap;
+
+export type TotalRow = { label: string; value: string; bold?: boolean; color?: [number, number, number] };
+
+/**
+ * Jami qutisi — o'ng tomonda. Sahifaga sig'masa yangi sahifaga o'tadi, shuning uchun jami
+ * HAR DOIM oxirgi sahifada va to'liq ko'rinadi.
+ */
+export function drawTotalsBox(
+  doc: jsPDF,
+  startY: number,
+  rows: TotalRow[],
+  company: CompanyInfo,
+  header: { title: string; number: string; date: string },
+  boxWidth = 71,
+): number {
+  const height = rows.length * 8 + 6;
+  const y = ensureSpace(doc, startY, height, company, header);
+  const boxX = A4.width - A4.marginX - boxWidth;
+
+  doc.setFillColor(...PDF_COLORS.rowAlt);
+  doc.roundedRect(boxX - 2, y - 2, boxWidth + 4, height, 3, 3, "F");
+  rows.forEach((row, index) => {
+    const ry = y + index * 8 + 4;
+    doc.setFont("helvetica", row.bold ? "bold" : "normal");
+    doc.setFontSize(row.bold ? 10 : 9);
+    doc.setTextColor(...(row.color ?? PDF_COLORS.textDark));
+    doc.text(row.label, boxX + 2, ry);
+    doc.text(row.value, boxX + boxWidth - 2, ry, { align: "right" });
+  });
+  return y + height;
+}
+
+/** Imzo joylari — topshirdi / qabul qildi. Sig'masa yangi sahifada chiziladi. */
+export function drawSignatures(
+  doc: jsPDF,
+  startY: number,
+  company: CompanyInfo,
+  header: { title: string; number: string; date: string },
+  labels: [string, string] = ["Topshirdi (imzo)", "Qabul qildi (imzo)"],
+): number {
+  const y = ensureSpace(doc, startY + 12, 20, company, header) + 8;
+  const right = A4.width - A4.marginX;
+  doc.setDrawColor(...PDF_COLORS.border);
+  doc.line(A4.marginX, y, A4.marginX + 66, y);
+  doc.line(right - 66, y, right, y);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(...PDF_COLORS.textMuted);
+  doc.text(labels[0], A4.marginX + 33, y + 5, { align: "center" });
+  doc.text(labels[1], right - 33, y + 5, { align: "center" });
+  doc.text(`Sana: ${new Date().toLocaleDateString("uz-UZ")}`, A4.marginX, y + 12);
+  return y + 14;
+}
+
+/** Izoh bloki — jadvaldan keyin chap tomonda; sig'masa yangi sahifaga o'tadi. */
+export function drawNotes(
+  doc: jsPDF,
+  startY: number,
+  notes: string,
+  company: CompanyInfo,
+  header: { title: string; number: string; date: string },
+  width = 100,
+): number {
+  const lines = doc.splitTextToSize(notes, width) as string[];
+  const y = ensureSpace(doc, startY, lines.length * 4.5 + 10, company, header);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.setTextColor(...PDF_COLORS.textMuted);
+  doc.text("Izoh:", A4.marginX, y + 4);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...PDF_COLORS.textDark);
+  doc.text(lines, A4.marginX, y + 11);
+  return y + lines.length * 4.5 + 12;
 }
 
 /**

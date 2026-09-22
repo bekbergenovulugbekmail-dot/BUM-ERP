@@ -38,8 +38,10 @@ import {
   posShifts,
   salesOrderItems,
   salesOrders,
+  salesReturnItems,
   salesReturns,
 } from "../../db/schema/sales.js";
+import { users } from "../../db/schema/platform.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
@@ -527,7 +529,9 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
     .from(customerCashbackTransactions)
     .where(and(eq(customerCashbackTransactions.orderId, orderId), eq(customerCashbackTransactions.type, "earn")));
 
-  const returns = await conn
+  // Qaytarish tarixi: hujjat sarlavhasi, kim qabul qilgani va QAYSI qatordan qancha qaytgani.
+  // Qisman qaytarishda foydalanuvchi "qancha qaytgan, yana qancha mumkin" ni shu yerdan ko'radi.
+  const returnRows = await conn
     .select({
       id: salesReturns.id,
       number: salesReturns.number,
@@ -536,10 +540,32 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
       refundAmount: salesReturns.refundAmount,
       reason: salesReturns.reason,
       createdAt: salesReturns.createdAt,
+      createdByName: users.name,
     })
     .from(salesReturns)
+    .leftJoin(users, eq(users.id, salesReturns.createdBy))
     .where(eq(salesReturns.orderId, orderId))
     .orderBy(asc(salesReturns.createdAt));
+
+  const returnLines = returnRows.length
+    ? await conn
+        .select({
+          returnId: salesReturnItems.returnId,
+          orderItemId: salesReturnItems.orderItemId,
+          productId: salesReturnItems.productId,
+          productName: products.name,
+          quantity: salesReturnItems.quantity,
+          lineTotal: salesReturnItems.lineTotal,
+        })
+        .from(salesReturnItems)
+        .innerJoin(products, eq(products.id, salesReturnItems.productId))
+        .where(inArray(salesReturnItems.returnId, returnRows.map((row) => row.id)))
+        .orderBy(asc(salesReturnItems.createdAt))
+    : [];
+  const returns = returnRows.map((row) => ({
+    ...row,
+    items: returnLines.filter((line) => line.returnId === row.id).map(({ returnId: _returnId, ...line }) => line),
+  }));
 
   return { ...order, currencyTotals, cashbackEarned: earned!.total, items, payments, returns };
 }

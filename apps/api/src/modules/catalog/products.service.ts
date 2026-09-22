@@ -17,7 +17,7 @@
 import { and, asc, eq, getTableColumns, gt, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { badRequest, notFound } from "@bum/shared";
-import { batches, brands, categories, productKind, products, units } from "../../db/schema/catalog.js";
+import { batches, brands, categories, productKind, products, unitConversions, units } from "../../db/schema/catalog.js";
 
 /** Katalog turi — sxemadagi enum bilan bir xil. */
 export type ProductKind = (typeof productKind.enumValues)[number];
@@ -25,6 +25,7 @@ import { warehouses } from "../../db/schema/inventory.js";
 import { suppliers } from "../../db/schema/purchase.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
+import { cleanNumber } from "../../shared/csv.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import { priceSchema, qtySchema } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
@@ -493,7 +494,14 @@ export type ImportRow = {
   name?: string;
   sku?: string;
   barcode?: string;
+  /** ASOSIY birlik (qoldiq va tannarx shunda yuritiladi) — berilmasa "dona". */
   unit?: string;
+  /** Xarid qilinadigan birlik ("blok", "pachka") — `unitsPerPackage` bilan birga. */
+  purchaseUnit?: string;
+  /** Sotiladigan birlik; berilmasa asosiy birlik. */
+  saleUnit?: string;
+  /** 1 qadoqda nechta asosiy birlik bor (1 blok = 6 dona → 6). */
+  unitsPerPackage?: string | number;
   purchasePrice?: string | number;
   salesPrice?: string | number;
   minStock?: string | number;
@@ -503,10 +511,52 @@ export type ImportRow = {
 
 export type ImportError = { row: number; sku: string | null; message: string };
 
-/** "12 500,50" → "12500.50"; bo'sh → "0". */
-function cleanNumber(value: string | number | undefined): string {
-  if (value === undefined || value === "") return "0";
-  return String(value).replace(/\s/g, "").replace(",", ".");
+/**
+ * Preview qatori: foydalanuvchi importdan OLDIN nima bo'lishini ko'radi —
+ * normallashtirilgan narx, qadoq konversiyasi va bitta asosiy birlikka tushadigan tannarx.
+ */
+export type ImportPreviewRow = {
+  row: number;
+  status: "new" | "duplicate" | "error";
+  name: string;
+  sku: string;
+  barcode: string | null;
+  /** Asosiy birlik nomi (qoldiq shunda). */
+  baseUnit: string;
+  /** Xarid birligi va 1 qadoqdagi asosiy birlik soni; qadoq yo'q bo'lsa null. */
+  purchaseUnit: string | null;
+  unitsPerPackage: string | null;
+  /** Faylda yozilgani va tizim tushungan qiymat — noaniqlik yashirilmaydi. */
+  purchasePriceRaw: string;
+  purchasePrice: string;
+  salesPriceRaw: string;
+  salesPrice: string;
+  /**
+   * Bitta ASOSIY birlikka tushadigan kirim narxi: xarid birligi qadoq bo'lsa
+   * `purchasePrice / unitsPerPackage`, aks holda `purchasePrice`.
+   */
+  unitCost: string;
+  message: string | null;
+};
+
+/** Xato yoki dublikat qatorining preview ko'rinishi — sababi bilan. */
+function errorPreview(item: ImportError, status: "error" | "duplicate"): ImportPreviewRow {
+  return {
+    row: item.row,
+    status,
+    name: "",
+    sku: item.sku ?? "",
+    barcode: null,
+    baseUnit: "",
+    purchaseUnit: null,
+    unitsPerPackage: null,
+    purchasePriceRaw: "",
+    purchasePrice: "0",
+    salesPriceRaw: "",
+    salesPrice: "0",
+    unitCost: "0",
+    message: item.message,
+  };
 }
 
 export async function importProducts(
@@ -552,6 +602,10 @@ export async function importProducts(
   const duplicates: ImportError[] = [];
   const warnings: ImportError[] = [];
   const values: (typeof products.$inferInsert)[] = [];
+  /** Qadoq konversiyalari — mahsulotlar yozilgandan keyin id bo'yicha bog'lanadi. */
+  const conversions: { sku: string; fromUnitId: string; toUnitId: string; factor: string }[] = [];
+  const preview: ImportPreviewRow[] = [];
+  const unitNameById = new Map((await listUnits(tx)).map((unit) => [unit.id, unit.shortName]));
   let autoSku = await nextNumericSku(tx, companyId);
 
   rows.forEach((row, index) => {
@@ -578,6 +632,30 @@ export async function importProducts(
     const baseUnitId = unitKey ? unitIndex.get(unitKey) : defaultUnitId;
     if (!baseUnitId) return fail(`O'lchov birligi topilmadi: ${row.unit ?? ""}`);
 
+    // Xarid va sotuv birligi — asosiy birlikdan farq qilsa, konversiya majburiy
+    const purchaseUnitKey = row.purchaseUnit?.trim().toLowerCase();
+    const purchaseUnitId = purchaseUnitKey ? unitIndex.get(purchaseUnitKey) : null;
+    if (purchaseUnitKey && !purchaseUnitId) return fail(`Xarid birligi topilmadi: ${row.purchaseUnit}`);
+    const saleUnitKey = row.saleUnit?.trim().toLowerCase();
+    const saleUnitId = saleUnitKey ? unitIndex.get(saleUnitKey) : null;
+    if (saleUnitKey && !saleUnitId) return fail(`Sotuv birligi topilmadi: ${row.saleUnit}`);
+
+    const packText = cleanNumber(row.unitsPerPackage);
+    const packParsed = qtySchema.safeParse(packText);
+    if (!packParsed.success) return fail("Qadoqdagi miqdor noto'g'ri son");
+    const perPackage = Number(packParsed.data);
+    // "1 blok = 6 dona" — blok ko'rsatilgan bo'lsa, nechtaligi ham aytilishi shart,
+    // aks holda 10 blok 10 dona bo'lib tushib ketardi
+    if (purchaseUnitId && purchaseUnitId !== baseUnitId && perPackage <= 0) {
+      return fail(`"${row.purchaseUnit}" uchun 1 qadoqdagi miqdor ko'rsatilmagan`);
+    }
+    if (saleUnitId && saleUnitId !== baseUnitId && saleUnitId !== purchaseUnitId && perPackage <= 0) {
+      return fail(`"${row.saleUnit}" uchun 1 qadoqdagi miqdor ko'rsatilmagan`);
+    }
+    if (perPackage > 0 && !purchaseUnitId && !saleUnitId) {
+      warnings.push({ row: line, sku, message: "Qadoqdagi miqdor ko'rsatilgan, lekin qadoq birligi yo'q — e'tiborsiz qoldirildi" });
+    }
+
     const purchasePrice = priceSchema.safeParse(cleanNumber(row.purchasePrice));
     const salesPrice = priceSchema.safeParse(cleanNumber(row.salesPrice));
     const minStock = qtySchema.safeParse(cleanNumber(row.minStock));
@@ -598,28 +676,83 @@ export async function importProducts(
       sku,
       barcode: barcode ? barcode.slice(0, 64) : null,
       baseUnitId,
+      purchaseUnitId: purchaseUnitId ?? null,
+      salesUnitId: saleUnitId ?? null,
       purchasePrice: purchasePrice.data,
       salesPrice: salesPrice.data,
       minStock: minStock.data,
       categoryId,
       brandId: row.brand ? (brandIndex.get(row.brand.trim().toLowerCase()) ?? null) : null,
     });
+
+    // Qadoq → asosiy birlik konversiyasi (mahsulotga xos). Xarid va sotuv birligi bir xil bo'lsa bitta yozuv.
+    const packUnits = [...new Set([purchaseUnitId, saleUnitId].filter((id): id is string => Boolean(id) && id !== baseUnitId))];
+    if (perPackage > 0) {
+      for (const unitId of packUnits) {
+        conversions.push({ sku, fromUnitId: unitId, toUnitId: baseUnitId, factor: packParsed.data });
+      }
+    }
+
+    preview.push({
+      row: line,
+      status: "new",
+      name,
+      sku,
+      barcode: barcode ? barcode.slice(0, 64) : null,
+      baseUnit: unitNameById.get(baseUnitId) ?? "",
+      purchaseUnit: purchaseUnitId ? (unitNameById.get(purchaseUnitId) ?? null) : null,
+      unitsPerPackage: perPackage > 0 ? packParsed.data : null,
+      purchasePriceRaw: String(row.purchasePrice ?? ""),
+      purchasePrice: purchasePrice.data,
+      salesPriceRaw: String(row.salesPrice ?? ""),
+      salesPrice: salesPrice.data,
+      // Kirim narxi qadoq uchun berilgan bo'lsa — bitta asosiy birlikka tushadigan tannarx
+      unitCost:
+        purchaseUnitId && purchaseUnitId !== baseUnitId && perPackage > 0
+          ? (Number(purchasePrice.data) / perPackage).toFixed(4)
+          : purchasePrice.data,
+      message: null,
+    });
   });
 
-  // Preview (`dryRun`): tekshiruv tugadi — bazaga hech narsa yozilmaydi
-  if (dryRun) return { created: 0, valid: values.length, errors, duplicates, warnings, dryRun: true };
+  // Xato va dublikat qatorlari ham previewda ko'rinsin (foydalanuvchi sababini ko'radi)
+  for (const item of errors) preview.push(errorPreview(item, "error"));
+  for (const item of duplicates) preview.push(errorPreview(item, "duplicate"));
+  preview.sort((a, b) => a.row - b.row);
 
+  // Preview (`dryRun`): tekshiruv tugadi — bazaga hech narsa yozilmaydi
+  if (dryRun) return { created: 0, valid: values.length, errors, duplicates, warnings, preview, dryRun: true };
+
+  const insertedIds = new Map<string, string>();
   for (let i = 0; i < values.length; i += IMPORT_CHUNK) {
-    await tx.insert(products).values(values.slice(i, i + IMPORT_CHUNK));
+    const chunk = await tx
+      .insert(products)
+      .values(values.slice(i, i + IMPORT_CHUNK))
+      .returning({ id: products.id, sku: products.sku });
+    for (const item of chunk) insertedIds.set(item.sku, item.id);
+  }
+
+  // Qadoq konversiyalari: "1 blok = 6 dona" — xarid va sotuv shu koeffitsientdan foydalanadi
+  const conversionValues = conversions
+    .map((item) => ({
+      companyId,
+      productId: insertedIds.get(item.sku) ?? null,
+      fromUnitId: item.fromUnitId,
+      toUnitId: item.toUnitId,
+      factor: item.factor,
+    }))
+    .filter((item) => item.productId !== null);
+  for (let i = 0; i < conversionValues.length; i += IMPORT_CHUNK) {
+    await tx.insert(unitConversions).values(conversionValues.slice(i, i + IMPORT_CHUNK));
   }
 
   await audit(tx, tenant, meta, {
     action: "PRODUCTS_IMPORTED",
     resource: "products",
     resourceId: "import",
-    details: { created: values.length, failed: errors.length, duplicates: duplicates.length },
+    details: { created: values.length, failed: errors.length, duplicates: duplicates.length, conversions: conversionValues.length },
   });
-  return { created: values.length, valid: values.length, errors, duplicates, warnings, dryRun: false };
+  return { created: values.length, valid: values.length, errors, duplicates, warnings, preview, dryRun: false };
 }
 
 const CSV_HEADER = ["Nomi", "SKU", "Shtrix-kod", "Kategoriya", "Brend", "O'lchov birligi", "Kirim narxi", "Sotuv narxi", "Min. qoldiq", "Faol"];

@@ -4,10 +4,11 @@
  */
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import type { CompanyInfo } from "./pdf-utils.ts";
+import type { CompanyInfo, TotalRow } from "./pdf-utils.ts";
 import {
   PDF_COLORS,
-  drawCompanyHeader, drawInfoBox, drawFooter, fmtNum, fmtMoney,
+  afterTable, drawCompanyHeader, drawFooter, drawInfoBox, drawNotes, drawSignatures, drawTotalsBox,
+  fmtMoney, fmtNum, tableOptions,
 } from "./pdf-utils.ts";
 
 export type InvoiceItem = {
@@ -61,9 +62,17 @@ const STATUS_COLORS: Record<string, [number, number, number]> = {
   cancelled: [239, 68, 68],
 };
 
-export function generateSalesInvoicePDF(data: InvoiceData): void {
+export function generateSalesInvoicePDF(data: InvoiceData): jsPDF {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const currency = data.currency ?? "so'm";
+  /** Har sahifada takrorlanadigan sarlavha (50+ qatorli nakladnoyda 2-sahifa ham to'liq hujjat). */
+  const pageHeader = {
+    title: "HISOB-FAKTURA",
+    number: data.number,
+    date: data.date,
+    rightLabel: "Holat",
+    rightValue: STATUS_LABELS[data.status] ?? data.status,
+  };
 
   let y = drawCompanyHeader(
     doc, data.company,
@@ -110,17 +119,7 @@ export function generateSalesInvoicePDF(data: InvoiceData): void {
       item.taxRate > 0 ? `${item.taxRate}%` : "—",
       fmtMoney(item.lineTotal, currency),
     ]),
-    theme: "grid",
-    headStyles: {
-      fillColor: PDF_COLORS.headerBg,
-      textColor: PDF_COLORS.headerText,
-      fontStyle: "bold",
-      fontSize: 8.5,
-      halign: "center",
-    },
-    bodyStyles: { fontSize: 8.5, textColor: PDF_COLORS.textDark },
-    alternateRowStyles: { fillColor: PDF_COLORS.rowAlt },
-    columnStyles: {
+    ...tableOptions(doc, data.company, pageHeader, {
       0: { cellWidth: 8, halign: "center" },
       1: { cellWidth: 50 },
       2: { cellWidth: 22, textColor: PDF_COLORS.textMuted },
@@ -129,20 +128,14 @@ export function generateSalesInvoicePDF(data: InvoiceData): void {
       5: { halign: "center" },
       6: { halign: "center" },
       7: { halign: "right", fontStyle: "bold" },
-    },
-    margin: { left: 14, right: 14 },
-    styles: { lineColor: PDF_COLORS.border, lineWidth: 0.2 },
+    }),
   });
 
-  const tableY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+  const tableY = afterTable(doc);
 
-  // Totals box (right side)
-  const pw = doc.internal.pageSize.getWidth();
-  const boxX = pw - 85;
-  const boxW = 71;
-  let ty = tableY;
-
-  const totals: { label: string; value: string; bold?: boolean; color?: [number, number, number] }[] = [
+  // Jami — faqat oxirgi sahifada; hujjat turida yo'q maydon ko'rsatilmaydi (soxta qator yo'q)
+  const totals: TotalRow[] = [
+    { label: "Jami mahsulot:", value: `${fmtNum(data.items.length)} nomda` },
     { label: "Subtotal:", value: fmtMoney(data.subtotal, currency) },
     ...(data.discountTotal > 0 ? [{ label: "Chegirma:", value: `-${fmtMoney(data.discountTotal, currency)}`, color: PDF_COLORS.red }] : []),
     ...(data.taxTotal > 0 ? [{ label: "Soliq:", value: fmtMoney(data.taxTotal, currency) }] : []),
@@ -150,48 +143,12 @@ export function generateSalesInvoicePDF(data: InvoiceData): void {
     { label: "To'langan:", value: fmtMoney(data.paidAmount, currency), color: PDF_COLORS.green },
     { label: "Qoldi:", value: fmtMoney(data.balance, currency), bold: true, color: data.balance > 0 ? PDF_COLORS.amber : PDF_COLORS.green },
   ];
-
-  doc.setFillColor(...PDF_COLORS.rowAlt);
-  doc.roundedRect(boxX - 2, ty - 2, boxW + 4, totals.length * 8 + 6, 3, 3, "F");
-
-  totals.forEach((row, idx) => {
-    const ry = ty + idx * 8 + 4;
-    doc.setFont("helvetica", row.bold ? "bold" : "normal");
-    doc.setFontSize(row.bold ? 10 : 9);
-    doc.setTextColor(...(row.color ?? PDF_COLORS.textDark));
-    doc.text(row.label, boxX + 2, ry);
-    doc.text(row.value, boxX + boxW - 2, ry, { align: "right" });
-  });
-
-  // Notes
-  if (data.notes) {
-    const notesY = tableY;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8.5);
-    doc.setTextColor(...PDF_COLORS.textMuted);
-    doc.text("Izoh:", 14, notesY + 4);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.5);
-    doc.setTextColor(...PDF_COLORS.textDark);
-    const lines = doc.splitTextToSize(data.notes, 100);
-    doc.text(lines, 14, notesY + 11);
-  }
-
-  // Signature line
-  const sigY = Math.max(
-    tableY + totals.length * 8 + 18,
-    (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 50
-  );
-  doc.setDrawColor(...PDF_COLORS.border);
-  doc.line(14, sigY, 80, sigY);
-  doc.line(pw - 80, sigY, pw - 14, sigY);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(...PDF_COLORS.textMuted);
-  doc.text("Sotuvchi imzosi", 47, sigY + 5, { align: "center" });
-  doc.text("Mijoz imzosi", pw - 47, sigY + 5, { align: "center" });
+  let blockY = drawTotalsBox(doc, tableY, totals, data.company, pageHeader);
+  if (data.notes) blockY = Math.max(blockY, drawNotes(doc, tableY, data.notes, data.company, pageHeader));
+  drawSignatures(doc, blockY, data.company, pageHeader, ["Sotuvchi (imzo)", "Mijoz (imzo)"]);
 
   drawFooter(doc, `${data.company.name}  —  Hisob-faktura ${data.number}`);
 
   doc.save(`invoice-${data.number}.pdf`);
+  return doc;
 }

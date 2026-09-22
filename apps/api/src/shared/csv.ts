@@ -60,10 +60,62 @@ export function csvDocument(header: string[], rows: (string | number | null | un
   return String.fromCharCode(0xfeff) + lines.join("\r\n");
 }
 
-/** "12 500,50" → "12500.50" (bo'linmas probel ham); bo'sh → "0". */
+/**
+ * Excel/CSV dagi sonni bir xil (nuqtali) ko'rinishga keltiradi. Bo'sh — "0".
+ *
+ * MUAMMO: ilgari `replace(",", ".")` qilinardi va "10,500" → "10.500" = 10.5 bo'lib ketardi
+ * (10 500 o'rniga), "10.000" esa 10 bo'lardi. Bu narx va miqdorni 1000 barobar buzadi.
+ *
+ * QOIDA (aniq va takrorlanadigan):
+ *   1. Ikkala ajratgich ham bor ("1.234,56" yoki "1,234.56") — OXIRGISI kasr, boshqasi mingliklar.
+ *   2. Bitta ajratgich bir necha marta ("1.234.567") — mingliklar.
+ *   3. Bitta ajratgich bir marta:
+ *        - ortidan AYNAN 3 raqam ("10,500", "10.500") — MINGLIKLAR (o'zbek/rus yozuvi);
+ *        - 1, 2 yoki 4+ raqam ("10.5", "10000.50", "1.2345") — KASR.
+ * Natija previewda ko'rsatiladi, shuning uchun noaniqlik foydalanuvchidan yashirilmaydi.
+ *
+ * Yaroqsiz qiymat (harf, bir nechta minus, NaN, Infinity) — "" qaytadi; chaqiruvchi sxema
+ * (`priceSchema`, `qtySchema`) uni xato deb rad etadi.
+ */
 export function cleanNumber(value: string | number | null | undefined): string {
   if (value === undefined || value === null || value === "") return "0";
-  return String(value).replace(/\s/g, "").replace(",", ".");
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
+
+  // Probel (bo'linmas ham), apostrof va valyuta belgilaridan tozalash
+  const raw = String(value).replace(/[\s\u00a0\u202f']/g, "").trim();
+  if (!raw) return "0";
+
+  const match = /^([+-]?)([\d.,]+)$/.exec(raw);
+  if (!match) return "";
+  const sign = match[1] === "-" ? "-" : "";
+  const body = match[2]!;
+
+  const dots = (body.match(/\./g) ?? []).length;
+  const commas = (body.match(/,/g) ?? []).length;
+
+  let normalized: string;
+  if (dots > 0 && commas > 0) {
+    // Oxirgi ajratgich — kasr, qolgani mingliklar
+    const decimalChar = body.lastIndexOf(".") > body.lastIndexOf(",") ? "." : ",";
+    const thousandsChar = decimalChar === "." ? "," : ".";
+    const index = body.lastIndexOf(decimalChar);
+    normalized = `${body.slice(0, index).split(thousandsChar).join("")}.${body.slice(index + 1)}`;
+  } else if (dots + commas === 0) {
+    normalized = body;
+  } else {
+    const separator = dots > 0 ? "." : ",";
+    const parts = body.split(separator);
+    const tail = parts[parts.length - 1]!;
+    // Bir necha ajratgich yoki ortidan aynan 3 raqam — mingliklar
+    normalized = parts.length > 2 || (parts.length === 2 && parts[0] !== "" && tail.length === 3)
+      ? parts.join("")
+      : `${parts[0]}.${tail}`;
+  }
+
+  if (!/^\d*\.?\d*$/.test(normalized) || normalized === "" || normalized === ".") return "";
+  const asNumber = Number(`${sign}${normalized}`);
+  if (!Number.isFinite(asNumber)) return "";
+  return `${sign}${normalized}`;
 }
 
 /** "ha", "true", "1", "faol" → true; "yo'q", "false", "0" → false; bo'sh — standart qiymat. */
