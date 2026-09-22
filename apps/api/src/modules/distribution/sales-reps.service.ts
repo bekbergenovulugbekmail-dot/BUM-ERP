@@ -4,7 +4,9 @@
  * Convex'dan farqlar:
  *  - kod "agentlar soni + 1" edi — o'chirishdan keyin va parallel yaratishda takrorlanardi (`SR-001`, advisory lock)
  *  - `getStats` har agentga kompaniyaning BARCHA buyurtmalari sonini va doim `thisMonthSales: 0`
- *    qaytarardi — endi agentning shu oydagi lidlari, yutilgan lidlar summasi, tashriflari va tashrif savdosi
+ *    qaytarardi — endi agentning shu oydagi lidlari, yutilgan lidlar summasi, tashriflari va savdosi.
+ *    Tashrif va savdo ko'rsatkichlari MAYDON ma'lumotidan (`agent_visits`, `agent_orders`) olinadi —
+ *    agent ilovasi, rahbar paneli va agent hisoboti bir xil manbadan hisoblaydi
  *  - lid/marshrut/tashrifga bog'langan agentni o'chirish tarixni yo'qotardi — endi faqat faolsizlantirish
  *  - `userId` kompaniya a'zosi ekani tekshiriladi; `update` / `remove` to'xtatilgan kompaniyada ham yozardi
  *  - o'qish `distribution.view` talab qiladi (CRM'dagi lidga agent tanlash — faqat id, nom, kod)
@@ -12,6 +14,8 @@
 import { and, asc, eq, getTableColumns, ne, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
 import { distributionRoutes, leads, routeVisits, salesReps } from "../../db/schema/crm.js";
+import { salesOrders } from "../../db/schema/sales.js";
+import { PAYABLE_STATUSES } from "../sales/sale-status.js";
 import { companyMembers } from "../../db/schema/platform.js";
 import { agentOrders, agentProspects, agentVisits, agentWorkSessions } from "../../db/schema/sales-agent.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -104,8 +108,26 @@ export async function salesRepStats(conn: DbOrTx, tenant: TenantContext) {
       leadsThisMonth: sql<number>`(select count(*)::int from ${leads} where ${leads.salesRepId} = ${outerRepId} and ${leads.createdAt} >= ${monthStart}::date)`,
       openLeads: sql<number>`(select count(*)::int from ${leads} where ${leads.salesRepId} = ${outerRepId} and ${leads.stage} not in ('won', 'lost'))`,
       wonValueThisMonth: sql<string>`(select coalesce(sum(${leads.estimatedValue}), 0)::numeric(18,2) from ${leads} where ${leads.salesRepId} = ${outerRepId} and ${leads.stage} = 'won' and ${leads.updatedAt} >= ${monthStart}::date)`,
-      visitsThisMonth: sql<number>`(select count(*)::int from ${routeVisits} where ${routeVisits.salesRepId} = ${outerRepId} and ${routeVisits.status} = 'completed' and ${routeVisits.visitDate} >= ${monthStart}::date)`,
-      visitSalesThisMonth: sql<string>`(select coalesce(sum(${routeVisits.totalAmount}), 0)::numeric(18,2) from ${routeVisits} where ${routeVisits.salesRepId} = ${outerRepId} and ${routeVisits.status} = 'completed' and ${routeVisits.visitDate} >= ${monthStart}::date)`,
+      // DIQQAT: tashrif ko'rsatkichlari MAYDONDAGI tashrifdan (`agent_visits`) olinadi — agent ilovasi shu
+      // jadvalga yozadi. `route_visits` — marshrut-kun jurnali (boshqa granularlik, qo'lda kiritiladi) va
+      // KPI uchun manba EMAS: aks holda rahbar panelida tashriflar doim 0 bo'lib turardi.
+      visitsThisMonth: sql<number>`(select count(*)::int from ${agentVisits}
+        where ${agentVisits.salesRepId} = ${outerRepId} and ${agentVisits.status} = 'completed' and ${agentVisits.visitDate} >= ${monthStart}::date)`,
+      orderedVisitsThisMonth: sql<number>`(select count(*)::int from ${agentVisits}
+        where ${agentVisits.salesRepId} = ${outerRepId} and ${agentVisits.result} = 'ordered' and ${agentVisits.visitDate} >= ${monthStart}::date)`,
+      noOrderVisitsThisMonth: sql<number>`(select count(*)::int from ${agentVisits}
+        where ${agentVisits.salesRepId} = ${outerRepId} and ${agentVisits.result} = 'no_order' and ${agentVisits.visitDate} >= ${monthStart}::date)`,
+      // Savdo — agentning yuborilgan buyurtmalari (agent hisobotidagi qoida bilan AYNAN bir xil)
+      visitSalesThisMonth: sql<string>`(select coalesce(sum(${salesOrders.totalAmount}), 0)::numeric(18,2)
+        from ${agentOrders} join ${salesOrders} on ${salesOrders.id} = ${agentOrders.orderId}
+        where ${agentOrders.salesRepId} = ${outerRepId} and ${agentOrders.submittedAt} is not null
+          and ${salesOrders.status} in ${sql.raw(`(${PAYABLE_STATUSES.map((status) => `'${status}'`).join(", ")})`)}
+          and ${salesOrders.orderDate} >= ${monthStart}::date)`,
+      ordersThisMonth: sql<number>`(select count(*)::int
+        from ${agentOrders} join ${salesOrders} on ${salesOrders.id} = ${agentOrders.orderId}
+        where ${agentOrders.salesRepId} = ${outerRepId} and ${agentOrders.submittedAt} is not null
+          and ${salesOrders.status} in ${sql.raw(`(${PAYABLE_STATUSES.map((status) => `'${status}'`).join(", ")})`)}
+          and ${salesOrders.orderDate} >= ${monthStart}::date)`,
     })
     .from(salesReps)
     .where(and(eq(salesReps.companyId, tenant.company.id), eq(salesReps.isActive, true)))

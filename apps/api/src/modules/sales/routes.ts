@@ -44,7 +44,7 @@ import { decimalSchema, moneySchema, percentSchema, priceSchema } from "../../sh
 import { authOf, requireAuth } from "../auth/guard.js";
 import { requireAnyPermission, requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import { autoCreateDeliveryTask } from "../delivery/tasks.service.js";
-import { createCustomer, getCustomer, listCustomerRegions, listCustomers, updateCustomer } from "./customers.service.js";
+import { createCustomer, getCustomer, listCustomerRegions, listCustomers, salesAudit, updateCustomer } from "./customers.service.js";
 import {
   cancelOrder,
   confirmOrder,
@@ -57,6 +57,9 @@ import {
   updateOrder,
 } from "./orders.service.js";
 import { listCustomerPayments, recordSalesPayment } from "./payments.service.js";
+import { AGING_BUCKETS, receivablesAging } from "./receivables.service.js";
+import { evaluateCredit, setCreditStatus } from "./credit.service.js";
+import { deactivateCustomerPrice, listCustomerPrices, setCustomerPrice } from "./customer-prices.service.js";
 import { recordMixedCustomerPayment } from "./payment-allocation.service.js";
 import { paymentTerminalOptions, posBankAccountOptions } from "../finance/terminals.service.js";
 import { getPosAppearance } from "../pos-device/appearance.service.js";
@@ -218,6 +221,38 @@ const mixedPaymentBody = z.strictObject({
   reference: nullableText(100),
   notes: nullableText(2000),
 });
+/** Debitorlik yoshi: mijoz, guruh va faqat muddati o'tganlar bo'yicha filtr. */
+/** Kelishilgan narx: mijoz × mahsulot × birlik, amal muddati bilan. */
+const customerPriceBody = z.strictObject({
+  customerId: z.uuid(),
+  productId: z.uuid(),
+  unitId: z.uuid(),
+  price: priceSchema,
+  effectiveFrom: z.iso.date().optional(),
+  effectiveTo: z.iso.date().nullable().optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
+});
+const customerPricesQuery = z.object({
+  customerId: z.uuid().optional(),
+  productId: z.uuid().optional(),
+  activeOnly: z.enum(["true", "false"]).transform((value) => value === "true").optional(),
+  limit: z.coerce.number().int().min(1).max(1000).optional(),
+});
+const customerPriceParams = z.object({ priceId: z.uuid() });
+
+/** Nasiya to'xtatish / ochish — sabab majburiy (audit uchun). */
+const creditStatusBody = z.strictObject({
+  status: z.enum(["ok", "hold"]),
+  reason: z.string().trim().min(3).max(500),
+});
+
+const agingQuery = z.object({
+  customerId: z.uuid().optional(),
+  bucket: z.enum(AGING_BUCKETS).optional(),
+  overdueOnly: z.enum(["true", "false"]).transform((value) => value === "true").optional(),
+  limit: z.coerce.number().int().min(1).max(2000).optional(),
+});
+
 const paymentsQuery = z.object({
   customerId: z.uuid().optional(),
   orderId: z.uuid().optional(),
@@ -479,6 +514,51 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     return { customer };
   });
 
+  // ─── Kelishilgan narx (mijoz × mahsulot × birlik) ────────────────────────
+
+  app.get("/customer-prices", async (req) => {
+    const query = customerPricesQuery.parse(req.query);
+    return listCustomerPrices(db, await readTenant(req, "sales.view"), query);
+  });
+
+  app.post("/customer-prices", async (req, reply) => {
+    const body = customerPriceBody.parse(req.body);
+    const result = await writeInTenant(req, "sales.edit", (tx, tenant) => setCustomerPrice(tx, tenant, body, requestMeta(req)));
+    reply.status(201);
+    return result;
+  });
+
+  app.delete("/customer-prices/:priceId", async (req) => {
+    const { priceId } = customerPriceParams.parse(req.params);
+    return writeInTenant(req, "sales.edit", (tx, tenant) => deactivateCustomerPrice(tx, tenant, priceId, requestMeta(req)));
+  });
+
+  // ─── Kredit holati (nasiya to'xtatish) ───────────────────────────────────
+
+  app.get("/customers/:customerId/credit", async (req) => {
+    const { customerId } = customerParams.parse(req.params);
+    const tenant = await readTenant(req, "sales.view");
+    // Mijoz shu kompaniyanikimi — begona id bo'yicha holat sizmasin
+    await getCustomer(db, tenant, customerId);
+    return { credit: await evaluateCredit(db, tenant.company.id, customerId) };
+  });
+
+  app.post("/customers/:customerId/credit", async (req) => {
+    const { customerId } = customerParams.parse(req.params);
+    const body = creditStatusBody.parse(req.body);
+    const result = await writeInTenant(req, "sales.approve", async (tx, tenant) => {
+      const changed = await setCreditStatus(tx, tenant, customerId, body);
+      await salesAudit(tx, tenant, requestMeta(req), {
+        action: body.status === "hold" ? "CUSTOMER_CREDIT_HOLD" : "CUSTOMER_CREDIT_RELEASE",
+        resource: "customers",
+        resourceId: customerId,
+        details: { name: changed.customer.name, from: changed.previousStatus, to: body.status, reason: body.reason },
+      });
+      return changed;
+    });
+    return { customer: result.customer };
+  });
+
   // ─── Buyurtmalar ─────────────────────────────────────────────────────────
 
   app.get("/orders", async (req) => {
@@ -558,6 +638,13 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     );
     reply.status(201);
     return result;
+  });
+
+  // ─── Debitorlik (qarz yoshi) ─────────────────────────────────────────────
+
+  app.get("/receivables/aging", async (req) => {
+    const query = agingQuery.parse(req.query);
+    return receivablesAging(db, await readTenant(req, "sales.view"), query);
   });
 
   // ─── To'lovlar ───────────────────────────────────────────────────────────

@@ -24,8 +24,13 @@ export type SalesRepStats = SalesRep & {
   leadsThisMonth: number;
   openLeads: number;
   wonValueThisMonth: string;
+  /** Maydondagi yakunlangan tashriflar (`agent_visits`) — agent ilovasi bilan bir xil manba. */
   visitsThisMonth: number;
+  orderedVisitsThisMonth: number;
+  noOrderVisitsThisMonth: number;
+  /** Agent yuborgan buyurtmalar summasi va soni (`agent_orders`). */
   visitSalesThisMonth: string;
+  ordersThisMonth: number;
 };
 
 /** Hudud (Urganch, Xiva ...) — marshrutlar shu hudud tarkibida. */

@@ -9,7 +9,7 @@
  */
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, X } from "lucide-react";
+import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, ShieldCheck, ShieldOff, X } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -22,6 +22,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
+import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
@@ -101,6 +102,27 @@ export default function CustomersSection() {
   const [showArchive, setShowArchive] = useState(false);
   /** Arxivga ko'chirish yoki qaytarish tasdig'i. */
   const [archiving, setArchiving] = useState<Customer | null>(null);
+
+  /** Nasiya to'xtatish / ochish — rahbar ruxsati (`sales.approve`); sabab majburiy va auditga tushadi. */
+  const canHoldCredit = can("sales.approve");
+  const [creditDialog, setCreditDialog] = useState<Customer | null>(null);
+  const [creditReason, setCreditReason] = useState("");
+  const setCreditStatus = useApiMutation(({ id, body }: { id: string; body: { status: "ok" | "hold"; reason: string } }) =>
+    api.post(`/api/sales/customers/${id}/credit`, body),
+  );
+
+  const submitCredit = async () => {
+    if (!creditDialog) return;
+    const status = creditDialog.creditStatus === "hold" ? "ok" : "hold";
+    try {
+      await setCreditStatus.mutateAsync({ id: creditDialog.id, body: { status, reason: creditReason.trim() } });
+      toast.success(status === "hold" ? "Nasiya to'xtatildi" : "Nasiya ochildi");
+      setCreditDialog(null);
+      setCreditReason("");
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
 
   /** Saralash: hudud, tartib va "qarzi borlar" — hammasi serverda (ro'yxat chegarasi 200 ta). */
   const [filter, setFilter] = useState<CustomerFilter>(emptyCustomerFilter);
@@ -338,6 +360,11 @@ export default function CustomersSection() {
                       {c.code}
                       {c.partyType === "legal" && <span className="ml-2 font-sans text-primary">Yuridik shaxs</span>}
                       {!c.isActive && <span className="ml-2 font-sans text-muted-foreground">Arxivda</span>}
+                      {c.creditStatus === "hold" && (
+                        <span className="ml-2 font-sans text-destructive" title={c.creditHoldReason ?? undefined}>
+                          Nasiya to'xtatilgan
+                        </span>
+                      )}
                     </p>
                   </div>
                   <div className="flex items-start gap-1">
@@ -368,6 +395,22 @@ export default function CustomersSection() {
                         onClick={() => setAdjusting(c)}
                       >
                         <Wallet className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                    {canHoldCredit && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn("h-7 w-7", c.creditStatus === "hold" && "text-destructive")}
+                        data-testid={`customer-credit-${c.code}`}
+                        title={c.creditStatus === "hold" ? "Nasiyani ochish" : "Nasiyani to'xtatish"}
+                        aria-label={`${c.name} — ${c.creditStatus === "hold" ? "nasiyani ochish" : "nasiyani to'xtatish"}`}
+                        onClick={() => {
+                          setCreditDialog(c);
+                          setCreditReason("");
+                        }}
+                      >
+                        {c.creditStatus === "hold" ? <ShieldOff className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />}
                       </Button>
                     )}
                     {canManage && (
@@ -443,6 +486,53 @@ export default function CustomersSection() {
       )}
 
       {/* Arxivga ko'chirish / qaytarish tasdig'i — yozuv o'chirilmaydi, tarixi saqlanadi */}
+      {/* Nasiyani to'xtatish / ochish — sabab majburiy, audit yoziladi */}
+      <Dialog open={creditDialog !== null} onOpenChange={(open) => !open && setCreditDialog(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {creditDialog?.creditStatus === "hold" ? "Nasiyani ochish" : "Nasiyani to'xtatish"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {creditDialog?.creditStatus === "hold" ? (
+                <>
+                  <b>{creditDialog.name}</b> uchun nasiya sotuv yana ochiladi.
+                  {creditDialog.creditHoldReason && <> Joriy sabab: {creditDialog.creditHoldReason}.</>}
+                </>
+              ) : (
+                <>
+                  <b>{creditDialog?.name}</b> ga <b>nasiya</b> sotuv rad etiladi. Naqd sotuv va qarzni to'lash
+                  avvalgidek ishlaydi.
+                </>
+              )}
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="credit-reason">Sabab</Label>
+              <Input
+                id="credit-reason"
+                value={creditReason}
+                onChange={(event) => setCreditReason(event.target.value)}
+                placeholder={creditDialog?.creditStatus === "hold" ? "Qarz to'landi" : "To'lov intizomi buzilgan"}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setCreditDialog(null)}>
+              Bekor
+            </Button>
+            <Button
+              variant={creditDialog?.creditStatus === "hold" ? "default" : "destructive"}
+              onClick={submitCredit}
+              disabled={setCreditStatus.isPending || creditReason.trim().length < 3}
+            >
+              {setCreditStatus.isPending ? "..." : creditDialog?.creditStatus === "hold" ? "Ochish" : "To'xtatish"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={archiving !== null} onOpenChange={(open) => !open && setArchiving(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>

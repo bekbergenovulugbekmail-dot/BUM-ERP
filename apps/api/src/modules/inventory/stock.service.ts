@@ -40,6 +40,7 @@ import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { todayIso } from "../finance/cash.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { allowedWarehouses, assertWarehouseAccess } from "./warehouses.service.js";
+import { allocateBackorders } from "./backorders.service.js";
 
 export type MovementType = (typeof stockMovementType.enumValues)[number];
 
@@ -587,7 +588,9 @@ export async function recordManualMovement(
   );
   // O'tgan sana bilan — undan keyingi inventarizatsiya bu tovarni allaqachon sanagan bo'lishi mumkin
   if (input.occurredAt) await compensateCountedMovements(tx, tenant.company.id, tenant.user.id);
-  return { ...result, journalEntryId: journal?.id ?? null };
+  // Qo'lda kirim ham backorderni yopadi (xarid qabuli bilan bir xil qoida) — chiqimda emas
+  const allocations = incoming ? await allocateBackorders(tx, tenant.company.id, input.warehouseId, [input.productId]) : [];
+  return { ...result, journalEntryId: journal?.id ?? null, allocations };
 }
 
 export async function transferStock(

@@ -4,7 +4,10 @@
  *   maxDiscountPercent       — qo'lda berilgan chegirma shu foizdan oshsa `sales.approve` kerak (offline kassa — nomuvofiqlik)
  *   cashierDepositLimit      — kassada mijoz balansiga bir martada shundan ortiq yozish (to'ldirish, qaytim) `sales.approve`
  *   shiftDifferenceTolerance — smena yopilganda kassa farqi shundan oshsa rahbar ko'rib chiqadi
- * `null` — cheklanmagan. Standart: chegirma va depozit cheklanmagan, har qanday kassa farqi ko'rib chiqiladi.
+ *   creditHoldOverdueDays    — to'lov muddati shuncha kundan ko'p o'tgan bo'lsa NASIYA sotuv to'xtaydi
+ *   creditHoldOverdueAmount  — muddati o'tgan qarz shu summadan oshsa NASIYA sotuv to'xtaydi
+ * `null` — cheklanmagan. Standart: chegirma va depozit cheklanmagan, har qanday kassa farqi ko'rib
+ * chiqiladi, kredit to'xtatish qoidasi O'CHIQ (mavjud xatti-harakat o'zgarmaydi — faqat ega yoqadi).
  */
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -23,11 +26,23 @@ export const salesPolicySchema = z.strictObject({
   maxDiscountPercent: percentSchema.nullable(),
   cashierDepositLimit: moneySchema.nullable(),
   shiftDifferenceTolerance: moneySchema,
+  /**
+   * Nasiya to'xtatish chegaralari; `null` — o'chiq. Naqd sotuv va qarz to'lash hech qachon to'xtamaydi.
+   * Ixtiyoriy: eski mijozlar (va saqlangan eski sozlama) shu maydonlarsiz yuborsa ham qabul qilinadi.
+   */
+  creditHoldOverdueDays: z.number().int().min(0).max(3650).nullable().default(null),
+  creditHoldOverdueAmount: moneySchema.nullable().default(null),
 });
 
 export type SalesPolicy = z.output<typeof salesPolicySchema>;
 
-export const DEFAULT_SALES_POLICY: SalesPolicy = { maxDiscountPercent: null, cashierDepositLimit: null, shiftDifferenceTolerance: "0" };
+export const DEFAULT_SALES_POLICY: SalesPolicy = {
+  maxDiscountPercent: null,
+  cashierDepositLimit: null,
+  shiftDifferenceTolerance: "0",
+  creditHoldOverdueDays: null,
+  creditHoldOverdueAmount: null,
+};
 
 export async function getSalesPolicy(conn: DbOrTx, companyId: string): Promise<SalesPolicy> {
   const [row] = await conn

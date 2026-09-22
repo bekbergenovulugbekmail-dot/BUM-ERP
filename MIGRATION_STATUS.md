@@ -3722,6 +3722,93 @@ Regressiya: `acceptance-real-world` (35), `acceptance-wholesale` (19), `acceptan
 `delivery-*` (flow, security, redelivery, tracking), `distribution`, `territories`,
 `distribution-customer-import`, `sales-payments` — **hammasi PASS**; `tsc` va `eslint` toza.
 
+## GO-LIVE kritik bo'shliqlar 1–6 yopildi (2026-09-22)
+
+Real biznes GAP AUDIT natijasida "go-live oldidan muhim" deb topilgan 6 ta bo'shliq tuzatildi.
+**Yangi parallel arxitektura yaratilmadi** — hammasi mavjud manba va oqimlar ustiga qo'shildi.
+Migratsiya `0077_credit_hold_customer_prices` — faqat QO'SHADI (ustun, jadval, indeks), hech narsa
+o'chirilmaydi va mavjud yozuvlar standart qiymat bilan avvalgidek ishlaydi.
+
+### 1. Agent KPI — bitta manba
+Muammo: rahbar paneli (`GET /api/distribution/sales-reps/stats`) tashriflarni `route_visits` dan
+sanardi, agent ilovasi esa `agent_visits` ga yozadi → panelda tashriflar **doim 0** edi.
+
+Yechim: maydon KPI si `agent_visits` + `agent_orders` dan olinadi (agent hisoboti bilan AYNAN bir
+xil qoida). `route_visits` **saqlanadi** — u marshrut-kun jurnali, boshqa granularlik va qo'lda
+kiritiladi; endi u KPI ni shishirmaydi. Yangi maydonlar: `orderedVisitsThisMonth`,
+`noOrderVisitsThisMonth`, `ordersThisMonth`. Migratsiya kerak emas, tarix yo'qolmadi.
+
+### 2. Qarz yoshi va to'lov taqsimoti
+Muammo: mijoz darajasidagi to'lov (buyurtmasiz) faqat `customers.total_debt` ni kamaytirardi,
+hujjatlarning `paid_amount` i o'zgarmasdi → qarz yoshi va "muddati o'tgan" ogohlantirishi yolg'on
+chiqardi. ERP tomonida yosh guruhlari umuman yo'q edi.
+
+Yechim — yangi `sales/receivables.service.ts`:
+- `allocateCustomerPayment` — to'lov ochiq hujjatlarga **eng eski muddatdan** taqsimlanadi
+  (deterministik: muddat → hujjat sanasi → id). Naqd to'lov va balansdan to'lash bir xil yo'ldan
+  o'tadi; jurnal va to'lov hujjati O'ZGARMAYDI (taqsimot faqat `paid_amount` yozadi).
+- `GET /api/sales/receivables/aging` (`sales.view`) — `current / 0–30 / 31–60 / 61–90 / 90+`,
+  mijoz va hujjat kesimida, jami bilan.
+- **Qaytarish tuzatildi:** qarz endi hujjatning SOF summasidan hisoblanadi
+  (`total_amount − qaytarilgan − paid_amount`). Qisman qaytarishda `total_amount` o'zgarmaydi,
+  shuning uchun eski hisob qarzni oshirib ko'rsatardi. Bir xil ta'rif `salesStats` va muddat
+  bildirishnomasiga ham qo'llandi.
+- Invariant: `customers.total_debt` = ochiq hujjatlar qoldig'i = qarz yoshi jami.
+- UI: Sotuv → **"Qarz yoshi"** tabi (mijozlar va hujjatlar kesimi, guruhga bosib filtrlash).
+
+### 3. Nasiya to'xtatish (credit hold)
+Muammo: muddati o'tgan qarzi bor mijozga nasiyani to'xtatishning yagona yo'li mijozni butunlay
+faolsizlantirish edi (u holda naqd sotuv ham, qarz to'lash ham bloklanardi).
+
+Yechim — `sales/credit.service.ts`, bitta server qoidasi ERP, kassa va agent uchun:
+- `customers.credit_status` (`ok | hold`) + sabab, vaqt va kim qo'ygani (migratsiya 0077);
+- siyosat chegaralari `sales.policy` da: `creditHoldOverdueDays`, `creditHoldOverdueAmount`
+  (standart `null` — o'chiq, mavjud xatti-harakat o'zgarmaydi). Kodda "sehrli raqam" yo'q.
+- **Faqat qarz qoldiradigan sotuv to'xtaydi**: naqd sotuv va mijozning qarzni to'lashi hech qachon
+  bloklanmaydi;
+- siyosat to'xtatishi HOSILAVIY (bazaga yozilmaydi): mijoz to'lagach o'zi ochiladi, qo'lda
+  to'xtatishni esa faqat rahbar ochadi;
+- `POST /api/sales/customers/:id/credit` (`sales.approve`, sabab majburiy) — audit
+  `CUSTOMER_CREDIT_HOLD` / `CUSTOMER_CREDIT_RELEASE`; `GET .../credit` — joriy qaror va sabab.
+- UI: CRM → Mijozlar da qalqon tugmasi, "Nasiya to'xtatilgan" nishoni va sabab dialogi.
+
+### 4–5. Mijoz × mahsulot kelishilgan narxi va kanallar birligi
+Muammo: ulgurjida narx har mijoz bilan alohida kelishiladi, lekin faqat `discount_percent` bor edi —
+qolgani har qatorga qo'lda narx (ya'ni `sales.edit` hammaga kerak). Miqdorga bog'liq aksiya esa
+faqat agent kanalida ishlardi.
+
+Yechim: yangi `customer_prices` jadvali (mijoz × mahsulot × **birlik**, amal muddati, tarix bilan)
+va narx hal qilish MAVJUD markazga — `prepareSalesItems` ga qo'shildi. ERP, kassa va agent
+allaqachon shu funksiyadan o'tgani uchun uchala kanal avtomatik bir xil narx beradi.
+- Ustuvorlik: qo'lda narx → kelishilgan narx → aksiya narxi → prays-list. Miqdor aksiyasi
+  kelishilgan narx USTIGA chegirma bo'lib tushadi (narxni emas, chegirmani o'zgartiradi).
+- Narx asosiy valyutada, kurs bilan qayta hisoblanmaydi; prays-list va boshqa mijozlar tegilmaydi.
+- Tarix: yangi narx eskisini `effective_to` bilan yopadi, o'chirmaydi.
+- `GET/POST /api/sales/customer-prices`, `DELETE /api/sales/customer-prices/:id` (`sales.edit`).
+- Agent katalogi `?customerId=` bilan kelishilgan narxni ko'rsatadi (do'kon agent marshrutida
+  bo'lishi tekshiriladi); frontend narx hisoblamaydi.
+
+### 6. Backorder reyestri
+Muammo: `best_effort` band qilish oldindan buyurtma yaratardi, lekin "kimga qancha yetmayapti"
+ro'yxati yo'q edi va tovar kelganda hech narsa avtomatik band qilinmasdi.
+
+Yechim — `inventory/backorders.service.ts`, **yangi jadvalsiz** (`sales_order_items` dan hosila):
+- `GET /api/inventory/backorders` (`warehouse.view`) — mijoz/mahsulot/ombor/holat/sana filtri,
+  `ordered / reserved / remaining`, holat `open | partially_allocated`, va yo'ldagi tasdiqlangan
+  xarid qoldig'i (soxta ETA yo'q — faqat haqiqiy hujjat);
+- tovar kelganda (xarid qabuli va qo'lda kirim) ochiq backorderlar **eng eski buyurtmadan**
+  boshlab avtomatik band qilinadi; `POST /api/inventory/backorders/allocate` — qo'lda qayta urinish
+  (`warehouse.receive`);
+- invariantlar saqlanadi: `reserved_qty <= quantity` baza sharti bilan, qoldiq qatori `for update`
+  bilan qulflanadi, omborlar va tenantlar aralashmaydi.
+- UI: Ombor → **"Kutilayotgan"** tabi.
+
+### Testlar
+Yangi: `agent-kpi-reconciliation` (6), `receivables-aging` (8), `credit-hold` (7),
+`customer-pricing` (9), `backorders` (9) — **39 ta yangi test**.
+Qayta ishlatildi: `acceptance-wholesale` (19/19) va `acceptance-distributor` (19/19) — yangi
+narx, qarz, kredit va backorder mantiqi bilan ham to'liq PASS.
+
 ### Qolgan ishlar
 1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
 1a. **Bootstrap admin parolini almashtirish** (egasi, Railway o'zgaruvchisi): hozirgi parol oddiy parollar qoidasiga tushadi. Tizimga kirgan holda production smoke: realtime (dostavka xaritasi) CSP ostida, kassada kassir kirishi va qaytarish

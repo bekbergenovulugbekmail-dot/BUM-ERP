@@ -50,6 +50,13 @@ export type Customer = {
   cashbackBalance: string;
   isActive: boolean;
   notes: string | null;
+  /**
+   * Kredit holati: `ok` — cheklovsiz, `hold` — NASIYA sotuv rad etiladi.
+   * Naqd sotuv va qarzni to'lash hech qachon bloklanmaydi.
+   */
+  creditStatus: "ok" | "hold";
+  creditHoldReason: string | null;
+  creditHoldAt: string | null;
 };
 
 /** POS javobidagi mijoz holati (sotuv yoki to'lovdan keyin). */

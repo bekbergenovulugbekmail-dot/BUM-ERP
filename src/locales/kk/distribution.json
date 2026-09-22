@@ -7,6 +7,7 @@
   "stats.active": "Белсенді",
   "stats.visits": "Сапарлар",
   "stats.visits_sub": "Осы айда аяқталған",
+  "stats.visits_ordered": "Осы айда аяқталды, {{count}} тапсырыспен",
   "stats.visit_sales": "Сапар сатылымы",
   "stats.this_month": "Осы ай",
   "tabs.routes": "Бағыттар",

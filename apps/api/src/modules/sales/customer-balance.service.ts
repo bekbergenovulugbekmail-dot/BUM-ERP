@@ -27,6 +27,7 @@ import { assertPeriodOpen, ensureAccountBySubtype, postJournalEntry, requireAcco
 import { setCustomerCashback } from "./cashback.service.js";
 import { salesAudit } from "./customers.service.js";
 import { isPayableSale } from "./sale-status.js";
+import { allocateCustomerPayment } from "./receivables.service.js";
 
 const { companyId: _companyId, ...balanceTxFields } = getTableColumns(customerBalanceTransactions);
 
@@ -263,6 +264,9 @@ export async function payFromBalance(
       .update(salesOrders)
       .set({ paidAmount: fromMinor(paid), updatedAt: new Date() })
       .where(eq(salesOrders.id, order.id));
+  } else {
+    // Buyurtmasiz to'lash — naqd to'lov bilan bir xil qoida: ochiq hujjatlarga eng eski muddatdan taqsimlanadi
+    await allocateCustomerPayment(tx, companyId, customer.id, amount);
   }
 
   const balanceAfter = balance - amount;

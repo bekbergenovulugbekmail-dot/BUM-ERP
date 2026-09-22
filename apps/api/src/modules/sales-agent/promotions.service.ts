@@ -10,6 +10,7 @@ import { badRequest, conflict, notFound } from "@bum/shared";
 import { products } from "../../db/schema/catalog.js";
 import { customers } from "../../db/schema/sales.js";
 import { orderPromotions, promotions, type PromotionRule } from "../../db/schema/sales-agent.js";
+import { agreedPricesFor } from "../sales/customer-prices.service.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { fromMinor, rescale, toMinor } from "../../shared/decimal.js";
@@ -213,15 +214,25 @@ export type AppliedPromotion = {
   discountAmount: string;
 };
 
-/** Dona narxi asosiy valyutada (sotuv buyurtmasi bilan bir xil konversiya). */
-async function piecePrices(conn: DbOrTx, companyId: string, productIds: string[]) {
+/**
+ * Dona narxi asosiy valyutada (sotuv buyurtmasi bilan bir xil konversiya).
+ * Mijoz bilan kelishilgan narx bo'lsa — o'sha: aksiya qiymati (bepul tovar bahosi, chegirma summasi)
+ * buyurtmada haqiqatda qo'llanadigan narxdan hisoblanadi, prays-listdan emas.
+ */
+async function piecePrices(conn: DbOrTx, companyId: string, customerId: string, productIds: string[]) {
   const rows = await conn
-    .select({ id: products.id, salesPrice: products.salesPrice, salesCurrency: products.salesCurrency })
+    .select({ id: products.id, baseUnitId: products.baseUnitId, salesPrice: products.salesPrice, salesCurrency: products.salesCurrency })
     .from(products)
     .where(and(eq(products.companyId, companyId), inArray(products.id, productIds)));
+  const agreed = await agreedPricesFor(conn, companyId, customerId, rows.map((row) => ({ productId: row.id, unitId: row.baseUnitId })));
   const rates = new Map<string, string>();
   const prices = new Map<string, bigint>();
   for (const row of rows) {
+    const agreedPrice = agreed.get(`${row.id}|${row.baseUnitId}`);
+    if (agreedPrice) {
+      prices.set(row.id, toMinor(agreedPrice, 4));
+      continue;
+    }
     let price = toMinor(row.salesPrice, 4);
     if (row.salesCurrency) {
       if (!rates.has(row.salesCurrency)) rates.set(row.salesCurrency, await currencyRate(conn, companyId, row.salesCurrency));
@@ -247,7 +258,7 @@ export async function applyPromotions(conn: DbOrTx, companyId: string, customerI
     .where(eq(customers.id, customerId))
     .limit(1);
   const customerDiscount = customer?.discountPercent ?? "0";
-  const prices = await piecePrices(conn, companyId, productIds);
+  const prices = await piecePrices(conn, companyId, customerId, productIds);
 
   const result: SalesItemInput[] = [];
   const applied: AppliedPromotion[] = [];

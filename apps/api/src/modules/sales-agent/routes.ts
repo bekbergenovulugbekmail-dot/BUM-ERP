@@ -107,7 +107,7 @@ import { createSalesAgent, listTeam, supervisorCandidates, updateTeamMember } fr
 import { currentWorkSession, endWorkSession, startWorkSession } from "./work-session.service.js";
 import { addCustomerPhoto, customerHistory, customerPhotoContent, saveCustomerLocation, updateAgentCustomer } from "./customers.service.js";
 import { convertProspect, createProspect, listAgentProspects, rejectProspect, supervisorProspects } from "./prospects.service.js";
-import { agentDebtors, agentStore, agentStores, agentToday } from "./stores.service.js";
+import { accessibleStore, agentDebtors, agentStore, agentStores, agentToday } from "./stores.service.js";
 import {
   agentLocationHistory,
   locationEvents,
@@ -269,6 +269,8 @@ const catalogQuery = z.object({
   search: z.string().trim().min(1).max(100).optional(),
   categoryId: z.uuid().optional(),
   brandId: z.uuid().optional(),
+  /** Do'kon tanlangan bo'lsa narx shu mijoz bilan kelishilganidan olinadi. */
+  customerId: z.uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).max(10_000).default(0),
 });
@@ -643,7 +645,10 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/catalog", async (req) => {
     const query = catalogQuery.parse(req.query);
-    return agentCatalog(db, await readAgent(req), query, storageProvider.client);
+    const context = await readAgent(req);
+    // Begona do'kon id'si bilan narx sizib chiqmasin — do'kon agentning marshrutida bo'lishi shart
+    if (query.customerId) await accessibleStore(db, context, query.customerId);
+    return agentCatalog(db, context, query, storageProvider.client);
   });
 
   app.get("/catalog/filters", async (req) => catalogFilters(db, await readAgent(req)));

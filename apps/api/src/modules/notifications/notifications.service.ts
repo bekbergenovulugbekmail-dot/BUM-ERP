@@ -361,7 +361,10 @@ export async function generateSmartAlerts(tx: Tx, companyId: string) {
     .select({
       id: salesOrders.id,
       number: salesOrders.number,
-      balance: sql<string>`(${salesOrders.totalAmount} - ${salesOrders.paidAmount})::numeric(18,2)`,
+      // Qaytarilgan tovar qiymati chegiriladi — qisman qaytarishdan keyin yolg'on ogohlantirish bo'lmaydi
+      balance: sql<string>`(${salesOrders.totalAmount} - coalesce((
+        select sum(r."total_amount") from "sales_returns" r where r."order_id" = ${salesOrders.id}
+      ), 0) - ${salesOrders.paidAmount})::numeric(18,2)`,
       customerName: customers.name,
     })
     .from(salesOrders)
@@ -370,7 +373,9 @@ export async function generateSmartAlerts(tx: Tx, companyId: string) {
       and(
         eq(salesOrders.companyId, companyId),
         sql`${salesOrders.status} in ('completed', 'shipped', 'delivered')`,
-        sql`${salesOrders.totalAmount} > ${salesOrders.paidAmount}`,
+        sql`(${salesOrders.totalAmount} - coalesce((
+          select sum(r."total_amount") from "sales_returns" r where r."order_id" = ${salesOrders.id}
+        ), 0)) > ${salesOrders.paidAmount}`,
         sql`${salesOrders.orderDate} + ${customers.paymentTermDays} < ${today}::date`,
       ),
     )

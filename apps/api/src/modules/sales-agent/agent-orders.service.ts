@@ -34,6 +34,8 @@ import { cancelOrder, confirmOrder, createOrder, updateOrder, type SalesItemInpu
 import type { AgentContext } from "./agent-context.js";
 import { checkLocationQuality, insertLocationEvent, type LocationInput } from "./location.service.js";
 import { getSalesAgentPolicy } from "./policy.service.js";
+import { assertCreditAllowed } from "../sales/credit.service.js";
+import { agreedPricesFor } from "../sales/customer-prices.service.js";
 import { activePromotions, applyPromotions, saveOrderPromotions } from "./promotions.service.js";
 import { accessibleStore, todayRoutes } from "./stores.service.js";
 import { assertVisitReady, finishVisitWithOrder, openStoreVisit } from "./visits.service.js";
@@ -141,7 +143,7 @@ export async function catalogFilters(conn: DbOrTx, context: AgentContext) {
 export async function agentCatalog(
   conn: DbOrTx,
   context: AgentContext,
-  options: { search?: string; categoryId?: string; brandId?: string; limit: number; offset: number },
+  options: { search?: string; categoryId?: string; brandId?: string; limit: number; offset: number; customerId?: string },
   client: StorageClient | null = null,
 ) {
   const companyId = context.company.id;
@@ -188,22 +190,38 @@ export async function agentCatalog(
   const page = rows.slice(0, options.limit);
   const boxes = await boxUnits(conn, companyId, page);
   const promotionsByProduct = await activePromotions(conn, companyId, todayIso(), page.map((row) => row.id));
+  // Do'kon tanlangan bo'lsa — shu mijoz bilan kelishilgan narx (buyurtmada ham aynan shu qo'llanadi,
+  // chunki ikkalasi bitta manbadan o'qiydi). Agent narxni o'zi hisoblamaydi.
+  const agreed = await agreedPricesFor(
+    conn,
+    companyId,
+    options.customerId,
+    page.flatMap((row) => {
+      const box = boxes.get(row.id);
+      return box ? [{ productId: row.id, unitId: row.baseUnitId }, { productId: row.id, unitId: box.unitId }] : [{ productId: row.id, unitId: row.baseUnitId }];
+    }),
+  );
   const rates = new Map<string, string>();
   const items = [];
-  for (const { baseUnitId: _baseUnitId, salesUnitId: _salesUnitId, salesPrice, salesCurrency, imageKey, ...row } of page) {
+  for (const { baseUnitId, salesUnitId: _salesUnitId, salesPrice, salesCurrency, imageKey, ...row } of page) {
     // Narxi boshqa valyutada — sotuv buyurtmasi bilan bir xil: joriy kurs bilan asosiy valyutada
     let piecePrice = salesPrice;
     if (salesCurrency) {
       if (!rates.has(salesCurrency)) rates.set(salesCurrency, await currencyRate(conn, companyId, salesCurrency));
       piecePrice = mul4(salesPrice, rates.get(salesCurrency)!);
     }
+    const agreedPiece = agreed.get(`${row.id}|${baseUnitId}`);
+    if (agreedPiece) piecePrice = agreedPiece;
     const box = boxes.get(row.id);
+    const agreedBox = box ? agreed.get(`${row.id}|${box.unitId}`) : undefined;
     items.push({
       ...row,
       /** Kichik rasm uchun imzolangan havola (5 daqiqa); fayl saqlash sozlanmagan bo'lsa null. */
       imageUrl: client && imageKey ? client.signedUrl("GET", imageKey, VIEW_TTL) : null,
       piecePrice,
-      box: box ? { ...box, price: mul4(piecePrice, box.factor) } : null,
+      /** Mijoz bilan kelishilgan narx qo'llandimi — agent buni ekranda ko'radi. */
+      agreedPrice: Boolean(agreedPiece || agreedBox),
+      box: box ? { ...box, price: agreedBox ?? mul4(piecePrice, box.factor) } : null,
       promotions: promotionsByProduct.get(row.id) ?? [],
     });
   }
@@ -706,6 +724,8 @@ export async function submitAgentOrder(
 
   let pendingApproval = false;
   if (row.paymentType === "credit") {
+    // Nasiya to'xtatilgan mijozga agent ham nasiya yoza olmaydi — qoida serverda bitta
+    await assertCreditAllowed(tx, companyId, row.customerId, toMinor(order!.totalAmount));
     const [customer] = await tx
       .select({ totalDebt: customers.totalDebt, creditLimit: customers.creditLimit })
       .from(customers)

@@ -57,6 +57,7 @@ export default function DistributionPage() {
    */
   const storeCount = (routes ?? []).reduce((sum, r) => sum + r.customerCount, 0);
   const visitsThisMonth = (reps ?? []).reduce((sum, r) => sum + r.visitsThisMonth, 0);
+  const orderedVisits = (reps ?? []).reduce((sum, r) => sum + r.orderedVisitsThisMonth, 0);
   const visitSales = (reps ?? []).reduce((sum, r) => sum + num(r.visitSalesThisMonth), 0);
 
   const statsCards = [
@@ -79,7 +80,7 @@ export default function DistributionPage() {
     {
       label: t("stats.visits"),
       value: visitsThisMonth,
-      sub: t("stats.visits_sub"),
+      sub: t("stats.visits_ordered", { count: orderedVisits }),
       icon: CalendarCheck,
       color: "text-indigo-500",
       bg: "bg-indigo-500/10",

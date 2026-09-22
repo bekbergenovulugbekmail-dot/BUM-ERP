@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { ShoppingBag, TrendingUp, Clock, Plus, Search, ChevronRight, DollarSign } from "lucide-react";
+import { ShoppingBag, TrendingUp, Clock, Plus, Search, ChevronRight, DollarSign, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
+import PageTabs from "@/components/page-tabs.tsx";
+import ReceivablesAging from "./_components/receivables-aging.tsx";
 import OrderDetailDrawer from "./_components/order-detail-drawer.tsx";
 import CreateOrderDialog from "./_components/create-order-dialog.tsx";
 import { num, type SalesOrderRow, type SalesOrderStatus, type SalesStats } from "./_lib/types.ts";
@@ -70,6 +72,8 @@ export default function SalesPage() {
   const [search, setSearch] = useState("");
   const [debouncedSearch] = useDebounce(search.trim(), 300);
   const [createOpen, setCreateOpen] = useState(false);
+  /** "Buyurtmalar" va "Qarz yoshi" — ikkalasi ham `sales.view` bilan ochiladi. */
+  const [tab, setTab] = useState<"orders" | "aging">("orders");
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [visibleLimit, setVisibleLimit] = useState(PAGE_SIZE);
 
@@ -148,6 +152,19 @@ export default function SalesPage() {
         ))}
       </div>
 
+      <PageTabs
+        tabs={[
+          { key: "orders", label: "Buyurtmalar", icon: ShoppingBag },
+          { key: "aging", label: "Qarz yoshi", icon: CalendarClock },
+        ]}
+        value={tab}
+        onChange={(value) => setTab(value as "orders" | "aging")}
+      />
+
+      {tab === "aging" ? (
+        <ReceivablesAging />
+      ) : (
+        <div className="space-y-6">
           {/* Status chips */}
           <div className="flex flex-wrap gap-2">
             {STATUS_TABS.map((s) => (
@@ -279,6 +296,8 @@ export default function SalesPage() {
               </Button>
             </div>
           )}
+        </div>
+      )}
 
       {createOpen && (
         <CreateOrderDialog

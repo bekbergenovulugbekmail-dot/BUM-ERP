@@ -559,8 +559,14 @@ export async function completeSale(
     input.items,
     customerDiscount,
     offline
-      ? { trustedPricing: true, rates: offline.rates, promoDate: offline.soldAt.toISOString().slice(0, 10) }
-      : { promoDate: todayIso() },
+      ? {
+          trustedPricing: true,
+          rates: offline.rates,
+          promoDate: offline.soldAt.toISOString().slice(0, 10),
+          customerId: input.customerId ?? null,
+          priceDate: offline.soldAt.toISOString().slice(0, 10),
+        }
+      : { promoDate: todayIso(), customerId: input.customerId ?? null, priceDate: todayIso() },
   );
   if (priceChanges.length > 0) conflicts.push({ kind: "price_changed", details: { items: priceChanges } });
   if (discountOverLimit.length > 0) conflicts.push({ kind: "discount_over_limit", details: { items: discountOverLimit } });

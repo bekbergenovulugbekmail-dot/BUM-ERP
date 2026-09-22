@@ -7,6 +7,7 @@
   "stats.active": "Активные",
   "stats.visits": "Визиты",
   "stats.visits_sub": "Завершено в этом месяце",
+  "stats.visits_ordered": "Завершено в этом месяце, из них {{count}} с заказом",
   "stats.visit_sales": "Продажи на визитах",
   "stats.this_month": "В этом месяце",
   "tabs.routes": "Маршруты",

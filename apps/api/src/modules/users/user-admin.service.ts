@@ -109,6 +109,11 @@ export type NewAccount = {
  * "band" bo'lib qolardi va xodimni qaytadan qo'sha olmasdik. Endi qayta qo'shilganda shu hisob
  * tiklanadi: yangi parol, yangi ism, yangi a'zolik. Platforma admini va boshqa kompaniya a'zosi
  * qayta ishlatilmaydi.
+ *
+ * XAVFSIZLIK: qayta ishlatish faqat KOMPANIYA ICHIDA xodim qo'shishda ruxsat etiladi (`allowReuse`).
+ * Ochiq ro'yxatdan o'tish va platforma admini kompaniya yaratishida band telefon 409 qaytaradi —
+ * aks holda begona telefonni bilgan har kim o'sha hisobni (uning id'si va tarixi bilan) egallab
+ * olishi mumkin edi.
  */
 async function reusableAccount(tx: Tx, phone: string) {
   const [row] = await tx.select().from(users).where(eq(users.phone, phone)).limit(1).for("update");
@@ -124,12 +129,14 @@ async function reusableAccount(tx: Tx, phone: string) {
 export async function insertUser(
   tx: Tx,
   input: NewAccount & { activeCompanyId?: string | null },
+  /** Kompaniyadan chiqarilgan hisobni qayta ishlatish — faqat xodim qo'shish yo'lida. */
+  options: { allowReuse?: boolean } = {},
 ): Promise<SessionUser> {
   const phone = normalizePhoneOrThrow(input.phone);
   assertPasswordPolicy(input.password);
 
   // Avval chiqarilgan hisob — o'sha yozuv tiklanadi (yangi yozuv ochilmaydi)
-  const reusable = await reusableAccount(tx, phone);
+  const reusable = options.allowReuse ? await reusableAccount(tx, phone) : null;
   if (reusable) {
     const [restored] = await tx
       .update(users)
@@ -456,7 +463,8 @@ export async function createCompanyAccount(
   }
   if (input.pin != null && !PIN_PATTERN.test(input.pin)) throw badRequest("PIN 4-8 ta raqamdan iborat bo'lishi kerak");
 
-  const user = await insertUser(tx, { ...input, activeCompanyId: companyId });
+  // Xodim qo'shish — kompaniya ichidagi ruxsatli amal: chiqarilgan hisobning telefoni qayta ishlatiladi
+  const user = await insertUser(tx, { ...input, activeCompanyId: companyId }, { allowReuse: true });
   if (input.pin) {
     await tx.update(users).set({ pinHash: await hashPassword(input.pin) }).where(eq(users.id, user.id));
   }

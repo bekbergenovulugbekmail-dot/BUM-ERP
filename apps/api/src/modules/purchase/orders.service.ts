@@ -46,6 +46,7 @@ import { todayIso } from "../finance/cash.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { moveStock } from "../inventory/stock.service.js";
+import { allocateBackorders } from "../inventory/backorders.service.js";
 import { allowedWarehouses, assertWarehouseAccess } from "../inventory/warehouses.service.js";
 import { assertProductsInScope, categoryScope, documentHasScopedItem } from "../catalog/category-scope.js";
 import { applySupplierBalance } from "./supplier-balances.service.js";
@@ -789,11 +790,15 @@ export async function receiveGoods(
     });
   }
 
+  // Tovar keldi — mijozga va'da qilingan (backorder) qatorlar shu tranzaksiyada band qilinadi:
+  // eng eski buyurtmadan boshlab. Zaxira invarianti (`reserved_qty <= quantity`) saqlanadi.
+  const allocations = await allocateBackorders(tx, companyId, order.warehouseId, orderItems.map((item) => item.productId));
+
   await purchaseAudit(tx, tenant, meta, {
     action: "PURCHASE_GOODS_RECEIVED",
     resource: "purchase_receipts",
     resourceId: receipt!.id,
-    details: { orderId, number: order.number, total: totalText, status },
+    details: { orderId, number: order.number, total: totalText, status, ...(allocations.length > 0 ? { backorderAllocations: allocations } : {}) },
   });
-  return { receipt: receipt!, total: totalText, status };
+  return { receipt: receipt!, total: totalText, status, allocations };
 }

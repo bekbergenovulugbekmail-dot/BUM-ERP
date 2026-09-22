@@ -61,6 +61,8 @@ import {
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { moveStock } from "../inventory/stock.service.js";
 import { releaseOrderStock, reserveOrderStock } from "../inventory/reservations.service.js";
+import { assertCreditAllowed } from "./credit.service.js";
+import { agreedPricesFor } from "./customer-prices.service.js";
 import { earnOrderCashback, reverseOrderCashback } from "./cashback.service.js";
 import { refundToBalance } from "./customer-balance.service.js";
 import { addCurrencyAmounts } from "./shift-totals.js";
@@ -122,6 +124,13 @@ export type PricingOptions = {
   rates?: Record<string, string>;
   /** Kassa (POS): shu sanada amaldagi aksiya narxi (`promoPrice`, `promoPriceEnd` gacha) prays-list narxi hisoblanadi. */
   promoDate?: string;
+  /**
+   * Kelishilgan narx uchun mijoz (mijoz × mahsulot × birlik). Berilmasa — prays-list narxi.
+   * ERP, kassa va savdo agenti shu yagona yo'ldan o'tadi, shuning uchun uchala kanalda narx bir xil.
+   */
+  customerId?: string | null;
+  /** Kelishilgan narx qaysi sanaga qarab olinadi (hujjat sanasi); berilmasa — bugun. */
+  priceDate?: string;
 };
 
 /** `sales.edit` ruxsatisiz, lekin ishonchli narxlashda prays-listdan farq qilgan qator (offline kassa nomuvofiqligi). */
@@ -197,6 +206,15 @@ export async function prepareSalesItems(
   // Soliq kompaniya sozlamasida o'chirilgan bo'lsa — yangi hujjatlarda stavka 0
   const taxOn = await isTaxEnabled(tx, companyId);
 
+  // Mijoz bilan kelishilgan narxlar (mijoz × mahsulot × birlik) — prays-listdan ustun turadi
+  const agreed = await agreedPricesFor(
+    tx,
+    companyId,
+    options.customerId,
+    items.map((item) => ({ productId: item.productId, unitId: item.unitId ?? byId.get(item.productId)?.baseUnitId ?? "" })),
+    options.priceDate,
+  );
+
   for (const item of items) {
     const product = byId.get(item.productId);
     if (!product) throw badRequest("Mahsulot topilmadi");
@@ -206,8 +224,11 @@ export async function prepareSalesItems(
     const factor = await unitFactorToBase(tx, companyId, product, unitId);
     // Aksiya narxini server hisoblaydi — kassa ko'rsatgan narx faqat taqqoslanadi
     const promo = options.promoDate ? activePromoPrice(product, options.promoDate) : null;
+    // Kelishilgan narx BIRLIK uchun beriladi (dona yoki blok) — konversiya qilinmaydi va valyuta
+    // kursiga bog'liq emas: shartnomadagi summa o'zgarmaydi
+    const agreedPrice = agreed.get(`${product.id}|${unitId}`) ?? null;
     const unitBasePrice = await basePrice(promo ?? product.salesPrice, product.salesCurrency);
-    const listPrice = fromMinor(rescale(toMinor(unitBasePrice, 4) * toMinor(factor, 4), 8, 4), 4);
+    const listPrice = agreedPrice ?? fromMinor(rescale(toMinor(unitBasePrice, 4) * toMinor(factor, 4), 8, 4), 4);
     const unitPrice = item.unitPrice ?? listPrice;
     const discountPercent = item.discountPercent ?? customerDiscount;
     const changed =
@@ -604,6 +625,11 @@ export async function listOrders(
   };
 }
 
+/** Hujjatning sof summasi — qaytarilgan tovar qiymati chegirilgan (`receivables.service.ts` bilan bir xil). */
+const netOrderAmount = sql<string>`(${salesOrders.totalAmount} - coalesce((
+  select sum(r."total_amount") from "sales_returns" r where r."order_id" = ${salesOrders.id}
+), 0))::numeric(18,2)`;
+
 export async function salesStats(conn: DbOrTx, tenant: TenantContext) {
   const today = todayIso();
   const monthStart = `${today.slice(0, 7)}-01`;
@@ -612,9 +638,10 @@ export async function salesStats(conn: DbOrTx, tenant: TenantContext) {
       totalThisMonth: sql<string>`coalesce(sum(${salesOrders.totalAmount}) filter (where ${salesOrders.orderDate} >= ${monthStart} and ${salesOrders.status} not in ('draft', 'cancelled', 'returned')), 0)::numeric(18,2)`,
       countThisMonth: sql<number>`(count(*) filter (where ${salesOrders.orderDate} >= ${monthStart} and ${salesOrders.status} not in ('draft', 'cancelled', 'returned')))::int`,
       todayCount: sql<number>`(count(*) filter (where ${salesOrders.orderDate} = ${today} and ${salesOrders.status} not in ('draft', 'cancelled')))::int`,
-      pendingPayment: sql<number>`(count(*) filter (where ${salesOrders.totalAmount} > ${salesOrders.paidAmount} and ${salesOrders.status} in ('confirmed', 'completed', 'shipped', 'delivered')))::int`,
-      // Qarz — yakunlangan sotuvning to'lanmagan qoldig'i (holat emas, summalar farqi)
-      totalDebt: sql<string>`coalesce(sum(${salesOrders.totalAmount} - ${salesOrders.paidAmount}) filter (where ${salesOrders.status} in ('completed', 'shipped', 'delivered') and ${salesOrders.totalAmount} > ${salesOrders.paidAmount}), 0)::numeric(18,2)`,
+      pendingPayment: sql<number>`(count(*) filter (where ${netOrderAmount} > ${salesOrders.paidAmount} and ${salesOrders.status} in ('confirmed', 'completed', 'shipped', 'delivered')))::int`,
+      // Qarz — yakunlangan sotuvning to'lanmagan SOF qoldig'i: qaytarilgan tovar qiymati chegiriladi
+      // (qisman qaytarishda `total_amount` o'zgarmaydi, lekin mijoz faqat qolgani uchun qarzdor)
+      totalDebt: sql<string>`coalesce(sum(${netOrderAmount} - ${salesOrders.paidAmount}) filter (where ${salesOrders.status} in ('completed', 'shipped', 'delivered') and ${netOrderAmount} > ${salesOrders.paidAmount}), 0)::numeric(18,2)`,
     })
     .from(salesOrders)
     .where(eq(salesOrders.companyId, tenant.company.id));
@@ -633,7 +660,9 @@ export async function createOrder(
   const companyId = tenant.company.id;
   const customerDiscount = await customerDiscountFor(tx, companyId, input.customerId);
   await assertWarehouse(tx, tenant, input.warehouseId);
-  const { items, totals } = await prepareSalesItems(tx, tenant, input.items, customerDiscount, options);
+  // Kelishilgan narx uchun mijoz va hujjat sanasi — chaqiruvchi alohida uzatishi shart emas
+  const pricing: PricingOptions = { customerId: input.customerId ?? null, priceDate: input.orderDate, ...options };
+  const { items, totals } = await prepareSalesItems(tx, tenant, input.items, customerDiscount, pricing);
   const baseCurrency = await companyCurrency(tx, companyId);
   if (input.saleCurrencies?.length) {
     await assignSaleCurrencies(tx, companyId, baseCurrency, [...new Set(input.saleCurrencies)], items);
@@ -698,7 +727,8 @@ export async function updateOrder(
 
   let totals = {};
   if (patch.items) {
-    const prepared = await prepareSalesItems(tx, tenant, patch.items, customerDiscount, options);
+    const pricing: PricingOptions = { customerId: customerId ?? null, priceDate: patch.orderDate ?? order.orderDate, ...options };
+    const prepared = await prepareSalesItems(tx, tenant, patch.items, customerDiscount, pricing);
     if (patch.saleCurrencies?.length) {
       const baseCurrency = await companyCurrency(tx, companyId);
       await assignSaleCurrencies(tx, companyId, baseCurrency, [...new Set(patch.saleCurrencies)], prepared.items);
@@ -816,6 +846,13 @@ export async function dispatchOrder(
       .for("update");
     const limit = toMinor(customer!.creditLimit);
     const debtAfter = toMinor(customer!.totalDebt) + total - upcomingPayment;
+    // Nasiya to'xtatilganmi — kredit limitidan OLDIN: qarz qoldiradigan sotuv rad etiladi,
+    // to'liq to'langan (naqd) sotuv esa o'tadi. Offline kassa sinxroni (`skipCreditLimit`) chekni
+    // qayta rad etmaydi — u qurilmada allaqachon yopilgan, nomuvofiqlik sifatida qaytadi.
+    if (!options.skipCreditLimit) {
+      const unpaid = total - upcomingPayment - toMinor(order.paidAmount);
+      await assertCreditAllowed(tx, companyId, order.customerId, unpaid);
+    }
     if (limit > 0n && debtAfter > limit) {
       if (!options.skipCreditLimit) {
         throw badRequest(`Mijoz kredit limitidan oshadi (limit ${fromMinor(limit)}, qarz ${fromMinor(debtAfter)})`);

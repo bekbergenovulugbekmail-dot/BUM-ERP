@@ -50,6 +50,7 @@ import {
   warehouseStats,
 } from "./stock.service.js";
 import { createWarehouse, getWarehouse, listWarehouses, updateWarehouse } from "./warehouses.service.js";
+import { allocateBackorders, listBackorders } from "./backorders.service.js";
 
 const nullableText = (max: number) =>
   z
@@ -142,6 +143,22 @@ const countParams = z.object({ countId: z.uuid() });
 const countItemParams = z.object({ countId: z.uuid(), itemId: z.uuid() });
 const warehouseListQuery = z.object({ includeInactive: boolQuery });
 
+/** Backorder reyestri filtrlari. */
+const backordersQuery = z.object({
+  customerId: z.uuid().optional(),
+  productId: z.uuid().optional(),
+  warehouseId: z.uuid().optional(),
+  status: z.enum(["open", "partially_allocated"]).optional(),
+  dateFrom: z.iso.date().optional(),
+  dateTo: z.iso.date().optional(),
+  limit: z.coerce.number().int().min(1).max(1000).optional(),
+});
+const allocateBody = z.strictObject({
+  warehouseId: z.uuid(),
+  /** Berilmasa — shu ombordagi barcha ochiq backorder mahsulotlari. */
+  productIds: z.array(z.uuid()).min(1).max(200).optional(),
+});
+
 async function readTenant(req: FastifyRequest, permission?: Permission): Promise<TenantContext> {
   const tenant = await requireTenant(db, authOf(req).user);
   if (permission) await requirePermission(db, tenant, permission);
@@ -191,6 +208,25 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
       updateWarehouse(tx, tenant, warehouseId, patch, requestMeta(req)),
     );
     return { warehouse };
+  });
+
+  // ─── Backorder reyestri ──────────────────────────────────────────────────
+
+  app.get("/backorders", async (req) => {
+    const query = backordersQuery.parse(req.query);
+    return listBackorders(db, await readTenant(req, "warehouse.view"), query);
+  });
+
+  /** Tovar kelganda avtomatik taqsimlanadi; bu — qo'lda qayta urinish (masalan qoldiq tuzatilgandan keyin). */
+  app.post("/backorders/allocate", async (req) => {
+    const body = allocateBody.parse(req.body);
+    const allocations = await writeInTenant(req, ["warehouse.receive"], async (tx, tenant) => {
+      // Ombor shu kompaniyanikimi va foydalanuvchiga ochiqmi — begona ombor id'si 404 beradi
+      await getWarehouse(tx, tenant, body.warehouseId);
+      const productIds = body.productIds ?? (await listBackorders(tx, tenant, { warehouseId: body.warehouseId, limit: 1000 })).items.map((row) => row.productId);
+      return allocateBackorders(tx, tenant.company.id, body.warehouseId, productIds);
+    });
+    return { allocations };
   });
 
   // ─── Zaxira ──────────────────────────────────────────────────────────────

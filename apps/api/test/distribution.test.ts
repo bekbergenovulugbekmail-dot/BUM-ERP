@@ -243,8 +243,11 @@ describe("Marshrutlar va tashriflar", () => {
     expect(done.json().visit).toMatchObject({ status: "completed", customersVisited: 2, totalAmount: "350000.00" });
     expect((await dist("PATCH", `/visits/${visitId}`, { notes: "X" })).statusCode).toBe(400);
 
+    // Marshrut-kun jurnali (`route_visits`) — qo'lda kiritiladigan reja/xulosa; MAYDON KPI si emas.
+    // Agent ilovasi `agent_visits` ga yozadi va rahbar paneli aynan shundan hisoblaydi, shuning uchun
+    // bu yerdagi qo'lda yozuv ko'rsatkichni shishirmaydi (`agent-kpi-reconciliation.test.ts`).
     const repStats = (await dist("GET", "/sales-reps/stats")).json().salesReps[0];
-    expect(repStats).toMatchObject({ visitsThisMonth: 1, visitSalesThisMonth: "350000.00" });
+    expect(repStats).toMatchObject({ visitsThisMonth: 0, visitSalesThisMonth: "0.00", ordersThisMonth: 0 });
 
     expect((await dist("DELETE", `/routes/${routeId}`)).statusCode).toBe(409);
     expect((await dist("PATCH", `/routes/${routeId}`, { isActive: false })).json().route.isActive).toBe(false);

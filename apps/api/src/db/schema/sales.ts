@@ -126,6 +126,16 @@ export const customers = pgTable(
     paymentTermDays: integer("payment_term_days").notNull().default(0),
     currency: varchar("currency", { length: 3 }).notNull().default("UZS"),
 
+    /**
+     * Kredit holati: `ok` — cheklovsiz, `hold` — NASIYA sotuv rad etiladi.
+     * Naqd sotuv va qarzni to'lash hech qachon bloklanmaydi (mijozni faolsizlantirishdan farqi shu).
+     * Qo'lda ham qo'yiladi, siyosatdagi muddat/summa chegarasidan avtomatik ham.
+     */
+    creditStatus: varchar("credit_status", { length: 16 }).notNull().default("ok"),
+    creditHoldReason: text("credit_hold_reason"),
+    creditHoldAt: timestamp("credit_hold_at", { withTimezone: true }),
+    creditHoldBy: uuid("credit_hold_by").references(() => users.id, { onDelete: "set null" }),
+
     totalDebt: money("total_debt").notNull().default("0"),
     totalPurchased: money("total_purchased").notNull().default("0"),
     /** Oldindan to'langan pul (hamyon) — qarzdan alohida; o'zgarishi faqat customer_balance_transactions orqali. */
@@ -145,6 +155,8 @@ export const customers = pgTable(
     check("customers_balance_non_negative", sql`${t.balance} >= 0`),
     check("customers_cashback_non_negative", sql`${t.cashbackBalance} >= 0`),
     check("customers_party_type", sql`${t.partyType} in ('individual', 'legal')`),
+    check("customers_credit_status_check", sql`${t.creditStatus} in ('ok', 'hold')`),
+    index("customers_company_credit_status_idx").on(t.companyId, t.creditStatus).where(sql`${t.creditStatus} <> 'ok'`),
   ],
 );
 
@@ -614,3 +626,52 @@ export const posShiftsRelations = relations(posShifts, ({ one, many }) => ({
   warehouse: one(warehouses, { fields: [posShifts.warehouseId], references: [warehouses.id] }),
   orders: many(salesOrders),
 }));
+
+// ─── customer_prices ─────────────────────────────────────────────────────────
+
+/**
+ * Mijoz bilan KELISHILGAN narx: mijoz × mahsulot × birlik. Ulgurjida narx har mijoz bilan alohida
+ * kelishiladi — bu jadval shuni saqlaydi, prays-listni (`products.sales_price`) o'zgartirmaydi va
+ * boshqa mijozlarga ta'sir qilmaydi.
+ *
+ * Narx ASOSIY valyutada (kurs bilan qayta hisoblanmaydi): kelishilgan summa shartnomadagidek qoladi.
+ * Tarix saqlanadi — narx o'chirilmaydi, `effectiveTo` bilan yopiladi va yangisi qo'shiladi.
+ */
+export const customerPrices = pgTable(
+  "customer_prices",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** Qaysi birlik uchun kelishilgan (dona, blok ...) — buyurtma qatori shu birlikda bo'lsa qo'llanadi. */
+    unitId: uuid("unit_id")
+      .notNull()
+      .references(() => units.id),
+    price: price("price").notNull(),
+    effectiveFrom: date("effective_from").notNull(),
+    /** null — muddatsiz (bekor qilinmaguncha amalda). */
+    effectiveTo: date("effective_to"),
+    isActive: boolean("is_active").notNull().default(true),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    index("cp_company_customer_product_idx").on(t.companyId, t.customerId, t.productId, t.unitId),
+    index("cp_company_product_idx").on(t.companyId, t.productId),
+    /** Bir vaqtda bitta amaldagi narx: ochiq muddatli faol narx yagona. */
+    uniqueIndex("cp_open_active_key")
+      .on(t.companyId, t.customerId, t.productId, t.unitId)
+      .where(sql`${t.isActive} and ${t.effectiveTo} is null`),
+    check("customer_prices_price_non_negative", sql`${t.price} >= 0`),
+    check("customer_prices_period_check", sql`${t.effectiveTo} is null or ${t.effectiveTo} >= ${t.effectiveFrom}`),
+  ],
+);

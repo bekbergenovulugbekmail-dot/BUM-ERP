@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import {
   Warehouse, PackagePlus, PackageMinus, ArrowLeftRight,
-  ClipboardList, TrendingUp, TrendingDown, AlertTriangle,
+  ClipboardList, TrendingUp, TrendingDown, AlertTriangle, PackageSearch,
   BarChart3, Search, SlidersHorizontal, History, ScanLine,
   Boxes,
 } from "lucide-react";
@@ -24,6 +24,7 @@ import TransferDialog from "./_components/transfer-dialog.tsx";
 import MovementHistory from "./_components/movement-history.tsx";
 import InventoryCountSection from "./_components/inventory-count-section.tsx";
 import CatalogSection from "./_components/catalog-section.tsx";
+import BackordersSection from "./_components/backorders-section.tsx";
 import BarcodeScanner from "@/components/barcode-scanner.tsx";
 import { toNumber } from "@/pages/products/_lib/types.ts";
 import type { WarehouseItem, WarehouseStats } from "./_lib/types.ts";
@@ -181,6 +182,7 @@ export default function WarehousePage() {
                 { key: "stock", label: "Zaxira", icon: BarChart3 },
                 { key: "movements", label: "Harakatlar", icon: History },
                 { key: "count", label: "Inventarizatsiya", icon: ClipboardList },
+                { key: "backorders", label: "Kutilayotgan", icon: PackageSearch },
                 { key: "catalog", label: "Katalog", icon: Boxes },
               ]}
               value={activeTab}
@@ -261,6 +263,11 @@ export default function WarehousePage() {
             {selectedWarehouseId && (
               <InventoryCountSection warehouseId={selectedWarehouseId} />
             )}
+          </TabsContent>
+
+          {/* Backorder: tasdiqlangan buyurtmaning band qilinmagan qismi (tovar kelganda avtomatik yopiladi) */}
+          <TabsContent value="backorders" className="flex-1 min-h-0 mt-0">
+            {selectedWarehouseId && <BackordersSection warehouseId={selectedWarehouseId} />}
           </TabsContent>
 
           {/* Mahsulot, xom ashyo va yarim tayyor — bitta katalogda (ombor uchun ular bir xil) */}

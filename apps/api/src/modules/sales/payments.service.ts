@@ -37,6 +37,7 @@ import { earnOrderCashback, getCashbackSettings, maxCashbackUsage, redeemCashbac
 import { payFromBalance } from "./customer-balance.service.js";
 import { salesAudit } from "./customers.service.js";
 import { orderCurrencyBuckets } from "./orders.service.js";
+import { allocateCustomerPayment } from "./receivables.service.js";
 import { isPayableSale } from "./sale-status.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...paymentFields } = getTableColumns(customerPayments);
@@ -202,6 +203,7 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
     .where(eq(customerPayments.id, payment!.id))
     .returning(paymentFields);
 
+  let allocations: { orderId: string; number: string; amount: string }[] = [];
   if (order) {
     const paid = toMinor(order.paidAmount) + amount;
     // To'lov sotuv holatini o'zgartirmaydi: to'langanlik summalardan, yetkazilgani esa yetkazma hujjatidan o'qiladi
@@ -209,6 +211,10 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
       .update(salesOrders)
       .set({ paidAmount: fromMinor(paid), updatedAt: new Date() })
       .where(eq(salesOrders.id, order.id));
+  } else if (customerId) {
+    // Buyurtmasiz (umumiy qarz) to'lovi ochiq hujjatlarga taqsimlanadi — eng eski muddat birinchi.
+    // Shusiz hujjatlar "to'lanmagan" bo'lib qolar, qarz yoshi va muddat ogohlantirishi noto'g'ri chiqardi.
+    ({ allocations } = await allocateCustomerPayment(tx, companyId, customerId, amount));
   }
   if (customerId) {
     await tx
@@ -229,9 +235,10 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
       cashAccountId: account.id,
       ...(input.terminalId ? { terminalId: input.terminalId } : {}),
       ...(input.paymentId ? { paymentId: input.paymentId } : {}),
+      ...(allocations.length > 0 ? { allocations } : {}),
     },
   });
-  return { payment: updated!, created: true };
+  return { payment: updated!, created: true, allocations };
 }
 
 /**
