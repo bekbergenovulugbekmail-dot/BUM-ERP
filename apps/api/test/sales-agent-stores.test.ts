@@ -98,6 +98,38 @@ describe("Geo", () => {
 });
 
 describe("Sotuv agenti: hudud, do'konlar, qarzdorlar", () => {
+  it("haftalik jadval: agent o'z dasturida shu hafta kunining marshrutini ko'radi", async () => {
+    const owner = company.ownerCookie;
+    const zamira = await agent("Zamira");
+    const shop = await store({ name: "Bog'ot do'koni", phone: "+998901110011" });
+    const routeId = await route("Bog'ot tumani", zamira.repId, [shop]);
+
+    const today = todayIso();
+    const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
+    const otherDay = (weekday + 1) % 7;
+
+    // Boshqa kun belgilangan bo'lsa bugun chiqmaydi
+    expect((await call(owner, "PATCH", `/api/distribution/routes/${routeId}`, { days: [otherDay] })).statusCode).toBe(200);
+    expect((await call(zamira.cookie, "GET", "/api/sales-agent/today")).json().routes).toEqual([]);
+
+    // Hudud va kun bo'limi aynan shuni yozadi: marshrutga agent va hafta kunlari
+    const saved = await call(owner, "PATCH", `/api/distribution/routes/${routeId}`, {
+      salesRepId: zamira.repId,
+      days: [weekday],
+    });
+    expect(saved.statusCode, saved.body).toBe(200);
+
+    const plan = (await call(zamira.cookie, "GET", "/api/sales-agent/today")).json();
+    expect(plan.routes).toEqual([expect.objectContaining({ id: routeId, name: "Bog'ot tumani", days: [weekday] })]);
+    expect(plan.stores.map((row: { name: string }) => row.name)).toEqual(["Bog'ot do'koni"]);
+
+    // Boshqa agentga o'tkazilsa — endi u ko'radi, avvalgisida yo'qoladi
+    const dilnoza = await agent("Dilnoza");
+    expect((await call(owner, "PATCH", `/api/distribution/routes/${routeId}`, { salesRepId: dilnoza.repId })).statusCode).toBe(200);
+    expect((await call(zamira.cookie, "GET", "/api/sales-agent/today")).json().routes).toEqual([]);
+    expect((await call(dilnoza.cookie, "GET", "/api/sales-agent/today")).json().routes).toHaveLength(1);
+  });
+
   it("bugungi marshrut sanaga biriktirishdan; do'kon va qarzdorlar faqat o'z hududi; masofa serverda", async () => {
     const owner = company.ownerCookie;
     const ali = await agent("Ali");
