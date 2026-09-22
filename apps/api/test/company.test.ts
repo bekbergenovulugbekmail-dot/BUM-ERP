@@ -281,6 +281,47 @@ describe("A'zoni yangilash", () => {
     expect((await api(companyA.ownerCookie, "DELETE", `/employees/${xodim.id}`)).statusCode).toBe(404);
   });
 
+  it("chiqarilgan raqam bo'shaydi: xodim o'sha telefon bilan qaytadan qo'shiladi", async () => {
+    const phone = uniquePhone();
+    const first = await api(companyA.ownerCookie, "POST", "/employees", {
+      phone,
+      password: "eski-parol-123",
+      name: "Gulnoz",
+      role: "Kassir",
+    });
+    expect(first.statusCode, first.body).toBe(201);
+    const firstId = first.json().employee.id as string;
+
+    expect((await api(companyA.ownerCookie, "DELETE", `/employees/${firstId}`)).statusCode).toBe(200);
+
+    // Xuddi shu raqam bilan qaytadan — endi "bu nomer bor" demaydi
+    const again = await api(companyA.ownerCookie, "POST", "/employees", {
+      phone,
+      password: "yangi-parol-123",
+      name: "Gulnoz Allaberganova",
+      role: "Omborchi",
+    });
+    expect(again.statusCode, again.body).toBe(201);
+
+    // Hisob o'sha (tarix yo'qolmaydi), lekin yangi parol va yangi rol bilan ishlaydi
+    expect(again.json().employee.id).toBe(firstId);
+    const { cookie } = await login(app, phone, "yangi-parol-123");
+    expect(cookie).toBeTruthy();
+    expect((await api(cookie!, "GET", "")).json().permissions).toEqual(expect.arrayContaining(["warehouse.view"]));
+    const [account] = await db.select().from(users).where(eq(users.id, firstId));
+    expect(account).toMatchObject({ name: "Gulnoz Allaberganova", isActive: true });
+
+    // Boshqa kompaniyada a'zo bo'lgan raqam esa avvalgidek band
+    const busy = await employeeOf(companyB);
+    const taken = await api(companyA.ownerCookie, "POST", "/employees", {
+      phone: busy.phone,
+      password: "parol-123456",
+      name: "Boshqa",
+      role: "Kassir",
+    });
+    expect(taken.statusCode).toBe(409);
+  });
+
   it("chiqarish himoyasi: o'zini, egalik rolini, boshqa kompaniya xodimini va ega bo'lmagan Direktor chiqara olmaydi", async () => {
     expect((await api(companyA.ownerCookie, "DELETE", `/employees/${companyA.owner.id}`)).statusCode).toBe(403);
 

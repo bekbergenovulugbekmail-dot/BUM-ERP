@@ -101,12 +101,53 @@ export type NewAccount = {
   name?: string | null;
 };
 
+/**
+ * Telefon band, lekin egasi HECH BIR kompaniyada a'zo emas (kompaniyadan chiqarilgan hisob) —
+ * shunda o'sha hisobning o'zi qayta ishlatiladi.
+ *
+ * Hisob o'chirilmaydi (nomi hujjatlar va auditda qoladi), shuning uchun chiqarilgandan keyin telefon
+ * "band" bo'lib qolardi va xodimni qaytadan qo'sha olmasdik. Endi qayta qo'shilganda shu hisob
+ * tiklanadi: yangi parol, yangi ism, yangi a'zolik. Platforma admini va boshqa kompaniya a'zosi
+ * qayta ishlatilmaydi.
+ */
+async function reusableAccount(tx: Tx, phone: string) {
+  const [row] = await tx.select().from(users).where(eq(users.phone, phone)).limit(1).for("update");
+  if (!row || row.isPlatformAdmin || row.isBootstrapAdmin) return null;
+  const [membership] = await tx
+    .select({ id: companyMembers.id })
+    .from(companyMembers)
+    .where(eq(companyMembers.userId, row.id))
+    .limit(1);
+  return membership ? null : row;
+}
+
 export async function insertUser(
   tx: Tx,
   input: NewAccount & { activeCompanyId?: string | null },
 ): Promise<SessionUser> {
   const phone = normalizePhoneOrThrow(input.phone);
   assertPasswordPolicy(input.password);
+
+  // Avval chiqarilgan hisob — o'sha yozuv tiklanadi (yangi yozuv ochilmaydi)
+  const reusable = await reusableAccount(tx, phone);
+  if (reusable) {
+    const [restored] = await tx
+      .update(users)
+      .set({
+        name: input.name?.trim() || null,
+        passwordHash: await hashPassword(input.password),
+        passwordChangedAt: new Date(),
+        activeCompanyId: input.activeCompanyId ?? null,
+        isActive: true,
+        // Eski PIN va kirish urinishlari yangi xodimga o'tmaydi
+        pinHash: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, reusable.id))
+      .returning();
+    return restored!;
+  }
+
   await assertPhoneFree(tx, phone);
 
   const [user] = await tx
