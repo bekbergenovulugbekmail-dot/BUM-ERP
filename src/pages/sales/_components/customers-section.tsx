@@ -20,10 +20,12 @@ import { usePermissions } from "@/hooks/use-company.ts";
 import SetBalanceDialog from "@/components/balances/set-balance-dialog.tsx";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import CustomerFilters from "@/components/customers/customer-filters.tsx";
+import SuggestInput from "@/components/ui/suggest-input.tsx";
 import {
   customerFilterParams,
   emptyCustomerFilter,
   type CustomerFilter,
+  type CustomerRegion,
 } from "@/components/customers/customer-filter.ts";
 import { num, type Customer } from "../_lib/types.ts";
 
@@ -187,6 +189,23 @@ export default function CustomersSection() {
   };
 
   const canManage = can("crm.manage");
+
+  /**
+   * Yangi mijoz oynasidagi takliflar: avval kiritilgan shahar va mahallalar
+   * (arxivdagilar ham — hudud nomi o'zgarmaydi). Mahalla ro'yxati tanlangan shaharga qarab qisqaradi.
+   */
+  const regions =
+    useApiQuery<{ regions: CustomerRegion[] }>("/api/sales/customers/regions", { includeInactive: true }).data
+      ?.regions ?? [];
+  const citySuggestions = [...new Set(regions.map((region) => region.city).filter((city): city is string => Boolean(city)))].sort();
+  const districtSuggestions = [
+    ...new Set(
+      regions
+        .filter((region) => !form.city.trim() || region.city?.toLowerCase() === form.city.trim().toLowerCase())
+        .map((region) => region.district)
+        .filter((district): district is string => Boolean(district)),
+    ),
+  ].sort();
 
 
   return (
@@ -481,11 +500,28 @@ export default function CustomersSection() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label htmlFor="customer-city">Shahar / tuman</Label>
-                  <Input id="customer-city" maxLength={100} value={form.city} onChange={(e) => set({ city: e.target.value })} placeholder="Urganch" />
+                  {/* Avval kiritilgan hududlar taklif bo'lib chiqadi — har safar qo'lda yozish shart emas */}
+                  <SuggestInput
+                    id="customer-city"
+                    testId="customer-city"
+                    maxLength={100}
+                    placeholder="Urganch"
+                    value={form.city}
+                    options={citySuggestions}
+                    onChange={(city) => set({ city })}
+                  />
                 </div>
                 <div>
                   <Label htmlFor="customer-district">Mahalla / hudud</Label>
-                  <Input id="customer-district" maxLength={100} value={form.district} onChange={(e) => set({ district: e.target.value })} placeholder="Luchevoy" />
+                  <SuggestInput
+                    id="customer-district"
+                    testId="customer-district"
+                    maxLength={100}
+                    placeholder="Luchevoy"
+                    value={form.district}
+                    options={districtSuggestions}
+                    onChange={(district) => set({ district })}
+                  />
                 </div>
               </div>
               <div>
