@@ -197,7 +197,20 @@ export default function CustomersSection() {
   const regions =
     useApiQuery<{ regions: CustomerRegion[] }>("/api/sales/customers/regions", { includeInactive: true }).data
       ?.regions ?? [];
-  const citySuggestions = [...new Set(regions.map((region) => region.city).filter((city): city is string => Boolean(city)))].sort();
+  /**
+   * Shahar takliflari: mijozlarda kiritilgan qiymatlar + distributsiya HUDUDLARI nomi.
+   * Hudud — marshrutlar guruhi (`territories`), mijozdagi "Shahar/tuman" esa alohida matn maydoni;
+   * ikkovi bir xil yozilishi uchun ikkala manba ham taklifga qo'shiladi. Ruxsat bo'lmasa (403) —
+   * shunchaki mijozlardagi qiymatlar qoladi.
+   */
+  const territoryNames =
+    useApiQuery<{ territories: { name: string }[] }>("/api/distribution/territories").data?.territories ?? [];
+  const citySuggestions = [
+    ...new Set([
+      ...regions.map((region) => region.city).filter((city): city is string => Boolean(city)),
+      ...territoryNames.map((territory) => territory.name),
+    ]),
+  ].sort();
   const districtSuggestions = [
     ...new Set(
       regions
