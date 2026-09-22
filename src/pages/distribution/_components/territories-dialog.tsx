@@ -7,9 +7,13 @@
  */
 import { useState } from "react";
 import { toast } from "sonner";
-import { Check, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronRight, Download, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -47,6 +51,16 @@ export default function TerritoriesDialog({ onClose }: { onClose: () => void }) 
     { invalidate },
   );
   const remove = useApiMutation((id: string) => api.delete(`/api/distribution/territories/${id}`), { invalidate });
+  /** O'zbekiston viloyat va tumanlari — bir marta bosiladigan yuklash (mavjudiga tegmaydi). */
+  const seed = useApiMutation(
+    () =>
+      api.post<{ regionsAdded: number; districtsAdded: number; districtsLinked: number }>(
+        "/api/distribution/territories/seed-uzbekistan",
+        {},
+      ),
+    { invalidate },
+  );
+  const [seedOpen, setSeedOpen] = useState(false);
 
   const [kind, setKind] = useState<TerritoryKind>("district");
   const [parentId, setParentId] = useState(NO_PARENT);
@@ -87,6 +101,21 @@ export default function TerritoriesDialog({ onClose }: { onClose: () => void }) 
       const moved = result.territory.renamedCustomers;
       toast.success(moved > 0 ? `Nomi o'zgartirildi — ${moved} ta mijozda ham yangilandi` : "Nomi o'zgartirildi");
       setEditing(null);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
+
+  const loadUzbekistan = async () => {
+    try {
+      const result = await seed.mutateAsync();
+      const parts = [
+        result.regionsAdded > 0 && `${result.regionsAdded} ta viloyat`,
+        result.districtsAdded > 0 && `${result.districtsAdded} ta shahar/tuman`,
+        result.districtsLinked > 0 && `${result.districtsLinked} tasi viloyatiga bog'landi`,
+      ].filter(Boolean);
+      toast.success(parts.length > 0 ? `Qo'shildi: ${parts.join(", ")}` : "Ro'yxat allaqachon to'liq");
+      setSeedOpen(false);
     } catch (error) {
       toast.error(errorMessage(error));
     }
@@ -256,9 +285,36 @@ export default function TerritoriesDialog({ onClose }: { onClose: () => void }) 
           </div>
         )}
 
-        <DialogFooter>
+        <DialogFooter className="sm:justify-between">
+          <Button variant="outline" data-testid="territories-seed" onClick={() => setSeedOpen(true)}>
+            <Download className="mr-1 h-4 w-4" /> O'zbekiston ro'yxatini yuklash
+          </Button>
           <Button variant="secondary" onClick={onClose}>Yopish</Button>
         </DialogFooter>
+
+        <AlertDialog open={seedOpen} onOpenChange={(open) => !open && setSeedOpen(false)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>O'zbekiston viloyat va tumanlarini yuklash</AlertDialogTitle>
+              <AlertDialogDescription>
+                14 ta viloyat (Qoraqalpog'iston Respublikasi va Toshkent shahri bilan) va ularning
+                shahar/tumanlari ma'lumotnomaga qo'shiladi. Mavjud hududlaringiz <b>o'chirilmaydi va
+                nomi o'zgarmaydi</b> — viloyatsiz turganlari o'z viloyatiga bog'lanadi xolos. Keraksizini
+                keyin o'chirib tashlashingiz mumkin.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={seed.isPending}>Bekor qilish</AlertDialogCancel>
+              <AlertDialogAction
+                data-testid="territories-seed-confirm"
+                disabled={seed.isPending}
+                onClick={(event) => { event.preventDefault(); void loadUzbekistan(); }}
+              >
+                {seed.isPending ? "Yuklanmoqda..." : "Yuklash"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </DialogContent>
     </Dialog>
   );

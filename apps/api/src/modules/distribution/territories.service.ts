@@ -16,6 +16,7 @@ import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import type { TenantContext } from "../company/tenant.js";
 import { distributionAudit } from "./sales-reps.service.js";
+import { UZBEKISTAN_REGIONS } from "./uzbekistan-regions.js";
 
 /** 'region' — viloyat, 'district' — shahar/tuman, 'neighborhood' — mahalla. */
 export type TerritoryKind = "region" | "district" | "neighborhood";
@@ -292,4 +293,72 @@ export async function findOrCreateTerritory(
   if (found) return found.id;
   const created = await createTerritory(tx, tenant, { name: trimmed, kind, parentId }, meta);
   return created.id;
+}
+
+/**
+ * O'zbekiston viloyat va tumanlari ro'yxatini ma'lumotnomaga yuklaydi (bir marta bosiladigan amal).
+ *
+ * Faqat YETISHMAYOTGANINI qo'shadi va viloyatsiz turgan mavjud shahar/tumanni o'z viloyatiga bog'laydi
+ * ("Urganch" → "Xorazm viloyati"): mavjud yozuv o'chirilmaydi, nomi o'zgartirilmaydi, mijozlarga
+ * tegilmaydi. Takroriy bosilsa hech narsa qo'shilmaydi (idempotent).
+ */
+export async function seedUzbekistanRegions(tx: Tx, tenant: TenantContext, meta: RequestMeta) {
+  const companyId = tenant.company.id;
+  const existing = await tx
+    .select({ id: territories.id, name: territories.name, kind: territories.kind, parentId: territories.parentId })
+    .from(territories)
+    .where(eq(territories.companyId, companyId));
+
+  const key = (name: string) => name.trim().toLowerCase();
+  const byName = new Map(existing.map((row) => [key(row.name), row]));
+  let regionsAdded = 0;
+  let districtsAdded = 0;
+  let districtsLinked = 0;
+
+  for (const region of UZBEKISTAN_REGIONS) {
+    let regionRow = byName.get(key(region.name));
+    if (regionRow && regionRow.kind !== "region") {
+      // Shu nom boshqa darajada band (masalan, "Toshkent shahri" tuman bo'lib kiritilgan) — tegmaymiz
+      continue;
+    }
+    if (!regionRow) {
+      const [created] = await tx
+        .insert(territories)
+        .values({ companyId, name: region.name, kind: "region", parentId: null })
+        .returning({ id: territories.id, name: territories.name, kind: territories.kind, parentId: territories.parentId });
+      regionRow = created!;
+      byName.set(key(region.name), regionRow);
+      regionsAdded += 1;
+    }
+
+    for (const district of region.districts) {
+      const found = byName.get(key(district));
+      if (found) {
+        // Bor, lekin viloyatsiz turibdi — o'z viloyatiga bog'laymiz (nomi o'zgarmaydi)
+        if (found.kind === "district" && !found.parentId) {
+          await tx.update(territories).set({ parentId: regionRow.id, updatedAt: new Date() }).where(eq(territories.id, found.id));
+          found.parentId = regionRow.id;
+          districtsLinked += 1;
+        }
+        continue;
+      }
+      const [created] = await tx
+        .insert(territories)
+        .values({ companyId, name: district, kind: "district", parentId: regionRow.id })
+        .returning({ id: territories.id, name: territories.name, kind: territories.kind, parentId: territories.parentId });
+      byName.set(key(district), created!);
+      districtsAdded += 1;
+    }
+  }
+
+  const result = { regionsAdded, districtsAdded, districtsLinked };
+  if (regionsAdded + districtsAdded + districtsLinked > 0) {
+    await distributionAudit(tx, tenant, meta, {
+      action: "TERRITORIES_SEEDED",
+      resource: "territories",
+      resourceId: companyId,
+      details: result,
+    });
+  }
+  return result;
 }

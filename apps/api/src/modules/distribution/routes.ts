@@ -54,6 +54,7 @@ import {
   deleteTerritory,
   listTerritories,
   updateTerritory,
+  seedUzbekistanRegions,
 } from "./territories.service.js";
 import { handoverRepCash, repCashSummary } from "../sales-agent/agent-cash.service.js";
 
@@ -262,6 +263,13 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
       .object({ includeInactive: boolQuery, kind: territoryKind.optional() })
       .parse(req.query);
     return { territories: await listTerritories(db, await readTenant(req), includeInactive ?? false, kind) };
+  });
+
+  /** O'zbekiston viloyat va tumanlari ro'yxatini bir marta yuklab qo'yish (mavjudiga tegmaydi). */
+  app.post("/territories/seed-uzbekistan", async (req, reply) => {
+    const result = await writeInTenant(req, (tx, tenant) => seedUzbekistanRegions(tx, tenant, requestMeta(req)));
+    reply.status(201);
+    return result;
   });
 
   app.post("/territories", async (req, reply) => {

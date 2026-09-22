@@ -133,6 +133,33 @@ describe("Hududlar — geografik ma'lumotnoma", () => {
     expect(districts[0]?.parentId).toBe(regionId);
   });
 
+  it("O'zbekiston ro'yxati yuklanadi: mavjud tuman viloyatiga bog'lanadi, takror yuklashda o'zgarish yo'q", async () => {
+    // Avvaldan bor tuman (viloyatsiz) — yuklashdan keyin o'z viloyatiga bog'lanishi kerak
+    const urganch = (await dist("POST", "/territories", { name: "Urganch", kind: "district" })).json().territory.id as string;
+
+    const seeded = await dist("POST", "/territories/seed-uzbekistan");
+    expect(seeded.statusCode, seeded.body).toBe(201);
+    expect(seeded.json().regionsAdded).toBe(14);
+    expect(seeded.json().districtsAdded).toBeGreaterThan(150);
+    expect(seeded.json().districtsLinked).toBe(1);
+
+    const list = (await dist("GET", "/territories")).json().territories as {
+      id: string; name: string; kind: string; parentId: string | null;
+    }[];
+    const xorazm = list.find((row) => row.name === "Xorazm viloyati");
+    expect(xorazm?.kind).toBe("region");
+    // Mavjud "Urganch" yozuvi o'chirilmadi — o'sha id, endi viloyati bor
+    expect(list.find((row) => row.id === urganch)).toMatchObject({ name: "Urganch", parentId: xorazm!.id });
+    expect(list.filter((row) => row.name === "Urganch")).toHaveLength(1);
+    expect(list.find((row) => row.name === "Chilonzor tumani")?.parentId).toBe(
+      list.find((row) => row.name === "Toshkent shahri")?.id,
+    );
+
+    // Takroriy yuklash — hech narsa qo'shilmaydi
+    const again = await dist("POST", "/territories/seed-uzbekistan");
+    expect(again.json()).toEqual({ regionsAdded: 0, districtsAdded: 0, districtsLinked: 0 });
+  });
+
   it("mijozning hududi ma'lumotnomaga tushadi, nom o'zgarsa mijozda ham yangilanadi", async () => {
     const created = await sales("POST", "/customers", { name: "Do'kon", city: "Urganch", district: "Luchevoy" });
     expect(created.statusCode, created.body).toBe(201);
