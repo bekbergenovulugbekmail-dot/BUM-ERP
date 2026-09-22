@@ -101,6 +101,63 @@ describe("Savdo agentlari", () => {
   });
 });
 
+describe("Hududlar — geografik ma'lumotnoma", () => {
+  const sales = (method: Method, url: string, payload?: object) =>
+    app.inject({ method, url: `/api/sales${url}`, headers: { cookie: company.ownerCookie }, ...(payload ? { payload } : {}) });
+
+  it("viloyat → shahar/tuman → mahalla iyerarxiyasi va qoidalari", async () => {
+    const region = await dist("POST", "/territories", { name: "Xorazm", kind: "region" });
+    expect(region.statusCode, region.body).toBe(201);
+    const regionId = region.json().territory.id as string;
+
+    const district = await dist("POST", "/territories", { name: "Urganch", kind: "district", parentId: regionId });
+    expect(district.statusCode, district.body).toBe(201);
+    const districtId = district.json().territory.id as string;
+
+    const mahalla = await dist("POST", "/territories", { name: "Luchevoy", kind: "neighborhood", parentId: districtId });
+    expect(mahalla.statusCode, mahalla.body).toBe(201);
+
+    // Qoidalar: mahalla otasiz bo'lmaydi, viloyatning otasi bo'lmaydi, mahalla viloyat ichida bo'lmaydi
+    expect((await dist("POST", "/territories", { name: "Yangi", kind: "neighborhood" })).statusCode).toBe(400);
+    expect((await dist("POST", "/territories", { name: "Yangi", kind: "region", parentId: regionId })).statusCode).toBe(400);
+    expect((await dist("POST", "/territories", { name: "Yangi", kind: "neighborhood", parentId: regionId })).statusCode).toBe(400);
+
+    // Bir xil nom: bitta tuman ichida takrorlanmaydi, boshqa tumanda esa bo'laveradi
+    expect((await dist("POST", "/territories", { name: "Luchevoy", kind: "neighborhood", parentId: districtId })).statusCode).toBe(409);
+    const xiva = (await dist("POST", "/territories", { name: "Xiva", kind: "district", parentId: regionId })).json().territory.id;
+    expect((await dist("POST", "/territories", { name: "Luchevoy", kind: "neighborhood", parentId: xiva })).statusCode).toBe(201);
+
+    // Ro'yxat darajaga qarab filtrlanadi va ota bog'lanishini qaytaradi
+    const districts = (await dist("GET", "/territories?kind=district")).json().territories as { name: string; parentId: string }[];
+    expect(districts.map((row) => row.name)).toEqual(["Urganch", "Xiva"]);
+    expect(districts[0]?.parentId).toBe(regionId);
+  });
+
+  it("mijozning hududi ma'lumotnomaga tushadi, nom o'zgarsa mijozda ham yangilanadi", async () => {
+    const created = await sales("POST", "/customers", { name: "Do'kon", city: "Urganch", district: "Luchevoy" });
+    expect(created.statusCode, created.body).toBe(201);
+
+    // Mijoz saqlanganda shahar va mahalla ma'lumotnomaga yozildi (mahalla — shahri tagiga)
+    const list = (await dist("GET", "/territories")).json().territories as {
+      id: string; name: string; kind: string; parentId: string | null; customerCount: number;
+    }[];
+    const city = list.find((row) => row.name === "Urganch");
+    const mahalla = list.find((row) => row.name === "Luchevoy");
+    expect(city).toMatchObject({ kind: "district", parentId: null, customerCount: 1 });
+    expect(mahalla).toMatchObject({ kind: "neighborhood", parentId: city!.id, customerCount: 1 });
+
+    // Nomi tuzatilsa mijozdagi matn ham yangilanadi — ma'lumotnoma bilan ajralib qolmaydi
+    const renamed = await dist("PATCH", `/territories/${city!.id}`, { name: "Urganch shahri" });
+    expect(renamed.statusCode, renamed.body).toBe(200);
+    expect(renamed.json().territory.renamedCustomers).toBe(1);
+    expect((await sales("GET", "/customers")).json().customers[0].city).toBe("Urganch shahri");
+
+    // Mijozi yoki ichki hududi bor hudud o'chirilmaydi
+    expect((await dist("DELETE", `/territories/${city!.id}`)).statusCode).toBe(409);
+    expect((await dist("DELETE", `/territories/${mahalla!.id}`)).statusCode).toBe(409);
+  });
+});
+
 describe("Marshrutlar va tashriflar", () => {
   it("ro'yxatdan ko'p mijozni birdan qo'shish: marshrutdagilari o'tkazib yuboriladi", async () => {
     const routeRes = await dist("POST", "/routes", { name: "Ko'p tanlov", days: [1] });

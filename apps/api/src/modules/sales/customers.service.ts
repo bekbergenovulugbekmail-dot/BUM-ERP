@@ -17,6 +17,7 @@ import { isValidCoordinate } from "../../shared/geo.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
+import { findOrCreateTerritory } from "../distribution/territories.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...customerFields } = getTableColumns(customers);
 
@@ -211,6 +212,21 @@ export async function getCustomer(conn: DbOrTx, tenant: TenantContext, customerI
   return { ...customer, orders, payments };
 }
 
+/**
+ * Mijozning shahar/tumani va mahallasi hududlar MA'LUMOTNOMASIGA yozib qo'yiladi (yo'q bo'lsa ochiladi).
+ *
+ * Mijozda hudud matn bo'lib saqlanadi (dostavka va eksport shunga tayanadi), ma'lumotnoma esa tanlov
+ * ro'yxati: import yoki qo'lda yozilgan yangi joy darhol ro'yxatga tushadi va keyingi safar tanlanadi.
+ */
+async function registerRegion(tx: Tx, tenant: TenantContext, meta: RequestMeta, city?: string | null, district?: string | null) {
+  const cityName = (city ?? "").trim();
+  const districtName = (district ?? "").trim();
+  if (!cityName) return;
+  const cityId = await findOrCreateTerritory(tx, tenant, cityName, meta, { kind: "district" });
+  // Mahalla faqat shahri bilan birga ma'noga ega — otasi shu shahar/tuman
+  if (districtName) await findOrCreateTerritory(tx, tenant, districtName, meta, { kind: "neighborhood", parentId: cityId });
+}
+
 export async function createCustomer(tx: Tx, tenant: TenantContext, input: CustomerInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
   const currency = await resolveCurrency(tx, companyId, input.currency);
@@ -229,6 +245,7 @@ export async function createCustomer(tx: Tx, tenant: TenantContext, input: Custo
     .values({ ...fields, ...coordinateValues({ latitude, longitude }), code, currency, companyId })
     .returning(customerFields);
 
+  await registerRegion(tx, tenant, meta, customer!.city, customer!.district);
   await salesAudit(tx, tenant, meta, {
     action: "CUSTOMER_CREATED",
     resource: "customers",
@@ -266,6 +283,10 @@ export async function updateCustomer(
     .where(eq(customers.id, customerId))
     .returning(customerFields);
 
+  // Hudud o'zgargan bo'lsa — ma'lumotnomada ham bo'lsin
+  if (patch.city !== undefined || patch.district !== undefined) {
+    await registerRegion(tx, tenant, meta, updated!.city, updated!.district);
+  }
   await salesAudit(tx, tenant, meta, {
     action: "CUSTOMER_UPDATED",
     resource: "customers",

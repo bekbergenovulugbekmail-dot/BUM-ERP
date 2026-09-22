@@ -82,8 +82,14 @@ const repBody = z.strictObject({
 });
 const repPatch = repBody.partial().extend({ isActive: z.boolean().optional() });
 
+/** Hudud — geografik ma'lumotnoma: viloyat → shahar/tuman → mahalla. */
+const territoryKind = z.enum(["region", "district", "neighborhood"]);
 const territoryBody = z.strictObject({
   name: z.string().trim().min(1).max(200),
+  /** Berilmasa — shahar/tuman (marshrutlar shu darajaga biriktiriladi). */
+  kind: territoryKind.optional(),
+  /** Ota hudud: tuman viloyat ichida, mahalla tuman ichida (mahalla uchun majburiy). */
+  parentId: z.uuid().nullable().optional(),
   description: nullableText(2000),
 });
 const territoryPatch = territoryBody.partial().extend({ isActive: z.boolean().optional() });
@@ -252,8 +258,10 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
   // ─── Hududlar (marshrutlar shular tarkibida) ──────────────────────────────
 
   app.get("/territories", async (req) => {
-    const { includeInactive } = z.object({ includeInactive: boolQuery }).parse(req.query);
-    return { territories: await listTerritories(db, await readTenant(req), includeInactive ?? false) };
+    const { includeInactive, kind } = z
+      .object({ includeInactive: boolQuery, kind: territoryKind.optional() })
+      .parse(req.query);
+    return { territories: await listTerritories(db, await readTenant(req), includeInactive ?? false, kind) };
   });
 
   app.post("/territories", async (req, reply) => {

@@ -4,6 +4,7 @@ import { Plus, Route, Users, Calendar, ChevronDown, ChevronUp, Trash2, UserPlus,
 import { Button } from "@/components/ui/button.tsx";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import CustomerFilters from "@/components/customers/customer-filters.tsx";
+import TerritoriesDialog from "./territories-dialog.tsx";
 import {
   customerFilterParams,
   emptyCustomerFilter,
@@ -581,91 +582,3 @@ export default function RoutesSection() {
 }
 
 /** Hududlar ro'yxati: qo'shish, nomini o'zgartirish va o'chirish (marshruti borini o'chirib bo'lmaydi). */
-function TerritoriesDialog({ onClose }: { onClose: () => void }) {
-  const query = useApiQuery<{ territories: Territory[] }>("/api/distribution/territories");
-  const create = useApiMutation((body: { name: string }) => api.post("/api/distribution/territories", body), {
-    invalidate: ["/api/distribution"],
-  });
-  const remove = useApiMutation((id: string) => api.delete(`/api/distribution/territories/${id}`), {
-    invalidate: ["/api/distribution"],
-  });
-  const [name, setName] = useState("");
-
-  const add = async () => {
-    const value = name.trim();
-    if (!value) { toast.error("Hudud nomini kiriting"); return; }
-    try {
-      await create.mutateAsync({ name: value });
-      setName("");
-      toast.success("Hudud qo'shildi");
-    } catch (error) {
-      toast.error(errorMessage(error));
-    }
-  };
-
-  const territories = query.data?.territories;
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent data-testid="territories-dialog">
-        <DialogHeader>
-          <DialogTitle>Hududlar</DialogTitle>
-        </DialogHeader>
-        <p className="text-xs text-muted-foreground">
-          Marshrutlar hudud tarkibida bo'ladi. Masalan, «Urganch» hududida «Luchevoy» va «Nadmes bozor» marshrutlari.
-        </p>
-
-        <div className="flex gap-2">
-          <Input
-            value={name}
-            placeholder="Urganch"
-            data-testid="territory-name"
-            onChange={(event) => setName(event.target.value)}
-            onKeyDown={(event) => event.key === "Enter" && void add()}
-          />
-          <Button disabled={create.isPending} onClick={() => void add()}>
-            <Plus className="mr-1 h-4 w-4" /> Qo'shish
-          </Button>
-        </div>
-
-        {!territories ? (
-          <Skeleton className="h-24 rounded-xl" />
-        ) : territories.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">Hudud yo'q — birinchisini qo'shing</p>
-        ) : (
-          <ul className="divide-y divide-border rounded-xl border border-border">
-            {territories.map((territory) => (
-              <li key={territory.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
-                <span className="min-w-0 truncate">{territory.name}</span>
-                <span className="flex shrink-0 items-center gap-2">
-                  <span className="text-xs text-muted-foreground tabular-nums">{territory.routeCount} ta marshrut</span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 w-7 p-0 text-destructive"
-                    aria-label={`${territory.name} hududini o'chirish`}
-                    disabled={remove.isPending}
-                    onClick={async () => {
-                      try {
-                        await remove.mutateAsync(territory.id);
-                        toast.success("Hudud o'chirildi");
-                      } catch (error) {
-                        toast.error(errorMessage(error));
-                      }
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <DialogFooter>
-          <Button variant="secondary" onClick={onClose}>Yopish</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}

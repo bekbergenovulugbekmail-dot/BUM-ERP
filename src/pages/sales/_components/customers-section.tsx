@@ -191,35 +191,46 @@ export default function CustomersSection() {
   const canManage = can("crm.manage");
 
   /**
-   * Yangi mijoz oynasidagi takliflar: avval kiritilgan shahar va mahallalar
-   * (arxivdagilar ham — hudud nomi o'zgarmaydi). Mahalla ro'yxati tanlangan shaharga qarab qisqaradi.
+   * Shahar va mahalla tanlovi — HUDUDLAR MA'LUMOTNOMASIDAN (Distributsiya → Hududlar):
+   * shahar/tuman darajasidagi hududlar, mahallalar esa tanlangan shahar ichidagilari.
+   * Ruxsat bo'lmasa (403) yoki ma'lumotnoma bo'sh bo'lsa — mijozlarda allaqachon yozilgan qiymatlar
+   * ishlatiladi (`/customers/regions`), ya'ni ro'yxat hech qachon bo'sh qolmaydi.
+   * Yangi joy yozilsa, mijoz saqlanganda server uni ma'lumotnomaga ham qo'shib qo'yadi.
    */
   const regions =
     useApiQuery<{ regions: CustomerRegion[] }>("/api/sales/customers/regions", { includeInactive: true }).data
       ?.regions ?? [];
-  /**
-   * Shahar takliflari: mijozlarda kiritilgan qiymatlar + distributsiya HUDUDLARI nomi.
-   * Hudud — marshrutlar guruhi (`territories`), mijozdagi "Shahar/tuman" esa alohida matn maydoni;
-   * ikkovi bir xil yozilishi uchun ikkala manba ham taklifga qo'shiladi. Ruxsat bo'lmasa (403) —
-   * shunchaki mijozlardagi qiymatlar qoladi.
-   */
-  const territoryNames =
-    useApiQuery<{ territories: { name: string }[] }>("/api/distribution/territories").data?.territories ?? [];
+  const territories =
+    useApiQuery<{ territories: { id: string; name: string; kind: string; parentId: string | null }[] }>(
+      "/api/distribution/territories",
+    ).data?.territories ?? [];
+
+  const cityText = form.city.trim().toLowerCase();
   const citySuggestions = [
     ...new Set([
+      ...territories.filter((territory) => territory.kind === "district").map((territory) => territory.name),
       ...regions.map((region) => region.city).filter((city): city is string => Boolean(city)),
-      ...territoryNames.map((territory) => territory.name),
     ]),
   ].sort();
+  const selectedCity = territories.find(
+    (territory) => territory.kind === "district" && territory.name.toLowerCase() === cityText,
+  );
   const districtSuggestions = [
-    ...new Set(
-      regions
-        .filter((region) => !form.city.trim() || region.city?.toLowerCase() === form.city.trim().toLowerCase())
+    ...new Set([
+      ...territories
+        .filter(
+          (territory) =>
+            territory.kind === "neighborhood" && (!selectedCity || territory.parentId === selectedCity.id),
+        )
+        .map((territory) => territory.name),
+      ...regions
+        .filter((region) => !cityText || region.city?.toLowerCase() === cityText)
         .map((region) => region.district)
         .filter((district): district is string => Boolean(district)),
-    ),
+    ]),
   ].sort();
-
+  /** Ro'yxatda yo'q qiymat — yangi hudud bo'lib qo'shiladi (foydalanuvchi buni bilib tursin). */
+  const newCity = form.city.trim() !== "" && !citySuggestions.some((city) => city.toLowerCase() === cityText);
 
   return (
     <div className="space-y-4">
@@ -523,6 +534,11 @@ export default function CustomersSection() {
                     options={citySuggestions}
                     onChange={(city) => set({ city })}
                   />
+                  {newCity && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Ro'yxatda yo'q — saqlanganda yangi shahar/tuman sifatida hududlar ma'lumotnomasiga qo'shiladi
+                    </p>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="customer-district">Mahalla / hudud</Label>

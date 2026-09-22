@@ -7,6 +7,7 @@ import {
   boolean,
   date,
   index,
+  type AnyPgColumn,
   integer,
   pgEnum,
   pgTable,
@@ -204,6 +205,14 @@ export const customerSegmentMembers = pgTable(
  * Hudud (Urganch, Xiva ...) — marshrutlar shu hudud tarkibida bo'ladi.
  * Hudud o'chirilmaydi, faqat faolsizlantiriladi; marshruti bor hudud o'chirilmaydi (`restrict`).
  */
+/**
+ * Hududlar — GEOGRAFIK ma'lumotnoma: viloyat → shahar/tuman → mahalla (`kind` + `parent_id`).
+ * Marshrut shahar/tuman darajasidagi hududga biriktiriladi; mijozning "Shahar/tuman" va "Mahalla"
+ * maydonlari shu ma'lumotnomadan tanlanadi (`customers` da matn bo'lib saqlanadi — dostavka va
+ * eksport shunga tayanadi, nom o'zgarsa mijozlarda ham yangilanadi).
+ */
+export const territoryKinds = ["region", "district", "neighborhood"] as const;
+
 export const territories = pgTable(
   "territories",
   {
@@ -212,12 +221,20 @@ export const territories = pgTable(
       .notNull()
       .references(() => companies.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 200 }).notNull(),
+    /** 'region' — viloyat, 'district' — shahar/tuman, 'neighborhood' — mahalla. */
+    kind: varchar("kind", { length: 20 }).notNull().default("district"),
+    /** Ota hudud: tuman viloyat ichida, mahalla tuman ichida. Yuqori daraja — null. */
+    parentId: uuid("parent_id").references((): AnyPgColumn => territories.id, { onDelete: "restrict" }),
     description: text("description"),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps(),
   },
   (t) => [
-    uniqueIndex("terr_company_name_key").on(t.companyId, t.name),
+    // Nom ota hudud ichida takrorlanmaydi; yuqori darajada — kompaniya bo'yicha (qisman indeks)
+    uniqueIndex("terr_company_parent_name_key").on(t.companyId, t.parentId, t.name),
+    uniqueIndex("terr_company_root_name_key").on(t.companyId, t.name).where(sql`${t.parentId} is null`),
+    index("terr_company_kind_idx").on(t.companyId, t.kind),
+    index("terr_company_parent_idx").on(t.companyId, t.parentId),
     index("terr_company_active_idx").on(t.companyId, t.isActive),
   ],
 );

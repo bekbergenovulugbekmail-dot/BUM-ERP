@@ -29,12 +29,23 @@ export type SalesRepStats = SalesRep & {
 };
 
 /** Hudud (Urganch, Xiva ...) — marshrutlar shu hudud tarkibida. */
+/** Hudud darajasi: viloyat → shahar/tuman → mahalla. */
+export type TerritoryKind = "region" | "district" | "neighborhood";
+
 export type Territory = {
   id: string;
   name: string;
+  kind: TerritoryKind;
+  /** Ota hudud (viloyat ichidagi tuman, tuman ichidagi mahalla); yuqori daraja — null. */
+  parentId: string | null;
   description: string | null;
   isActive: boolean;
+  /** Shu hududga biriktirilgan marshrutlar soni. */
   routeCount: number;
+  /** Ichidagi hududlar soni (viloyatda tumanlar, tumanda mahallalar). */
+  childCount: number;
+  /** Shu hudud ko'rsatilgan mijozlar soni (nom bo'yicha). */
+  customerCount: number;
 };
 
 export type DistributionRoute = {
