@@ -3343,6 +3343,49 @@ moslashtiriladi. Boshlanmagan.
 **Production (2026-09-22):** commit `72cfb97`; faqat `bum-web` (deployment `74a58c09`),
 bundle `index-C4Nniv1Y.js` → **`index-BObbwNQH.js`**.
 
+## Hududlar — geografik ma'lumotnoma (2026-09-22)
+
+Egasining qaroriga ko'ra "hudud" savdo hududidan **geografik ma'lumotnomaga** o'tkazildi:
+**viloyat → shahar/tuman → mahalla**.
+
+**Migratsiya 0076** (faqat qo'shadi va to'ldiradi, ma'lumot o'chirilmaydi):
+- `territories.kind` (`region` | `district` | `neighborhood`) va `parent_id` (o'ziga havola,
+  `on delete restrict`); mavjud hududlar `district` bo'lib qoladi — marshrutlar bog'lanishi o'zgarmaydi;
+- eski `terr_company_name_key` o'rniga `terr_company_parent_name_key` (ota ichida takrorlanmaydi) va
+  yuqori daraja uchun qisman unikal `terr_company_root_name_key`; `kind` va `parent_id` bo'yicha indekslar;
+- mijozlarda yozilgan shahar/tumanlar va mahallalar ma'lumotnomaga ko'chiriladi (registri har xil
+  yozilganlari bitta yozuvga yig'iladi; mahalla o'z shahri tagiga).
+
+**API:** `GET /territories?kind=` — daraja, ota bog'lanishi, ichki hududlar soni va **mijozlar soni**;
+`POST`/`PATCH` daraja qoidasini tekshiradi (mahalla faqat shahar/tuman ichida va otasi majburiy,
+viloyatning otasi bo'lmaydi, bir ota ichida nom takrorlanmaydi); nom o'zgarsa **mijozlardagi matn ham
+yangilanadi** (`renamedCustomers`); ishlatilayotgan hudud o'chirilmaydi (marshrut, ichki hudud yoki mijoz).
+Mijoz saqlanganda shahar/mahalla ma'lumotnomaga avtomatik qo'shiladi (`registerRegion`) — CSV import ham
+shu yo'ldan o'tadi, ya'ni ro'yxat o'zi to'lib boradi.
+
+**Web:** "Hududlar" oynasi daraxt ko'rinishida alohida faylga chiqarildi
+(`src/pages/distribution/_components/territories-dialog.tsx`): daraja va ota tanlovi, nomni joyida
+tuzatish (mijozlarga tarqaladi), har bir hududda marshrut va mijozlar soni. Mijoz oynasidagi shahar va
+mahalla takliflari endi ma'lumotnomadan keladi (mahalla — tanlangan shahar ichidagilari); ro'yxatda yo'q
+qiymat yozilsa "yangi hudud sifatida qo'shiladi" izohi chiqadi.
+
+**Testlar:** `distribution.test.ts` — iyerarxiya qoidalari, bir xil nomning turli otalarda bo'lishi,
+`kind` filtri, mijoz hududining ma'lumotnomaga tushishi, nom o'zgarganda mijozda yangilanishi,
+ishlatilayotgan hududni o'chirib bo'lmasligi (**7/7 PASS**). Qo'shimcha: `sales`, `csv-import-export`,
+`crm` (**20 PASS**), `acceptance-import-export`, `distribution-customer-import`, `delivery-dispatch`
+(**25 PASS**), frontend **26 fayl / 109 test PASS**; `tsc` va butun `src` bo'yicha `eslint` toza.
+
+**Production (2026-09-22):** commit `654eef9`; `bum-api` (deployment `fe156f58`) va `bum-web`
+(deployment `d0ff69a7`). API toza ko'tarildi: `Migratsiyalar qo'llandi (40ms)`, bitta `Server listening`.
+Bazadan (faqat o'qish, `railway ssh`) tasdiqlandi: `territories` da `kind` va `parent_id` ustunlari,
+yangi indekslar, jami **77 ta migratsiya** (0000–0076). Hozirgi holat: 2 ta `district`
+("Urganch", "Urganch tumani"), mahalla yo'q — chunki import faylida "Mahalla" ustuni bo'sh edi.
+Web bundle `index-BObbwNQH.js` → **`index-4sRZvYVh.js`**.
+
+**Keyingi qadam (ixtiyoriy):** O'zbekiston viloyat/tuman ro'yxatini bir marta yuklab qo'yish
+(hozir ma'lumotnoma faqat kompaniya ishlatgan joylardan to'ladi) va mijoz eksport/importiga "Viloyat"
+ustunini qo'shish.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
