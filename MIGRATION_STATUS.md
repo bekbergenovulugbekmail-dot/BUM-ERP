@@ -3618,6 +3618,53 @@ almashtirilsa marshrut yangisiga o'tadi (**3/3 PASS**). Qo'shimcha: `distributio
 o'zgarmagan (faqat test qo'shildi). Bundle `index-a8jxZSdv.js` → **`index-BvUcLGGU.js`**; ikkala yangi
 sarlavha bundle ichida tasdiqlandi.
 
+## Real biznes qabul testi: mini market va supermarket (2026-09-22)
+
+Egasining topshirig'i bo'yicha ikki biznes ketma-ket uchidan-uchigacha sinovdan o'tkazildi.
+**Production bazasiga tegilmadi**: test lokal `bumerp_test` bazasida, ikkita alohida test tenantida
+bajarildi (`TEST-01-MINIMARKET`, `TEST-02-SUPERMARKET`) — yangi
+`apps/api/test/acceptance-real-world.test.ts` (**35 ta test, hammasi PASS**).
+
+Har qadam API javobi BILAN BIRGA baza holatiga qarab tekshiriladi: ombor qoldig'i va harakatlari,
+mijoz/ta'minotchi qarzi, kassa qoldig'i, buxgalteriya jurnali (umumiy debet = kredit va HAR BIR yozuv
+ichida ham), audit yozuvlari.
+
+**Qamrov (ikkala biznesda):** tenant va rollar (ega / menejer / kassir, ruxsatsiz endpointlar 403);
+mahsulot, kategoriya, shtrix-kod, qidiruv, faolsizlantirish; xarid (hujjat → tasdiq → qabul),
+ta'minotchi qarzi va to'lovi; kassa cheklari (naqd, aralash naqd+karta, nasiya, mijozli, anonim) va
+kassa chekiga yetkazma YARATILMASLIGI; mijoz qarzi (to'liq / qisman / to'lanmagan va qarzni yopish);
+qaytarish (qoldiq va qarz qayta hisoblanishi, takroriy qaytarish rad etilishi); narx tavsiyalari
+(narxni o'zgartirmaydi) va tannarx (AVCO, oxirgi xarid, marja; kassirga 403); xarajatlar
+(pending → approved → paid) va kassa qoldig'i; hisobotlar (sotuv, xarid, xarajat, to'lovlar — API
+summalari baza bilan AYNAN teng); aylanma balans va foyda-zarar.
+
+**Chegaralar va invariantlar (salbiy ssenariylar):** qoldiqsiz yoki ortiqcha sotuv rad etiladi va
+qoldiq o'zgarmaydi; kredit limitidan oshiq nasiya rad etiladi va qarz yozilmaydi; kassir chekda narxni
+o'zgartira olmaydi (ega — oladi); bir xil qabulni ikki marta yozib bo'lmaydi; tasdiqlangan buyurtma
+zaxirani band qiladi, jo'natishda bo'shaydi (`reserved_qty <= quantity`, qoldiq manfiy emas).
+
+**Idempotentlik:** bir xil `clientRequestId` bilan kassa cheki **409** (`duplicate: true` va o'sha
+hujjat id'si) — ikkinchi chek va ikkinchi ombor harakati yo'q; bir xil `reference` bilan mijoz to'lovi
+**200** — qarz ikki marta kamaymaydi.
+
+**Cross-tenant:** begona ID bo'yicha o'qish/tahrir — 404; ro'yxatlarda begona yozuv yo'q; tanadagi
+`companyId` — 400 (strict sxema); begona mahsulotni sotish va begona mijozga to'lov rad etiladi;
+audit va jurnal satrlari tenantlar orasida aralashmaydi (`journal_lines` hech qachon begona hisobga
+bog'lanmagan).
+
+**Natija:** MINI MARKET — **ACCEPTED** (15/15), SUPERMARKET — **ACCEPTED** (12/12 + umumiy chegaralar),
+cross-tenant — **PASS** (3/3), chegaralar — **PASS** (5/5). Mahsulot kodida XATO TOPILMADI: dastlabki
+8 ta muvaffaqiyatsizlik testning o'zidagi noto'g'ri API shakllari edi (xarid qatori `unitId`+`orderedQty`,
+xarajat `pending → approved → paid`, kassa idempotentligi 409, hisobot maydon nomlari, kassaga
+boshlang'ich mablag' kerakligi) — ular tuzatilib qayta ishlatildi.
+
+**Regressiya:** `acceptance-business-scenarios` + `acceptance-cross-module` + `acceptance-payments`
+(**35 PASS**), `acceptance-rbac` + `acceptance-access` + `acceptance-import-export` + `company`
+(**47 PASS**), `sales` + `pos` + `purchase` + `inventory` (**21 PASS**), `finance` +
+`inventory-journal` + `distribution` + `csv-import-export` (**22 PASS**). `tsc` va `eslint` toza.
+
+**Commit:** `3bcce20` (faqat test qo'shildi — mahsulot xatti-harakati o'zgarmagan, deploy kerak emas).
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
