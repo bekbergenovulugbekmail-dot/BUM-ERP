@@ -120,14 +120,16 @@ function IssueTable({ title, tone, issues }: { title: string; tone: string; issu
       <p className={`text-xs font-semibold ${tone}`}>
         {title} — {issues.length} ta
       </p>
-      <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
+      <div className="w-full max-h-40 overflow-auto rounded-lg border border-border">
         <table className="w-full text-xs">
           <tbody className="divide-y divide-border">
             {issues.slice(0, MAX_ISSUES_SHOWN).map((issue, index) => (
               <tr key={`${issue.row}-${index}`}>
                 <td className="w-20 px-2 py-1 text-muted-foreground tabular-nums">{issue.row}-qator</td>
-                <td className="w-28 truncate px-2 py-1 font-mono text-muted-foreground">{issueKey(issue) ?? ""}</td>
-                <td className="px-2 py-1">{issue.message}</td>
+                <td className="w-28 px-2 py-1 font-mono text-muted-foreground">
+                  <span className="block max-w-28 truncate">{issueKey(issue) ?? ""}</span>
+                </td>
+                <td className="px-2 py-1 break-words">{issue.message}</td>
               </tr>
             ))}
           </tbody>
@@ -625,7 +627,7 @@ export default function CsvToolbar({
               </div>
             )}
 
-            <div className={`overflow-auto rounded-lg border border-border ${quickFull ? "max-h-[62vh]" : "max-h-[45vh]"}`}>
+            <div className={`w-full overflow-auto rounded-lg border border-border ${quickFull ? "max-h-[62vh]" : "max-h-[45vh]"}`}>
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-muted/60 backdrop-blur">
                   <tr>
@@ -841,11 +843,11 @@ export default function CsvToolbar({
                     )}
                   </div>
                   {/* Ustun ko'p bo'lishi mumkin — jadval o'zi yon tomonga suriladi */}
-                  <div className="max-h-64 overflow-auto rounded-lg border border-border" data-testid="csv-preview-table">
+                  <div className="w-full max-h-64 overflow-auto rounded-lg border border-border" data-testid="csv-preview-table">
                     <table className="w-full text-xs">
                       <thead className="sticky top-0 bg-muted/60 backdrop-blur">
                         <tr>
-                          <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">#</th>
+                          <th className="sticky left-0 z-20 bg-muted px-2 py-1.5 text-left font-medium text-muted-foreground">#</th>
                           {preview.keys.map((key) => (
                             <th key={key} className="px-2 py-1.5 text-left font-medium whitespace-nowrap">
                               {labelOf(key)}
@@ -858,11 +860,24 @@ export default function CsvToolbar({
                           const line = index + 2; // 1-qator — sarlavha
                           const issue = rowIssue(line);
                           return (
-                            <tr key={index} className={issue === "error" ? "bg-destructive/10" : issue === "duplicate" ? "bg-amber-500/10" : undefined}>
-                              <td className="px-2 py-1 text-muted-foreground tabular-nums">{line}</td>
+                            <tr
+                              key={index}
+                              className={
+                                issue === "error"
+                                  ? "bg-destructive/10"
+                                  : issue === "duplicate"
+                                    ? "bg-amber-500/10"
+                                    : "bg-background"
+                              }
+                            >
+                              {/* Qator raqami yopishib turadi — ustunlar bo'ylab surilganda qaysi qator ekani yo'qolmaydi */}
+                              <td className="sticky left-0 z-10 bg-inherit px-2 py-1 text-muted-foreground tabular-nums">{line}</td>
                               {preview.keys.map((key) => (
-                                <td key={key} className="max-w-56 truncate px-2 py-1" title={row[key] ?? ""}>
-                                  {row[key] ?? <span className="text-muted-foreground">—</span>}
+                                <td key={key} className="px-2 py-1 align-top" title={row[key] ?? ""}>
+                                  {/* Katak kengligi jadvalni cho'zmasin: uzun manzil qisqartiriladi (to'lig'i — sichqoncha ostida) */}
+                                  <span className="block max-w-56 truncate">
+                                    {row[key] ?? <span className="text-muted-foreground">—</span>}
+                                  </span>
                                 </td>
                               ))}
                             </tr>
