@@ -3267,6 +3267,30 @@ Mijoz ro'yxati chiqadigan hamma joy ko'rib chiqildi va kerakli joyiga saralash y
 **Production (2026-09-21):** commit `b7a128f`; faqat `bum-web` (deployment `28714490`).
 Bundle `index-Bc_aSJM_.js` → **`index-CH8cjoMx.js`**, qidiruvli tanlagich matni bundle ichida topildi.
 
+## Oynalar: keng jadval chegaradan chiqib ketmasligi (2026-09-22)
+
+Importni tekshirish oynasidagi jadval oyna chegarasidan tashqariga chiqib, o'ng tomondagi ustunlar ekran
+chetida qirqilib qolardi (egasining ekran surati). Sabab UI primitivida: `DialogContent` — `grid`, uning
+bolalarining eng kichik kengligi sukut bo'yicha MAZMUNGA teng (`min-width: auto`), shuning uchun keng
+jadval `overflow-auto` ichida surilish o'rniga oynaning o'zini cho'zib yuborardi.
+
+- `src/components/ui/dialog.tsx`: `DialogContent` ga **`[&>*]:min-w-0`**. Endi mazmun ichkarida suriladi,
+  oyna kengligi buzilmaydi — bu **barcha** oynalarga tegishli (import, "Tezda qo'shish", dostavka
+  avtomatik taqsimoti, marshrutga mijoz qo'shish...). `overflow-hidden` ATAYLAB qo'shilmadi: u baland
+  oynalarni kesib qo'yardi.
+- Importni tekshirish jadvali: katak mazmuni ichki blokda cheklanadi (`max-w-56 truncate` — jadval
+  avtomatik joylashuvida `td` ga berilgan `max-width` ishlamaydi, ichki blokka esa ishlaydi; to'liq matn
+  sichqoncha ostida), qator raqami ustuni esa yon tomonga surilganda yopishib turadi (`sticky left-0`).
+- Muammolar jadvalida uzun xabar so'z bo'yicha ko'chiriladi, kalit ustuni qisqartiriladi.
+
+**Tekshirilgani:** `vite build` chiqargan CSS da qoida bor — `.[&>*]:min-w-0>*{min-width:0}`; deploy'dan
+keyin productiondagi `index-dQGEMSvA.css` ichida ham tasdiqlandi. Frontend `src/components/csv` testlari
+**13 PASS**, `tsc` va `eslint --max-warnings=0` toza. Ko'rinishning o'zi (piksel darajasida) brauzerda
+tekshirilmagan — egasi oynani ochib ko'radi.
+
+**Production (2026-09-22):** commit `7b0161f`; faqat `bum-web` (deployment `930d132d`),
+bundle `index-CH8cjoMx.js` → **`index-Dt53jYRJ.js`**.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
