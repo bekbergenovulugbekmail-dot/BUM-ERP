@@ -3413,6 +3413,36 @@ endpoint tashqaridan tasdiqlandi: `/territories/seed-uzbekistan` → **401**, ma
 Web bundle `index-4sRZvYVh.js` → **`index--P2dwF5a.js`**. Ro'yxat hali YUKLANMAGAN — tugmani egasi
 bosadi (bu ma'lumot qo'shadigan amal, avtomatik bajarilmaydi).
 
+## Import: moslash oynasida fayl namunasi va ajratgich (2026-09-22)
+
+"Ustunlarni moslash" oynasida faqat ustun NOMLARI ko'rinardi — fayl ichida nima turganini ko'rmasdan
+moslashga to'g'ri kelardi. Egasining ekran suratida oqibati: fayl ustunlarga ajralmagan
+("74 ta qator, 1 ta ustun topildi"), hamma maydon "o'tkazib yuborish" bo'lib qolgan va sababi bilinmaydi.
+
+Egasi bilan kelishilgan to'rtta o'zgarish:
+1. **Fayl namunasi jadvali** — birinchi 4 qator, hamma ustuni bilan (ustun ko'p bo'lsa yon tomonga
+   suriladi, uzun matn ichki blokda qisqartiriladi, to'lig'i sichqoncha ostida).
+2. **Belgilash ikki tomondan** — jadval sarlavhasidagi tanlov ("bu ustun — Telefon") va pastdagi
+   maydonlar ro'yxati bitta `choice` holatiga yozadi; bir ustun ikki maydonga tushmaydi (avvalgisi
+   avtomat bo'shaydi). Mantiq alohida modulda: `src/components/csv/mapping.ts`
+   (`assignColumn`, `assignByColumn`, `columnOwner`, `sampleValues`).
+3. **Maydon tagida namuna qiymatlar** — tanlangan ustunning birinchi 3 ta bo'sh bo'lmagan qiymati.
+4. **Ajratgichni qo'lda tanlash** — Avtomatik / `,` / `;` / Tab / `|`; fayl O'QILGAN MATNDAN qayta
+   ajratiladi (faylni yana o'qish va kodlashni aniqlash shart emas). 1 ta ustun topilsa qizil
+   ogohlantirish chiqadi.
+
+Oyna kengaytirildi (`sm:max-w-4xl`). O'zgarish barcha CSV importlariga tegishli.
+
+**Testlar:** yangi `mapping.test.ts` (5 ta — ustun bitta maydonda qolishi, sarlavhadan belgilash, namuna
+qiymatlar) va `csv-toolbar.test.tsx` ga 2 ta yangi holat (namuna jadvali qiymatlari o'z ustunida
+ko'rinishi; ajratgich `;` ga o'zgartirilganda ustun 1 taga tushib ogohlantirish chiqishi va Tabga
+qaytarilganda yana 4 ta bo'lishi). Frontend to'plami: **27 fayl / 116 test PASS**, `tsc` va butun `src`
+bo'yicha `eslint --max-warnings=0` toza.
+
+**Production (2026-09-22):** commit `f3e599b`; faqat `bum-web` (deployment `f20a383d`) — API kodi
+o'zgarmagan. Bundle `index--P2dwF5a.js` → **`index-DlsY21XF.js`**; yuklab olingan bundle ichida
+`csv-file-preview`, "Fayl ustunlarga ajralmadi" va "olinmasin" matnlari topildi.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
