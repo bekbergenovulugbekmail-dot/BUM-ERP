@@ -3474,6 +3474,31 @@ frontend **27 fayl / 116 test PASS**; `tsc`, `eslint` (`src` va `apps/api/src`) 
 konteyner `878f3e0e3b18`). Web bundle `index-DlsY21XF.js` → **`index-BaVPqLfZ.js`** (tasdiq oynasi matni
 bundle ichida topildi). Migratsiya yo'q.
 
+## Mijozlar ro'yxati CRM bo'limiga ko'chirildi (2026-09-22)
+
+Egasining qaroriga ko'ra (tanlov: "CRM bo'limiga ko'chirilsin") mijozlar ro'yxati Sotuv modulidan
+CRM ga ko'chdi: mijoz faqat sotuvga emas, kassa, distributsiya, dostavka va CRM faoliyatiga ham tegishli.
+
+- `src/pages/sales/_components/customers-section.tsx` → `src/pages/crm/_components/customers-section.tsx`
+  (kod o'zgarmadi — faqat mijoz turi `@/pages/sales/_lib/types.ts` dan olinadi; endpointlar ham o'sha:
+  `/api/sales/customers`).
+- CRM sahifasida **"Mijozlar" birinchi tab** (Pipeline va Faoliyatlar yonida); tab `sales.view` ruxsati
+  bo'lganda ko'rinadi, sahifaning o'zi esa avvalgidek `crm` moduli va `crm.view` bilan ochiladi.
+- Sotuv moduli endi faqat buyurtmalar va to'lovlar (tab satri olib tashlandi, sarlavha matni yangilandi).
+- Tezkor qidiruvda (Ctrl+K) mijoz tanlanganda CRM bo'limi ochiladi (ilgari Sotuv).
+- Distributsiya → Mijozlar O'Z JOYIDA qoladi — u do'kon/marshrut ko'rinishi (hudud, marshrutga qo'shish).
+
+**Egasi uchun eslatma:** CRM moduli hozir kompaniyada O'CHIRILGAN — mijozlar ro'yxati ko'rinishi uchun
+Sozlamalar → Modullar dan CRM yoqiladi. Mijozlar bilan ishlaydigan rollarga `crm.view` ruxsati kerak
+bo'ladi (`sales.view` esa ma'lumot uchun avvalgidek).
+
+**Tekshirilgani:** frontend **27 fayl / 116 test PASS**, `tsc`, butun `src` bo'yicha `eslint` va
+`vite build` toza.
+
+**Production (2026-09-22):** commit `a406d85`; faqat `bum-web` (deployment `4c8e416d`),
+bundle `index-BaVPqLfZ.js` → **`index-CyXr6YGd.js`** (yangi sarlavha matnlari bundle ichida topildi).
+API kodi o'zgarmagan.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
