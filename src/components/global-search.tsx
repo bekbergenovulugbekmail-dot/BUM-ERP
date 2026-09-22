@@ -116,7 +116,8 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
               <CommandItem
                 key={c.id}
                 value={`customer-${c.id} ${c.name} ${c.phone ?? ""}`}
-                onSelect={() => navigateTo("sales")}
+                // Mijozlar ro'yxati CRM bo'limida (ilgari Sotuvda edi)
+                onSelect={() => navigateTo("crm")}
                 className="cursor-pointer"
               >
                 <Users className="h-4 w-4 text-emerald-500" />

@@ -1,20 +1,15 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import {
-  ShoppingBag, TrendingUp, Clock, Plus, Search,
-  Users, ChevronRight, DollarSign,
-} from "lucide-react";
+import { ShoppingBag, TrendingUp, Clock, Plus, Search, ChevronRight, DollarSign } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
-import PageTabs from "@/components/page-tabs.tsx";
 import { useApiQuery } from "@/lib/query.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import OrderDetailDrawer from "./_components/order-detail-drawer.tsx";
 import CreateOrderDialog from "./_components/create-order-dialog.tsx";
-import CustomersSection from "./_components/customers-section.tsx";
 import { num, type SalesOrderRow, type SalesOrderStatus, type SalesStats } from "./_lib/types.ts";
 
 const PAGE_SIZE = 30;
@@ -71,7 +66,6 @@ const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
 export default function SalesPage() {
   const { can } = usePermissions();
-  const [tab, setTab] = useState("orders");
   const [statusFilter, setStatusFilter] = useState<SalesStatus | "all">("all");
   const [search, setSearch] = useState("");
   const [debouncedSearch] = useDebounce(search.trim(), 300);
@@ -120,7 +114,8 @@ export default function SalesPage() {
           </div>
           <div>
             <h1 className="text-xl font-bold">Sotuv moduli</h1>
-            <p className="text-sm text-muted-foreground">Buyurtmalar, mijozlar va to'lovlar</p>
+            {/* Mijozlar ro'yxati CRM bo'limiga ko'chirildi — bu yerda faqat buyurtmalar va to'lovlar */}
+            <p className="text-sm text-muted-foreground">Buyurtmalar va to'lovlar</p>
           </div>
         </div>
         {canCreate && (
@@ -153,19 +148,6 @@ export default function SalesPage() {
         ))}
       </div>
 
-      <PageTabs
-        tabs={[
-          { key: "orders", label: "Buyurtmalar", icon: ShoppingBag },
-          { key: "customers", label: "Mijozlar", icon: Users },
-        ]}
-        value={tab}
-        onChange={setTab}
-      />
-
-      {tab === "customers" ? (
-        <CustomersSection />
-      ) : (
-        <>
           {/* Status chips */}
           <div className="flex flex-wrap gap-2">
             {STATUS_TABS.map((s) => (
@@ -297,8 +279,6 @@ export default function SalesPage() {
               </Button>
             </div>
           )}
-        </>
-      )}
 
       {createOpen && (
         <CreateOrderDialog

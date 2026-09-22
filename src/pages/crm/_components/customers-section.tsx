@@ -1,3 +1,12 @@
+/**
+ * Mijozlar ro'yxati — CRM bo'limining asosiy jadvali (`/api/sales/customers`).
+ *
+ * Ilgari Sotuv modulining "Mijozlar" tabida edi: mijoz esa faqat sotuvga emas, kassa, distributsiya,
+ * dostavka va CRM faoliyatiga ham tegishli — shuning uchun egasining qaroriga ko'ra CRM ga ko'chirildi.
+ * Ma'lumot va endpointlar o'zgarmagan; Distributsiya → Mijozlar do'kon/marshrut ko'rinishi bo'lib qoladi.
+ *
+ * Ko'rish — `sales.view`, o'zgartirish — `crm.manage`, balansni to'g'rilash — `finance.approve`.
+ */
 import { useState } from "react";
 import { toast } from "sonner";
 import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, X } from "lucide-react";
@@ -27,7 +36,8 @@ import {
   type CustomerFilter,
   type CustomerRegion,
 } from "@/components/customers/customer-filter.ts";
-import { num, type Customer } from "../_lib/types.ts";
+// Mijoz turi sotuv modulida ta'riflangan (`/api/sales/customers` javobi) — CRM shu turni ishlatadi
+import { num, type Customer } from "@/pages/sales/_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 

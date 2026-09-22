@@ -9,17 +9,24 @@ import PageTabs from "@/components/page-tabs.tsx";
 import { useApiQuery } from "@/lib/query.ts";
 import LeadsPipeline from "./_components/leads-pipeline.tsx";
 import ActivitiesSection from "./_components/activities-section.tsx";
+import CustomersSection from "./_components/customers-section.tsx";
+import { usePermissions } from "@/hooks/use-company.ts";
 import { num, type Activity as ActivityRow, type LeadStats } from "./_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
+/** Mijozlar — CRM ning asosiy ro'yxati (ilgari Sotuv modulida edi). */
 const TABS = [
+  { key: "customers", label: "Mijozlar", icon: Users },
   { key: "pipeline", label: "Pipeline", icon: TrendingUp },
   { key: "activities", label: "Faoliyatlar", icon: Activity },
 ] as const;
 
 export default function CRMPage() {
-  const [tab, setTab] = useState<typeof TABS[number]["key"]>("pipeline");
+  const { can } = usePermissions();
+  // Mijozlar ro'yxati `sales.view` bilan ochiladi; ruxsat bo'lmasa tab ham ko'rinmaydi
+  const canViewCustomers = can("sales.view");
+  const [tab, setTab] = useState<typeof TABS[number]["key"]>(canViewCustomers ? "customers" : "pipeline");
 
   const leadStats = useApiQuery<LeadStats>("/api/crm/leads/stats").data;
   const planned = useApiQuery<{ activities: ActivityRow[] }>("/api/crm/activities", { status: "planned", limit: 500 })
@@ -78,7 +85,7 @@ export default function CRMPage() {
         </div>
         <div>
           <h1 className="text-xl font-bold">CRM</h1>
-          <p className="text-sm text-muted-foreground">Lidlar, pipeline va mijozlar bilan faoliyat</p>
+          <p className="text-sm text-muted-foreground">Mijozlar, lidlar va ular bilan faoliyat</p>
         </div>
       </motion.div>
 
@@ -109,7 +116,15 @@ export default function CRMPage() {
         ))}
       </motion.div>
 
-      <PageTabs tabs={TABS.map((item) => ({ key: item.key, label: item.label, icon: item.icon }))} value={tab} onChange={setTab} />
+      <PageTabs
+        tabs={TABS.filter((item) => item.key !== "customers" || canViewCustomers).map((item) => ({
+          key: item.key,
+          label: item.label,
+          icon: item.icon,
+        }))}
+        value={tab}
+        onChange={setTab}
+      />
 
       {/* Tab content */}
       <motion.div
@@ -118,6 +133,7 @@ export default function CRMPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.15 }}
       >
+        {tab === "customers" && canViewCustomers && <CustomersSection />}
         {tab === "pipeline" && <LeadsPipeline />}
         {tab === "activities" && <ActivitiesSection />}
       </motion.div>
