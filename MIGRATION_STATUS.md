@@ -3386,6 +3386,33 @@ Web bundle `index-BObbwNQH.js` → **`index-4sRZvYVh.js`**.
 (hozir ma'lumotnoma faqat kompaniya ishlatgan joylardan to'ladi) va mijoz eksport/importiga "Viloyat"
 ustunini qo'shish.
 
+## Hududlar: O'zbekiston ro'yxatini yuklash (2026-09-22)
+
+Ma'lumotnoma faqat kompaniya o'zi ishlatgan joylardan to'lardi. Endi "Hududlar" oynasida bitta tugma —
+**"O'zbekiston ro'yxatini yuklash"**: 14 ta viloyat (Qoraqalpog'iston Respublikasi va Toshkent shahri
+bilan) va ularning shahar/tumanlari (190 dan ortiq) ma'lumotnomaga tushadi.
+
+- `POST /api/distribution/territories/seed-uzbekistan` (`distribution.manage`): faqat YETISHMAYOTGANINI
+  qo'shadi, mavjud hududni o'chirmaydi va nomini o'zgartirmaydi; viloyatsiz turgan mavjud shahar/tumanni
+  o'z viloyatiga bog'laydi ("Urganch" → "Xorazm viloyati"). Takror bosilsa hech narsa qo'shilmaydi
+  (idempotent). Javob: `{ regionsAdded, districtsAdded, districtsLinked }`, audit `TERRITORIES_SEEDED`.
+- Ro'yxat `apps/api/src/modules/distribution/uzbekistan-regions.ts` da — lotin alifbosida, BOSHLANG'ICH
+  ma'lumot: nomni tuzatish, keraksizini o'chirish va yangisini qo'shish kompaniya ixtiyorida (nom
+  tuzatilsa mijozlardagi matn ham yangilanadi).
+- Web: oynada tasdiq so'raladi ("mavjudlari o'chirilmaydi") va natijada nechta viloyat/tuman qo'shilgani
+  va nechtasi viloyatiga bog'langani ko'rsatiladi.
+
+**Testlar:** `distribution.test.ts` — 14 viloyat va 150 dan ortiq tuman qo'shilishi, avvaldan bor
+"Urganch" yozuvi O'CHIRILMASDAN Xorazmga bog'lanishi (o'sha `id`), Toshkent shahri tumanlarining to'g'ri
+otaga tushishi, takroriy yuklashda o'zgarish yo'qligi (**8/8 PASS**); `sales.test.ts` **5/5**, frontend
+**26 fayl / 109 test PASS**; `tsc` va `eslint` toza.
+
+**Production (2026-09-22):** commit `ee5fa74`; `bum-api` (deployment `5da8734f`) va `bum-web`
+(deployment `7e97c08e`). API toza ko'tarildi (`Migratsiyalar qo'llandi (32ms)`, bitta `Server listening`),
+endpoint tashqaridan tasdiqlandi: `/territories/seed-uzbekistan` → **401**, mavjud bo'lmagan yo'l → 404.
+Web bundle `index-4sRZvYVh.js` → **`index--P2dwF5a.js`**. Ro'yxat hali YUKLANMAGAN — tugmani egasi
+bosadi (bu ma'lumot qo'shadigan amal, avtomatik bajarilmaydi).
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
