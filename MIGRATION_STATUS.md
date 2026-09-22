@@ -3557,6 +3557,28 @@ ichida kirish formasi matni bor, eski "Bu sahifa faqat platforma adminlari uchun
 Endi CRM modulini yoqish yo'li ochiq: `/uz/admin` → platforma admini (`+998999635353`) bilan kirish →
 Kompaniyalar → Ezo → Modullar → CRM.
 
+## Distributsiya ko'rsatkichi: "Faol marshrutlar" → "Marshrutlar" (2026-09-22)
+
+Egasining savoli: "Faol marshrutlar 26 / 1318 ta do'kon deb turibdi — hali savdo boshlanmagan-ku?"
+
+Productiondan tekshirildi (faqat o'qish, Ezo kompaniyasi): **26 ta marshrut** bor va hammasi yoqilgan
+(`is_active`), ularga **1318 ta do'kon** biriktirilgan — `route_customers` da 1318 qator va 1318 TAKRORSIZ
+mijoz, ya'ni son ikki marta sanalmayapti (kompaniyada jami 1322 mijoz, 1319 tasi faol). Tashriflar
+jadvalida esa **0 ta** yozuv. Ya'ni raqam to'g'ri: u marshrut YOQILGANINI bildiradi, savdo yoki tashrif
+boshlanganini emas.
+
+Chalkashlik faqat so'zda edi — yorliqlar tuzatildi:
+- uz: "Faol marshrutlar" → **"Marshrutlar"**, "{{count}} ta do'kon" → "{{count}} ta do'kon biriktirilgan"
+- ru: "Активные маршруты" → "Маршруты", "Привязано магазинов: {{count}}"
+- kk: "Белсенді бағыттар" → "Бағыттар", "Бекітілген дүкендер: {{count}}"
+
+Kodda ham izoh qo'yildi: ko'rsatkich `/routes` (faolsizlantirilganlari qaytmaydi) bo'yicha hisoblanadi,
+tashrif va tashrif savdosi esa alohida kartochkalarda.
+
+**Tekshirilgani:** frontend **28 fayl / 118 test PASS**, `tsc` va `eslint` toza.
+**Production (2026-09-22):** commit `bda8941`; faqat `bum-web` (deployment `e173a832`), bundle
+`index-DJa857Ky.js` → **`index-Dt2XeHtK.js`** — eski "Faol marshrutlar" matni bundle ichida yo'q.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
