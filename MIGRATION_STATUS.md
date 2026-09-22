@@ -3591,6 +3591,33 @@ mantig'i o'zgarmagan.
 `index-Dt2XeHtK.js` → **`index-a8jxZSdv.js`**; bundle ichida `placeholder:`bum`` va izohdagi `bum`
 tasdiqlandi (`railway up` ikki marta "operation timed out" berdi, uchinchi urinishda o'tdi).
 
+## Hudud va kun: haftalik jadval (2026-09-22)
+
+Egasining so'rovi: agentni belgilagandan keyin hafta kunlarini ham belgilash kerak — agent o'z dasturiga
+kirganda o'sha kunning marshrutlari chiqsin.
+
+Server tomoni ALLAQACHON shunga mo'ljallangan edi (`routesForAgent`): shu sanaga biriktirish bo'lsa u
+ustun, bo'lmasa agentning o'z marshrutlari **hafta kuni** bo'yicha olinadi (`distribution_routes.days` +
+`sales_rep_id`). Yetishmagani — UI: "Hudud va kun" da faqat aniq sanaga biriktirish bor edi, haftalik
+jadvalni esa marshrutni tahrirlab qo'yish kerak edi.
+
+**Web (Distributsiya → Hudud va kun)** ikki qismga bo'lindi:
+- **"Haftalik jadval (doimiy)"** — marshrut + agent + hafta kunlari (Du…Ya tugmalari). Saqlanganda
+  marshrutning o'ziga yoziladi (`PATCH /api/distribution/routes/:routeId` — `salesRepId`, `days`), ya'ni
+  yangi jadval ham, migratsiya ham kerak emas. Pastda **joriy jadval ro'yxati**: har marshrutda agent va
+  belgilangan kunlar; qator bosilsa forma o'sha marshrut bilan to'ladi (tahrirlash).
+- **"Kunlik o'zgartirish (bir martalik)"** — avvalgi sanaga biriktirish; shu kun uchun jadvaldan ustun
+  turadi (almashinuv, bemorlik), keyingi haftaga ta'sir qilmaydi. Bo'sh holat matni ham shunga moslandi.
+
+**Test:** `sales-agent-stores.test.ts` — boshqa kun belgilangan marshrut agentning "Bugungi marshrut"
+ro'yxatida chiqmaydi; bugungi kun va agent belgilangach marshrut va uning do'konlari chiqadi; agent
+almashtirilsa marshrut yangisiga o'tadi (**3/3 PASS**). Qo'shimcha: `distribution`,
+`sales-agent-boundaries` (**11 PASS**), frontend **28 fayl / 118 test PASS**; `tsc` va `eslint` toza.
+
+**Production (2026-09-22):** commit `60111e8`; faqat `bum-web` (deployment `c3234a2f`) — API kodi
+o'zgarmagan (faqat test qo'shildi). Bundle `index-a8jxZSdv.js` → **`index-BvUcLGGU.js`**; ikkala yangi
+sarlavha bundle ichida tasdiqlandi.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
