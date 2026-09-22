@@ -3499,6 +3499,42 @@ bo'ladi (`sales.view` esa ma'lumot uchun avvalgidek).
 bundle `index-BaVPqLfZ.js` → **`index-CyXr6YGd.js`** (yangi sarlavha matnlari bundle ichida topildi).
 API kodi o'zgarmagan.
 
+## Chiqarilgan xodimning telefoni qayta ishlatiladi (2026-09-22)
+
+Egasining bildirgani: foydalanuvchini o'chirdim, ro'yxatdan yo'qoldi, lekin xodimni qaytadan qo'shmoqchi
+bo'lsam "bu nomer bor" deydi.
+
+Sabab: chiqarishda hisobning O'ZI (`users`) ataylab saqlanadi — nomi hujjatlar va auditda kerak; telefon
+esa global unikal, shuning uchun raqam band bo'lib qolardi.
+
+**Yechim** (`insertUser`): telefon egasi HECH BIR kompaniyada a'zo bo'lmasa (chiqarilgan hisob), yangi
+yozuv ochilmaydi — o'sha hisob TIKLANADI: yangi parol, yangi ism, yangi a'zolik va rol; eski PIN
+o'chiriladi, hisob faollashadi. Hisob id'si o'zgarmagani uchun eski hujjatlardagi nomi joyida qoladi.
+Platforma admini va boshqa kompaniyada a'zo bo'lgan raqam qayta ishlatilmaydi — avvalgidek `409`.
+O'zgarish barcha yo'llarga tegishli: Sozlamalar → Foydalanuvchi qo'shish va Kadrlar → Xodim qo'shish.
+
+**Testlar:** `company.test.ts` — chiqarilgandan keyin o'sha telefon bilan xodim qaytadan qo'shiladi
+(o'sha hisob id'si, yangi parol bilan kirish ishlaydi, yangi rol ruxsatlari qo'llanadi), boshqa kompaniya
+a'zosining raqami esa `409` (**23/23 PASS**). Qo'shimcha: `hr`, `company-owner`, `acceptance-access`
+(**15 PASS**), `auth`, `pos`, `subscription`, `bootstrap` (**62 PASS**); `tsc` va `eslint` toza.
+
+**Production (2026-09-22):** commit `16df7a3`; faqat `bum-api` (deployment `7554dd31`) — web o'zgarmagan.
+API toza ko'tarildi (`Migratsiyalar qo'llandi (27ms)`, konteyner `16cccb825393`).
+
+### Modullarni yoqish — kim qiladi (2026-09-22 aniqlangan)
+
+Egasining "Admin paneliga kirib bo'lmayapti" savoli bo'yicha tekshirildi (production bazasidan, faqat
+o'qish): **Ezo** kompaniyasida `crm`, `manufacturing` va `pos` modullari O'CHIRILGAN; platforma admini
+esa bitta — `+998999635353` (Bootstrap Admin, faol).
+
+Loyiha qoidasi: modulni kompaniyaning o'zi yoqa olmaydi (`modules-section.tsx` da `canManage = false`,
+o'chirilgan modul ro'yxatda ham ko'rsatilmaydi) — bu platforma administratori qarori. Shuning uchun CRM ni
+yoqish yo'li: `app.bum-erp.uz/uz/admin` → platforma admini sifatida kirish → Kompaniyalar → Ezo →
+Modullar → CRM. Mijozlar ro'yxati CRM ga ko'chirilgani uchun bu qadam **hozir zarur**.
+
+Ochiq taklif (bajarilmagan): kompaniya egasiga o'z tarifidagi modullarni yoqish huquqini berish — egasi
+xohlasa alohida ish sifatida qilinadi.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
