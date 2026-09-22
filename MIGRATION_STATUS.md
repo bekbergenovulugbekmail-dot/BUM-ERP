@@ -3291,6 +3291,31 @@ tekshirilmagan — egasi oynani ochib ko'radi.
 **Production (2026-09-22):** commit `7b0161f`; faqat `bum-web` (deployment `930d132d`),
 bundle `index-CH8cjoMx.js` → **`index-Dt53jYRJ.js`**.
 
+## Mijoz oynasi: shahar va mahalla takliflari (2026-09-22)
+
+"Yangi mijoz" oynasida Shahar/tuman va Mahalla har safar QO'LDA yozilardi: bazada "Urganch" bo'lsa ham
+maydon bo'sh ochilardi, ustiga bosilganda hech narsa chiqmasdi. Bu nafaqat noqulay — bir hududning ikki
+xil yozilishi hudud bo'yicha saralashda ikki alohida hudud bo'lib chiqardi.
+
+**Yangi `src/components/ui/suggest-input.tsx`** — erkin yoziladigan, lekin avval kiritilgan qiymatlarni
+taklif qiladigan maydon: bosilganda to'liq ro'yxat ochiladi, yozila boshlangach ro'yxat qisqaradi,
+ro'yxatda yo'q qiymatni ham yozish mumkin (bu `Select` emas). Ro'yxat qatori `onMouseDown` da tanlanadi —
+maydon fokusdan chiqmaydi, shuning uchun `blur` da yopilishi tanlashni buzmaydi. Qiymat aynan mos kelsa
+ro'yxat ochilmaydi (keraksiz taklif chiqmaydi).
+
+Sotuv → Mijozlar oynasida shahar va mahalla shu maydonga o'tkazildi; takliflar
+`GET /api/sales/customers/regions` dan (`includeInactive=true` — hudud nomi arxivdagilarda ham o'sha),
+mahalla ro'yxati tanlangan shaharga qarab qisqaradi. Distributsiya → "Tezda qo'shish" da hudud va agent
+allaqachon `Select` bilan tanlanadi — tegilmadi.
+
+**Test:** yangi `suggest-input.test.tsx` (4 ta) — bosilganda ro'yxat ochilishi, yozilganda qisqarishi,
+tanlangani maydonga tushishi, aynan mos qiymatda ro'yxat ochilmasligi, ro'yxatda yo'q matn
+yozilaverishi. Frontend to'plami: **26 fayl / 109 test PASS**, `tsc` va butun `src` bo'yicha
+`eslint --max-warnings=0` toza.
+
+**Production (2026-09-22):** commit `9a111d5`; faqat `bum-web` (deployment `5b14897a`),
+bundle `index-Dt53jYRJ.js` → **`index-C4Nniv1Y.js`**.
+
 ### Android
 - loyiha: `apps/mobile` (Capacitor 8.4.3, `uz.bumerp.app`), production web manzilini ochadi
 - ikonka va splash: BUM logotipi (adaptive ikonka kesilmaydi)
