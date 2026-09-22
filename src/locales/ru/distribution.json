@@ -1,8 +1,8 @@
 {
   "title": "Дистрибуция",
   "subtitle": "Маршруты, торговые агенты и визиты",
-  "stats.routes": "Активные маршруты",
-  "stats.stores": "Магазинов: {{count}}",
+  "stats.routes": "Маршруты",
+  "stats.stores": "Привязано магазинов: {{count}}",
   "stats.reps": "Торговые агенты",
   "stats.active": "Активные",
   "stats.visits": "Визиты",

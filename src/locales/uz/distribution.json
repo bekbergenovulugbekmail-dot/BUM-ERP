@@ -1,8 +1,8 @@
 {
   "title": "Distributsiya",
   "subtitle": "Marshrutlar, savdo agentlari va tashriflar",
-  "stats.routes": "Faol marshrutlar",
-  "stats.stores": "{{count}} ta do'kon",
+  "stats.routes": "Marshrutlar",
+  "stats.stores": "{{count}} ta do'kon biriktirilgan",
   "stats.reps": "Savdo agentlari",
   "stats.active": "Faol",
   "stats.visits": "Tashriflar",

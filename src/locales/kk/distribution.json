@@ -1,8 +1,8 @@
 {
   "title": "Дистрибуция",
   "subtitle": "Бағыттар, сауда агенттері және сапарлар",
-  "stats.routes": "Белсенді бағыттар",
-  "stats.stores": "Дүкен саны: {{count}}",
+  "stats.routes": "Бағыттар",
+  "stats.stores": "Бекітілген дүкендер: {{count}}",
   "stats.reps": "Сауда агенттері",
   "stats.active": "Белсенді",
   "stats.visits": "Сапарлар",

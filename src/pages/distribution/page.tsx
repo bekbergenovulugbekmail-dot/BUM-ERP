@@ -50,6 +50,11 @@ export default function DistributionPage() {
   const routes = useApiQuery<{ routes: DistributionRoute[] }>("/api/distribution/routes").data?.routes;
   const reps = useApiQuery<{ salesReps: SalesRepStats[] }>("/api/distribution/sales-reps/stats").data?.salesReps;
 
+  /**
+   * Ko'rsatkich — YOQILGAN marshrutlar soni va ularga biriktirilgan do'konlar
+   * (`/routes` faolsizlantirilganlarini qaytarmaydi). Savdo yoki tashrif boshlanganini bildirmaydi:
+   * tashriflar va tashrif savdosi alohida kartochkalarda ko'rsatiladi.
+   */
   const storeCount = (routes ?? []).reduce((sum, r) => sum + r.customerCount, 0);
   const visitsThisMonth = (reps ?? []).reduce((sum, r) => sum + r.visitsThisMonth, 0);
   const visitSales = (reps ?? []).reduce((sum, r) => sum + num(r.visitSalesThisMonth), 0);
