@@ -15,6 +15,7 @@ import { usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import { BankCommissionHint } from "@/components/payments/bank-commission-hint.tsx";
 import AccountCardPayments, { AccountCommissionSummary } from "./account-card-payments.tsx";
+import AgentCash from "./agent-cash.tsx";
 import PendingSettlements from "./pending-settlements.tsx";
 import SetBalanceDialog from "@/components/balances/set-balance-dialog.tsx";
 import {
@@ -362,6 +363,9 @@ export default function CashAccountsSection() {
           ))}
         </div>
       )}
+
+      {/* Agentlardagi topshirilmagan naqd — kim qancha pul olib yurganini bitta joyda ko'rsatadi */}
+      <AgentCash />
 
       {/* Kutilayotgan karta/hamyon puli va qirqim */}
       <PendingSettlements />

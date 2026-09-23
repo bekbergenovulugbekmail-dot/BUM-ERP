@@ -20,6 +20,7 @@ import { useApiQuery } from "@/lib/query.ts";
 import { useActiveCompany } from "@/hooks/use-company.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { generateDeliveryWaybillPDF, type WaybillTask } from "@/lib/pdf/delivery-waybill-pdf.ts";
+import WaybillDialog, { type WaybillSettings } from "./waybill-dialog.tsx";
 import { EMPTY_FILTERS, STATUS_GROUPS, filtersToQuery, type StatusFilter, type TaskFilters } from "../_lib/filters.ts";
 
 type TaskPage = { tasks: DeliveryTaskRow[]; nextCursor: string | null };
@@ -53,10 +54,21 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
   const company = useActiveCompany().data?.company;
   const me = useCurrentUser();
   const [printing, setPrinting] = useState(false);
+  /** Serverdan yuklangan nakladnoy ma'lumoti — oyna ochiq turgani shu qiymat bilan bilinadi. */
+  const [waybill, setWaybill] = useState<{
+    agentCode: string;
+    agentPhone: string | null;
+    defaults: Omit<WaybillSettings, "columns" | "notes">;
+    tasks: WaybillTask[];
+  } | null>(null);
   /** Nakladnoy bitta agentning bitta kunidagi yetkazmalari uchun — shuning uchun ikkalasi tanlangan bo'lishi kerak. */
   const waybillDate = filters.dateFrom && filters.dateFrom === filters.dateTo ? filters.dateFrom : null;
   const canPrintWaybill = Boolean(filters.agentId && waybillDate);
 
+  /**
+   * Qog'oz TO'G'RIDAN-TO'G'RI chiqmaydi: avval ma'lumot yuklanadi va oynada ko'rsatiladi, chunki
+   * mas'ul shaxs, agent nomi va ustunlar har bir biznesda boshqacha bo'lishi mumkin.
+   */
   const handleWaybill = async () => {
     if (!filters.agentId || !waybillDate) return;
     setPrinting(true);
@@ -70,25 +82,16 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
         toast.error("Bu kunga biriktirilgan yetkazma yo'q");
         return;
       }
-      generateDeliveryWaybillPDF({
-        company: {
-          name: company?.name ?? "BUM ERP",
-          legalName: company?.legalName ?? undefined,
-          taxId: company?.taxId ?? undefined,
-          address: company?.address ?? undefined,
-          phone: company?.phone ?? undefined,
-          email: company?.email ?? undefined,
-          website: company?.website ?? undefined,
-        },
-        number: `${data.agent.code}-${waybillDate}`,
-        date: waybillDate,
-        agentName: data.agent.name ?? data.agent.code,
+      setWaybill({
         agentCode: data.agent.code,
         agentPhone: data.agent.phone,
-        // Mas'ul shaxs — hujjatni chop etayotgan xodim (imzo qatorida shu nom turadi)
-        responsibleName: me?.name ?? "—",
-        warehouseName: data.warehouseName,
-        currency: company?.currency ?? "UZS",
+        defaults: {
+          number: `${data.agent.code}-${waybillDate}`,
+          // Mas'ul shaxs — hujjatni chop etayotgan xodim; oynada o'zgartirsa bo'ladi
+          responsibleName: me?.name ?? "",
+          agentName: data.agent.name ?? data.agent.code,
+          warehouseName: data.warehouseName ?? "",
+        },
         tasks: data.tasks.map((task) => ({
           ...task,
           orderTotal: Number(task.orderTotal),
@@ -100,6 +103,33 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
     } finally {
       setPrinting(false);
     }
+  };
+
+  const handlePrintWaybill = (settings: WaybillSettings) => {
+    if (!waybill || !waybillDate) return;
+    generateDeliveryWaybillPDF({
+      company: {
+        name: company?.name ?? "BUM ERP",
+        legalName: company?.legalName ?? undefined,
+        taxId: company?.taxId ?? undefined,
+        address: company?.address ?? undefined,
+        phone: company?.phone ?? undefined,
+        email: company?.email ?? undefined,
+        website: company?.website ?? undefined,
+      },
+      number: settings.number,
+      date: waybillDate,
+      agentName: settings.agentName,
+      agentCode: waybill.agentCode,
+      agentPhone: waybill.agentPhone,
+      responsibleName: settings.responsibleName.trim() || "—",
+      warehouseName: settings.warehouseName.trim() || null,
+      currency: company?.currency ?? "UZS",
+      notes: settings.notes.trim() || null,
+      columns: settings.columns,
+      tasks: waybill.tasks,
+    });
+    setWaybill(null);
   };
 
   return (
@@ -207,6 +237,21 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
           </Button>
         </div>
       </div>
+
+      {waybill && waybillDate && (
+        <WaybillDialog
+          open
+          onOpenChange={(next) => !next && setWaybill(null)}
+          date={waybillDate}
+          currency={company?.currency ?? "UZS"}
+          tasks={waybill.tasks}
+          defaults={waybill.defaults}
+          debtAvailable={waybill.tasks.some((task) => task.customerDebt !== null)}
+          storageKey={`bum:waybill:${company?.id ?? "default"}`}
+          printing={printing}
+          onPrint={handlePrintWaybill}
+        />
+      )}
 
       {query.isError ? (
         <p className="rounded-2xl border border-border bg-card p-4 text-sm text-destructive">{deliveryErrorMessage(query.error, t)}</p>

@@ -14,6 +14,7 @@
  *   GET    /cash-accounts/:cashAccountId/transactions (?dateFrom=&dateTo=&limit=&cursor=)   finance.view
  *   POST   /cash-accounts, PATCH /cash-accounts/:cashAccountId finance.manage
  *   POST   /cash-transactions, /cash-transfers                 finance.manage
+ *   GET    /agent-cash                                         finance.view (agentlardagi topshirilmagan naqd)
  *   GET    /settlements                                        finance.view (kutilayotgan karta/hamyon puli)
  *   POST   /cash-accounts/:cashAccountId/settle                finance.manage (qirqim: komissiya ushlanib bank hisobiga)
  *   POST   /cash-accounts/:cashAccountId/set-balance           finance.approve (qoldiqni to'g'rilash: farq kirim/chiqim)
@@ -79,6 +80,7 @@ import {
   setCurrencyRate,
 } from "./currencies.service.js";
 import { createManualEntry, getJournalEntry, getLockDate, listJournal, setLockDate, voidManualEntry } from "./journal.service.js";
+import { agentCashHolders } from "./agent-cash.service.js";
 import { listPendingSettlements, settleCashAccount } from "./settlement.service.js";
 import { createTerminal, getTerminal, listTerminals, updateTerminal } from "./terminals.service.js";
 
@@ -486,6 +488,16 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
     );
     reply.status(201);
     return result;
+  });
+
+  /**
+   * Agentlardagi topshirilmagan naqd — sotuv va dostavka agentlari BIR ro'yxatda.
+   * Faqat ko'rsatadi: topshirishni o'z bo'limi qayd etadi
+   * (`POST /api/distribution/sales-reps/:id/cash-handover`, `POST /api/delivery/agents/:id/cash-handover`).
+   */
+  app.get("/agent-cash", async (req) => {
+    const tenant = await readTenant(req, "finance.view");
+    return { holders: await agentCashHolders(db, tenant.company.id) };
   });
 
   // ─── Qirqim: kutilayotgan karta/hamyon puli → bank hisobi ────────────────

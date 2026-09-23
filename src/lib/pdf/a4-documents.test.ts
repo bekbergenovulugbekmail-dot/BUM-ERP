@@ -24,6 +24,7 @@ vi.mock("jspdf", async (importOriginal) => {
 const { A4, contentBottom } = await import("./pdf-utils.ts");
 const { generateSalesInvoicePDF } = await import("./invoice-pdf.ts");
 const { generatePurchaseOrderPDF } = await import("./purchase-order-pdf.ts");
+const { generateDeliveryWaybillPDF } = await import("./delivery-waybill-pdf.ts");
 type InvoiceItem = Parameters<typeof generateSalesInvoicePDF>[0]["items"][number];
 
 const company = {
@@ -259,5 +260,68 @@ describe("A4 hujjatlar", () => {
     }
     expect(pageText(doc, pages)).toContain("JAMI:");
     expect(pageText(doc, pages)).toContain("imzo");
+  });
+
+  /**
+   * Yetkazma nakladnoyi: agent qo'liga beriladigan qog'oz. Mas'ul shaxs va agent nomi
+   * oynada tahrirlanadi — hujjatga aynan TAHRIRLANGAN qiymat tushishi kerak, aks holda
+   * foydalanuvchi to'g'rilagan narsa qog'ozda ko'rinmay qolardi.
+   */
+  const waybill = (count: number, overrides: Partial<Parameters<typeof generateDeliveryWaybillPDF>[0]> = {}) =>
+    generateDeliveryWaybillPDF({
+      company,
+      number: "AG-01-2026-09-22",
+      date: "2026-09-22",
+      agentName: "Sardor Yusupov",
+      agentCode: "AG-01",
+      agentPhone: "+998 93 222 33 44",
+      responsibleName: "Ombor mudiri Aziz aka",
+      warehouseName: "Asosiy ombor",
+      currency: "so'm",
+      tasks: Array.from({ length: count }, (_, index) => ({
+        number: `YT-${index + 1}`,
+        orderNumber: `SO-${index + 1}`,
+        customerName: `Mijoz ${index + 1}`,
+        customerPhone: "+998 90 000 00 00",
+        customerAddress: "Urganch sh., ko'cha 1",
+        orderTotal: 250_000,
+        customerDebt: 100_000,
+      })),
+      ...overrides,
+    });
+
+  it("nakladnoy A4 standartida; mas'ul shaxs va agent nomi qog'ozda", () => {
+    const doc = waybill(3);
+    expect(Math.round(doc.internal.pageSize.getWidth())).toBe(A4.width);
+    const text = pageText(doc, 1);
+    expect(text, "mas'ul shaxs").toContain("Ombor mudiri Aziz aka");
+    expect(text, "agent nomi").toContain("Sardor Yusupov");
+    expect(pageText(doc, pageCount(doc)), "jami summa qatori").toContain("Jami summa");
+    expect(pageText(doc, pageCount(doc)), "jami qarz qatori").toContain("Jami qarz");
+  });
+
+  it("ustunlarni o'chirish qog'ozdan olib tashlaydi (qarz, manzil, telefon)", () => {
+    const hidden = waybill(3, { columns: { address: false, phone: false, debt: false } });
+    const text = [...Array(pageCount(hidden)).keys()].map((index) => pageText(hidden, index + 1)).join(" ");
+    expect(text, "qarz ustuni o'chirilgan").not.toContain("Jami qarz");
+    expect(text).not.toContain("Manzil");
+    expect(text).not.toContain("Telefon");
+    // Summa va mijoz baribir qoladi — ular hujjatning mohiyati
+    expect(text).toContain("Mijoz 1");
+    expect(text).toContain("Jami summa");
+  });
+
+  it("uzun nakladnoy ko'p sahifaga bo'linadi, sarlavha va imzo joyida qoladi", () => {
+    const doc = waybill(70);
+    const pages = pageCount(doc);
+    expect(pages).toBeGreaterThan(1);
+    for (let page = 1; page <= pages; page += 1) {
+      expect(pageText(doc, page), `${page}-sahifada sarlavha yo'q`).toContain("BUM DISTRIBUTION");
+      for (const block of textBlocks(doc, page)) {
+        expect(block.top, `"${block.text}" sahifadan chiqib ketdi`).toBeGreaterThanOrEqual(0);
+        expect(block.top).toBeLessThanOrEqual(A4.height);
+      }
+    }
+    expect(pageText(doc, pages), "imzo qatori").toContain("Topshirdi");
   });
 });

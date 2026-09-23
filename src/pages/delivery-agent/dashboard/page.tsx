@@ -27,6 +27,11 @@ export default function DeliveryDashboardPage() {
   const interval = useLiveInterval(60_000);
   const dashboard = useApiQuery<{ dashboard: AgentDashboard }>("/api/delivery/agent/dashboard", undefined, { refetchInterval: interval }).data?.dashboard;
   const tasks = useApiQuery<{ tasks: DeliveryTaskRow[] }>("/api/delivery/agent/tasks", { scope: "today" }, { refetchInterval: interval }).data?.tasks;
+  /**
+   * Agentdagi TOPSHIRILMAGAN naqd — bugungi yig'ilgan pul emas, balki jamg'arilib qolgan qoldiq.
+   * Faqat ko'rsatiladi: topshirishni pulni qabul qiluvchi ERP'da qayd etadi (ikki tomonlama nazorat).
+   */
+  const cash = useApiQuery<{ cash: { balance: string } }>("/api/delivery/agent/cash", undefined, { refetchInterval: interval }).data?.cash;
 
   const next = tasks
     ?.map((task) => ({ task, status: projectedStatus(task.status, queue.items.filter((item) => item.taskId === task.id)) as DeliveryStatus }))
@@ -139,6 +144,18 @@ export default function DeliveryDashboardPage() {
                   <AlertTriangle className="h-4 w-4" /> {t("dash.mismatch")}
                 </span>
                 <span className="font-semibold tabular-nums">{money(dashboard.mismatchAmount)}</span>
+              </div>
+            )}
+            {/* Kassaga topshirilmagan qoldiq — agent qancha qarzdorligini va qayerga topshirishni shu yerdan biladi */}
+            {cash && (
+              <div className="space-y-1 border-t border-border pt-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">{t("dash.cash_on_hand")}</span>
+                  <span className={cn("font-bold tabular-nums", num(cash.balance) > 0 && "text-emerald-700 dark:text-emerald-400")}>
+                    {money(cash.balance)}
+                  </span>
+                </div>
+                {num(cash.balance) > 0 && <p className="text-[11px] text-muted-foreground">{t("dash.cash_handover_hint")}</p>}
               </div>
             )}
           </div>

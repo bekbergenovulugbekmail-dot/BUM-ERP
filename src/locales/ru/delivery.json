@@ -73,6 +73,8 @@
   "dash.collected": "Собрано сегодня",
   "dash.expected_pending": "Ожидается к сбору",
   "dash.mismatch": "Расхождение оплаты",
+  "dash.cash_on_hand": "Наличные, не сданные в кассу",
+  "dash.cash_handover_hint": "Сдайте наличные в кассу или супервайзеру — это фиксируется в ERP в разделе \"Доставка → Агенты\"",
   "dash.customers_debt": "Долг моих клиентов",
   "dash.open_tasks": "Все доставки",
   "tasks.title": "Доставки",

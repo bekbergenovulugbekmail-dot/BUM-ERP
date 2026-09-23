@@ -292,4 +292,59 @@ describe("Moliyada ko'rinishi", () => {
     expect(accounts[0]!.salesRepId).toBe(repId);
     expect(accounts[0]!.name).toContain("yo'ldagi naqd");
   });
+
+  /**
+   * "Pulni qayerda topshiraman?" — sotuv va dostavka agentlari ikki xil bo'limda edi.
+   * Moliyadagi yagona ro'yxat shu savolga javob beradi; pul yig'ilmagan bo'lsa ro'yxat bo'sh.
+   */
+  it("moliyada 'agentlardagi naqd' ro'yxati topshirilmagan pulni ko'rsatadi", async () => {
+    const bosh = await call(company.ownerCookie, "GET", "/api/finance/agent-cash");
+    expect(bosh.statusCode, bosh.body).toBe(200);
+    expect(bosh.json().holders, "pul yig'ilmagan — ro'yxat bo'sh").toEqual([]);
+
+    const { cookie, repId } = await agent("Nodir");
+    const customerId = await shop("Do'kon N");
+    const orderId = await debtOrder(customerId);
+    expect(
+      (
+        await call(cookie, "POST", "/api/sales-agent/payments", {
+          customerId,
+          orderId,
+          clientRequestId: uuid(),
+          parts: [{ method: "cash", amount: "45000" }],
+        })
+      ).statusCode,
+    ).toBe(201);
+
+    const res = await call(company.ownerCookie, "GET", "/api/finance/agent-cash");
+    expect(res.statusCode, res.body).toBe(200);
+    const holders = res.json().holders as { kind: string; holderId: string; balance: string; name: string }[];
+    expect(holders).toHaveLength(1);
+    expect(holders[0]).toMatchObject({ kind: "sales_rep", holderId: repId });
+    expect(Number(holders[0]!.balance)).toBe(45000);
+
+    // Topshirilgandan keyin ro'yxatdan chiqadi — qoldiq nolga tushadi
+    expect(
+      (await call(company.ownerCookie, "POST", `/api/distribution/sales-reps/${repId}/cash-handover`, { amount: "45000" })).statusCode,
+    ).toBe(201);
+    expect((await call(company.ownerCookie, "GET", "/api/finance/agent-cash")).json().holders).toEqual([]);
+  });
+
+  it("begona kompaniyaning agenti ro'yxatda ko'rinmaydi", async () => {
+    const { cookie } = await agent("Ulug'bek");
+    const customerId = await shop("Do'kon U");
+    const orderId = await debtOrder(customerId);
+    await call(cookie, "POST", "/api/sales-agent/payments", {
+      customerId,
+      orderId,
+      clientRequestId: uuid(),
+      parts: [{ method: "cash", amount: "15000" }],
+    });
+
+    const admin = await signedIn(app, { isPlatformAdmin: true });
+    const other = await createCompany(app, admin.cookie, { name: "Begona kompaniya" });
+    const res = await call(other.ownerCookie, "GET", "/api/finance/agent-cash");
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().holders).toEqual([]);
+  });
 });

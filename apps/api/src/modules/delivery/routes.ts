@@ -49,6 +49,7 @@
  *   POST /agent/tasks/:taskId/confirm              delivery.confirm — to'liq yoki qisman, OTP, geofence
  *   POST /agent/tasks/:taskId/fail                 delivery.fail — sabab ("Boshqa" — izoh majburiy)
  *   GET  /agent/customers (?search=), GET /agent/customers/:customerId
+ *   GET  /agent/cash                               o'zidagi (kassaga topshirilmagan) naqd — faqat o'qish
  *   GET  /agent/debts                              delivery.view_debt
  *   GET  /agent/reports (?from=&to=)
  *   GET  /agent/route (?lat=&lng=)                  bugungi ochiq yetkazmalarning eng qisqa tartibi (tavsiya, yozilmaydi)
@@ -896,6 +897,16 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
     const { taskId } = taskParams.parse(req.params);
     const { context, permissions } = await readAgent(req);
     return { task: await agentTaskView(context, taskId, permissions) };
+  });
+
+  /**
+   * Agentning O'ZIDAGI naqd: qancha pul yig'ilgan va kassaga topshirilmagan.
+   * Faqat O'QISH — topshirishni pulni QABUL QILUVCHI qayd etadi (ikki tomonlama nazorat),
+   * shuning uchun bu yerda `POST` yo'q va agent boshqa agentning pulini ko'rmaydi.
+   */
+  app.get("/agent/cash", async (req) => {
+    const { context } = await readAgent(req);
+    return { cash: await agentCashSummary(db, context.company.id, context.deliveryAgent.id) };
   });
 
   app.get("/agent/work-session", async (req) => {

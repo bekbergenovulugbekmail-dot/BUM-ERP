@@ -73,6 +73,8 @@
   "dash.collected": "Bugun yig'ilgan pul",
   "dash.expected_pending": "Yig'ilishi kutilmoqda",
   "dash.mismatch": "To'lov farqi",
+  "dash.cash_on_hand": "Kassaga topshirilmagan naqd",
+  "dash.cash_handover_hint": "Naqdni kassaga yoki supervayzerga topshiring — u ERP'da \"Dostavka → Agentlar\" bo'limida qayd etiladi",
   "dash.customers_debt": "Mijozlarim qarzi",
   "dash.open_tasks": "Barcha yetkazmalar",
   "tasks.title": "Yetkazmalar",
