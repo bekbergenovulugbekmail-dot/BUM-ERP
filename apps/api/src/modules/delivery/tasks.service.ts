@@ -19,6 +19,7 @@ import {
 import { products, units } from "../../db/schema/catalog.js";
 import { deliveryAgents, deliveryEvents, deliveryPayments, deliveryProofs, deliveryTaskItems, deliveryTasks } from "../../db/schema/delivery.js";
 import { users } from "../../db/schema/platform.js";
+import { warehouses } from "../../db/schema/inventory.js";
 import { customers, salesOrderItems, salesOrders, salesReturns } from "../../db/schema/sales.js";
 import { agentOrders } from "../../db/schema/sales-agent.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -1041,3 +1042,66 @@ export async function readyOrdersForDelivery(conn: DbOrTx, tenant: TenantContext
 }
 
 export type { DeliveryTaskRow };
+
+/**
+ * NAKLADNOY ma'lumoti — agentga biriktirilgan yetkazmalar bitta kun uchun.
+ *
+ * Alohida so'rov: `GET /tasks` javobini kengaytirish barcha ekranlarga ta'sir qilardi, bu yerda esa
+ * qog'ozga chiqadigan aniq ro'yxat kerak. Mijoz QARZI faqat ruxsat bilan qo'shiladi — nakladnoyda
+ * qarz ko'rinishi maxfiy ma'lumot, shuning uchun u `canViewDebt` bilan boshqariladi.
+ */
+export async function deliveryWaybill(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  options: { agentId: string; date: string },
+  canViewDebt: boolean,
+) {
+  const [agent] = await conn
+    .select({
+      id: deliveryAgents.id,
+      code: deliveryAgents.code,
+      name: agentUser.name,
+      phone: agentUser.phone,
+    })
+    .from(deliveryAgents)
+    .leftJoin(agentUser, eq(agentUser.id, deliveryAgents.userId))
+    .where(and(eq(deliveryAgents.id, options.agentId), eq(deliveryAgents.companyId, tenant.company.id)))
+    .limit(1);
+  if (!agent) throw notFound("Yetkazuvchi topilmadi");
+
+  const rows = await conn
+    .select({
+      number: deliveryTasks.number,
+      orderNumber: salesOrders.number,
+      orderTotal: salesOrders.totalAmount,
+      customerName: customers.name,
+      customerPhone: customers.phone,
+      customerAddress: customers.address,
+      customerDebt: customers.totalDebt,
+      warehouseName: warehouses.name,
+    })
+    .from(deliveryTasks)
+    .innerJoin(salesOrders, eq(salesOrders.id, deliveryTasks.orderId))
+    .innerJoin(customers, eq(customers.id, deliveryTasks.customerId))
+    .leftJoin(warehouses, eq(warehouses.id, deliveryTasks.warehouseId))
+    .where(
+      and(
+        eq(deliveryTasks.companyId, tenant.company.id),
+        eq(deliveryTasks.deliveryAgentId, options.agentId),
+        eq(deliveryTasks.scheduledDate, options.date),
+        // Bekor qilingani qog'ozga chiqmaydi
+        ne(deliveryTasks.status, "cancelled"),
+      ),
+    )
+    .orderBy(asc(deliveryTasks.number));
+
+  return {
+    agent: { id: agent.id, code: agent.code, name: agent.name, phone: agent.phone },
+    date: options.date,
+    warehouseName: rows.find((row) => row.warehouseName)?.warehouseName ?? null,
+    tasks: rows.map(({ warehouseName: _warehouseName, customerDebt, ...row }) => ({
+      ...row,
+      customerDebt: canViewDebt ? customerDebt : null,
+    })),
+  };
+}

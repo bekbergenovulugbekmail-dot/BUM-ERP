@@ -4131,6 +4131,41 @@ fayl muvaffaqiyatli import bo'lib, xato eng oxirida — "to'g'ridan-to'g'ri qabu
 Testlar: `import-units-prices.test.ts` (+3) — konversiyasiz blok xato beradi va hujjat yaratilmaydi;
 "Birlikdagi dona" bilan 10 blok × 12 = 120 dona qoldiq; mavjud konversiya ikkilanmaydi.
 
+## Oylik plani, mijoz balansi tarixi, inventarizatsiya to'liqligi va dostavka nakladnoyi (2026-09-23)
+
+### Oylik (8, 9)
+KPI tizimi bor edi, lekin hisob PROGRESSIV — "plan bajarilmasa foiz yo'q" qoidasini ifodalab
+bo'lmasdi. `kpi_rules.min_value` qo'shildi (`0080_kpi_min_value.sql`, faqat ustun):
+ko'rsatkich plandan kam bo'lsa qoida bo'yicha pul 0, `null` — chegara yo'q (mavjud qoidalar
+o'zgarmaydi). HR → KPI oynasida "Plan" maydoni. Dostavshik uchun yangi ko'rsatkich kerak emas:
+`agent_collected_amount` to'lovni KIM qayd etganiga qarab hisoblanadi, shuning uchun dostavka
+agenti yig'gan pul ham unga tushadi — yorlig'i aniqlashtirildi.
+
+### Mijoz balansi (10)
+API bor edi, UI yo'q edi. `SetBalanceDialog` ga ixtiyoriy `historyUrl` — oxirgi 20 harakat
+(turi, summasi, keyingi qoldiq, izoh) shu oynada. Balansni o'rnatish avvalgidek `balance-adjust`.
+
+### Inventarizatsiya (11)
+Hisob `stock_levels` dan qurilardi — harakat bo'lmagan mahsulot ro'yxatga tushmasdi ("chala").
+Endi MAHSULOTLAR jadvalidan quriladi, kutilgan qoldiq `coalesce(qoldiq, 0)`, katalog katta
+bo'lsa bo'laklab yoziladi.
+
+### Naqd topshirish (12)
+Funksiya bor: ERP → "Distribyutsiya → Sotuv agentlari" va "Dostavka → Agentlar". Agent
+ilovasidagi "Sizdagi naqd" kartochkasiga qayerga topshirish kerakligi yozildi (uz/ru/kk).
+Pulni QABUL QILUVCHI qayd etadi — ikki tomonlama nazorat saqlanadi.
+
+### Dostavka nakladnoyi (13)
+Umuman yo'q edi. `GET /api/delivery/waybill?agentId=&date=` (`delivery.view`; mijoz qarzi faqat
+`finance.view` bilan) va `delivery-waybill-pdf.ts` — boshqa hujjatlar bilan bir xil A4 ko'rinish.
+Qog'ozda: kompaniya sarlavhasi (Sozlamalar → Kompaniya dan), agent nomi va kodi, MAS'UL SHAXS
+(chop etayotgan xodim), ombor, har bir yetkazma (raqam, buyurtma, mijoz, manzil, telefon, summa,
+qarzi), jami bloki (yetkazmalar soni, jami summa, jami qarz) va imzolar. Tugma: Dostavka →
+Yetkazmalar, agent va bitta kun tanlanganda faollashadi. Bekor qilingan yetkazma chiqmaydi.
+
+Testlar: `kpi.test.ts` (+3), `counts.test.ts` (+2), yangi `delivery-waybill.test.ts` (5).
+Production deploy QILINMADI.
+
 ### Blockerlar
 - **Production zaxira xizmati (AUDIT-2, HIGH):** kod va hujjat tayyor (`deploy/backup/`), lekin Railway'da `bum-backup` xizmati, volume va `Cron Schedule` egasi tomonidan yaratilmagan; `BACKUP_PASSPHRASE` ham egasi kiritadi (parol repoda yo'q va hech qayerda chop etilmaydi). Shu qadamgacha production bazasining avtomatik nusxasi YO'Q
 - **Android real qurilma:** `adb devices` bo'sh, emulyator uchun xotira yetmaydi — telefon ulash kerak

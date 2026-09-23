@@ -125,6 +125,7 @@ import {
   cancelDeliveryTask,
   createDeliveryTask,
   getDeliveryTask,
+  deliveryWaybill,
   listDeliveryTasks,
   readyOrdersForDelivery,
   redeliverRemainder,
@@ -175,6 +176,9 @@ const pairMessage = { message: "latitude, longitude va accuracy birga beriladi" 
 const taskParams = z.object({ taskId: z.uuid() });
 const proofParams = z.object({ taskId: z.uuid(), proofId: z.uuid() });
 const agentParams = z.object({ agentId: z.uuid() });
+/** Nakladnoy: qaysi agent va qaysi kun. */
+const waybillQuery = z.object({ agentId: z.uuid(), date: z.iso.date() });
+
 const cashHandoverBody = z.strictObject({
   amount: moneySchema,
   /** Standart — asosiy naqd kassa; boshqa kassa — finance.manage. */
@@ -526,6 +530,17 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
     const query = readyQuery.parse(req.query);
     const tenant = await readTenantWith(req, "delivery.manage");
     return { orders: await readyOrdersForDelivery(db, tenant, query) };
+  });
+
+  /**
+   * Nakladnoy (dostavka varaqasi) ma'lumoti — agentga biriktirilgan kunlik yetkazmalar.
+   * Mijoz qarzi faqat `finance.view` bilan qo'shiladi (qog'ozga chiqadigan maxfiy ma'lumot).
+   */
+  app.get("/waybill", async (req) => {
+    const query = waybillQuery.parse(req.query);
+    const tenant = await readTenantWith(req, "delivery.view");
+    const canViewDebt = (await effectivePermissions(db, tenant)).includes("finance.view");
+    return deliveryWaybill(db, tenant, { agentId: query.agentId, date: query.date }, canViewDebt);
   });
 
   app.get("/tasks", async (req) => {

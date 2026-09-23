@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Loader2, RotateCcw, Search } from "lucide-react";
+import { FileDown, Loader2, RotateCcw, Search } from "lucide-react";
 import { DELIVERY_STATUSES } from "@bum/shared";
 import { LateBadge, PriorityBadge, ReturnPendingBadge, StatusBadge } from "@/components/delivery/badges.tsx";
 import { Button } from "@/components/ui/button.tsx";
@@ -10,12 +10,16 @@ import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
-import { api } from "@/lib/api.ts";
+import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api.ts";
 import { deliveryErrorMessage } from "@/lib/delivery/errors.ts";
 import { timeWindow } from "@/lib/delivery/format.ts";
 import { useLiveInterval } from "@/lib/delivery/realtime.ts";
 import type { DeliveryAgentRow, DeliveryTaskRow } from "@/lib/delivery/types.ts";
 import { useApiQuery } from "@/lib/query.ts";
+import { useActiveCompany } from "@/hooks/use-company.ts";
+import { useCurrentUser } from "@/hooks/use-auth.ts";
+import { generateDeliveryWaybillPDF, type WaybillTask } from "@/lib/pdf/delivery-waybill-pdf.ts";
 import { EMPTY_FILTERS, STATUS_GROUPS, filtersToQuery, type StatusFilter, type TaskFilters } from "../_lib/filters.ts";
 
 type TaskPage = { tasks: DeliveryTaskRow[]; nextCursor: string | null };
@@ -45,6 +49,58 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
   });
   const rows = query.data?.pages.flatMap((page) => page.tasks);
   const set = (patch: Partial<TaskFilters>) => onFiltersChange({ ...filters, ...patch });
+
+  const company = useActiveCompany().data?.company;
+  const me = useCurrentUser();
+  const [printing, setPrinting] = useState(false);
+  /** Nakladnoy bitta agentning bitta kunidagi yetkazmalari uchun — shuning uchun ikkalasi tanlangan bo'lishi kerak. */
+  const waybillDate = filters.dateFrom && filters.dateFrom === filters.dateTo ? filters.dateFrom : null;
+  const canPrintWaybill = Boolean(filters.agentId && waybillDate);
+
+  const handleWaybill = async () => {
+    if (!filters.agentId || !waybillDate) return;
+    setPrinting(true);
+    try {
+      const data = await api.get<{
+        agent: { code: string; name: string | null; phone: string | null };
+        warehouseName: string | null;
+        tasks: (WaybillTask & { orderTotal: string; customerDebt: string | null })[];
+      }>("/api/delivery/waybill", { agentId: filters.agentId, date: waybillDate });
+      if (data.tasks.length === 0) {
+        toast.error("Bu kunga biriktirilgan yetkazma yo'q");
+        return;
+      }
+      generateDeliveryWaybillPDF({
+        company: {
+          name: company?.name ?? "BUM ERP",
+          legalName: company?.legalName ?? undefined,
+          taxId: company?.taxId ?? undefined,
+          address: company?.address ?? undefined,
+          phone: company?.phone ?? undefined,
+          email: company?.email ?? undefined,
+          website: company?.website ?? undefined,
+        },
+        number: `${data.agent.code}-${waybillDate}`,
+        date: waybillDate,
+        agentName: data.agent.name ?? data.agent.code,
+        agentCode: data.agent.code,
+        agentPhone: data.agent.phone,
+        // Mas'ul shaxs — hujjatni chop etayotgan xodim (imzo qatorida shu nom turadi)
+        responsibleName: me?.name ?? "—",
+        warehouseName: data.warehouseName,
+        currency: company?.currency ?? "UZS",
+        tasks: data.tasks.map((task) => ({
+          ...task,
+          orderTotal: Number(task.orderTotal),
+          customerDebt: task.customerDebt === null ? null : Number(task.customerDebt),
+        })),
+      });
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setPrinting(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -138,6 +194,16 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
             }}
           >
             <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> {t("sv.filter.reset")}
+          </Button>
+          {/* Nakladnoy — agent va BITTA kun tanlanganda: qog'oz aynan shu ro'yxat bo'yicha chiqadi */}
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!canPrintWaybill || printing}
+            title={canPrintWaybill ? "Nakladnoyni PDF qilib chiqarish" : "Avval agentni va bitta kunni tanlang"}
+            onClick={() => void handleWaybill()}
+          >
+            <FileDown className="mr-1.5 h-3.5 w-3.5" /> Nakladnoy
           </Button>
         </div>
       </div>
