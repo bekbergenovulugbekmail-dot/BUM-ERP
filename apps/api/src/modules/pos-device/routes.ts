@@ -386,7 +386,10 @@ export async function posDeviceRoutes(app: FastifyInstance): Promise<void> {
       // Qurilma yuborgan cashierId — faqat shu qurilmada parol bilan kirgan kassir (boshqa xodim nomidan so'rab bo'lmaydi)
       await assertCashierBound(db, context, cashierId);
       await requirePermission(db, tenant, "analytics.view");
-      return deviceAnalytics(db, context, range);
+      const report = await deviceAnalytics(db, context, range);
+      // Foyda, marja va tannarx — alohida ruxsat bilan (kassada ham xuddi webdagidek)
+      if ((await effectivePermissions(db, tenant)).includes("analytics.view_profit")) return report;
+      return { ...report, kpis: { ...report.kpis, cogs: null, grossProfit: null, margin: null }, profitHidden: true };
     });
 
     scoped.get("/currencies/history", async (req) => {

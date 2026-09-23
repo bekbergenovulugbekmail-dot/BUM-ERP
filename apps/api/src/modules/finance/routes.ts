@@ -383,9 +383,13 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
     return trialBalance(db, await readTenant(req, "finance.view"), range);
   });
 
+  // Foyda-zarar — foydani ko'rsatadigan hisobot: `finance.view` ustiga `analytics.view_profit` kerak
+  // (standart holatda faqat egada; ega uni buxgalterga rollar sozlamasidan beradi)
   app.get("/reports/profit-loss", async (req) => {
     const range = rangeQuery.parse(req.query);
-    return profitAndLoss(db, await readTenant(req, "finance.view"), range);
+    const tenant = await readTenant(req, "finance.view");
+    await requirePermission(db, tenant, "analytics.view_profit");
+    return profitAndLoss(db, tenant, range);
   });
 
   app.get("/reports/bank-commissions", async (req) => {

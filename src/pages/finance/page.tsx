@@ -23,13 +23,17 @@ const TABS = [
   { key: "overview", label: "Umumiy ko'rinish", icon: BarChart3 },
   { key: "cash", label: "Kassa & Bank", icon: Wallet },
   { key: "expenses", label: "Xarajatlar", icon: Receipt },
-  { key: "pnl", label: "Daromad & Zarar", icon: TrendingUp },
+  /** Foyda ko'rsatadigan hisobot — alohida ruxsat (`analytics.view_profit`) bilan. */
+  { key: "pnl", label: "Daromad & Zarar", icon: TrendingUp, permission: "analytics.view_profit" as const },
   { key: "accounts", label: "Hisoblar rejasi", icon: BookOpen },
 ];
 
 export default function FinancePage() {
   const [tab, setTab] = useState("overview");
   const { can } = usePermissions();
+  /** Foyda ko'rsatkichlari alohida ruxsat bilan — tab ham, tarkibi ham yopiladi. */
+  const canSeeProfit = can("analytics.view_profit");
+  const visibleTabs = TABS.filter((item) => !item.permission || can(item.permission));
   const statsQuery = useApiQuery<FinanceDashboard>("/api/finance/dashboard");
   const stats = statsQuery.data;
   const expStats = useApiQuery<ExpenseStats>("/api/finance/expenses/stats").data;
@@ -157,13 +161,13 @@ export default function FinancePage() {
         ))}
       </div>
 
-      <PageTabs tabs={TABS.map((item) => ({ key: item.key, label: item.label, icon: item.icon }))} value={tab} onChange={setTab} />
+      <PageTabs tabs={visibleTabs.map((item) => ({ key: item.key, label: item.label, icon: item.icon }))} value={tab} onChange={setTab} />
 
       {/* Tab content */}
       {tab === "overview" && <OverviewTab stats={stats} expStats={expStats} />}
       {tab === "cash" && <CashAccountsSection />}
       {tab === "expenses" && <ExpensesSection />}
-      {tab === "pnl" && <ProfitLossSection />}
+      {tab === "pnl" && canSeeProfit && <ProfitLossSection />}
       {tab === "accounts" && <AccountsSection />}
     </div>
   );

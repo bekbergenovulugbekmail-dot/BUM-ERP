@@ -140,6 +140,15 @@ export const PERMISSIONS = {
   // ─── Analitika ─────────────────────────────────────────────────────────────
   "analytics.view":       { label: "Analitikani ko'rish",          group: "Analitika" },
   "analytics.export":     { label: "Ma'lumot eksport",             group: "Analitika" },
+  /**
+   * FOYDA ko'rsatkichlari: sof foyda, yalpi foyda, marja, tovar tannarxi (COGS) va foyda-zarar
+   * hisoboti. Aylanma (daromad) va xarajat bundan tashqarida — ular `analytics.view` bilan ko'rinadi.
+   *
+   * Alohida ruxsat: kompaniya egasi foydani xodimlarga ko'rsatishni xohlamasligi mumkin. Hech bir
+   * tayyor rolda YO'Q — faqat ega va superadmin (to'liq huquqli) ko'radi; kerak bo'lsa ega uni
+   * rollar sozlamasida direktor yoki buxgalterga beradi.
+   */
+  "analytics.view_profit": { label: "Foydani ko'rish",             group: "Analitika" },
 
   // ─── Admin ─────────────────────────────────────────────────────────────────
   "settings.view":        { label: "Sozlamalarni ko'rish",         group: "Admin" },
@@ -215,8 +224,14 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     description: "Barcha operatsiyalarni ko'rish va boshqarish",
     color: "#0ea5e9",
     isSystem: true,
+    // Foyda (`analytics.view_profit`) bu yerda ham YO'Q: uni faqat ega ko'radi. Kerak bo'lsa ega
+    // rollar sozlamasida direktorga qo'shib beradi.
     permissions: ALL_PERMISSIONS.filter(
-      (p) => p !== "roles.manage" && p !== "company.manage" && !BILLING_MANAGE.includes(p),
+      (p) =>
+        p !== "roles.manage" &&
+        p !== "company.manage" &&
+        p !== "analytics.view_profit" &&
+        !BILLING_MANAGE.includes(p),
     ),
   },
   {

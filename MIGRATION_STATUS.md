@@ -3939,6 +3939,40 @@ ANDROID_HOME = Android SDK).
 Test: `back-button.test.ts` ikkita yangi holat bilan (kamera oynasi avval yopiladi; qaytadigan joy
 qolmaganda tarixga tegilmay chiqish taklif qilinadi).
 
+## Foydani faqat ega ko'radi (2026-09-23)
+
+Egasining qarori: sof foyda, yalpi foyda, marja va tovar tannarxi (COGS) xodimlarga ko'rinmasligi
+kerak. Ilgari "Analitika → BI Ko'rsatkichlar" dagi **"Sof foyda"** kartochkasini `analytics.view`
+bor har bir rol ko'rardi — buxgalter, savdo, xarid, ombor, HR, ishlab chiqarish menejeri,
+supervayzer, auditor va ko'ruvchi.
+
+**Yangi ruxsat `analytics.view_profit`** (guruh "Analitika"):
+- hech bir tayyor rolda YO'Q — faqat `Business Owner` va `Superadmin` (to'liq huquqli) ko'radi;
+- **`Direktor` dan ham ataylab olib tashlangan**: u roli `ALL_PERMISSIONS` dan quriladi, shuning
+  uchun yangi ruxsat unga avtomatik tushib ketardi (`roles.manage` va `company.manage` kabi
+  istisnolar qatoriga qo'shildi);
+- `VIEW_ONLY` ga tushmaydi (`.view` bilan tugamaydi), shuning uchun Auditor va Ko'ruvchi ham olmaydi;
+- ega xohlasa rollar sozlamasidan istalgan rolga beradi (bitta belgi).
+
+**Nima yashiriladi (server tomonda `null`, UI'da kartochka umuman chiqmaydi):**
+| Joy | Yashiriladi | Ochiq qoladi |
+|---|---|---|
+| `GET /api/analytics/reports/overview` | `cogs`, `grossProfit`, `netProfit`, `grossMargin` | daromad, xarajat, ombor qiymati, mijoz/xodim soni |
+| `GET /api/analytics/dashboard` | `cogs`, `grossProfit` | kassa, bank, qarzlar (`finance.view` bilan) |
+| `GET /api/finance/reports/profit-loss` | butun hisobot — **403** | aylanma balans (`trial-balance`) ochiq |
+| `GET /api/pos-device/.../analytics` | `cogs`, `grossProfit`, `margin` | aylanma, qaytarish, sof aylanma |
+| AI yordamchi | foyda qatorlari so'rovga UMUMAN qo'shilmaydi | qolgan moliya konteksti |
+
+Daromad va xarajat ataylab ochiq qoldirildi: ular ish uchun kerak va **ulardan foydani hisoblab
+bo'lmaydi** — chunki tannarx (COGS) yashirilgan (`foyda = daromad − tannarx − xarajat`).
+
+AI yordamchida foyda qatorlari kontekstga qo'shilmaydi va modelga "raqam aytmang, ruxsat yo'qligini
+ayting" deb ko'rsatma beriladi — aks holda kartochkani yashirib, yordamchidan so'rab olish mumkin edi.
+
+Migratsiya kerak emas (ruxsatlar kodda). Test: `profit-visibility.test.ts` (7) — ega ko'radi;
+buxgalter, savdo, ombor, HR, supervayzer va direktor ko'rmaydi; bosh sahifa va foyda-zarar
+tekshiriladi; ega ruxsat bergach direktorga ochilishi tasdiqlanadi.
+
 ### Qolgan ishlar
 1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
 1a. **Bootstrap admin parolini almashtirish** (egasi, Railway o'zgaruvchisi): hozirgi parol oddiy parollar qoidasiga tushadi. Tizimga kirgan holda production smoke: realtime (dostavka xaritasi) CSP ostida, kassada kassir kirishi va qaytarish

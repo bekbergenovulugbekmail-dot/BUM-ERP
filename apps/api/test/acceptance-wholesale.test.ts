@@ -802,7 +802,10 @@ describe("BUSINESS 03 — ULGURJI SAVDO (TEST-03-WHOLESALE)", () => {
     // Kassa hisobi qoldig'i — kirim/chiqim yig'indisi bilan mos
     const dashboard = await call(ws.accountantCookie, "GET", "/api/finance/dashboard");
     expect(dashboard.statusCode, dashboard.body).toBe(200);
-    const pl = await call(ws.accountantCookie, "GET", `/api/finance/reports/profit-loss?dateFrom=2000-01-01&dateTo=${today()}`);
+    // Foyda-zarar — FAQAT egada (`analytics.view_profit`): buxgalter foydani ko'rmaydi
+    const plUrl = `/api/finance/reports/profit-loss?dateFrom=2000-01-01&dateTo=${today()}`;
+    expect((await call(ws.accountantCookie, "GET", plUrl)).statusCode, "buxgalterga foyda yopiq").toBe(403);
+    const pl = await call(ws.ownerCookie, "GET", plUrl);
     expect(pl.statusCode, pl.body).toBe(200);
   });
 

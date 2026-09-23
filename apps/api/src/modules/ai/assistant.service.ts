@@ -87,14 +87,20 @@ async function buildSystemPrompt(conn: DbOrTx, tenant: TenantContext, context?: 
 
   const topProducts = sales.topProducts.map((p) => `${p.name} (${p.quantity})`).join(", ") || "ma'lumot yo'q";
   const categories = expenses?.byCategory.map((c) => `${c.category}: ${c.amount}`).join(", ") || "ma'lumot yo'q";
+  // Foyda, marja va tannarx alohida ruxsat bilan: ruxsat bo'lmasa bu qatorlar so'rovga UMUMAN
+  // qo'shilmaydi — aks holda yordamchidan "foyda qancha?" deb so'rab olish mumkin bo'lardi
+  const profitLines = permissions.includes("analytics.view_profit")
+    ? `- Tovar tannarxi: ${overview?.cogs}; yalpi foyda: ${overview?.grossProfit} (marja ${overview?.grossMargin}%)
+- Sof foyda: ${overview?.netProfit}
+`
+    : "";
   const financeBlock =
     expenses && overview && dashboard
       ? `MOLIYA (oxirgi 30 kun):
-- Tovar tannarxi: ${overview.cogs}; yalpi foyda: ${overview.grossProfit} (marja ${overview.grossMargin}%)
-- Xarajatlar: ${expenses.total} (${categories})
-- Sof foyda: ${overview.netProfit}
+${profitLines}- Xarajatlar: ${expenses.total} (${categories})
 - Kassa: ${dashboard.cashBalance}; bank: ${dashboard.bankBalance}
-- Mijozlar qarzi: ${dashboard.customerDebt}; ta'minotchilarga qarz: ${dashboard.supplierDebt}`
+- Mijozlar qarzi: ${dashboard.customerDebt}; ta'minotchilarga qarz: ${dashboard.supplierDebt}
+${profitLines ? "" : "- Foyda, marja va tannarx: bu foydalanuvchiga berilmagan — so'ralsa, ruxsat yo'qligini ayting va raqam aytmang."}`
       : "MOLIYA: bu foydalanuvchiga berilmagan (moliya ruxsati yo'q yoki modul o'chiq) — so'ralsa, shuni ayting.";
   const staffBlock = staff
     ? `XODIMLAR:

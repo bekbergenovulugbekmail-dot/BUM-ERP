@@ -5,16 +5,21 @@
 
 export type BiOverview = {
   revenue: string;
-  cogs: string;
-  grossProfit: string;
   expenses: string;
-  netProfit: string;
-  /** Foiz, masalan "23.50". */
-  grossMargin: string;
   orderCount: number;
   customerCount: number;
   employeeCount: number;
   stockValue: string;
+  /**
+   * Foyda ko'rsatkichlari — `analytics.view_profit` ruxsati bo'lmasa server `null` qaytaradi
+   * (`profitHidden: true`). Daromad va xarajat esa hammaga ochiq.
+   */
+  cogs: string | null;
+  grossProfit: string | null;
+  netProfit: string | null;
+  /** Foiz, masalan "23.50". */
+  grossMargin: string | null;
+  profitHidden: boolean;
 };
 
 export type SalesSummary = {

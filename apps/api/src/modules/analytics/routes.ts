@@ -45,9 +45,17 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
       effectivePermissions(db, tenant),
       companyModuleStates(db, tenant.company.id),
     ]);
-    // Kassa/bank qoldig'i, qarzlar va foyda — moliya ma'lumoti: `analytics.view` o'zi yetmaydi (moliya ruxsati va moduli)
-    if (permissions.includes("finance.view") && modules.finance) return { ...dashboard, financeHidden: false };
-    return { ...dashboard, cashBalance: null, bankBalance: null, supplierDebt: null, customerDebt: null, cogs: null, grossProfit: null, financeHidden: true };
+    // Kassa/bank qoldig'i va qarzlar — moliya ma'lumoti: `analytics.view` o'zi yetmaydi (moliya ruxsati va moduli).
+    // Foyda va tannarx esa undan ham tor: `analytics.view_profit` (standart holatda faqat egada).
+    const finance = permissions.includes("finance.view") && modules.finance;
+    const profit = finance && permissions.includes("analytics.view_profit");
+    return {
+      ...dashboard,
+      ...(finance ? {} : { cashBalance: null, bankBalance: null, supplierDebt: null, customerDebt: null }),
+      ...(profit ? {} : { cogs: null, grossProfit: null }),
+      financeHidden: !finance,
+      profitHidden: !profit,
+    };
   });
 
   app.get("/reports/sales", async (req) => {
@@ -69,7 +77,14 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/reports/overview", async (req) => {
     const { days } = daysQuery.parse(req.query);
-    return biOverview(db, await readTenant(req), days);
+    const tenant = await readTenant(req);
+    const overview = await biOverview(db, tenant, days);
+    // Foyda, marja va tannarx — alohida ruxsat bilan. Aylanma va xarajat ochiq qoladi: ular
+    // ikkovidan foydani hisoblab bo'lmaydi, chunki tannarx (COGS) yashirilgan.
+    if ((await effectivePermissions(db, tenant)).includes("analytics.view_profit")) {
+      return { ...overview, profitHidden: false };
+    }
+    return { ...overview, cogs: null, grossProfit: null, netProfit: null, grossMargin: null, profitHidden: true };
   });
 
   app.get("/reports/top-customers", async (req) => {

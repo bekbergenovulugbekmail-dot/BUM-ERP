@@ -23,7 +23,17 @@ export default function OverviewSection({ days }: { days: number }) {
   const kpis = bi ? [
     { label: "Daromad", value: fmt(num(bi.revenue)) + " so'm", icon: DollarSign, color: "text-emerald-500", bg: "bg-emerald-500/10", sub: `${bi.orderCount} buyurtma` },
     { label: "Xarajat", value: fmt(num(bi.expenses)) + " so'm", icon: TrendingUp, color: "text-rose-500", bg: "bg-rose-500/10", sub: "Tasdiqlangan xarajatlar" },
-    { label: "Sof foyda", value: fmt(netProfit) + " so'm", icon: Percent, color: netProfit >= 0 ? "text-blue-500" : "text-rose-500", bg: netProfit >= 0 ? "bg-blue-500/10" : "bg-rose-500/10", sub: `Gross margin: ${num(bi.grossMargin).toFixed(1)}%` },
+    // Foyda kartochkasi faqat ruxsat bo'lganda: serverda ham qiymat `null` bo'ladi
+    ...(bi.profitHidden
+      ? []
+      : [{
+          label: "Sof foyda",
+          value: fmt(netProfit) + " so'm",
+          icon: Percent,
+          color: netProfit >= 0 ? "text-blue-500" : "text-rose-500",
+          bg: netProfit >= 0 ? "bg-blue-500/10" : "bg-rose-500/10",
+          sub: `Gross margin: ${num(bi.grossMargin).toFixed(1)}%`,
+        }]),
     { label: "Ombor qiymati", value: fmt(num(bi.stockValue)) + " so'm", icon: Package, color: "text-indigo-500", bg: "bg-indigo-500/10", sub: "Joriy qoldiq" },
     { label: "Faol mijozlar", value: bi.customerCount.toLocaleString(), icon: Users, color: "text-violet-500", bg: "bg-violet-500/10", sub: "Ro'yxatdan o'tgan" },
     { label: "Xodimlar", value: bi.employeeCount.toLocaleString(), icon: ShoppingCart, color: "text-amber-500", bg: "bg-amber-500/10", sub: "Faol ishchilar" },
