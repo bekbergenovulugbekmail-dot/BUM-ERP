@@ -81,6 +81,9 @@ export default function PurchasePage() {
             importUrl="/api/purchase/orders/import"
             invalidate={["/api/purchase/orders"]}
             canImport={can("purchase.create")}
+            // Excel shabloni: ustunlar alohida katakda ochiladi va namuna qatori kulrang ko'rinadi
+            // (CSV shabloni Excel'da bitta ustunga tushib qolardi va namuna qatori ma'lumotdan farqlanmasdi)
+            templateFormat="xlsx"
             quickGroupField="docKey"
             columns={[
               // Bitta hujjatning har bir mahsuloti - alohida qator; hujjat raqami takrorlanadi

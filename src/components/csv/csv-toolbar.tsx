@@ -147,8 +147,39 @@ function newGroupKey(): string {
 const isExampleRow = (row: Record<string, string>, fields: string[]) =>
   (row[fields[0] ?? ""] ?? "").trim().startsWith("#");
 
+/** Butunlay bo'sh qator: Excel fayl oxiriga ";;;;" satrlarini qo'shib yuboradi — ular ma'lumot emas. */
+const isBlankRow = (row: Record<string, string>, fields: string[]) =>
+  fields.every((field) => (row[field] ?? "").toString().trim() === "");
+
+/** Sarlavha satridagi ustun ajratgichi — `papaparse` uni topa olmaganda (hamma narsa bitta ustunga tushganda). */
+const guessDelimiter = (header: string): string | null => {
+  const best = [";", "\t", ",", "|"]
+    .map((delimiter) => ({ delimiter, parts: header.split(delimiter).length }))
+    .sort((a, b) => b.parts - a.parts)[0];
+  return best && best.parts > 1 ? best.delimiter : null;
+};
+
+/**
+ * Excelda noto'g'ri ochilgan CSV `.xlsx` bo'lib saqlansa, butun qator A ustuniga tushib qoladi.
+ * Sarlavhada ajratgich ko'rinsa — ustunlarga qaytadan bo'lamiz, aks holda fayl umuman moslanmasdi.
+ */
+const splitSingleColumn = (fields: string[], rows: Record<string, string>[]) => {
+  if (fields.length !== 1) return { fields, rows };
+  const header = fields[0] ?? "";
+  const delimiter = guessDelimiter(header);
+  if (!delimiter) return { fields, rows };
+  const next = header.split(delimiter).map((part) => part.trim());
+  return {
+    fields: next,
+    rows: rows.map((row) => {
+      const parts = (row[header] ?? "").split(delimiter);
+      return Object.fromEntries(next.map((field, index) => [field, (parts[index] ?? "").trim()]));
+    }),
+  };
+};
+
 /** Fayldagi qator raqami: sarlavha 1-qator, ma'lumot 2-qatordan; `offset` — bo'lak boshlanishi. */
-const fileLine = (offset: number, issue: ImportIssue) => offset + issue.row + 1;
+const fileLine = (offset: number, issue: { row: number }) => offset + issue.row + 1;
 const issueKey = (issue: ImportIssue) => issue.key ?? issue.sku ?? null;
 
 function IssueTable({ title, tone, issues }: { title: string; tone: string; issues: ImportIssue[] }) {
@@ -352,10 +383,20 @@ export default function CsvToolbar({
     source?: { text: string; delimiter: string | null },
   ) => {
     const clean = fields.filter((field) => field.trim() !== "");
-    // Shablondagi namuna qatori foydalanuvchida qolib ketsa ham import qilinmaydi
-    const raw = rows.filter((row) => !isExampleRow(row, clean));
-    if (raw.length === 0 || clean.length === 0) {
-      toast.error("Faylda qator topilmadi");
+    if (clean.length === 0) {
+      toast.error("Faylda sarlavha qatori yo'q — 1-qatorda ustun nomlari bo'lishi kerak");
+      return;
+    }
+    // Excel qo'shib yuboradigan bo'sh satrlar ham, shablondagi namuna qatori ham ma'lumot emas
+    const filled = rows.filter((row) => !isBlankRow(row, clean));
+    const raw = filled.filter((row) => !isExampleRow(row, clean));
+    if (raw.length === 0) {
+      // Eng ko'p uchraydigan holat: shablon yuklab olingan, lekin namuna qatori ustiga yozilmagan
+      toast.error(
+        filled.length > 0
+          ? "Faylda faqat namuna qatori bor: «#» bilan boshlanadigan qatorni o'chiring va o'z ma'lumotlaringizni yozing"
+          : "Faylda ma'lumot qatori topilmadi — sarlavhadan keyin kamida bitta to'ldirilgan qator bo'lishi kerak",
+      );
       return;
     }
     // Avtomat moslash: maydon nomlari (o'zbekcha/inglizcha) fayl sarlavhalari bilan solishtiriladi
@@ -376,6 +417,19 @@ export default function CsvToolbar({
       ...(delimiter ? { delimiter } : {}),
     });
 
+  /**
+   * CSV ni avtomatik ajratadi; `papaparse` ajratgichni topa olmay hammasini bitta ustunga qo'shsa,
+   * sarlavhadagi ajratgich bilan QAYTA ajratadi (qo'shtirnoqli kataklar to'g'ri o'qilishi uchun — parser bilan).
+   */
+  const parseCsvAuto = (text: string) => {
+    const parsed = parseCsvText(text, null);
+    const fields = parsed.meta.fields ?? [];
+    if (fields.length > 1) return { parsed, delimiter: null as string | null };
+    const delimiter = guessDelimiter(fields[0] ?? "");
+    if (!delimiter) return { parsed, delimiter: null as string | null };
+    return { parsed: parseCsvText(text, delimiter), delimiter };
+  };
+
   /** "Ajratgich" tugmalari: fayl SHU MATNDAN qayta ajratiladi va moslash qaytadan taklif qilinadi. */
   const changeDelimiter = (delimiter: string | null) => {
     const text = mapping?.text;
@@ -393,8 +447,19 @@ export default function CsvToolbar({
     if (isExcelFile(file.name)) {
       setBusy("preview");
       void parseXlsx(file)
-        .then(({ fields, raw }) => acceptParsed(fields, raw))
-        .catch(() => toast.error("Excel faylni o'qib bo'lmadi"))
+        // Noto'g'ri ochilgan CSV `.xlsx` bo'lib saqlansa — butun qator A ustunida bo'ladi, qayta bo'lamiz
+        .then(({ fields, raw }) => {
+          const sheet = splitSingleColumn(fields, raw);
+          acceptParsed(sheet.fields, sheet.rows);
+        })
+        .catch(() =>
+          toast.error(
+            // Eski ikkilik `.xls` ni `exceljs` o'qiy olmaydi — foydalanuvchiga nima qilish kerakligini aytamiz
+            /\.xls$/i.test(file.name.trim())
+              ? "Eski .xls formatini o'qib bo'lmadi — faylni Excel'da «.xlsx» yoki CSV qilib saqlang"
+              : "Excel faylni o'qib bo'lmadi",
+          ),
+        )
         .finally(() => setBusy(null));
       return;
     }
@@ -404,11 +469,11 @@ export default function CsvToolbar({
     setBusy("preview");
     void readTextFile(file)
       .then(({ text, encoding }) => {
-        const parsed = parseCsvText(text, null);
+        const { parsed, delimiter } = parseCsvAuto(text);
         if (encoding !== "utf-8") {
           toast.info(`Fayl ${encoding.toUpperCase()} kodlashida o'qildi — matn to'g'ri ko'rinishiga ishonch hosil qiling`);
         }
-        acceptParsed(parsed.meta.fields ?? [], parsed.data, { text, delimiter: null });
+        acceptParsed(parsed.meta.fields ?? [], parsed.data, { text, delimiter });
       })
       .catch(() => toast.error("CSV faylni o'qib bo'lmadi"))
       .finally(() => setBusy(null));

@@ -15,7 +15,7 @@ vi.mock("jspdf", async (importOriginal) => {
   const actual = await importOriginal<typeof import("jspdf")>();
   const Wrapped = function (...args: ConstructorParameters<typeof actual.jsPDF>) {
     const doc = new actual.jsPDF(...args);
-    doc.save = () => doc;
+    doc.save = (() => doc) as typeof doc.save;
     return doc;
   } as unknown as typeof actual.jsPDF;
   return { ...actual, default: Wrapped, jsPDF: Wrapped };
@@ -66,7 +66,7 @@ const invoice = (count: number, overrides: Partial<Parameters<typeof generateSal
     totalAmount: subtotal,
     paidAmount: 0,
     balance: subtotal,
-    notes: null,
+    notes: undefined,
     ...overrides,
   });
 };
@@ -246,7 +246,7 @@ describe("A4 hujjatlar", () => {
       totalAmount: 420_000_000,
       paidAmount: 0,
       balance: 420_000_000,
-      notes: null,
+      notes: undefined,
     });
 
     expect(Math.round(doc.internal.pageSize.getWidth())).toBe(A4.width);

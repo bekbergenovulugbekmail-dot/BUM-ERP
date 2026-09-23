@@ -15,6 +15,11 @@ vi.mock("@/lib/query.ts", () => ({
   useApiMutation: () => ({ mutateAsync, isPending: false }),
 }));
 
+const toastError = vi.fn();
+vi.mock("sonner", () => ({
+  toast: { error: toastError, success: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}));
+
 const { default: CsvToolbar } = await import("./csv-toolbar.tsx");
 
 const COLUMNS = [
@@ -133,5 +138,51 @@ describe("Import — tekshirish oynasidagi jadval", () => {
         { name: "Нурия ун оптом", partyType: "Yuridik Shaxs", phone: "+998999631212", address: "Асадбек тойхона ёни" },
       ],
     });
+  });
+});
+
+
+/**
+ * "Faylda qator topilmadi" — xaridda eng ko'p uchragan shikoyat. Sabab deyarli doim bitta:
+ * shablon yuklab olinadi, lekin `#` bilan boshlanadigan NAMUNA qatori o'chirilmaydi yoki uning
+ * ustiga yozilmaydi. Endi xabar sababni AYTADI va nima qilish kerakligini ko'rsatadi.
+ */
+describe("Import — bo'sh fayl xabarlari", () => {
+  const feed = (text: string, name = "xaridlar.csv") => {
+    toastError.mockClear();
+    const input = renderToolbar();
+    fireEvent.change(input, { target: { files: [new File([text], name, { type: "text/csv" })] } });
+    return input;
+  };
+
+  it("shablon o'zgartirilmasdan import qilinsa — namuna qatori haqida aytadi", async () => {
+    // Aynan `handleTemplate` chiqaradigan fayl: BOM + `;` + `#` bilan boshlanadigan namuna
+    feed("﻿Nomi*;Turi;Telefon;Manzil\r\n# Imona Market;Yuridik Shaxs;+998901234567;Chilonzor\r\n");
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastError.mock.calls[0]?.[0]).toMatch(/faqat namuna qatori/i);
+    expect(screen.queryByTestId("csv-mapping"), "moslash oynasi ochilmaydi").not.toBeInTheDocument();
+  });
+
+  it("sarlavhadan boshqa hech narsa yo'q — ma'lumot qatori yo'qligini aytadi", async () => {
+    feed("Nomi*;Turi;Telefon;Manzil\r\n;;;\r\n;;;\r\n");
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastError.mock.calls[0]?.[0]).toMatch(/ma'lumot qatori topilmadi/i);
+  });
+
+  it("namuna qatori va Excel qo'shgan bo'sh satrlar tashlanadi, haqiqiy qator qoladi", async () => {
+    feed(
+      "﻿Nomi*;Turi;Telefon;Manzil\r\n" +
+        "# Imona Market;Yuridik Shaxs;+998901234567;Chilonzor\r\n" +
+        "Nuriya un;Yuridik Shaxs;+998999631212;Asadbek\r\n;;;\r\n",
+    );
+
+    await screen.findByTestId("csv-mapping");
+    expect(toastError).not.toHaveBeenCalled();
+    const rows = within(screen.getByTestId("csv-file-preview")).getAllByRole("row").slice(1);
+    expect(rows.map((row) => within(row).getAllByRole("cell").map((cell) => cell.textContent))).toEqual([
+      ["Nuriya un", "Yuridik Shaxs", "+998999631212", "Asadbek"],
+    ]);
   });
 });
