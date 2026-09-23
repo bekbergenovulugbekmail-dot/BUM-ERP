@@ -24,6 +24,13 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
   cancelled:   { label: "Bekor",       color: "bg-destructive/10 text-destructive" },
 };
 
+/**
+ * Bir ekranda ko'rsatiladigan qator chegarasi: hisobda butun katalog bo'lgani uchun
+ * hammasini bir yo'la yuborish katta bizneslarda brauzerni ham, serverni ham cho'ktiradi.
+ * Chegaradan oshgani qidiruv orqali topiladi.
+ */
+const ITEM_LIMIT = 200;
+
 export default function InventoryCountSection({ warehouseId }: Props) {
   const { can } = usePermissions();
   const canCount = can("warehouse.count");
@@ -34,8 +41,12 @@ export default function InventoryCountSection({ warehouseId }: Props) {
   const [newName, setNewName] = useState("");
   const [activeCountId, setActiveCountId] = useState<string | null>(null);
   const [countInputs, setCountInputs] = useState<Record<string, string>>({});
-  /** Ochiq hisob ichidagi qidiruv — yuzlab mahsulotli omborda qatorni topish uchun. */
+  /**
+   * Ochiq hisob ichidagi qidiruv. Hisob BUTUN katalogdan quriladi, shuning uchun qidiruv
+   * SERVERDA bajariladi — minglab mahsulotli bizneslarda hamma qatorni brauzerga tortmaymiz.
+   */
   const [itemSearch, setItemSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   /** "Topilma": omborda bor, lekin hisobda yo'q mahsulotni qo'shish. */
   const [addOpen, setAddOpen] = useState(false);
   const [productSearch, setProductSearch] = useState("");
@@ -52,8 +63,15 @@ export default function InventoryCountSection({ warehouseId }: Props) {
 
   const countsQuery = useApiQuery<{ counts: InventoryCountListItem[] }>("/api/inventory/counts", { warehouseId });
   const counts = countsQuery.data?.counts;
+  // Har harfda so'rov ketmasin — sanoqchi yozib bo'lgach qidiriladi
+  useEffect(() => {
+    const timer = setTimeout(() => setAppliedSearch(itemSearch.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [itemSearch]);
+
   const activeCount = useApiQuery<{ count: InventoryCountDetail }>(
     activeCountId ? `/api/inventory/counts/${activeCountId}` : null,
+    { search: appliedSearch || undefined, limit: ITEM_LIMIT },
   ).data?.count;
 
   const createCount = useApiMutation((name: string) =>
@@ -161,18 +179,15 @@ export default function InventoryCountSection({ warehouseId }: Props) {
     activeCount.status !== "completed" &&
     activeCount.status !== "cancelled";
 
-  // Qo'llash natijasi: faqat SANALGAN qatorlar tuzatiladi, sanalmaganlari tegilmaydi
-  const counted = activeCount?.items.filter((item) => item.countedQty !== null) ?? [];
-  const notCounted = (activeCount?.items.length ?? 0) - counted.length;
-  const surplusLines = counted.filter((item) => toNumber(item.difference) > 0).length;
-  const shortageLines = counted.filter((item) => toNumber(item.difference) < 0).length;
-  const needle = itemSearch.trim().toLowerCase();
-  const visibleItems = (activeCount?.items ?? []).filter(
-    (item) =>
-      needle === "" ||
-      item.productName.toLowerCase().includes(needle) ||
-      (item.productSku ?? "").toLowerCase().includes(needle),
-  );
+  // Qo'llash natijasi: faqat SANALGAN qatorlar tuzatiladi, sanalmaganlari tegilmaydi.
+  // Ko'rsatkichlar serverdan keladi — ekranda qatorlarning faqat bir qismi bo'lishi mumkin.
+  const countedLines = activeCount?.countedItems ?? 0;
+  const notCounted = (activeCount?.itemCount ?? 0) - countedLines;
+  const surplusLines = activeCount?.surplusItems ?? 0;
+  const shortageLines = activeCount?.shortageItems ?? 0;
+  const visibleItems = activeCount?.items ?? [];
+  // Chegaraga tegib turgan ro'yxat — qolgani qidiruv orqali ochiladi
+  const truncated = visibleItems.length >= ITEM_LIMIT;
 
   return (
     <div className="flex flex-col gap-4 h-full">
@@ -265,7 +280,7 @@ export default function InventoryCountSection({ warehouseId }: Props) {
             <div className="rounded-lg border border-border divide-y divide-border text-xs">
               <div className="flex justify-between px-3 py-2">
                 <span className="text-muted-foreground">Sanalgan</span>
-                <span className="font-medium">{counted.length} ta</span>
+                <span className="font-medium">{countedLines} ta</span>
               </div>
               <div className="flex justify-between px-3 py-2">
                 <span className="text-muted-foreground">Ortiqcha chiqqan</span>
@@ -280,14 +295,14 @@ export default function InventoryCountSection({ warehouseId }: Props) {
                 <span className="font-medium">{notCounted} ta</span>
               </div>
             </div>
-            {counted.length === 0 && (
+            {countedLines === 0 && (
               <p className="text-xs text-destructive">Hech bir mahsulot sanalmagan — qo'llashdan foyda yo'q.</p>
             )}
           </div>
           <DialogFooter>
             <Button variant="secondary" onClick={() => setConfirmApply(false)}>Bekor</Button>
             <Button
-              disabled={applyAdjustments.isPending || counted.length === 0 || !activeCount}
+              disabled={applyAdjustments.isPending || countedLines === 0 || !activeCount}
               onClick={() => activeCount && void handleApply(activeCount.id)}
             >
               Qo'llash
@@ -303,7 +318,7 @@ export default function InventoryCountSection({ warehouseId }: Props) {
             <div>
               <p className="font-semibold text-sm">{activeCount.name}</p>
               <p className="text-xs text-muted-foreground">
-                {activeCount.items.filter((i) => i.countedQty !== null).length} / {activeCount.items.length} ta mahsulot sanalib bo'ldi
+                {activeCount.countedItems} / {activeCount.itemCount} ta mahsulot sanalib bo'ldi
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -424,7 +439,13 @@ export default function InventoryCountSection({ warehouseId }: Props) {
             </table>
             {visibleItems.length === 0 && (
               <p className="px-4 py-6 text-center text-xs text-muted-foreground">
-                {needle ? "Qidiruv bo'yicha mahsulot topilmadi" : "Hisobda mahsulot yo'q"}
+                {appliedSearch ? "Qidiruv bo'yicha mahsulot topilmadi" : "Hisobda mahsulot yo'q"}
+              </p>
+            )}
+            {truncated && (
+              <p className="px-4 py-3 text-center text-[11px] text-muted-foreground border-t border-border">
+                Birinchi {ITEM_LIMIT} ta qator ko'rsatildi ({activeCount.itemCount} tadan) — qolganini
+                qidiruv orqali toping.
               </p>
             )}
           </div>

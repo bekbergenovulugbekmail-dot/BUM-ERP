@@ -10,7 +10,8 @@
  *   GET    /stock/movements (?warehouseId=&productId=&type=&limit=&cursor=)   warehouse.view
  *   POST   /stock/movements                               receive → warehouse.receive; boshqalar → warehouse.manage
  *   POST   /stock/transfers                               warehouse.transfer
- *   GET    /counts (?warehouseId=&status=), /counts/:countId           warehouse.view
+ *   GET    /counts (?warehouseId=&status=)                              warehouse.view
+ *   GET    /counts/:countId (?search=&limit=)                          warehouse.view
  *   POST   /counts, /counts/:countId/items, /counts/:countId/status    warehouse.count
  *   PATCH  /counts/:countId/items/:itemId                              warehouse.count
  *   POST   /counts/:countId/apply                         warehouse.count + warehouse.manage
@@ -141,6 +142,11 @@ const countStatusBody = z.strictObject({ status: z.enum(["in_progress", "cancell
 const warehouseParams = z.object({ warehouseId: z.uuid() });
 const productParams = z.object({ productId: z.uuid() });
 const countParams = z.object({ countId: z.uuid() });
+/** Hisob qatorlari: katalog katta bo'lishi mumkin — qidiruv va chegara serverda. */
+const countItemsQuery = z.object({
+  search: z.string().trim().min(1).max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(2000).optional(),
+});
 const countItemParams = z.object({ countId: z.uuid(), itemId: z.uuid() });
 const warehouseListQuery = z.object({ includeInactive: boolQuery });
 
@@ -299,7 +305,8 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/counts/:countId", async (req) => {
     const { countId } = countParams.parse(req.params);
-    return { count: await getCount(db, await readTenant(req, "warehouse.view"), countId) };
+    const query = countItemsQuery.parse(req.query);
+    return { count: await getCount(db, await readTenant(req, "warehouse.view"), countId, query) };
   });
 
   app.post("/counts", async (req, reply) => {

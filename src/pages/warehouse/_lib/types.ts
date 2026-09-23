@@ -111,5 +111,14 @@ export type InventoryCountItem = {
 
 export type InventoryCountDetail = InventoryCount & {
   warehouseName: string | null;
+  /**
+   * Jarayon ko'rsatkichlari SERVERDA sanaladi — `items` qidiruv/chegara bilan kelgani uchun
+   * ularni ekrandagi qatorlardan hisoblab bo'lmaydi.
+   */
+  itemCount: number;
+  countedItems: number;
+  surplusItems: number;
+  shortageItems: number;
+  /** Ko'rsatish uchun qatorlar: qidiruvga mos va chegaralangan qism. */
   items: InventoryCountItem[];
 };

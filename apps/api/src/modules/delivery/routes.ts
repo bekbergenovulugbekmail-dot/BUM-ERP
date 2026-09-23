@@ -14,6 +14,7 @@
  *   GET  /dashboard (?date=)                       delivery.view
  *   GET  /reports (?from=&to=&agentId=)            delivery.view_reports
  *   GET  /ready-orders (?search=&limit=)           delivery.manage — yetkazma yaratiladigan buyurtmalar
+ *   GET  /waybill (?agentId=&date=)                delivery.view — nakladnoy (qarz faqat finance.view bilan)
  *   GET  /tasks (?dateFrom=&dateTo=&status=&agentId=&unassigned=&branchId=&territory=&customerId=&search=&overdue=&reviewPending=&limit=&cursor=)   delivery.view
  *   POST /tasks                                    delivery.manage (+ delivery.assign — agent bilan)
  *   GET  /tasks/:taskId, GET /tasks/:taskId/proofs/:proofId   delivery.view

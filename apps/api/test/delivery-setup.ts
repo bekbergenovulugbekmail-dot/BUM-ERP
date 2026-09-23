@@ -99,7 +99,7 @@ export async function confirmedOrder(app: FastifyInstance, company: DeliveryComp
 
 export async function taskForOrder(app: FastifyInstance, cookie: string, orderId: string) {
   const res = await caller(app)(cookie, "GET", "/api/delivery/tasks?limit=200");
-  const task = (res.json().tasks as { id: string; orderId: string }[]).find((item) => item.orderId === orderId);
+  const task = (res.json().tasks as { id: string; orderId: string; number: string }[]).find((item) => item.orderId === orderId);
   if (!task) throw new Error(`Yetkazma topilmadi: ${res.body}`);
   return task;
 }

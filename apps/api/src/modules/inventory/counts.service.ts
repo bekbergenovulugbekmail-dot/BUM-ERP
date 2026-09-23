@@ -10,7 +10,7 @@
  *  - hisobga mahsulot qo'shish mumkin (omborda qoldig'i yo'q topilma)
  *  - `warehouse.count` ruxsati; qo'llash qo'shimcha `warehouse.manage` (routes)
  */
-import { and, desc, eq, getTableColumns, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, ilike, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { badRequest, notFound } from "@bum/shared";
 import { products, units } from "../../db/schema/catalog.js";
 import { inventoryCountItems, inventoryCounts, stockLevels, warehouses } from "../../db/schema/inventory.js";
@@ -91,23 +91,56 @@ function assertEditable(count: { status: CountStatus; adjustmentsMade: boolean }
   }
 }
 
-export async function getCount(conn: DbOrTx, tenant: TenantContext, countId: string) {
+/**
+ * Hisob va uning qatorlari.
+ *
+ * Qatorlar QIDIRUV bilan va chegaralangan holda qaytadi: hisob butun katalogdan quriladi, katta
+ * katalogli bizneslarda esa hamma qatorni bir yo'la yuborish og'ir bo'lardi. Jarayon ko'rsatkichlari
+ * (sanalgan, ortiqcha, kam) SERVERDA sanaladi — shuning uchun ular chegaradan mustaqil va har doim to'g'ri.
+ */
+export async function getCount(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  countId: string,
+  options: { search?: string; limit?: number } = {},
+) {
   const count = await loadCount(conn, tenant, countId);
   const [warehouse] = await conn.select({ name: warehouses.name }).from(warehouses).where(eq(warehouses.id, count.warehouseId));
+  const scope = productScopeCondition(await categoryScope(conn, tenant));
+  const belongs = and(eq(inventoryCountItems.countId, countId), eq(inventoryCountItems.companyId, tenant.company.id));
+
+  const [summary] = await conn
+    .select({
+      itemCount: sql<number>`count(*)::int`,
+      countedItems: sql<number>`(count(*) filter (where ${inventoryCountItems.countedQty} is not null))::int`,
+      surplusItems: sql<number>`(count(*) filter (where ${inventoryCountItems.difference} > 0))::int`,
+      shortageItems: sql<number>`(count(*) filter (where ${inventoryCountItems.difference} < 0))::int`,
+    })
+    .from(inventoryCountItems)
+    .innerJoin(products, eq(products.id, inventoryCountItems.productId))
+    .where(and(belongs, scope));
+
+  // ILIKE maxsus belgilari (% _ \) oddiy matn sifatida qidirilsin
+  const needle = options.search?.trim();
+  const pattern = needle ? `%${needle.replace(/[\\%_]/g, (char) => `\\${char}`)}%` : null;
   const items = await conn
     .select({ ...itemFields, productName: products.name, productSku: products.sku, unitName: units.shortName })
     .from(inventoryCountItems)
     .innerJoin(products, eq(products.id, inventoryCountItems.productId))
     .innerJoin(units, eq(units.id, products.baseUnitId))
-    .where(
-      and(
-        eq(inventoryCountItems.countId, countId),
-        eq(inventoryCountItems.companyId, tenant.company.id),
-        productScopeCondition(await categoryScope(conn, tenant)),
-      ),
-    )
-    .orderBy(products.name);
-  return { ...count, warehouseName: warehouse?.name ?? null, items };
+    .where(and(belongs, scope, pattern ? or(ilike(products.name, pattern), ilike(products.sku, pattern)) : undefined))
+    .orderBy(products.name)
+    .limit(options.limit ?? 200);
+
+  return {
+    ...count,
+    warehouseName: warehouse?.name ?? null,
+    itemCount: summary?.itemCount ?? 0,
+    countedItems: summary?.countedItems ?? 0,
+    surplusItems: summary?.surplusItems ?? 0,
+    shortageItems: summary?.shortageItems ?? 0,
+    items,
+  };
 }
 
 export async function createCount(

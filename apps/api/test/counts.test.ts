@@ -301,4 +301,46 @@ describe("Inventarizatsiya — sanoqchi oqimi", () => {
     const added = await api(companyA.ownerCookie, "POST", `/counts/${countId}/items`, { productId });
     expect(added.statusCode, added.body).toBe(400);
   });
+  /**
+   * Hisob BUTUN katalogdan quriladi — minglab mahsulotli bizneslarda hamma qatorni bir yo'la
+   * yuborib bo'lmaydi. Qidiruv va chegara SERVERDA; ko'rsatkichlar esa chegaradan mustaqil
+   * bo'lishi shart, aks holda "nechta sanalgan" soni ekrandagi qatorlar soniga qarab yolg'on ko'rsatardi.
+   */
+  it("qidiruv serverda bajariladi, ko'rsatkichlar esa to'liq hisobdan olinadi", async () => {
+    await stocked("QIDIR-OLMA", "10");
+    await stocked("QIDIR-NOK", "5");
+    await stocked("BOSHQA-UZUM", "3");
+    const countId = await openCount("Qidiruvli");
+
+    const all = (await api(companyA.ownerCookie, "GET", `/counts/${countId}`)).json().count;
+    expect(all.itemCount, "hamma mahsulot hisobda").toBe(3);
+    expect(all.countedItems).toBe(0);
+
+    const found = (await api(companyA.ownerCookie, "GET", `/counts/${countId}?search=QIDIR`)).json().count;
+    expect(found.items.map((item: { productSku: string }) => item.productSku).sort()).toEqual(["QIDIR-NOK", "QIDIR-OLMA"]);
+    expect(found.itemCount, "ko'rsatkich qidiruvdan qat'i nazar to'liq").toBe(3);
+
+    const bySku = (await api(companyA.ownerCookie, "GET", `/counts/${countId}?search=UZUM`)).json().count;
+    expect(bySku.items).toHaveLength(1);
+    expect((await api(companyA.ownerCookie, "GET", `/counts/${countId}?search=YO%27QNARSA`)).json().count.items).toEqual([]);
+  });
+
+  it("chegara qatorlarni kesadi, sanalgan/ortiqcha/kam ko'rsatkichlari esa butun hisobdan", async () => {
+    const first = await stocked("LIMIT-A", "10");
+    await stocked("LIMIT-B", "10");
+    await stocked("LIMIT-C", "10");
+    const countId = await openCount("Chegarali");
+
+    const items = (await detail(countId)).items;
+    const firstItem = items.find((item) => item.productId === first)!;
+    // Bitta qator ortiqcha chiqdi (12 > 10)
+    expect((await api(companyA.ownerCookie, "PATCH", `/counts/${countId}/items/${firstItem.id}`, { countedQty: 12 })).statusCode).toBe(200);
+
+    const limited = (await api(companyA.ownerCookie, "GET", `/counts/${countId}?limit=1`)).json().count;
+    expect(limited.items, "ekranga faqat bitta qator").toHaveLength(1);
+    expect(limited.itemCount).toBe(3);
+    expect(limited.countedItems, "sanalganlar soni chegaradan mustaqil").toBe(1);
+    expect(limited.surplusItems).toBe(1);
+    expect(limited.shortageItems).toBe(0);
+  });
 });
