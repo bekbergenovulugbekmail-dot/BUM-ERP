@@ -4198,21 +4198,27 @@ Testlar: `kpi.test.ts` (+3), `counts.test.ts` (+2), yangi `delivery-waybill.test
 `a4-documents.test.ts` (+3), `sales-agent-cash.test.ts` (+2).
 Production deploy QILINMADI.
 
-### Test holati (ochiq muammo, 2026-09-23)
-YASHIL: ikkala `tsc`, `eslint`, frontend vitest (31 fayl / 149 test), API'dan
-`counts` + `sales-agent-cash` + `delivery-waybill` (29 test) va
-`agent-kpi-reconciliation` + `cash` + `cashback` (14 test).
+### Test holati (2026-09-24) — YOPILDI
+To'liq API to'plami YASHIL: **150 fayl / 988 test**, bitta ham qizil yo'q. Frontend vitest
+31 fayl / 149 test, ikkala `tsc` va `eslint` ham toza.
 
-TEKSHIRILMAGAN: to'liq API to'plami (150 fayl) shu mashinada ishga tushmadi. 8 GB xotiradan
-Docker VM ~2 GB, Claude jarayonlari ~1.1 GB oladi; vitest yuklangach bo'sh xotira ~500 MB ga
-tushadi va nazoratchi jarayonni o'ldiradi. 15, 6, 3 va 2 fayllik bo'laklar ham o'ldirildi.
+Kechagi "acceptance-access qizil" xulosasi NOTO'G'RI edi — kod xatosi emas. Sabab: xotira
+yetmagani uchun o'ldirilgan test yurishlaridan **yetim `vitest` jarayonlari** (va bir nechta
+yetim boshqaruvchi `bash` skripti) tirik qolib, o'sha `bumerp_test` bazasiga PARALLEL ulanib
+turgan. Ikki `truncate` bir vaqtda ishlaganda Postgres DEADLOCK (40P01) beradi, qolgan
+xatolar (`duplicate key`, "kira olmadi") shundan kelib chiqadi. Yetimlar tozalangach o'sha
+fayl 6/6 yashil.
 
-`acceptance-access.test.ts` ALOHIDA ishga tushirilganda 6 ta testi qizil. Sabab —
-`truncate table users, companies, rate_limits, audit_logs cascade` da POSTGRES DEADLOCK
-(40P01): fayl ichidagi bir nechta `buildServer()` pooli bir vaqtda bazani qulflaydi, keyingi
-xatolar (`duplicate key`, "kira olmadi") shundan kelib chiqadi. Bu joy shu sessiyadagi
-o'zgarishlarga tegishli emas (o'zgarishlar `users`/`companies`/`roles`/auth'ga tegmaydi),
-lekin PASS deb yozilmaydi: xotira bo'shaganda to'liq to'plam qayta yuritilishi kerak.
+### Bu mashinada testni QANDAY yuritish kerak (8 GB)
+1. **Fon rejimida yuritmang.** Nazoratchi bo'sh xotira ~500 MB ga tushganda fon buyrug'ini
+   o'ldiradi; o'ldirilgan skriptning bolalari esa tirik qoladi va bazani buzadi.
+   Old planda (foreground), vaqt budjeti bilan bo'lak-bo'lak yuriting.
+2. **Har bo'lakdan keyin yetim jarayonlarni o'ldiring** (`node.exe` — `vitest` yoki
+   `experimental-import-meta-resolve`), so'ng `pg_stat_activity` da `bumerp_test` ulanishlari
+   0 ekanini tekshiring.
+3. **Bo'lak o'lchami:** `acceptance*` va `security-hardening` — BITTADAN, qolganlari 4 tadan.
+4. Tayyor skript: `scratchpad/run-chunks.sh <sekund>` — holatni `/tmp/api-chunks.done` da
+   saqlaydi, uzilsa qolgan joyidan davom etadi.
 
 ### Blockerlar
 - **Production zaxira xizmati (AUDIT-2, HIGH):** kod va hujjat tayyor (`deploy/backup/`), lekin Railway'da `bum-backup` xizmati, volume va `Cron Schedule` egasi tomonidan yaratilmagan; `BACKUP_PASSPHRASE` ham egasi kiritadi (parol repoda yo'q va hech qayerda chop etilmaydi). Shu qadamgacha production bazasining avtomatik nusxasi YO'Q
