@@ -568,6 +568,13 @@
       "when": 1789829826441,
       "tag": "0080_kpi_min_value",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1790206478169,
+      "tag": "0081_kpi_targets_salary_history",
+      "breakpoints": true
     }
   ]
 }

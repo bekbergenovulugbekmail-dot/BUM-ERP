@@ -8,9 +8,9 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
 import { salaryKpiLines, salaryPayments } from "../src/db/schema/hr.js";
-import { tierAmount, type Tier } from "../src/modules/hr/kpi.service.js";
+import { achievementOf, targetBonus, tierAmount, type Tier } from "../src/modules/hr/kpi.service.js";
 import { buildServer } from "../src/server.js";
-import { createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 
@@ -326,5 +326,201 @@ describe("KPI plani (minValue)", () => {
 
     const rules = (await hr("GET", "/kpi/rules")).json().rules as { positionId: string | null; minValue: string | null }[];
     expect(rules.find((rule) => rule.positionId === positionId)!.minValue).toBeNull();
+  });
+});
+
+/**
+ * 1-VAZIFA: fiksatsiyalangan oylik ALOHIDA, KPI mukofoti ALOHIDA.
+ * Oylik keyin o'zgarsa tugagan oyning hisob-kitobi buzilmasligi kerak — shuning uchun
+ * o'zgarish "qaysi oydan amal qiladi" bilan yoziladi va tarixda qoladi.
+ */
+describe("Fiksatsiyalangan oylik tarixi", () => {
+  const prevMonth = (() => {
+    const [y, m] = month.split("-").map(Number) as [number, number];
+    return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+  })();
+
+  it("o'zgarish tarixga yoziladi: eski, yangi, qaysi oydan, kim va nega", async () => {
+    const employeeId = await employee("Oyligi oshadi", "5000000");
+    const res = await hr("POST", `/employees/${employeeId}/salary-history`, {
+      newSalary: "6000000",
+      effectiveMonth: month,
+      reason: "Ish hajmi oshdi",
+    });
+    expect(res.statusCode, res.body).toBe(201);
+
+    const history = (await hr("GET", `/employees/${employeeId}/salary-history`)).json().history as {
+      oldSalary: string; newSalary: string; effectiveMonth: string; reason: string | null; changedBy: string | null;
+    }[];
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      oldSalary: "5000000.00",
+      newSalary: "6000000.00",
+      effectiveMonth: month,
+      reason: "Ish hajmi oshdi",
+    });
+    expect(history[0]!.changedBy, "kim o'zgartirgani yozilgan").not.toBeNull();
+  });
+
+  it("oylik oshsa ham TUGAGAN oy eski stavka bilan hisoblanadi", async () => {
+    const employeeId = await employee("Eski oy", "5000000");
+    // Avvalgi oyga 5 000 000, joriy oydan 9 000 000
+    expect((await hr("POST", `/employees/${employeeId}/salary-history`, {
+      newSalary: "5000000", effectiveMonth: prevMonth,
+    })).statusCode).toBe(201);
+    expect((await hr("POST", `/employees/${employeeId}/salary-history`, {
+      newSalary: "9000000", effectiveMonth: month,
+    })).statusCode).toBe(201);
+
+    expect((await hr("POST", "/salaries/generate", { month: prevMonth, workDays: "26" })).statusCode).toBe(200);
+    expect((await hr("POST", "/salaries/generate", { month, workDays: "26" })).statusCode).toBe(200);
+
+    const rows = await db
+      .select({ month: salaryPayments.month, baseSalary: salaryPayments.baseSalary })
+      .from(salaryPayments)
+      .where(and(eq(salaryPayments.companyId, company.companyId), eq(salaryPayments.employeeId, employeeId)));
+    const byMonth = new Map(rows.map((row) => [row.month, row.baseSalary]));
+    expect(byMonth.get(prevMonth), "tugagan oy eski stavkada qoladi").toBe("5000000.00");
+    expect(byMonth.get(month), "joriy oy yangi stavkada").toBe("9000000.00");
+  });
+
+  it("tarixi yo'q xodim avvalgidek `baseSalary` bilan hisoblanadi", async () => {
+    const employeeId = await employee("Tarixsiz", "4000000");
+    expect((await hr("POST", "/salaries/generate", { month, workDays: "26" })).statusCode).toBe(200);
+    const [row] = await db
+      .select({ baseSalary: salaryPayments.baseSalary })
+      .from(salaryPayments)
+      .where(and(eq(salaryPayments.companyId, company.companyId), eq(salaryPayments.employeeId, employeeId)));
+    expect(row!.baseSalary).toBe("4000000.00");
+  });
+
+  it("oylik summasi maxfiy: `hr.salary` ruxsatisiz tarix ko'rinmaydi", async () => {
+    const employeeId = await employee("Maxfiy", "5000000");
+    const warehouse = await addEmployee(app, company, "Ombor menejeri");
+    const res = await hr("GET", `/employees/${employeeId}/salary-history`, undefined, warehouse.cookie);
+    expect(res.statusCode, res.body).toBe(403);
+  });
+});
+
+/**
+ * 3-VAZIFA: KPI qoidasini admin o'zi tuzadi — maqsad (plan), bonus turi, ulush va shift.
+ * `tiered` — eski xatti-harakat, shuning uchun mavjud qoidalar o'zgarmaydi.
+ */
+describe("Maqsadga asoslangan KPI qoidalari", () => {
+  const targetRule = (positionId: string, extra: Record<string, unknown>) =>
+    hr("PUT", "/kpi/rules", {
+      positionId,
+      metric: "delivery_count",
+      bonusType: "achievement",
+      target: "100",
+      bonusAmount: "1000000",
+      ...extra,
+    });
+
+  it("maqsadli qoidada bosqich shart emas, lekin maqsad majburiy", async () => {
+    const positionId = await position("Dostavchi maqsad");
+    const ok = await targetRule(positionId, {});
+    expect(ok.statusCode, ok.body).toBe(200);
+
+    const noTarget = await hr("PUT", "/kpi/rules", {
+      positionId,
+      metric: "delivery_amount",
+      bonusType: "fixed",
+      bonusAmount: "500000",
+    });
+    expect(noTarget.statusCode, "maqsadsiz qoida rad etiladi").toBe(400);
+  });
+
+  it("bosqichli qoidada bosqich hamon majburiy (eski xatti-harakat saqlanadi)", async () => {
+    const positionId = await position("Dostavchi bosqich");
+    const res = await hr("PUT", "/kpi/rules", { positionId, metric: "delivery_count", tiers: [] });
+    expect(res.statusCode, res.body).toBe(400);
+  });
+
+  it("ulush 100 dan oshmasin, shift manfiy bo'lmasin", async () => {
+    const positionId = await position("Dostavchi chegara");
+    expect((await targetRule(positionId, { weight: "150" })).statusCode).toBe(400);
+    expect((await targetRule(positionId, { maxAchievement: "-5" })).statusCode).toBe(400);
+  });
+
+  it("qoida maydonlari saqlanadi va qaytadi", async () => {
+    const positionId = await position("Dostavchi saqlansin");
+    expect((await targetRule(positionId, {
+      name: "Yetkazmalar soni",
+      description: "Oyiga 100 ta",
+      weight: "30",
+      maxAchievement: "120",
+      effectiveMonth: month,
+    })).statusCode).toBe(200);
+
+    const rules = (await hr("GET", "/kpi/rules")).json().rules as Record<string, unknown>[];
+    const saved = rules.find((rule) => rule.positionId === positionId)!;
+    expect(saved).toMatchObject({
+      bonusType: "achievement",
+      name: "Yetkazmalar soni",
+      target: "100.0000",
+      bonusAmount: "1000000.00",
+      weight: "30.00",
+      maxAchievement: "120.00",
+      effectiveMonth: month,
+    });
+  });
+});
+
+/**
+ * Maqsadli mukofot matematikasi (sof funksiya) — 3.2 va 3.3 bandlari.
+ * Ko'rsatkich 4 xonali bigint (100 → 1 000 000n), foiz 2 xonali (100% → 10 000n), pul 2 xonali.
+ */
+describe("Bajarilish va mukofot (sof funksiya)", () => {
+  const value = (n: number) => BigInt(Math.round(n * 10_000));
+
+  it("bajarilish = haqiqiy / maqsad", () => {
+    expect(achievementOf(value(95), "100", null), "95/100 = 95%").toBe(9500n);
+    expect(achievementOf(value(100), "100", null)).toBe(10000n);
+    expect(achievementOf(value(120), "100", null)).toBe(12000n);
+    expect(achievementOf(value(0), "100", null)).toBe(0n);
+  });
+
+  it("shift ortiqcha bajarishni cheklaydi", () => {
+    expect(achievementOf(value(200), "100", "120"), "200% → 120% ga tushadi").toBe(12000n);
+    expect(achievementOf(value(110), "100", "120"), "shiftdan past — o'zgarmaydi").toBe(11000n);
+  });
+
+  it("maqsad yo'q yoki nol — bajarilish aniqlanmaydi", () => {
+    expect(achievementOf(value(50), null, null)).toBeNull();
+    expect(achievementOf(value(50), "0", null)).toBeNull();
+  });
+
+  it("achievement: summa × bajarilish foizi", () => {
+    const rule = { bonusType: "achievement" as const, bonusAmount: "1000000", weight: null };
+    expect(targetBonus(rule, 9500n), "1 000 000 × 95% = 950 000").toBe(95_000_000n);
+    expect(targetBonus(rule, 10000n)).toBe(100_000_000n);
+    expect(targetBonus(rule, 0n)).toBe(0n);
+  });
+
+  it("fixed: maqsad bajarilsa to'liq summa, bajarilmasa 0", () => {
+    const rule = { bonusType: "fixed" as const, bonusAmount: "1000000", weight: null };
+    expect(targetBonus(rule, 10000n), "100% — to'liq").toBe(100_000_000n);
+    expect(targetBonus(rule, 12000n), "ortiqcha bajarish ham to'liq summa").toBe(100_000_000n);
+    expect(targetBonus(rule, 9999n), "99.99% — pul yo'q").toBe(0n);
+  });
+
+  it("ulush: bir nechta KPI bitta fondni bo'lishadi (30+30+20+20 = 100%)", () => {
+    const pot = "1000000";
+    const share = (weight: string, achievement: bigint) =>
+      targetBonus({ bonusType: "achievement", bonusAmount: pot, weight }, achievement);
+
+    // Hammasi 100% bajarilsa — jami aynan fondning o'zi
+    const full = share("30", 10000n) + share("30", 10000n) + share("20", 10000n) + share("20", 10000n);
+    expect(full, "to'liq bajarilishda fond to'liq beriladi").toBe(100_000_000n);
+
+    // Yetkazma 100%, o'z vaqtida 50%, undirish 100%, qaytarish 0%
+    const mixed = share("30", 10000n) + share("30", 5000n) + share("20", 10000n) + share("20", 0n);
+    // 300 000 + 150 000 + 200 000 + 0 = 650 000
+    expect(mixed).toBe(65_000_000n);
+  });
+
+  it("bajarilish aniqlanmagan bo'lsa mukofot yo'q", () => {
+    expect(targetBonus({ bonusType: "achievement", bonusAmount: "1000000", weight: null }, null)).toBe(0n);
   });
 });

@@ -298,6 +298,8 @@ export async function metricValue(
   }
 }
 
+export type KpiBonusType = "tiered" | "fixed" | "achievement";
+
 export type ResolvedRule = {
   ruleId: string;
   metric: KpiMetric;
@@ -307,6 +309,18 @@ export type ResolvedRule = {
   tiers: Tier[];
   /** Qoida lavozimdanmi yoki shu xodimga alohida yozilganmi. */
   source: "position" | "employee";
+  /** Mukofot turi; `tiered` — eski progressiv hisob (sukut). */
+  bonusType: KpiBonusType;
+  /** MAQSAD — `fixed` va `achievement` uchun majburiy. */
+  target: string | null;
+  /** 100% bajarilishdagi summa. */
+  bonusAmount: string;
+  /** Ulush (foiz) — bir nechta KPI bitta mukofot fondini bo'lishganda. */
+  weight: string | null;
+  /** Bajarilish shifti (foiz) — ortiqcha bajarish cheksiz pul bermasin. */
+  maxAchievement: string | null;
+  /** Qoida qaysi oydan amal qiladi; `null` — doim. */
+  effectiveMonth: string | null;
 };
 
 /**
@@ -332,6 +346,12 @@ export async function resolveRules(
       metric: kpiRules.metric,
       rateType: kpiRules.rateType,
       minValue: kpiRules.minValue,
+      bonusType: kpiRules.bonusType,
+      target: kpiRules.target,
+      bonusAmount: kpiRules.bonusAmount,
+      weight: kpiRules.weight,
+      maxAchievement: kpiRules.maxAchievement,
+      effectiveMonth: kpiRules.effectiveMonth,
     })
     .from(kpiRules)
     .where(
@@ -378,6 +398,12 @@ export async function resolveRules(
         minValue: rule.minValue,
         tiers: tiersByRule.get(rule.id) ?? [],
         source: matchesEmployee ? "employee" : "position",
+        bonusType: rule.bonusType,
+        target: rule.target,
+        bonusAmount: rule.bonusAmount,
+        weight: rule.weight,
+        maxAchievement: rule.maxAchievement,
+        effectiveMonth: rule.effectiveMonth,
       });
     }
     if (byMetric.size > 0) result.set(person.id, [...byMetric.values()]);
@@ -385,8 +411,64 @@ export async function resolveRules(
   return result;
 }
 
-export type KpiLine = { metric: KpiMetric; metricValue: string; amount: string; ruleId: string };
+export type KpiLine = {
+  metric: KpiMetric;
+  metricValue: string;
+  amount: string;
+  ruleId: string;
+  /** Hisobot va SNAPSHOT uchun — oy yopilgach qoida o'zgarsa ham bular o'zgarmaydi. */
+  target: string | null;
+  achievementPercent: string | null;
+  weight: string | null;
+  bonusType: KpiBonusType;
+};
 export type KpiResult = { total: string; lines: KpiLine[] };
+
+/** Bajarilish foizi (2 xonali bigint, ya'ni 100.00% → 10000n). Maqsad yo'q/nol — null. */
+export function achievementOf(value: bigint, target: string | null, maxAchievement: string | null): bigint | null {
+  if (target === null) return null;
+  const targetMinor = toMinor(target, VALUE_SCALE);
+  if (targetMinor <= 0n) return null;
+  // value va target bir xil masshtabda — nisbat foizga ko'chiriladi (yarmi yuqoriga)
+  let percent = (value * 10000n * 2n + targetMinor) / (2n * targetMinor);
+  if (maxAchievement !== null) {
+    const cap = toMinor(maxAchievement, 2);
+    if (percent > cap) percent = cap;
+  }
+  return percent;
+}
+
+/**
+ * Maqsadga asoslangan mukofot.
+ *  - `fixed`       — maqsad bajarilsa (>= 100%) to'liq summa, aks holda 0
+ *  - `achievement` — summa × bajarilish foizi
+ * Ulush (`weight`) berilgan bo'lsa natija shu ulushga ko'paytiriladi: bir nechta KPI
+ * bitta mukofot fondini bo'lishadi (masalan 30% + 30% + 20% + 20% = 100%).
+ */
+export function targetBonus(
+  rule: Pick<ResolvedRule, "bonusType" | "bonusAmount" | "weight">,
+  achievement: bigint | null,
+): bigint {
+  if (achievement === null) return 0n;
+  const amount = toMinor(rule.bonusAmount, MONEY_SCALE);
+  if (amount <= 0n) return 0n;
+
+  let bonus: bigint;
+  if (rule.bonusType === "fixed") {
+    bonus = achievement >= 10000n ? amount : 0n;
+  } else {
+    // summa × foiz / 100 (yarmi yuqoriga yaxlitlanadi)
+    bonus = (amount * achievement * 2n + 10000n) / (2n * 10000n);
+  }
+  if (bonus === 0n || rule.weight === null) return bonus;
+  const weight = toMinor(rule.weight, 2);
+  return (bonus * weight * 2n + 10000n) / (2n * 10000n);
+}
+
+/** Qoida shu oyga amal qiladimi (`effectiveMonth` dan oldingi oylarga tegmaydi). */
+function ruleAppliesTo(rule: ResolvedRule, month: string): boolean {
+  return rule.effectiveMonth === null || month >= rule.effectiveMonth;
+}
 
 /** Bitta xodimning oylik KPI'si. Qoida bo'lmasa — 0 va bo'sh ro'yxat. */
 export async function computeKpi(
@@ -399,11 +481,20 @@ export async function computeKpi(
   const lines: KpiLine[] = [];
   let total = 0n;
   for (const rule of rules) {
-    if (rule.tiers.length === 0) continue;
+    if (!ruleAppliesTo(rule, month)) continue;
+    // Bosqichli qoidada bosqichsiz pul hisoblab bo'lmaydi; maqsadli turlarda bosqich kerak emas
+    if (rule.bonusType === "tiered" && rule.tiers.length === 0) continue;
+
     const value = await metricValue(conn, companyId, links, rule.metric, month);
     // PLAN bajarilmadi — qoida bo'yicha pul yo'q (ko'rsatkichning o'zi hisobotda ko'rinib turadi)
     const planMet = rule.minValue === null || value >= toMinor(rule.minValue, VALUE_SCALE);
-    const amount = planMet ? tierAmount(value, rule.tiers, rule.rateType) : 0n;
+    const achievement = achievementOf(value, rule.target, rule.maxAchievement);
+
+    let amount: bigint;
+    if (!planMet) amount = 0n;
+    else if (rule.bonusType === "tiered") amount = tierAmount(value, rule.tiers, rule.rateType);
+    else amount = targetBonus(rule, achievement);
+
     if (amount === 0n && value === 0n) continue;
     total += amount;
     lines.push({
@@ -411,6 +502,10 @@ export async function computeKpi(
       metricValue: fromMinor(value, VALUE_SCALE),
       amount: fromMinor(amount, MONEY_SCALE),
       ruleId: rule.ruleId,
+      target: rule.target,
+      achievementPercent: achievement === null ? null : fromMinor(achievement, 2),
+      weight: rule.weight,
+      bonusType: rule.bonusType,
     });
   }
   return { total: fromMinor(total, MONEY_SCALE), lines };

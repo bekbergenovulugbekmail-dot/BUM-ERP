@@ -18,6 +18,8 @@
  *   POST   /salaries/generate, PATCH / DELETE /salaries/:salaryId                 hr.salary
  *   GET    /allowances (?employeeId=&month=)      qo'shimcha to'lovlar (yo'l, ovqat, aloqa)  hr.view
  *   POST   /allowances, PATCH / DELETE /allowances/:allowanceId                    hr.salary
+ *   GET    /employees/:employeeId/salary-history                                  hr.salary
+ *   POST   /employees/:employeeId/salary-history  oylikni o'zgartirish (tarix bilan) hr.salary
  *   GET    /kpi/rules                          KPI qoidalari (bosqichlari bilan)  hr.view
  *   PUT    /kpi/rules, DELETE /kpi/rules/:ruleId                                  hr.salary
  *   GET    /kpi/preview (?month=&employeeId=)  oylik tayyorlanmasdan hisob-kitob  hr.salary
@@ -68,6 +70,7 @@ import {
 } from "./salary.service.js";
 import { KPI_METRICS } from "./kpi.service.js";
 import { deleteKpiRule, kpiPreview, listKpiRules, saveKpiRule } from "./kpi-rules.service.js";
+import { listSalaryHistory, recordSalaryChange } from "./salary-history.service.js";
 
 const nullableText = (max: number) =>
   z
@@ -264,14 +267,40 @@ const kpiRuleBody = z
     metric: z.enum(KPI_METRICS),
     /** PLAN: ko'rsatkich shundan kam bo'lsa foiz/summa berilmaydi. Bo'sh — chegara yo'q. */
     minValue: decimalSchema({ scale: 4 }).nullable().optional(),
-    tiers: z.array(kpiTier).min(1).max(20),
+    /** Bosqichlar — faqat `tiered` turida kerak (maqsadli turlarda bo'sh bo'lishi mumkin). */
+    tiers: z.array(kpiTier).max(20).optional(),
     isActive: z.boolean().optional(),
     notes: nullableText(1000),
+
+    /** Mukofot turi; berilmasa `tiered` — mavjud qoidalar avvalgidek ishlaydi. */
+    bonusType: z.enum(["tiered", "fixed", "achievement"]).optional(),
+    name: nullableText(120),
+    description: nullableText(2000),
+    /** MAQSAD (plan) — `fixed` va `achievement` uchun majburiy. */
+    target: decimalSchema({ scale: 4 }).nullable().optional(),
+    /** 100% bajarilishdagi summa. */
+    bonusAmount: decimalSchema({ scale: 2 }).nullable().optional(),
+    /** Ulush (foiz) — bir nechta KPI bitta fondni bo'lishganda. */
+    weight: decimalSchema({ scale: 2 }).nullable().optional(),
+    /** Bajarilish shifti (foiz), masalan 120. */
+    maxAchievement: decimalSchema({ scale: 2 }).nullable().optional(),
+    /** Qoida qaysi oydan amal qiladi ("2026-09"). */
+    effectiveMonth: month.nullable().optional(),
   })
   .refine((body) => Boolean(body.positionId) !== Boolean(body.employeeId), {
     message: "Qoida yo lavozimga, yo xodimga biriktiriladi",
+  })
+  .refine((body) => (body.bonusType ?? "tiered") !== "tiered" || (body.tiers?.length ?? 0) > 0, {
+    message: "Bosqichli qoidada kamida bitta bosqich bo'lishi kerak",
   });
 const kpiPreviewQuery = z.object({ month, employeeId: z.uuid().optional() });
+
+/** Oylik o'zgarishi: qaysi oydan amal qiladi va nega. */
+const salaryChangeBody = z.strictObject({
+  newSalary: decimalSchema({ scale: 2 }),
+  effectiveMonth: month,
+  reason: nullableText(500),
+});
 
 const includeInactiveQuery = z.object({ includeInactive: boolQuery });
 const positionsQuery = z.object({ departmentId: z.uuid().optional(), includeInactive: boolQuery });
@@ -487,6 +516,25 @@ export async function hrRoutes(app: FastifyInstance): Promise<void> {
 
   // ─── KPI qoidalari ──────────────────────────────────────────────────────
   // Qoida lavozimga yoziladi; xodimga yozilgani o'sha xodim uchun uning o'rniga ishlaydi.
+
+  // ─── Fiksatsiyalangan oylik tarixi ──────────────────────────────────────
+  app.get("/employees/:employeeId/salary-history", async (req) => {
+    const employeeId = param(req, "employeeId");
+    // Oylik summasi maxfiy — `hr.view` yetarli emas, alohida `hr.salary` kerak
+    const tenant = await readTenant(req);
+    await requirePermission(db, tenant, "hr.salary");
+    return { history: await listSalaryHistory(db, tenant, employeeId) };
+  });
+
+  app.post("/employees/:employeeId/salary-history", async (req, reply) => {
+    const employeeId = param(req, "employeeId");
+    const body = salaryChangeBody.parse(req.body);
+    const change = await writeInTenant(req, "hr.salary", (tx, tenant) =>
+      recordSalaryChange(tx, tenant, { employeeId, ...body }),
+    );
+    reply.status(201);
+    return { change };
+  });
 
   app.get("/kpi/rules", async (req) => listKpiRules(db, (await readTenant(req)).company.id));
 

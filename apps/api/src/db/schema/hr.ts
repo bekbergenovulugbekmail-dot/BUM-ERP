@@ -12,6 +12,7 @@ import {
   date,
   index,
   integer,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -304,6 +305,39 @@ export const salaryPayments = pgTable(
   ],
 );
 
+/**
+ * FIKSATSIYALANGAN OYLIK TARIXI.
+ *
+ * Nega kerak: oylik o'zgarganda OLDINGI oylar hisob-kitobi buzilmasligi kerak. Har o'zgarish
+ * "qaysi oydan amal qiladi" (`effectiveMonth`) bilan yoziladi; maosh tayyorlashda shu oyga
+ * amal qilgan stavka olinadi, `employees.baseSalary` esa joriy (eng oxirgi) stavka bo'lib qoladi.
+ */
+export const employeeSalaryHistory = pgTable(
+  "employee_salary_history",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+
+    oldSalary: money("old_salary").notNull().default("0"),
+    newSalary: money("new_salary").notNull().default("0"),
+    /** "2026-09" — shu oydan boshlab amal qiladi. */
+    effectiveMonth: varchar("effective_month", { length: 7 }).notNull(),
+    reason: text("reason"),
+    changedBy: uuid("changed_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("esh_company_employee_idx").on(t.companyId, t.employeeId, t.effectiveMonth),
+    check("esh_salary_non_negative", sql`${t.oldSalary} >= 0 and ${t.newSalary} >= 0`),
+    check("esh_month_format", sql`${t.effectiveMonth} ~ '^[0-9]{4}-[0-9]{2}$'`),
+  ],
+);
+
 // ─── relations ───────────────────────────────────────────────────────────────
 
 export const departmentsRelations = relations(departments, ({ one, many }) => ({
@@ -362,6 +396,14 @@ export const kpiMetric = pgEnum("kpi_metric", [
 export const kpiRateType = pgEnum("kpi_rate_type", ["percent", "per_unit"]);
 
 /**
+ * Mukofot qanday hisoblanadi:
+ *  - `tiered`      — progressiv bosqichlar (eski, sukut bo'yicha xatti-harakat)
+ *  - `fixed`       — maqsad bajarilsa belgilangan summa, bajarilmasa 0
+ *  - `achievement` — summa × bajarilish foizi (shift bilan cheklanadi)
+ */
+export const kpiBonusType = pgEnum("kpi_bonus_type", ["tiered", "fixed", "achievement"]);
+
+/**
  * KPI qoidasi. Lavozimga yozilsa — shu lavozimdagi hamma xodimga tegadi; xodimga yozilgani
  * o'sha xodim uchun lavozim qoidasining o'rniga ishlaydi (bitta ko'rsatkich bo'yicha).
  * Bir maqsadga bir nechta ko'rsatkich bo'lishi mumkin — ular qo'shiladi.
@@ -384,6 +426,22 @@ export const kpiRules = pgTable(
      * `null` — chegara yo'q (faqat bosqichlar ishlaydi, eski xatti-harakat).
      */
     minValue: qty("min_value"),
+
+    /** Qoidaning o'qiladigan nomi (masalan "Yetkazmalar soni"); bo'sh bo'lsa ko'rsatkich nomi ishlatiladi. */
+    name: varchar("name", { length: 120 }),
+    description: text("description"),
+    /** MAQSAD (plan): bajarilish = haqiqiy / maqsad. `tiered` dan boshqa turlarda majburiy. */
+    target: qty("target"),
+    bonusType: kpiBonusType("bonus_type").notNull().default("tiered"),
+    /** 100% bajarilishdagi summa (`fixed` va `achievement` uchun). */
+    bonusAmount: money("bonus_amount").notNull().default("0"),
+    /** Bir nechta KPI bo'lganda ulush (foiz); `null` — ulush yo'q, summa to'liq hisoblanadi. */
+    weight: percent("weight"),
+    /** Bajarilish shifti (masalan 120) — ortiqcha bajarish cheksiz pul bermasin. */
+    maxAchievement: percent("max_achievement"),
+    /** Qoida qaysi oydan amal qiladi ("2026-09"); `null` — doim. */
+    effectiveMonth: varchar("effective_month", { length: 7 }),
+
     isActive: boolean("is_active").notNull().default(true),
     notes: text("notes"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -399,6 +457,13 @@ export const kpiRules = pgTable(
     index("kpi_rule_company_idx").on(t.companyId, t.isActive),
     check("kpi_rule_one_target", sql`(${t.positionId} is null) <> (${t.employeeId} is null)`),
     check("kpi_rule_min_value_non_negative", sql`${t.minValue} is null or ${t.minValue} >= 0`),
+    check("kpi_rule_target_positive", sql`${t.target} is null or ${t.target} > 0`),
+    check("kpi_rule_bonus_non_negative", sql`${t.bonusAmount} >= 0`),
+    check("kpi_rule_weight_range", sql`${t.weight} is null or (${t.weight} > 0 and ${t.weight} <= 100)`),
+    check("kpi_rule_max_achievement_range", sql`${t.maxAchievement} is null or ${t.maxAchievement} >= 0`),
+    check("kpi_rule_effective_month_format", sql`${t.effectiveMonth} is null or ${t.effectiveMonth} ~ '^[0-9]{4}-[0-9]{2}$'`),
+    // Maqsadga asoslangan turlarda maqsad majburiy (bosqichli turga tegmaydi)
+    check("kpi_rule_target_required", sql`${t.bonusType} = 'tiered' or ${t.target} is not null`),
   ],
 );
 
@@ -448,6 +513,16 @@ export const salaryKpiLines = pgTable(
     /** Shu ko'rsatkichdan chiqqan mukofot. */
     amount: money("amount").notNull().default("0"),
     ruleId: uuid("rule_id").references(() => kpiRules.id, { onDelete: "set null" }),
+
+    /**
+     * SNAPSHOT: oy yopilgandan keyin qoida o'zgarsa ham shu oy hisoboti o'zgarmasligi uchun
+     * maqsad, bajarilish foizi, ulush va tur o'sha paytdagi holatda yoziladi.
+     */
+    target: qty("target"),
+    achievementPercent: numeric("achievement_percent", { precision: 9, scale: 2 }),
+    weight: percent("weight"),
+    bonusType: kpiBonusType("bonus_type"),
+
     createdAt: createdAt(),
   },
   (t) => [

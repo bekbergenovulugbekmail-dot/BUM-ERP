@@ -30,6 +30,7 @@ import { and, asc, eq, getTableColumns, gte, inArray, lt, sql } from "drizzle-or
 import { badRequest, forbidden, notFound } from "@bum/shared";
 import { attendances, departments, employees, leaves, positions, salaryKpiLines, salaryPayments } from "../../db/schema/hr.js";
 import { computeKpi, employeeLinks, resolveRules } from "./kpi.service.js";
+import { effectiveSalaries } from "./salary-history.service.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
@@ -178,6 +179,9 @@ export async function generateSalaries(
 
   // Yo'l puli, ovqat puli va boshqa muntazam to'lovlar — shu oyga tegishlilari
   const allowanceTotals = await allowanceTotalsForMonth(tx, companyId, input.month);
+  // Shu OYGA amal qilgan oylik stavkalar: oylik keyin oshirilsa ham tugagan oy qayta
+  // hisoblanganda eski stavka ishlatiladi. Tarixi yo'q xodimda joriy `baseSalary` qoladi.
+  const salaryForMonth = await effectiveSalaries(tx, companyId, pending.map((person) => person.id), input.month);
   const rate = toMinor(taxRate, 2);
   let kpiTotal = 0n;
   /** Haqiqatda yozilgan varaqalar soni (to'lovi yo'q xodimlar o'tkazib yuboriladi). */
@@ -199,7 +203,8 @@ export async function generateSalaries(
       hours = workDays * 8n;
     }
 
-    const base = toMinor(employee.baseSalary);
+    const monthSalary = salaryForMonth.get(employee.id) ?? employee.baseSalary;
+    const base = toMinor(monthSalary);
     let earned: bigint;
     let hourlyRate: bigint; // 4 xona
     if (employee.salaryType === "monthly") {
@@ -236,7 +241,7 @@ export async function generateSalaries(
       companyId,
       employeeId: employee.id,
       month: input.month,
-      baseSalary: employee.baseSalary,
+      baseSalary: monthSalary,
       workDays: fromMinor(workDays, 4),
       actualDays: fromMinor(days, 4),
       overtime: fromMinor(overtime, 4),
@@ -261,6 +266,11 @@ export async function generateSalaries(
           metricValue: line.metricValue,
           amount: line.amount,
           ruleId: line.ruleId,
+          // SNAPSHOT — keyin qoida o'zgarsa ham shu oy hisoboti o'zgarmaydi
+          target: line.target,
+          achievementPercent: line.achievementPercent,
+          weight: line.weight,
+          bonusType: line.bonusType,
         })),
       );
     }
