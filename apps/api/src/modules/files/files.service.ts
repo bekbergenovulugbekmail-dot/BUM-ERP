@@ -199,11 +199,36 @@ export async function detachFile(
 export async function fileUrl(conn: DbOrTx, tenant: TenantContext, input: { kind: FileKind; targetId: string }, client: StorageClient | null) {
   const key = await loadTarget(conn, tenant, input.kind, input.targetId, false);
   if (!key) throw notFound("Fayl biriktirilmagan");
-  if (isDatabaseKey(key)) {
-    return { url: `/api/files/${input.kind}/${input.targetId}/content?v=${encodeURIComponent(key.slice(key.lastIndexOf("/") + 1))}`, expiresIn: VIEW_TTL };
-  }
+  if (isDatabaseKey(key)) return { url: databaseContentUrl(input.kind, input.targetId, key), expiresIn: VIEW_TTL };
   if (!client) return null;
   return { url: client.signedUrl("GET", key, VIEW_TTL), expiresIn: VIEW_TTL };
+}
+
+/** Bazadagi fayl uchun API manzili; `?v=` — rasm almashtirilganda brauzer keshidan eskisi olinmasin. */
+function databaseContentUrl(kind: FileKind, targetId: string, key: string): string {
+  return `/api/files/${kind}/${targetId}/content?v=${encodeURIComponent(key.slice(key.lastIndexOf("/") + 1))}`;
+}
+
+/**
+ * Mahsulot rasmining ko'rish havolasi — kalit qayerda saqlanganiga qarab.
+ *
+ * Saqlash (S3) sozlanmagan bo'lsa rasm BAZADA bo'ladi va imzolangan URL umuman bo'lmaydi;
+ * shuning uchun har bir ro'yxat (agent katalogi, kassa) shu funksiyadan foydalanadi — aks holda
+ * rasm faqat S3 bor muhitda ko'rinardi.
+ */
+export function productImageUrl(
+  productId: string,
+  key: string | null | undefined,
+  client: StorageClient | null,
+  /**
+   * Bazadagi rasm uchun mazmun manzili. Standart yo'l `products.view` talab qiladi, shuning uchun
+   * sotuv agenti kabi bu ruxsatsiz chaqiruvchilar O'Z marshrutini beradi (aks holda rasm 403 bo'ladi).
+   */
+  contentPath: (id: string) => string = (id) => `/api/files/product-image/${id}/content`,
+): string | null {
+  if (!key) return null;
+  if (isDatabaseKey(key)) return `${contentPath(productId)}?v=${encodeURIComponent(key.slice(key.lastIndexOf("/") + 1))}`;
+  return client ? client.signedUrl("GET", key, VIEW_TTL) : null;
 }
 
 // ─── Bazadagi mahsulot rasmi (fayl saqlash sozlanmagan) ─────────────────────

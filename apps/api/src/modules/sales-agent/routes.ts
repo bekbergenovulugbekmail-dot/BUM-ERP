@@ -51,10 +51,11 @@
  *   GET/POST /supervisor/promotions, PATCH/DELETE /supervisor/promotions/:promotionId   promotions.manage
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { forbidden, type Permission } from "@bum/shared";
+import { forbidden, notFound, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
+import { products } from "../../db/schema/catalog.js";
 import { companies } from "../../db/schema/platform.js";
 import {
   agentLocationEvents,
@@ -64,6 +65,8 @@ import {
   agentVisits,
   promotions,
 } from "../../db/schema/sales-agent.js";
+import { loadProductImage } from "../files/files.service.js";
+import { sendStoredImage } from "../files/routes.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
 import { MAX_PAYMENT_PARTS } from "@bum/shared";
@@ -655,9 +658,27 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/catalog/:productId/image", async (req, reply) => {
     const { productId } = productParams.parse(req.params);
-    const client = storageProvider.client;
-    if (!client) return storageUnavailable(reply);
-    return catalogImageUrl(db, await readAgent(req), productId, client);
+    // Saqlash (S3) sozlanmagan bo'lsa ham rasm bazadan beriladi — 503 faqat kalit saqlashda bo'lsa
+    const result = await catalogImageUrl(db, await readAgent(req), productId, storageProvider.client);
+    return result ?? storageUnavailable(reply);
+  });
+
+  /**
+   * Bazadagi rasm mazmuni — AGENT ruxsati bilan (`/api/files/...` yo'li `products.view` talab qiladi,
+   * sotuv agentida esa u yo'q). Faqat o'z kompaniyasining faol mahsuloti.
+   */
+  app.get("/catalog/:productId/image/content", async (req, reply) => {
+    const { productId } = productParams.parse(req.params);
+    const context = await readAgent(req);
+    const [product] = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(and(eq(products.id, productId), eq(products.companyId, context.company.id), eq(products.isActive, true)))
+      .limit(1);
+    if (!product) throw notFound("Rasm topilmadi");
+    const image = await loadProductImage(db, context.company.id, productId);
+    if (image.kind !== "database") throw notFound("Rasm topilmadi");
+    return sendStoredImage(reply, image);
   });
 
   app.get("/orders", async (req) => {

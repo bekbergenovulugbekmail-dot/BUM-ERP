@@ -28,7 +28,7 @@ import { categoryScope } from "../catalog/category-scope.js";
 import type { TenantContext } from "../company/tenant.js";
 import { todayIso } from "../finance/cash.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
-import { VIEW_TTL } from "../files/files.service.js";
+import { VIEW_TTL, productImageUrl } from "../files/files.service.js";
 import { autoCreateDeliveryTask } from "../delivery/tasks.service.js";
 import { cancelOrder, confirmOrder, createOrder, updateOrder, type SalesItemInput } from "../sales/orders.service.js";
 import type { AgentContext } from "./agent-context.js";
@@ -216,8 +216,8 @@ export async function agentCatalog(
     const agreedBox = box ? agreed.get(`${row.id}|${box.unitId}`) : undefined;
     items.push({
       ...row,
-      /** Kichik rasm uchun imzolangan havola (5 daqiqa); fayl saqlash sozlanmagan bo'lsa null. */
-      imageUrl: client && imageKey ? client.signedUrl("GET", imageKey, VIEW_TTL) : null,
+      /** Rasm havolasi: saqlashdagisi — imzolangan (5 daqiqa), bazadagisi — API manzili. */
+      imageUrl: productImageUrl(row.id, imageKey, client, agentImagePath),
       piecePrice,
       /** Mijoz bilan kelishilgan narx qo'llandimi — agent buni ekranda ko'radi. */
       agreedPrice: Boolean(agreedPiece || agreedBox),
@@ -228,15 +228,19 @@ export async function agentCatalog(
   return { products: items, nextOffset: rows.length > options.limit ? options.offset + options.limit : null };
 }
 
-/** Mahsulot rasmi — imzolangan qisqa muddatli havola (saqlash ochiq emas). */
-export async function catalogImageUrl(conn: DbOrTx, context: AgentContext, productId: string, client: StorageClient) {
+/** Agent ruxsati bilan ochiladigan rasm manzili (`/api/files/...` agentda `products.view` talab qiladi). */
+const agentImagePath = (productId: string) => `/api/sales-agent/catalog/${productId}/image/content`;
+
+/** Mahsulot rasmi: saqlashdagisi — imzolangan qisqa muddatli havola, bazadagisi — API manzili. */
+export async function catalogImageUrl(conn: DbOrTx, context: AgentContext, productId: string, client: StorageClient | null) {
   const [product] = await conn
     .select({ key: products.imageKey })
     .from(products)
     .where(and(eq(products.id, productId), eq(products.companyId, context.company.id), eq(products.isActive, true)))
     .limit(1);
-  if (!product?.key) throw notFound("Rasm topilmadi");
-  return { url: client.signedUrl("GET", product.key, VIEW_TTL), expiresIn: VIEW_TTL };
+  const url = productImageUrl(productId, product?.key, client, agentImagePath);
+  if (!url) throw notFound("Rasm topilmadi");
+  return { url, expiresIn: VIEW_TTL };
 }
 
 // ─── Qatorlar, yetkazish kuni, qoldiq ────────────────────────────────────────

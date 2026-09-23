@@ -159,6 +159,8 @@ const orderImportBody = z.strictObject({
         product: z.string().max(300).optional(),
         quantity: z.string().max(50).optional(),
         unit: z.string().max(50).optional(),
+        /** "Blok"/"pachka"dagi dona soni — birlik asosiy birlikdan farq qilganda konversiya shu bilan ochiladi. */
+        unitsPerPackage: z.string().max(50).optional(),
         price: z.string().max(50).optional(),
         discountPercent: z.string().max(50).optional(),
         taxRate: z.string().max(50).optional(),

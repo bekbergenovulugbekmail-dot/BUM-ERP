@@ -9,8 +9,7 @@
  * bo'lsa har qator alohida hujjat bo'ladi. `dryRun` — faqat tekshirish (preview): bazaga hech narsa yozilmaydi.
  */
 import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
-import { units } from "../../db/schema/catalog.js";
-import { products } from "../../db/schema/catalog.js";
+import { products, unitConversions, units } from "../../db/schema/catalog.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import { purchaseOrderItems, purchaseOrders, suppliers } from "../../db/schema/purchase.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -168,6 +167,8 @@ export type PurchaseImportRow = {
   product?: string;
   quantity?: string;
   unit?: string;
+  /** "Blok"/"pachka"dagi dona soni — birlik mahsulotning asosiy birligidan farq qilsa kerak bo'ladi. */
+  unitsPerPackage?: string;
   price?: string;
   discountPercent?: string;
   taxRate?: string;
@@ -235,6 +236,22 @@ export async function importPurchaseOrders(
     unitByName.set(unit.shortName.trim().toLowerCase(), unit.id);
     unitByName.set(unit.name.trim().toLowerCase(), unit.id);
   }
+
+  /**
+   * MAVJUD KONVERSIYALAR ("blok" → "dona"). Zaxira doim asosiy birlikda yuritiladi, shuning uchun
+   * qatordagi birlik asosiy birlikdan farq qilsa koeffitsient SHART. Ilgari bu faqat TOVAR QABUL
+   * QILINAYOTGANDA tekshirilardi — import o'tib ketib, xato oxirgi qadamda chiqardi.
+   */
+  const conversionRows = await tx
+    .select({ fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId, productId: unitConversions.productId })
+    .from(unitConversions)
+    .where(eq(unitConversions.companyId, companyId));
+  const conversionKey = (fromUnitId: string, toUnitId: string, productId: string | null) => `${fromUnitId}|${toUnitId}|${productId ?? "*"}`;
+  const knownConversions = new Set(conversionRows.map((row) => conversionKey(row.fromUnitId, row.toUnitId, row.productId)));
+  const hasConversion = (fromUnitId: string, toUnitId: string, productId: string) =>
+    knownConversions.has(conversionKey(fromUnitId, toUnitId, productId)) || knownConversions.has(conversionKey(fromUnitId, toUnitId, null));
+  /** Fayl o'zi e'lon qilgan koeffitsientlar — hujjat yozilganda yaratiladi. */
+  const newConversions: { productId: string; fromUnitId: string; toUnitId: string; factor: string }[] = [];
 
   const groups = groupRows(rows);
   // Takroriy hujjat raqami: bazadagilar oldindan olinadi (INSERT xatosi tranzaksiyani yiqitmasin)
@@ -358,6 +375,24 @@ export async function importPurchaseOrders(
       }
 
       const unitId = rowUnitId ?? product.baseUnitId;
+      // Birlik asosiy birlikdan farq qilsa — koeffitsient bo'lishi kerak; faylda berilgan bo'lsa yaratiladi
+      if (unitId !== product.baseUnitId && !hasConversion(unitId, product.baseUnitId, product.id)) {
+        const perPackage = Number(cleanNumber(row.unitsPerPackage));
+        if (!Number.isFinite(perPackage) || perPackage <= 0) {
+          fail(
+            line,
+            `${product.name}: "${unitText}" birligidan asosiy birlikka konversiya yo'q — "Birlikdagi dona" ustunini to'ldiring`,
+          );
+          broken = true;
+          continue;
+        }
+        knownConversions.add(conversionKey(unitId, product.baseUnitId, product.id));
+        if (dryRun) {
+          warnings.push({ row: line, key: group.number, message: `Konversiya ochiladi: 1 ${unitText} = ${perPackage} (asosiy birlik)` });
+        } else {
+          newConversions.push({ productId: product.id, fromUnitId: unitId, toUnitId: product.baseUnitId, factor: cleanNumber(row.unitsPerPackage) });
+        }
+      }
       const quantity = Number(cleanNumber(row.quantity));
       if (!Number.isFinite(quantity) || quantity <= 0) {
         fail(line, "Miqdor musbat son bo'lishi kerak");
@@ -392,6 +427,15 @@ export async function importPurchaseOrders(
 
     documents += 1;
     if (dryRun) continue;
+
+    // Fayl e'lon qilgan koeffitsientlar hujjatdan OLDIN yoziladi — tovar qabul qilinganda tayyor bo'lsin
+    if (newConversions.length > 0) {
+      await tx
+        .insert(unitConversions)
+        .values(newConversions.map((item) => ({ companyId, ...item })))
+        .onConflictDoNothing();
+      newConversions.length = 0;
+    }
 
     // Qoralama hujjat: zaxira, qarz va jurnal tegilmaydi — mavjud servis va uning tekshiruvlari bilan
     await createOrder(

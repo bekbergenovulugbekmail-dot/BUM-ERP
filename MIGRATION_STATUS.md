@@ -4104,6 +4104,33 @@ Bo'shliqlar UI da edi va yopildi:
 Testlar: `counts.test.ts` (4 ta yangi) — topilma qo'shish va takrorlanmaslik, sanalmagan qator
 tegilmasligi, band tovardan kam sanashning rad etilishi, bekor qilingan hisobga qator qo'shilmasligi.
 
+## Agent katalogida rasm va xarid importida qadoq birligi (2026-09-23)
+
+### Agentda mahsulot rasmi ko'rinmasdi
+Agent katalogi rasm havolasini FAQAT imzolangan S3 URL bilan berardi (`client && imageKey ? ... : null`),
+productionda esa S3 sozlanmagan — shuning uchun `imageUrl` har doim `null` bo'lib, agent ilovasida
+rasm umuman chiqmasdi (kompyuterdagi ERP bazadagi rasmni ko'rsatardi, chunki u `fileUrl` dan o'tadi).
+
+- `files.service.ts` da umumiy `productImageUrl(productId, key, client, contentPath)` — bazadagi kalit
+  uchun API manzili, saqlashdagi uchun imzolangan URL;
+- agent uchun ALOHIDA marshrut `GET /api/sales-agent/catalog/:productId/image/content`: umumiy
+  `/api/files/...` yo'li `products.view` talab qiladi, sotuv agentida esa u yo'q edi (403);
+- frontendda manzil `apiUrl` bilan to'ldiriladi (biznes konteksti bo'lmasa sessiya topilmay 401 bo'lardi).
+Testlar: `sales-agent-catalog-notify.test.ts` — S3'siz muhitda havola keladi, rasm ochiladi, begona
+kompaniyaga 404; eski "rasm havolasi saqlashsiz null" kutilmasi yangi holatga moslandi.
+
+### Xarid importida "blok"/"pachka" konversiyasi
+Zaxira asosiy birlikda yuritiladi, shuning uchun qatordagi birlik asosiy birlikdan farq qilsa
+koeffitsient shart. Ilgari buni faqat `unitFactorToBase` TOVAR QABUL QILINAYOTGANDA tekshirardi:
+fayl muvaffaqiyatli import bo'lib, xato eng oxirida — "to'g'ridan-to'g'ri qabul" bosilganda chiqardi.
+
+- import endi qatorning o'zida tekshiradi va xatoni o'sha qatorda ko'rsatadi;
+- faylga ixtiyoriy "Birlikdagi dona" (`unitsPerPackage`) ustuni qo'shildi — konversiya yo'q bo'lsa
+  shu bilan ochiladi (mahsulot importidagi bilan bir xil naqsh), hujjatdan OLDIN yoziladi;
+- mavjud konversiya bo'lsa fayl uni takrorlamaydi va ikkilantirmaydi.
+Testlar: `import-units-prices.test.ts` (+3) — konversiyasiz blok xato beradi va hujjat yaratilmaydi;
+"Birlikdagi dona" bilan 10 blok × 12 = 120 dona qoldiq; mavjud konversiya ikkilanmaydi.
+
 ### Blockerlar
 - **Production zaxira xizmati (AUDIT-2, HIGH):** kod va hujjat tayyor (`deploy/backup/`), lekin Railway'da `bum-backup` xizmati, volume va `Cron Schedule` egasi tomonidan yaratilmagan; `BACKUP_PASSPHRASE` ham egasi kiritadi (parol repoda yo'q va hech qayerda chop etilmaydi). Shu qadamgacha production bazasining avtomatik nusxasi YO'Q
 - **Android real qurilma:** `adb devices` bo'sh, emulyator uchun xotira yetmaydi — telefon ulash kerak

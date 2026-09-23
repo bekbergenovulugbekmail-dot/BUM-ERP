@@ -87,7 +87,7 @@ async function agentWithStore(customer: object) {
 const notified = (userId: string, title: string) => db.$count(notifications, and(eq(notifications.userId, userId), eq(notifications.title, title)));
 
 describe("Katalog filtrlari, bildirishnoma oluvchilar va bosh sahifa", () => {
-  it("katalog: kategoriya va brend filtrlari, nomlari; rasm havolasi saqlashsiz null", async () => {
+  it("katalog: kategoriya va brend filtrlari, nomlari; rasmsiz mahsulotda havola null", async () => {
     const ali = await agentWithStore({});
     const filters = (await call(ali.cookie, "GET", "/api/sales-agent/catalog/filters")).json();
     expect(filters.categories.map((c: { name: string }) => c.name)).toEqual(["Gazaklar", "Ichimliklar"]);
@@ -95,9 +95,55 @@ describe("Katalog filtrlari, bildirishnoma oluvchilar va bosh sahifa", () => {
 
     const coke = filters.brands.find((b: { name: string }) => b.name === "Coca-Cola").id;
     const byBrand = (await call(ali.cookie, "GET", `/api/sales-agent/catalog?brandId=${coke}`)).json().products;
-    expect(byBrand).toEqual([expect.objectContaining({ id: cola, brandName: "Coca-Cola", categoryName: "Ichimliklar", imageUrl: null })]);
+    // Bu mahsulotga rasm biriktirilmagan — havola yo'q (rasmi bori quyidagi testda tekshiriladi)
+    expect(byBrand).toEqual([expect.objectContaining({ id: cola, brandName: "Coca-Cola", categoryName: "Ichimliklar", imageUrl: null, hasImage: false })]);
     const snacks = filters.categories.find((c: { name: string }) => c.name === "Gazaklar").id;
     expect((await call(ali.cookie, "GET", `/api/sales-agent/catalog?categoryId=${snacks}`)).json().products.map((p: { id: string }) => p.id)).toEqual([chips]);
+  });
+
+  /**
+   * PRODUCTION HOLATI: fayl saqlash (S3) sozlanmagan — rasm BAZADA saqlanadi.
+   *
+   * Ilgari agent katalogi rasmni faqat imzolangan S3 havolasi bilan berardi, shuning uchun
+   * saqlashsiz muhitda `imageUrl` har doim null bo'lib, agent ilovasida rasm umuman
+   * ko'rinmasdi (kompyuterdagi ERP esa bazadagi rasmni ko'rsatardi).
+   */
+  it("saqlash sozlanmagan bo'lsa ham agent katalogida rasm havolasi keladi va rasm ochiladi", async () => {
+    const ali = await agentWithStore({});
+    // Eng kichik haqiqiy PNG (1×1) — fayl imzosi tekshiruvidan o'tadi
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/api/files/product-image/${cola}/content`,
+      headers: { cookie: company.ownerCookie, "content-type": "image/png" },
+      payload: png,
+    });
+    expect(saved.statusCode, saved.body).toBe(200);
+
+    const item = ((await call(ali.cookie, "GET", "/api/sales-agent/catalog")).json().products as { id: string; imageUrl: string | null }[]).find(
+      (row) => row.id === cola,
+    )!;
+    expect(item.imageUrl, "agent katalogida rasm havolasi").not.toBeNull();
+    // Havola AGENT marshrutiga ishora qiladi: `/api/files/...` agentda `products.view` talab qilardi
+    expect(item.imageUrl!.startsWith(`/api/sales-agent/catalog/${cola}/image/content`), item.imageUrl!).toBe(true);
+
+    // Aynan shu havola rasmni qaytaradi (agent ham ko'ra oladi)
+    const content = await call(ali.cookie, "GET", item.imageUrl!);
+    expect(content.statusCode, content.body.slice(0, 200)).toBe(200);
+    expect(content.headers["content-type"]).toBe("image/png");
+
+    // Bitta mahsulot havolasi ham ishlaydi (503 emas)
+    const single = await call(ali.cookie, "GET", `/api/sales-agent/catalog/${cola}/image`);
+    expect(single.statusCode, single.body).toBe(200);
+    expect(single.json().url).toBe(item.imageUrl);
+
+    // Begona kompaniya agenti bu rasmni ololmaydi — 404 (mahsulot borligi ham bildirilmaydi)
+    const other = await createCompany(app, (await signedIn(app, { isPlatformAdmin: true })).cookie, { name: "Begona" });
+    const stranger = await addEmployee(app, other, "Sotuv agenti");
+    expect((await call(stranger.cookie, "GET", item.imageUrl!)).statusCode, "tenant chegarasi").toBe(404);
   });
 
   it("kredit limiti oshsa bildirishnoma va audit; siyosatda tanlangan oluvchilar; bosh sahifa mijozlari va top mahsulotlar", async () => {

@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
-import { ApiError, api, errorMessage } from "@/lib/api.ts";
+import { ApiError, api, apiUrl, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { formatMoney } from "@/hooks/use-currencies.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
@@ -32,6 +32,12 @@ import {
   type Promotion,
   type StoreProfile,
 } from "../_lib/types.ts";
+
+/**
+ * Rasm manzili: saqlash (S3) sozlanmagan bo'lsa server API yo'lini beradi (`/api/files/...`) —
+ * unga biznes konteksti qo'shilishi shart, aks holda sessiya topilmay 401 bo'ladi.
+ */
+const imageSrc = (url: string | null) => (url?.startsWith("/api/") ? apiUrl(url) : url);
 
 const PAGE_SIZE = 30;
 const ALL = "all";
@@ -118,7 +124,7 @@ function ProductCard({
     >
       <div className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted">
         {product.imageUrl ? (
-          <img src={product.imageUrl} alt="" loading="lazy" className="h-full w-full object-cover" />
+          <img src={imageSrc(product.imageUrl)!} alt="" loading="lazy" className="h-full w-full object-cover" />
         ) : (
           <ImageIcon className="h-6 w-6 text-muted-foreground/50" />
         )}
@@ -182,7 +188,7 @@ function ProductDialog({
           <DialogDescription>{subtitle || t("order.catalog")}</DialogDescription>
         </DialogHeader>
         {product.imageUrl ? (
-          <img src={product.imageUrl} alt={product.name} className="max-h-72 w-full rounded-xl bg-muted object-contain" />
+          <img src={imageSrc(product.imageUrl)!} alt={product.name} className="max-h-72 w-full rounded-xl bg-muted object-contain" />
         ) : (
           <div className="flex h-28 items-center justify-center gap-2 rounded-xl bg-muted text-xs text-muted-foreground">
             <ImageIcon className="h-5 w-5" /> {t("order.no_image")}

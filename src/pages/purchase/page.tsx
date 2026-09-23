@@ -95,6 +95,8 @@ export default function PurchasePage() {
               { key: "product", aliases: ["Mahsulot", "Mahsulot nomi", "SKU", "product"], required: true, example: "Coca-Cola 1L" },
               { key: "quantity", aliases: ["Miqdor", "quantity"], required: true, example: "24" },
               { key: "unit", aliases: ["Birlik", "unit"], example: "Dona" },
+              // Birlik asosiy birlikdan farq qilsa (masalan "Blok") — bitta blokdagi dona soni
+              { key: "unitsPerPackage", aliases: ["Birlikdagi dona", "unitsPerPackage"], example: "12" },
               { key: "price", aliases: ["Narx", "price"], required: true, example: "8000" },
               { key: "discountPercent", aliases: ["Chegirma %", "discountPercent"], example: "0" },
               { key: "taxRate", aliases: ["Soliq %", "taxRate"], example: "0" },

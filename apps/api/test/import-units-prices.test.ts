@@ -469,3 +469,92 @@ describe("Xarid importi va to'liq zanjir", () => {
     expect(conversionCount!.count, "konversiya ham yozilmadi").toBe(0);
   });
 });
+
+/**
+ * XARID IMPORTIDA QADOQ BIRLIGI ("blok", "pachka").
+ *
+ * Zaxira doim ASOSIY birlikda yuritiladi, shuning uchun qatordagi birlik asosiy birlikdan farq
+ * qilsa koeffitsient shart. Ilgari bu faqat TOVAR QABUL QILINAYOTGANDA tekshirilardi: fayl
+ * muvaffaqiyatli import bo'lib, xato eng oxirida — "to'g'ridan-to'g'ri qabul" bosilganda chiqardi.
+ * Endi xato aynan o'sha QATORDA, tekshirish (dryRun) bosqichidayoq ko'rinadi.
+ */
+describe("Xarid importi: qadoq birligi va konversiya", () => {
+  /** Asosiy birligi "dona" bo'lgan mahsulot — xaridda "blok" ishlatiladi. */
+  async function pieceProduct(sku: string) {
+    const res = await importProducts([{ name: `Mahsulot ${sku}`, sku, baseUnit: "Dona", salesPrice: "10000" }]);
+    expect(res.statusCode, res.body).toBe(200);
+    const product = await productBySku(sku);
+    expect(product!.baseUnitId).toBe(piece);
+    return product!;
+  }
+
+  const purchaseRow = (product: { name: string }, extra: object) => ({
+    supplier: "TA'MINOTCHI",
+    warehouse: "Asosiy ombor",
+    orderDate: todayIso(),
+    product: product.name,
+    quantity: "10",
+    price: "120000",
+    ...extra,
+  });
+
+  it("konversiyasiz blok — xato AYNAN QATORDA, hujjat yaratilmaydi", async () => {
+    const product = await pieceProduct("PKG-1");
+
+    const res = await importPurchases([purchaseRow(product, { unit: "Blok" })]);
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json();
+    expect(body.created, "hujjat yaratilmadi").toBe(0);
+    expect(body.errors).toHaveLength(1);
+    expect(body.errors[0].message).toMatch(/konversiya yo'q/i);
+    expect(body.errors[0].message).toMatch(/Birlikdagi dona/i);
+    expect(await conversionsOf(product.id), "konversiya ochilmadi").toHaveLength(0);
+  });
+
+  it("\"Birlikdagi dona\" berilsa — konversiya ochiladi va qabulda 10 blok 120 dona bo'ladi", async () => {
+    const product = await pieceProduct("PKG-2");
+
+    // Avval tekshirish: bazaga hech narsa yozilmaydi, lekin nima ochilishi aytiladi
+    const preview = await importPurchases([purchaseRow(product, { unit: "Blok", unitsPerPackage: "12" })], { dryRun: true });
+    expect(preview.statusCode, preview.body).toBe(200);
+    expect(preview.json().errors).toHaveLength(0);
+    expect((preview.json().warnings as { message: string }[]).some((item) => /Konversiya ochiladi/i.test(item.message))).toBe(true);
+    expect(await conversionsOf(product.id), "dryRun bazaga yozmaydi").toHaveLength(0);
+
+    // Haqiqiy import
+    const res = await importPurchases([purchaseRow(product, { unit: "Blok", unitsPerPackage: "12" })]);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().created).toBe(1);
+    const conversions = await conversionsOf(product.id);
+    expect(conversions).toHaveLength(1);
+    expect(conversions[0]).toMatchObject({ fromUnitId: box, toUnitId: piece });
+    expect(money(conversions[0]!.factor)).toBe(12);
+
+    // Hujjatni yakunlash: 10 blok → 120 dona qoldiq (konversiya bir marta qo'llanadi)
+    const orderId = (await call(company.ownerCookie, "GET", "/api/purchase/orders?limit=1")).json().orders[0].id as string;
+    const done = await call(company.ownerCookie, "POST", `/api/purchase/orders/${orderId}/complete`);
+    expect(done.statusCode, done.body).toBe(201);
+    expect((await stockOf(product.id)).quantity, "10 blok × 12 = 120 dona").toBe(120);
+  });
+
+  it("konversiya allaqachon bor — fayl uni takrorlamaydi va ikkilantirmaydi", async () => {
+    // Mahsulot importi konversiyani o'zi ochadi (blok = 24 dona)
+    expect(
+      (await importProducts([{ name: "Mahsulot PKG-3", sku: "PKG-3", baseUnit: "Dona", purchaseUnit: "Blok", unitsPerPackage: "24", salesPrice: "5000" }]))
+        .statusCode,
+    ).toBe(200);
+    const product = (await productBySku("PKG-3"))!;
+    expect(await conversionsOf(product.id)).toHaveLength(1);
+
+    // Xarid faylida "Birlikdagi dona" umuman yo'q — mavjud konversiya ishlatiladi
+    const res = await importPurchases([purchaseRow(product, { unit: "Blok" })]);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().errors, res.body).toHaveLength(0);
+    expect(res.json().created).toBe(1);
+    expect(await conversionsOf(product.id), "konversiya ikkilanmadi").toHaveLength(1);
+
+    const orderId = (await call(company.ownerCookie, "GET", "/api/purchase/orders?limit=1")).json().orders[0].id as string;
+    expect((await call(company.ownerCookie, "POST", `/api/purchase/orders/${orderId}/complete`)).statusCode).toBe(201);
+    expect((await stockOf(product.id)).quantity, "10 blok × 24 = 240 dona").toBe(240);
+  });
+});
