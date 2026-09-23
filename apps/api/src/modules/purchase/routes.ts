@@ -13,6 +13,8 @@
  *   POST   /orders/:orderId/confirm                       purchase.approve
  *   POST   /orders/:orderId/cancel                        purchase.cancel
  *   POST   /orders/:orderId/receipts                      warehouse.receive (+ ombor ruxsati)
+ *   POST   /orders/:orderId/complete                      purchase.approve + warehouse.receive
+ *                                                         (tasdiqlash + qolgan tovarni to'liq qabul + ixtiyoriy to'lov)
  *   POST   /orders/:orderId/returns                       purchase.return (qisman; ta'minotchi qaytargan pul bilan)
  *   GET    /orders/export (?supplierId=&status=&dateFrom=&dateTo=)   purchase.view (CSV: hujjat qatorlari)
  *   POST   /orders/import ({rows, dryRun})                purchase.create (qoralama hujjat; dryRun — faqat tekshirish)
@@ -30,6 +32,7 @@ import { authOf, requireAuth } from "../auth/guard.js";
 import { requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import {
   cancelOrder,
+  completePurchase,
   confirmOrder,
   createOrder,
   getOrder,
@@ -182,6 +185,27 @@ const receiptBody = z.strictObject({
     .min(1)
     .max(500),
 });
+
+/**
+ * "To'g'ridan-to'g'ri qabul qilish": qoralama bo'lsa tasdiqlanadi, QOLGAN tovar to'liq qabul qilinadi
+ * va ixtiyoriy to'lov yoziladi. To'lov berilmasa hujjat ta'minotchi qarziga qoladi.
+ */
+const completeBody = z
+  .strictObject({
+    receiptDate: isoDate.optional(),
+    notes: nullableText(2000),
+    payment: z
+      .strictObject({
+        amount: decimalSchema({ scale: 2, positive: true }),
+        method: z.enum(["cash", "bank", "card", "transfer"]).default("cash"),
+        cashAccountId: z.uuid().nullable().optional(),
+        paymentDate: isoDate.optional(),
+        reference: nullableText(100),
+      })
+      .nullable()
+      .optional(),
+  })
+  .optional();
 
 const purchaseReturnBody = z.strictObject({
   items: z.array(z.strictObject({ orderItemId: z.uuid(), quantity: positiveQty })).min(1).max(500),
@@ -385,6 +409,21 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
     const result = await writeInTenant(req, "warehouse.receive", (tx, tenant) =>
       receiveGoods(tx, tenant, orderId, body, requestMeta(req)),
     );
+    reply.status(201);
+    return result;
+  });
+
+  /** Bir bosqichda yakunlash — bitta odam xaridni kiritib, o'zi qabul qilib, to'lovni ham yozadi. */
+  app.post("/orders/:orderId/complete", async (req, reply) => {
+    const { orderId } = orderParams.parse(req.params);
+    const body = completeBody.parse(req.body) ?? {};
+    const result = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      // Tasdiqlash va to'lov — xarid ruxsati; tovarni jismonan qabul qilish — ombor ruxsati
+      await requirePermission(tx, tenant, "purchase.approve");
+      await requirePermission(tx, tenant, "warehouse.receive");
+      return completePurchase(tx, tenant, orderId, body, requestMeta(req));
+    });
     reply.status(201);
     return result;
   });

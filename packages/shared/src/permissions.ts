@@ -391,7 +391,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
   },
   {
     name: "Supervayzer",
-    description: "Savdo agentlari nazorati: marshrut, lokatsiya, aksiyalar",
+    description: "Savdo agentlari nazorati va o'zi ham zakaz olishi: marshrut, lokatsiya, aksiyalar",
     color: "#0891b2",
     isSystem: true,
     permissions: [
@@ -399,6 +399,10 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "sales.view",
       "crm.view",
       "distribution.view", "distribution.manage",
+      // Supervayzer o'zi ham zakaz oladi: agent ish joyi unga ham ochiq (hisobi faol savdo agentiga
+      // bog'langan bo'lishi kerak — "Distribyutsiya → Sotuv agentlari" da bir marta bog'lanadi)
+      "sales_agent.use",
+      "sales_agent.customer.edit", "sales_agent.customer.location.edit", "sales_agent.customer.photo.create",
       "sales_agent.supervise",
       "sales_agent.location.view", "sales_agent.location.live", "sales_agent.location.history",
       "promotions.manage", "sales_agent.agents.manage",

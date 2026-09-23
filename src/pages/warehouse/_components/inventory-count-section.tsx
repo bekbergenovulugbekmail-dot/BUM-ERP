@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Play, CheckCircle, ClipboardList, ChevronRight, Check } from "lucide-react";
+import { Plus, Play, CheckCircle, ClipboardList, ChevronRight, Check, Search, Ban, PackagePlus } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -34,6 +34,13 @@ export default function InventoryCountSection({ warehouseId }: Props) {
   const [newName, setNewName] = useState("");
   const [activeCountId, setActiveCountId] = useState<string | null>(null);
   const [countInputs, setCountInputs] = useState<Record<string, string>>({});
+  /** Ochiq hisob ichidagi qidiruv — yuzlab mahsulotli omborda qatorni topish uchun. */
+  const [itemSearch, setItemSearch] = useState("");
+  /** "Topilma": omborda bor, lekin hisobda yo'q mahsulotni qo'shish. */
+  const [addOpen, setAddOpen] = useState(false);
+  const [productSearch, setProductSearch] = useState("");
+  /** Tuzatmalarni qo'llashdan oldingi tasdiq — nima o'zgarishi ko'rsatiladi. */
+  const [confirmApply, setConfirmApply] = useState(false);
 
   // Ombor almashtirilganda boshqa omborning hisobi ochiq qolmasin (render paytida moslash)
   const [shownWarehouseId, setShownWarehouseId] = useState(warehouseId);
@@ -61,6 +68,14 @@ export default function InventoryCountSection({ warehouseId }: Props) {
   const applyAdjustments = useApiMutation((id: string) =>
     api.post<{ adjusted: number }>(`/api/inventory/counts/${id}/apply`),
   );
+  const addItem = useApiMutation((input: { countId: string; productId: string }) =>
+    api.post(`/api/inventory/counts/${input.countId}/items`, { productId: input.productId }),
+  );
+  // Qo'shish oynasi ochiq bo'lgandagina qidiriladi
+  const productOptions = useApiQuery<{ products: { id: string; name: string; sku: string }[] }>(
+    addOpen ? "/api/catalog/products" : null,
+    { search: productSearch.trim() || undefined, limit: 20 },
+  ).data?.products;
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -110,7 +125,31 @@ export default function InventoryCountSection({ warehouseId }: Props) {
     try {
       const { adjusted } = await applyAdjustments.mutateAsync(id);
       toast.success(`Tuzatmalar qo'llanildi (${adjusted} ta mahsulot)`);
+      setConfirmApply(false);
       setActiveCountId(null);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
+  const handleCancelCount = async (id: string) => {
+    try {
+      await updateStatus.mutateAsync({ id, status: "cancelled" });
+      toast.success("Inventarizatsiya bekor qilindi");
+      setActiveCountId(null);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
+  /** Omborda qoldig'i yo'q topilma ham sanaladi — mahsulot hisobga qo'shiladi. */
+  const handleAddProduct = async (productId: string) => {
+    if (!activeCountId) return;
+    try {
+      await addItem.mutateAsync({ countId: activeCountId, productId });
+      toast.success("Mahsulot hisobga qo'shildi");
+      setAddOpen(false);
+      setProductSearch("");
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -121,6 +160,19 @@ export default function InventoryCountSection({ warehouseId }: Props) {
     !activeCount.adjustmentsMade &&
     activeCount.status !== "completed" &&
     activeCount.status !== "cancelled";
+
+  // Qo'llash natijasi: faqat SANALGAN qatorlar tuzatiladi, sanalmaganlari tegilmaydi
+  const counted = activeCount?.items.filter((item) => item.countedQty !== null) ?? [];
+  const notCounted = (activeCount?.items.length ?? 0) - counted.length;
+  const surplusLines = counted.filter((item) => toNumber(item.difference) > 0).length;
+  const shortageLines = counted.filter((item) => toNumber(item.difference) < 0).length;
+  const needle = itemSearch.trim().toLowerCase();
+  const visibleItems = (activeCount?.items ?? []).filter(
+    (item) =>
+      needle === "" ||
+      item.productName.toLowerCase().includes(needle) ||
+      (item.productSku ?? "").toLowerCase().includes(needle),
+  );
 
   return (
     <div className="flex flex-col gap-4 h-full">
@@ -157,6 +209,93 @@ export default function InventoryCountSection({ warehouseId }: Props) {
         </DialogContent>
       </Dialog>
 
+      {/* "Topilma" qo'shish: omborda bor, hisobda yo'q mahsulot */}
+      <Dialog open={addOpen} onOpenChange={(open) => { setAddOpen(open); if (!open) setProductSearch(""); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Hisobga mahsulot qo'shish</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              autoFocus
+              placeholder="Nomi yoki SKU"
+              value={productSearch}
+              onChange={(e) => setProductSearch(e.target.value)}
+            />
+            <div className="max-h-64 overflow-auto rounded-lg border border-border divide-y divide-border">
+              {productOptions === undefined ? (
+                <div className="p-3 space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-6 w-full" />)}
+                </div>
+              ) : productOptions.length === 0 ? (
+                <p className="p-3 text-xs text-muted-foreground text-center">Mahsulot topilmadi</p>
+              ) : (
+                productOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    disabled={addItem.isPending}
+                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted/50 disabled:opacity-50"
+                    onClick={() => void handleAddProduct(option.id)}
+                  >
+                    <span className="truncate">{option.name}</span>
+                    <span className="ml-2 shrink-0 font-mono text-[11px] text-muted-foreground">{option.sku}</span>
+                  </button>
+                ))
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Omborda qoldig'i yo'q mahsulot ham qo'shiladi — sanalgan miqdor kirim bo'lib yoziladi.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Qo'llashdan oldin: nima o'zgarishi aniq ko'rsatiladi (amal qaytarilmaydi) */}
+      <Dialog open={confirmApply} onOpenChange={setConfirmApply}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Tuzatmalarni qo'llash</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            <p className="text-muted-foreground text-xs">
+              Sanalgan qatorlar bo'yicha ombor qoldig'i to'g'rilanadi va buxgalteriyaga yozuv tushadi.
+              Bu amalni qaytarib bo'lmaydi.
+            </p>
+            <div className="rounded-lg border border-border divide-y divide-border text-xs">
+              <div className="flex justify-between px-3 py-2">
+                <span className="text-muted-foreground">Sanalgan</span>
+                <span className="font-medium">{counted.length} ta</span>
+              </div>
+              <div className="flex justify-between px-3 py-2">
+                <span className="text-muted-foreground">Ortiqcha chiqqan</span>
+                <span className="font-medium text-green-600">{surplusLines} ta</span>
+              </div>
+              <div className="flex justify-between px-3 py-2">
+                <span className="text-muted-foreground">Kam chiqqan</span>
+                <span className="font-medium text-destructive">{shortageLines} ta</span>
+              </div>
+              <div className="flex justify-between px-3 py-2">
+                <span className="text-muted-foreground">Sanalmagan (tegilmaydi)</span>
+                <span className="font-medium">{notCounted} ta</span>
+              </div>
+            </div>
+            {counted.length === 0 && (
+              <p className="text-xs text-destructive">Hech bir mahsulot sanalmagan — qo'llashdan foyda yo'q.</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setConfirmApply(false)}>Bekor</Button>
+            <Button
+              disabled={applyAdjustments.isPending || counted.length === 0 || !activeCount}
+              onClick={() => activeCount && void handleApply(activeCount.id)}
+            >
+              Qo'llash
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Active count detail */}
       {activeCountId && activeCount && (
         <div className="border border-border rounded-xl overflow-hidden">
@@ -167,15 +306,44 @@ export default function InventoryCountSection({ warehouseId }: Props) {
                 {activeCount.items.filter((i) => i.countedQty !== null).length} / {activeCount.items.length} ta mahsulot sanalib bo'ldi
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button variant="secondary" size="sm" onClick={() => setActiveCountId(null)}>
                 Yopish
               </Button>
+              {editable && canCount && (
+                <Button variant="secondary" size="sm" onClick={() => setAddOpen(true)}>
+                  <PackagePlus className="h-4 w-4 mr-1" /> Mahsulot qo'shish
+                </Button>
+              )}
+              {editable && canCount && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive"
+                  disabled={updateStatus.isPending}
+                  onClick={() => handleCancelCount(activeCount.id)}
+                >
+                  <Ban className="h-4 w-4 mr-1" /> Bekor qilish
+                </Button>
+              )}
               {editable && activeCount.status === "in_progress" && canApply && (
-                <Button size="sm" disabled={applyAdjustments.isPending} onClick={() => handleApply(activeCount.id)}>
+                <Button size="sm" disabled={applyAdjustments.isPending} onClick={() => setConfirmApply(true)}>
                   <CheckCircle className="h-4 w-4 mr-1" /> Tuzatmalarni qo'llash
                 </Button>
               )}
+            </div>
+          </div>
+
+          {/* Qidiruv — ko'p mahsulotli omborda kerakli qatorni topish */}
+          <div className="px-4 py-2 border-b border-border">
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                className="h-8 pl-7 text-xs"
+                placeholder="Mahsulot nomi yoki SKU bo'yicha qidirish"
+                value={itemSearch}
+                onChange={(e) => setItemSearch(e.target.value)}
+              />
             </div>
           </div>
           <div className="overflow-auto max-h-[400px]">
@@ -190,7 +358,7 @@ export default function InventoryCountSection({ warehouseId }: Props) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {activeCount.items.map((item) => {
+                {visibleItems.map((item) => {
                   const diff = item.difference === null ? null : toNumber(item.difference);
                   return (
                     <tr key={item.id} className="hover:bg-muted/30">
@@ -212,6 +380,14 @@ export default function InventoryCountSection({ warehouseId }: Props) {
                             onChange={(e) =>
                               setCountInputs((p) => ({ ...p, [item.id]: e.target.value }))
                             }
+                            // Sanoqchi klaviaturadan chiqmasin: Enter saqlaydi, fokusdan chiqqanda ham saqlanadi
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void handleSaveItem(activeCount.id, item.id);
+                              }
+                            }}
+                            onBlur={() => void handleSaveItem(activeCount.id, item.id)}
                             disabled={!editable || !canCount}
                           />
                           {editable && canCount && (
@@ -246,6 +422,11 @@ export default function InventoryCountSection({ warehouseId }: Props) {
                 })}
               </tbody>
             </table>
+            {visibleItems.length === 0 && (
+              <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+                {needle ? "Qidiruv bo'yicha mahsulot topilmadi" : "Hisobda mahsulot yo'q"}
+              </p>
+            )}
           </div>
         </div>
       )}

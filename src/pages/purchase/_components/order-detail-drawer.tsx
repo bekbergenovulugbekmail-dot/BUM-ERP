@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import {
   X, CheckCircle, Truck, CreditCard,
-  Ban, ChevronDown, ChevronUp, FileDown, Tag,
+  Ban, ChevronDown, ChevronUp, FileDown, Tag, Zap,
 } from "lucide-react";
 import LabelPrintDialog from "@/components/label-print-dialog.tsx";
 import { toLabelProduct, type LabelItem } from "@/lib/print/label-html.ts";
@@ -83,9 +83,19 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const recordPayment = useApiMutation((body: object) =>
     api.post<{ created: boolean }>("/api/purchase/payments", body),
   );
+  // To'g'ridan-to'g'ri yakunlash: tasdiq + qolgan tovarni to'liq qabul + ixtiyoriy to'lov (bitta so'rov)
+  const completeOrder = useApiMutation((body: object) =>
+    api.post<{ order: PurchaseOrderDetail }>(`/api/purchase/orders/${orderId}/complete`, body),
+  );
 
   const [showReceive, setShowReceive] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
+  const [showComplete, setShowComplete] = useState(false);
+  const [completeMethod, setCompleteMethod] = useState<PaymentMethod>("cash");
+  const [completeAmount, setCompleteAmount] = useState("");
+  const [completeAccount, setCompleteAccount] = useState(AUTO_ACCOUNT);
+  /** "Qarzga" — to'lov yozilmaydi, summa ta'minotchi qarziga qoladi. */
+  const [completeOnCredit, setCompleteOnCredit] = useState(false);
   const [receiveLines, setReceiveLines] = useState<Record<string, ReceiveLine>>({});
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
@@ -196,6 +206,38 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
     finally { setLoading(false); }
   };
 
+  /**
+   * Bitta tugma: qoralama bo'lsa tasdiqlanadi, QOLGAN tovar to'liq qabul qilinadi va tanlangan
+   * usulda to'lov yoziladi. Serverda hammasi bitta tranzaksiyada — to'lov xato bo'lsa qabul ham bekor.
+   */
+  const handleComplete = async () => {
+    if (!order) return;
+    setLoading(true);
+    try {
+      const amount = (completeAmount.trim() || String(completeRemaining)).trim();
+      const result = await completeOrder.mutateAsync({
+        ...(completeOnCredit
+          ? {}
+          : {
+              payment: {
+                amount,
+                method: completeMethod,
+                ...(completeAccount !== AUTO_ACCOUNT ? { cashAccountId: completeAccount } : {}),
+              },
+            }),
+      });
+      toast.success(
+        completeOnCredit
+          ? "Tovar qabul qilindi — summa ta'minotchi qarzida"
+          : `Xarid yakunlandi: tovar qabul qilindi va ${formatMoney(amount, currencies.base)} to'lov yozildi`,
+      );
+      setShowComplete(false);
+      setCompleteAmount("");
+      void result;
+    } catch (err) { toast.error(errorMessage(err)); }
+    finally { setLoading(false); }
+  };
+
   const handlePrintPO = () => {
     if (!order) return;
     generatePurchaseOrderPDF({
@@ -245,6 +287,16 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const payRemaining = activeBucket ? num(activeBucket.totalAmount) - num(activeBucket.paidAmount) : balance;
   const multiCurrency = buckets.length > 1 || buckets.some((b) => b.currency !== currencies.base);
   const hasOpenBalance = buckets.length > 0 ? openBuckets.length > 0 : balance > 0;
+  // Yakunlash faqat qabul qilinmagan qoldiq bo'lsa; to'lov summasi — to'lanmagan qismi
+  const pendingLines = order?.items.filter((item) => num(item.pendingQty) > 0) ?? [];
+  const completeRemaining = order ? Math.max(0, num(order.totalAmount) - num(order.paidAmount)) : 0;
+  const canComplete =
+    order !== undefined &&
+    pendingLines.length > 0 &&
+    !["cancelled"].includes(order.status) &&
+    !multiCurrency &&
+    can("purchase.approve") &&
+    can("warehouse.receive");
 
   return (
     <AnimatePresence>
@@ -323,8 +375,15 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
 
                 {/* Action buttons */}
                 <div className="flex flex-wrap gap-2">
+                  {/* Bitta odam xaridni kiritib, o'zi qabul qiladi: tasdiq + to'liq qabul + to'lov */}
+                  {canComplete && (
+                    <Button size="sm" onClick={() => setShowComplete((p) => !p)}>
+                      <Zap className="h-4 w-4 mr-1" /> To'g'ridan-to'g'ri qabul qilish
+                      {showComplete ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
+                    </Button>
+                  )}
                   {order.status === "draft" && can("purchase.approve") && (
-                    <Button size="sm" onClick={handleConfirm} disabled={confirmOrder.isPending}>
+                    <Button size="sm" variant="secondary" onClick={handleConfirm} disabled={confirmOrder.isPending}>
                       <CheckCircle className="h-4 w-4 mr-1" /> Tasdiqlash
                     </Button>
                   )}
@@ -359,6 +418,87 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                 )}
 
                 {/* Receive form */}
+                {showComplete && (
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+                    <div>
+                      <p className="text-sm font-semibold">Xaridni yakunlash</p>
+                      <p className="text-xs text-muted-foreground">
+                        {pendingLines.length} ta qator to'liq qabul qilinadi
+                        {order.status === "draft" ? " (hujjat avval tasdiqlanadi)" : ""}
+                        {completeOnCredit ? " va summa ta'minotchi qarziga yoziladi" : " va to'lov qayd etiladi"}
+                      </p>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5"
+                        checked={completeOnCredit}
+                        onChange={(e) => setCompleteOnCredit(e.target.checked)}
+                      />
+                      Qarzga olish — hozir to'lov qilinmaydi
+                    </label>
+
+                    {!completeOnCredit && (
+                      <>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label className="text-xs">Summa ({currencies.base})</Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              value={completeAmount}
+                              onChange={(e) => setCompleteAmount(e.target.value)}
+                              placeholder={String(completeRemaining)}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">To'lov usuli</Label>
+                            <Select
+                              value={completeMethod}
+                              onValueChange={(v) => { setCompleteMethod(v as PaymentMethod); setCompleteAccount(AUTO_ACCOUNT); }}
+                            >
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="cash">Naqd</SelectItem>
+                                <SelectItem value="bank">Bank</SelectItem>
+                                <SelectItem value="card">Karta</SelectItem>
+                                <SelectItem value="transfer">O'tkazma</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        {payAccounts && (() => {
+                          const choices = payAccountChoices(payAccounts, currencies.base, completeMethod);
+                          const autoAccount = completeMethod === "cash" ? null : (choices[0] ?? null);
+                          return (
+                            <div>
+                              <Label htmlFor="complete-pay-account" className="text-xs">Qaysi hisobdan</Label>
+                              <Select value={completeAccount} onValueChange={setCompleteAccount}>
+                                <SelectTrigger id="complete-pay-account"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value={AUTO_ACCOUNT}>
+                                    Avtomatik — {autoAccount ? autoAccount.name : "asosiy kassa"}
+                                  </SelectItem>
+                                  {choices.map((account) => (
+                                    <SelectItem key={account.id} value={account.id}>
+                                      {account.name} ({formatMoney(account.balance, account.currency)})
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    )}
+
+                    <Button size="sm" className="w-full" onClick={handleComplete} disabled={loading}>
+                      {loading ? "..." : completeOnCredit ? "Qabul qilish (qarzga)" : "Qabul qilish va to'lash"}
+                    </Button>
+                  </div>
+                )}
+
                 {showReceive && (
                   <div className="border border-border rounded-xl p-4 space-y-3 bg-muted/20">
                     <p className="text-sm font-semibold">Tovar qabul qilish</p>

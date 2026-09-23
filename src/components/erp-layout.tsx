@@ -31,6 +31,7 @@ import {
   Lock,
   KeyRound,
   ExternalLink,
+  Smartphone,
   type LucideIcon,
 } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -66,7 +67,7 @@ import NotificationCenter from "@/components/notification-center.tsx";
 import PWAInstallBanner from "@/components/pwa-install-banner.tsx";
 import { GlobalSearch } from "@/components/global-search.tsx";
 import { useAuth, useCurrentUser } from "@/hooks/use-auth.ts";
-import { useActiveCompany, useMyCompanies, useSwitchCompany } from "@/hooks/use-company.ts";
+import { useActiveCompany, useMyCompanies, usePermissions, useSwitchCompany } from "@/hooks/use-company.ts";
 import { isAgentOnly, isDeliveryAgentOnly } from "@/lib/agent-access.ts";
 import { Authenticated, Unauthenticated } from "@/components/auth-gates.tsx";
 import { useTheme } from "next-themes";
@@ -113,6 +114,10 @@ function SidebarNav({ collapsed, onToggle, onLinkClick }: SidebarProps) {
   const { lng } = useParams<{ lng: string }>();
   const visibleModules = useVisibleModules();
   const location = useLocation();
+  // Supervayzer kabi xodimda ERP ham, agent ish joyi ham bor — ERP menyusidan o'tib zakaz oladi
+  // (faqat agent ruxsati bo'lsa foydalanuvchi allaqachon agent ish joyiga yo'naltiriladi)
+  const { can } = usePermissions();
+  const agentWorkspace = can("sales_agent.use");
 
   const GROUP_LABELS: Record<string, Record<string, string>> = {
     uz: { main: "Asosiy", operations: "Operatsiyalar", business: "Biznes", insights: "Tahlil", system: "Tizim" },
@@ -201,6 +206,26 @@ function SidebarNav({ collapsed, onToggle, onLinkClick }: SidebarProps) {
             );
           })}
         </TooltipProvider>
+
+        {/* Mobil agent ish joyi — ERP bo'limi emas, shuning uchun alohida havola */}
+        {agentWorkspace && (
+          <div>
+            {!collapsed && (
+              <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40 select-none">
+                {groupLabels.operations ?? MODULE_GROUPS.operations}
+              </p>
+            )}
+            <NavLink
+              to={`/${lng}/sales-agent`}
+              onClick={onLinkClick}
+              title="Sotuv agenti ish joyi"
+              className="flex items-center gap-3 px-2 py-2 rounded-md text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+            >
+              <Smartphone className={cn("shrink-0", collapsed ? "h-5 w-5" : "h-4 w-4")} />
+              {!collapsed && <span className="truncate">Zakaz olish</span>}
+            </NavLink>
+          </div>
+        )}
       </nav>
     </aside>
   );

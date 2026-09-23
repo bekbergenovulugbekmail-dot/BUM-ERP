@@ -4058,6 +4058,52 @@ To'liq API to'plami: 956/956; frontend: 145/145.
 11. PR `feat/postgres-migration` → `main` — o'tish kuni kelishilgach
 12. Railway'dagi eski xizmatlar (`BUM-ERP`, `logto`, logto'ning Postgres'i) hali bo'lsa — egasi o'chiradi (tasdiqsiz o'chirilmaydi)
 
+## Inventarizatsiya, to'g'ridan-to'g'ri qabul, supervayzer zakazi va mahsulot rasmi (2026-09-23)
+
+### Mahsulot rasmi ko'rinmasdi — sabab `apiUrl` da edi
+Rasm havolasi serverdan SO'ROV QATORI bilan keladi (`/api/files/product-image/<id>/content?v=<kalit>`).
+`apiUrl` esa biznes kontekstini qo'shayotganda yana `?` qo'yardi:
+`...content?v=abc?bumCompany=bonnu-market`. Natijada `bumCompany` parametr bo'lmay qolardi, sessiya
+cookie'si esa biznesga bog'langan (`bum_s_<biznes>`) — so'rov 401 qaytar va rasm ko'rinmasdi.
+
+- `buildUrl` endi yo'lda `?` bo'lsa `&` bilan qo'shadi (barcha brauzer yuklaydigan manzillar uchun);
+- test: `src/lib/company-context.test.ts` — ikkala parametr ham `URL` bilan o'qib tekshiriladi;
+- productionda ishlatiladigan yo'l (S3'siz, rasm BAZADA) umuman test bilan qoplanmagan edi —
+  `apps/api/test/files.test.ts` ga uchidan-uchiga test qo'shildi (yuklash → ro'yxatda `imageKey` →
+  ko'rish havolasi → rasm mazmuni; begona kompaniya 404).
+
+### Xaridni bir bosqichda yakunlash
+Kichik biznesda xaridni kirituvchi odam uni o'zi qabul qiladi. `POST /orders/:orderId/complete`
+(`purchase.approve` + `warehouse.receive`): qoralama bo'lsa tasdiqlanadi, QOLGAN tovar to'liq qabul
+qilinadi, ixtiyoriy to'lov yoziladi — hammasi BITTA tranzaksiyada. Yangi hisob-kitob yo'q: qabul aynan
+`receiveGoods`, to'lov aynan `recordSupplierPayment` orqali (zaxira, AVCO, jurnal, ta'minotchi qarzi va
+backorder taqsimoti o'zgarmagan). UI: xarid hujjatida "To'g'ridan-to'g'ri qabul qilish" — to'lov usuli
+yoki "qarzga" tanlanadi. Import qilingan qoralama hujjat ham shu tugma bilan yakunlanadi.
+Testlar: `purchase.test.ts` (4 ta yangi) — to'liq oqim, qarzga olish, qisman qabuldan keyin yakunlash va
+takror bosishda xato, bekor qilingan hujjat, `warehouse.receive` yo'q xodimga 403.
+
+### Supervayzer ham zakaz oladi
+"Supervayzer" roliga `sales_agent.use` va agent mijoz ruxsatlari qo'shildi; mavjud kompaniyalar uchun
+`0079_supervisor_takes_orders.sql` (faqat yetishmayotganini qo'shadi, idempotent). ERP yon menyusida
+"Zakaz olish" havolasi — `sales_agent.use` bor, lekin ERP bo'limlari ham bor xodimga (faqat agent
+ruxsati bo'lganlar allaqachon agent ish joyiga yo'naltiriladi). Ruxsatning o'zi yetmaydi: hisob FAOL
+savdo agentiga bog'lanishi kerak — "Distribyutsiya → Sotuv agentlari" da `userId` bilan bir marta.
+Test: `supervisor-orders.test.ts` (4) — rol tarkibi, bog'lanmagan holatda 403, bog'langach ish joyi
+ochilishi va boshqa rollarda ochilmasligi.
+
+### Inventarizatsiya auditi
+Server mantig'i to'g'ri ishlayotgani tasdiqlandi: tuzatma JORIY qoldiqqa nisbatan hisoblanadi, faqat
+SANALGAN qatorlar tegiladi, band (rezerv) qilingan tovardan kam sanash `moveStock` invarianti bilan
+rad etiladi, bekor qilingan hisob qo'llanmaydi, takror mahsulot noyob indeks bilan 409 beradi.
+Bo'shliqlar UI da edi va yopildi:
+- hisobga mahsulot qo'shish ("topilma" — omborda bor, ro'yxatda yo'q) — API bor edi, tugma yo'q edi;
+- qatorlar bo'yicha qidiruv (ko'p mahsulotli omborda sanash imkonsiz edi);
+- qo'llashdan oldin tasdiq oynasi: sanalgan, ortiqcha, kam va sanalmagan qatorlar soni bilan;
+- seansni bekor qilish tugmasi (API bor edi, UI da faqat "Boshlash" ulangan edi);
+- sanalgan miqdor Enter va fokusdan chiqqanda ham saqlanadi.
+Testlar: `counts.test.ts` (4 ta yangi) — topilma qo'shish va takrorlanmaslik, sanalmagan qator
+tegilmasligi, band tovardan kam sanashning rad etilishi, bekor qilingan hisobga qator qo'shilmasligi.
+
 ### Blockerlar
 - **Production zaxira xizmati (AUDIT-2, HIGH):** kod va hujjat tayyor (`deploy/backup/`), lekin Railway'da `bum-backup` xizmati, volume va `Cron Schedule` egasi tomonidan yaratilmagan; `BACKUP_PASSPHRASE` ham egasi kiritadi (parol repoda yo'q va hech qayerda chop etilmaydi). Shu qadamgacha production bazasining avtomatik nusxasi YO'Q
 - **Android real qurilma:** `adb devices` bo'sh, emulyator uchun xotira yetmaydi — telefon ulash kerak

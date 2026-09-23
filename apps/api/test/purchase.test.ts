@@ -255,3 +255,106 @@ describe("Xarid buyurtmalari", () => {
     expect(movement).toMatchObject({ batchId: batch!.id, quantity: "24.0000" });
   });
 });
+
+/**
+ * TO'G'RIDAN-TO'G'RI QABUL QILISH — kichik biznesda xaridni kirituvchi odam uni o'zi qabul qiladi.
+ *
+ * Talab: import qilingan (yoki qo'lda kiritilgan) QORALAMA hujjatda bitta tugma bosilsa — hujjat
+ * tasdiqlanadi, qolgan tovar to'liq qabul qilinadi va ko'rsatilgan usulda to'lov yoziladi.
+ * Yangi hisob-kitob yo'q: zaxira, tannarx, jurnal va ta'minotchi qarzi odatdagi yo'l bilan yoziladi.
+ */
+describe("Xaridni bir bosqichda yakunlash", () => {
+  async function draftOrder(items: object[], supplierId?: string) {
+    const res = await purchase("POST", "/orders", {
+      supplierId: supplierId ?? (await supplier()),
+      warehouseId: mainWh,
+      orderDate: today,
+      items,
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    return res.json().order as { id: string; supplierId: string; status: string; totalAmount: string };
+  }
+
+  /** Naqd to'lov kassadan chiqadi — kassa manfiyga ketmasligi uchun avval qoldiq qo'yiladi. */
+  async function fundCash(amount: string) {
+    const accounts = (await call(company.ownerCookie, "GET", "/api/finance/cash-accounts")).json().cashAccounts as { id: string; type: string }[];
+    const cash = accounts.find((account) => account.type === "cash") ?? accounts[0]!;
+    const res = await call(company.ownerCookie, "POST", `/api/finance/cash-accounts/${cash.id}/set-balance`, {
+      balance: amount,
+      reason: "Sinov qoldig'i",
+    });
+    expect(res.statusCode, res.body).toBe(200);
+  }
+
+  it("qoralama → tasdiq + to'liq qabul + naqd to'lov, hammasi bitta so'rovda", async () => {
+    await fundCash("100000");
+    const productId = await product("DIRECT-1");
+    const order = await draftOrder([{ productId, unitId: piece, orderedQty: "10", unitPrice: "5000" }]);
+    expect(order.status).toBe("draft");
+
+    const res = await purchase("POST", `/orders/${order.id}/complete`, {
+      payment: { amount: "50000", method: "cash" },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+
+    const done = res.json().order as { status: string; paidAmount: string; totalAmount: string };
+    expect(done.totalAmount).toBe("50000.00");
+    expect(done.paidAmount, "to'lov yozildi").toBe("50000.00");
+    expect(done.status, "to'liq qabul + to'liq to'lov").toBe("paid");
+    expect((await stock(productId))?.quantity, "tovar omborga kirdi").toBe("10.0000");
+    expect(res.json().payment, "to'lov hujjati qaytadi").not.toBeNull();
+  });
+
+  it("to'lovsiz yakunlash — tovar kiradi, summa ta'minotchi qarziga qoladi", async () => {
+    const productId = await product("DIRECT-2");
+    const supplierId = await supplier();
+    const order = await draftOrder([{ productId, unitId: piece, orderedQty: "4", unitPrice: "2500" }], supplierId);
+
+    const res = await purchase("POST", `/orders/${order.id}/complete`);
+    expect(res.statusCode, res.body).toBe(201);
+    expect(res.json().payment).toBeNull();
+    expect(res.json().order.status, "qabul qilingan, to'lanmagan").toBe("received");
+    expect((await stock(productId))?.quantity).toBe("4.0000");
+
+    const [row] = await db.select().from(suppliers).where(eq(suppliers.id, supplierId));
+    expect(row!.totalDebt, "qarz o'sdi").toBe("10000.00");
+  });
+
+  it("qisman qabul qilingan hujjatni yakunlaydi va takror bosilsa xato beradi", async () => {
+    const productId = await product("DIRECT-3");
+    const order = await confirmedOrder([{ productId, unitId: piece, orderedQty: "10", unitPrice: "1000" }]);
+    const itemId = (await purchase("GET", `/orders/${order.id}`)).json().order.items[0].id as string;
+
+    // Avval 4 tasi qo'lda qabul qilinadi
+    expect((await purchase("POST", `/orders/${order.id}/receipts`, { items: [{ orderItemId: itemId, receivedQty: "4" }] })).statusCode).toBe(201);
+    expect((await stock(productId))?.quantity).toBe("4.0000");
+
+    // Qolgan 6 tasi bitta tugma bilan
+    const res = await purchase("POST", `/orders/${order.id}/complete`);
+    expect(res.statusCode, res.body).toBe(201);
+    expect((await stock(productId))?.quantity, "qolgani ham kirdi").toBe("10.0000");
+    expect(res.json().order.status).toBe("received");
+
+    // Takror bosilsa — qabul qilinadigan qoldiq yo'q
+    const again = await purchase("POST", `/orders/${order.id}/complete`);
+    expect(again.statusCode).toBe(400);
+    expect(again.json().message).toMatch(/allaqachon qabul qilingan/i);
+    expect((await stock(productId))?.quantity, "ikkinchi bosishdan qoldiq o'zgarmaydi").toBe("10.0000");
+  });
+
+  it("bekor qilingan hujjat yakunlanmaydi; ombor ruxsati yo'q xodim qabul qilolmaydi", async () => {
+    const productId = await product("DIRECT-4");
+    const cancelled = await draftOrder([{ productId, unitId: piece, orderedQty: "1", unitPrice: "1000" }]);
+    expect((await purchase("POST", `/orders/${cancelled.id}/cancel`, { reason: "kerak emas" })).statusCode).toBe(200);
+    const res = await purchase("POST", `/orders/${cancelled.id}/complete`);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/bekor qilingan/i);
+
+    // Buxgalterda `warehouse.receive` yo'q — tovarni jismonan qabul qila olmaydi
+    const order = await draftOrder([{ productId, unitId: piece, orderedQty: "1", unitPrice: "1000" }]);
+    const accountant = await addEmployee(app, company, "Buxgalter");
+    const denied = await purchase("POST", `/orders/${order.id}/complete`, undefined, accountant.cookie);
+    expect(denied.statusCode, denied.body).toBe(403);
+    expect(await stock(productId), "rad etilganda qoldiq yozuvi umuman yaratilmaydi").toBeUndefined();
+  });
+});

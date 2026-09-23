@@ -138,3 +138,106 @@ describe("Inventarizatsiya", () => {
     expect((await api(manager.cookie, "POST", `/counts/${countId}/apply`)).statusCode).toBe(200);
   });
 });
+
+/**
+ * INVENTARIZATSIYA AUDITI — sanoqchi ish oqimining chegaralari.
+ *
+ * Hisobga mahsulot qo'shish ("topilma"), takror qo'shishning oldini olish, bekor qilingan
+ * hisobning qo'llanmasligi va band (rezerv) qilingan tovardan kam sanash holati tekshiriladi.
+ */
+describe("Inventarizatsiya — sanoqchi oqimi", () => {
+  async function openCount(name = "Audit") {
+    const res = await api(companyA.ownerCookie, "POST", "/counts", { warehouseId: mainA, name });
+    expect(res.statusCode, res.body).toBe(201);
+    const id = res.json().count.id as string;
+    expect((await api(companyA.ownerCookie, "POST", `/counts/${id}/status`, { status: "in_progress" })).statusCode).toBe(200);
+    return id;
+  }
+
+  const detail = async (countId: string) =>
+    (await api(companyA.ownerCookie, "GET", `/counts/${countId}`)).json().count as {
+      items: { id: string; productId: string; expectedQty: string; countedQty: string | null }[];
+    };
+
+  it("hisobdan keyin paydo bo'lgan mahsulotni qo'shib sanash mumkin, takror qo'shilmaydi", async () => {
+    const countId = await openCount();
+    // Hisob ochilgandan KEYIN kelgan tovar — ro'yxatda yo'q
+    const later = await stocked("LATER-1", "7");
+    expect((await detail(countId)).items.some((item) => item.productId === later), "avval ro'yxatda yo'q").toBe(false);
+
+    const added = await api(companyA.ownerCookie, "POST", `/counts/${countId}/items`, { productId: later });
+    expect(added.statusCode, added.body).toBe(201);
+    expect((await detail(countId)).items.some((item) => item.productId === later)).toBe(true);
+
+    // Takror qo'shish — noyob indeks 409 beradi (500 emas), hisobda dublikat qator paydo bo'lmaydi
+    const again = await api(companyA.ownerCookie, "POST", `/counts/${countId}/items`, { productId: later });
+    expect(again.statusCode, again.body).toBe(409);
+    expect((await detail(countId)).items.filter((item) => item.productId === later)).toHaveLength(1);
+  });
+
+  it("sanalmagan qatorlar tegilmaydi — faqat sanalganlari tuzatiladi", async () => {
+    const touched = await stocked("TOUCH-1", "10");
+    const untouched = await stocked("TOUCH-2", "10");
+    const countId = await openCount();
+    const items = (await detail(countId)).items;
+    const touchedItem = items.find((item) => item.productId === touched)!;
+
+    // Faqat bittasi sanaladi
+    expect((await api(companyA.ownerCookie, "PATCH", `/counts/${countId}/items/${touchedItem.id}`, { countedQty: 8 })).statusCode).toBe(200);
+
+    const applied = await api(companyA.ownerCookie, "POST", `/counts/${countId}/apply`);
+    expect(applied.statusCode, applied.body).toBe(200);
+    expect(applied.json().adjusted, "faqat bitta qator tuzatildi").toBe(1);
+    expect(await quantityOf(touched)).toBe("8.0000");
+    expect(await quantityOf(untouched), "sanalmagan mahsulot qoldig'i o'zgarmaydi").toBe("10.0000");
+  });
+
+  it("band qilingan tovardan kam sanash rad etiladi — zaxira invarianti buzilmaydi", async () => {
+    const productId = await stocked("RESERVED-1", "10");
+    // 6 dona mijoz buyurtmasi uchun band qilinadi
+    const customer = await app.inject({
+      method: "POST",
+      url: "/api/sales/customers",
+      headers: { cookie: companyA.ownerCookie },
+      payload: { name: "Mijoz", phone: `+9989${Math.floor(10_000_000 + Math.random() * 89_999_999)}` },
+    });
+    expect(customer.statusCode).toBe(201);
+    const order = await app.inject({
+      method: "POST",
+      url: "/api/sales/orders",
+      headers: { cookie: companyA.ownerCookie },
+      payload: {
+        customerId: customer.json().customer.id,
+        warehouseId: mainA,
+        orderDate: new Date().toISOString().slice(0, 10),
+        items: [{ productId, quantity: "6" }],
+      },
+    });
+    expect(order.statusCode, order.body).toBe(201);
+    expect(
+      (await app.inject({
+        method: "POST",
+        url: `/api/sales/orders/${order.json().order.id}/confirm`,
+        headers: { cookie: companyA.ownerCookie },
+      })).statusCode,
+    ).toBe(200);
+
+    const countId = await openCount("Band tovar");
+    const item = (await detail(countId)).items.find((row) => row.productId === productId)!;
+    // Sanoqda 2 dona topildi — lekin 6 tasi band, qoldiq 2 ga tushsa invariant buzilardi
+    expect((await api(companyA.ownerCookie, "PATCH", `/counts/${countId}/items/${item.id}`, { countedQty: 2 })).statusCode).toBe(200);
+
+    const applied = await api(companyA.ownerCookie, "POST", `/counts/${countId}/apply`);
+    expect(applied.statusCode, applied.body).toBe(400);
+    expect(await quantityOf(productId), "qoldiq o'zgarmadi").toBe("10.0000");
+  });
+
+  it("bekor qilingan hisobga qator qo'shib bo'lmaydi", async () => {
+    const productId = await stocked("CANCEL-1", "3");
+    const countId = await openCount("Bekor bo'ladi");
+    expect((await api(companyA.ownerCookie, "POST", `/counts/${countId}/status`, { status: "cancelled" })).statusCode).toBe(200);
+
+    const added = await api(companyA.ownerCookie, "POST", `/counts/${countId}/items`, { productId });
+    expect(added.statusCode, added.body).toBe(400);
+  });
+});

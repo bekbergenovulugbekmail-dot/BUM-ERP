@@ -98,9 +98,16 @@ describe("Sotuv agenti roli va ish joyi", () => {
       .set({ permissions: ["crm.view"] })
       .where(and(eq(roles.companyId, company.companyId), eq(roles.name, "Direktor")));
 
-    // 0020 (rollar), 0027 (agent qo'shish ruxsati), 0030 (mijoz ruxsatlari), 0042 (Supervayzerga dostavka ruxsatlari) — ketma-ket, ikki marta
+    // 0020 (rollar), 0027 (agent qo'shish ruxsati), 0030 (mijoz ruxsatlari), 0042 (Supervayzerga dostavka ruxsatlari),
+    // 0079 (supervayzer o'zi ham zakaz oladi) — ketma-ket, ikki marta (har biri idempotent bo'lishi kerak)
     const migrations = await Promise.all(
-      ["0020_sales_agent_roles.sql", "0027_sales_agent_team.sql", "0030_customer_photos.sql", "0042_delivery.sql"].map((file) =>
+      [
+        "0020_sales_agent_roles.sql",
+        "0027_sales_agent_team.sql",
+        "0030_customer_photos.sql",
+        "0042_delivery.sql",
+        "0079_supervisor_takes_orders.sql",
+      ].map((file) =>
         readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), "utf8"),
       ),
     );

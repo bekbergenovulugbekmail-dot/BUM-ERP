@@ -32,4 +32,22 @@ describe("biznes manzili", () => {
     expect(getCompanyContext()).toBe("hadicha-market");
     expect(apiUrl("/api/files/x", { v: 1 })).toBe("/api/files/x?v=1&bumCompany=hadicha-market");
   });
+
+  /**
+   * Rasm havolasi SERVERDAN so'rov qatori bilan keladi (`/api/files/product-image/<id>/content?v=<kalit>`).
+   * Ilgari `apiUrl` ikkinchi `?` qo'shardi va `bumCompany` parametr bo'lmay qolardi — sessiya cookie'si
+   * esa biznesga bog'langan (`bum_s_<biznes>`), shuning uchun rasm so'rovi 401 bilan qaytar va ko'rinmasdi.
+   */
+  it("yo'lda allaqachon so'rov qatori bo'lsa — parametr `&` bilan qo'shiladi", () => {
+    const image = "/api/files/product-image/11111111-1111-4111-8111-111111111111/content?v=db%2Fx.png";
+    expect(apiUrl(image), "konteksti yo'q — o'zgarmaydi").toBe(image);
+
+    setCompanyContext("hadicha-market");
+    const withContext = apiUrl(image);
+    expect(withContext).toBe(`${image}&bumCompany=hadicha-market`);
+    // Brauzer ham aynan shunday o'qiydi: ikkala parametr ham joyida
+    const params = new URL(withContext, "https://app.bum-erp.uz").searchParams;
+    expect(params.get("bumCompany"), "biznes konteksti serverga yetadi").toBe("hadicha-market");
+    expect(params.get("v"), "kesh kaliti buzilmaydi").toBe("db/x.png");
+  });
 });

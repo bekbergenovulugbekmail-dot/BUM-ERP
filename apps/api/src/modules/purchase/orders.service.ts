@@ -36,6 +36,7 @@ import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
 import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
+import { recordSupplierPayment, type PaymentMethod } from "./payments.service.js";
 import { computeLine } from "../../shared/line-amounts.js";
 import { effectiveTaxRate, isTaxEnabled } from "../company/tax-settings.service.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
@@ -801,4 +802,92 @@ export async function receiveGoods(
     details: { orderId, number: order.number, total: totalText, status, ...(allocations.length > 0 ? { backorderAllocations: allocations } : {}) },
   });
   return { receipt: receipt!, total: totalText, status, allocations };
+}
+
+/**
+ * XARIDNI BIR BOSQICHDA YAKUNLASH ("to'g'ridan-to'g'ri qabul qilish").
+ *
+ * Nega kerak: kichik biznesda xaridni kirituvchi odam uni o'zi qabul ham qiladi. Uch qadam
+ * (tasdiqlash → qabul → to'lov) bitta tugmaga yig'iladi; import qilingan qoralama hujjat ham
+ * shu yo'l bilan yakunlanadi.
+ *
+ * Yangi hisob-kitob YO'Q: qoldiq qatorlar aynan `receiveGoods` orqali qabul qilinadi (zaxira,
+ * tannarx/AVCO, jurnal, ta'minotchi qarzi va backorder taqsimoti o'sha-o'sha), to'lov esa aynan
+ * `recordSupplierPayment` orqali. Hammasi BITTA tranzaksiyada: to'lov xato bo'lsa qabul ham bekor bo'ladi.
+ *
+ * Ruxsatlar marshrutda: `purchase.approve` (tasdiqlash va to'lov) + `warehouse.receive` (qabul).
+ */
+export async function completePurchase(
+  tx: Tx,
+  tenant: TenantContext,
+  orderId: string,
+  input: {
+    receiptDate?: string;
+    notes?: string | null;
+    payment?: { amount: string; method: PaymentMethod; cashAccountId?: string | null; paymentDate?: string; reference?: string | null } | null;
+  },
+  meta: RequestMeta,
+) {
+  const order = await lockOrder(tx, tenant, orderId);
+  if (order.status === "cancelled") throw badRequest("Bekor qilingan buyurtmani yakunlab bo'lmaydi");
+  await assertOrderInScope(tx, tenant, orderId);
+
+  // 1) Qoralama bo'lsa avval tasdiqlanadi (qabul faqat tasdiqlangan hujjat bo'yicha bo'ladi)
+  if (order.status === "draft") await confirmOrder(tx, tenant, orderId, meta);
+
+  // 2) Qolgan MIQDOR to'liq qabul qilinadi (qisman qabul qilingan hujjat ham yakunlanadi)
+  const pending = await tx
+    .select({
+      id: purchaseOrderItems.id,
+      remaining: sql<string>`(${purchaseOrderItems.orderedQty} - ${purchaseOrderItems.receivedQty})::numeric(18,4)`,
+    })
+    .from(purchaseOrderItems)
+    .where(eq(purchaseOrderItems.orderId, orderId));
+  const items = pending.filter((item) => toMinor(item.remaining, 4) > 0n);
+  if (items.length === 0) throw badRequest("Barcha tovar allaqachon qabul qilingan");
+
+  const receipt = await receiveGoods(
+    tx,
+    tenant,
+    orderId,
+    {
+      receiptDate: input.receiptDate,
+      notes: input.notes ?? null,
+      items: items.map((item) => ({ orderItemId: item.id, receivedQty: item.remaining })),
+    },
+    meta,
+  );
+
+  // 3) To'lov ixtiyoriy: ko'rsatilmasa hujjat qarzga yoziladi (ta'minotchi qarzi o'sadi)
+  let payment: Awaited<ReturnType<typeof recordSupplierPayment>> | null = null;
+  if (input.payment) {
+    payment = await recordSupplierPayment(
+      tx,
+      tenant,
+      {
+        supplierId: order.supplierId,
+        orderId,
+        amount: input.payment.amount,
+        method: input.payment.method,
+        cashAccountId: input.payment.cashAccountId ?? null,
+        paymentDate: input.payment.paymentDate,
+        reference: input.payment.reference ?? null,
+      },
+      meta,
+    );
+  }
+
+  await purchaseAudit(tx, tenant, meta, {
+    action: "PURCHASE_ORDER_COMPLETED",
+    resource: "purchase_orders",
+    resourceId: orderId,
+    details: {
+      number: order.number,
+      receivedLines: items.length,
+      receiptTotal: receipt.total,
+      ...(payment ? { paymentAmount: input.payment!.amount, paymentMethod: input.payment!.method } : { paid: false }),
+    },
+  });
+
+  return { order: await getOrder(tx, tenant, orderId), receipt: receipt.receipt, payment };
 }

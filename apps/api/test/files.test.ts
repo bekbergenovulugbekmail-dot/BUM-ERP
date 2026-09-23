@@ -152,3 +152,67 @@ describe("Fayllar", () => {
     expect((await call("GET", `/api/files/url?kind=expense-receipt&targetId=${expenseId}`)).statusCode).toBe(503);
   });
 });
+
+/**
+ * PRODUCTION YO'LI: fayl saqlash (S3) sozlanmagan bo'lsa rasm BAZAGA yoziladi.
+ *
+ * Bu yo'l ilgari test bilan qoplanmagan edi, holbuki production aynan shunday ishlaydi:
+ * `POST /uploads` → 503 → brauzer `PUT /product-image/:id/content` ga o'tadi.
+ * Tekshiriladi: yozish, mahsulot ro'yxatida `imageKey`, ko'rish havolasi va rasm mazmuni.
+ */
+describe("Rasm bazada (saqlash sozlanmagan)", () => {
+  /** Eng kichik haqiqiy PNG (1×1) — imzo tekshiruvidan o'tadi. */
+  const PNG = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  const putImage = (productId: string, cookie = company.ownerCookie, body: Buffer = PNG) =>
+    app.inject({
+      method: "PUT",
+      url: `/api/files/product-image/${productId}/content`,
+      headers: { cookie, "content-type": "image/png" },
+      payload: body,
+    });
+
+  it("yuklash → ro'yxatda imageKey → ko'rish havolasi → rasm mazmuni", async () => {
+    storageProvider.client = null; // S3 sozlanmagan: production holati
+    const productId = await product();
+
+    // 1) Brauzer avval imzolangan URL so'raydi — saqlash yo'q, 503
+    expect((await call("POST", "/api/files/uploads", company.ownerCookie, { kind: "product-image", contentType: "image/png", size: PNG.length })).statusCode).toBe(503);
+
+    // 2) Shuning uchun faylni to'g'ridan-to'g'ri API'ga yuboradi
+    const saved = await putImage(productId);
+    expect(saved.statusCode, saved.body).toBe(200);
+    const key = saved.json().key as string;
+    expect(key.startsWith("db/product-image/"), key).toBe(true);
+
+    // 3) Mahsulot ro'yxati va kartochkasi `imageKey` yuborishi SHART — frontend rasmni shu bilan so'raydi
+    const list = (await call("GET", "/api/catalog/products")).json().products as { id: string; imageKey: string | null }[];
+    expect(list.find((row) => row.id === productId)?.imageKey, "ro'yxatda imageKey").toBe(key);
+    expect((await call("GET", `/api/catalog/products/${productId}`)).json().product.imageKey, "kartochkada imageKey").toBe(key);
+
+    // 4) Ko'rish havolasi — bazadagi rasm uchun API manzili
+    const urlRes = await call("GET", `/api/files/url?kind=product-image&targetId=${productId}`);
+    expect(urlRes.statusCode, urlRes.body).toBe(200);
+    const url = urlRes.json().url as string;
+    expect(url.startsWith(`/api/files/product-image/${productId}/content`), url).toBe(true);
+
+    // 5) Aynan shu manzil rasmni qaytaradi
+    const content = await app.inject({ method: "GET", url, headers: { cookie: company.ownerCookie } });
+    expect(content.statusCode, content.body.slice(0, 200)).toBe(200);
+    expect(content.headers["content-type"]).toBe("image/png");
+    expect(content.rawPayload.length).toBeGreaterThan(0);
+  });
+
+  it("begona kompaniya rasmini ko'ra olmaydi va yozolmaydi", async () => {
+    storageProvider.client = null;
+    const productId = await product();
+    expect((await putImage(productId)).statusCode).toBe(200);
+
+    expect((await putImage(productId, other.ownerCookie)).statusCode, "begona yozolmaydi").toBe(404);
+    const foreign = await call("GET", `/api/files/product-image/${productId}/content`, other.ownerCookie);
+    expect(foreign.statusCode, "begona ko'rolmaydi").toBe(404);
+  });
+});

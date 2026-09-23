@@ -49,7 +49,10 @@ function buildUrl(path: string, query?: QueryParams): string {
     if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
   }
   const search = params.toString();
-  return `${BASE_URL}${path}${search ? `?${search}` : ""}`;
+  if (!search) return `${BASE_URL}${path}`;
+  // Yo'lda allaqachon so'rov qatori bo'lishi mumkin (masalan serverdan kelgan rasm havolasi `?v=...`):
+  // ikkinchi `?` parametrni yo'q qilardi — `bumCompany` serverga yetib bormay, rasm 401 bilan qaytardi
+  return `${BASE_URL}${path}${path.includes("?") ? "&" : "?"}${search}`;
 }
 
 /** Brauzer o'zi yuklaydigan manzillar (rasm, yuklab olish, WebSocket): biznes konteksti so'rov parametrida. */
