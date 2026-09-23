@@ -26,6 +26,8 @@ export type KpiRuleInput = {
   positionId?: string | null;
   employeeId?: string | null;
   metric: KpiMetric;
+  /** PLAN: ko'rsatkich shundan kam bo'lsa qoida bo'yicha pul hisoblanmaydi. */
+  minValue?: string | null;
   tiers: TierInput[];
   isActive?: boolean;
   notes?: string | null;
@@ -64,6 +66,7 @@ export async function listKpiRules(conn: DbOrTx, companyId: string) {
       employeeId: kpiRules.employeeId,
       metric: kpiRules.metric,
       rateType: kpiRules.rateType,
+      minValue: kpiRules.minValue,
       isActive: kpiRules.isActive,
       notes: kpiRules.notes,
       positionName: positions.name,
@@ -145,7 +148,13 @@ export async function saveKpiRule(tx: Tx, tenant: TenantContext, input: KpiRuleI
     ruleId = existing.id;
     await tx
       .update(kpiRules)
-      .set({ rateType, isActive: input.isActive ?? true, notes: input.notes ?? null, updatedAt: new Date() })
+      .set({
+        rateType,
+        minValue: input.minValue === undefined || input.minValue === "" ? null : input.minValue,
+        isActive: input.isActive ?? true,
+        notes: input.notes ?? null,
+        updatedAt: new Date(),
+      })
       .where(eq(kpiRules.id, ruleId));
     await tx.delete(kpiRuleTiers).where(eq(kpiRuleTiers.ruleId, ruleId));
   } else {
@@ -157,6 +166,7 @@ export async function saveKpiRule(tx: Tx, tenant: TenantContext, input: KpiRuleI
         employeeId,
         metric: input.metric,
         rateType,
+        minValue: input.minValue === undefined || input.minValue === "" ? null : input.minValue,
         isActive: input.isActive ?? true,
         notes: input.notes ?? null,
         createdBy: tenant.user.id,

@@ -302,6 +302,8 @@ export type ResolvedRule = {
   ruleId: string;
   metric: KpiMetric;
   rateType: "percent" | "per_unit";
+  /** PLAN: ko'rsatkich shundan kam bo'lsa pul hisoblanmaydi. `null` — chegara yo'q. */
+  minValue: string | null;
   tiers: Tier[];
   /** Qoida lavozimdanmi yoki shu xodimga alohida yozilganmi. */
   source: "position" | "employee";
@@ -329,6 +331,7 @@ export async function resolveRules(
       employeeId: kpiRules.employeeId,
       metric: kpiRules.metric,
       rateType: kpiRules.rateType,
+      minValue: kpiRules.minValue,
     })
     .from(kpiRules)
     .where(
@@ -372,6 +375,7 @@ export async function resolveRules(
         ruleId: rule.id,
         metric,
         rateType: rule.rateType,
+        minValue: rule.minValue,
         tiers: tiersByRule.get(rule.id) ?? [],
         source: matchesEmployee ? "employee" : "position",
       });
@@ -397,7 +401,9 @@ export async function computeKpi(
   for (const rule of rules) {
     if (rule.tiers.length === 0) continue;
     const value = await metricValue(conn, companyId, links, rule.metric, month);
-    const amount = tierAmount(value, rule.tiers, rule.rateType);
+    // PLAN bajarilmadi — qoida bo'yicha pul yo'q (ko'rsatkichning o'zi hisobotda ko'rinib turadi)
+    const planMet = rule.minValue === null || value >= toMinor(rule.minValue, VALUE_SCALE);
+    const amount = planMet ? tierAmount(value, rule.tiers, rule.rateType) : 0n;
     if (amount === 0n && value === 0n) continue;
     total += amount;
     lines.push({

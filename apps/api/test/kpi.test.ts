@@ -269,3 +269,62 @@ describe("KPI oylikka qo'shiladi", () => {
     expect([401, 403]).toContain(res.statusCode);
   });
 });
+
+/**
+ * PLAN CHEGARASI — "plan bajarilmasa foiz berilmaydi".
+ *
+ * Bosqichli (progressiv) hisob bilan bu qoidani ifodalab bo'lmaydi: bosqich faqat plandan ORTIQCHA
+ * qismga foiz beradi. Shuning uchun qoidaga `minValue` (plan) qo'shildi — u `null` bo'lsa
+ * hisob-kitob avvalgidek qoladi, ya'ni mavjud bizneslarning oyligi o'zgarmaydi.
+ */
+describe("KPI plani (minValue)", () => {
+  const PERCENT_TIER = [{ fromValue: "0", toValue: null, rate: "3" }];
+
+  async function ruleWithPlan(positionId: string, minValue: string | null) {
+    const res = await hr("PUT", "/kpi/rules", {
+      positionId,
+      metric: "agent_sales_amount",
+      ...(minValue === null ? {} : { minValue }),
+      tiers: PERCENT_TIER,
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    return res;
+  }
+
+  it("plan saqlanadi va ro'yxatda qaytadi; bo'sh bo'lsa null", async () => {
+    const withPlan = await position("Agent plan bilan");
+    await ruleWithPlan(withPlan, "50000000");
+    const noPlan = await position("Agent plansiz");
+    await ruleWithPlan(noPlan, null);
+
+    const rules = (await hr("GET", "/kpi/rules")).json().rules as { positionId: string | null; minValue: string | null }[];
+    expect(Number(rules.find((rule) => rule.positionId === withPlan)!.minValue)).toBe(50_000_000);
+    expect(rules.find((rule) => rule.positionId === noPlan)!.minValue, "plansiz qoida").toBeNull();
+  });
+
+  it("plan manfiy bo'lolmaydi", async () => {
+    const positionId = await position("Agent manfiy plan");
+    const res = await hr("PUT", "/kpi/rules", {
+      positionId,
+      metric: "agent_sales_amount",
+      minValue: "-1",
+      tiers: PERCENT_TIER,
+    });
+    expect(res.statusCode, res.body).toBe(400);
+  });
+
+  it("planni o'chirib tashlash mumkin (null yuborilsa chegara yo'qoladi)", async () => {
+    const positionId = await position("Agent planni oladi");
+    await ruleWithPlan(positionId, "10000000");
+    const cleared = await hr("PUT", "/kpi/rules", {
+      positionId,
+      metric: "agent_sales_amount",
+      minValue: null,
+      tiers: PERCENT_TIER,
+    });
+    expect(cleared.statusCode, cleared.body).toBe(200);
+
+    const rules = (await hr("GET", "/kpi/rules")).json().rules as { positionId: string | null; minValue: string | null }[];
+    expect(rules.find((rule) => rule.positionId === positionId)!.minValue).toBeNull();
+  });
+});

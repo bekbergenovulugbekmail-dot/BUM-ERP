@@ -32,7 +32,8 @@ const METRICS = [
   { key: "agent_sales_amount", label: "Savdo agenti: sotuv summasi", unit: "so'm" },
   { key: "agent_order_count", label: "Savdo agenti: buyurtma soni", unit: "dona" },
   { key: "agent_visit_count", label: "Savdo agenti: tashrif soni", unit: "dona" },
-  { key: "agent_collected_amount", label: "Savdo agenti: yig'ilgan to'lov", unit: "so'm" },
+  // To'lov `created_by` bo'yicha hisoblanadi — dostavka agenti yig'gan pul ham shu yerga tushadi
+  { key: "agent_collected_amount", label: "Yig'ilgan to'lov (agent yoki dostavshik)", unit: "so'm" },
   { key: "cashier_receipt_count", label: "Kassir: chek soni", unit: "dona" },
   { key: "cashier_sales_amount", label: "Kassir: kassa savdosi", unit: "so'm" },
   { key: "warehouse_receipt_count", label: "Ombor: qabul hujjatlari", unit: "dona" },
@@ -51,6 +52,7 @@ type Rule = {
   employeeId: string | null;
   metric: Metric;
   rateType: "percent" | "per_unit";
+  minValue: string | null;
   isActive: boolean;
   positionName: string | null;
   employeeName: string | null;
@@ -233,6 +235,8 @@ function RuleDialog({ rule, onClose }: { rule: Rule | null; onClose: () => void 
   const [tiers, setTiers] = useState<Tier[]>(
     rule?.tiers.length ? rule.tiers : [{ fromValue: "0", toValue: null, rate: "0" }],
   );
+  /** PLAN: ko'rsatkich shundan kam bo'lsa pul berilmaydi. Bo'sh — chegara yo'q. */
+  const [minValue, setMinValue] = useState(rule?.minValue ?? "");
   const [error, setError] = useState<string | null>(null);
 
   const save = useApiMutation(
@@ -249,6 +253,7 @@ function RuleDialog({ rule, onClose }: { rule: Rule | null; onClose: () => void 
       await save.mutateAsync({
         ...(target === "position" ? { positionId } : { employeeId }),
         metric,
+        minValue: minValue.trim() === "" ? null : minValue.trim(),
         tiers: tiers.map((tier) => ({
           fromValue: tier.fromValue || "0",
           toValue: tier.toValue === null || tier.toValue === "" ? null : tier.toValue,
@@ -322,6 +327,21 @@ function RuleDialog({ rule, onClose }: { rule: Rule | null; onClose: () => void 
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="kpi-min-value">Plan ({unit}) — ixtiyoriy</Label>
+            <Input
+              id="kpi-min-value"
+              inputMode="decimal"
+              placeholder="Bo'sh — plan yo'q"
+              value={minValue}
+              onChange={(event) => setMinValue(event.target.value)}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Ko'rsatkich shu qiymatdan kam bo'lsa qoida bo'yicha pul BERILMAYDI. Masalan: plan 50 000 000,
+              bosqich 0+ → 3% — agent 50 mln sotsa butun summadan 3%, sotmasa 0.
+            </p>
           </div>
 
           <div className="space-y-2">

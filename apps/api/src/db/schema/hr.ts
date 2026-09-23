@@ -379,6 +379,11 @@ export const kpiRules = pgTable(
     employeeId: uuid("employee_id").references(() => employees.id, { onDelete: "cascade" }),
     metric: kpiMetric("metric").notNull(),
     rateType: kpiRateType("rate_type").notNull(),
+    /**
+     * PLAN: ko'rsatkich shu qiymatdan kam bo'lsa qoida bo'yicha pul hisoblanmaydi.
+     * `null` — chegara yo'q (faqat bosqichlar ishlaydi, eski xatti-harakat).
+     */
+    minValue: qty("min_value"),
     isActive: boolean("is_active").notNull().default(true),
     notes: text("notes"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -393,6 +398,7 @@ export const kpiRules = pgTable(
       .where(sql`${t.employeeId} is not null`),
     index("kpi_rule_company_idx").on(t.companyId, t.isActive),
     check("kpi_rule_one_target", sql`(${t.positionId} is null) <> (${t.employeeId} is null)`),
+    check("kpi_rule_min_value_non_negative", sql`${t.minValue} is null or ${t.minValue} >= 0`),
   ],
 );
 

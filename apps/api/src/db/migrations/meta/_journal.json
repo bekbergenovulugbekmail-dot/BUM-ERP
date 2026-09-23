@@ -561,6 +561,13 @@
       "when": 1789829766441,
       "tag": "0079_supervisor_takes_orders",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1789829826441,
+      "tag": "0080_kpi_min_value",
+      "breakpoints": true
     }
   ]
 }

@@ -262,6 +262,8 @@ const kpiRuleBody = z
     positionId: z.uuid().nullable().optional(),
     employeeId: z.uuid().nullable().optional(),
     metric: z.enum(KPI_METRICS),
+    /** PLAN: ko'rsatkich shundan kam bo'lsa foiz/summa berilmaydi. Bo'sh — chegara yo'q. */
+    minValue: decimalSchema({ scale: 4 }).nullable().optional(),
     tiers: z.array(kpiTier).min(1).max(20),
     isActive: z.boolean().optional(),
     notes: nullableText(1000),
