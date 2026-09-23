@@ -190,8 +190,11 @@ export default function InventoryCountSection({ warehouseId }: Props) {
   const truncated = visibleItems.length >= ITEM_LIMIT;
 
   return (
-    <div className="flex flex-col gap-4 h-full">
-      <div className="flex items-center justify-between">
+    // Bo'lim O'ZI aylanadi: tepadagi yorliq paneli balandligi qat'iy (`flex-1 min-h-0`), shuning
+    // uchun ichidagi bloklar siqilib ketmasligi kerak — aks holda ochiq hisob ro'yxati nolgacha
+    // siqilib, faqat brauzer masshtabi kichraytirilganda ko'rinardi.
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto">
+      <div className="flex shrink-0 items-center justify-between">
         <p className="text-sm text-muted-foreground">Inventarizatsiya seanslari</p>
         {canCount && (
           <Button size="sm" onClick={() => setCreateOpen(true)}>
@@ -313,7 +316,9 @@ export default function InventoryCountSection({ warehouseId }: Props) {
 
       {/* Active count detail */}
       {activeCountId && activeCount && (
-        <div className="border border-border rounded-xl overflow-hidden">
+        // `shrink-0` majburiy: `overflow-hidden` flex elementining eng kichik balandligini 0 ga
+        // tushiradi, shusiz sanoq jadvali butunlay yo'qolib ketadi
+        <div className="shrink-0 overflow-hidden rounded-xl border border-border">
           <div className="flex items-center justify-between px-4 py-3 bg-blue-50 dark:bg-blue-900/20 border-b border-border">
             <div>
               <p className="font-semibold text-sm">{activeCount.name}</p>
@@ -475,7 +480,7 @@ export default function InventoryCountSection({ warehouseId }: Props) {
           )}
         </Empty>
       ) : (
-        <div className="space-y-2">
+        <div className="shrink-0 space-y-2">
           {counts.map((c) => {
             const meta = STATUS_META[c.status] ?? STATUS_META.draft;
             return (

@@ -51,7 +51,9 @@ export default function MovementHistory({ warehouseId }: Props) {
   const movements = query.data?.pages.flatMap((page) => page.movements);
 
   return (
-    <div className="flex flex-col gap-4 h-full">
+    // Yorliq paneli balandligi qat'iy — bo'lim O'ZI aylanadi, aks holda quyidagi jadval
+    // (`overflow-hidden` tufayli eng kichik balandligi 0) siqilib ko'rinmay qoladi
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto">
       <div className="flex items-center gap-3">
         <Select value={typeFilter} onValueChange={setTypeFilter}>
           <SelectTrigger className="h-9 w-52">
@@ -92,7 +94,7 @@ export default function MovementHistory({ warehouseId }: Props) {
         </Empty>
       ) : (
         <>
-          <div className="rounded-xl border border-border overflow-hidden">
+          <div className="shrink-0 overflow-hidden rounded-xl border border-border">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-muted/50 border-b border-border">
