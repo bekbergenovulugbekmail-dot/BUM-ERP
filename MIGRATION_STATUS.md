@@ -4150,10 +4150,33 @@ Hisob `stock_levels` dan qurilardi — harakat bo'lmagan mahsulot ro'yxatga tush
 Endi MAHSULOTLAR jadvalidan quriladi, kutilgan qoldiq `coalesce(qoldiq, 0)`, katalog katta
 bo'lsa bo'laklab yoziladi.
 
+Shu o'zgarish yangi yuk tug'dirdi: hisobda endi BUTUN katalog bor, `GET /counts/:countId` esa
+hamma qatorni qaytarardi. Endi `?search=` (nom yoki SKU, serverda ILIKE) va `?limit=` (sukut 200)
+bor; `itemCount`, `countedItems`, `surplusItems`, `shortageItems` SERVERDA sanaladi, shuning
+uchun jarayon ko'rsatkichi va "Tuzatmalarni qo'llash" oynasidagi sonlar chegaradan mustaqil.
+UI qidiruvni 300 ms kechikish bilan yuboradi, ro'yxat chegaraga tegsa shuni yozadi.
+Parametrsiz so'rov avvalgidek ishlaydi — mavjud bizneslar uchun xatti-harakat o'zgarmadi.
+
 ### Naqd topshirish (12)
 Funksiya bor: ERP → "Distribyutsiya → Sotuv agentlari" va "Dostavka → Agentlar". Agent
 ilovasidagi "Sizdagi naqd" kartochkasiga qayerga topshirish kerakligi yozildi (uz/ru/kk).
 Pulni QABUL QILUVCHI qayd etadi — ikki tomonlama nazorat saqlanadi.
+
+Keyingi tekshiruvda ikkita haqiqiy kamchilik topildi va yopildi:
+1. Sotuv agentining puli "Distribyutsiya" da, dostavka agentiniki "Dostavka" da edi — pulni
+   qabul qiladigan odam ikkalasini alohida qidirardi. `GET /api/finance/agent-cash`
+   (`finance.view`) ikkala turni BITTA ro'yxatda beradi; Moliya → Kassa sahifasida
+   "Agentlardagi naqd (topshirilmagan)" bo'limi shu ro'yxatni ko'rsatadi va topshirishni shu
+   yerdan qabul qiladi. Qoldig'i nol bo'lganlar ro'yxatga tushmaydi.
+2. Dostavka agenti o'zida qancha topshirilmagan pul borligini umuman ko'rmasdi (sotuv agentida
+   `AgentCashCard` bor edi). `GET /api/delivery/agent/cash` — faqat o'qish, agent bosh
+   sahifasida qoldiq va qayerga topshirish yozuvi (uz/ru/kk).
+
+Ruxsatlar O'ZGARMADI: topshirishni avvalgidek `distribution.manage` (sotuv agenti) yoki
+`delivery.manage` (dostavka agenti) bor xodim qayd etadi. Ruxsati yo'q xodim faqat ko'radi.
+OCHIQ SAVOL: standart `Kassir` rolida ikkala ruxsat ham yo'q — agent ilovasi "kassaga
+topshiring" deydi-yu, kassirning o'zi qayd eta olmaydi. Rol modelini o'zgartirish boshqa
+bizneslarga ham tegadi, shuning uchun egasining qaroriga qoldirildi.
 
 ### Dostavka nakladnoyi (13)
 Umuman yo'q edi. `GET /api/delivery/waybill?agentId=&date=` (`delivery.view`; mijoz qarzi faqat
@@ -4163,8 +4186,33 @@ Qog'ozda: kompaniya sarlavhasi (Sozlamalar → Kompaniya dan), agent nomi va kod
 qarzi), jami bloki (yetkazmalar soni, jami summa, jami qarz) va imzolar. Tugma: Dostavka →
 Yetkazmalar, agent va bitta kun tanlanganda faollashadi. Bekor qilingan yetkazma chiqmaydi.
 
-Testlar: `kpi.test.ts` (+3), `counts.test.ts` (+2), yangi `delivery-waybill.test.ts` (5).
+Qog'ozni TO'G'RILASH joyi ham qo'shildi: "Nakladnoy" bosilganda avval oyna ochiladi — hujjat
+raqami, MAS'UL SHAXS, agent nomi, ombor va izoh tahrirlanadi; Manzil / Telefon / Mijoz qarzi
+ustunlari yoqib-o'chiriladi; yetkazmalar soni, jami summa va jami qarz o'sha yerda ko'rinadi.
+Sozlamalar brauzerda kompaniya kaliti bilan eslab qolinadi (serverdagi ma'lumotga tegilmaydi).
+Tuzatilgan xato: nakladnoyning BIRINCHI sahifasida kompaniya sarlavhasi chizilmasdi —
+`tableOptions` birinchi sahifani ataylab o'tkazib yuboradi (chaqiruvchi chizgan deb hisoblaydi),
+hisob-faktura chizardi, nakladnoy esa yo'q edi. Yangi A4 testi shuni topdi.
+
+Testlar: `kpi.test.ts` (+3), `counts.test.ts` (+2), yangi `delivery-waybill.test.ts` (5),
+`a4-documents.test.ts` (+3), `sales-agent-cash.test.ts` (+2).
 Production deploy QILINMADI.
+
+### Test holati (ochiq muammo, 2026-09-23)
+YASHIL: ikkala `tsc`, `eslint`, frontend vitest (31 fayl / 149 test), API'dan
+`counts` + `sales-agent-cash` + `delivery-waybill` (29 test) va
+`agent-kpi-reconciliation` + `cash` + `cashback` (14 test).
+
+TEKSHIRILMAGAN: to'liq API to'plami (150 fayl) shu mashinada ishga tushmadi. 8 GB xotiradan
+Docker VM ~2 GB, Claude jarayonlari ~1.1 GB oladi; vitest yuklangach bo'sh xotira ~500 MB ga
+tushadi va nazoratchi jarayonni o'ldiradi. 15, 6, 3 va 2 fayllik bo'laklar ham o'ldirildi.
+
+`acceptance-access.test.ts` ALOHIDA ishga tushirilganda 6 ta testi qizil. Sabab —
+`truncate table users, companies, rate_limits, audit_logs cascade` da POSTGRES DEADLOCK
+(40P01): fayl ichidagi bir nechta `buildServer()` pooli bir vaqtda bazani qulflaydi, keyingi
+xatolar (`duplicate key`, "kira olmadi") shundan kelib chiqadi. Bu joy shu sessiyadagi
+o'zgarishlarga tegishli emas (o'zgarishlar `users`/`companies`/`roles`/auth'ga tegmaydi),
+lekin PASS deb yozilmaydi: xotira bo'shaganda to'liq to'plam qayta yuritilishi kerak.
 
 ### Blockerlar
 - **Production zaxira xizmati (AUDIT-2, HIGH):** kod va hujjat tayyor (`deploy/backup/`), lekin Railway'da `bum-backup` xizmati, volume va `Cron Schedule` egasi tomonidan yaratilmagan; `BACKUP_PASSPHRASE` ham egasi kiritadi (parol repoda yo'q va hech qayerda chop etilmaydi). Shu qadamgacha production bazasining avtomatik nusxasi YO'Q
