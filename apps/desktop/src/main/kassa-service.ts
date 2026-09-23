@@ -434,6 +434,43 @@ function costValue(costs: Map<string, string>, productId: string, quantity: bigi
   return quantity < 0n ? -value : value;
 }
 
+/**
+ * Offline analitikadan foyda va tannarxni olib tashlaydi.
+ *
+ * Kompaniya egasining qarori: foydani faqat `analytics.view_profit`, tannarxni faqat
+ * `products.view_cost` bo'lgan xodim ko'radi (standart holatda — faqat ega). Serverdagi
+ * `GET /analytics` allaqachon shunday yuboradi; kassa offline hisoblaganda ham qoida bir xil.
+ *
+ * Aylanma, qaytarilgan pul, chek soni va qarzlar ochiq qoladi — ular ish uchun kerak.
+ */
+function hideCostAndProfit(report: AnalyticsReport, permissions: string[]): AnalyticsReport {
+  const cost = permissions.includes("products.view_cost");
+  const profit = permissions.includes("analytics.view_profit");
+  if (cost && profit) return report;
+  return {
+    ...report,
+    kpis: {
+      ...report.kpis,
+      ...(cost ? {} : { cogs: null, stockValue: null }),
+      ...(profit ? {} : { grossProfit: null, margin: null }),
+    },
+    daily: profit ? report.daily : report.daily.map((day) => ({ ...day, profit: null })),
+    products: {
+      top: report.products.top.map((row) => ({
+        ...row,
+        ...(cost ? {} : { cogs: null }),
+        ...(profit ? {} : { profit: null }),
+      })),
+      slow: cost ? report.products.slow : report.products.slow.map((row) => ({ ...row, value: null })),
+    },
+    categories: report.categories.map((row) => ({
+      ...row,
+      ...(cost ? {} : { cogs: null, stockValue: null }),
+      ...(profit ? {} : { profit: null }),
+    })),
+  };
+}
+
 function documentSync<T>(stored: StoredDocument<T>): DocumentSync {
   const conflicts = stored.result?.conflicts;
   return {
@@ -2852,7 +2889,7 @@ export class KassaService {
    */
   stockList(input: { query: string; filter?: StockFilter; limit?: number }): StockList {
     const cashier = this.requireCashierWith("warehouse.view");
-    const showCost = cashier.permissions.includes("warehouse.manage");
+    const showCost = cashier.permissions.includes("products.view_cost");
     const filter = STOCK_FILTERS.includes(input.filter as StockFilter) ? (input.filter as StockFilter) : "all";
     const limit = Math.min(Math.max(Number(input.limit) || 300, 1), 2000);
     const products = this.store.searchProducts(String(input.query ?? ""), 100_000, { saleableOnly: false }) as StockProductRow[];
@@ -3022,7 +3059,7 @@ export class KassaService {
     if (!target) throw new KassaError("BAD_REQUEST", "Qabul qiluvchi ombor topilmadi");
     const lines = this.stockLines(input.lines);
     const notes = note(input.notes);
-    const showCost = cashier.permissions.includes("warehouse.manage");
+    const showCost = cashier.permissions.includes("products.view_cost");
     const costs = this.store.stockLevelCosts();
     const value = lines.reduce((sum, line) => sum + costValue(costs, line.product.id, line.minor), 0n);
     return this.saveStockDocument({
@@ -3267,7 +3304,8 @@ export class KassaService {
         if (!(error instanceof OfflineError)) throw error;
       }
     }
-    return this.localAnalytics(from, to);
+    // Offline hisobotda ham server bilan BIR XIL qoida: foyda va tannarx alohida ruxsat bilan
+    return hideCostAndProfit(this.localAnalytics(from, to), cashier.permissions);
   }
 
   private localAnalytics(from: string, to: string): AnalyticsReport {

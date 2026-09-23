@@ -5,6 +5,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type ApiError } from "@/lib/api.ts";
 
+/** Tannarx maydonlari (`totalCost`, `unitCost`, `completedCost` ...) `products.view_cost` ruxsatisiz `null` keladi. */
 export type Bom = {
   id: string;
   productId: string;
@@ -43,7 +44,7 @@ export type WorkCenter = {
   name: string;
   code: string;
   type: WorkCenterType;
-  costPerHour: string;
+  costPerHour: string | null;
   isActive: boolean;
 };
 
@@ -61,10 +62,10 @@ export type ProductionOrder = {
   plannedDate: string;
   startedAt: string | null;
   completedAt: string | null;
-  totalMaterialCost: string;
-  totalLaborCost: string;
-  totalCost: string;
-  unitCost: string;
+  totalMaterialCost: string | null;
+  totalLaborCost: string | null;
+  totalCost: string | null;
+  unitCost: string | null;
   notes: string | null;
   productName: string;
   warehouseName: string;
@@ -78,8 +79,8 @@ export type ProductionMaterial = {
   plannedQty: string;
   actualQty: string;
   unitId: string;
-  unitCost: string;
-  totalCost: string;
+  unitCost: string | null;
+  totalCost: string | null;
   componentName: string;
   componentSku: string | null;
   unitName: string;
@@ -91,8 +92,8 @@ export type ProductionTimeLine = {
   workCenterId: string;
   plannedHours: string;
   actualHours: string;
-  costPerHour: string;
-  totalCost: string;
+  costPerHour: string | null;
+  totalCost: string | null;
   workCenterName: string;
 };
 
@@ -104,7 +105,7 @@ export type ProductionOrderDetail = ProductionOrder & {
 
 export type ProductionStats = {
   total: number;
-  completedCost: string;
+  completedCost: string | null;
   completedThisMonth: number;
   byStatus: { status: ProductionStatus; count: number }[];
 };

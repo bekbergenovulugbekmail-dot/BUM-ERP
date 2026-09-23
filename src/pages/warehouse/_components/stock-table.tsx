@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
 import { errorMessage } from "@/lib/api.ts";
 import { useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty.tsx";
 import { formatQty, toNumber } from "@/pages/products/_lib/types.ts";
 import type { StockRow } from "../_lib/types.ts";
@@ -26,6 +27,9 @@ export default function StockTable({ warehouseId, search, lowStockOnly, canRecei
     lowStockOnly: lowStockOnly || undefined,
   });
   const stockLevels = query.data?.stock;
+  // Tannarx va qiymat ustunlari — faqat `products.view_cost` bo'lganda (server ham shunda yuboradi)
+  const { can } = usePermissions();
+  const showCost = can("products.view_cost");
 
   if (query.isError) {
     return (
@@ -78,8 +82,12 @@ export default function StockTable({ warehouseId, search, lowStockOnly, canRecei
               <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs whitespace-nowrap">Jami</th>
               <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs whitespace-nowrap">Band</th>
               <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs whitespace-nowrap">Mavjud</th>
-              <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs whitespace-nowrap">O'rtacha narx</th>
-              <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs whitespace-nowrap">Qiymat</th>
+              {showCost && (
+                <>
+                  <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs whitespace-nowrap">O'rtacha narx</th>
+                  <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs whitespace-nowrap">Qiymat</th>
+                </>
+              )}
               <th className="text-center px-4 py-3 font-medium text-muted-foreground text-xs">Holat</th>
               <th className="px-4 py-3"></th>
             </tr>
@@ -127,12 +135,16 @@ export default function StockTable({ warehouseId, search, lowStockOnly, canRecei
                     </span>
                     <span className="text-xs text-muted-foreground ml-1">{row.unitName}</span>
                   </td>
-                  <td className="px-4 py-3 text-right text-muted-foreground whitespace-nowrap text-xs">
-                    {new Intl.NumberFormat("uz-UZ").format(Math.round(avgCost))} so'm
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium whitespace-nowrap text-xs">
-                    {new Intl.NumberFormat("uz-UZ", { notation: "compact" }).format(value)} so'm
-                  </td>
+                  {showCost && (
+                    <>
+                      <td className="px-4 py-3 text-right text-muted-foreground whitespace-nowrap text-xs">
+                        {new Intl.NumberFormat("uz-UZ").format(Math.round(avgCost))} so'm
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium whitespace-nowrap text-xs">
+                        {new Intl.NumberFormat("uz-UZ", { notation: "compact" }).format(value)} so'm
+                      </td>
+                    </>
+                  )}
                   <td className="px-4 py-3 text-center">
                     <span className={cn("text-[11px] px-2 py-0.5 rounded-full font-medium", statusLabel.cls)}>
                       {statusLabel.text}

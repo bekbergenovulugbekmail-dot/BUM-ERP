@@ -12,7 +12,13 @@ import { z } from "zod";
 import { db } from "../../db/client.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 import { companyModuleStates } from "../company/modules.service.js";
-import { effectivePermissions, requirePermission, requireTenant, type TenantContext } from "../company/tenant.js";
+import {
+  effectivePermissions,
+  hasPermission,
+  requirePermission,
+  requireTenant,
+  type TenantContext,
+} from "../company/tenant.js";
 import type { TenantAccess } from "../subscription/access.js";
 import { getDashboard } from "./dashboard.service.js";
 import {
@@ -63,7 +69,19 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
     return salesSummary(db, await readTenant(req), days);
   });
 
-  app.get("/reports/stock", async (req) => stockSummary(db, await readTenant(req)));
+  /** Ombor qiymati va ABC qiymatlari — tannarxdan hisoblanadi, shuning uchun `products.view_cost` kerak. */
+  app.get("/reports/stock", async (req) => {
+    const tenant = await readTenant(req);
+    const summary = await stockSummary(db, tenant);
+    if (await hasPermission(db, tenant, "products.view_cost")) return { ...summary, costHidden: false };
+    // ABC harfi qoladi (u ish uchun kerak), pul qiymati esa yashiriladi
+    return {
+      ...summary,
+      totalValue: null,
+      abcData: summary.abcData.map((row) => ({ ...row, value: null })),
+      costHidden: true,
+    };
+  });
 
   app.get("/reports/expenses", async (req) => {
     const { days } = daysQuery.parse(req.query);
@@ -92,8 +110,12 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
     return { customers: await topCustomers(db, await readTenant(req), days, limit) };
   });
 
+  /** Qoldiq qiymati (`value`) tannarxdan hisoblanadi — miqdor va harakatlilik ochiq, pul yopiq. */
   app.get("/reports/stock-velocity", async (req) => {
     const { days } = daysQuery.parse(req.query);
-    return { products: await stockVelocity(db, await readTenant(req), days) };
+    const tenant = await readTenant(req);
+    const products = await stockVelocity(db, tenant, days);
+    if (await hasPermission(db, tenant, "products.view_cost")) return { products, costHidden: false };
+    return { products: products.map((row) => ({ ...row, value: null })), costHidden: true };
   });
 }

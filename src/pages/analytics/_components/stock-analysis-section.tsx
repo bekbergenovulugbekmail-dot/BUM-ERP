@@ -4,6 +4,7 @@ import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import Papa from "papaparse";
 import { useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
 import { num, type StockSummary, type StockVelocityRow } from "../_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
@@ -22,6 +23,9 @@ const ABC_MAP = {
 
 export default function StockAnalysisSection({ days }: { days: number }) {
   const stockSummary = useApiQuery<StockSummary>("/api/analytics/reports/stock").data;
+  // Qoldiq QIYMATI tannarxdan hisoblanadi — ruxsatsiz server `null` yuboradi, ustun ham ko'rsatilmaydi
+  const { can } = usePermissions();
+  const showCost = can("products.view_cost");
   const velocity = useApiQuery<{ products: StockVelocityRow[] }>("/api/analytics/reports/stock-velocity", { days }).data?.products;
 
   const handleExport = () => {
@@ -33,7 +37,7 @@ export default function StockAnalysisSection({ days }: { days: number }) {
       "Sotilgan (period)": v.soldQty,
       "Kun qoldiq": v.daysOfStock ?? "∞",
       "Harakatlilik": v.velocity,
-      "Qoldiq qiymati": v.value,
+      ...(showCost ? { "Qoldiq qiymati": v.value } : {}),
     }));
     const csv = Papa.unparse(data);
     const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
@@ -58,7 +62,9 @@ export default function StockAnalysisSection({ days }: { days: number }) {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
             { label: "Jami SKU", value: stockSummary.totalProducts, sub: "Noyob mahsulotlar" },
-            { label: "Ombor qiymati", value: fmt(num(stockSummary.totalValue)) + " so'm", sub: "Joriy baholash" },
+            ...(showCost
+              ? [{ label: "Ombor qiymati", value: fmt(num(stockSummary.totalValue)) + " so'm", sub: "Joriy baholash" }]
+              : []),
             { label: "Kam qoldiq", value: stockSummary.lowStock, sub: "Min miqdordan kam", danger: stockSummary.lowStock > 0 },
             { label: "Tugagan", value: stockSummary.outOfStock, sub: "Zaxira yo'q", danger: stockSummary.outOfStock > 0 },
           ].map((s) => (
@@ -95,7 +101,9 @@ export default function StockAnalysisSection({ days }: { days: number }) {
                   <th className="text-right px-3 py-2.5 text-xs text-muted-foreground font-medium">Qoldiq</th>
                   <th className="text-right px-3 py-2.5 text-xs text-muted-foreground font-medium">Sotilgan</th>
                   <th className="text-right px-3 py-2.5 text-xs text-muted-foreground font-medium">Kun qoldiq</th>
-                  <th className="text-right px-3 py-2.5 text-xs text-muted-foreground font-medium">Qiymati</th>
+                  {showCost && (
+                    <th className="text-right px-3 py-2.5 text-xs text-muted-foreground font-medium">Qiymati</th>
+                  )}
                   <th className="text-center px-3 py-2.5 text-xs text-muted-foreground font-medium">Holat</th>
                 </tr>
               </thead>
@@ -119,7 +127,7 @@ export default function StockAnalysisSection({ days }: { days: number }) {
                       <td className={cn("px-3 py-2.5 text-right", daysLeft !== null && daysLeft < 7 ? "text-rose-500 font-semibold" : daysLeft !== null && daysLeft < 30 ? "text-amber-600" : "")}>
                         {daysLeft === null ? "∞" : daysLeft + "d"}
                       </td>
-                      <td className="px-3 py-2.5 text-right">{fmt(num(item.value))}</td>
+                      {showCost && <td className="px-3 py-2.5 text-right">{fmt(num(item.value))}</td>}
                       <td className="px-3 py-2.5 text-center">
                         <span className={cn("text-xs px-2 py-0.5 rounded-full", vel.color)}>{vel.label}</span>
                       </td>

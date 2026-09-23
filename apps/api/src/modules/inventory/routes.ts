@@ -26,6 +26,7 @@ import { requestMeta } from "../../shared/audit.js";
 import { decimalSchema, priceSchema, qtySchema } from "../../shared/decimal.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 import {
+  hasPermission,
   requirePermission,
   requireTenant,
   requireTenantForWrite,
@@ -165,6 +166,18 @@ async function readTenant(req: FastifyRequest, permission?: Permission): Promise
   return tenant;
 }
 
+/**
+ * Tannarxni ko'rish huquqi (`products.view_cost`) — ombor ruxsatidan ALOHIDA.
+ *
+ * Kompaniya egasining qarori: o'rtacha tannarx va ombor qiymati xodimlarga ko'rinmaydi. Qoldiq,
+ * zaxira va harakatlar esa ochiq qoladi — ular ish uchun kerak va foyda ko'rsatmaydi.
+ */
+const canViewCost = (tenant: TenantContext) => hasPermission(db, tenant, "products.view_cost");
+
+/** Ruxsat bo'lmasa tannarx maydoni `null` bo'lib qaytadi (0 emas — 0 noto'g'ri ma'lumot berardi). */
+const hideCost = <T extends { avgCostPrice: string }>(rows: T[], allowed: boolean) =>
+  allowed ? rows : rows.map((row) => ({ ...row, avgCostPrice: null }));
+
 function writeInTenant<T>(
   req: FastifyRequest,
   permissions: Permission[],
@@ -233,17 +246,22 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/stock", async (req) => {
     const query = stockQuery.parse(req.query);
-    return { stock: await listStock(db, await readTenant(req, "warehouse.view"), query) };
+    const tenant = await readTenant(req, "warehouse.view");
+    return { stock: hideCost(await listStock(db, tenant, query), await canViewCost(tenant)) };
   });
 
   app.get("/stock/stats", async (req) => {
     const { warehouseId } = statsQuery.parse(req.query);
-    return warehouseStats(db, await readTenant(req, "warehouse.view"), warehouseId);
+    const tenant = await readTenant(req, "warehouse.view");
+    const stats = await warehouseStats(db, tenant, warehouseId);
+    // Ombor qiymati = qoldiq × tannarx, ya'ni tannarxning o'zi — ruxsatsiz yuborilmaydi
+    return (await canViewCost(tenant)) ? stats : { ...stats, totalValue: null };
   });
 
   app.get("/stock/products/:productId", async (req) => {
     const { productId } = productParams.parse(req.params);
-    return { stock: await productStock(db, await readTenant(req, "warehouse.view"), productId) };
+    const tenant = await readTenant(req, "warehouse.view");
+    return { stock: hideCost(await productStock(db, tenant, productId), await canViewCost(tenant)) };
   });
 
   app.get("/stock/movements", async (req) => {

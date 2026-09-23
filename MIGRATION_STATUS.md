@@ -3973,6 +3973,68 @@ Migratsiya kerak emas (ruxsatlar kodda). Test: `profit-visibility.test.ts` (7) �
 buxgalter, savdo, ombor, HR, supervayzer va direktor ko'rmaydi; bosh sahifa va foyda-zarar
 tekshiriladi; ega ruxsat bergach direktorga ochilishi tasdiqlanadi.
 
+## Import: "Faylda qator topilmadi" sababini aytadi (2026-09-23)
+
+Egasi: «xariddan importni bossam faylda qator topilmadi deydi». Shablon fayli qayta o'qib
+chiqilganda holat takrorlandi: CSV shabloni ikki qatordan iborat — sarlavha va `#` bilan
+boshlanadigan NAMUNA. Import namuna qatorini tashlab yuboradi, natijada 0 qator qoladi va
+bitta umumiy xabar chiqardi — sabab ko'rinmasdi. Excel `;` ajratgichli CSV ni ko'pincha bitta
+ustunga ochgani uchun foydalanuvchi namuna qatorini ma'lumotdan farqlay olmasdi.
+
+- `acceptParsed` uch holatni ajratadi: sarlavha yo'q / faqat namuna qatori bor (nima qilish
+  kerakligi bilan) / ma'lumot qatori yo'q;
+- Excel qo'shib yuboradigan bo'sh (`;;;;`) satrlar ma'lumot deb hisoblanmaydi;
+- `papaparse` ajratgichni topa olmay hammasini bitta ustunga qo'ysa — sarlavhadagi ajratgich
+  bilan QAYTA ajratiladi; Excelda noto'g'ri ochilgan CSV `.xlsx` bo'lib saqlansa ham ustunlarga
+  bo'linadi;
+- eski `.xls` o'qilmasa — "`.xlsx` yoki CSV qilib saqlang" deb aytiladi;
+- **xarid shabloni endi Excel (`.xlsx`)**: ustunlar alohida katakda, namuna qatori kulrang/qiya.
+
+Test: `src/components/csv/csv-toolbar.test.tsx` (3 ta yangi). Commit `53ae2a5`, production'ga
+deploy qilingan (`app.bum-erp.uz` bundle'ida uchala yangi xabar tasdiqlandi).
+
+## Tannarxni ham faqat ega ko'radi (2026-09-23)
+
+Egasining qarori (foyda qaroridan keyin): tannarxni ham hech kim ko'rmasin. Ilgari
+`products.view_cost` sakkizta tayyor rolda bor edi (Buxgalter, Moliya/Savdo/Xarid/Ombor
+menejeri, Omborchi, Ishlab chiqarish menejeri, Auditor) va `Direktor` ga `ALL_PERMISSIONS`
+orqali tushardi.
+
+**Ruxsat `products.view_cost`** endi `analytics.view_profit` bilan bir xil qoidada: hech bir
+tayyor rolda yo'q, faqat `Business Owner` va `Superadmin` da; `Direktor` uchun ham istisno
+qilingan; ega uni rollar sozlamasidan istalgan rolga beradi.
+
+**Audit natijasida topilgan va yopilgan teshiklar** (katalog allaqachon yopiq edi, qolganlari YO'Q edi):
+| Joy | Yashiriladi | Ochiq qoladi |
+|---|---|---|
+| `GET /api/inventory/stock` | `avgCostPrice` | qoldiq, band, mavjud, holat |
+| `GET /api/inventory/stock/stats` | `totalValue` (ombor qiymati) | mahsulot soni, kam/tugagan |
+| `GET /api/inventory/stock/products/:id` | `avgCostPrice` | omborlar bo'yicha qoldiq |
+| `GET /api/analytics/reports/stock` | `totalValue`, ABC pul qiymati | SKU soni, **ABC harfi** |
+| `GET /api/analytics/reports/stock-velocity` | `value` | qoldiq, sotilgan, harakatlilik |
+| `GET /api/sales/orders/:id` | qator `costPrice` | sotuv narxi, miqdor, chegirma |
+| `GET /api/manufacturing/orders`, `/orders/stats`, `/orders/:id` | material/mehnat/jami/birlik narxi, soatlik narx | miqdor, muddat, holat, ish markazi |
+
+Sotuv buyurtmasi qatoridagi `costPrice` eng jiddiy edi: uni `sales.view` bor har bir xodim
+ko'rardi (jadval ustuni `...itemFields` bilan to'liq qaytarilardi).
+
+Frontend: ombor jadvalidagi "O'rtacha narx"/"Qiymat" ustunlari, "Ombor qiymati" kartochkalari
+(Ombor va Analitika), ishlab chiqarish narx ko'rsatkichlari va CSV eksportdagi "Qoldiq qiymati"
+ustuni ruxsatsiz umuman ko'rsatilmaydi (0 emas — 0 noto'g'ri ma'lumot berardi).
+
+Desktop kassa: offline analitikada foyda va tannarx UMUMAN cheklanmagan edi (server yo'li
+2026-09-23 da yopilgan, offline yo'li esa yo'q). `hideCostAndProfit` qo'shildi va ombor
+ko'rinishlaridagi eski `warehouse.manage` gate `products.view_cost` ga almashtirildi —
+**yangi desktop relizida kuchga kiradi**.
+
+Migratsiya kerak emas (ruxsatlar kodda). Testlar: yangi `cost-visibility.test.ts` (7) —
+ombor, analitika, sotuv va rol standartlari; `product-cost.test.ts` dagi "omborchi tannarxni
+ko'radi" testi yangi qoidaga moslandi (endi ko'rmaydi, ega ruxsat bersagina ochiladi). To'liq API
+to'plamida ikkita acceptance testi (`acceptance-real-world` BUSINESS 02, `acceptance-wholesale`
+PHASE 3) menejer cookie'si bilan tannarx so'rardi — ular ham yangi qoidaga moslandi (AVCO hisobi
+tekshiruvi saqlanib, so'rov egadan qilinadi va menejerga 403 qaytishi tasdiqlanadi).
+To'liq API to'plami: 956/956; frontend: 145/145.
+
 ### Qolgan ishlar
 1. Android: release imzo kaliti → imzolangan APK; real telefonda sinov (Android bo'limidagi ro'yxat)
 1a. **Bootstrap admin parolini almashtirish** (egasi, Railway o'zgaruvchisi): hozirgi parol oddiy parollar qoidasiga tushadi. Tizimga kirgan holda production smoke: realtime (dostavka xaritasi) CSP ostida, kassada kassir kirishi va qaytarish

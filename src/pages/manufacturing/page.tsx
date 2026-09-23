@@ -4,6 +4,7 @@ import { Factory, Package, Cog, TrendingUp, Layers } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import PageTabs from "@/components/page-tabs.tsx";
 import { useApiQuery } from "@/lib/query.ts";
+import { usePermissions } from "@/hooks/use-company.ts";
 import BOMSection from "./_components/bom-section.tsx";
 import OrdersSection from "./_components/orders-section.tsx";
 import WorkCentersSection from "./_components/work-centers-section.tsx";
@@ -19,6 +20,7 @@ const TABS = [
 
 export default function ManufacturingPage() {
   const [tab, setTab] = useState<typeof TABS[number]["key"]>("orders");
+  const { can } = usePermissions();
   const stats = useApiQuery<ProductionStats>("/api/manufacturing/orders/stats").data;
   const boms = useApiQuery<{ boms: Bom[] }>("/api/manufacturing/boms").data?.boms;
 
@@ -49,14 +51,19 @@ export default function ManufacturingPage() {
       color: "text-blue-500",
       bg: "bg-blue-500/10",
     },
-    {
-      label: "Jami ishlab chiqarish narxi",
-      value: fmt(num(stats?.completedCost)) + " so'm",
-      sub: "Yakunlangan buyurtmalar bo'yicha",
-      icon: Package,
-      color: "text-emerald-500",
-      bg: "bg-emerald-500/10",
-    },
+    // Ishlab chiqarish narxi = tannarx: `products.view_cost` ruxsatisiz karta ko'rsatilmaydi
+    ...(can("products.view_cost")
+      ? [
+          {
+            label: "Jami ishlab chiqarish narxi",
+            value: fmt(num(stats?.completedCost)) + " so'm",
+            sub: "Yakunlangan buyurtmalar bo'yicha",
+            icon: Package,
+            color: "text-emerald-500",
+            bg: "bg-emerald-500/10",
+          },
+        ]
+      : []),
   ];
 
   return (

@@ -42,7 +42,14 @@ import { notifyCustomerPaymentReceived, notifyOrderPurchase } from "../telegram/
 import { alertBigDiscount, alertShiftDifference } from "../telegram/alerts.service.js";
 import { decimalSchema, moneySchema, percentSchema, priceSchema } from "../../shared/decimal.js";
 import { authOf, requireAuth } from "../auth/guard.js";
-import { requireAnyPermission, requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
+import {
+  hasPermission,
+  requireAnyPermission,
+  requirePermission,
+  requireTenant,
+  requireTenantForWrite,
+  type TenantContext,
+} from "../company/tenant.js";
 import { autoCreateDeliveryTask } from "../delivery/tasks.service.js";
 import { createCustomer, getCustomer, listCustomerRegions, listCustomers, salesAudit, updateCustomer } from "./customers.service.js";
 import {
@@ -570,7 +577,11 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/orders/:orderId", async (req) => {
     const { orderId } = orderParams.parse(req.params);
-    return { order: await getOrder(db, await readTenant(req, "sales.view"), orderId) };
+    const tenant = await readTenant(req, "sales.view");
+    const order = await getOrder(db, tenant, orderId);
+    // Qator tannarxi (`costPrice`) — sotuv ruxsati yetmaydi, `products.view_cost` kerak
+    if (await hasPermission(db, tenant, "products.view_cost")) return { order };
+    return { order: { ...order, items: order.items.map((item) => ({ ...item, costPrice: null })) } };
   });
 
   app.post("/orders", async (req, reply) => {

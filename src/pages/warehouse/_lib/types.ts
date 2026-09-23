@@ -18,8 +18,9 @@ export type WarehouseItem = {
   createdAt: string;
 };
 
+/** `totalValue` — tannarxdan hisoblanadi: `products.view_cost` ruxsatisiz server `null` yuboradi. */
 export type WarehouseStats = {
-  totalValue: string;
+  totalValue: string | null;
   totalItems: number;
   lowStockCount: number;
   zeroStockCount: number;
@@ -32,7 +33,8 @@ export type StockRow = {
   quantity: string;
   reservedQty: string;
   availableQty: string;
-  avgCostPrice: string;
+  /** Tannarx: `products.view_cost` ruxsatisiz server `null` yuboradi. */
+  avgCostPrice: string | null;
   productName: string;
   productSku: string;
   productBarcode: string | null;

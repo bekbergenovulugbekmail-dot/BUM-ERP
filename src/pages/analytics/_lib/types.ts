@@ -31,13 +31,14 @@ export type SalesSummary = {
   dailyRevenue: { date: string; amount: string }[];
 };
 
+/** Tannarxga bog'liq maydonlar (`totalValue`, `abcData[].value`) `products.view_cost` ruxsatisiz `null`. */
 export type StockSummary = {
   totalProducts: number;
-  totalValue: string;
+  totalValue: string | null;
   lowStock: number;
   outOfStock: number;
   /** Qiymati bo'yicha eng yirik 50 ta mahsulot. */
-  abcData: { productId: string; name: string; quantity: string; value: string; abc: "A" | "B" | "C" }[];
+  abcData: { productId: string; name: string; quantity: string; value: string | null; abc: "A" | "B" | "C" }[];
 };
 
 export type TopCustomer = { customerId: string; name: string; amount: string; orders: number };
@@ -53,7 +54,8 @@ export type StockVelocityRow = {
   /** Sotuv bo'lmasa `null` — zaxira cheksiz. */
   daysOfStock: number | null;
   velocity: "fast" | "slow" | "dead";
-  value: string;
+  /** Qoldiq qiymati (tannarxdan): `products.view_cost` ruxsatisiz `null`. */
+  value: string | null;
 };
 
 /** Numeric satr → son (faqat ko'rsatish uchun). */

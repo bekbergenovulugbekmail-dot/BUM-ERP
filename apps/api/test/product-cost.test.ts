@@ -212,12 +212,27 @@ describe("Tannarx ruxsati", () => {
     expect((await suggest(p, "", kassir.cookie)).statusCode).toBe(403);
   });
 
-  it("omborchi tannarxni ko'radi (rolga ruxsat berilgan)", async () => {
+  /**
+   * Kompaniya egasining qarori: tannarxni HECH KIM ko'rmaydi — omborchi ham. Ruxsat (`products.view_cost`)
+   * hech bir tayyor rolda yo'q; ega uni kerakli xodimga rollar sozlamasidan beradi.
+   */
+  it("omborchi ham tannarxni ko'rmaydi — ega ruxsat bersagina ochiladi", async () => {
     const p = await product({ purchasePrice: "6000" });
     const omborchi = await addEmployee(app, company, "Omborchi");
+
     const list = await call(omborchi.cookie, "GET", "/api/catalog/products");
     const row = (list.json().products as { id: string; purchasePrice?: string }[]).find((item) => item.id === p)!;
-    expect(row.purchasePrice).toBe("6000.0000");
+    expect(row.purchasePrice, "tannarx yuborilmaydi").toBeUndefined();
+    expect((await call(omborchi.cookie, "GET", "/api/catalog/products/costs")).statusCode).toBe(403);
+
+    // Ega "Omborchi" roliga tannarx ruxsatini qo'shadi
+    const roles = (await owner("GET", "/api/company/roles")).json().roles as { id: string; name: string; permissions: string[] }[];
+    const role = roles.find((item) => item.name === "Omborchi")!;
+    const updated = await owner("PATCH", `/api/company/roles/${role.id}`, { permissions: [...role.permissions, "products.view_cost"] });
+    expect(updated.statusCode, updated.body).toBe(200);
+
+    const after = await call(omborchi.cookie, "GET", "/api/catalog/products");
+    expect((after.json().products as { id: string; purchasePrice?: string }[]).find((item) => item.id === p)!.purchasePrice).toBe("6000.0000");
     expect((await call(omborchi.cookie, "GET", "/api/catalog/products/costs")).statusCode).toBe(200);
   });
 });

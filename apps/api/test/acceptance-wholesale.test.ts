@@ -389,13 +389,15 @@ describe("BUSINESS 03 — ULGURJI SAVDO (TEST-03-WHOLESALE)", () => {
     await purchase(ws.suppliers["TEST-SUPPLIER-C"]!, [{ productId, quantity: "1000", unitPrice: "11000" }]);
     expect(await stockOf(productId)).toBe(3000);
 
-    const costs = (await call(ws.managerCookie, "GET", "/api/catalog/products/costs?search=WS-01")).json().products;
+    // Tannarx ro'yxati faqat egada (`products.view_cost` hech bir tayyor rolda yo'q)
+    expect((await call(ws.managerCookie, "GET", "/api/catalog/products/costs?search=WS-01")).statusCode).toBe(403);
+    const costs = (await call(ws.ownerCookie, "GET", "/api/catalog/products/costs?search=WS-01")).json().products;
     const row = costs.find((item: { sku: string }) => item.sku === "WS-01");
     expect(money(row.avgCost), "AVCO = (10000+12000+11000)/3").toBeCloseTo(11_000, 0);
     expect(money(row.lastPurchasePrice), "oxirgi xarid narxi").toBe(11_000);
     expect(row.lastPurchaseDate).toBe(today());
 
-    const suggestion = await call(ws.managerCookie, "GET", `/api/catalog/products/${productId}/price-suggestions`);
+    const suggestion = await call(ws.ownerCookie, "GET", `/api/catalog/products/${productId}/price-suggestions`);
     expect(suggestion.statusCode, suggestion.body).toBe(200);
     expect(money(suggestion.json().lastPurchase.price)).toBe(11_000);
     expect(money(suggestion.json().avgPurchasePrice)).toBeCloseTo(11_000, 0);
@@ -405,8 +407,9 @@ describe("BUSINESS 03 — ULGURJI SAVDO (TEST-03-WHOLESALE)", () => {
     expect(cardAfter.salesPrice).toBe(cardBefore.salesPrice);
     expect(cardAfter.purchasePrice).toBe(cardBefore.purchasePrice);
 
-    const history = await call(ws.managerCookie, "GET", `/api/catalog/products/${productId}/cost-history`);
+    const history = await call(ws.ownerCookie, "GET", `/api/catalog/products/${productId}/cost-history`);
     expect(history.statusCode, history.body).toBe(200);
+    expect((await call(ws.managerCookie, "GET", `/api/catalog/products/${productId}/cost-history`)).statusCode, "menejerga tannarx tarixi yopiq").toBe(403);
   });
 
   it("PHASE 4 — ulgurji savdo: besh mijozga buyurtma, tasdiq va jo'natish", async () => {

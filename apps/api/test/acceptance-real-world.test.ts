@@ -957,10 +957,12 @@ describe("BUSINESS 02 — SUPERMARKET (TEST-02-SUPERMARKET)", () => {
     expect(money(row.salesPrice)).toBe(10_000);
     expect(money(row.marginPercent), "marja foizda").toBeGreaterThan(0);
 
-    const suggestion = await call(superm.managerCookie, "GET", `/api/catalog/products/${productId}/price-suggestions`);
+    const suggestion = await call(superm.ownerCookie, "GET", `/api/catalog/products/${productId}/price-suggestions`);
     expect(suggestion.statusCode, suggestion.body).toBe(200);
     expect(money(suggestion.json().avgPurchasePrice), "o'rtacha xarid narxi").toBeCloseTo(7000, 0);
 
+    // Egasining qarori: tannarxni faqat ega ko'radi — menejer ham, kassir ham ko'rmaydi
+    expect((await call(superm.managerCookie, "GET", `/api/catalog/products/${productId}/price-suggestions`)).statusCode).toBe(403);
     expect((await call(superm.cashierCookie, "GET", `/api/catalog/products/${productId}/price-suggestions`)).statusCode).toBe(403);
     expect((await call(superm.cashierCookie, "GET", `/api/catalog/products/${productId}/cost-history`)).statusCode).toBe(403);
   });

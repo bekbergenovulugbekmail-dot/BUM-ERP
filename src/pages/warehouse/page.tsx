@@ -68,6 +68,7 @@ export default function WarehousePage() {
   const formatMoney = (n: number) =>
     new Intl.NumberFormat("uz-UZ", { notation: "compact" }).format(n) + " so'm";
 
+  // "Ombor qiymati" = qoldiq × tannarx: ruxsatsiz server `null` yuboradi, karta umuman ko'rsatilmaydi
   const STAT_CARDS = [
     {
       label: "Jami mahsulot turi",
@@ -75,12 +76,16 @@ export default function WarehousePage() {
       icon: <BarChart3 className="h-5 w-5" />,
       color: "text-primary",
     },
-    {
-      label: "Ombor qiymati",
-      value: stats ? formatMoney(toNumber(stats.totalValue)) : "—",
-      icon: <TrendingUp className="h-5 w-5" />,
-      color: "text-green-600",
-    },
+    ...(can("products.view_cost")
+      ? [
+          {
+            label: "Ombor qiymati",
+            value: stats?.totalValue ? formatMoney(toNumber(stats.totalValue)) : "—",
+            icon: <TrendingUp className="h-5 w-5" />,
+            color: "text-green-600",
+          },
+        ]
+      : []),
     {
       label: "Kam zaxira",
       value: stats?.lowStockCount ?? 0,

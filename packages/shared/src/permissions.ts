@@ -17,8 +17,11 @@ export const PERMISSIONS = {
   /** Kategoriya, brend, o'lchov birligi kabi mahsulot ma'lumotnomalari. */
   "products.manage":      { label: "Mahsulot ma'lumotnomalari",    group: "Mahsulotlar" },
   /**
-   * Tannarx, xarid narxi va marja. `products.view` dan ATAYLAB ajratilgan: kassir va sotuv agenti
-   * mahsulotni ko'radi, lekin firma qancha pulga olganini ko'rmaydi (savdo siri).
+   * Tannarx, xarid narxi, ombor qiymati va marja. `products.view` dan ATAYLAB ajratilgan.
+   *
+   * Kompaniya egasining qarori: tannarxni HECH KIM ko'rmaydi — shuning uchun bu ruxsat hech bir
+   * tayyor rolda yo'q (Direktorda ham), faqat to'liq huquqlilarda (Business Owner, Superadmin).
+   * Kerak bo'lsa ega uni rollar sozlamasidan kerakli xodimga beradi — `analytics.view_profit` kabi.
    */
   "products.view_cost":   { label: "Tannarx va xarid narxini ko'rish", group: "Mahsulotlar" },
 
@@ -224,13 +227,14 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     description: "Barcha operatsiyalarni ko'rish va boshqarish",
     color: "#0ea5e9",
     isSystem: true,
-    // Foyda (`analytics.view_profit`) bu yerda ham YO'Q: uni faqat ega ko'radi. Kerak bo'lsa ega
-    // rollar sozlamasida direktorga qo'shib beradi.
+    // Foyda (`analytics.view_profit`) va tannarx (`products.view_cost`) bu yerda ham YO'Q: ularni
+    // faqat ega ko'radi. Kerak bo'lsa ega rollar sozlamasida direktorga qo'shib beradi.
     permissions: ALL_PERMISSIONS.filter(
       (p) =>
         p !== "roles.manage" &&
         p !== "company.manage" &&
         p !== "analytics.view_profit" &&
+        p !== "products.view_cost" &&
         !BILLING_MANAGE.includes(p),
     ),
   },
@@ -240,7 +244,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     color: "#14b8a6",
     isSystem: true,
     permissions: [
-      "products.view", "products.view_cost",
+      "products.view",
       "sales.view", "sales.approve",
       "purchase.view", "purchase.create", "purchase.edit", "purchase.approve",
       "finance.view", "finance.manage", "finance.approve", "finance.export",
@@ -257,7 +261,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     color: "#22c55e",
     isSystem: true,
     permissions: [
-      "products.view", "products.view_cost",
+      "products.view",
       "sales.view", "sales.approve",
       "purchase.view", "purchase.approve",
       "finance.view", "finance.manage", "finance.approve", "finance.export",
@@ -273,7 +277,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     color: "#f97316",
     isSystem: true,
     permissions: [
-      "products.view", "products.view_cost", "products.create", "products.edit", "products.manage",
+      "products.view", "products.create", "products.edit", "products.manage",
       "sales.view", "sales.create", "sales.edit", "sales.approve", "sales.cancel", "sales.refund",
       "sales.collect_payment",
       "pos.use",
@@ -295,7 +299,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     color: "#a855f7",
     isSystem: true,
     permissions: [
-      "products.view", "products.view_cost", "products.create", "products.edit", "products.manage",
+      "products.view", "products.create", "products.edit", "products.manage",
       "purchase.view", "purchase.create", "purchase.edit", "purchase.approve", "purchase.cancel", "purchase.return",
       "warehouse.view", "warehouse.manage", "warehouse.receive",
       "finance.view",
@@ -309,7 +313,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     color: "#8b5cf6",
     isSystem: true,
     permissions: [
-      "products.view", "products.view_cost", "products.create", "products.edit", "products.manage",
+      "products.view", "products.create", "products.edit", "products.manage",
       "warehouse.view", "warehouse.manage", "warehouse.transfer", "warehouse.count", "warehouse.receive",
       "scale.view", "scale.manage", "scale.sync",
       "purchase.view",
@@ -324,7 +328,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     color: "#64748b",
     isSystem: true,
     permissions: [
-      "products.view", "products.view_cost",
+      "products.view",
       "warehouse.view", "warehouse.manage", "warehouse.transfer", "warehouse.receive",
       "purchase.view",
     ],
@@ -369,7 +373,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     color: "#d97706",
     isSystem: true,
     permissions: [
-      "products.view", "products.view_cost", "products.create", "products.edit", "products.manage",
+      "products.view", "products.create", "products.edit", "products.manage",
       "manufacturing.view", "manufacturing.manage", "manufacturing.approve",
       "warehouse.view", "warehouse.manage", "warehouse.receive",
       "purchase.view",
@@ -419,7 +423,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     description: "Faqat o'qish va hisobot",
     color: "#94a3b8",
     isSystem: true,
-    permissions: VIEW_ONLY.concat(["products.view_cost", "analytics.export", "audit.view"]),
+    permissions: VIEW_ONLY.concat(["analytics.export", "audit.view"]),
   },
   {
     name: "Ko'ruvchi",

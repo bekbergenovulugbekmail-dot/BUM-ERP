@@ -19,7 +19,13 @@ import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
 import { decimalSchema, moneySchema, percentSchema, qtySchema } from "../../shared/decimal.js";
 import { authOf, requireAuth } from "../auth/guard.js";
-import { requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
+import {
+  hasPermission,
+  requirePermission,
+  requireTenant,
+  requireTenantForWrite,
+  type TenantContext,
+} from "../company/tenant.js";
 import { addBomItem, createBom, deleteBom, deleteBomItem, getBom, listBoms, updateBom, updateBomItem } from "./boms.service.js";
 import {
   addTimeLine,
@@ -133,6 +139,22 @@ function writeInTenant<T>(
   });
 }
 
+/**
+ * Tannarxni ko'rish huquqi (`products.view_cost`) — ishlab chiqarish ruxsatidan ALOHIDA.
+ *
+ * Kompaniya egasining qarori: tannarxni hech kim ko'rmaydi. Ishlab chiqarish buyurtmasining
+ * material va ish haqi qiymati — aynan tayyor mahsulot tannarxi, shuning uchun u ham yashiriladi.
+ * Miqdorlar, muddatlar va holat ochiq qoladi — ular ish uchun kerak.
+ */
+const COST_FIELDS = ["totalMaterialCost", "totalLaborCost", "totalCost", "unitCost", "costPerHour"] as const;
+
+/** Ruxsatsiz tannarx maydonlari `null` bo'lib qaytadi (0 emas — 0 noto'g'ri ma'lumot berardi). */
+function hideCost<T extends object>(row: T): T {
+  const copy = { ...row } as Record<string, unknown>;
+  for (const field of COST_FIELDS) if (field in copy) copy[field] = null;
+  return copy as T;
+}
+
 export async function manufacturingRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", requireAuth);
 
@@ -217,14 +239,32 @@ export async function manufacturingRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/orders", async (req) => {
     const query = ordersQuery.parse(req.query);
-    return { orders: await listOrders(db, await readTenant(req), query) };
+    const tenant = await readTenant(req);
+    const orders = await listOrders(db, tenant, query);
+    if (await hasPermission(db, tenant, "products.view_cost")) return { orders, costHidden: false };
+    return { orders: orders.map(hideCost), costHidden: true };
   });
 
-  app.get("/orders/stats", async (req) => productionStats(db, await readTenant(req)));
+  app.get("/orders/stats", async (req) => {
+    const tenant = await readTenant(req);
+    const stats = await productionStats(db, tenant);
+    if (await hasPermission(db, tenant, "products.view_cost")) return { ...stats, costHidden: false };
+    return { ...stats, completedCost: null, costHidden: true };
+  });
 
   app.get("/orders/:orderId", async (req) => {
     const { orderId } = orderParams.parse(req.params);
-    return { order: await getOrder(db, await readTenant(req), orderId) };
+    const tenant = await readTenant(req);
+    const order = await getOrder(db, tenant, orderId);
+    if (await hasPermission(db, tenant, "products.view_cost")) return { order, costHidden: false };
+    return {
+      order: {
+        ...hideCost(order),
+        materials: order.materials.map(hideCost),
+        timeLines: order.timeLines.map(hideCost),
+      },
+      costHidden: true,
+    };
   });
 
   app.post("/orders", async (req, reply) => {

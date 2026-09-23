@@ -42,6 +42,8 @@ const emptyTimeForm = () => ({ workCenterId: "", plannedHours: "1", actualHours:
 
 export default function OrdersSection() {
   const { can } = usePermissions();
+  // Ishlab chiqarish narxi = tayyor mahsulot tannarxi: `products.view_cost` ruxsatisiz ko'rsatilmaydi
+  const showCost = can("products.view_cost");
   const canApprove = can("manufacturing.approve");
 
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_TABS)[number]>("all");
@@ -202,10 +204,12 @@ export default function OrdersSection() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <div className="text-right hidden md:block">
-                      <p className="text-xs text-muted-foreground">Narxi</p>
-                      <p className="text-sm font-semibold">{fmt(num(order.totalCost))} so'm</p>
-                    </div>
+                    {showCost && (
+                      <div className="text-right hidden md:block">
+                        <p className="text-xs text-muted-foreground">Narxi</p>
+                        <p className="text-sm font-semibold">{fmt(num(order.totalCost))} so'm</p>
+                      </div>
+                    )}
                     {/* Action buttons */}
                     {order.status === "draft" && canApprove && (
                       <Button size="sm" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); void runTransition(order.id, "confirm"); }}>
@@ -233,20 +237,22 @@ export default function OrdersSection() {
 
                 {expanded && expandedOrderData && expandedOrderData.id === order.id && (
                   <div className="border-t border-border p-4 space-y-4">
-                    {/* Cost summary */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      {[
-                        { label: "Material narxi", value: fmt(num(expandedOrderData.totalMaterialCost)) + " so'm", icon: Layers },
-                        { label: "Mehnat narxi", value: fmt(num(expandedOrderData.totalLaborCost)) + " so'm", icon: Clock },
-                        { label: "Jami narx", value: fmt(num(expandedOrderData.totalCost)) + " so'm", icon: DollarSign },
-                        { label: "Birlik narxi", value: fmt(num(expandedOrderData.unitCost)) + " so'm", icon: Factory },
-                      ].map((s) => (
-                        <div key={s.label} className="bg-muted/40 rounded-xl p-3">
-                          <p className="text-xs text-muted-foreground">{s.label}</p>
-                          <p className="font-semibold text-sm mt-0.5">{s.value}</p>
-                        </div>
-                      ))}
-                    </div>
+                    {/* Cost summary — faqat tannarxni ko'rish ruxsati bilan */}
+                    {showCost && (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {[
+                          { label: "Material narxi", value: fmt(num(expandedOrderData.totalMaterialCost)) + " so'm", icon: Layers },
+                          { label: "Mehnat narxi", value: fmt(num(expandedOrderData.totalLaborCost)) + " so'm", icon: Clock },
+                          { label: "Jami narx", value: fmt(num(expandedOrderData.totalCost)) + " so'm", icon: DollarSign },
+                          { label: "Birlik narxi", value: fmt(num(expandedOrderData.unitCost)) + " so'm", icon: Factory },
+                        ].map((s) => (
+                          <div key={s.label} className="bg-muted/40 rounded-xl p-3">
+                            <p className="text-xs text-muted-foreground">{s.label}</p>
+                            <p className="font-semibold text-sm mt-0.5">{s.value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Materials table */}
                     {expandedOrderData.materials.length > 0 && (
@@ -259,7 +265,9 @@ export default function OrdersSection() {
                                 <th className="text-left px-3 py-2.5 text-xs text-muted-foreground font-medium">Komponent</th>
                                 <th className="text-right px-3 py-2.5 text-xs text-muted-foreground font-medium">Reja</th>
                                 <th className="text-right px-3 py-2.5 text-xs text-muted-foreground font-medium">Actual</th>
-                                <th className="text-right px-3 py-2.5 text-xs text-muted-foreground font-medium">Narx</th>
+                                {showCost && (
+                                  <th className="text-right px-3 py-2.5 text-xs text-muted-foreground font-medium">Narx</th>
+                                )}
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-border">
@@ -270,7 +278,7 @@ export default function OrdersSection() {
                                   <td className={cn("px-3 py-2.5 text-right", num(m.actualQty) > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
                                     {num(m.actualQty) > 0 ? `${num(m.actualQty).toFixed(2)} ${m.unitName}` : "—"}
                                   </td>
-                                  <td className="px-3 py-2.5 text-right">{fmt(num(m.totalCost))} so'm</td>
+                                  {showCost && <td className="px-3 py-2.5 text-right">{fmt(num(m.totalCost))} so'm</td>}
                                 </tr>
                               ))}
                             </tbody>
@@ -297,8 +305,10 @@ export default function OrdersSection() {
                             <div key={tl.id} className="flex items-center gap-3 bg-muted/30 rounded-xl px-3 py-2 text-sm">
                               <Clock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                               <span className="flex-1">{tl.workCenterName}</span>
-                              <span className="text-muted-foreground">{num(tl.actualHours)}h × {fmt(num(tl.costPerHour))}</span>
-                              <span className="font-semibold">{fmt(num(tl.totalCost))} so'm</span>
+                              <span className="text-muted-foreground">
+                                {num(tl.actualHours)}h{showCost ? ` × ${fmt(num(tl.costPerHour))}` : ""}
+                              </span>
+                              {showCost && <span className="font-semibold">{fmt(num(tl.totalCost))} so'm</span>}
                               {editable && (
                                 <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => void handleDeleteTime(order.id, tl.id)}>
                                   <Trash2 className="h-3 w-3 text-destructive" />
