@@ -441,6 +441,7 @@ export default function CustomersSection() {
                           { key: "cashback", label: "Keshbek", current: c.cashbackBalance },
                         ]}
                         endpoint={`/api/sales/customers/${c.id}/balance-adjust`}
+                        historyUrl={`/api/sales/customers/${c.id}/balance`}
                         invalidate={["/api/sales/customers"]}
                         onClose={() => setAdjusting(null)}
                       />

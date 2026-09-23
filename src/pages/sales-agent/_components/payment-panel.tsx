@@ -51,6 +51,8 @@ export function AgentCashCard({ currency }: { currency: string }) {
       </div>
       <p className="text-lg font-bold mt-1 tabular-nums">{formatMoney(balance, currency)}</p>
       <p className="text-[11px] text-muted-foreground mt-0.5">{t("payment.on_hand_hint")}</p>
+      {/* Pulni qayerga topshirishni agent shu yerdan biladi — topshirishni kassir/supervayzer qayd etadi */}
+      {balance > 0 && <p className="text-[11px] text-muted-foreground mt-1">{t("payment.handover_hint")}</p>}
     </div>
   );
 }

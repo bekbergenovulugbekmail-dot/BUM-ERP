@@ -136,22 +136,34 @@ export async function createCount(
     })
     .returning(countFields);
 
+  /**
+   * Hisob MAHSULOTLAR ro'yxatidan quriladi, qoldiqdan emas.
+   *
+   * Ilgari u faqat `stock_levels` dan olinardi — omborda hech qachon harakat bo'lmagan mahsulotda
+   * bunday qator umuman yo'q, shuning uchun ular ro'yxatga tushmasdi va sanoqchi "chala ro'yxat"
+   * ko'rardi. Holbuki inventarizatsiya aynan shunday tovarni topish uchun ham qilinadi
+   * (qoldiq 0 deb turgan mahsulot omborda chiqib qolishi mumkin).
+   */
   const levels = await tx
-    .select({ productId: stockLevels.productId, quantity: stockLevels.quantity })
-    .from(stockLevels)
-    .innerJoin(products, eq(products.id, stockLevels.productId))
+    .select({ productId: products.id, quantity: sql<string>`coalesce(${stockLevels.quantity}, '0')::numeric(18,4)` })
+    .from(products)
+    .leftJoin(
+      stockLevels,
+      and(eq(stockLevels.productId, products.id), eq(stockLevels.warehouseId, warehouse.id), eq(stockLevels.companyId, tenant.company.id)),
+    )
     .where(
       and(
-        eq(stockLevels.companyId, tenant.company.id),
-        eq(stockLevels.warehouseId, warehouse.id),
+        eq(products.companyId, tenant.company.id),
         eq(products.isActive, true),
         // Cheklangan xodimning hisobiga faqat uning kategoriyalaridagi mahsulotlar kiradi
         productScopeCondition(await categoryScope(tx, tenant)),
       ),
     );
-  if (levels.length > 0) {
+  // Katalog katta bo'lishi mumkin — bo'laklab yoziladi (bitta INSERT parametr chegarasiga urilmasin)
+  const CHUNK = 500;
+  for (let index = 0; index < levels.length; index += CHUNK) {
     await tx.insert(inventoryCountItems).values(
-      levels.map((l) => ({
+      levels.slice(index, index + CHUNK).map((l) => ({
         companyId: tenant.company.id,
         countId: count!.id,
         productId: l.productId,

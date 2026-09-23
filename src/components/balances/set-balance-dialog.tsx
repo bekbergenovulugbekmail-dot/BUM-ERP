@@ -12,7 +12,8 @@ import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
-import { useApiMutation } from "@/lib/query.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
+import { Skeleton } from "@/components/ui/skeleton.tsx";
 
 export type BalanceField = {
   /** So'rov tanasidagi kalit (masalan `balance`, `totalDebt`, `cashback`). */
@@ -23,6 +24,74 @@ export type BalanceField = {
   hint?: string;
 };
 
+/** Balans harakati — `GET .../balance` qaytaradigan qator. */
+type BalanceTx = {
+  id: string;
+  type: "deposit" | "change" | "sale_payment" | "refund" | "adjustment";
+  amount: string;
+  balanceAfter: string;
+  notes: string | null;
+  orderNumber: string | null;
+  createdAt: string;
+};
+
+const TX_LABELS: Record<BalanceTx["type"], string> = {
+  deposit: "To'ldirish",
+  change: "Chek qaytimi",
+  sale_payment: "Savdoga to'lov",
+  refund: "Qaytarish",
+  adjustment: "Qo'lda to'g'rilash",
+};
+
+const moneyText = (value: string | number) => new Intl.NumberFormat("uz-UZ").format(Number(value));
+
+/**
+ * Balans TARIXI — nima uchun shunday raqam chiqqani shu yerda ko'rinadi.
+ * Tuzatishdan oldin tarixni ko'rish kerak, shuning uchun u aynan shu oynada.
+ */
+function BalanceHistory({ url }: { url: string }) {
+  const query = useApiQuery<{ transactions: BalanceTx[] }>(url, { limit: 20 });
+  const rows = query.data?.transactions;
+
+  if (query.isError) return <p className="text-xs text-destructive">{errorMessage(query.error)}</p>;
+  if (rows === undefined) {
+    return (
+      <div className="space-y-1.5">
+        {Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} className="h-7 w-full" />)}
+      </div>
+    );
+  }
+  if (rows.length === 0) return <p className="text-xs text-muted-foreground">Harakat yo'q</p>;
+
+  return (
+    <div className="max-h-56 overflow-auto rounded-lg border border-border divide-y divide-border">
+      {rows.map((row) => {
+        const amount = Number(row.amount);
+        return (
+          <div key={row.id} className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
+            <div className="min-w-0">
+              <p className="font-medium">
+                {TX_LABELS[row.type]}
+                {row.orderNumber ? ` · ${row.orderNumber}` : ""}
+              </p>
+              <p className="truncate text-[11px] text-muted-foreground">
+                {new Date(row.createdAt).toLocaleString("uz-UZ")}
+                {row.notes ? ` · ${row.notes}` : ""}
+              </p>
+            </div>
+            <div className="shrink-0 text-right tabular-nums">
+              <p className={amount < 0 ? "font-semibold text-destructive" : "font-semibold text-emerald-600"}>
+                {amount > 0 ? "+" : ""}{moneyText(amount)}
+              </p>
+              <p className="text-[11px] text-muted-foreground">Qoldiq: {moneyText(row.balanceAfter)}</p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // JS `\s` bo'linmas probelni (NBSP) ham qamrab oladi — "12 500,50" kabi kiritish ham o'qiladi
 const numeric = (value: string) => Number(value.trim().replace(/\s/g, "").replace(",", ".") || "0");
 
@@ -31,6 +100,7 @@ export default function SetBalanceDialog({
   description,
   fields,
   endpoint,
+  historyUrl,
   invalidate,
   onClose,
 }: {
@@ -39,6 +109,8 @@ export default function SetBalanceDialog({
   fields: BalanceField[];
   /** To'liq yo'l, masalan `/api/sales/customers/<id>/balance-adjust`. */
   endpoint: string;
+  /** Balans harakatlari tarixi (`GET`) — berilsa oynada ko'rsatiladi. */
+  historyUrl?: string;
   invalidate: string[];
   onClose: () => void;
 }) {
@@ -102,6 +174,12 @@ export default function SetBalanceDialog({
             />
             <p className="mt-1 text-[11px] text-muted-foreground">Sabab jurnal yozuvi va audit tarixida saqlanadi</p>
           </div>
+          {historyUrl && (
+            <div>
+              <p className="mb-1 text-xs font-medium">Balans tarixi</p>
+              <BalanceHistory url={historyUrl} />
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>Bekor</Button>

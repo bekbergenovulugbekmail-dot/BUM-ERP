@@ -112,11 +112,14 @@ describe("Inventarizatsiya", () => {
     const found = res.json().product.id as string;
 
     const countId = (await api(companyA.ownerCookie, "POST", "/counts", { warehouseId: mainA, name: "Topilmalar" })).json().count.id;
-    const item = await api(companyA.ownerCookie, "POST", `/counts/${countId}/items`, { productId: found });
-    expect(item.statusCode).toBe(201);
+    // Hisob mahsulotlar ro'yxatidan quriladi — qoldig'i yo'q tovar ham DARHOL ro'yxatda bo'ladi
+    const items = (await api(companyA.ownerCookie, "GET", `/counts/${countId}`)).json().count.items as { id: string; productId: string }[];
+    const item = items.find((row) => row.productId === found);
+    expect(item, "topilma ro'yxatda").toBeDefined();
+    // Shuning uchun uni qayta qo'shib bo'lmaydi (noyob indeks)
     expect((await api(companyA.ownerCookie, "POST", `/counts/${countId}/items`, { productId: found })).statusCode).toBe(409);
 
-    await api(companyA.ownerCookie, "PATCH", `/counts/${countId}/items/${item.json().item.id}`, { countedQty: "4" });
+    await api(companyA.ownerCookie, "PATCH", `/counts/${countId}/items/${item!.id}`, { countedQty: "4" });
     await api(companyA.ownerCookie, "POST", `/counts/${countId}/apply`);
     expect(await quantityOf(found)).toBe("4.0000");
 
@@ -145,6 +148,64 @@ describe("Inventarizatsiya", () => {
  * Hisobga mahsulot qo'shish ("topilma"), takror qo'shishning oldini olish, bekor qilingan
  * hisobning qo'llanmasligi va band (rezerv) qilingan tovardan kam sanash holati tekshiriladi.
  */
+describe("Inventarizatsiya ro'yxati to'liqligi", () => {
+  /**
+   * Hisob MAHSULOTLAR ro'yxatidan qurilishi kerak, qoldiqdan emas: omborda hech qachon harakat
+   * bo'lmagan mahsulotda `stock_levels` qatori yo'q va u ilgari ro'yxatga umuman tushmasdi —
+   * sanoqchi chala ro'yxat ko'rardi. Holbuki inventarizatsiya aynan shunday tovarni topish uchun ham.
+   */
+  it("qoldig'i yo'q (harakat bo'lmagan) mahsulot ham ro'yxatga tushadi", async () => {
+    const stockedId = await stocked("FULL-1", "5");
+    // Bu mahsulotga hech qanday harakat yo'q — `stock_levels` qatori ham yo'q
+    const untouched = (
+      await app.inject({
+        method: "POST",
+        url: "/api/catalog/products",
+        headers: { cookie: companyA.ownerCookie },
+        payload: { name: "Harakatsiz", sku: "FULL-2", baseUnitId: piece },
+      })
+    ).json().product.id as string;
+
+    const created = await api(companyA.ownerCookie, "POST", "/counts", { warehouseId: mainA, name: "To'liq ro'yxat" });
+    expect(created.statusCode, created.body).toBe(201);
+    const items = (await api(companyA.ownerCookie, "GET", `/counts/${created.json().count.id}`)).json().count.items as {
+      productId: string;
+      expectedQty: string;
+    }[];
+
+    const byProduct = new Map(items.map((item) => [item.productId, item.expectedQty]));
+    expect(byProduct.get(stockedId), "qoldig'i bor mahsulot").toBe("5.0000");
+    expect(byProduct.has(untouched), "harakat bo'lmagan mahsulot ham ro'yxatda").toBe(true);
+    expect(Number(byProduct.get(untouched)), "kutilgan qoldiq 0").toBe(0);
+  });
+
+  it("faol bo'lmagan mahsulot ro'yxatga kirmaydi", async () => {
+    const active = await stocked("FULL-3", "2");
+    const archived = (
+      await app.inject({
+        method: "POST",
+        url: "/api/catalog/products",
+        headers: { cookie: companyA.ownerCookie },
+        payload: { name: "Arxiv", sku: "FULL-4", baseUnitId: piece },
+      })
+    ).json().product.id as string;
+    expect(
+      (await app.inject({
+        method: "PATCH",
+        url: `/api/catalog/products/${archived}`,
+        headers: { cookie: companyA.ownerCookie },
+        payload: { isActive: false },
+      })).statusCode,
+    ).toBe(200);
+
+    const created = await api(companyA.ownerCookie, "POST", "/counts", { warehouseId: mainA, name: "Faollar" });
+    const items = (await api(companyA.ownerCookie, "GET", `/counts/${created.json().count.id}`)).json().count.items as { productId: string }[];
+    const ids = new Set(items.map((item) => item.productId));
+    expect(ids.has(active)).toBe(true);
+    expect(ids.has(archived), "arxivlangan mahsulot sanalmaydi").toBe(false);
+  });
+});
+
 describe("Inventarizatsiya — sanoqchi oqimi", () => {
   async function openCount(name = "Audit") {
     const res = await api(companyA.ownerCookie, "POST", "/counts", { warehouseId: mainA, name });

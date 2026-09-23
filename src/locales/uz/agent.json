@@ -364,6 +364,7 @@
     "card": "Karta",
     "bank": "Bank",
     "on_hand": "Sizdagi naqd",
+    "handover_hint": "Naqdni kassaga yoki supervayzerga topshiring — u ERP'da \"Distribyutsiya → Sotuv agentlari\" bo'limida qayd etiladi",
     "on_hand_hint": "Kassaga topshirilmagan"
   }
 }

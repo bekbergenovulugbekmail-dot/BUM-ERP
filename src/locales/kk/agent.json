@@ -364,6 +364,7 @@
     "card": "Karta",
     "bank": "Bank",
     "on_hand": "Sizdegi naqd",
+    "handover_hint": "Naqdti kassağa nemese supervayzerge tapsırıñız — ol ERP'de \"Distribýusiä → Satuw agentleri\" bólimin de jazıladı",
     "on_hand_hint": "Kassaǵa tapsırılmaǵan"
   }
 }
