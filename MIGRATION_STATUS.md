@@ -4027,7 +4027,14 @@ Desktop kassa: offline analitikada foyda va tannarx UMUMAN cheklanmagan edi (ser
 ko'rinishlaridagi eski `warehouse.manage` gate `products.view_cost` ga almashtirildi —
 **yangi desktop relizida kuchga kiradi**.
 
-Migratsiya kerak emas (ruxsatlar kodda). Testlar: yangi `cost-visibility.test.ts` (7) —
+**Migratsiya KERAK bo'ldi** (`0078_hide_cost_from_roles.sql`): `DEFAULT_ROLES` — faqat yangi
+kompaniya uchun shablon, rollar kompaniya yaratilganda bazaga NUSXALANADI. Shuning uchun kodda
+ruxsatni olib tashlash mavjud kompaniyalarga ta'sir qilmasdi. Migratsiya `roles.permissions`
+massividan faqat bitta qatorni — `'products.view_cost'` — olib tashlaydi (to'liq huquqli rollardan
+tashqari); boshqa hech narsa tegilmaydi va ega uni rollar sozlamasidan qaytarib bera oladi.
+(`analytics.view_profit` da bu muammo yo'q edi — u YANGI ruxsat, eski rollarda umuman yo'q.)
+
+Testlar: yangi `cost-visibility.test.ts` (7) —
 ombor, analitika, sotuv va rol standartlari; `product-cost.test.ts` dagi "omborchi tannarxni
 ko'radi" testi yangi qoidaga moslandi (endi ko'rmaydi, ega ruxsat bersagina ochiladi). To'liq API
 to'plamida ikkita acceptance testi (`acceptance-real-world` BUSINESS 02, `acceptance-wholesale`

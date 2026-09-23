@@ -547,6 +547,13 @@
       "when": 1789829646441,
       "tag": "0077_credit_hold_customer_prices",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1789829706441,
+      "tag": "0078_hide_cost_from_roles",
+      "breakpoints": true
     }
   ]
 }
