@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Plus, Search, Users, Phone, Building2, Pencil, Trash2, User, MapPin, UserCheck, MonitorSmartphone, MonitorOff } from "lucide-react";
+import { Plus, Search, Users, Phone, Building2, Pencil, Trash2, User, MapPin, UserCheck, MonitorSmartphone, MonitorOff, History } from "lucide-react";
 import { FULL_ACCESS_ROLES } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
+import SalaryHistoryDialog from "./salary-history-dialog.tsx";
 import AdditionalLicensePicker from "@/components/subscription/additional-license-picker.tsx";
 import { LICENSE_STATUS_LABEL, LICENSE_TYPE_LABEL, formatDay, licenseLimitOf } from "@/lib/subscription.ts";
 import {
@@ -90,6 +91,8 @@ export default function EmployeesSection() {
   const { can } = usePermissions();
   const canManage = can("hr.manage");
   const canSoftware = canManage && can("employee.software_access.manage");
+  /** Oylik summasi maxfiy — alohida ruxsat (server ham shuni talab qiladi). */
+  const canSalary = can("hr.salary");
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | EmployeeStatus>("all");
@@ -97,6 +100,7 @@ export default function EmployeesSection() {
   /** Yagona "Xodim qo'shish" oynasi (Sozlamalar bo'limidagi bilan bir xil komponent). */
   const [addOpen, setAddOpen] = useState(false);
   const [accessTarget, setAccessTarget] = useState<Employee | null>(null);
+  const [salaryTarget, setSalaryTarget] = useState<Employee | null>(null);
 
   const employeesQuery = useApiQuery<{ employees: Employee[] }>("/api/hr/employees", {
     search: search.trim().length > 1 ? search.trim() : undefined,
@@ -292,7 +296,23 @@ export default function EmployeesSection() {
                 <div className="mt-3 pt-3 border-t border-border flex items-center justify-between">
                   <div>
                     <p className="text-xs text-muted-foreground">Oylik maosh</p>
-                    <p className="font-bold">{fmt(emp.baseSalary)} so'm</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-bold">{fmt(emp.baseSalary)} so'm</p>
+                      {canSalary && (
+                        // Oylikni shunchaki tahrirlash tugagan oyni buzadi — o'zgarish
+                        // "qaysi oydan" va "nega" bilan alohida oynada yoziladi
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6"
+                          title="Oylikni o'zgartirish va tarixi"
+                          aria-label={`${emp.name}: oylikni o'zgartirish`}
+                          onClick={() => setSalaryTarget(emp)}
+                        >
+                          <History className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
                   {canManage && (
                     <div className="flex gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
@@ -375,6 +395,10 @@ export default function EmployeesSection() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      )}
+
+      {salaryTarget && (
+        <SalaryHistoryDialog key={salaryTarget.id} employee={salaryTarget} onClose={() => setSalaryTarget(null)} />
       )}
 
       {accessTarget && (

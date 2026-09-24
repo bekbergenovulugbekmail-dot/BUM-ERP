@@ -46,6 +46,17 @@ const metricOf = (key: string) => METRICS.find((item) => item.key === key);
 const isPercent = (key: string) => metricOf(key)?.unit === "so'm";
 
 type Tier = { fromValue: string; toValue: string | null; rate: string };
+
+/**
+ * Mukofot qanday hisoblanadi. `tiered` — hozirgi progressiv bosqichlar (eski qoidalar shunday
+ * qoladi); qolgan ikkitasi MAQSADga (planga) asoslanadi.
+ */
+type BonusType = "tiered" | "fixed" | "achievement";
+const BONUS_TYPES: { key: BonusType; label: string; hint: string }[] = [
+  { key: "tiered", label: "Bosqichli", hint: "Har bosqich faqat o'z oralig'iga qo'llanadi (progressiv)" },
+  { key: "fixed", label: "Maqsad bajarilsa — belgilangan summa", hint: "100% bajarilsa to'liq summa, bajarilmasa 0" },
+  { key: "achievement", label: "Bajarilish foiziga qarab", hint: "Summa × bajarilish foizi (shift bilan cheklanadi)" },
+];
 type Rule = {
   id: string;
   positionId: string | null;
@@ -57,8 +68,24 @@ type Rule = {
   positionName: string | null;
   employeeName: string | null;
   tiers: Tier[];
+  bonusType: BonusType;
+  name: string | null;
+  description: string | null;
+  target: string | null;
+  bonusAmount: string;
+  weight: string | null;
+  maxAchievement: string | null;
+  effectiveMonth: string | null;
 };
-type PreviewLine = { metric: Metric; metricValue: string; amount: string };
+type PreviewLine = {
+  metric: Metric;
+  metricValue: string;
+  amount: string;
+  /** Maqsadli qoidalarda — plan, bajarilish foizi va ulush (bosqichlida `null`). */
+  target: string | null;
+  achievementPercent: string | null;
+  weight: string | null;
+};
 type Preview = { month: string; employees: { employeeId: string; name: string; positionName: string | null; total: string; lines: PreviewLine[] }[] };
 
 const fmt = (value: string | number) => new Intl.NumberFormat("uz-UZ").format(Math.round(Number(value)));
@@ -127,13 +154,32 @@ export default function KpiSection() {
                   </td>
                   <td className="px-4 py-2">{metricOf(rule.metric)?.label ?? rule.metric}</td>
                   <td className="px-4 py-2">
-                    <div className="flex flex-wrap gap-1">
-                      {rule.tiers.map((tier) => (
-                        <span key={tier.fromValue} className="rounded-full bg-muted px-2 py-0.5 text-xs tabular-nums">
-                          {tierText(tier, rule.metric)}
+                    {rule.bonusType === "tiered" ? (
+                      <div className="flex flex-wrap gap-1">
+                        {rule.tiers.map((tier) => (
+                          <span key={tier.fromValue} className="rounded-full bg-muted px-2 py-0.5 text-xs tabular-nums">
+                            {tierText(tier, rule.metric)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      // Maqsadli qoidada bosqich bo'lmaydi — maqsad, summa va ulush ko'rsatiladi
+                      <div className="flex flex-wrap gap-1 text-xs">
+                        <span className="rounded-full bg-muted px-2 py-0.5 tabular-nums">
+                          Maqsad: {trim(rule.target ?? "0")} {metricOf(rule.metric)?.unit}
                         </span>
-                      ))}
-                    </div>
+                        <span className="rounded-full bg-muted px-2 py-0.5 tabular-nums">
+                          {fmt(rule.bonusAmount)} so'm
+                          {rule.bonusType === "achievement" ? " × bajarilish" : " (bajarilsa)"}
+                        </span>
+                        {rule.weight !== null && (
+                          <span className="rounded-full bg-muted px-2 py-0.5 tabular-nums">Ulush {trim(rule.weight)}%</span>
+                        )}
+                        {rule.maxAchievement !== null && (
+                          <span className="rounded-full bg-muted px-2 py-0.5 tabular-nums">Shift {trim(rule.maxAchievement)}%</span>
+                        )}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-2 text-right">
                     {canManage && (
@@ -201,7 +247,20 @@ export default function KpiSection() {
                       <td className="px-4 py-2">
                         {person.lines.map((line) => (
                           <p key={line.metric} className="text-xs">
-                            {metricOf(line.metric)?.label}: <span className="tabular-nums">{fmt(line.metricValue)}</span>{" "}
+                            {metricOf(line.metric)?.label}: <span className="tabular-nums">{fmt(line.metricValue)}</span>
+                            {/* Maqsadli qoidada "haqiqiy / maqsad = bajarilish%" ko'rinib tursin */}
+                            {line.target !== null && (
+                              <>
+                                {" / "}
+                                <span className="tabular-nums">{trim(line.target)}</span>
+                                {line.achievementPercent !== null && (
+                                  <span className="tabular-nums"> = {trim(line.achievementPercent)}%</span>
+                                )}
+                                {line.weight !== null && (
+                                  <span className="text-muted-foreground"> (ulush {trim(line.weight)}%)</span>
+                                )}
+                              </>
+                            )}{" "}
                             {metricOf(line.metric)?.unit} → <span className="tabular-nums">{fmt(line.amount)}</span> so'm
                           </p>
                         ))}
@@ -237,7 +296,14 @@ function RuleDialog({ rule, onClose }: { rule: Rule | null; onClose: () => void 
   );
   /** PLAN: ko'rsatkich shundan kam bo'lsa pul berilmaydi. Bo'sh — chegara yo'q. */
   const [minValue, setMinValue] = useState(rule?.minValue ?? "");
+  const [bonusType, setBonusType] = useState<BonusType>(rule?.bonusType ?? "tiered");
+  const [name, setName] = useState(rule?.name ?? "");
+  const [ruleTarget, setRuleTarget] = useState(rule?.target ?? "");
+  const [bonusAmount, setBonusAmount] = useState(rule?.bonusAmount ?? "");
+  const [weight, setWeight] = useState(rule?.weight ?? "");
+  const [maxAchievement, setMaxAchievement] = useState(rule?.maxAchievement ?? "");
   const [error, setError] = useState<string | null>(null);
+  const targetBased = bonusType !== "tiered";
 
   const save = useApiMutation(
     (body: object) => api.put("/api/hr/kpi/rules", body),
@@ -254,11 +320,23 @@ function RuleDialog({ rule, onClose }: { rule: Rule | null; onClose: () => void 
         ...(target === "position" ? { positionId } : { employeeId }),
         metric,
         minValue: minValue.trim() === "" ? null : minValue.trim(),
-        tiers: tiers.map((tier) => ({
-          fromValue: tier.fromValue || "0",
-          toValue: tier.toValue === null || tier.toValue === "" ? null : tier.toValue,
-          rate: tier.rate || "0",
-        })),
+        bonusType,
+        name: name.trim() || null,
+        // Maqsadli turda bosqich yuborilmaydi, bosqichli turda maqsad maydonlari yuborilmaydi
+        ...(targetBased
+          ? {
+              target: ruleTarget.trim(),
+              bonusAmount: bonusAmount.trim() || "0",
+              weight: weight.trim() === "" ? null : weight.trim(),
+              maxAchievement: maxAchievement.trim() === "" ? null : maxAchievement.trim(),
+            }
+          : {
+              tiers: tiers.map((tier) => ({
+                fromValue: tier.fromValue || "0",
+                toValue: tier.toValue === null || tier.toValue === "" ? null : tier.toValue,
+                rate: tier.rate || "0",
+              })),
+            }),
       });
       toast.success("Qoida saqlandi");
       onClose();
@@ -330,6 +408,81 @@ function RuleDialog({ rule, onClose }: { rule: Rule | null; onClose: () => void 
           </div>
 
           <div className="space-y-1.5">
+            <Label htmlFor="kpi-name">Qoida nomi — ixtiyoriy</Label>
+            <Input
+              id="kpi-name"
+              placeholder="Masalan: Yetkazmalar soni"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="kpi-bonus-type">Mukofot qanday hisoblanadi</Label>
+            <Select value={bonusType} onValueChange={(value) => setBonusType(value as BonusType)}>
+              <SelectTrigger id="kpi-bonus-type" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent position="popper">
+                {BONUS_TYPES.map((item) => (
+                  <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              {BONUS_TYPES.find((item) => item.key === bonusType)?.hint}
+            </p>
+          </div>
+
+          {targetBased && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="kpi-target">Maqsad — plan ({unit})</Label>
+                <Input
+                  id="kpi-target"
+                  inputMode="decimal"
+                  placeholder="Masalan: 100"
+                  value={ruleTarget}
+                  onChange={(event) => setRuleTarget(event.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="kpi-bonus-amount">100% bajarilishdagi summa (so'm)</Label>
+                <Input
+                  id="kpi-bonus-amount"
+                  inputMode="decimal"
+                  placeholder="Masalan: 1000000"
+                  value={bonusAmount}
+                  onChange={(event) => setBonusAmount(event.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="kpi-weight">Ulush (%) — ixtiyoriy</Label>
+                <Input
+                  id="kpi-weight"
+                  inputMode="decimal"
+                  placeholder="Bo'sh — to'liq summa"
+                  value={weight}
+                  onChange={(event) => setWeight(event.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="kpi-max-achievement">Bajarilish shifti (%) — ixtiyoriy</Label>
+                <Input
+                  id="kpi-max-achievement"
+                  inputMode="decimal"
+                  placeholder="Masalan: 120"
+                  value={maxAchievement}
+                  onChange={(event) => setMaxAchievement(event.target.value)}
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground sm:col-span-2">
+                Bir xodimga bir nechta KPI qo'ysangiz, ULUSH bilan ular bitta mukofot fondini
+                bo'lishadi: masalan 30% + 30% + 20% + 20% = 100%. Shift ortiqcha bajarish uchun
+                cheksiz pul berilishining oldini oladi.
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
             <Label htmlFor="kpi-min-value">Plan ({unit}) — ixtiyoriy</Label>
             <Input
               id="kpi-min-value"
@@ -344,7 +497,7 @@ function RuleDialog({ rule, onClose }: { rule: Rule | null; onClose: () => void 
             </p>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2" hidden={targetBased}>
             <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 text-xs text-muted-foreground">
               <span>Dan ({unit})</span>
               <span>Gacha — bo'sh = cheksiz</span>
