@@ -9,7 +9,7 @@
  */
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, ShieldCheck, ShieldOff, X } from "lucide-react";
+import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, ShieldCheck, ShieldOff, X, PlusCircle, MinusCircle } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -27,6 +27,7 @@ import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
+import CustomerMoneyDialog from "./customer-money-dialog.tsx";
 import SetBalanceDialog from "@/components/balances/set-balance-dialog.tsx";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import CustomerFilters from "@/components/customers/customer-filters.tsx";
@@ -96,7 +97,10 @@ export default function CustomersSection() {
   const [locating, setLocating] = useState(false);
   /** Balansni to'g'rilash — moliyaviy tasdiq ruxsati bilan. */
   const canAdjustBalance = can("finance.approve");
+  /** Hisobga pul kirim/chiqimi — to'lov qabul qilish ruxsati (to'g'rilashdan alohida). */
+  const canMoveMoney = can("sales.collect_payment");
   const [adjusting, setAdjusting] = useState<Customer | null>(null);
+  const [money, setMoney] = useState<{ customer: Customer; direction: "deposit" | "withdraw" } | null>(null);
 
   /** Arxiv ko'rinishi: nofaol qilingan mijozlar (ro'yxatdan chiqarilgan, lekin tarixi saqlanadi). */
   const [showArchive, setShowArchive] = useState(false);
@@ -385,6 +389,31 @@ export default function CustomersSection() {
                         </span>
                       )}
                     </div>
+                    {canMoveMoney && (
+                      // Haqiqiy pul harakati — "to'g'rilash" dan alohida tugmalar
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          title="Hisobiga pul qo'shish"
+                          aria-label={`${c.name} hisobiga pul qo'shish`}
+                          onClick={() => setMoney({ customer: c, direction: "deposit" })}
+                        >
+                          <PlusCircle className="h-3.5 w-3.5 text-emerald-600" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          title="Hisobidan pul ayirish"
+                          aria-label={`${c.name} hisobidan pul ayirish`}
+                          onClick={() => setMoney({ customer: c, direction: "withdraw" })}
+                        >
+                          <MinusCircle className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
+                      </>
+                    )}
                     {canAdjustBalance && (
                       <Button
                         variant="ghost"
@@ -430,6 +459,13 @@ export default function CustomersSection() {
                       >
                         {c.isActive ? <Archive className="h-3.5 w-3.5" /> : <ArchiveRestore className="h-3.5 w-3.5" />}
                       </Button>
+                    )}
+                    {money?.customer.id === c.id && (
+                      <CustomerMoneyDialog
+                        customer={money.customer}
+                        direction={money.direction}
+                        onClose={() => setMoney(null)}
+                      />
                     )}
                     {adjusting?.id === c.id && (
                       <SetBalanceDialog

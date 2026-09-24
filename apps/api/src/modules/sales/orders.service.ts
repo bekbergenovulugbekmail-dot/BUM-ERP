@@ -652,7 +652,12 @@ export async function listOrders(
 }
 
 /** Hujjatning sof summasi — qaytarilgan tovar qiymati chegirilgan (`receivables.service.ts` bilan bir xil). */
-const netOrderAmount = sql<string>`(${salesOrders.totalAmount} - coalesce((
+/**
+ * Hujjatning SOF summasi: qaytarilgan tovar qiymati chegirilgan.
+ * Qarz, oborot va hisobotlar AYNAN shu ta'rifdan foydalanadi — aks holda bir joyda boshqa,
+ * boshqa joyda boshqa raqam chiqardi.
+ */
+export const netOrderAmount = sql<string>`(${salesOrders.totalAmount} - coalesce((
   select sum(r."total_amount") from "sales_returns" r where r."order_id" = ${salesOrders.id}
 ), 0))::numeric(18,2)`;
 

@@ -327,3 +327,88 @@ describe("Mijoz hisobiga pul qo'shish va ayirish", () => {
     expect([403, 404]).toContain(res.statusCode);
   });
 });
+
+/**
+ * 2.5 — MIJOZ OBOROTI va qarz KESHINING haqiqiy manbaga MOSLIGI.
+ *
+ * `customers.total_debt` — bu kesh; haqiqiy qarz hujjatlardan hisoblanadi
+ * (`net = total_amount − qaytarish`, yakunlangan hujjatlarning to'lanmagan qismi).
+ * Ikkalasi hech qachon ajralib qolmasligi kerak — aks holda mijoz kartochkasi,
+ * qarz yoshi hisoboti va kredit tekshiruvi turli raqam ko'rsatadi.
+ */
+describe("Mijoz oboroti va qarz keshi", () => {
+  const turnover = async (customerId: string) =>
+    (await call(company.ownerCookie, "GET", `/api/sales/customers/${customerId}/turnover`)).json() as {
+      orderCount: number; grossSales: string; returnsTotal: string; netSales: string;
+      totalPaid: string; openDebt: string; cachedDebt: string; balance: string;
+    };
+
+  /** Qarzga sotuv: tasdiqlangan va yakunlangan hujjat (tovar mijozda). */
+  async function creditSale(customerId: string, quantity: string, unitPrice: string) {
+    const order = await call(company.ownerCookie, "POST", "/api/sales/orders", {
+      customerId,
+      warehouseId: mainWh,
+      orderDate: new Date().toISOString().slice(0, 10),
+      items: [{ productId, quantity, unitPrice }],
+    });
+    expect(order.statusCode, order.body).toBe(201);
+    const orderId = order.json().order.id as string;
+    expect((await call(company.ownerCookie, "POST", `/api/sales/orders/${orderId}/confirm`)).statusCode).toBe(200);
+    // Tovar mijozga jo'natiladi — hujjat "shipped" bo'ladi va qarzga tushadi
+    const shipped = await call(company.ownerCookie, "POST", `/api/sales/orders/${orderId}/ship`);
+    expect(shipped.statusCode, shipped.body).toBe(200);
+    return orderId;
+  }
+
+  it("oborot: jami xarid, sof savdo, to'lov va qarz bir-biriga mos", async () => {
+    const customer = await newCustomer(company.ownerCookie, { name: "Oborot", phone: uniquePhone() });
+    await creditSale(customer.id, "2", "500000"); // 1 000 000
+
+    const before = await turnover(customer.id);
+    expect(before.orderCount).toBe(1);
+    expect(before.grossSales).toBe("1000000.00");
+    expect(before.netSales).toBe("1000000.00");
+    expect(before.openDebt, "to'lanmagan — to'liq qarz").toBe("1000000.00");
+    expect(before.cachedDebt, "kesh haqiqiy qarzga teng").toBe(before.openDebt);
+
+    // 400 000 to'lov
+    const paid = await call(company.ownerCookie, "POST", "/api/sales/payments", {
+      customerId: customer.id, amount: "400000", method: "cash",
+    });
+    expect(paid.statusCode, paid.body).toBe(201);
+
+    const after = await turnover(customer.id);
+    expect(after.totalPaid).toBe("400000.00");
+    expect(after.openDebt).toBe("600000.00");
+    expect(after.cachedDebt, "to'lovdan keyin ham kesh mos").toBe(after.openDebt);
+  });
+
+  it("to'liq to'langan hujjatdan qaytarish: kesh haqiqiy qarzdan ajralib qolmaydi", async () => {
+    const customer = await newCustomer(company.ownerCookie, { name: "Qaytaruvchi", phone: uniquePhone() });
+    const orderId = await creditSale(customer.id, "2", "500000"); // 1 000 000
+
+    expect((await call(company.ownerCookie, "POST", "/api/sales/payments", {
+      customerId: customer.id, amount: "1000000", method: "cash",
+    })).statusCode).toBe(201);
+
+    const paidOff = await turnover(customer.id);
+    expect(paidOff.openDebt).toBe("0.00");
+    expect(paidOff.cachedDebt).toBe("0.00");
+
+    // Bitta dona qaytariladi — 500 000
+    const items = (await call(company.ownerCookie, "GET", `/api/sales/orders/${orderId}`)).json().order.items as
+      { id: string }[];
+    const returned = await call(company.ownerCookie, "POST", `/api/sales/orders/${orderId}/return-items`, {
+      items: [{ orderItemId: items[0]!.id, quantity: "1" }],
+      refundMethod: "cash",
+      reason: "Sifatsiz",
+    });
+    expect(returned.statusCode, returned.body).toBe(201);
+
+    const final = await turnover(customer.id);
+    expect(final.netSales, "sof savdo qaytarish chegirilgan").toBe("500000.00");
+    expect(final.returnsTotal).toBe("500000.00");
+    // ENG MUHIMI: kesh va haqiqiy qarz ajralib qolmasin
+    expect(final.cachedDebt, "qaytarishdan keyin kesh haqiqiy qarzga teng bo'lishi kerak").toBe(final.openDebt);
+  });
+});

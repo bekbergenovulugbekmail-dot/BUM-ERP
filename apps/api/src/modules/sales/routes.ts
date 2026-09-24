@@ -24,6 +24,7 @@
  *   POST   /pos/customers                                 pos.use (kassada mijoz qo'shish)
  *   POST   /pos/customers/:customerId/payments            pos.use (balansni to'ldirish / qarzni to'lash)
  *   GET    /customers/:customerId/balance (?limit=)       sales.view (balans tarixi)
+ *   GET    /customers/:customerId/turnover                sales.view (oborot: xarid, qaytarish, to'lov, qarz)
  *   GET    /customers/:customerId/cashback (?limit=)      sales.view (keshbek tarixi)
  *   POST   /customers/:customerId/balance-deposit         sales.collect_payment (balansga pul qo'shish)
  *   POST   /customers/:customerId/balance-withdraw        sales.collect_payment (balansdan pul qaytarish)
@@ -79,6 +80,7 @@ import {
   saveCashbackSettings,
 } from "./cashback.service.js";
 import { exportCustomersCsv, importCustomers } from "./customers-csv.service.js";
+import { customerTurnover } from "./customer-turnover.service.js";
 import {
   depositToBalance,
   listBalanceTransactions,
@@ -489,6 +491,13 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     const { customerId } = customerParams.parse(req.params);
     const { limit } = balanceQuery.parse(req.query);
     return { transactions: await listBalanceTransactions(db, await readTenant(req, "sales.view"), customerId, limit) };
+  });
+
+  /** Mijoz kartochkasidagi moliyaviy xulosa — jami xarid, qaytarish, to'lov, qarz, balans. */
+  app.get("/customers/:customerId/turnover", async (req) => {
+    const { customerId } = customerParams.parse(req.params);
+    const tenant = await readTenant(req, "sales.view");
+    return customerTurnover(db, tenant.company.id, customerId);
   });
 
   app.get("/customers/:customerId/cashback", async (req) => {
