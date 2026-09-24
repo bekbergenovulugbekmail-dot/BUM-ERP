@@ -72,7 +72,7 @@ const invoice = (count: number, overrides: Partial<Parameters<typeof generateSal
   });
 };
 
-type Doc = ReturnType<typeof generateSalesInvoicePDF>;
+type Doc = Awaited<ReturnType<typeof generateSalesInvoicePDF>>;
 
 /** Sahifa tarkibidagi matn (jsPDF oqimidan) — sarlavha va jami qidirish uchun. */
 function pageText(doc: Doc, page: number): string {
@@ -101,24 +101,24 @@ function textBlocks(doc: Doc, page: number): { top: number; text: string }[] {
 }
 
 describe("A4 hujjatlar", () => {
-  it("sahifa formati aynan A4 (210 x 297 mm)", () => {
-    const doc = invoice(1);
+  it("sahifa formati aynan A4 (210 x 297 mm)", async () => {
+    const doc = await invoice(1);
     expect(Math.round(doc.internal.pageSize.getWidth())).toBe(A4.width);
     expect(Math.round(doc.internal.pageSize.getHeight())).toBe(A4.height);
     expect(pageCount(doc), "bitta mahsulot — bitta sahifa").toBe(1);
   });
 
-  it("bitta, o'nta va 50+ mahsulot — hammasi chiziladi", () => {
-    expect(pageCount(invoice(1))).toBe(1);
-    expect(pageCount(invoice(10))).toBe(1);
-    const big = invoice(60);
+  it("bitta, o'nta va 50+ mahsulot — hammasi chiziladi", async () => {
+    expect(pageCount(await invoice(1))).toBe(1);
+    expect(pageCount(await invoice(10))).toBe(1);
+    const big = await invoice(60);
     expect(pageCount(big), "60 qator bir sahifaga sig'maydi").toBeGreaterThan(1);
-    const huge = invoice(120);
+    const huge = await invoice(120);
     expect(pageCount(huge)).toBeGreaterThan(pageCount(big));
   });
 
-  it("kompaniya sarlavhasi HAR sahifada takrorlanadi", () => {
-    const doc = invoice(80);
+  it("kompaniya sarlavhasi HAR sahifada takrorlanadi", async () => {
+    const doc = await invoice(80);
     const pages = pageCount(doc);
     expect(pages).toBeGreaterThan(1);
     for (let page = 1; page <= pages; page += 1) {
@@ -127,8 +127,8 @@ describe("A4 hujjatlar", () => {
     }
   });
 
-  it("jadval sarlavhasi qator bo'lgan har sahifada qaytadi", () => {
-    const doc = invoice(80);
+  it("jadval sarlavhasi qator bo'lgan har sahifada qaytadi", async () => {
+    const doc = await invoice(80);
     let pagesWithRows = 0;
     for (let page = 1; page <= pageCount(doc); page += 1) {
       const text = pageText(doc, page);
@@ -140,8 +140,8 @@ describe("A4 hujjatlar", () => {
     expect(pagesWithRows, "qator bir necha sahifaga bo'lindi").toBeGreaterThan(1);
   });
 
-  it("jami bir marta va barcha qatorlardan keyin; imzo undan keyin, sahifa ichida", () => {
-    const doc = invoice(80);
+  it("jami bir marta va barcha qatorlardan keyin; imzo undan keyin, sahifa ichida", async () => {
+    const doc = await invoice(80);
     const pages = pageCount(doc);
     const pageOf = (needle: string) =>
       [...Array(pages).keys()].map((index) => index + 1).filter((page) => pageText(doc, page).includes(needle));
@@ -163,9 +163,9 @@ describe("A4 hujjatlar", () => {
     }
   });
 
-  it("hech bir element sahifadan tashqariga chiqmaydi, qator footer ustiga tushmaydi", () => {
+  it("hech bir element sahifadan tashqariga chiqmaydi, qator footer ustiga tushmaydi", async () => {
     for (const count of [47, 60, 120]) {
-      const doc = invoice(count);
+      const doc = await invoice(count);
       for (let page = 1; page <= pageCount(doc); page += 1) {
         for (const block of textBlocks(doc, page)) {
           expect(block.top, `${count}/${page}: "${block.text}" sahifadan yuqorida`).toBeGreaterThanOrEqual(0);
@@ -180,9 +180,9 @@ describe("A4 hujjatlar", () => {
     expect(contentBottom()).toBe(A4.height - A4.footerHeight);
   });
 
-  it("uzun mahsulot nomi va aralash birliklar kesilmaydi", () => {
+  it("uzun mahsulot nomi va aralash birliklar kesilmaydi", async () => {
     const longName = "Coca Cola Zero Sugar 1.5 L plastik shishada, 6 tali blok qadoq, aksiya narxida";
-    const doc = invoice(3, {
+    const doc = await invoice(3, {
       items: [
         { ...item(1, longName), unit: "blok" },
         { ...item(2), unit: "pachka" },
@@ -197,20 +197,20 @@ describe("A4 hujjatlar", () => {
     }
   });
 
-  it("chegirma, to'langan va qarz — mavjud bo'lsagina ko'rsatiladi", () => {
-    const withDiscount = invoice(5, { discountTotal: 50_000, paidAmount: 100_000, balance: 900_000, totalAmount: 1_000_000 });
+  it("chegirma, to'langan va qarz — mavjud bo'lsagina ko'rsatiladi", async () => {
+    const withDiscount = await invoice(5, { discountTotal: 50_000, paidAmount: 100_000, balance: 900_000, totalAmount: 1_000_000 });
     const text = pageText(withDiscount, pageCount(withDiscount));
     expect(text, "jami qatorida chegirma").toContain("Chegirma:");
     expect(text).toContain("To'langan:");
     expect(text).toContain("Qoldi:");
 
     // Chegirma yo'q hujjatda jami ichida soxta qator chiqmaydi ("Chegirma" — jadval USTUNI, u qoladi)
-    const plain = invoice(5);
+    const plain = await invoice(5);
     expect(pageText(plain, pageCount(plain)), "soxta chegirma qatori").not.toContain("Chegirma:");
   });
 
-  it("izoh chap tomonda, jami o'ngda — ikkalasi ham sahifa ichida", () => {
-    const doc = invoice(45, { notes: "Yetkazish ertaga soat 9:00 da. Mashina raqami 95 A 123 BC. Qabul qiluvchi: Sardor aka." });
+  it("izoh chap tomonda, jami o'ngda — ikkalasi ham sahifa ichida", async () => {
+    const doc = await invoice(45, { notes: "Yetkazish ertaga soat 9:00 da. Mashina raqami 95 A 123 BC. Qabul qiluvchi: Sardor aka." });
     const pages = pageCount(doc);
     const notesPage = [...Array(pages).keys()]
       .map((index) => index + 1)
@@ -222,7 +222,7 @@ describe("A4 hujjatlar", () => {
     }
   });
 
-  it("xarid buyurtmasi ham bir xil A4 standartida", () => {
+  it("xarid buyurtmasi ham bir xil A4 standartida", async () => {
     const items = Array.from({ length: 70 }, (_, index) => ({
       productName: `Xarid mahsuloti ${index + 1}`,
       productSku: `P-${index + 1}`,
@@ -232,7 +232,7 @@ describe("A4 hujjatlar", () => {
       unitPrice: 60_000,
       lineTotal: 6_000_000,
     }));
-    const doc = generatePurchaseOrderPDF({
+    const doc = await generatePurchaseOrderPDF({
       company,
       number: "PO-2026-0007",
       orderDate: "2026-09-22",
@@ -290,8 +290,8 @@ describe("A4 hujjatlar", () => {
       ...overrides,
     });
 
-  it("nakladnoy A4 standartida; mas'ul shaxs va agent nomi qog'ozda", () => {
-    const doc = waybill(3);
+  it("nakladnoy A4 standartida; mas'ul shaxs va agent nomi qog'ozda", async () => {
+    const doc = await waybill(3);
     expect(Math.round(doc.internal.pageSize.getWidth())).toBe(A4.width);
     const text = pageText(doc, 1);
     expect(text, "mas'ul shaxs").toContain("Ombor mudiri Aziz aka");
@@ -300,8 +300,8 @@ describe("A4 hujjatlar", () => {
     expect(pageText(doc, pageCount(doc)), "jami qarz qatori").toContain("Jami qarz");
   });
 
-  it("ustunlarni o'chirish qog'ozdan olib tashlaydi (qarz, manzil, telefon)", () => {
-    const hidden = waybill(3, { columns: { address: false, phone: false, debt: false } });
+  it("ustunlarni o'chirish qog'ozdan olib tashlaydi (qarz, manzil, telefon)", async () => {
+    const hidden = await waybill(3, { columns: { address: false, phone: false, debt: false } });
     const text = [...Array(pageCount(hidden)).keys()].map((index) => pageText(hidden, index + 1)).join(" ");
     expect(text, "qarz ustuni o'chirilgan").not.toContain("Jami qarz");
     expect(text).not.toContain("Manzil");
@@ -311,8 +311,8 @@ describe("A4 hujjatlar", () => {
     expect(text).toContain("Jami summa");
   });
 
-  it("uzun nakladnoy ko'p sahifaga bo'linadi, sarlavha va imzo joyida qoladi", () => {
-    const doc = waybill(70);
+  it("uzun nakladnoy ko'p sahifaga bo'linadi, sarlavha va imzo joyida qoladi", async () => {
+    const doc = await waybill(70);
     const pages = pageCount(doc);
     expect(pages).toBeGreaterThan(1);
     for (let page = 1; page <= pages; page += 1) {

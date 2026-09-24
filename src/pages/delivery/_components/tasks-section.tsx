@@ -96,7 +96,7 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
         toast.error("Tanlanganlar orasida chiqariladigan yetkazma yo'q");
         return;
       }
-      generateBulkDeliveryWaybillsPDF({
+      await generateBulkDeliveryWaybillsPDF({
         company: {
           name: company?.name ?? "BUM ERP",
           legalName: company?.legalName ?? undefined,
@@ -177,9 +177,9 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
     }
   };
 
-  const handlePrintWaybill = (settings: WaybillSettings) => {
+  const handlePrintWaybill = async (settings: WaybillSettings) => {
     if (!waybill || !waybillDate) return;
-    generateDeliveryWaybillPDF({
+    await generateDeliveryWaybillPDF({
       company: {
         name: company?.name ?? "BUM ERP",
         legalName: company?.legalName ?? undefined,
@@ -328,7 +328,7 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
           debtAvailable={waybill.tasks.some((task) => task.customerDebt !== null)}
           storageKey={`bum:waybill:${company?.id ?? "default"}`}
           printing={printing}
-          onPrint={handlePrintWaybill}
+          onPrint={(settings) => void handlePrintWaybill(settings)}
         />
       )}
 

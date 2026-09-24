@@ -109,8 +109,8 @@ export default function POSReceipt({
     if (autoPrintEnabled(template.autoPrint)) handlePrint();
   });
 
-  const handleDownloadPDF = () => {
-    generateReceiptPDF({
+  const handleDownloadPDF = async () => {
+    await generateReceiptPDF({
       company: {
         name: company?.name ?? "BUM ERP",
         address: company?.address ?? undefined,
@@ -293,7 +293,7 @@ export default function POSReceipt({
           <Button variant="secondary" size="sm" className="flex-1" onClick={handlePrint}>
             <Printer className="h-4 w-4 mr-1" /> Chop
           </Button>
-          <Button variant="secondary" size="sm" className="flex-1" onClick={handleDownloadPDF}>
+          <Button variant="secondary" size="sm" className="flex-1" onClick={() => void handleDownloadPDF()}>
             <FileDown className="h-4 w-4 mr-1" /> PDF
           </Button>
           <Button size="sm" className="flex-1" onClick={onClose}>

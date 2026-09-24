@@ -12,6 +12,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { CompanyInfo, TotalRow } from "./pdf-utils.ts";
 import {
+  createDocument,
   PDF_COLORS,
   afterTable, drawCompanyHeader, drawFooter, drawInfoBox, drawNotes, drawSignatures, drawTotalsBox,
   fmtMoney, tableOptions,
@@ -64,8 +65,8 @@ export type DeliveryWaybillData = {
 
 const dash = (value: string | null | undefined) => (value && value.trim() !== "" ? value : "—");
 
-export function generateDeliveryWaybillPDF(data: DeliveryWaybillData): jsPDF {
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
+export async function generateDeliveryWaybillPDF(data: DeliveryWaybillData): Promise<jsPDF> {
+  const doc = await createDocument();
   const header = { title: "YETKAZMA NAKLADNOYI", number: data.number, date: data.date };
 
   const columns = data.columns ?? DEFAULT_WAYBILL_COLUMNS;
@@ -164,13 +165,13 @@ export type SingleDeliveryWaybill = {
  *
  * Chop etish HUJJAT amali — yetkazma holatini o'zgartirmaydi (buni server ham kafolatlaydi).
  */
-export function generateBulkDeliveryWaybillsPDF(data: {
+export async function generateBulkDeliveryWaybillsPDF(data: {
   company: CompanyInfo;
   currency: string;
   responsibleName: string;
   deliveries: SingleDeliveryWaybill[];
 }): jsPDF {
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const doc = await createDocument();
   const showDebt = data.deliveries.some((row) => row.customerDebt !== null);
 
   data.deliveries.forEach((delivery, index) => {

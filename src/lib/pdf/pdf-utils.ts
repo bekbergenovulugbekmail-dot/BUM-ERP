@@ -4,6 +4,17 @@
  */
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { redirectHelvetica, applyUnicodeFont } from "./unicode-font.ts";
+
+/**
+ * Hujjat yaratishning YAGONA yo'li: har hujjat unicode shrift bilan ochiladi, shuning uchun
+ * kirill ism va manzillar buzilmaydi. Shrift birinchi hujjatda yuklanadi va keshlanadi.
+ */
+export async function createDocument(options: { format?: string | number[]; orientation?: "portrait" | "landscape" } = {}): Promise<jsPDF> {
+  const doc = new jsPDF({ unit: "mm", format: options.format ?? "a4", orientation: options.orientation ?? "portrait" });
+  redirectHelvetica(doc, await applyUnicodeFont(doc));
+  return doc;
+}
 
 // Brand colors (indigo palette matching ERP theme)
 export const PDF_COLORS = {

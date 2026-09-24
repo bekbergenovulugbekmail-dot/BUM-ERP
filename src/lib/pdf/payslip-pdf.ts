@@ -5,6 +5,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { CompanyInfo } from "./pdf-utils.ts";
 import {
+  createDocument,
   PDF_COLORS,
   A4, drawCompanyHeader, drawInfoBox, drawFooter, fmtNum, fmtMoney,
 } from "./pdf-utils.ts";
@@ -40,8 +41,8 @@ const STATUS_LABELS: Record<string, string> = {
   paid: "To'langan",
 };
 
-export function generatePayslipPDF(data: PayslipData): void {
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
+export async function generatePayslipPDF(data: PayslipData): Promise<void> {
+  const doc = await createDocument();
   const currency = data.currency ?? "so'm";
 
   let y = drawCompanyHeader(

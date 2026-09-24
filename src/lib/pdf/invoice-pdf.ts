@@ -6,6 +6,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { CompanyInfo, TotalRow } from "./pdf-utils.ts";
 import {
+  createDocument,
   PDF_COLORS,
   afterTable, drawCompanyHeader, drawFooter, drawInfoBox, drawNotes, drawSignatures, drawTotalsBox,
   fmtMoney, fmtNum, tableOptions,
@@ -62,8 +63,8 @@ const STATUS_COLORS: Record<string, [number, number, number]> = {
   cancelled: [239, 68, 68],
 };
 
-export function generateSalesInvoicePDF(data: InvoiceData): jsPDF {
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
+export async function generateSalesInvoicePDF(data: InvoiceData): Promise<jsPDF> {
+  const doc = await createDocument();
   const currency = data.currency ?? "so'm";
   /** Har sahifada takrorlanadigan sarlavha (50+ qatorli nakladnoyda 2-sahifa ham to'liq hujjat). */
   const pageHeader = {

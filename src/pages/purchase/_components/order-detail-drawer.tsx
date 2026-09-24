@@ -254,9 +254,9 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
     finally { setLoading(false); }
   };
 
-  const handlePrintPO = () => {
+  const handlePrintPO = async () => {
     if (!order) return;
-    generatePurchaseOrderPDF({
+    await generatePurchaseOrderPDF({
       company: {
         name: company?.name ?? "BUM ERP",
         legalName: company?.legalName ?? undefined,
@@ -405,7 +405,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                       <Ban className="h-4 w-4 mr-1" /> Bekor qilish
                     </Button>
                   )}
-                  <Button size="sm" variant="secondary" onClick={handlePrintPO}>
+                  <Button size="sm" variant="secondary" onClick={() => void handlePrintPO()}>
                     <FileDown className="h-4 w-4 mr-1" /> PDF
                   </Button>
                   {order.items.length > 0 && (

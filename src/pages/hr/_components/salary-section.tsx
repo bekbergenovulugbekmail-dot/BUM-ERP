@@ -95,8 +95,8 @@ export default function SalarySection() {
     catch (e) { toast.error(errorMessage(e)); }
   };
 
-  const handlePrintPayslip = (p: SalaryPayment) => {
-    generatePayslipPDF({
+  const handlePrintPayslip = async (p: SalaryPayment) => {
+    await generatePayslipPDF({
       company: {
         name: company?.name ?? "BUM ERP",
         legalName: company?.legalName ?? undefined,
@@ -260,7 +260,7 @@ export default function SalarySection() {
                         )}
                         <Button size="icon" variant="ghost" className="h-6 w-6"
                           title="PDF yuklash"
-                          onClick={() => handlePrintPayslip(p)}>
+                          onClick={() => void handlePrintPayslip(p)}>
                           <FileDown className="h-3.5 w-3.5 text-muted-foreground" />
                         </Button>
                       </div>

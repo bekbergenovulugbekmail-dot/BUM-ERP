@@ -4,7 +4,7 @@
  * balans/keshbekdan to'lov, qaytim balansga va qarz ham chiqadi.
  */
 import jsPDF from "jspdf";
-import { fmtNum } from "./pdf-utils.ts";
+import { createDocument, fmtNum } from "./pdf-utils.ts";
 
 export type ReceiptItem = {
   name: string;
@@ -200,20 +200,20 @@ function drawReceipt(doc: jsPDF, data: ReceiptData): void {
   doc.text("Qaytib keling!", pw / 2, y, { align: "center" });
 }
 
-function newReceiptDoc(): jsPDF {
+function newReceiptDoc(): Promise<jsPDF> {
   // 200 mm balandlik ko'p cheklar uchun yetarli (jsPDF sahifani keyin kichraytirmaydi)
-  return new jsPDF({ unit: "mm", format: [PAGE_WIDTH, 200], orientation: "portrait" });
+  return createDocument({ format: [PAGE_WIDTH, 200] });
 }
 
-export function generateReceiptPDF(data: ReceiptData): void {
-  const doc = newReceiptDoc();
+export async function generateReceiptPDF(data: ReceiptData): Promise<void> {
+  const doc = await newReceiptDoc();
   drawReceipt(doc, data);
   doc.save(`receipt-${data.orderNumber}.pdf`);
 }
 
 /** Chekni yangi oynada brauzer orqali chop etish uchun ochadi. */
-export function printReceiptInBrowser(data: ReceiptData): void {
-  const doc = newReceiptDoc();
+export async function printReceiptInBrowser(data: ReceiptData): Promise<void> {
+  const doc = await newReceiptDoc();
   drawReceipt(doc, data);
   const url = doc.output("bloburl");
   const win = window.open(url as unknown as string, "_blank");

@@ -166,9 +166,9 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
     finally { setLoading(false); }
   };
 
-  const handlePrintInvoice = () => {
+  const handlePrintInvoice = async () => {
     if (!order) return;
-    generateSalesInvoicePDF({
+    await generateSalesInvoicePDF({
       company: companyInfo(company),
       number: order.number,
       date: order.orderDate,
@@ -306,7 +306,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                       <Ban className="h-4 w-4 mr-1" /> Bekor
                     </Button>
                   )}
-                  <Button size="sm" variant="secondary" onClick={handlePrintInvoice}>
+                  <Button size="sm" variant="secondary" onClick={() => void handlePrintInvoice()}>
                     <FileDown className="h-4 w-4 mr-1" /> PDF
                   </Button>
                 </div>

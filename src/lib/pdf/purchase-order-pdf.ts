@@ -6,6 +6,7 @@ import autoTable from "jspdf-autotable";
 import type { CompanyInfo } from "./pdf-utils.ts";
 import type { TotalRow } from "./pdf-utils.ts";
 import {
+  createDocument,
   PDF_COLORS,
   afterTable, drawCompanyHeader, drawFooter, drawInfoBox, drawNotes, drawSignatures, drawTotalsBox,
   fmtMoney, fmtNum, tableOptions,
@@ -48,8 +49,8 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "Bekor",
 };
 
-export function generatePurchaseOrderPDF(data: PurchaseOrderData): jsPDF {
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
+export async function generatePurchaseOrderPDF(data: PurchaseOrderData): Promise<jsPDF> {
+  const doc = await createDocument();
   /** Har sahifada takrorlanadigan sarlavha. */
   const pageHeader = {
     title: "XARID BUYURTMASI",
