@@ -38,7 +38,8 @@ export const ELEMENT_TYPES = [
   "totals", //      jami bloki (qaysi qatorlar ko'rinishi tanlanadi)
   "payments", //    to'lov usullari bo'yicha taqsimot
   "signatures", //  imzo joylari
-  "qr", //          hujjat raqami yoki tasdiqlash havolasi
+  "qr", //          hujjat raqami yoki buyurtma raqami (ixtiyoriy URL emas)
+  "barcode", //     shtrix-kod (Code128) — o'sha manbalardan
   "pageNumber", //  "1 / 3"
 ] as const;
 export type ElementType = (typeof ELEMENT_TYPES)[number];
@@ -83,10 +84,16 @@ export type DocumentElement = {
   columns?: { key: string; label?: string; width?: number; align?: Alignment }[];
   /** `totals` va `payments` uchun: qaysi qatorlar ko'rinadi. */
   rows?: string[];
-  /** `image` uchun: `files` xizmatidagi kalit (tashqi URL EMAS). */
-  imageKey?: string;
-  /** `qr` uchun: nimani kodlash — faqat ro'yxatdan. */
-  qrSource?: "documentNumber" | "verifyUrl";
+  /**
+   * `image` uchun rasm — `data:image/...;base64,...` ko'rinishida, shablon ichida.
+   *
+   * Nega fayl kaliti emas: production'da fayl saqlash (S3) sozlanmagan, chek logotipi ham
+   * shu yo'l bilan ishlaydi. Data URL tashqi tarmoqqa chiqmaydi va skript bajarmaydi —
+   * server uni qat'iy tekshiradi (faqat png/jpeg/webp, hajm chegarasi bilan).
+   */
+  imageData?: string;
+  /** `qr` va `barcode` uchun: nimani kodlash — faqat ro'yxatdan. */
+  qrSource?: "documentNumber" | "orderNumber" | "customerPhone";
   /** mm; berilmasa element butun kenglikni egallaydi. */
   width?: number;
   height?: number;
@@ -140,3 +147,13 @@ export const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
 export const MAX_ELEMENTS_PER_SECTION = 60;
 export const MAX_TABLE_COLUMNS = 12;
+
+/** Shablondagi rasm hajmi (data URL uzunligi) — chek logotipi bilan bir xil chegara. */
+export const MAX_IMAGE_DATA_LENGTH = 300_000;
+
+/** Ruxsat etilgan rasm boshlanishi. Boshqa hech narsa (`svg`, `data:text/html`) qabul qilinmaydi. */
+export const IMAGE_DATA_PREFIX = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+
+/** QR ichiga nima yoziladi — faqat shu manbalardan (ixtiyoriy URL emas). */
+export const QR_SOURCES = ["documentNumber", "orderNumber", "customerPhone"] as const;
+export type QrSource = (typeof QR_SOURCES)[number];

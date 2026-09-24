@@ -6,7 +6,7 @@
 | | |
 |---|---|
 | Boshlandi | 2026-09-24 |
-| Holat | 1–4-bosqich ✅ (audit, shrift, model+API, renderer, dizayner UI) · 5–6 rejada |
+| Holat | 1–6-bosqich ✅ — hammasi bajarildi |
 | Production deploy | 2026-09-24: egasining so'rovi bilan chiqarildi (`bum-api` + `bum-web`) |
 
 ---
@@ -136,8 +136,8 @@ faqat tegishli ruxsat bo'lsa ro'yxatga kiradi (`products.view_cost`).
 | 2 | Ma'lumot modeli, API, maydonlar katalogi, versiyalash | ✅ bajarildi |
 | 3 | Renderer: shablon JSON → mavjud A4 dvigatel | ✅ bajarildi |
 | 4 | Dizayner UI (Sozlamalar → Hujjatlar, jonli A4) | ✅ bajarildi |
-| 5 | Rasm/QR/sahifa raqami elementlari, ustun kengligi va tartibi sudrab o'zgartirish | rejada |
-| 6 | Mavjud nakladnoy chiqarishni shablonga ulash, bulk print, eksport/import | rejada |
+| 5 | Rasm, QR, shtrix-kod, sahifa raqami; ustun tartibi va kengligi | ✅ bajarildi |
+| 6 | Nakladnoy chiqarishni shablonga ulash (bulk print bilan) | ✅ bajarildi |
 
 ---
 
@@ -248,3 +248,55 @@ Commit `5a4696b`. `bum-api`: `Migratsiyalar qo'llandi (47ms)`, bitta `Server lis
 loglarda 500 YO'Q. `bum-web`: `build.json` → **14:46:41Z**.
 Tekshirildi: `/api/documents/templates` → **401** (marshrut bor, sessiya kerak),
 `/fonts/PTSans-Regular.ttf` → **200** (kirill shrifti tarqaldi).
+
+
+---
+
+## 5. 5–6-BOSQICH NATIJASI
+
+### Yangi elementlar
+
+| Element | Qanday ishlaydi |
+|---|---|
+| **Rasm** (logo, muhr) | Fayl tanlanadi, brauzer uni 384 px gacha kichraytirib **data URL** qiladi va shablon ichida saqlaydi. Fayl saqlash (S3) production'da sozlanmagani uchun chek logotipidagi yo'l tanlandi |
+| **QR** | `qrcode` kutubxonasi bilan chiziladi |
+| **Shtrix-kod** | `jsbarcode` (CODE128) |
+| **Sahifa raqami** | "1 / 3" — hamma sahifa chizilgandan keyin qo'yiladi (jami soni faqat o'shanda ma'lum) |
+
+**QR/shtrix-kod ichiga ixtiyoriy havola yozib bo'lmaydi.** Manba faqat uchta: hujjat raqami,
+buyurtma raqami, mijoz telefoni. Shu sababli kod skanerlanganda begona manzilga olib bormaydi.
+
+**Rasm xavfsizligi:** server faqat `data:image/(png|jpeg|webp);base64,...` ni qabul qiladi.
+Tashqi URL, `data:text/html` va **SVG** rad etiladi (SVG ichida skript bo'lishi mumkin);
+hajm chegarasi 300 KB.
+
+### Jadval ustunlari
+
+Tanlangan ustunlar endi **tartibi va kengligi** bilan boshqariladi: yuqoriga/pastga siljitish
+va mm dagi kenglik. Qog'ozdagi tartib aynan shu ro'yxat bo'yicha.
+
+### Nakladnoy shablon bilan chiqadi
+
+`GET /api/documents/active/:type` endi `{ schema, custom }` qaytaradi. `custom` —
+kompaniya O'ZI tuzgan shablonmi.
+
+- **`custom: false`** → nakladnoy AVVALGI qat'iy ko'rinishda chiqadi. Ya'ni hech kimda hech
+  narsa o'z-o'zidan o'zgarmaydi: shablon yaratilmaguncha hamma narsa eski holicha.
+- **`custom: true`** → `renderWaybillsWithTemplate` ishlaydi: har yetkazma O'Z SAHIFASIDA,
+  shablon bo'yicha.
+
+Chop etish yetkazma holatini o'zgartirmaydi (avvalgidek).
+
+### Tekshiruv
+
+- **Renderer:** `template-renderer.test.ts` 10 → **14** (rasm qo'yiladi, buzuq rasm hujjatni
+  yiqitmaydi, sahifa raqami har sahifada `1 / N`, kod manbasi bo'sh bo'lsa jim o'tkaziladi).
+- **Xavfsizlik:** `document-sanitize.test.ts` 5 → **10** (tashqi URL, SVG, `data:text/html`
+  va `javascript:` rad etiladi; katta rasm rad etiladi; QR manbasi faqat ro'yxatdan;
+  ustun tartibi saqlanadi va kenglik chegaraga tushiriladi).
+- **Brauzer:** yangi `document-template-print.spec.ts` (3) — shablonsiz `custom: false`,
+  standart qilingach `custom: true`, va shablon bilan chizilgan **kirill nomli** nakladnoy
+  haqiqiy ko'p sahifali PDF bo'lishi. `document-designer.spec.ts` (2) yashil.
+- E2E endi o'zidan keyin tozalaydi (sinov shablonlarini arxivlaydi) — aks holda bir necha
+  yurishdan keyin "20 tadan ortiq shablon" chegarasiga urilib, sababsiz qizil bo'lardi.
+- Frontend 40 fayl / **198** test; API `document*` **22**; `tsc`, `eslint`, `vite build` toza.

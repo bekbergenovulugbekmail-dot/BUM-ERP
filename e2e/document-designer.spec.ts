@@ -22,6 +22,23 @@ test.beforeEach(async ({ page }) => {
   await login(page, "owner");
 });
 
+/**
+ * Test o'zidan keyin tozalaydi: sinov shablonlari arxivlanadi.
+ *
+ * Shusiz har yurish yangi shablon qoldirar va bir necha yurishdan keyin "bu turda 20 tadan
+ * ortiq shablon bo'lmaydi" chegarasiga urilib, testlar sababsiz qizil bo'lardi.
+ */
+test.afterEach(async ({ page }) => {
+  // Tozalash HECH QACHON testni yiqitmasin — u asosiy tekshiruv emas
+  const list = await page.request.get("/api/documents/templates", { timeout: 30_000 }).catch(() => null);
+  if (!list?.ok()) return;
+  const { templates } = (await list.json()) as { templates: { id: string; name: string; isDefault: boolean }[] };
+  for (const template of templates) {
+    if (!/^(Sinov|Versiya|Nakladnoy) \d+$/.test(template.name) || template.isDefault) continue;
+    await page.request.delete(`/api/documents/templates/${template.id}`, { timeout: 30_000 }).catch(() => null);
+  }
+});
+
 test("shablon yaratiladi, tahrirlanadi, saqlanadi va qayta ochilganda joyida qoladi", async ({ page }) => {
   await openDesigner(page);
 
@@ -57,6 +74,8 @@ test("shablon yaratiladi, tahrirlanadi, saqlanadi va qayta ochilganda joyida qol
 });
 
 test("versiyaga qaytish eski ko'rinishni tiklaydi", async ({ page }) => {
+  // Bu test ko'p qadam bosadi va har qadamda A4 PDF qayta chiziladi (shrift bilan) — sekinroq
+  test.setTimeout(180_000);
   await openDesigner(page);
 
   const name = `Versiya ${Date.now()}`;

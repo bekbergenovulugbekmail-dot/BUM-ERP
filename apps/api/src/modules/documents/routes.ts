@@ -111,7 +111,7 @@ export async function documentRoutes(app: FastifyInstance): Promise<void> {
   app.get("/active/:documentType", async (req) => {
     const params = typeParams.parse(req.params);
     const tenant = await readTenant(req);
-    return { schema: await activeSchemaFor(db, tenant, params.documentType) };
+    return activeSchemaFor(db, tenant, params.documentType);
   });
 
   app.post("/templates", async (req, reply) => {

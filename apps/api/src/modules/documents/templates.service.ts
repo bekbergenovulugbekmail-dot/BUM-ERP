@@ -96,7 +96,11 @@ export async function getTemplate(conn: DbOrTx, tenant: TenantContext, templateI
  * Hujjat chizishda ishlatiladigan sxema: kompaniyaning standart shabloni bo'lsa — o'sha,
  * aks holda zavod shabloni. Hujjat HECH QACHON shablon yo'qligi sababli chiqmay qolmaydi.
  */
-export async function activeSchemaFor(conn: DbOrTx, tenant: TenantContext, documentType: DocumentType): Promise<DocumentTemplateSchema> {
+export async function activeSchemaFor(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  documentType: DocumentType,
+): Promise<{ schema: DocumentTemplateSchema; custom: boolean }> {
   const [row] = await conn
     .select({ schema: documentTemplateVersions.schema })
     .from(documentTemplates)
@@ -110,7 +114,10 @@ export async function activeSchemaFor(conn: DbOrTx, tenant: TenantContext, docum
       ),
     )
     .limit(1);
-  return (row?.schema as DocumentTemplateSchema | undefined) ?? defaultSchemaFor(documentType);
+  // `custom` — kompaniya O'ZI tuzgan shablonmi. Hujjat chiqaruvchi shunga qarab qaror qiladi:
+  // shablon bo'lmasa avvalgi qat'iy ko'rinish saqlanadi (hech kimda hech narsa o'zgarmaydi).
+  const schema = row?.schema as DocumentTemplateSchema | undefined;
+  return schema ? { schema, custom: true } : { schema: defaultSchemaFor(documentType), custom: false };
 }
 
 async function insertVersion(

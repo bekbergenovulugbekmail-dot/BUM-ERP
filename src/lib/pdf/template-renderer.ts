@@ -47,6 +47,8 @@ export type DocumentData = {
   columnLabels?: Record<string, string>;
   /** Jami va to'lov qatorlarining nomlari. */
   rowLabels?: Record<string, string>;
+  /** QR va shtrix-kod ichiga yoziladigan qiymatlar (faqat shu manbalardan). */
+  codes?: Partial<Record<"documentNumber" | "orderNumber" | "customerPhone", string>>;
 };
 
 const DEFAULT_ROW_LABELS: Record<string, string> = {
@@ -117,6 +119,8 @@ type RenderContext = {
   y: number;
   /** Keyingi sahifalarda takrorlanadigan sarlavha (jadval bo'linganda). */
   header: { title: string; number: string; date: string };
+  /** Element id → tayyor QR/shtrix-kod rasmi (data URL). */
+  codeImages?: Record<string, string>;
 };
 
 function drawText(ctx: RenderContext, element: DocumentElement, value: string) {
@@ -181,6 +185,39 @@ function drawSignatureBlock(ctx: RenderContext, element: DocumentElement) {
   ctx.y = drawSignatures(ctx.doc, ctx.y, ctx.data.company, ctx.header, pair);
 }
 
+/** Rasm — data URL. Tashqi tarmoqqa chiqmaydi (server ham faqat data URL ga ruxsat beradi). */
+function drawImage(ctx: RenderContext, element: DocumentElement) {
+  if (!element.imageData) return;
+  const width = Math.min(element.width ?? 30, ctx.right - ctx.left);
+  const height = element.height ?? width * 0.5;
+  ctx.y = ensureSpace(ctx.doc, ctx.y, height + 2);
+  const align = element.style?.align ?? "left";
+  const x = align === "center" ? (ctx.left + ctx.right) / 2 - width / 2 : align === "right" ? ctx.right - width : ctx.left;
+  try {
+    ctx.doc.addImage(element.imageData, x, ctx.y, width, height);
+  } catch {
+    // Buzuq rasm butun hujjatni yiqitmasin — joyi bo'sh qoladi
+  }
+  ctx.y += height + 2;
+}
+
+/** QR yoki shtrix-kod: matn OLDINDAN tayyorlangan data URL ko'rinishida keladi. */
+function drawCode(ctx: RenderContext, element: DocumentElement) {
+  const image = ctx.codeImages?.[element.id];
+  if (!image) return;
+  const size = Math.min(element.width ?? (element.type === "qr" ? 22 : 50), ctx.right - ctx.left);
+  const height = element.type === "qr" ? size : (element.height ?? 14);
+  ctx.y = ensureSpace(ctx.doc, ctx.y, height + 2);
+  const align = element.style?.align ?? "left";
+  const x = align === "center" ? (ctx.left + ctx.right) / 2 - size / 2 : align === "right" ? ctx.right - size : ctx.left;
+  try {
+    ctx.doc.addImage(image, x, ctx.y, size, height);
+  } catch {
+    // e'tiborsiz
+  }
+  ctx.y += height + 2;
+}
+
 function drawLine(ctx: RenderContext) {
   ctx.y = ensureSpace(ctx.doc, ctx.y, 4);
   ctx.doc.setDrawColor(...PDF_COLORS.border);
@@ -209,13 +246,20 @@ function renderElement(ctx: RenderContext, element: DocumentElement) {
     case "signatures":
       drawSignatureBlock(ctx, element);
       break;
+    case "image":
+      drawImage(ctx, element);
+      break;
+    case "qr":
+    case "barcode":
+      drawCode(ctx, element);
+      break;
     case "line":
       drawLine(ctx);
       break;
     case "spacer":
       ctx.y += Math.min(element.height ?? 4, 40);
       break;
-    // `image`, `qr`, `pageNumber` — footer tasmasi va keyingi bosqichda
+    // `pageNumber` — hamma sahifa chizilgandan keyin (jami soni shunda ma'lum)
     default:
       break;
   }
@@ -227,8 +271,59 @@ function renderElement(ctx: RenderContext, element: DocumentElement) {
  * Sahifa bo'linishi mavjud dvigateldan: jadval o'zi bo'linadi va har sahifada sarlavhasini
  * takrorlaydi, bloklar esa `ensureSpace` bilan chetga chiqib ketmaydi.
  */
+/**
+ * Shablondagi QR va shtrix-kod elementlari uchun rasm tayyorlaydi.
+ *
+ * Kod ichiga FAQAT ro'yxatdagi manbadan qiymat tushadi (hujjat raqami, buyurtma raqami,
+ * mijoz telefoni) — ixtiyoriy URL yoki matn emas, shuning uchun skanerlanganda begona
+ * manzilga olib bormaydi.
+ */
+async function buildCodeImages(schema: DocumentTemplateSchema, data: DocumentData): Promise<Record<string, string>> {
+  const elements = schema.sections.flatMap((section) => section.elements).filter((element) => element.type === "qr" || element.type === "barcode");
+  if (elements.length === 0) return {};
+  const images: Record<string, string> = {};
+  for (const element of elements) {
+    const value = element.qrSource ? data.codes?.[element.qrSource] : undefined;
+    if (!value) continue;
+    try {
+      if (element.type === "qr") {
+        const QRCode = (await import("qrcode")).default;
+        images[element.id] = await QRCode.toDataURL(value, { margin: 0, width: 256 });
+      } else {
+        const JsBarcode = (await import("jsbarcode")).default;
+        const canvas = document.createElement("canvas");
+        JsBarcode(canvas, value, { format: "CODE128", displayValue: false, margin: 0, height: 60 });
+        images[element.id] = canvas.toDataURL("image/png");
+      }
+    } catch {
+      // Kod chizilmasa hujjat baribir chiqadi
+    }
+  }
+  return images;
+}
+
+/** Hamma sahifa chizilgandan keyin: "1 / 3". Jami soni faqat shu payt ma'lum. */
+function drawPageNumbers(doc: jsPDF, schema: DocumentTemplateSchema) {
+  const element = schema.sections
+    .flatMap((section) => section.elements)
+    .find((item) => item.type === "pageNumber");
+  if (!element) return;
+  const total = doc.getNumberOfPages();
+  const width = doc.internal.pageSize.getWidth();
+  for (let page = 1; page <= total; page += 1) {
+    doc.setPage(page);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(element.style?.fontSize ?? 8);
+    doc.setTextColor(...PDF_COLORS.textMuted);
+    const align = element.style?.align ?? "right";
+    const x = align === "center" ? width / 2 : align === "left" ? A4.marginX : width - A4.marginX;
+    doc.text(`${page} / ${total}`, x, contentBottom() + 10, { align });
+  }
+}
+
 export async function renderTemplate(schema: DocumentTemplateSchema, data: DocumentData): Promise<jsPDF> {
   const doc = await createDocument({ orientation: schema.page.orientation });
+  const codeImages = await buildCodeImages(schema, data);
   const left = schema.page.margins.left || A4.marginX;
   const right = doc.internal.pageSize.getWidth() - (schema.page.margins.right || A4.marginX);
   // Jadval ikkinchi sahifaga o'tganda sarlavha takrorlanadi — nomi shablondagi birinchi
@@ -242,6 +337,7 @@ export async function renderTemplate(schema: DocumentTemplateSchema, data: Docum
     right,
     y: schema.page.margins.top || A4.marginX,
     header: { title, number: data.values["document.number"] ?? "", date: data.values["document.date"] ?? "" },
+    codeImages,
   };
 
   for (const section of schema.sections) {
@@ -260,5 +356,6 @@ export async function renderTemplate(schema: DocumentTemplateSchema, data: Docum
   }
 
   drawFooter(doc);
+  drawPageNumbers(doc, schema);
   return doc;
 }

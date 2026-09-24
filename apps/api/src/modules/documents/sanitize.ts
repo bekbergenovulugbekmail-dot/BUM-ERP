@@ -22,6 +22,9 @@ import {
   SECTIONS,
   STYLE_LIMITS,
   CONDITION_OPERATORS,
+  IMAGE_DATA_PREFIX,
+  MAX_IMAGE_DATA_LENGTH,
+  QR_SOURCES,
   type Alignment,
   type ConditionOperator,
   type DocumentElement,
@@ -29,6 +32,7 @@ import {
   type DocumentTemplateSchema,
   type ElementType,
   type PageSettings,
+  type QrSource,
   type SectionKey,
   type TextStyle,
   type VisibilityCondition,
@@ -162,19 +166,27 @@ function sanitizeElement(value: unknown, access: CatalogAccess, warnings: string
   }
 
   if (type === "image") {
-    // Faqat `files` xizmatidagi kalit: `<uuid>.<ext>`. Tashqi URL yoki `data:` qabul qilinmaydi.
-    const key = text(value.imageKey, 120);
-    if (!key || !/^[0-9a-f-]{36}\.(jpg|png|webp)$/.test(key)) {
-      warnings.push("Rasm kaliti yaroqsiz — element tashlandi");
+    /**
+     * Faqat `data:image/(png|jpeg|webp);base64,...`. Tashqi URL, `data:text/html` va `svg`
+     * qabul qilinmaydi: SVG ichida skript bo'lishi mumkin, tashqi URL esa hujjat chiqarilganda
+     * begona manzilga so'rov yuborardi.
+     */
+    const raw = typeof value.imageData === "string" ? value.imageData.trim() : "";
+    if (!raw || !IMAGE_DATA_PREFIX.test(raw)) {
+      warnings.push("Rasm formati yaroqsiz — faqat PNG, JPEG yoki WEBP");
       return null;
     }
-    element.imageKey = key;
+    if (raw.length > MAX_IMAGE_DATA_LENGTH) {
+      warnings.push("Rasm juda katta — kichikroq fayl tanlang");
+      return null;
+    }
+    element.imageData = raw;
   }
 
-  if (type === "qr") {
-    const source = pick<"documentNumber" | "verifyUrl">(value.qrSource, ["documentNumber", "verifyUrl"]);
+  if (type === "qr" || type === "barcode") {
+    const source = pick<QrSource>(value.qrSource, QR_SOURCES);
     if (!source) {
-      warnings.push("QR manbasi noto'g'ri — element tashlandi");
+      warnings.push("Kod manbasi noto'g'ri — element tashlandi");
       return null;
     }
     element.qrSource = source;

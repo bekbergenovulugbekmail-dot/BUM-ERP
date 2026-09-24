@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { FileDown, Loader2, RotateCcw, Search } from "lucide-react";
-import { DELIVERY_STATUSES, isOpenDeliveryStatus } from "@bum/shared";
+import { DELIVERY_STATUSES, isOpenDeliveryStatus, type DocumentTemplateSchema } from "@bum/shared";
 import { LateBadge, PriorityBadge, ReturnPendingBadge, StatusBadge } from "@/components/delivery/badges.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Checkbox } from "@/components/ui/checkbox.tsx";
@@ -96,24 +96,36 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
         toast.error("Tanlanganlar orasida chiqariladigan yetkazma yo'q");
         return;
       }
-      await generateBulkDeliveryWaybillsPDF({
-        company: {
-          name: company?.name ?? "BUM ERP",
-          legalName: company?.legalName ?? undefined,
-          taxId: company?.taxId ?? undefined,
-          address: company?.address ?? undefined,
-          phone: company?.phone ?? undefined,
-          email: company?.email ?? undefined,
-          website: company?.website ?? undefined,
-        },
-        currency: company?.currency ?? "UZS",
-        responsibleName: me?.name ?? "—",
-        deliveries: data.tasks.map((task) => ({
-          ...task,
-          orderTotal: Number(task.orderTotal),
-          customerDebt: task.customerDebt === null ? null : Number(task.customerDebt),
-        })),
-      });
+      const companyInfo = {
+        name: company?.name ?? "BUM ERP",
+        legalName: company?.legalName ?? undefined,
+        taxId: company?.taxId ?? undefined,
+        address: company?.address ?? undefined,
+        phone: company?.phone ?? undefined,
+        email: company?.email ?? undefined,
+        website: company?.website ?? undefined,
+      };
+      const deliveries = data.tasks.map((task) => ({
+        ...task,
+        orderTotal: Number(task.orderTotal),
+        customerDebt: task.customerDebt === null ? null : Number(task.customerDebt),
+      }));
+      const options = { company: companyInfo, currency: company?.currency ?? "UZS", responsibleName: me?.name ?? "—" };
+
+      /**
+       * Kompaniya O'Z shablonini tuzgan bo'lsa — nakladnoy o'sha bo'yicha chiqadi.
+       * Aks holda avvalgi qat'iy ko'rinish: hech kimda hech narsa o'z-o'zidan o'zgarmaydi.
+       */
+      const active = await api
+        .get<{ schema: DocumentTemplateSchema; custom: boolean }>("/api/documents/active/delivery_waybill")
+        .catch(() => null);
+      if (active?.custom) {
+        const { renderWaybillsWithTemplate } = await import("@/lib/pdf/delivery-template.ts");
+        const doc = await renderWaybillsWithTemplate(active.schema, deliveries, options);
+        doc.save(`nakladnoylar-${deliveries.length}-ta.pdf`);
+      } else {
+        await generateBulkDeliveryWaybillsPDF({ ...options, deliveries });
+      }
       if (data.tasks.length < selectedPrintable.length) {
         toast.info(`${data.tasks.length} ta nakladnoy chiqdi (qolganlari holati bo'yicha chiqmaydi)`);
       }

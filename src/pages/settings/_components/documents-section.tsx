@@ -14,7 +14,7 @@ import {
   ArrowDown, ArrowUp, Copy, FileText, History, Plus, RotateCcw, Save, Star, Trash2,
 } from "lucide-react";
 import {
-  DOCUMENT_TYPE_LABELS, DOCUMENT_TYPES,
+  DOCUMENT_TYPE_LABELS, DOCUMENT_TYPES, MAX_IMAGE_DATA_LENGTH, QR_SOURCES,
   type DocumentElement, type DocumentTemplateSchema, type DocumentType, type SectionKey,
 } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
@@ -34,6 +34,29 @@ import {
 
 const SECTION_ORDER: SectionKey[] = ["header", "body", "footer"];
 
+/**
+ * Rasmni shablonga sig'adigan holga keltiradi: kengligi 384 px gacha kichraytiriladi va
+ * data URL bo'lib saqlanadi (chek logotipidagi kabi). Server ham shu formatni kutadi.
+ */
+async function imageToDataUrl(file: File): Promise<string> {
+  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) throw new Error("PNG, JPEG yoki WebP rasm tanlang");
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 384 / bitmap.width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Rasmni o'qib bo'lmadi");
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  let dataUrl = canvas.toDataURL("image/png");
+  if (dataUrl.length > MAX_IMAGE_DATA_LENGTH) dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+  if (dataUrl.length > MAX_IMAGE_DATA_LENGTH) throw new Error("Rasm juda katta — kichikroq fayl tanlang");
+  return dataUrl;
+}
+
 /** Yangi element — turiga qarab eng kerakli standart qiymat bilan. */
 function newElement(type: DocumentElement["type"], catalog: FieldCatalog | undefined): DocumentElement {
   const id = crypto.randomUUID();
@@ -46,6 +69,9 @@ function newElement(type: DocumentElement["type"], catalog: FieldCatalog | undef
   if (type === "payments") return { id, type, rows: ["cash", "card"] };
   if (type === "signatures") return { id, type, label: "Topshirdi|Qabul qildi" };
   if (type === "text") return { id, type, label: "Yangi matn" };
+  if (type === "qr") return { id, type, qrSource: "documentNumber", width: 22 };
+  if (type === "barcode") return { id, type, qrSource: "documentNumber", width: 50, height: 14 };
+  if (type === "image") return { id, type, width: 40, height: 20 };
   return { id, type };
 }
 
@@ -363,7 +389,7 @@ export default function DocumentsSection() {
                 {canManage && schema && (
                   <div className="flex flex-wrap justify-end gap-1">
                     {/* Bir bosishda qo'shiladi — ko'p qadamli menyu tez ishlashga xalaqit beradi */}
-                    {(["text", "field", "itemsTable", "totals", "signatures", "line"] as const).map((type) => (
+                    {(["text", "field", "itemsTable", "totals", "signatures", "image", "qr", "barcode", "pageNumber", "line"] as const).map((type) => (
                       <button
                         key={type}
                         type="button"

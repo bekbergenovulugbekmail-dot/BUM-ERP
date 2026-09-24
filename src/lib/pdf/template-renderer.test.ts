@@ -161,6 +161,53 @@ describe("Shablon renderer", () => {
   });
 });
 
+describe("Rasm, kod va sahifa raqami", () => {
+  /** 1x1 shaffof PNG — eng kichik yaroqli rasm. */
+  const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+  it("rasm hujjatga qo'yiladi va o'lchami shablondan olinadi", async () => {
+    const doc = await renderTemplate(
+      schema([{ id: "img", type: "image", imageData: PNG, width: 30, height: 15 }]),
+      data(),
+    );
+    // jsPDF rasmni hujjat resurslariga qo'shadi
+    expect(doc.getNumberOfPages()).toBe(1);
+    expect(JSON.stringify((doc as unknown as { internal: { pages: string[][] } }).internal.pages)).toContain("Do");
+  });
+
+  it("buzuq rasm hujjatni yiqitmaydi", async () => {
+    await expect(
+      renderTemplate(schema([{ id: "img", type: "image", imageData: "data:image/png;base64,QQQQ" }]), data()),
+    ).resolves.toBeTruthy();
+  });
+
+  it("sahifa raqami har sahifaga qo'yiladi", async () => {
+    const items = Array.from({ length: 90 }, (_, index) => ({ name: `M ${index + 1}`, total: "1 000" }));
+    const doc = await renderTemplate(
+      {
+        schemaVersion: 1,
+        page,
+        sections: [
+          { key: "header", elements: [] },
+          { key: "body", elements: [{ id: "t", type: "itemsTable", columns: [{ key: "name" }, { key: "total" }] }] },
+          { key: "footer", elements: [{ id: "p", type: "pageNumber" }] },
+        ],
+      },
+      data({ items }),
+    );
+    const total = doc.getNumberOfPages();
+    expect(total).toBeGreaterThan(1);
+    expect(pageText(doc, 1)).toContain(`1 / ${total}`);
+    expect(pageText(doc, total)).toContain(`${total} / ${total}`);
+  });
+
+  it("kod manbasi bo'sh bo'lsa element jim o'tkazib yuboriladi", async () => {
+    await expect(
+      renderTemplate(schema([{ id: "q", type: "qr", qrSource: "orderNumber" }]), data({ codes: {} })),
+    ).resolves.toBeTruthy();
+  });
+});
+
 describe("Shart tekshiruvi (sof funksiya)", () => {
   const values = data();
   it("son va matn taqqoslash", () => {
