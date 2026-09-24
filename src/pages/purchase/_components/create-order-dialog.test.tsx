@@ -7,7 +7,7 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { convertUnitPrice, defaultUnitId, factorOf } from "../_lib/units.ts";
+import { convertUnitPrice, defaultUnitId, factorOf } from "@/lib/units.ts";
 import type { ProductOption } from "../_lib/types.ts";
 
 const DONA = "u-dona";
@@ -84,6 +84,20 @@ describe("Xarid oynasi — miqdor birligi", () => {
     fireEvent.change(qtyInput(), { target: { value: "12" } });
     // 12 dona × 8 300 = 99 600 — aynan 1 blokning haqiqiy narxi
     expect(screen.getAllByText("99 600 so'm").length).toBeGreaterThan(0);
+  });
+});
+
+describe("Narx ikkala birlikda", () => {
+  it("dona narxi yozilsa blok narxi o'zi chiqadi va aksincha", () => {
+    openWithProduct();
+    // Qator "Dona" da: ikkinchi maydon — blok narxi (8 300 × 12)
+    const other = screen.getByTestId("other-unit-price-0") as HTMLInputElement;
+    expect(other.value).toBe("99600");
+
+    // Blok narxi yozilsa asosiy maydon (dona narxi) qayta hisoblanadi
+    fireEvent.change(other, { target: { value: "120000" } });
+    expect((screen.getAllByRole("spinbutton")[1] as HTMLInputElement).value).toBe("10000");
+    expect((screen.getByTestId("other-unit-price-0") as HTMLInputElement).value).toBe("120000");
   });
 });
 

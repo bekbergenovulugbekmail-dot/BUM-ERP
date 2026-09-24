@@ -5,6 +5,7 @@
  * Lokatsiya faqat faol ish sessiyasida kuzatiladi. Asosiy himoya — serverda.
  */
 import { useCallback, useEffect, useState } from "react";
+import ErrorBoundary from "@/components/error-boundary.tsx";
 import { Link, NavLink, Navigate, Outlet, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -292,7 +293,9 @@ export default function DeliveryAgentLayout() {
           <LocationRequired onRequest={location.request} />
         ) : (
           <DeliveryRealtimeContext.Provider value={realtime}>
-            <Outlet context={outlet} />
+            <ErrorBoundary area="Yetkazuvchi">
+              <Outlet context={outlet} />
+            </ErrorBoundary>
           </DeliveryRealtimeContext.Provider>
         )}
       </main>

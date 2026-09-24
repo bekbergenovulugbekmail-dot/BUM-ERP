@@ -22,7 +22,7 @@ import {
   num, todayLocal,
   type ProductOption, type Supplier, type UnitOption, type WarehouseOption,
 } from "../_lib/types.ts";
-import { convertUnitPrice, defaultUnitId, factorOf, unitsOf } from "../_lib/units.ts";
+import { convertUnitPrice, defaultUnitId, factorOf, unitsOf } from "@/lib/units.ts";
 import PriceSuggestions from "./price-suggestions.tsx";
 import QuickSupplierDialog from "./quick-supplier-dialog.tsx";
 import QuickProductDialog from "./quick-product-dialog.tsx";
@@ -470,7 +470,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                     <th className="text-left px-3 py-2 text-xs text-muted-foreground min-w-[180px]">Mahsulot</th>
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-40">Miqdor</th>
                     {showCurrencyColumn && <th className="text-left px-3 py-2 text-xs text-muted-foreground w-24">Valyuta</th>}
-                    <th className="text-right px-3 py-2 text-xs text-muted-foreground w-28">Xarid narxi</th>
+                    <th className="text-right px-3 py-2 text-xs text-muted-foreground w-32">Xarid narxi</th>
                     {taxEnabled && <th className="text-right px-3 py-2 text-xs text-muted-foreground w-20">Soliq %</th>}
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-20">Chegirma %</th>
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-28">Sotuv narxi</th>
@@ -487,6 +487,11 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                     const lineFactor = factorOf(lineProduct, line.unitId);
                     const lineBaseUnit = lineUnits.find((unit) => unit.unitId === lineProduct?.baseUnitId)?.name.toLowerCase() ?? "";
                     const lineUnitName = lineUnits.find((unit) => unit.unitId === line.unitId)?.name.toLowerCase() ?? "";
+                    // Ikkinchi birlik (dona ↔ blok): narx ikkalasida ham ko'rinadi va tahrirlanadi
+                    const otherUnit = lineUnits.length === 2 ? lineUnits.find((unit) => unit.unitId !== line.unitId) : undefined;
+                    const otherUnitName = otherUnit?.name.toLowerCase() ?? "";
+                    const otherFactor = otherUnit ? factorOf(lineProduct, otherUnit.unitId) : 1;
+                    const otherUnitPrice = otherUnit ? convertUnitPrice(line.unitPrice, lineFactor, otherFactor) : 0;
 
                     return (
                       <tr key={i}>
@@ -571,9 +576,20 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                               />
                             )}
                           </div>
-                          {/* Narx qaysi birlik uchun ekani ko'rinib tursin — blok narxi dona narxi bilan adashmasin */}
-                          {lineFactor > 1 && (
-                            <p className="text-[10px] text-muted-foreground mt-0.5">1 {lineUnitName} narxi</p>
+                          {/* Narx IKKALA birlikda ham: qaysi biriga yozilsa, ikkinchisi o'zi hisoblanadi */}
+                          {otherUnit && (
+                            <>
+                              <p className="mt-0.5 text-[10px] text-muted-foreground">1 {lineUnitName} narxi</p>
+                              <Input
+                                type="number" min="0" step="any" className="mt-1 h-7 text-[11px] text-right"
+                                data-testid={`other-unit-price-${i}`}
+                                value={otherUnitPrice}
+                                onChange={(e) =>
+                                  updateLine(i, "unitPrice", convertUnitPrice(e.target.valueAsNumber || 0, otherFactor, lineFactor))
+                                }
+                              />
+                              <p className="mt-0.5 text-[10px] text-muted-foreground">1 {otherUnitName} narxi</p>
+                            </>
                           )}
                         </td>
                         {taxEnabled && (

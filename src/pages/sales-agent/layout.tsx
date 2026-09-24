@@ -5,6 +5,7 @@
  * Asosiy himoya — serverda.
  */
 import { useCallback } from "react";
+import ErrorBoundary from "@/components/error-boundary.tsx";
 import { NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -202,7 +203,9 @@ export default function SalesAgentLayout() {
           ) : onDuty && location.status === "denied" ? (
             <LocationRequired onRequest={location.request} />
           ) : (
-            <Outlet context={meQuery.data} />
+            <ErrorBoundary area="Sotuv agenti" resetKey={location.pathname}>
+              <Outlet context={meQuery.data} />
+            </ErrorBoundary>
           )}
         </main>
         <nav className="fixed bottom-0 inset-x-0 z-30 grid grid-cols-5 border-t border-border bg-card pb-safe">

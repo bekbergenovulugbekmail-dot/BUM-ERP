@@ -1,3 +1,6 @@
+export type { UnitOption } from "@/lib/units.ts";
+import type { UnitOption } from "@/lib/units.ts";
+
 /**
  * `/api/sales` (POS bilan) javob turlari — apps/api/src/modules/sales. Summa va miqdorlar — numeric satr.
  */
@@ -232,6 +235,8 @@ export type ProductOption = {
   sku: string;
   barcode: string | null;
   baseUnitId: string;
+  /** Mahsulot odatda qaysi birlikda sotiladi; null — asosiy birlikda. */
+  salesUnitId?: string | null;
   salesPrice: string;
   /** Narx valyutasi; null — asosiy valyuta. Sotuvda joriy kurs bilan hisoblanadi. */
   salesCurrency: string | null;
@@ -242,6 +247,8 @@ export type ProductOption = {
   taxIncluded: boolean;
   isActive: boolean;
   isSaleable: boolean;
+  /** `?withUnits=true` bilan so'ralganda — kiritish mumkin bo'lgan birliklar (asosiysi birinchi). */
+  unitOptions?: UnitOption[];
   /** Rasm kaliti (StorageService) — kassada mahsulot rasmi shu bo'yicha ko'rsatiladi; null — rasm yo'q. */
   imageKey?: string | null;
   /** O'lchov birligi qisqartmasi ("d", "kg") — kassada narx yonida. */

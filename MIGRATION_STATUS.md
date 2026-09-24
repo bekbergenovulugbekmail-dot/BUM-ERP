@@ -4663,3 +4663,44 @@ aytishi kerak (tuzatish alohida ish sifatida bajariladi).
 
 **Production (2026-09-24, tuzatish):** commit `b23128c`, faqat `bum-web` (API o'zgarmadi).
 `build.json` 09:35:35Z → **09:55:41Z**, yangi bundle `index-C9EEzso7.js`.
+
+## Narx ikkala birlikda, oq ekran himoyasi va sotuvda blok (2026-09-24)
+
+Egasining uchta so'rovi.
+
+### 1. Narx dona va blokda birga
+
+Xarid va sotuv qatorida endi IKKITA narx maydoni: tanlangan birlik narxi va ikkinchi birlik narxi
+("1 dona narxi" / "1 blok narxi"). Qaysi biriga yozilsa, ikkinchisi koeffitsient bilan o'zi
+hisoblanadi (8 300/dona ↔ 99 600/blok). Birlik mantig'i `src/lib/units.ts` ga chiqarildi va
+xarid hamda sotuv oynasi shuni ishlatadi.
+
+### 2. Oq ekran — xato chegarasi qo'yildi
+
+Egasi "Dostavka" ga kirganda butun sahifa oq bo'lib qoldi (yon menyu ham yo'q). Sabab aniqlandi:
+ilovada **xato chegarasi (ErrorBoundary) umuman yo'q edi** — React'da ushlanmagan istalgan xato
+butun daraxtni yechib tashlaydi, shuning uchun bitta bo'limdagi xato butun ilovani o'chirardi.
+
+- Yangi `src/components/error-boundary.tsx`: xato bo'limda ushlanadi, menyu joyida qoladi,
+  foydalanuvchi xato matnini ko'radi va "Xato matnini nusxalash" bilan yubora oladi.
+  Marshrut o'zgarsa chegara o'zi tiklanadi.
+- Uch joyga qo'yildi: ERP layout (`Outlet`), sotuv agenti va yetkazuvchi ish joylari.
+- Yangi `e2e/delivery-page-loads.spec.ts` — Dostavka sahifasi haqiqiy brauzerda ochiladi,
+  ushlanmagan xato yo'q. Lokal demo ma'lumotda sahifa TOZA ochildi, ya'ni production'dagi
+  xato ma'lumotga bog'liq; endi u oq ekran o'rniga sababini ko'rsatadi.
+
+### 3. Sotuv buyurtmasi: birlik va keng ekran
+
+- Miqdor katagida birlik tanlovi (Dona / Blok), ostida asosiy birlikdagi miqdor ("= 12 dona").
+- Narx ikkala birlikda (yuqoridagidek); birlik almashsa narx va prays-list narxi ham keltiriladi.
+- Oyna sarlavhasida butun ekranga yoyish tugmasi (xariddagidek, `sm:max-w-[98vw]`).
+
+### Tekshiruv — REAL brauzerda (Playwright)
+
+`e2e/order-units.spec.ts` (2 test, ikkalasi ham yashil):
+- **Xarid:** qator Dona'da ochiladi, narx 8 300, ikkinchi maydon 99 600; Blokka o'tilganda
+  asosiy maydon 99 600, ikkinchisi 8 300, qatorda "= 12 dona".
+- **Sotuv:** keng ekran tugmasi holatni almashtiradi; narx 12 000/dona va 144 000/blok;
+  Blokka o'tilganda 144 000 va "= 12 dona".
+
+Frontend to'plami 37 fayl / 176 test yashil; `tsc` va `eslint` toza.

@@ -102,11 +102,7 @@ export type PurchaseOrderDetail = Omit<PurchaseOrderRow, "itemCount"> & {
 /** `/api/inventory/warehouses` — tanlash uchun kerakli maydonlar. */
 export type WarehouseOption = { id: string; name: string; code: string; isDefault: boolean; isActive: boolean };
 
-/**
- * Miqdor kiritish mumkin bo'lgan birlik. `factor` — 1 birlikda nechta ASOSIY birlik
- * ("1 blok = 6 dona" → "6"); asosiy birlik uchun "1".
- */
-export type UnitOption = { unitId: string; name: string; shortName: string; factor: string };
+export type { UnitOption } from "@/lib/units.ts";
 
 /** `/api/catalog/products` — tanlash uchun kerakli maydonlar. */
 export type ProductOption = {

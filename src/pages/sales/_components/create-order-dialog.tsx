@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, ShoppingBag } from "lucide-react";
+import { Maximize2, Minimize2, Plus, Trash2, ShoppingBag } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog.tsx";
@@ -17,6 +17,7 @@ import { useTaxEnabled } from "@/hooks/use-tax.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import { cn } from "@/lib/utils.ts";
+import { convertUnitPrice, defaultUnitId, factorOf, unitsOf } from "@/lib/units.ts";
 import { computeLine, minorToNumber } from "../_lib/line-amounts.ts";
 import {
   num, todayLocal,
@@ -67,8 +68,11 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const canOverride = can("sales.edit");
   const warehouses = useApiQuery<{ warehouses: WarehouseOption[] }>("/api/inventory/warehouses").data?.warehouses;
   // API chegarasi: 200 ta faol mahsulot
-  const products = useApiQuery<{ products: ProductOption[] }>("/api/catalog/products", { limit: 200, isActive: true })
+  // `withUnits` — miqdorni "dona" yonida "blok"da ham kiritish uchun
+  const products = useApiQuery<{ products: ProductOption[] }>("/api/catalog/products", { limit: 200, isActive: true, withUnits: true })
     .data?.products.filter((p) => p.isSaleable);
+  /** Birliklari kelmagan mahsulotda ham birlik nomi ko'rinsin. */
+  const allUnits = useApiQuery<{ units: { id: string; name: string; shortName: string }[] }>("/api/catalog/units").data?.units;
   const createOrder = useApiMutation((body: object) => api.post<{ order: { id: string } }>("/api/sales/orders", body));
 
   /** Mijoz qidiruvli ro'yxatdan tanlanadi; `null` — anonim. */
@@ -81,6 +85,8 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineItem[]>([emptyLine()]);
   const [loading, setLoading] = useState(false);
+  /** Oyna butun ekranga yoyilganmi — ko'p qatorli buyurtmalarni qulay ko'rish uchun. */
+  const [full, setFull] = useState(false);
   /** Sotuv valyutalari; bo'sh — asosiy valyuta. */
   const [saleCurrencies, setSaleCurrencies] = useState<string[]>([]);
 
@@ -98,12 +104,19 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
     setLines((p) => {
       const next = [...p];
       const line = { ...next[i], ...patch };
+      // Birlik almashsa narx ham o'sha birlikka keltiriladi (8 300/dona → Blok(12) → 99 600/blok)
+      if (patch.unitId !== undefined && patch.productId === undefined) {
+        const prod = products?.find((p) => p.id === line.productId);
+        const converted = convertUnitPrice(line.unitPrice, factorOf(prod, next[i]!.unitId), factorOf(prod, patch.unitId));
+        line.unitPrice = converted;
+        line.listPrice = convertUnitPrice(line.listPrice, factorOf(prod, next[i]!.unitId), factorOf(prod, patch.unitId));
+      }
       if (patch.productId !== undefined) {
         const prod = products?.find((p) => p.id === patch.productId);
         if (prod) {
           // Narxi boshqa valyutada — joriy kurs bilan asosiy valyutada (server ham shunday)
           const price = currencies.toBase(prod.salesPrice, prod.salesCurrency) || 0;
-          line.unitId = prod.baseUnitId;
+          line.unitId = defaultUnitId(prod);
           line.unitPrice = price;
           line.listPrice = price;
           line.taxRate = prod.taxRate;
@@ -184,11 +197,22 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className={cn("max-h-[92vh] overflow-y-auto", full ? "sm:max-w-[98vw]" : "sm:max-w-4xl")}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShoppingBag className="h-5 w-5 text-emerald-500" />
             Yangi sotuv buyurtmasi
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              data-testid="order-fullscreen"
+              aria-label={full ? "Oynani kichraytirish" : "Butun ekranga yoyish"}
+              title={full ? "Kichraytirish" : "Butun ekranga yoyish"}
+              onClick={() => setFull((current) => !current)}
+            >
+              {full ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </Button>
           </DialogTitle>
         </DialogHeader>
 
@@ -276,15 +300,30 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                 <thead>
                   <tr className="bg-muted/50 border-b border-border">
                     <th className="text-left px-3 py-2 text-xs text-muted-foreground">Mahsulot</th>
-                    <th className="text-right px-3 py-2 text-xs text-muted-foreground w-24">Miqdor</th>
-                    <th className="text-right px-3 py-2 text-xs text-muted-foreground w-28">Narx</th>
+                    <th className="text-right px-3 py-2 text-xs text-muted-foreground w-40">Miqdor</th>
+                    <th className="text-right px-3 py-2 text-xs text-muted-foreground w-32">Narx</th>
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-20">Chegirma %</th>
                     <th className="text-right px-3 py-2 text-xs text-muted-foreground w-32">Jami</th>
                     <th className="w-8 px-2"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {lines.map((line, i) => (
+                  {lines.map((line, i) => {
+                    const lineProduct = products?.find((p) => p.id === line.productId);
+                    const fallbackBase = lineProduct && allUnits?.find((unit) => unit.id === lineProduct.baseUnitId);
+                    const lineUnits = unitsOf(lineProduct).length > 0
+                      ? unitsOf(lineProduct)
+                      : fallbackBase
+                        ? [{ unitId: fallbackBase.id, name: fallbackBase.name, shortName: fallbackBase.shortName, factor: "1" }]
+                        : [];
+                    const lineFactor = factorOf(lineProduct, line.unitId);
+                    const baseUnitName = lineUnits.find((unit) => unit.unitId === lineProduct?.baseUnitId)?.name.toLowerCase() ?? "";
+                    const lineUnitName = lineUnits.find((unit) => unit.unitId === line.unitId)?.name.toLowerCase() ?? "";
+                    // Ikkinchi birlik: narx dona va blokda birga ko'rinadi, ikkalasi ham tahrirlanadi
+                    const otherUnit = lineUnits.length === 2 ? lineUnits.find((unit) => unit.unitId !== line.unitId) : undefined;
+                    const otherFactor = otherUnit ? factorOf(lineProduct, otherUnit.unitId) : 1;
+                    const otherUnitPrice = otherUnit ? convertUnitPrice(line.unitPrice, lineFactor, otherFactor) : 0;
+                    return (
                     <tr key={i}>
                       <td className="px-2 py-2">
                         <Select value={line.productId} onValueChange={(v) => updateLine(i, { productId: v })}>
@@ -300,9 +339,29 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                         </Select>
                       </td>
                       <td className="px-2 py-2">
-                        <Input type="number" min="0.001" step="0.001" className="h-8 text-xs text-right"
-                          value={line.quantity}
-                          onChange={(e) => updateLine(i, { quantity: e.target.valueAsNumber || 0 })} />
+                        <div className="flex items-center gap-1">
+                          <Input type="number" min="0.001" step="0.001" className="h-8 text-xs text-right"
+                            value={line.quantity}
+                            onChange={(e) => updateLine(i, { quantity: e.target.valueAsNumber || 0 })} />
+                          {lineUnits.length > 1 ? (
+                            <Select value={line.unitId} onValueChange={(v) => updateLine(i, { unitId: v })}>
+                              <SelectTrigger className="h-8 w-[76px] shrink-0 text-xs"><SelectValue /></SelectTrigger>
+                              <SelectContent position="popper">
+                                {lineUnits.map((unit) => (
+                                  <SelectItem key={unit.unitId} value={unit.unitId}>{unit.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <span className="w-[76px] shrink-0 text-[11px] text-muted-foreground">{lineUnits[0]?.name ?? ""}</span>
+                          )}
+                        </div>
+                        {/* Qadoqda sotilganda omborga qancha ta'sir qilishi darhol ko'rinsin */}
+                        {lineFactor > 1 && line.quantity > 0 && (
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">
+                            = {Math.round(line.quantity * lineFactor * 1000) / 1000} {baseUnitName}
+                          </p>
+                        )}
                       </td>
                       <td className="px-2 py-2">
                         <Input type="number" min="0" className="h-8 text-xs text-right"
@@ -310,6 +369,22 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                           disabled={!canOverride}
                           title={canOverride ? undefined : "Narxni o'zgartirish uchun ruxsat yo'q"}
                           onChange={(e) => updateLine(i, { unitPrice: e.target.valueAsNumber || 0 })} />
+                        {/* Narx IKKALA birlikda: qaysi biriga yozilsa, ikkinchisi o'zi hisoblanadi */}
+                        {otherUnit && (
+                          <>
+                            <p className="mt-0.5 text-[10px] text-muted-foreground">1 {lineUnitName} narxi</p>
+                            <Input
+                              type="number" min="0" className="mt-1 h-7 text-[11px] text-right"
+                              data-testid={`sale-other-unit-price-${i}`}
+                              value={otherUnitPrice}
+                              disabled={!canOverride}
+                              onChange={(e) =>
+                                updateLine(i, { unitPrice: convertUnitPrice(e.target.valueAsNumber || 0, otherFactor, lineFactor) })
+                              }
+                            />
+                            <p className="mt-0.5 text-[10px] text-muted-foreground">1 {otherUnit.name.toLowerCase()} narxi</p>
+                          </>
+                        )}
                       </td>
                       <td className="px-2 py-2">
                         <Input type="number" min="0" max="100" className="h-8 text-xs text-right"
@@ -333,7 +408,8 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                         )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -1,6 +1,7 @@
 import { Suspense, useEffect } from "react";
 import { toast } from "sonner";
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import ErrorBoundary from "./components/error-boundary.tsx";
 import { DefaultProviders } from "./components/providers/default.tsx";
 import BaseSegment from "./components/providers/base-segment.tsx";
 import LocaleWrapper from "./components/providers/locale-wrapper.tsx";
@@ -85,9 +86,13 @@ function RootRedirect() {
 }
 
 function ERPApp() {
+  // Bo'limdagi xato menyuni ham o'chirib yubormasin; marshrut o'zgarsa chegara tiklanadi
+  const { pathname } = useLocation();
   return (
     <ERPLayout>
-      <Outlet />
+      <ErrorBoundary area={pathname.split("/").pop() || "Bo'lim"} resetKey={pathname}>
+        <Outlet />
+      </ErrorBoundary>
     </ERPLayout>
   );
 }
