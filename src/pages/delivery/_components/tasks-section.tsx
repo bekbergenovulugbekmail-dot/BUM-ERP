@@ -128,6 +128,14 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
   /** Nakladnoy bitta agentning bitta kunidagi yetkazmalari uchun — shuning uchun ikkalasi tanlangan bo'lishi kerak. */
   const waybillDate = filters.dateFrom && filters.dateFrom === filters.dateTo ? filters.dateFrom : null;
   const canPrintWaybill = Boolean(filters.agentId && waybillDate);
+  /** Tugma yonadi: yo belgilangan yetkazmalar bor, yo agent + bitta kun tanlangan. */
+  const canPrintAny = selectedPrintable.length > 0 || canPrintWaybill;
+  const waybillHint =
+    selectedPrintable.length > 0
+      ? `Belgilangan ${selectedPrintable.length} ta yetkazma uchun nakladnoy`
+      : canPrintWaybill
+        ? "Agentning shu kundagi nakladnoyi"
+        : "Yetkazmalarni belgilang yoki agent va bitta kunni tanlang";
 
   /**
    * Qog'oz TO'G'RIDAN-TO'G'RI chiqmaydi: avval ma'lumot yuklanadi va oynada ko'rsatiladi, chunki
@@ -289,30 +297,22 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
           >
             <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> {t("sv.filter.reset")}
           </Button>
-          {/* Nakladnoy — agent va BITTA kun tanlanganda: qog'oz aynan shu ro'yxat bo'yicha chiqadi */}
+          {/*
+            BITTA "Nakladnoy" tugmasi ikkala yo'lni qamraydi:
+              · yetkazmalar belgilangan bo'lsa — aynan shular (har biri alohida A4 sahifada)
+              · belgilanmagan bo'lsa va agent + BITTA kun tanlangan bo'lsa — agentning kunlik nakladnoyi
+            Ilgari ikkita alohida tugma edi: qator belgilanganda ham "Nakladnoy" o'chiq turar,
+            foydalanuvchi esa nega yonmaganini bilmasdi.
+          */}
           <Button
-            variant="secondary"
             size="sm"
-            disabled={!canPrintWaybill || printing}
-            title={canPrintWaybill ? "Nakladnoyni PDF qilib chiqarish" : "Avval agentni va bitta kunni tanlang"}
-            onClick={() => void handleWaybill()}
-          >
-            <FileDown className="mr-1.5 h-3.5 w-3.5" /> Nakladnoy
-          </Button>
-          {/* Belgilanganlar uchun — har biri alohida A4 sahifada, bitta faylda */}
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={selectedPrintable.length === 0 || printing}
-            title={
-              selectedPrintable.length > 0
-                ? `${selectedPrintable.length} ta yetkazma uchun nakladnoy`
-                : "Avval yetkazmalarni belgilang"
-            }
-            onClick={() => void handleBulkPrint()}
+            data-testid="waybill-print"
+            disabled={!canPrintAny || printing}
+            title={waybillHint}
+            onClick={() => void (selectedPrintable.length > 0 ? handleBulkPrint() : handleWaybill())}
           >
             <FileDown className="mr-1.5 h-3.5 w-3.5" />
-            Belgilanganlar ({selectedPrintable.length})
+            Nakladnoy{selectedPrintable.length > 0 ? ` (${selectedPrintable.length})` : ""}
           </Button>
         </div>
       </div>

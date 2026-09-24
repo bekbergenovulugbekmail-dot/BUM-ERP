@@ -4760,3 +4760,24 @@ Web `build.json` → **11:05:18Z**, bundle `index-DMzdjjbu.js` (ichida `allowsFr
 API sog'lom: `/api/auth/me` → 401, loglarda 500 YO'Q, so'rovlar 200 bilan javob beryapti.
 Migratsiya `0085` qo'shimcha va idempotent (`add column if not exists`); API migratsiya
 muvaffaqiyatsiz bo'lsa ishga tushmasdi — xizmat esa ishlayapti.
+
+## "Nakladnoy" tugmasi belgilanganda yonadi (2026-09-24)
+
+Egasi yetkazmani belgiladi, "Nakladnoy" esa o'chiq turaverdi. Sabab: IKKITA alohida tugma bor edi —
+"Nakladnoy" faqat **agent + bitta kun** filtri bilan yonardi, belgilanganlar uchun esa yonida
+"Belgilanganlar (N)" degan boshqa tugma turardi. Tugma nega o'chiqligi ekranda ko'rinmasdi.
+
+Endi bitta tugma ikkala yo'lni qamraydi:
+- yetkazmalar belgilangan bo'lsa — **"Nakladnoy (N)"**, aynan shular (har biri alohida A4 sahifada);
+- belgilanmagan bo'lsa va agent + bitta kun tanlangan bo'lsa — agentning kunlik nakladnoyi;
+- ikkalasi ham yo'q bo'lsa — o'chiq, tooltipda sababi: "Yetkazmalarni belgilang yoki agent va
+  bitta kunni tanlang".
+
+Bekor qilingan va yakunlangan yetkazmalarning belgilash katagi avvalgidek o'chiq — ular
+nakladnoyga tushmaydi.
+
+Testlar: yangi `tasks-section.test.tsx` (4) — ro'yxat yiqilmaydi (TDZ regressiyasi ham shu yerda
+qulflandi), belgilanmaganda tugma o'chiq va sababi tooltipda, qator belgilansa tugma yonadi va
+"Nakladnoy (1)" bo'ladi, bekor qilingani belgilanmaydi. Test eski xulq bilan QIZIL bo'lishi
+tasdiqlandi. Frontend to'plami 38 fayl / 180 test; `tsc` va `eslint` toza;
+`e2e/delivery-page-loads.spec.ts` yashil.
