@@ -56,8 +56,22 @@ export type CashAccountType = (typeof cashAccounts.type.enumValues)[number];
 export const TRANSFER_CATEGORY = "transfer";
 export const OPENING_BALANCE_CATEGORY = "opening_balance";
 
-export function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+/**
+ * Biznes kuni O'zbekiston vaqtida (UTC+5) sanaladi — server qayerda turganidan qat'i nazar.
+ *
+ * Production konteyneri UTC da ishlaydi, shuning uchun oddiy `toISOString()` mahalliy vaqt bilan
+ * 00:00–05:00 oralig'ida KECHAGI sanani berardi: o'sha soatlarda yozilgan kassa harakati,
+ * agentning marshruti, tashrifi va KPI kuni bir kun orqaga tushib ketardi. Kodning boshqa
+ * joylarida kun chegarasi allaqachon `+05:00` / `Asia/Tashkent` bilan olinadi
+ * (`supervisor.service.ts`, `delivery/reports.service.ts`) — bu funksiya ularga zid edi.
+ *
+ * O'zbekistonda yozgi vaqt yo'q, shuning uchun siljish doimiy. Boshqa mintaqa kerak bo'lsa
+ * `BUSINESS_UTC_OFFSET_MINUTES` muhit o'zgaruvchisi bilan almashtiriladi.
+ */
+const BUSINESS_UTC_OFFSET_MINUTES = Number(process.env.BUSINESS_UTC_OFFSET_MINUTES ?? 300);
+
+export function todayIso(now: Date = new Date()): string {
+  return new Date(now.getTime() + BUSINESS_UTC_OFFSET_MINUTES * 60_000).toISOString().slice(0, 10);
 }
 
 /**

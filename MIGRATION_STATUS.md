@@ -4325,3 +4325,51 @@ production bazasiga faqat o'qish so'rovi KERAK — auto rejim `railway ssh` ni r
 shuning uchun TEKSHIRILMADI. Ehtimoliy manbalar: marshrut CSV importidagi `Kunlar (0-6)`
 ustuni (qaysi kun 0 ekani hech qayerda yozilmagan, UI esa dushanbadan boshlanadi) yoki
 "Kunlik o'zgartirish" da qolib ketgan biriktirish (u haftalik jadvaldan USTUN turadi).
+
+## Sana chegarasi: biznes kuni UTC emas, UTC+5 (2026-09-24)
+
+Egasi "agentda payshanba o'rniga juma marshruti chiqyapti, sana xatoligi bormi" deb
+xabar berdi. Tekshiruv ikki qismga bo'lindi.
+
+### 1. Marshrut kuni zanjiri — XATO YO'Q (production ma'lumoti bilan tasdiqlandi)
+UI tugmasi (0 = dushanba) → `toApiDay` → baza (0 = yakshanba) → server `getUTCDay()`.
+Production bazasidan o'qildi (faqat o'qish so'rovi): server sanasi `2026-09-24`, `dow=4`,
+o'sha kunga hech qanday `route_assignments` yo'q, va `days` da 4 bo'lgan marshrutlar
+admin panelda "Pa" deb ko'rinadiganlar bilan AYNAN bir xil:
+
+    Лочинбек → Pitnak Marshruti      Сабиров → Mangit Amudaryo
+    Султанова → Gurlan tumani        Артикова → Гурленский
+    Атамуратова → Дехкон бозор
+
+Ya'ni agentga chiqayotgan marshrut jadvalga mos. Konvensiya `days.test.ts` bilan qulflandi.
+
+Diqqat qilinadigan joyi: 20-sentabrda yaratilgan RUSCHA nomli marshrutlar (Гурленский,
+Дехкон бозор, Даритал…) va 22-sentabrdagi O'ZBEKCHA nomlilar (Gurlan tumani, Xiva…)
+IKKALASI ham faol. "Гурленский" (Артикова, Ch+Pa) va "Gurlan tumani" (Султанова, Pa+Sh)
+bir hududga ikki agentni bugun birga chiqaradi — bu jadval/ma'lumot masalasi, kod emas.
+
+### 2. Haqiqiy sana xatosi — TUZATILDI
+`todayIso()` biznes kunini `new Date().toISOString()` bilan, ya'ni UTC bo'yicha olardi.
+Production konteyneri UTC da ishlaydi, biznes esa UTC+5 da: mahalliy vaqt bilan
+**00:00–05:00 oralig'ida butun tizim bir kun orqada** edi — o'sha soatlarda yozilgan kassa
+harakati va POS sotuvi kechagi sanaga tushardi, agent esa kechagi marshrutni ko'rardi.
+Funksiya 118 joydan chaqiriladi, shuning uchun ta'siri butun tizim bo'ylab.
+
+Kodning boshqa joylarida kun chegarasi allaqachon mahalliy vaqtda olinardi
+(`supervisor.service.ts` `+05:00`, `delivery/reports.service.ts` `Asia/Tashkent`) —
+`todayIso()` ularga zid edi.
+
+Endi: `todayIso(now = new Date())` — UTC+5 siljishi bilan. O'zbekistonda yozgi vaqt yo'q,
+shuning uchun siljish doimiy; boshqa mintaqa uchun `BUSINESS_UTC_OFFSET_MINUTES` muhit
+o'zgaruvchisi. Yangi `business-day.test.ts` (4) chegarani qulflaydi: mahalliy 23:59 hali
+eski kun, 00:30 esa allaqachon yangi kun va o'sha kunning hafta kuni to'g'ri chiqadi.
+
+Sana bog'liq to'plamlar qayta yuritildi va yashil: `cash`, `sales-agent-*`,
+`receivables-aging`, `settlement`, `salary`, `pos-session`, `sales`, `pos`, `finance`,
+`delivery-flow`, `acceptance-distributor`, `acceptance-business-scenarios`,
+`acceptance-real-world`.
+
+### Deploy
+Bugungi 1–7 vazifa va shu tuzatma production'ga chiqarildi. Tekshirildi:
+`/api/finance/handovers` va `/api/delivery/waybills/bulk` — 401 (mavjud), yo'q marshrut —
+404; web bundle'da "Pul topshirishlar" bloki bor.
