@@ -4754,3 +4754,9 @@ Endi belgi BIRLIKNING O'ZIDA: migratsiya `0085_unit_allows_fraction` — `units.
   `catalog` 6/6; regressiya: `products`, `purchase`, `pos`, `product-cost` (32) va
   `purchase-csv`, `sales`, `sales-agent-catalog-notify`, `pos-purchase-sync` (22) — yashil.
 - Frontend 37 fayl / 176 test; `tsc` (API va web) va `eslint` toza.
+
+**Production (2026-09-24):** commit `ee22f62`, `bum-api` va `bum-web`.
+Web `build.json` → **11:05:18Z**, bundle `index-DMzdjjbu.js` (ichida `allowsFraction` bor).
+API sog'lom: `/api/auth/me` → 401, loglarda 500 YO'Q, so'rovlar 200 bilan javob beryapti.
+Migratsiya `0085` qo'shimcha va idempotent (`add column if not exists`); API migratsiya
+muvaffaqiyatsiz bo'lsa ishga tushmasdi — xizmat esa ishlayapti.
