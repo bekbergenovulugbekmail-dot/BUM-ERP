@@ -8,3 +8,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** Vite `define` bilan har buildga qo'yiladigan belgi — `useBuildVersion` shuni server bilan solishtiradi. */
+declare const __BUILD_ID__: string;

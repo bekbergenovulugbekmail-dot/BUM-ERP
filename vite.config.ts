@@ -1,7 +1,28 @@
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react-swc";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
+
+/**
+ * Har build o'z belgisini oladi va u `build.json` da ham chiqadi.
+ *
+ * Android ilovasi production saytini ochadi, shuning uchun "deploy = darhol hamma telefonda" faqat
+ * sahifa QAYTA YUKLANGANDA to'g'ri. Agent ilovani yopmaydi (ish sessiyasi va fondagi GPS ochiq
+ * turadi), shuning uchun WebView eski JS bilan kunlab ishlashi mumkin edi. Ilova shu belgini
+ * server bilan solishtirib, yangi build chiqqanini o'zi biladi.
+ *
+ * `build.json` `/assets/` dan tashqarida, ya'ni nginx unga `Cache-Control: no-cache` beradi.
+ */
+const BUILD_ID = new Date().toISOString();
+
+function buildStamp(): Plugin {
+  return {
+    name: "bum-build-stamp",
+    generateBundle() {
+      this.emitFile({ type: "asset", fileName: "build.json", source: JSON.stringify({ build: BUILD_ID }) });
+    },
+  };
+}
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -18,7 +39,10 @@ export default defineConfig({
       "/api": { target: process.env.API_PROXY_TARGET ?? "http://localhost:3000", ws: true },
     },
   },
-  plugins: [react(), tailwindcss()],
+  define: {
+    __BUILD_ID__: JSON.stringify(BUILD_ID),
+  },
+  plugins: [react(), tailwindcss(), buildStamp()],
   resolve: {
     alias: {
       // API bilan umumiy: ruxsatlar katalogi, telefon formati, xato kodlari

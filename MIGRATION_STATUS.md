@@ -4494,3 +4494,44 @@ Shunga ko'ra panorama qayta sozlandi, chunki ilgari ikkalasi ham sariq "ogohlant
 
 Test: `schedule.test.ts` (+1) — og'ir kun chegarasi (marshrut soni ta'sir qilmasligi va
 ishlanmaydigan kun hech qachon og'ir bo'lmasligi).
+
+## Android eski ekranni ko'rsatardi: web build eskirganini hech kim aytmasdi (2026-09-24)
+
+Egasi ikkita ekranni yubordi: brauzerda "Mijozlar" da yangi 4 ta filtr (Bugun / Hammasi /
+Qarzdorlar / Kechikkan) va "Bugungi marshrut: Payshanba · Hazorasp, Pitnak" yozuvi bor,
+Android ilovasida esa eski 3 ta filtr.
+
+### Sabab — APK emas, QAYTA YUKLANMASLIK
+APK web'ni ichiga QOTIRMAYDI: `apps/mobile/capacitor.config.ts` da `server.url =
+https://app.bum-erp.uz`, ya'ni ilova production saytini ochadi. Tekshirildi — uchala domen
+(`app.`, `www.`, apex) bitta eng yangi bundle'ni beradi va nginx sarlavhalari ham to'g'ri:
+`index.html` va `sw.js` — `no-cache`, `/assets/` — `immutable`.
+
+Muammo shundaki, **ishlab turgan WebView sahifani qayta yuklamaydi**. Agent ilovani yopmaydi
+(ish sessiyasi va fondagi GPS ochiq turadi), shuning uchun telefonda bir necha kunlik eski JS
+ishlab yuraverardi. Service worker'ning "yangi versiya" xabari bu holatni qoplamaydi: u faqat
+`sw.js` faylining o'zi o'zgarganda chiqadi, oddiy deployda esa u o'zgarmaydi. `app-update-banner`
+ham qoplamaydi — u NATIV qobiq (APK) versiyasi haqida.
+
+### Tuzatma — build belgisi
+- `vite.config.ts` har buildga belgi qo'yadi (`__BUILD_ID__`) va shu belgini `build.json` ga
+  yozadi. Fayl `/assets/` dan tashqarida, shuning uchun nginx unga `no-cache` beradi.
+- `useBuildVersion` uni ishlab turgan belgi bilan solishtiradi: ilova ochilganda, old planga
+  qaytganda (telefonda — ilovaga qaytish, brauzerda — tabga qaytish) va har 15 daqiqada.
+- Fonda **2 daqiqadan ko'p** turgandan keyin qaytilsa — indamay qayta yuklanadi (o'sha paytda
+  yarim yozilgan narsa bo'lmaydi). Qolgan hollarda "Dasturning yangi versiyasi tayyor —
+  Yangilash" tugmasi chiqadi, chunki agent buyurtma yozayotgan bo'lishi mumkin.
+- Brauzer va Android — BITTA kod, shuning uchun ikkalasida ham bir xil ishlaydi.
+
+Oflayn chekka holati yopildi: service worker `/build.json` ni umuman keshlamaydi (aks holda
+internet yo'qda eski nusxa qaytib, ilova oflayn holda qayta yuklanib qolardi), kesh nomi
+`erp-assets-v3` ga oshirildi va tekshiruv `navigator.onLine === false` bo'lsa umuman
+yuborilmaydi.
+
+Testlar: yangi `build-version.test.ts` (5) — belgi bir xil/boshqa, belgi yo'q yoki tarmoq
+uzilgan bo'lsa hech narsa qilinmasligi, `build.json` keshni chetlab o'qilishi.
+Frontend to'plami: 35 fayl / 166 test yashil.
+
+MUHIM: bu tekshiruv YANGI build bilan keladi, shuning uchun telefonda ayni paytda ochiq turgan
+ESKI nusxa uni bilmaydi — bir marta ilovani yopib qayta ochish kerak. Undan keyingi hamma
+deploy o'zi yetib boradi.

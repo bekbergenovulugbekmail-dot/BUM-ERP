@@ -1,5 +1,5 @@
-// v2: v1 API javoblarini ham keshlab qo'yardi (tizimdan chiqqandan keyin ham qolardi) — nomi almashgani uchun o'chadi
-const CACHE_NAME = "erp-assets-v2";
+// v3: build.json keshda qolib ketmasligi uchun nom almashtirildi (v2 da bir marta keshlangan bo'lishi mumkin)
+const CACHE_NAME = "erp-assets-v3";
 // v2: kesh kaliti biznes bo'yicha (bir nechta biznes bitta brauzerda) — eski kalitlar o'chadi
 const AGENT_API_CACHE = "agent-api-v2";
 const OFFLINE_URL = "/offline.html";
@@ -118,6 +118,11 @@ self.addEventListener("fetch", (event) => {
 
   // Never intercept auth paths
   if (url.pathname.startsWith("/auth")) return;
+
+  // Build belgisi HECH QACHON keshlanmaydi: internet yo'qda eski nusxa qaytsa, ilova o'zini
+  // "eskirgan" deb bilib oflayn holda qayta yuklanib qolardi. Tarmoq bo'lmasa — so'rov shunchaki
+  // xato beradi va tekshiruv o'tkazib yuboriladi.
+  if (url.pathname === "/build.json") return;
 
   // API: faqat agent o'qish ma'lumotlari oflayn uchun keshlanadi, qolgani — to'g'ridan-to'g'ri tarmoq
   if (url.pathname.startsWith("/api/")) {

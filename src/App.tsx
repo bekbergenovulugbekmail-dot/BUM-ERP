@@ -9,6 +9,7 @@ import "./i18n.ts";
 import { useServiceWorker } from "./hooks/use-service-worker.ts";
 import { listenAndroidBack } from "./lib/native/back-button.ts";
 import AppUpdateBanner from "@/components/app-update-banner.tsx";
+import NewBuildBanner from "@/components/new-build-banner.tsx";
 import ERPLayout from "./components/erp-layout.tsx";
 import DashboardPage from "./pages/dashboard/page.tsx";
 import ProductsPage from "./pages/products/page.tsx";
@@ -222,6 +223,8 @@ export default function App() {
     <DefaultProviders>
       <BrowserRouter>
         {onAdminSurface ? <AdminSubdomainApp /> : <MainApp />}
+        {/* Yangi web build chiqqanda — brauzerda ham, ilovada ham (bitta bosishda yangilanadi) */}
+        <NewBuildBanner />
         {/* Telefon ilovasida yangi APK chiqqanda xabar (brauzerda ko'rinmaydi) */}
         <AppUpdateBanner />
       </BrowserRouter>
