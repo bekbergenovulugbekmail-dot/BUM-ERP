@@ -80,7 +80,7 @@ export async function unitFactorsToBase(
  *
  * `factor` — 1 birlikda nechta ASOSIY birlik bor (1 blok = 6 dona → "6"). Asosiy birlik uchun "1".
  */
-export type UnitOption = { unitId: string; name: string; shortName: string; factor: string };
+export type UnitOption = { unitId: string; name: string; shortName: string; factor: string; allowsFraction: boolean };
 
 export async function unitOptionsForProducts(
   conn: DbOrTx,
@@ -101,6 +101,7 @@ export async function unitOptionsForProducts(
       factor: unitConversions.factor,
       name: units.name,
       shortName: units.shortName,
+      allowsFraction: units.allowsFraction,
     })
     .from(unitConversions)
     .innerJoin(units, eq(units.id, unitConversions.fromUnitId))
@@ -114,7 +115,7 @@ export async function unitOptionsForProducts(
     );
 
   const baseUnits = await conn
-    .select({ id: units.id, name: units.name, shortName: units.shortName })
+    .select({ id: units.id, name: units.name, shortName: units.shortName, allowsFraction: units.allowsFraction })
     .from(units)
     .where(inArray(units.id, baseUnitIds));
   const baseById = new Map(baseUnits.map((unit) => [unit.id, unit]));
@@ -122,11 +123,11 @@ export async function unitOptionsForProducts(
   for (const item of items) {
     const base = baseById.get(item.baseUnitId);
     const options = new Map<string, UnitOption>();
-    if (base) options.set(base.id, { unitId: base.id, name: base.name, shortName: base.shortName, factor: "1" });
+    if (base) options.set(base.id, { unitId: base.id, name: base.name, shortName: base.shortName, factor: "1", allowsFraction: base.allowsFraction });
     // Avval umumiy, keyin mahsulotga xos — ikkinchisi birinchisining ustidan yozadi
     for (const row of rows.filter((r) => r.productId === null).concat(rows.filter((r) => r.productId === item.id))) {
       if (row.toUnitId !== item.baseUnitId || row.fromUnitId === item.baseUnitId) continue;
-      options.set(row.fromUnitId, { unitId: row.fromUnitId, name: row.name, shortName: row.shortName, factor: row.factor });
+      options.set(row.fromUnitId, { unitId: row.fromUnitId, name: row.name, shortName: row.shortName, factor: row.factor, allowsFraction: row.allowsFraction });
     }
     result.set(item.id, [...options.values()]);
   }

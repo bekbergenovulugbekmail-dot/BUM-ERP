@@ -22,7 +22,7 @@ import {
   num, todayLocal,
   type ProductOption, type Supplier, type UnitOption, type WarehouseOption,
 } from "../_lib/types.ts";
-import { convertUnitPrice, defaultUnitId, factorOf, unitsOf } from "@/lib/units.ts";
+import { allowsFraction, convertUnitPrice, defaultUnitId, factorOf, normalizeQuantity, unitsOf } from "@/lib/units.ts";
 import PriceSuggestions from "./price-suggestions.tsx";
 import QuickSupplierDialog from "./quick-supplier-dialog.tsx";
 import QuickProductDialog from "./quick-product-dialog.tsx";
@@ -85,7 +85,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
     withUnits: true,
   }).data?.products.filter((p) => p.isPurchaseable);
   /** Shu oynada yangi yaratilgan mahsulotda `unitOptions` bo'lmaydi — birlik nomi shundan olinadi. */
-  const allUnits = useApiQuery<{ units: { id: string; name: string; shortName: string }[] }>("/api/catalog/units").data?.units;
+  const allUnits = useApiQuery<{ units: { id: string; name: string; shortName: string; allowsFraction: boolean }[] }>("/api/catalog/units").data?.units;
   const createOrder = useApiMutation((body: object) => api.post<{ order: { id: string } }>("/api/purchase/orders", body));
   const confirmOrder = useApiMutation((id: string) => api.post(`/api/purchase/orders/${id}/confirm`));
 
@@ -123,7 +123,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
     const options = unitsOf(product);
     if (options.length > 0) return options;
     const base = product && allUnits?.find((unit) => unit.id === product.baseUnitId);
-    return base ? [{ unitId: base.id, name: base.name, shortName: base.shortName, factor: "1" }] : [];
+    return base ? [{ unitId: base.id, name: base.name, shortName: base.shortName, factor: "1", allowsFraction: base.allowsFraction }] : [];
   };
 
   // Auto-set default warehouse
@@ -225,6 +225,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
       if (field === "unitId" && typeof value === "string") {
         const prod = productOptions.find((p) => p.id === line.productId);
         line.unitPrice = convertUnitPrice(line.unitPrice, factorOf(prod, next[i]!.unitId), factorOf(prod, value));
+        line.orderedQty = normalizeQuantity(line.orderedQty, allowsFraction(prod, value));
       }
       // Mahsulot tanlanganda birlik, soliq va narx; narx valyutasi xaridda tanlangan bo'lsa — o'zida
       if (field === "productId" && typeof value === "string") {
@@ -492,6 +493,8 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                     const otherUnitName = otherUnit?.name.toLowerCase() ?? "";
                     const otherFactor = otherUnit ? factorOf(lineProduct, otherUnit.unitId) : 1;
                     const otherUnitPrice = otherUnit ? convertUnitPrice(line.unitPrice, lineFactor, otherFactor) : 0;
+                    // Dona, blok, quti — sanaladi: 1.5 dona bo'lmaydi (kg va litrda kasr qoladi)
+                    const fraction = allowsFraction(lineProduct, line.unitId);
 
                     return (
                       <tr key={i}>
@@ -523,9 +526,9 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                         </td>
                         <td className="px-2 py-2">
                           <div className="flex items-center gap-1">
-                            <Input type="number" min="0" step="0.001" className="h-8 text-xs text-right"
+                            <Input type="number" min="0" step={fraction ? "0.001" : "1"} className="h-8 text-xs text-right"
                               value={line.orderedQty}
-                              onChange={(e) => updateLine(i, "orderedQty", e.target.valueAsNumber || 0)} />
+                              onChange={(e) => updateLine(i, "orderedQty", normalizeQuantity(e.target.valueAsNumber, fraction))} />
                             {lineUnits.length > 1 ? (
                               <Select value={line.unitId} onValueChange={(v) => updateLine(i, "unitId", v)}>
                                 <SelectTrigger className="h-8 text-xs w-[76px] shrink-0"><SelectValue /></SelectTrigger>

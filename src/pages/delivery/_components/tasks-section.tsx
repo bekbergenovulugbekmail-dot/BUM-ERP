@@ -43,6 +43,18 @@ type Props = {
 export default function TasksSection({ filters, onFiltersChange, money, onOpenTask }: Props) {
   const { t } = useTranslation("delivery");
   const [search, setSearch] = useState(filters.search);
+  const company = useActiveCompany().data?.company;
+  const me = useCurrentUser();
+  const [printing, setPrinting] = useState(false);
+  /** Nakladnoy chiqarish uchun belgilangan yetkazmalar (faqat yo'lga chiqayotganlari). */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  /** Serverdan yuklangan nakladnoy ma'lumoti — oyna ochiq turgani shu qiymat bilan bilinadi. */
+  const [waybill, setWaybill] = useState<{
+    agentCode: string;
+    agentPhone: string | null;
+    defaults: Omit<WaybillSettings, "columns" | "notes">;
+    tasks: WaybillTask[];
+  } | null>(null);
   const agents = useApiQuery<{ agents: DeliveryAgentRow[] }>("/api/delivery/agents").data?.agents;
   const params = filtersToQuery(filters);
   const interval = useLiveInterval(60_000);
@@ -113,18 +125,6 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
     }
   };
 
-  const company = useActiveCompany().data?.company;
-  const me = useCurrentUser();
-  const [printing, setPrinting] = useState(false);
-  /** Nakladnoy chiqarish uchun belgilangan yetkazmalar (faqat yo'lga chiqayotganlari). */
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  /** Serverdan yuklangan nakladnoy ma'lumoti — oyna ochiq turgani shu qiymat bilan bilinadi. */
-  const [waybill, setWaybill] = useState<{
-    agentCode: string;
-    agentPhone: string | null;
-    defaults: Omit<WaybillSettings, "columns" | "notes">;
-    tasks: WaybillTask[];
-  } | null>(null);
   /** Nakladnoy bitta agentning bitta kunidagi yetkazmalari uchun — shuning uchun ikkalasi tanlangan bo'lishi kerak. */
   const waybillDate = filters.dateFrom && filters.dateFrom === filters.dateTo ? filters.dateFrom : null;
   const canPrintWaybill = Boolean(filters.agentId && waybillDate);

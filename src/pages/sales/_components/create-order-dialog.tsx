@@ -17,7 +17,7 @@ import { useTaxEnabled } from "@/hooks/use-tax.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import { cn } from "@/lib/utils.ts";
-import { convertUnitPrice, defaultUnitId, factorOf, unitsOf } from "@/lib/units.ts";
+import { allowsFraction, convertUnitPrice, defaultUnitId, factorOf, normalizeQuantity, unitsOf } from "@/lib/units.ts";
 import { computeLine, minorToNumber } from "../_lib/line-amounts.ts";
 import {
   num, todayLocal,
@@ -72,7 +72,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
   const products = useApiQuery<{ products: ProductOption[] }>("/api/catalog/products", { limit: 200, isActive: true, withUnits: true })
     .data?.products.filter((p) => p.isSaleable);
   /** Birliklari kelmagan mahsulotda ham birlik nomi ko'rinsin. */
-  const allUnits = useApiQuery<{ units: { id: string; name: string; shortName: string }[] }>("/api/catalog/units").data?.units;
+  const allUnits = useApiQuery<{ units: { id: string; name: string; shortName: string; allowsFraction: boolean }[] }>("/api/catalog/units").data?.units;
   const createOrder = useApiMutation((body: object) => api.post<{ order: { id: string } }>("/api/sales/orders", body));
 
   /** Mijoz qidiruvli ro'yxatdan tanlanadi; `null` — anonim. */
@@ -110,6 +110,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
         const converted = convertUnitPrice(line.unitPrice, factorOf(prod, next[i]!.unitId), factorOf(prod, patch.unitId));
         line.unitPrice = converted;
         line.listPrice = convertUnitPrice(line.listPrice, factorOf(prod, next[i]!.unitId), factorOf(prod, patch.unitId));
+        line.quantity = normalizeQuantity(line.quantity, allowsFraction(prod, patch.unitId));
       }
       if (patch.productId !== undefined) {
         const prod = products?.find((p) => p.id === patch.productId);
@@ -314,7 +315,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                     const lineUnits = unitsOf(lineProduct).length > 0
                       ? unitsOf(lineProduct)
                       : fallbackBase
-                        ? [{ unitId: fallbackBase.id, name: fallbackBase.name, shortName: fallbackBase.shortName, factor: "1" }]
+                        ? [{ unitId: fallbackBase.id, name: fallbackBase.name, shortName: fallbackBase.shortName, factor: "1", allowsFraction: fallbackBase.allowsFraction }]
                         : [];
                     const lineFactor = factorOf(lineProduct, line.unitId);
                     const baseUnitName = lineUnits.find((unit) => unit.unitId === lineProduct?.baseUnitId)?.name.toLowerCase() ?? "";
@@ -323,6 +324,8 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                     const otherUnit = lineUnits.length === 2 ? lineUnits.find((unit) => unit.unitId !== line.unitId) : undefined;
                     const otherFactor = otherUnit ? factorOf(lineProduct, otherUnit.unitId) : 1;
                     const otherUnitPrice = otherUnit ? convertUnitPrice(line.unitPrice, lineFactor, otherFactor) : 0;
+                    // Dona, blok, quti — sanaladi: 1.5 dona bo'lmaydi (kg va litrda kasr qoladi)
+                    const fraction = allowsFraction(lineProduct, line.unitId);
                     return (
                     <tr key={i}>
                       <td className="px-2 py-2">
@@ -340,9 +343,9 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                       </td>
                       <td className="px-2 py-2">
                         <div className="flex items-center gap-1">
-                          <Input type="number" min="0.001" step="0.001" className="h-8 text-xs text-right"
+                          <Input type="number" min={fraction ? "0.001" : "1"} step={fraction ? "0.001" : "1"} className="h-8 text-xs text-right"
                             value={line.quantity}
-                            onChange={(e) => updateLine(i, { quantity: e.target.valueAsNumber || 0 })} />
+                            onChange={(e) => updateLine(i, { quantity: normalizeQuantity(e.target.valueAsNumber, fraction) })} />
                           {lineUnits.length > 1 ? (
                             <Select value={line.unitId} onValueChange={(v) => updateLine(i, { unitId: v })}>
                               <SelectTrigger className="h-8 w-[76px] shrink-0 text-xs"><SelectValue /></SelectTrigger>

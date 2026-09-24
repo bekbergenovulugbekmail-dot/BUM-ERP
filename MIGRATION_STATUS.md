@@ -4709,3 +4709,48 @@ Frontend to'plami 37 fayl / 176 test yashil; `tsc` va `eslint` toza.
 `build.json` → **10:22:21Z**, bundle `index-ChyXOyT_.js`; xato chegarasi matni bundle ichida.
 Dostavka production'da yana yiqilsa — endi oq ekran o'rniga xato matni chiqadi, egasi uni
 nusxalab yuboradi va sabab aniqlanadi.
+
+## Oq ekran sababi topildi va miqdor butun son bo'ldi (2026-09-24)
+
+### Dostavka oq ekrani — TDZ xatosi
+
+Xato chegarasi qo'yilgandan keyin egasi aniq matnni yubordi:
+`Cannot access 'w' before initialization` — `Array.filter` ichida. Production bundle'ining
+o'sha joyidan (`index-ChyXOyT_.js:325:792319`) funksiya aniqlandi: **`TasksSection`**.
+
+Sabab (`tasks-section.tsx`): `selected` holati **120-qatorda** e'lon qilinardi, lekin
+**62-qatorda** ishlatilardi:
+
+    const printable = (rows ?? []).filter(...);
+    const selectedPrintable = printable.filter((task) => selected.has(task.id));  // ← TDZ
+
+`printable` BO'SH bo'lsa callback umuman ishlamaydi — shuning uchun lokal demo bazada ham,
+testda ham chiqmasdi. Production'da yo'lga chiqayotgan yetkazma bor edi → yiqildi.
+Xato chegarasi yo'q edi, shuning uchun butun ilova o'chib, oq ekran qolardi.
+
+Tuzatma: holatlar hamma hosila qiymatlardan oldin e'lon qilinadi.
+
+**Sinf butunlay yopildi:** `@typescript-eslint/no-use-before-define` qoidasi frontendga
+(`src/**`, shadcn `ui/**` dan tashqari) yoqildi. Qoida darhol `purchase/order-detail-drawer.tsx`
+dagi ikkita xavfli tartibni ham topdi — ular ham to'g'rilandi. Backend va testlarda qoida
+yoqilmadi (u yerda render paytida ishlaydigan kod yo'q, 14 fayl qayta tartiblanishi kerak bo'lardi).
+
+### Miqdor butun son: dona, quti, blok, pallet
+
+Ilgari miqdor maydoni har doim kasr qabul qilardi (`step=0.001`) — "1.5 dona" yozib bo'lardi.
+Endi belgi BIRLIKNING O'ZIDA: migratsiya `0085_unit_allows_fraction` — `units.allows_fraction`
+(standart `true`), dona/quti/blok/pallet uchun `false`, kg/litr/metr/gramm/ml uchun `true`.
+
+- Belgi `GET /api/catalog/units` va mahsulot `unitOptions[]` bilan keladi.
+- Xarid va sotuv oynasi: sanaladigan birlikda `step=1` va kiritilgan kasr butun songa
+  yaxlitlanadi (2.6 → 3); birlik almashtirilganda miqdor ham moslanadi.
+- Platforma admini yangi birlik qo'shganda belgini o'zi tanlaydi (`POST/PATCH /api/catalog/units`).
+
+### Tekshiruv
+
+- `e2e/order-units.spec.ts` — haqiqiy brauzerda: Blokda `step=1`, `2.6` kiritilsa `3` bo'ladi.
+- `e2e/delivery-page-loads.spec.ts` — Dostavka ochiladi, ushlanmagan xato yo'q.
+- `import-units-prices.test.ts` +2 (birlik belgisi va mahsulot ro'yxatidagi belgi) → 26/26,
+  `catalog` 6/6; regressiya: `products`, `purchase`, `pos`, `product-cost` (32) va
+  `purchase-csv`, `sales`, `sales-agent-catalog-notify`, `pos-purchase-sync` (22) — yashil.
+- Frontend 37 fayl / 176 test; `tsc` (API va web) va `eslint` toza.

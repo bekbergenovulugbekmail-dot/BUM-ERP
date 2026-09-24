@@ -9,8 +9,11 @@
  * Birliklar serverdan `?withUnits=true` bilan keladi (`GET /api/catalog/products`).
  */
 
-/** `factor` — 1 birlikda nechta ASOSIY birlik bor ("1 blok = 12 dona" → "12"); asosiyda "1". */
-export type UnitOption = { unitId: string; name: string; shortName: string; factor: string };
+/**
+ * `factor` — 1 birlikda nechta ASOSIY birlik bor ("1 blok = 12 dona" → "12"); asosiyda "1".
+ * `allowsFraction` — kasr miqdor mumkinmi: kilogramm/litr — ha, dona/quti/blok/pallet — yo'q.
+ */
+export type UnitOption = { unitId: string; name: string; shortName: string; factor: string; allowsFraction: boolean };
 
 type WithUnits = { unitOptions?: UnitOption[] };
 
@@ -35,4 +38,18 @@ export const defaultUnitId = (product: { baseUnitId: string }): string => produc
 export function convertUnitPrice(price: number, fromFactor: number, toFactor: number): number {
   if (!(price > 0) || !(fromFactor > 0) || !(toFactor > 0) || fromFactor === toFactor) return price;
   return Math.round((price / fromFactor) * toFactor * 100) / 100;
+}
+
+/** Miqdor kasr bo'la oladimi (birlik noma'lum bo'lsa — ha, eski xulq saqlanadi). */
+export function allowsFraction(product: WithUnits | undefined, unitId: string): boolean {
+  return unitsOf(product).find((unit) => unit.unitId === unitId)?.allowsFraction ?? true;
+}
+
+/**
+ * Miqdorni birlikka moslaydi: sanaladigan birlikda (dona, blok) butun songa yaxlitlanadi.
+ * Kasr birlikda (kg, litr) uch xonagacha qoldiriladi — qoldiq shu aniqlikda yuritiladi.
+ */
+export function normalizeQuantity(value: number, fraction: boolean): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return fraction ? Math.round(value * 1000) / 1000 : Math.round(value);
 }

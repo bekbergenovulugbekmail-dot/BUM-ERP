@@ -46,6 +46,11 @@ export const units = pgTable(
     name: varchar("name", { length: 60 }).notNull(),
     shortName: varchar("short_name", { length: 16 }).notNull(),
     isBase: boolean("is_base").notNull().default(false),
+    /**
+     * Kasr miqdor mumkinmi: kilogramm, litr, metr — ha (0.5 kg normal); dona, quti, blok,
+     * pallet — yo'q (1.5 dona bo'lmaydi). Hujjat oynasi shu belgiga qarab kirishni cheklaydi.
+     */
+    allowsFraction: boolean("allows_fraction").notNull().default(true),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps(),
   },

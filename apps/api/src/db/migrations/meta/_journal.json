@@ -596,6 +596,13 @@
       "when": 1790216123945,
       "tag": "0084_cash_handovers",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1790244000000,
+      "tag": "0085_unit_allows_fraction",
+      "breakpoints": true
     }
   ]
 }

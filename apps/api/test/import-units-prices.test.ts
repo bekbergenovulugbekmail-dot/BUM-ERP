@@ -618,3 +618,37 @@ describe("Mahsulot ro'yxati: kiritish birliklari (`?withUnits=true`)", () => {
     expect(suv.unitOptions[0].unitId).toBe(piece);
   });
 });
+
+/**
+ * "1.5 dona" bo'lmaydi: sanaladigan birlik (dona, quti, blok, pallet) butun son bilan ishlaydi,
+ * kilogramm va litrda esa kasr qoladi. Belgi BIRLIKDA turadi, shuning uchun oyna ham, boshqa
+ * chaqiruvchilar ham bitta manbadan o'qiydi.
+ */
+describe("Birlik: kasr miqdor mumkinmi (`allowsFraction`)", () => {
+  it("dona/quti/blok/pallet — butun son; kg/litr/metr — kasr", async () => {
+    const rows = (await call(company.ownerCookie, "GET", "/api/catalog/units")).json().units as {
+      shortName: string;
+      allowsFraction: boolean;
+    }[];
+    const flag = (shortName: string) => rows.find((row) => row.shortName === shortName)?.allowsFraction;
+    for (const shortName of ["d", "qt", "bl", "pal"]) {
+      expect(flag(shortName), `${shortName} sanaladigan birlik`).toBe(false);
+    }
+    for (const shortName of ["kg", "l", "m", "g", "ml"]) {
+      expect(flag(shortName), `${shortName} kasr bo'ladi`).toBe(true);
+    }
+  });
+
+  it("mahsulot birliklari ro'yxatida ham belgi keladi", async () => {
+    expect(
+      (
+        await importProducts([
+          { name: "Suv blokda", sku: "SUV-BL", unit: "dona", purchaseUnit: "bl", unitsPerPackage: "6", purchasePrice: "60 000", salesPrice: "12 000" },
+        ])
+      ).statusCode,
+    ).toBe(200);
+    const rows = (await call(company.ownerCookie, "GET", "/api/catalog/products?limit=200&withUnits=true")).json().products;
+    const suv = rows.find((row: { sku: string }) => row.sku === "SUV-BL")!;
+    expect(suv.unitOptions.map((unit: { allowsFraction: boolean }) => unit.allowsFraction)).toEqual([false, false]);
+  });
+});

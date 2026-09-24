@@ -89,6 +89,8 @@ const unitBody = z.strictObject({
   name: z.string().trim().min(1).max(60),
   shortName: z.string().trim().min(1).max(16),
   isBase: z.boolean(),
+  /** Kasr miqdor mumkinmi (kg — ha, dona — yo'q); berilmasa — mumkin. */
+  allowsFraction: z.boolean().optional(),
 });
 const unitPatch = unitBody.partial().extend({ isActive: z.boolean().optional() });
 

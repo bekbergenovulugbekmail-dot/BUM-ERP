@@ -48,6 +48,12 @@ test("Xarid: blokka o'tilganda narx dona narxidan hisoblanadi", async ({ page })
   await expect(price).toHaveValue("99600");
   await expect(page.getByTestId("other-unit-price-0")).toHaveValue("8300");
   await expect(row).toContainText("= 12 dona");
+
+  // Dona va blok sanaladi — kasr miqdor qabul qilinmaydi
+  await expect(qty).toHaveAttribute("step", "1");
+  await qty.fill("2.6");
+  await qty.blur();
+  await expect(qty).toHaveValue("3");
 });
 
 test("Sotuv: birlik tanlovi, ikkala narx va keng ekran", async ({ page }) => {

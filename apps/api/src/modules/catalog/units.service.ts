@@ -20,15 +20,16 @@ import { assertConversionInScope } from "./category-scope.js";
 
 /** Convex'dagi seedDefaultUnits bilan bir xil ro'yxat. */
 export const DEFAULT_UNITS = [
-  { name: "Dona", shortName: "d", isBase: true },
-  { name: "Kilogramm", shortName: "kg", isBase: true },
-  { name: "Litr", shortName: "l", isBase: true },
-  { name: "Metr", shortName: "m", isBase: true },
-  { name: "Quti", shortName: "qt", isBase: false },
-  { name: "Blok", shortName: "bl", isBase: false },
-  { name: "Pallet", shortName: "pal", isBase: false },
-  { name: "Gramm", shortName: "g", isBase: false },
-  { name: "Millilitr", shortName: "ml", isBase: false },
+  // `allowsFraction: false` — sanaladigan birlik (1.5 dona bo'lmaydi)
+  { name: "Dona", shortName: "d", isBase: true, allowsFraction: false },
+  { name: "Kilogramm", shortName: "kg", isBase: true, allowsFraction: true },
+  { name: "Litr", shortName: "l", isBase: true, allowsFraction: true },
+  { name: "Metr", shortName: "m", isBase: true, allowsFraction: true },
+  { name: "Quti", shortName: "qt", isBase: false, allowsFraction: false },
+  { name: "Blok", shortName: "bl", isBase: false, allowsFraction: false },
+  { name: "Pallet", shortName: "pal", isBase: false, allowsFraction: false },
+  { name: "Gramm", shortName: "g", isBase: false, allowsFraction: true },
+  { name: "Millilitr", shortName: "ml", isBase: false, allowsFraction: true },
 ] as const;
 
 const unitColumns = {
@@ -36,6 +37,7 @@ const unitColumns = {
   name: units.name,
   shortName: units.shortName,
   isBase: units.isBase,
+  allowsFraction: units.allowsFraction,
   isActive: units.isActive,
 };
 
@@ -75,7 +77,7 @@ function auditPlatform(tx: Tx, actor: SessionUser, meta: RequestMeta, action: st
   );
 }
 
-export type UnitInput = { name: string; shortName: string; isBase: boolean };
+export type UnitInput = { name: string; shortName: string; isBase: boolean; allowsFraction?: boolean };
 
 export async function createUnit(tx: Tx, actor: SessionUser, input: UnitInput, meta: RequestMeta) {
   const [unit] = await tx.insert(units).values(input).returning(unitColumns);

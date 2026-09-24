@@ -102,6 +102,22 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const [payCurrency, setPayCurrency] = useState<string | null>(null);
   const [payNote, setPayNote] = useState("");
   const [payAccount, setPayAccount] = useState(AUTO_ACCOUNT);
+
+  const balance = order ? num(order.balance) : 0;
+  // Valyuta bo'yicha qoldiq — to'lov qoldig'i bor valyutada qilinadi
+  const buckets = order?.currencyTotals ?? [];
+  const openBuckets = buckets.filter((b) => num(b.totalAmount) > num(b.paidAmount));
+  const activePayCurrency =
+    payCurrency && openBuckets.some((b) => b.currency === payCurrency)
+      ? payCurrency
+      : openBuckets[0]?.currency ?? currencies.base;
+  const activeBucket = buckets.find((b) => b.currency === activePayCurrency);
+  const payRemaining = activeBucket ? num(activeBucket.totalAmount) - num(activeBucket.paidAmount) : balance;
+  const multiCurrency = buckets.length > 1 || buckets.some((b) => b.currency !== currencies.base);
+  const hasOpenBalance = buckets.length > 0 ? openBuckets.length > 0 : balance > 0;
+  // Yakunlash faqat qabul qilinmagan qoldiq bo'lsa; to'lov summasi — to'lanmagan qismi
+  const pendingLines = order?.items.filter((item) => num(item.pendingQty) > 0) ?? [];
+  const completeRemaining = order ? Math.max(0, num(order.totalAmount) - num(order.paidAmount)) : 0;
   // Hisoblar ro'yxati moliya ruxsati bilan; bo'lmasa server usul bo'yicha tanlaydi (naqd — asosiy kassa, boshqasi — bank)
   const payAccounts = useApiQuery<{ cashAccounts: PayAccountOption[] }>(showPayment && can("finance.view") ? "/api/finance/cash-accounts" : null).data
     ?.cashAccounts;
@@ -275,21 +291,6 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
     });
   };
 
-  const balance = order ? num(order.balance) : 0;
-  // Valyuta bo'yicha qoldiq — to'lov qoldig'i bor valyutada qilinadi
-  const buckets = order?.currencyTotals ?? [];
-  const openBuckets = buckets.filter((b) => num(b.totalAmount) > num(b.paidAmount));
-  const activePayCurrency =
-    payCurrency && openBuckets.some((b) => b.currency === payCurrency)
-      ? payCurrency
-      : openBuckets[0]?.currency ?? currencies.base;
-  const activeBucket = buckets.find((b) => b.currency === activePayCurrency);
-  const payRemaining = activeBucket ? num(activeBucket.totalAmount) - num(activeBucket.paidAmount) : balance;
-  const multiCurrency = buckets.length > 1 || buckets.some((b) => b.currency !== currencies.base);
-  const hasOpenBalance = buckets.length > 0 ? openBuckets.length > 0 : balance > 0;
-  // Yakunlash faqat qabul qilinmagan qoldiq bo'lsa; to'lov summasi — to'lanmagan qismi
-  const pendingLines = order?.items.filter((item) => num(item.pendingQty) > 0) ?? [];
-  const completeRemaining = order ? Math.max(0, num(order.totalAmount) - num(order.paidAmount)) : 0;
   const canComplete =
     order !== undefined &&
     pendingLines.length > 0 &&

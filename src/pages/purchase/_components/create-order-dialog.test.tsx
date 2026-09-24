@@ -26,8 +26,8 @@ const product: ProductOption = {
   isActive: true,
   isPurchaseable: true,
   unitOptions: [
-    { unitId: DONA, name: "Dona", shortName: "d", factor: "1" },
-    { unitId: BLOK, name: "Blok", shortName: "bl", factor: "12.0000" },
+    { unitId: DONA, name: "Dona", shortName: "d", factor: "1", allowsFraction: false },
+    { unitId: BLOK, name: "Blok", shortName: "bl", factor: "12.0000", allowsFraction: false },
   ],
 };
 
