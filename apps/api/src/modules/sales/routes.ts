@@ -25,6 +25,7 @@
  *   POST   /pos/customers/:customerId/payments            pos.use (balansni to'ldirish / qarzni to'lash)
  *   GET    /customers/:customerId/balance (?limit=)       sales.view (balans tarixi)
  *   GET    /customers/:customerId/turnover                sales.view (oborot: xarid, qaytarish, to'lov, qarz)
+ *   POST   /customers/balance-import                      finance.approve (balans — tuzatma tranzaksiyasi sifatida)
  *   GET    /customers/:customerId/cashback (?limit=)      sales.view (keshbek tarixi)
  *   POST   /customers/:customerId/balance-deposit         sales.collect_payment (balansga pul qo'shish)
  *   POST   /customers/:customerId/balance-withdraw        sales.collect_payment (balansdan pul qaytarish)
@@ -85,6 +86,7 @@ import {
   isResponsibleOnly,
   responsibleCustomerIds,
 } from "../company/responsibility.service.js";
+import { importCustomerBalances } from "./customer-balance-csv.service.js";
 import { customerTurnover } from "./customer-turnover.service.js";
 import {
   depositToBalance,
@@ -355,6 +357,24 @@ const posCustomerPaymentBody = z
   .refine((body) => body.amount !== undefined || body.parts !== undefined, "To'lov summasi (amount) yoki qismlari (parts) kiritilsin");
 const balanceQuery = z.object({ limit: limitQuery });
 
+/** Balans importi: mijoz kod/telefon/nom bo'yicha topiladi, yangi mijoz YARATILMAYDI. */
+const balanceImportBody = z.strictObject({
+  rows: z
+    .array(
+      z.strictObject({
+        name: z.string().trim().max(200).nullable().optional(),
+        phone: z.string().trim().max(32).nullable().optional(),
+        code: z.string().trim().max(32).nullable().optional(),
+        balance: z.string().trim().min(1).max(32),
+        reason: z.string().trim().max(500).nullable().optional(),
+      }),
+    )
+    .min(1)
+    .max(5000),
+  /** Faqat ko'rib chiqish — hech narsa saqlanmaydi. */
+  dryRun: z.boolean().optional(),
+});
+
 /** Balansga kirim/chiqim: summa, to'lov usuli va izoh. Idempotentlik — `id` (so'rov kaliti). */
 const balanceMoveBody = z.strictObject({
   amount: moneySchema,
@@ -497,6 +517,18 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     const { rows, dryRun, requirePhone, updateExisting } = customerImportBody.parse(req.body);
     return writeInTenant(req, "crm.manage", (tx, tenant) =>
       importCustomers(tx, tenant, rows, requestMeta(req), { dryRun, requirePhone, updateExisting }),
+    );
+  });
+
+  /**
+   * Balans importi — har qator TUZATMA tranzaksiyasi bo'lib kiritiladi (balans ustuniga
+   * to'g'ridan-to'g'ri yozilmaydi). `dryRun` bilan avval ko'rib chiqiladi.
+   * Pul harakati bo'lgani uchun `finance.approve` talab qilinadi.
+   */
+  app.post("/customers/balance-import", async (req) => {
+    const { rows, dryRun } = balanceImportBody.parse(req.body);
+    return writeInTenant(req, "finance.approve", (tx, tenant) =>
+      importCustomerBalances(tx, tenant, rows, requestMeta(req), { dryRun }),
     );
   });
 
