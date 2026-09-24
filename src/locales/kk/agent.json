@@ -257,9 +257,13 @@
   "debtors.due_in": "{{count}} күннен кейін",
   "debtors.unscheduled": "Мерзім белгіленбеген",
   "debtors.empty": "Қарыздар дүкен жоқ",
+  "customers.filter.today": "Bügin",
   "customers.filter.all": "Барлығы",
   "customers.filter.debtors": "Қарыздарлар",
   "customers.filter.overdue": "Мерзімі өткен",
+  "customers.today_line": "Búginigi marshrut: {{value}}",
+  "customers.today_empty": "Búginigi marshrutta dúkan tabılmadı",
+  "customers.search_in_all": "Barlıq klientler arasınan izlew",
   "customer.edit": "Өзгерту",
   "customer.edit_title": "Клиент деректері",
   "customer.edit_hint": "Тек байланыс деректері — несие лимиті мен жеңілдікті супервайзер өзгертеді",
@@ -366,5 +370,12 @@
     "on_hand": "Sizdegi naqd",
     "handover_hint": "Naqdti kassağa nemese supervayzerge tapsırıñız — ol ERP'de \"Distribýusiä → Satuw agentleri\" bólimin de jazıladı",
     "on_hand_hint": "Kassaǵa tapsırılmaǵan"
-  }
+  },
+  "weekday.0": "Ekshembi",
+  "weekday.1": "Dúyshembi",
+  "weekday.2": "Siyshembi",
+  "weekday.3": "Sárshembi",
+  "weekday.4": "Piyshembi",
+  "weekday.5": "Juma",
+  "weekday.6": "Shembi"
 }

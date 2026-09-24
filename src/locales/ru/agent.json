@@ -257,9 +257,13 @@
   "debtors.due_in": "Через {{count}} дн.",
   "debtors.unscheduled": "Срок не установлен",
   "debtors.empty": "Должников нет",
+  "customers.filter.today": "Сегодня",
   "customers.filter.all": "Все",
   "customers.filter.debtors": "Должники",
   "customers.filter.overdue": "Просрочка",
+  "customers.today_line": "Маршрут на сегодня: {{value}}",
+  "customers.today_empty": "В сегодняшнем маршруте магазин не найден",
+  "customers.search_in_all": "Искать среди всех клиентов",
   "customer.edit": "Изменить",
   "customer.edit_title": "Данные клиента",
   "customer.edit_hint": "Только контактные данные — кредитный лимит и скидку меняет супервайзер",
@@ -366,5 +370,12 @@
     "on_hand": "Наличные у вас",
     "handover_hint": "Сдайте наличные в кассу или супервайзеру — это фиксируется в ERP: «Дистрибуция → Торговые агенты»",
     "on_hand_hint": "Не сданы в кассу"
-  }
+  },
+  "weekday.0": "Воскресенье",
+  "weekday.1": "Понедельник",
+  "weekday.2": "Вторник",
+  "weekday.3": "Среда",
+  "weekday.4": "Четверг",
+  "weekday.5": "Пятница",
+  "weekday.6": "Суббота"
 }

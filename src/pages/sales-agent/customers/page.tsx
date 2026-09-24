@@ -11,9 +11,15 @@ import EmptyState from "../_components/empty-state.tsx";
 import LocationBanner from "../_components/location-banner.tsx";
 import StoreCard from "../_components/store-card.tsx";
 import { originParams, useAgentLocation } from "../_lib/agent-location.ts";
-import type { AgentMe, AgentStore, Debtor, DebtorStatus } from "../_lib/types.ts";
+import type { AgentMe, AgentStore, AgentToday, Debtor, DebtorStatus } from "../_lib/types.ts";
 
-const FILTERS = ["all", "debtors", "overdue"] as const;
+/**
+ * Birinchi filtr — BUGUNGI marshrut. Ilgari sahifa doim `scope=all` so'rardi, ya'ni "Hammasi"
+ * agentning butun haftadagi do'konlarini bir ro'yxatda ko'rsatardi; agent esa buni bugungi
+ * marshrut deb o'qir va "payshanba marshruti bilan birga jumaniki ham chiqyapti" deb
+ * hisoblardi. Endi bugungi marshrut sukut bo'yicha, "Hammasi" esa ataylab tanlanadi.
+ */
+const FILTERS = ["today", "all", "debtors", "overdue"] as const;
 type Filter = (typeof FILTERS)[number];
 
 const STATUS_TONE: Record<DebtorStatus, string> = {
@@ -24,8 +30,11 @@ const STATUS_TONE: Record<DebtorStatus, string> = {
   unscheduled: "text-muted-foreground",
 };
 
+const matches = (store: AgentStore, needle: string) =>
+  !needle || [store.name, store.address, store.phone].some((value) => value?.toLowerCase().includes(needle));
+
 /**
- * Mijozlar: agentga ochiq barcha mijozlar (qidiruv, joy aniq bo'lsa — yaqinidan) va qarzdorlar (muddat bo'yicha rangli).
+ * Mijozlar: bugungi marshrut (sukut), agentga ochiq barcha mijozlar, qarzdorlar va kechikkanlar.
  * Profil — tarix, tahrirlash, joylashuv va vitrina rasmi.
  */
 export default function AgentCustomersPage() {
@@ -34,24 +43,33 @@ export default function AgentCustomersPage() {
   const { company } = useOutletContext<AgentMe>();
   const position = useAgentLocation();
   const [params, setParams] = useSearchParams();
-  const filter: Filter = FILTERS.find((value) => value === params.get("filter")) ?? "all";
+  const filter: Filter = FILTERS.find((value) => value === params.get("filter")) ?? "today";
   const [search, setSearch] = useState("");
   const [debounced] = useDebounce(search.trim(), 300);
+  const needle = debounced.toLowerCase();
+
+  // Bugungi marshrut "Sotuv" sahifasi bilan bir xil so'rov — qayta yuklanmaydi, keshdan keladi.
+  // Ro'yxat bitta marshrut do'konlari bo'lgani uchun qidiruv shu yerda, qo'shimcha so'rovsiz.
+  const today = useApiQuery<AgentToday>(
+    filter === "today" && position.status !== "locating" ? "/api/sales-agent/today" : null,
+    originParams(position),
+  ).data;
 
   const stores = useApiQuery<{ stores: AgentStore[] }>(
     filter === "all" && position.status !== "locating" ? "/api/sales-agent/stores" : null,
     { scope: "all", search: debounced || undefined, ...originParams(position) },
     { placeholderData: (previous) => previous },
   ).data?.stores;
-  const debtors = useApiQuery<{ debtors: Debtor[] }>(filter === "all" ? null : "/api/sales-agent/debtors", {
-    filter: filter === "overdue" ? "overdue" : "all",
-  }).data?.debtors;
 
-  const needle = debounced.toLowerCase();
-  const list: (AgentStore | Debtor)[] | undefined =
-    filter === "all"
-      ? stores
-      : debtors?.filter((debtor) => !needle || [debtor.name, debtor.address, debtor.phone].some((value) => value?.toLowerCase().includes(needle)));
+  const debtors = useApiQuery<{ debtors: Debtor[] }>(
+    filter === "today" || filter === "all" ? null : "/api/sales-agent/debtors",
+    { filter: filter === "overdue" ? "overdue" : "all" },
+  ).data?.debtors;
+
+  let list: (AgentStore | Debtor)[] | undefined;
+  if (filter === "today") list = today?.stores.filter((store) => matches(store, needle));
+  else if (filter === "all") list = stores;
+  else list = debtors?.filter((debtor) => matches(debtor, needle));
 
   const dueText = (debtor: Debtor) => {
     if (debtor.daysOverdue === null) return t("debtors.unscheduled");
@@ -60,15 +78,23 @@ export default function AgentCustomersPage() {
     return t("debtors.due_in", { count: -debtor.daysOverdue });
   };
 
+  /** "Payshanba · Дехкон бозор" — qaysi kun va qaysi marshrut ekani ro'yxat tepasida yozib turadi. */
+  const todayLine = () => {
+    if (!today) return null;
+    const weekday = t(`weekday.${new Date(`${today.date}T00:00:00Z`).getUTCDay()}`);
+    const routes = today.routes.map((route) => route.name).join(", ");
+    return routes ? `${weekday} · ${routes}` : weekday;
+  };
+
   return (
     <div className="p-4 space-y-4">
       <LocationBanner location={position} />
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         {FILTERS.map((key) => (
           <button
             key={key}
             type="button"
-            onClick={() => setParams(key === "all" ? {} : { filter: key }, { replace: true })}
+            onClick={() => setParams(key === "today" ? {} : { filter: key }, { replace: true })}
             className={cn(
               "h-11 rounded-xl border text-xs font-semibold transition-colors cursor-pointer",
               filter === key ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground",
@@ -78,6 +104,13 @@ export default function AgentCustomersPage() {
           </button>
         ))}
       </div>
+
+      {filter === "today" && todayLine() && (
+        <p className="text-xs text-muted-foreground">
+          {t("customers.today_line", { value: todayLine() })}
+        </p>
+      )}
+
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
         <Input
@@ -94,7 +127,23 @@ export default function AgentCustomersPage() {
           {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-2xl" />)}
         </div>
       ) : list.length === 0 ? (
-        <EmptyState icon={Users} title={t("nav.customers")} message={filter === "all" ? t("stores.empty") : t("debtors.empty")} />
+        <div className="space-y-3">
+          <EmptyState
+            icon={Users}
+            title={t("nav.customers")}
+            message={filter === "today" ? t("customers.today_empty") : filter === "all" ? t("stores.empty") : t("debtors.empty")}
+          />
+          {/* Bugungi marshrutda topilmasa — do'kon boshqa kunniki bo'lishi mumkin, shuning uchun yo'l ko'rsatiladi */}
+          {filter === "today" && needle && (
+            <button
+              type="button"
+              onClick={() => setParams({ filter: "all" }, { replace: true })}
+              className="w-full h-11 rounded-xl border border-primary bg-primary/10 text-sm font-semibold text-primary cursor-pointer"
+            >
+              {t("customers.search_in_all")}
+            </button>
+          )}
+        </div>
       ) : (
         <div className="space-y-2">
           {list.map((store) => (

@@ -130,6 +130,44 @@ describe("Sotuv agenti: hudud, do'konlar, qarzdorlar", () => {
     expect((await call(dilnoza.cookie, "GET", "/api/sales-agent/today")).json().routes).toHaveLength(1);
   });
 
+  it("`scope=today` faqat bugungi marshrut, `scope=all` butun hafta", async () => {
+    // Agent ilovasidagi "Mijozlar" ro'yxati shu ikki rejim ustida ishlaydi. Ilgari sahifa doim
+    // `scope=all` so'rardi va agent bugungi marshrut bilan birga boshqa kunlarning do'konlarini
+    // ham ko'rib, "payshanba bilan juma aralashib ketdi" deb hisoblardi.
+    const owner = company.ownerCookie;
+    const shahnoza = await agent("Shahnoza");
+    const bugungi = await store({ name: "Dehqon bozor do'koni", phone: "+998901230001" });
+    const jumalik = await store({ name: "Paxtakor do'koni", phone: "+998901230002" });
+
+    const today = todayIso();
+    const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
+    const boshqaKun = (weekday + 1) % 7;
+
+    const bugungiRoute = await route("Dehqon bozor", shahnoza.repId, [bugungi]);
+    const jumaRoute = await route("Paxtakor", shahnoza.repId, [jumalik]);
+    expect((await call(owner, "PATCH", `/api/distribution/routes/${bugungiRoute}`, { days: [weekday] })).statusCode).toBe(200);
+    expect((await call(owner, "PATCH", `/api/distribution/routes/${jumaRoute}`, { days: [boshqaKun] })).statusCode).toBe(200);
+
+    const names = (res: { json: () => { stores: { name: string }[] } }) => res.json().stores.map((row) => row.name).sort();
+
+    // Sukut — bugungi marshrut (so'rovda `scope` bo'lmasa ham)
+    expect(names(await call(shahnoza.cookie, "GET", "/api/sales-agent/stores"))).toEqual(["Dehqon bozor do'koni"]);
+    expect(names(await call(shahnoza.cookie, "GET", "/api/sales-agent/stores?scope=today"))).toEqual(["Dehqon bozor do'koni"]);
+
+    // "Hammasi" — ataylab tanlanganda butun hafta
+    expect(names(await call(shahnoza.cookie, "GET", "/api/sales-agent/stores?scope=all"))).toEqual([
+      "Dehqon bozor do'koni",
+      "Paxtakor do'koni",
+    ]);
+
+    // Boshqa kunning do'koni bugungi ro'yxatda qidirilsa topilmaydi, "hammasi" da topiladi
+    expect(names(await call(shahnoza.cookie, "GET", "/api/sales-agent/stores?scope=today&search=Paxtakor"))).toEqual([]);
+    expect(names(await call(shahnoza.cookie, "GET", "/api/sales-agent/stores?scope=all&search=Paxtakor"))).toEqual(["Paxtakor do'koni"]);
+
+    // Ikkalasi ham agentga OCHIQ: boshqa kunning do'koniga kirish mumkin (to'lov qabul qilish uchun)
+    expect((await call(shahnoza.cookie, "GET", `/api/sales-agent/stores/${jumalik}`)).statusCode).toBe(200);
+  });
+
   it("bugungi marshrut sanaga biriktirishdan; do'kon va qarzdorlar faqat o'z hududi; masofa serverda", async () => {
     const owner = company.ownerCookie;
     const ali = await agent("Ali");

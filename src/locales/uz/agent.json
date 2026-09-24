@@ -257,9 +257,13 @@
   "debtors.due_in": "{{count}} kundan keyin",
   "debtors.unscheduled": "Muddat belgilanmagan",
   "debtors.empty": "Qarzdor do'kon yo'q",
+  "customers.filter.today": "Bugun",
   "customers.filter.all": "Hammasi",
   "customers.filter.debtors": "Qarzdorlar",
   "customers.filter.overdue": "Kechikkan",
+  "customers.today_line": "Bugungi marshrut: {{value}}",
+  "customers.today_empty": "Bugungi marshrutda do'kon topilmadi",
+  "customers.search_in_all": "Hamma mijozlar ichidan qidirish",
   "customer.edit": "Tahrirlash",
   "customer.edit_title": "Mijoz ma'lumotlari",
   "customer.edit_hint": "Faqat aloqa ma'lumotlari — kredit limiti va chegirmani supervayzer o'zgartiradi",
@@ -366,5 +370,12 @@
     "on_hand": "Sizdagi naqd",
     "handover_hint": "Naqdni kassaga yoki supervayzerga topshiring — u ERP'da \"Distribyutsiya → Sotuv agentlari\" bo'limida qayd etiladi",
     "on_hand_hint": "Kassaga topshirilmagan"
-  }
+  },
+  "weekday.0": "Yakshanba",
+  "weekday.1": "Dushanba",
+  "weekday.2": "Seshanba",
+  "weekday.3": "Chorshanba",
+  "weekday.4": "Payshanba",
+  "weekday.5": "Juma",
+  "weekday.6": "Shanba"
 }

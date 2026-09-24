@@ -4373,3 +4373,48 @@ Sana bog'liq to'plamlar qayta yuritildi va yashil: `cash`, `sales-agent-*`,
 Bugungi 1–7 vazifa va shu tuzatma production'ga chiqarildi. Tekshirildi:
 `/api/finance/handovers` va `/api/delivery/waybills/bulk` — 401 (mavjud), yo'q marshrut —
 404; web bundle'da "Pul topshirishlar" bloki bor.
+
+## Agent "Mijozlar" ro'yxati bugungi marshrut emas edi (2026-09-24)
+
+Egasi Атамуратова Шахноза ekranini yubordi: "payshanba marshruti ham chiqyapti, jumaniki
+ham". Skrinshotda **Mijozlar** bo'limi va **"Hammasi"** filtri turgan edi.
+
+### Sabab — sana emas, SO'ROV DOIRASI
+`customers/page.tsx` har doim `scope=all` so'rardi. Server tomonda bu "agentga ochiq
+BARCHA do'konlar" degani (`assignedRouteIds` — hafta kunidan qat'i nazar), shuning uchun
+ro'yxatda payshanba marshruti (Дехкон бозор) bilan birga juma marshrutining do'konlari
+(Paxtakor, Водник) ham turardi. Bugungi marshrutni ko'rsatadigan filtr umuman yo'q edi.
+Serverning `scope` sukuti allaqachon `today` — faqat shu sahifa uni bosib o'tardi.
+
+### Tuzatma
+- Filtrlar: **Bugun | Hammasi | Qarzdorlar | Kechikkan**; sukut — **Bugun**.
+- "Bugun" ro'yxati `/api/sales-agent/today` dan (Sotuv sahifasi bilan bir xil so'rov, keshdan
+  keladi — qo'shimcha trafik yo'q), qidiruv shu ro'yxat ichida.
+- Ro'yxat tepasida "Bugungi marshrut: Payshanba · Дехкон бозор" — qaysi kun va qaysi marshrut
+  ekani yozib turadi.
+- Bugungi marshrutda qidirilgan do'kon topilmasa — "Hamma mijozlar ichidan qidirish" tugmasi
+  (boshqa kunning do'koniga to'lov uchun kirish avvalgidek ochiq).
+- uz/ru/kk kalitlari qo'shildi (`weekday.0…6` to'liq kun nomlari ham).
+
+Test: `sales-agent-stores.test.ts` (+1) — agentda bugungi va boshqa kunning marshruti bo'lsa
+`scope=today` faqat bugungisini, `scope=all` ikkalasini beradi; boshqa kunning do'koni bugungi
+qidiruvda chiqmaydi, "hammasi" da chiqadi, va unga kirish baribir ochiq.
+
+### Hamma agentlarning haftalik jadvali — AUDIT (production, faqat o'qish)
+Kun siljishi HECH QAYERDA yo'q. Har agent haftaning 6 kunida ishlaydi, yakshanba — dam:
+
+    Артикова Замира    Du Спутник чакка · Se Даритал · Ch,Pa Гурленский · Ju Даритал · Sh Райцентр
+    Атамуратова Шахноза Du Аерапорт Раддом+Лучевой · Se,Pa,Sh Дехкон бозор · Ch Заналний+Надмес · Ju Paxtakor+Водник
+    Лочинбек           Du Bog'ot · Se Hazorasp · Ch To'rtkul · Pa Pitnak · Ju Beruniy Boston · Sh Xonqa
+    Сабиров Дилшод     Du Xiva Elektroset · Se G'oybu+Xiva 2+Xiva · Ch Qo'shko'pir · Pa Mangit · Ju,Sh Yangiariq
+    Султанова Шахзода  Du Xiva Shukrona · Se Xiva Kosmo · Ch Shovot · Pa,Sh Gurlan · Ju Yangibozor
+
+Kun bo'yicha yuk: Du 272, Se 337, Ch 356, Pa 342, Ju 330, Sh 383 do'kon; yakshanba 0.
+
+EGASI QARORIGA QOLDIRILDI (kod masalasi emas, jadval masalasi):
+- `Cholish Marshruti` — agenti ham, hafta kuni ham yo'q (9 do'kon): HECH QACHON hech kimga
+  chiqmaydi. Agent va kun belgilansa yoki arxivga olinsa tugaydi.
+- Bitta faol mijoz hech bir faol marshrutda emas.
+- Bir kunda bir nechta marshrut: Шахноза (Du, Ch, Ju) va Сабиров (Se — 3 ta, 91 do'kon).
+  Bu ataylab bo'lishi mumkin (kichik marshrutlar birga yuriladi), lekin bir kunda 91 do'kon
+  real bajarilmasa jadvalni bo'lish kerak.
