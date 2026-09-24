@@ -4660,3 +4660,6 @@ OCHIQ SAVOL (egasiga): mahsulot IMPORTIDA narx ustuni qadoq birligi bilan berils
 fayldagi qiymat AYNAN yoziladi — ya'ni blok narxi. Web formasida esa u dona narxi sifatida
 ishlatiladi. Ikkala yo'l bitta ustunga boshqa ma'no yuklayapti; qaysi biri to'g'ri ekanini egasi
 aytishi kerak (tuzatish alohida ish sifatida bajariladi).
+
+**Production (2026-09-24, tuzatish):** commit `b23128c`, faqat `bum-web` (API o'zgarmadi).
+`build.json` 09:35:35Z → **09:55:41Z**, yangi bundle `index-C9EEzso7.js`.
