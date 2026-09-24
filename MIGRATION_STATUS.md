@@ -4237,3 +4237,91 @@ fayl 6/6 yashil.
 
 ### Eng muhim keyingi qadam
 Release imzo kalitini yaratib, imzolangan APK'ni haqiqiy Android telefonda sinash: dostavshik kirishi → ish sessiyasi → GPS (fonda, ekran qulflanganda) → yangi yetkazma bildirishnomasi → "Optimal marshrut" → Google Maps / Yandex.
+
+## Oylik tarixi, mijoz hisobi, rol chegarasi va pul topshirish hujjati (2026-09-24)
+
+Egasi bergan 1–7 vazifa. Hammasi commit qilindi, API to'plami va `tsc`/`eslint` yashil.
+
+### Oylik stavka tarixi va maqsadli KPI (1, 3)
+Fiksatsiyalangan oylik o'zgarganda faqat YANGI qiymat qolardi — kim, qachon va nega
+o'zgartirgani yo'qolardi. `employee_salary_history`: har o'zgarishda eski/yangi stavka,
+qaysi oydan kuchga kirishi, izoh va o'zgartirgan xodim yoziladi; xodim kartochkasida
+oylik yonida tarix tugmasi.
+
+KPI qoidasiga MUKOFOT TURI qo'shildi: avvalgi bosqichli hisob saqlandi, yoniga "maqsad"
+turi — plan bajarilsa belgilangan summa, bajarilmasa 0. Oyna qoidani jumla bilan
+ko'rsatadi, shuning uchun admin formulani boshida ko'radi.
+
+### Mijoz hisobi: pul qo'shish, ayirish va import (2, 2.6)
+Balans ustuni to'g'ridan-to'g'ri tahrirlanmaydi — har harakat tarix qatori + kassa
+harakati + balanslangan jurnal. Oldin faqat qo'shish bor edi; ortiqcha to'lovni qaytarish
+"qo'lda tuzatish" bilan yozilardi va moliyaviy ma'noni buzardi. Endi:
+
+- `POST /customers/:id/balance-deposit` va `.../balance-withdraw` (0082 — enum qiymati)
+- `POST /customers/balance-import` (`finance.approve`) — boshlang'ich qoldiqni fayldan.
+  Har qator TUZATMA tranzaksiyasi, shuning uchun qoldiq daromad deb hisoblanmaydi
+  (test: `grossSales` va `netSales` 0 bo'lib qoladi). `dryRun` bilan oldindan ko'rish;
+  mijoz topilmasa xato (yangi mijoz YARATILMAYDI); o'sha faylni qayta yuklash balansni
+  ikki barobar qilmaydi (maqsad qiymatga keltiriladi).
+- `GET /customers/:id/turnover` — oborot AYNAN `netOrderAmount` ta'rifidan hisoblanadi,
+  shuning uchun mijoz kartochkasi, qarz yoshi hisoboti va kredit tekshiruvi bir xil raqam
+  beradi. Javobda `openDebt` (hujjatlardan) va `cachedDebt` (`customers.total_debt`)
+  yonma-yon — moslikni tekshirish uchun.
+
+UI: mijoz qatorida "pul qo'shish" va "pul ayirish" (`sales.collect_payment`) —
+"balansni to'g'rilash" (`finance.approve`) dan ATAYLAB alohida.
+
+### Zakaz olish — alohida knopka emas, Savdo ichidagi ruxsat (4)
+`sales_agent.use` endi SAVDO guruhida va "Sotuvda zakaz olish" deb nomlanadi; yon menyuda
+ham pastdagi alohida blokdan Operatsiyalar guruhiga ko'chirildi. Dublikat buyurtma tizimi
+yaratilmadi — o'sha mavjud agent ish joyi. Ruxsat o'chirilsa server ham 403 beradi.
+
+### Rol chegarasi: "faqat mas'ul bo'lganlari" (5)
+`roles.scopes` (jsonb, 0083). Chegara qo'yish MA'NOGA ega ruxsatlar ro'yxati bilan
+chegaralangan (`sales.view`, `crm.view`, `delivery.view`) — boshqasiga qo'yilsa 400.
+Mas'uliyat MAVJUD biriktirishlardan o'qiladi (agent → marshrut → mijoz; kuryer →
+yetkazma), yangi jadval yo'q. Filtr SERVERDA: begona yozuvga URL orqali murojaat
+"topilmadi" beradi. Ustun bo'sh bo'lsa hech narsa o'zgarmaydi; egaga qo'llanmaydi.
+
+### Pul topshirish: submit → accept/reject (6)
+Oldin topshirish DARHOL pul o'tkazmasi qilardi — qabul qiluvchi ko'rib chiqmasdan, rad
+eta olmasdan. Endi topshirish HUJJAT (`cash_handovers`, 0084):
+`submitted → accepted | rejected | cancelled`.
+
+Moliyaviy qoida: topshirishda pul KO'CHMAYDI, faqat qabul qilinganda ko'chadi. Shuning
+uchun rad etishda qaytariladigan yozuv yo'q — summa o'z-o'zidan agentda qoladi. Karta
+tushumi jismonan agentda bo'lmaydi, shuning uchun qabulda ikkinchi marta ko'chirilmaydi
+(faqat solishtirish raqami). Sanoqda farq bo'lsa kamroq qabul qilinadi, qolgani agentda.
+Bitta topshiruvchida bir vaqtda faqat bitta ochiq topshirish (bazada qisman unique
+indeks — ikki marta bosish dublikat yaratmaydi), takroriy qabul 409.
+
+Shu bilan 2026-09-23 dagi OCHIQ SAVOL ham yopildi: endi topshirishni agentning o'zi
+yuboradi, `finance.view`/`finance.manage` bor xodim (kassir ham) qabul qiladi yoki rad
+etadi — `distribution.manage`/`delivery.manage` shart emas.
+
+UI: Moliya → Kassa sahifasida "Pul topshirishlar" bloki — yuborish, ko'rib chiqilmaganlar
+ro'yxati, qabul/rad etish (sabab majburiy) va oxirgi 10 ta tarix.
+
+### Ko'p yetkazmani birdan nakladnoy qilish (7)
+Yetkazmalar ro'yxatida belgilash ustuni va "Hammasini belgilash" — faqat yo'lga
+chiqayotganlari tanlanadi. `POST /api/delivery/waybills/bulk` tanlovni SERVERDA qayta
+filtrlaydi (frontendga ishonilmaydi). PDF: har yetkazma o'z sahifasidan boshlanadi.
+Chop etish yetkazma holatini O'ZGARTIRMAYDI; kim, qachon va nechta chiqargani auditda.
+
+### `tsc` qizil edi — yopildi
+5 va 4-vazifa commitlari frontend typecheck'ini buzgan (API va eslint toza bo'lgani uchun
+sezilmagan): `roles-section.tsx` da `filter` predikat emasligidan tur toraymasdi,
+`erp-layout.tsx` da `lng` `undefined` bo'lishi mumkin edi. Ikkalasi tuzatildi.
+
+### Hafta kuni konvensiyasi qulflandi
+Egasi "agentda payshanba o'rniga juma marshruti chiqyapti" deb xabar berdi. Kod
+tekshirildi: UI tugmasi (0 = dushanba) → `toApiDay` → baza (0 = yakshanba) → server
+`getUTCDay()` — zanjir TO'G'RI, siljish yo'q. Buni qulflash uchun
+`src/pages/distribution/_lib/days.test.ts` qo'shildi: har UI tugmasi saqlangach aynan
+o'sha sananing `getDay()` qiymatiga aylanishi tekshiriladi.
+
+Sabab bazadagi qiymatlarda deb taxmin qilinmoqda; xom qiymatlarni ko'rish uchun
+production bazasiga faqat o'qish so'rovi KERAK — auto rejim `railway ssh` ni rad etdi,
+shuning uchun TEKSHIRILMADI. Ehtimoliy manbalar: marshrut CSV importidagi `Kunlar (0-6)`
+ustuni (qaysi kun 0 ekani hech qayerda yozilmagan, UI esa dushanbadan boshlanadi) yoki
+"Kunlik o'zgartirish" da qolib ketgan biriktirish (u haftalik jadvaldan USTUN turadi).
