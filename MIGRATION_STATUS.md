@@ -4781,3 +4781,23 @@ qulflandi), belgilanmaganda tugma o'chiq va sababi tooltipda, qator belgilansa t
 "Nakladnoy (1)" bo'ladi, bekor qilingani belgilanmaydi. Test eski xulq bilan QIZIL bo'lishi
 tasdiqlandi. Frontend to'plami 38 fayl / 180 test; `tsc` va `eslint` toza;
 `e2e/delivery-page-loads.spec.ts` yashil.
+
+## Hujjat dizayneri (2026-09-24)
+
+Egasi topshirig'i: nakladnoyni foydalanuvchi Word'ga o'xshab o'zi tahrir qila oladigan tizim.
+To'liq hujjat — `DOCUMENT_DESIGNER.md`.
+
+**Auditda topilgan production xatosi:** PDF'da kirill matn buzilardi (`Раматов Расул` →
+`0 < 0 B > 2  0 A C ;`), chunki jsPDF ning `helvetica` shrifti faqat Latin-1 ni biladi.
+Endi hamma hujjat PT Sans (OFL) bilan ochiladi; shrift `/fonts/` dan yuklanadi va
+`setFont("helvetica")` unga yo'naltiriladi — mavjud hujjat kodi o'zgarmadi.
+
+**Qurildi:** `document_templates` + versiyalar (migratsiya `0086`), `/api/documents` API,
+maydonlar katalogi, oq ro'yxatli sanitizatsiya, shablon → A4 renderer va
+**Sozlamalar → Hujjatlar** dizayneri (jonli A4 ko'rinish — haqiqiy PDF).
+
+Moliyaviy yaxlitlik qat'iy: shablon faqat KO'RINISHni boshqaradi, summa serverdan keladi.
+
+Testlar: API 17 (versiyalash, XSS, tannarx ruxsati, tenant), renderer 10 (ko'p sahifa va
+moliyaviy yaxlitlik), brauzer e2e 2 + kirill PDF e2e 2. Frontend 40 fayl / 194 test.
+Production: `5a4696b` — API toza ko'tarildi, web `build.json` 14:46:41Z.

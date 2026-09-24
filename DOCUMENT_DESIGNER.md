@@ -7,7 +7,7 @@
 |---|---|
 | Boshlandi | 2026-09-24 |
 | Holat | 1–4-bosqich ✅ (audit, shrift, model+API, renderer, dizayner UI) · 5–6 rejada |
-| Production deploy | topshiriq bo'yicha QILINMAYDI |
+| Production deploy | 2026-09-24: egasining so'rovi bilan chiqarildi (`bum-api` + `bum-web`) |
 
 ---
 
@@ -240,3 +240,11 @@ Brauzer dialogi (`prompt`/`confirm`) ishlatilmaydi — ichki forma va ikki bosqi
   yuborardi — tuzatildi.
 - Frontend to'plami 40 fayl / 194 test; API `document*` 17, `catalog`/`products` 17,
   `security-hardening` 34; `tsc` (API va web), `eslint` va `vite build` toza.
+
+
+### Production (2026-09-24)
+
+Commit `5a4696b`. `bum-api`: `Migratsiyalar qo'llandi (47ms)`, bitta `Server listening`,
+loglarda 500 YO'Q. `bum-web`: `build.json` → **14:46:41Z**.
+Tekshirildi: `/api/documents/templates` → **401** (marshrut bor, sessiya kerak),
+`/fonts/PTSans-Regular.ttf` → **200** (kirill shrifti tarqaldi).
