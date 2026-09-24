@@ -7,7 +7,7 @@ import { accounts, cashAccounts } from "../src/db/schema/finance.js";
 import { stockLevels, warehouses } from "../src/db/schema/inventory.js";
 import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
 import { buildServer } from "../src/server.js";
-import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, signedIn, uniquePhone } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 
@@ -244,5 +244,86 @@ describe("POS mijozlari", () => {
     expect(await ledger("1100")).toBe("0.00");
     expect(await stockQty()).toBe("10.0000");
     expect((await pos("GET", `/shifts/${shift.id}`, kassir.cookie)).json().shift.totalCash).toBe("5000.00");
+  });
+});
+
+/**
+ * 2-VAZIFA: balans maydonini to'g'ridan-to'g'ri tahrirlash emas, PUL QO'SHISH va AYIRISH.
+ *
+ * Har ikkalasi ham tranzaksiya: tarix qatori + kassa harakati + BALANSLANGAN jurnal.
+ * Balans hech qachon qatorlar yig'indisidan ajralib qolmasligi kerak.
+ */
+describe("Mijoz hisobiga pul qo'shish va ayirish", () => {
+  const deposit = (cookie: string, customerId: string, body: object) =>
+    call(cookie, "POST", `/api/sales/customers/${customerId}/balance-deposit`, body);
+  const withdraw = (cookie: string, customerId: string, body: object) =>
+    call(cookie, "POST", `/api/sales/customers/${customerId}/balance-withdraw`, body);
+  const history = async (customerId: string) =>
+    (await call(company.ownerCookie, "GET", `/api/sales/customers/${customerId}/balance`)).json()
+      .transactions as { type: string; amount: string; balanceAfter: string }[];
+
+  it("pul qo'shish: balans, kassa va jurnal birga o'zgaradi", async () => {
+    const customer = await newCustomer(company.ownerCookie, { name: "Avans mijozi", phone: uniquePhone() });
+    const cashBefore = Number(await cashBalance());
+
+    const res = await deposit(company.ownerCookie, customer.id, { amount: "1000000", method: "cash", notes: "Oldindan to'lov" });
+    expect(res.statusCode, res.body).toBe(201);
+
+    expect((await customerOf(customer.id)).balance).toBe("1000000.00");
+    expect(Number(await cashBalance()) - cashBefore, "kassaga pul tushdi").toBe(1_000_000);
+    // 2300 "Mijozlar avanslari" — majburiyat oshdi
+    expect(await ledger("2300")).toBe("1000000.00");
+
+    const rows = await history(customer.id);
+    expect(rows[0]).toMatchObject({ type: "deposit", amount: "1000000.00", balanceAfter: "1000000.00" });
+  });
+
+  it("pul ayirish: balans kamayadi, kassadan pul chiqadi, avans majburiyati yopiladi", async () => {
+    const customer = await newCustomer(company.ownerCookie, { name: "Qaytarib oluvchi", phone: uniquePhone() });
+    expect((await deposit(company.ownerCookie, customer.id, { amount: "1000000", method: "cash" })).statusCode).toBe(201);
+    const cashAfterDeposit = Number(await cashBalance());
+
+    const res = await withdraw(company.ownerCookie, customer.id, { amount: "300000", method: "cash", notes: "Ortiqcha to'lov qaytdi" });
+    expect(res.statusCode, res.body).toBe(201);
+
+    expect((await customerOf(customer.id)).balance).toBe("700000.00");
+    expect(cashAfterDeposit - Number(await cashBalance()), "kassadan pul chiqdi").toBe(300_000);
+    expect(await ledger("2300"), "avans majburiyati kamaydi").toBe("700000.00");
+
+    const rows = await history(customer.id);
+    expect(rows[0]).toMatchObject({ type: "withdrawal", amount: "300000.00", balanceAfter: "700000.00" });
+  });
+
+  it("balansdan ortiq pul ayirib bo'lmaydi — balans manfiyga tushmaydi", async () => {
+    const customer = await newCustomer(company.ownerCookie, { name: "Kam balans", phone: uniquePhone() });
+    expect((await deposit(company.ownerCookie, customer.id, { amount: "100000", method: "cash" })).statusCode).toBe(201);
+
+    const res = await withdraw(company.ownerCookie, customer.id, { amount: "150000", method: "cash" });
+    expect(res.statusCode, res.body).toBe(400);
+    expect(res.json().details.reason).toBe("insufficient_balance");
+    expect((await customerOf(customer.id)).balance, "balans o'zgarmadi").toBe("100000.00");
+  });
+
+  it("balans har doim tarix qatorlari yig'indisiga teng", async () => {
+    const customer = await newCustomer(company.ownerCookie, { name: "Yig'indi", phone: uniquePhone() });
+    expect((await deposit(company.ownerCookie, customer.id, { amount: "500000", method: "cash" })).statusCode).toBe(201);
+    expect((await deposit(company.ownerCookie, customer.id, { amount: "250000", method: "card" })).statusCode).toBe(201);
+    expect((await withdraw(company.ownerCookie, customer.id, { amount: "100000", method: "cash" })).statusCode).toBe(201);
+
+    const rows = await history(customer.id);
+    const sum = rows.reduce(
+      (total, row) => total + (row.type === "withdrawal" || row.type === "sale_payment" ? -Number(row.amount) : Number(row.amount)),
+      0,
+    );
+    expect(sum, "kirim − chiqim").toBe(650_000);
+    expect(Number((await customerOf(customer.id)).balance), "balans yig'indiga teng").toBe(sum);
+    // Oxirgi qatordagi `balanceAfter` ham o'sha qiymat — tarix uzilmagan
+    expect(Number(rows[0]!.balanceAfter)).toBe(sum);
+  });
+
+  it("begona kompaniya mijoziga pul qo'shib bo'lmaydi", async () => {
+    const customer = await newCustomer(company.ownerCookie, { name: "Bizniki", phone: uniquePhone() });
+    const res = await deposit(other.ownerCookie, customer.id, { amount: "100000", method: "cash" });
+    expect([403, 404]).toContain(res.statusCode);
   });
 });

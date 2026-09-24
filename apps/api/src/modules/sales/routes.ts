@@ -25,6 +25,8 @@
  *   POST   /pos/customers/:customerId/payments            pos.use (balansni to'ldirish / qarzni to'lash)
  *   GET    /customers/:customerId/balance (?limit=)       sales.view (balans tarixi)
  *   GET    /customers/:customerId/cashback (?limit=)      sales.view (keshbek tarixi)
+ *   POST   /customers/:customerId/balance-deposit         sales.collect_payment (balansga pul qo'shish)
+ *   POST   /customers/:customerId/balance-withdraw        sales.collect_payment (balansdan pul qaytarish)
  *   POST   /customers/:customerId/balance-adjust          finance.approve (balans, qarz, keshbekni to'g'rilash)
  *   GET    /customers/export (?includeInactive=)          sales.view (CSV)
  *   POST   /customers/import                              crm.manage (CSV qatorlari; pul qiymatlari o'zgarmaydi,
@@ -77,7 +79,12 @@ import {
   saveCashbackSettings,
 } from "./cashback.service.js";
 import { exportCustomersCsv, importCustomers } from "./customers-csv.service.js";
-import { listBalanceTransactions, setCustomerBalances } from "./customer-balance.service.js";
+import {
+  depositToBalance,
+  listBalanceTransactions,
+  setCustomerBalances,
+  withdrawFromBalance,
+} from "./customer-balance.service.js";
 import {
   closeShift,
   completeSale,
@@ -340,6 +347,16 @@ const posCustomerPaymentBody = z
   })
   .refine((body) => body.amount !== undefined || body.parts !== undefined, "To'lov summasi (amount) yoki qismlari (parts) kiritilsin");
 const balanceQuery = z.object({ limit: limitQuery });
+
+/** Balansga kirim/chiqim: summa, to'lov usuli va izoh. Idempotentlik — `id` (so'rov kaliti). */
+const balanceMoveBody = z.strictObject({
+  amount: moneySchema,
+  method: z.enum(["cash", "bank", "card", "transfer"]).default("cash"),
+  cashAccountId: z.uuid().nullable().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+  date: z.iso.date().optional(),
+  id: z.uuid().optional(),
+});
 const customersExportQuery = z.object({ includeInactive: boolQuery });
 /** CSV import: fayl brauzerda o'qiladi, qatorlar shu yerda tekshiriladi. Qarz va balans ustunlari e'tiborsiz. */
 const customerImportBody = z.strictObject({
@@ -478,6 +495,30 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     const { customerId } = customerParams.parse(req.params);
     const { limit } = balanceQuery.parse(req.query);
     return { transactions: await listCashbackTransactions(db, await readTenant(req, "sales.view"), customerId, limit) };
+  });
+
+  /**
+   * Balansga pul QO'SHISH va AYIRISH — ikkalasi ham TRANZAKSIYA sifatida yoziladi
+   * (balans maydoni to'g'ridan-to'g'ri tahrirlanmaydi): tarix qatori, kassa harakati va jurnal.
+   */
+  app.post("/customers/:customerId/balance-deposit", async (req, reply) => {
+    const { customerId } = customerParams.parse(req.params);
+    const body = balanceMoveBody.parse(req.body);
+    const transaction = await writeInTenant(req, "sales.collect_payment", (tx, tenant) =>
+      depositToBalance(tx, tenant, { ...body, customerId, type: "deposit" }, requestMeta(req)),
+    );
+    reply.status(201);
+    return { transaction };
+  });
+
+  app.post("/customers/:customerId/balance-withdraw", async (req, reply) => {
+    const { customerId } = customerParams.parse(req.params);
+    const body = balanceMoveBody.parse(req.body);
+    const transaction = await writeInTenant(req, "sales.collect_payment", (tx, tenant) =>
+      withdrawFromBalance(tx, tenant, { ...body, customerId }, requestMeta(req)),
+    );
+    reply.status(201);
+    return { transaction };
   });
 
   app.post("/customers/:customerId/balance-adjust", async (req) => {

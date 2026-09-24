@@ -173,6 +173,95 @@ export async function depositToBalance(
 }
 
 /**
+ * Balansdan PUL AYIRISH — ortiqcha to'lovni mijozga qaytarish.
+ *
+ * `payFromBalance` dan farqi: u qarzni yopadi (pul kassadan chiqmaydi), bu esa haqiqiy pul
+ * chiqimi — kassadan/bankdan mijozga beriladi. `setCustomerBalances` dan farqi: u qo'lda
+ * TUZATISH (raqamni to'g'rilash), bu esa moliyaviy voqea.
+ *
+ *   DR 2300 Mijozlar avanslari / CR kassa (+ kassa chiqimi)
+ *
+ * Balans manfiy bo'lmaydi — mavjud summadan ortiq ayirib bo'lmaydi.
+ */
+export async function withdrawFromBalance(
+  tx: Tx,
+  tenant: TenantContext,
+  input: {
+    customerId: string;
+    amount: string;
+    method: PaymentMethod;
+    cashAccountId?: string | null;
+    notes?: string | null;
+    date?: string;
+    /** Takroriy yuborishdan himoya: so'rov kaliti yozuv ID'si bo'ladi. */
+    id?: string;
+  },
+  meta: RequestMeta,
+) {
+  const companyId = tenant.company.id;
+  const amount = positiveAmount(input.amount);
+  const customer = await lockCustomer(tx, companyId, input.customerId);
+
+  const balanceBefore = toMinor(customer.balance);
+  if (amount > balanceBefore) {
+    throw badRequest(`Balansda yetarli mablag' yo'q (${fromMinor(balanceBefore)})`, {
+      reason: "insufficient_balance",
+      balance: fromMinor(balanceBefore),
+    });
+  }
+
+  const id = input.id ?? randomUUID();
+  const date = input.date ?? todayIso();
+  await assertPeriodOpen(tx, companyId, date);
+  const description = `Balansdan qaytarildi: ${customer.name}`;
+  const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
+    cashAccountId: await resolvePaymentAccount(tx, companyId, input.method, input.cashAccountId),
+    type: "out",
+    amount: input.amount,
+    txDate: date,
+    description,
+    category: "customer_balance",
+    referenceType: "customer_balance",
+    referenceId: id,
+  });
+  const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+    entryDate: date,
+    description,
+    referenceType: "customer_balance",
+    referenceId: id,
+    lines: [
+      { accountId: await customerAdvanceAccount(tx, companyId), debit: input.amount },
+      { accountId: await ledgerAccountFor(tx, companyId, account), credit: input.amount },
+    ],
+  });
+
+  const balanceAfter = balanceBefore - amount;
+  await tx
+    .update(customers)
+    .set({ balance: fromMinor(balanceAfter), updatedAt: new Date() })
+    .where(eq(customers.id, customer.id));
+  const transaction = await insertBalanceTx(tx, tenant, {
+    id,
+    customerId: customer.id,
+    type: "withdrawal",
+    amount: fromMinor(amount),
+    balanceAfter: fromMinor(balanceAfter),
+    method: input.method,
+    cashAccountId: account.id,
+    journalEntryId: entry.id,
+    notes: input.notes ?? null,
+  });
+
+  await salesAudit(tx, tenant, meta, {
+    action: "CUSTOMER_BALANCE_WITHDRAWN",
+    resource: "customers",
+    resourceId: customer.id,
+    details: { amount: fromMinor(amount), method: input.method, balanceAfter: fromMinor(balanceAfter) },
+  });
+  return transaction;
+}
+
+/**
  * Balansdan to'lov: chek (`orderId`) yoki buyurtmaga bog'lanmagan qarz. Kassaga pul tushmaydi —
  * avans debitorlik bilan yopiladi.
  */

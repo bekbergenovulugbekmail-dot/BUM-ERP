@@ -575,6 +575,13 @@
       "when": 1790206478169,
       "tag": "0081_kpi_targets_salary_history",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1790208265333,
+      "tag": "0082_customer_balance_withdrawal",
+      "breakpoints": true
     }
   ]
 }
