@@ -4535,3 +4535,24 @@ Frontend to'plami: 35 fayl / 166 test yashil.
 MUHIM: bu tekshiruv YANGI build bilan keladi, shuning uchun telefonda ayni paytda ochiq turgan
 ESKI nusxa uni bilmaydi — bir marta ilovani yopib qayta ochish kerak. Undan keyingi hamma
 deploy o'zi yetib boradi.
+
+### Android APK 1.0.2 va imzo masalasi (2026-09-24)
+Egasi APK o'rnatolmadi. Sabab — imzo: lokalda ikkita APK bor va ular BOSHQA sertifikat bilan
+imzolangan (`app-debug.apk` → `CN=Android Debug`, `c1849ba8…`; `app-release.apk` →
+`CN=BUM ERP, L=Nukus`, `e05d1df7…`), paket nomi va versionCode esa bir xil. Android boshqa
+imzoli APK'ni mavjudining ustiga o'rnatmaydi — "noma'lum ilovalar" ruxsati bunga aloqador emas.
+
+Egasi debug imzoni tanladi (telefonlardagi nusxa shu imzoda — o'chirish shart emas):
+`bumVersionCode` 3, `bumVersionName` 1.0.2 va APK qayta qurildi. Tekshirildi: versionCode=3,
+imzo o'sha `c1849ba8…`, ichidagi `capacitor.config.json` da `server.url = https://app.bum-erp.uz`.
+
+**Build buyrug'i (muhim):** Gradle standart JDK 17 da `invalid source release: 21` beradi —
+Capacitor 8 uchun JDK 21+ kerak, bu mashinada 21 yo'q, lekin Android Studio JBR (25) ishlaydi:
+
+    cd apps/mobile && npx cap sync android
+    cd android && gradlew.bat assembleDebug --no-daemon "-Dorg.gradle.java.home=C:\Program Files\Android\Android Studio\jbr"
+
+Gradle bilan birga Docker ishlamasin (8 GB) — `docker compose stop` qilib, keyin build.
+
+Bu masala filtrlar bilan bog'liq EMAS edi: APK faqat saytni ochadigan qobiq. Egasi tasdiqladi —
+ilovani Force stop qilib qayta ochgach Android'da ham yangi 4 ta filtr chiqdi.
