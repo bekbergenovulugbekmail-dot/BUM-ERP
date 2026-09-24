@@ -15,6 +15,12 @@
  *   POST   /cash-accounts, PATCH /cash-accounts/:cashAccountId finance.manage
  *   POST   /cash-transactions, /cash-transfers                 finance.manage
  *   GET    /agent-cash                                         finance.view (agentlardagi topshirilmagan naqd)
+ *   GET    /handovers/mine                                     a'zo (o'z topshiruvchi profillari va solishtirish)
+ *   POST   /handovers                                          a'zo (o'zi uchun topshirish — pul ko'chmaydi)
+ *   GET    /handovers (?status=&limit=)                        finance.view
+ *   POST   /handovers/:handoverId/accept                       finance.manage (pul SHU YERDA ko'chadi)
+ *   POST   /handovers/:handoverId/reject                       finance.manage (sabab majburiy)
+ *   POST   /handovers/:handoverId/cancel                       topshirgan xodimning o'zi
  *   GET    /settlements                                        finance.view (kutilayotgan karta/hamyon puli)
  *   POST   /cash-accounts/:cashAccountId/settle                finance.manage (qirqim: komissiya ushlanib bank hisobiga)
  *   POST   /cash-accounts/:cashAccountId/set-balance           finance.approve (qoldiqni to'g'rilash: farq kirim/chiqim)
@@ -33,7 +39,14 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { ALLOCATION_METHODS, MAX_COMPANY_CURRENCIES, MAX_PAYMENT_PARTS, TERMINAL_NETWORKS, type Permission } from "@bum/shared";
+import {
+  ALLOCATION_METHODS,
+  MAX_COMPANY_CURRENCIES,
+  MAX_PAYMENT_PARTS,
+  TERMINAL_NETWORKS,
+  forbidden,
+  type Permission,
+} from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
@@ -81,6 +94,16 @@ import {
 } from "./currencies.service.js";
 import { createManualEntry, getJournalEntry, getLockDate, listJournal, setLockDate, voidManualEntry } from "./journal.service.js";
 import { agentCashHolders } from "./agent-cash.service.js";
+import {
+  HANDOVER_STATUSES,
+  acceptHandover,
+  cancelHandover,
+  holdersOfUser,
+  listHandovers,
+  rejectHandover,
+  submitHandover,
+  summariesFor,
+} from "./handover.service.js";
 import { listPendingSettlements, settleCashAccount } from "./settlement.service.js";
 import { createTerminal, getTerminal, listTerminals, updateTerminal } from "./terminals.service.js";
 
@@ -316,6 +339,26 @@ const currenciesBody = z.strictObject({
 const accountParams = z.object({ accountId: z.uuid() });
 const entryParams = z.object({ entryId: z.uuid() });
 const lockDateBody = z.strictObject({ lockDate: z.iso.date().nullable() });
+const handoverParams = z.object({ handoverId: z.uuid() });
+const handoverSubmitBody = z.strictObject({
+  /** Profil turi — xodimda ikkalasi ham bo'lsa qaysi biri uchun topshirilayotgani. */
+  kind: z.enum(["sales_rep", "delivery_agent"]).optional(),
+  cashAmount: moneySchema,
+  cardAmount: moneySchema.optional(),
+  notes: nullableText(1000),
+});
+const handoverAcceptBody = z.strictObject({
+  /** Sanoqda farq chiqsa — haqiqatda qabul qilingan naqd (topshirilganidan oshmaydi). */
+  acceptedCashAmount: moneySchema.nullable().optional(),
+  toCashAccountId: z.uuid().nullable().optional(),
+  notes: nullableText(1000),
+});
+const handoverRejectBody = z.strictObject({ reason: z.string().trim().min(3).max(1000) });
+const handoverListQuery = z.object({
+  status: z.enum(HANDOVER_STATUSES).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+});
+
 const cashAccountParams = z.object({ cashAccountId: z.uuid() });
 const expenseParams = z.object({ expenseId: z.uuid() });
 const includeInactiveQuery = z.object({ includeInactive: boolQuery });
@@ -498,6 +541,68 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
   app.get("/agent-cash", async (req) => {
     const tenant = await readTenant(req, "finance.view");
     return { holders: await agentCashHolders(db, tenant.company.id) };
+  });
+
+  // ─── Pul topshirish: agent/yetkazuvchi → mas'ul shaxs ───────────────────
+
+  /** O'zining topshiruvchi profillari va har biri bo'yicha solishtirish. */
+  app.get("/handovers/mine", async (req) => {
+    const tenant = await requireTenant(db, authOf(req).user);
+    const holders = await holdersOfUser(db, tenant.company.id, tenant.user.id);
+    return { summaries: await summariesFor(db, tenant.company.id, holders) };
+  });
+
+  /** Topshirish — pul KO'CHMAYDI, faqat hujjat yaratiladi. */
+  app.post("/handovers", async (req, reply) => {
+    const body = handoverSubmitBody.parse(req.body);
+    const handover = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      const holders = await holdersOfUser(tx, tenant.company.id, tenant.user.id);
+      // Topshirish faqat O'ZI uchun: profil so'rovdan olinmaydi
+      const holder = body.kind
+        ? holders.find((row) => row.kind === body.kind)
+        : holders[0];
+      if (!holder) throw forbidden("Sizda topshiruvchi profili yo'q");
+      return submitHandover(tx, tenant, holder, body, requestMeta(req));
+    });
+    reply.status(201);
+    return { handover };
+  });
+
+  app.get("/handovers", async (req) => {
+    const query = handoverListQuery.parse(req.query);
+    const tenant = await readTenant(req, "finance.view");
+    return { handovers: await listHandovers(db, tenant.company.id, query) };
+  });
+
+  app.post("/handovers/:handoverId/accept", async (req) => {
+    const { handoverId } = handoverParams.parse(req.params);
+    const body = handoverAcceptBody.parse(req.body ?? {});
+    return {
+      handover: await writeInTenant(req, "finance.manage", (tx, tenant) =>
+        acceptHandover(tx, tenant, handoverId, body, requestMeta(req)),
+      ),
+    };
+  });
+
+  app.post("/handovers/:handoverId/reject", async (req) => {
+    const { handoverId } = handoverParams.parse(req.params);
+    const body = handoverRejectBody.parse(req.body);
+    return {
+      handover: await writeInTenant(req, "finance.manage", (tx, tenant) =>
+        rejectHandover(tx, tenant, handoverId, body, requestMeta(req)),
+      ),
+    };
+  });
+
+  /** Topshiruvchi o'zi bekor qiladi — alohida moliya ruxsati talab qilinmaydi. */
+  app.post("/handovers/:handoverId/cancel", async (req) => {
+    const { handoverId } = handoverParams.parse(req.params);
+    const handover = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      return cancelHandover(tx, tenant, handoverId, requestMeta(req));
+    });
+    return { handover };
   });
 
   // ─── Qirqim: kutilayotgan karta/hamyon puli → bank hisobi ────────────────

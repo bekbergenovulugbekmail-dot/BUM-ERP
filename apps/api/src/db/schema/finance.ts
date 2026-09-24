@@ -431,3 +431,66 @@ export const cashTransactionsRelations = relations(cashTransactions, ({ one }) =
     references: [cashAccounts.id],
   }),
 }));
+
+/**
+ * PUL TOPSHIRISH HUJJATI: agent/yetkazuvchi yig'gan pulni mas'ul shaxsga topshiradi.
+ *
+ * Hayot sikli: `submitted` → `accepted` yoki `rejected` (yoki topshiruvchi `cancelled` qiladi).
+ * Pul FAQAT qabul qilinganda ko'chadi — rad etishda buxgalteriya yozuvi umuman yaratilmagan
+ * bo'ladi, shuning uchun qaytarish (reversal) kerak emas va ikki marta hisoblash xavfi yo'q.
+ *
+ * Karta tushumi jismonan agentda bo'lmaydi (to'g'ridan-to'g'ri bank/karta hisobiga tushadi),
+ * shuning uchun qabul qilishda ikkinchi marta ko'chirilmaydi — faqat solishtirish uchun yoziladi.
+ */
+export const cashHandovers = pgTable(
+  "cash_handovers",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+
+    salesRepId: uuid("sales_rep_id"),
+    deliveryAgentId: uuid("delivery_agent_id"),
+
+    number: varchar("number", { length: 32 }).notNull(),
+    status: varchar("status", { length: 16 }).notNull().default("submitted"),
+
+    cashAmount: money("cash_amount").notNull().default("0"),
+    cardAmount: money("card_amount").notNull().default("0"),
+    totalAmount: money("total_amount").notNull().default("0"),
+
+    /** Qabul qilinganda haqiqatda kassaga tushgan naqd (farq bo'lsa kamroq bo'lishi mumkin). */
+    acceptedCashAmount: money("accepted_cash_amount"),
+    toCashAccountId: uuid("to_cash_account_id").references(() => cashAccounts.id, { onDelete: "set null" }),
+    cashTransactionId: uuid("cash_transaction_id"),
+
+    notes: text("notes"),
+    rejectReason: text("reject_reason"),
+
+    submittedBy: uuid("submitted_by").references(() => users.id, { onDelete: "set null" }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull().defaultNow(),
+    reviewedBy: uuid("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("handover_company_number_key").on(t.companyId, t.number),
+    index("handover_company_status_idx").on(t.companyId, t.status),
+    index("handover_rep_idx").on(t.companyId, t.salesRepId),
+    index("handover_agent_idx").on(t.companyId, t.deliveryAgentId),
+    check("handover_one_holder", sql`(${t.salesRepId} is null) <> (${t.deliveryAgentId} is null)`),
+    check("handover_status", sql`${t.status} in ('submitted', 'accepted', 'rejected', 'cancelled')`),
+    check("handover_amounts_non_negative", sql`${t.cashAmount} >= 0 and ${t.cardAmount} >= 0 and ${t.totalAmount} >= 0`),
+    check("handover_total_matches", sql`${t.totalAmount} = ${t.cashAmount} + ${t.cardAmount}`),
+    check("handover_positive", sql`${t.totalAmount} > 0`),
+    check(
+      "handover_accepted_within",
+      sql`${t.acceptedCashAmount} is null or (${t.acceptedCashAmount} >= 0 and ${t.acceptedCashAmount} <= ${t.cashAmount})`,
+    ),
+    check(
+      "handover_reject_reason",
+      sql`${t.status} <> 'rejected' or (${t.rejectReason} is not null and length(btrim(${t.rejectReason})) > 0)`,
+    ),
+  ],
+);
