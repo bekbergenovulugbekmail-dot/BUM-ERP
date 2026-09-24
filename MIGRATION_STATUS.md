@@ -4556,3 +4556,38 @@ Gradle bilan birga Docker ishlamasin (8 GB) — `docker compose stop` qilib, key
 
 Bu masala filtrlar bilan bog'liq EMAS edi: APK faqat saytni ochadigan qobiq. Egasi tasdiqladi —
 ilovani Force stop qilib qayta ochgach Android'da ham yangi 4 ta filtr chiqdi.
+
+## Moliyaviy audit boshlandi: Bito ↔ BUM ERP (2026-09-24)
+
+Egasi topshirig'i: Bito ERP'ning moliyaviy tizimini real kuzatuv asosida o'rganib, BUM ERP
+bilan taqqoslash va farqlarni yopish. To'liq hujjat — `FINANCE_AUDIT.md`.
+
+**Bito BLOKLANGAN:** hamma Bito MCP vositasi `Error 11009 — Both Bito access and refresh
+tokens have expired ... must re-authorize via /authorize` qaytardi; `bito_profile_get_me`
+avto-rejim klassifikatori tomonidan ham rad etildi. Token o'z-o'zidan yangilanmadi — bu
+autentifikatsiyani chetlab o'tish bo'lardi (egasining qoidasi). Qolgan hamma faza shu
+bloker ortida: FAZA 1–21, GAP matritsasi va target arxitektura.
+
+**Bajarildi — FAZA 22 (BUM ERP moliyaviy auditi, faqat kod va sxema o'qildi, production
+bazasiga tegilmadi):** obyekt modeli, hisoblar rejasi (23 hisob), 26 ta hujjat turining
+moliyaviy ta'siri, to'lov zanjiri (usul → hisob → kassa harakati → jurnal), aralash to'lov
+qoidalari, kassa smenasi, RBAC va yaxlitlik mexanizmlari hujjatlashtirildi.
+
+**Bito'siz ham asoslangan ichki topilmalar** (`FINANCE_AUDIT.md` → "BUM ERP ichki topilmalar"):
+
+- **F-1 (CRITICAL):** smena yopilishidagi kassa farqi buxgalteriyaga UMUMAN tushmaydi —
+  `closeShift` va `reviewShiftDifference` na `recordCashTransaction`, na `postJournalEntry`
+  chaqiradi; hisoblar rejasida kamomad/ortiqcha hisobi ham yo'q. Kamomaddan keyin tizimdagi
+  kassa qoldig'i haqiqiy puldan ko'p bo'lib qoladi.
+- **F-2 (CRITICAL):** mijoz to'lovini bekor qilish/to'g'rilash yo'q — `POST /payments` bor,
+  bekor qilish marshruti butun API'da yo'q. Noto'g'ri kiritilgan to'lovni tuzatishning
+  to'g'ri yo'li mavjud emas.
+- **F-3 (HIGH):** mijoz va ta'minotchi bilan solishtirish akti (statement) yo'q.
+- **F-4 / F-5 (MEDIUM):** kompaniya darajasida pul oqimi hisoboti va buxgalteriya balansi yo'q
+  (aylanma balans va foyda/zarar bor).
+
+Kod O'ZGARTIRILMADI (topshiriqning 30-qoidasi: Bito auditi tugamaguncha kod yozilmaydi),
+production deploy qilinmadi.
+
+**Keyingi qadam:** egasi `/authorize` qiladi → FAZA 1 dan Bito auditi. F-1 va F-2 Bito'siz ham
+asoslangan, shuning uchun egasining ruxsati bilan ular oldinroq ham yopilishi mumkin.
