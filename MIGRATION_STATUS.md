@@ -4418,3 +4418,58 @@ EGASI QARORIGA QOLDIRILDI (kod masalasi emas, jadval masalasi):
 - Bir kunda bir nechta marshrut: Шахноза (Du, Ch, Ju) va Сабиров (Se — 3 ta, 91 do'kon).
   Bu ataylab bo'lishi mumkin (kichik marshrutlar birga yuriladi), lekin bir kunda 91 do'kon
   real bajarilmasa jadvalni bo'lish kerak.
+
+## Hudud va kun: haftalik panorama, ko'chirish va to'qnashuv ogohlantirishi (2026-09-24)
+
+Egasi marshrutni boshqa kunga "o'tkazgandan" keyin yana noto'g'ri chiqqanini aytdi.
+Production ma'lumoti avvalgi surat bilan solishtirildi va farq aniq ko'rindi:
+
+    OLDIN:  Лочинбек — Se: Hazorasp · Pa: Pitnak
+    HOZIR:  Лочинбек — Se: Hazorasp · Pa: Hazorasp + Pitnak
+
+Ya'ni "Hazorasp" KO'CHMAGAN — unga payshanba QO'SHILGAN, seshanba esa o'chmagan. Panel
+kunlarni belgilaydi/olib tashlaydi, almashtirmaydi; buni hech narsa aytmasdi va natijada
+Лочинбекда payshanba kuni 128 do'kon bo'lib qoldi (78 + 50).
+
+Bu KOD xatosi emas — interfeys niyatni ko'rsatmasligi edi. Tuzatildi:
+
+### Haftalik panorama (yangi)
+`_components/weekly-schedule-grid.tsx` + `_lib/schedule.ts`. Qator — agent, ustun — hafta
+kuni, katak — o'sha kuni yuriladigan marshrutlar va do'kon soni. Bir kunda ikkitadan ko'p
+bo'lsa katak sariq va jami do'kon yoziladi; bo'sh kun kulrang; pastda kunlik yuk
+(do'kon / agent / marshrut). Marshrut jadvaldagi katakdan bosiladi va formaga tushadi.
+Eski "Joriy jadval" ro'yxati shu jadval bilan almashtirildi.
+
+Alohida blok: **jadvalga tushmagan marshrutlar** — agenti yoki hafta kuni yo'q bo'lganlar
+("hech qachon chiqmaydi"), ular ilgari hech qayerda ko'rinmasdi.
+
+### Saqlashdan oldin nima o'zgarayotgani
+Forma ostida: "Hozir: Seshanba → bo'ladi: Seshanba, Payshanba" va `+ Payshanba` / `− Seshanba`.
+Bitta kun qo'shilgan-u eskisi turgan bo'lsa (aynan "ko'chirish" niyati) bitta tugma chiqadi:
+**"Faqat Payshanba qoldirish"**.
+
+### To'qnashuv
+Agent o'sha kuni boshqa marshrutda band bo'lsa: kun tugmasida sariq nuqta, forma ostida
+sariq ogohlantirish — qaysi marshrut, nechta do'kon va jami nechta bo'lishi.
+
+Testlar: `_lib/schedule.test.ts` (4) — agent/kun kesimiga o'girish, bir kunda ikkita marshrut,
+agenti/kuni yo'q marshrut jadvalga tushmasligi va kunlik yuk hisobi.
+
+### Production analizi (faqat o'qish, 2026-09-24)
+Hududlar: 14 ta, 30 marshrut, 1544 do'kon. `Urganch` — 10 marshrut / 519 do'kon (2 agent),
+`Xiva` — 5 / 167, qolganlari 1 marshrutdan.
+
+Haftada bir necha marta yuriladigan marshrutlar (ataylabmi — egasi tasdiqlashi kerak):
+Дехкон бозор 3× (102), Gurlan tumani 2× (88), Hazorasp 2× (78), Yangiariq 2× (61),
+Гурленский 2× (85), Даритал 2× (47).
+
+Agent haftalik yuki (tashrif = do'kon × kun):
+
+    Лочинбек            544 | og'ir kun 128 (Pa), yengil 65 | kunlik o'rtacha 91
+    Атамуратова Шахноза 481 | og'ir kun 102,      yengil 52 | o'rtacha 80
+    Артикова Замира     392 | og'ir kun  85,      yengil 47 | o'rtacha 65
+    Султанова Шахзода   345 | og'ir kun  88,      yengil 19 | o'rtacha 58
+    Сабиров Дилшод      336 | og'ir kun  91,      yengil 17 | o'rtacha 56
+
+Haqiqiy tashriflar hali juda kam (30 kunda 7 ta) — tizim sinov bosqichida. MUHIMI:
+"jadvaldan tashqari tashrif" 0 ta, ya'ni kun mosligi amalda ham to'g'ri ishlayapti.

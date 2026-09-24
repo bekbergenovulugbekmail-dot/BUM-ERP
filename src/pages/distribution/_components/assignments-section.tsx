@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { CalendarRange, Trash2, Truck } from "lucide-react";
+import { AlertTriangle, CalendarRange, Trash2, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -11,6 +11,8 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { todayLocal } from "@/pages/sales/_lib/types.ts";
 import { cn } from "@/lib/utils.ts";
 import { fromApiDay, toApiDay, type DistributionRoute, type RouteAssignment, type SalesRep } from "../_lib/types.ts";
+import { DAY_CHIPS, DAY_NAMES } from "../_lib/schedule.ts";
+import WeeklyScheduleGrid from "./weekly-schedule-grid.tsx";
 
 const shiftDate = (iso: string, days: number) => {
   const date = new Date(`${iso}T00:00:00Z`);
@@ -20,8 +22,6 @@ const shiftDate = (iso: string, days: number) => {
 
 const WEEKDAYS = ["Yakshanba", "Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma", "Shanba"];
 const dayLabel = (iso: string) => `${iso} · ${WEEKDAYS[new Date(`${iso}T00:00:00Z`).getUTCDay()]}`;
-/** Haftalik jadval tugmalari — dushanbadan boshlanadi (API esa yakshanbadan sanaydi). */
-const DAY_CHIPS = ["Du", "Se", "Ch", "Pa", "Ju", "Sh", "Ya"];
 
 /**
  * Hudud va kun — ikki bosqich:
@@ -122,7 +122,36 @@ export default function AssignmentsSection() {
     byDate.set(assignment.assignDate, [...(byDate.get(assignment.assignDate) ?? []), assignment]);
   }
 
-  const routesWithPlan = (routes ?? []).filter((route) => route.salesRepId && route.days.length > 0);
+  /**
+   * Kunlar tugmasi BELGILAYDI/OLIB TASHLAYDI, almashtirmaydi. Marshrutni boshqa kunga
+   * "ko'chiraman" degan odam yangi kunni bosadi-yu eskisini o'chirmaydi — natijada marshrut
+   * ikki kunda yuriladi va agentga ikkala kuni ham chiqadi. Shuning uchun saqlashdan OLDIN
+   * nima o'zgarayotgani va agentning o'sha kuni bandmi — shu yerda yozib turiladi.
+   */
+  const weeklyRoute = (routes ?? []).find((route) => route.id === weekly.routeId);
+  const savedDays = (weeklyRoute?.days ?? []).map(fromApiDay).sort((a, b) => a - b);
+  const addedDays = weekly.days.filter((day) => !savedDays.includes(day));
+  const removedDays = savedDays.filter((day) => !weekly.days.includes(day));
+  const changed = addedDays.length > 0 || removedDays.length > 0;
+  /** Faqat bitta kun qo'shilgan va eskisi turibdi — "ko'chirish" niyati shu, bir bosishda bajariladi. */
+  const moveTarget = addedDays.length === 1 && weekly.days.length > 1 ? addedDays[0]! : null;
+  const conflicts = weekly.days
+    .map((day) => ({
+      day,
+      others: (routes ?? []).filter(
+        (route) =>
+          route.id !== weekly.routeId && route.salesRepId === weekly.salesRepId && route.days.includes(toApiDay(day)),
+      ),
+    }))
+    .filter((row) => row.others.length > 0);
+  /** Agent shu kuni boshqa marshrutda band — tugmaning o'zida belgilanadi. */
+  const busyDays = new Set(
+    Array.from({ length: 7 }, (_, day) => day).filter((day) =>
+      (routes ?? []).some(
+        (route) => route.id !== weekly.routeId && route.salesRepId === weekly.salesRepId && route.days.includes(toApiDay(day)),
+      ),
+    ),
+  );
 
   return (
     <div className="space-y-5">
@@ -171,18 +200,82 @@ export default function AssignmentsSection() {
                 data-testid={`weekly-day-${day}`}
                 aria-pressed={weekly.days.includes(day)}
                 onClick={() => toggleWeeklyDay(day)}
+                title={busyDays.has(day) ? `${DAY_NAMES[day]}: agent boshqa marshrutda band` : DAY_NAMES[day]}
                 className={cn(
-                  "h-9 w-11 rounded-lg border text-xs font-medium transition-colors cursor-pointer",
+                  "relative h-9 w-11 rounded-lg border text-xs font-medium transition-colors cursor-pointer",
                   weekly.days.includes(day)
                     ? "border-primary bg-primary text-primary-foreground"
                     : "border-border bg-muted hover:bg-accent",
+                  busyDays.has(day) && !weekly.days.includes(day) && "border-amber-500",
                 )}
               >
                 {label}
+                {busyDays.has(day) && (
+                  <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-amber-500" />
+                )}
               </button>
             ))}
           </div>
         </div>
+
+        {weekly.routeId && (
+          <div className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
+            <p className="text-xs">
+              <span className="text-muted-foreground">Hozir: </span>
+              <span className="font-medium">{savedDays.length === 0 ? "kun belgilanmagan" : savedDays.map((day) => DAY_NAMES[day]).join(", ")}</span>
+              {changed && (
+                <>
+                  <span className="text-muted-foreground"> → bo'ladi: </span>
+                  <span className="font-semibold">
+                    {weekly.days.length === 0 ? "kun belgilanmagan" : weekly.days.map((day) => DAY_NAMES[day]).join(", ")}
+                  </span>
+                </>
+              )}
+            </p>
+            {changed && (
+              <p className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                {addedDays.map((day) => (
+                  <span key={`a${day}`} className="font-medium text-emerald-600 dark:text-emerald-400">+ {DAY_NAMES[day]}</span>
+                ))}
+                {removedDays.map((day) => (
+                  <span key={`r${day}`} className="font-medium text-destructive">− {DAY_NAMES[day]}</span>
+                ))}
+              </p>
+            )}
+            {moveTarget !== null && (
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Marshrut {weekly.days.length} kunda yuriladigan bo'ladi. Faqat ko'chirmoqchimisiz?
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  data-testid="weekly-move-only"
+                  onClick={() => setWeekly((current) => ({ ...current, days: [moveTarget] }))}
+                >
+                  Faqat {DAY_NAMES[moveTarget]} qoldirish
+                </Button>
+              </div>
+            )}
+            {conflicts.length > 0 && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="h-3.5 w-3.5" /> Bu agent o'sha kuni allaqachon band
+                </p>
+                <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                  {conflicts.map((row) => (
+                    <li key={row.day}>
+                      {DAY_NAMES[row.day]}: {row.others.map((route) => `${route.name} (${route.customerCount})`).join(", ")}
+                      {" — jami "}
+                      {row.others.reduce((sum, route) => sum + route.customerCount, 0) + (weeklyRoute?.customerCount ?? 0)} do'kon
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex justify-end">
           <Button data-testid="weekly-save" onClick={() => void handleWeeklySave()} disabled={saveWeekly.isPending}>
@@ -190,43 +283,7 @@ export default function AssignmentsSection() {
           </Button>
         </div>
 
-        {routesWithPlan.length > 0 && (
-          <div className="rounded-xl border border-border">
-            <div className="border-b border-border px-3 py-2 text-xs font-semibold text-muted-foreground">
-              Joriy jadval — {routesWithPlan.length} ta marshrut
-            </div>
-            <div className="max-h-56 divide-y divide-border overflow-auto">
-              {routesWithPlan.map((route) => {
-                const days = route.days.map(fromApiDay);
-                return (
-                  <button
-                    key={route.id}
-                    type="button"
-                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted/40"
-                    onClick={() => pickWeeklyRoute(route.id)}
-                  >
-                    <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: route.color ?? "#6366f1" }} />
-                    <span className="min-w-0 flex-1 truncate">{route.name}</span>
-                    <span className="hidden truncate text-xs text-muted-foreground sm:block">{route.salesRepName}</span>
-                    <span className="flex shrink-0 gap-1">
-                      {DAY_CHIPS.map((label, day) => (
-                        <span
-                          key={label}
-                          className={cn(
-                            "rounded px-1 text-[11px]",
-                            days.includes(day) ? "bg-primary/15 text-primary" : "text-muted-foreground/40",
-                          )}
-                        >
-                          {label}
-                        </span>
-                      ))}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        <WeeklyScheduleGrid routes={routes ?? []} selectedRouteId={weekly.routeId || undefined} onPick={pickWeeklyRoute} />
       </div>
 
       {/* 2-bosqich: aniq sanaga o'zgartirish — shu kun uchun jadvaldan ustun turadi */}
