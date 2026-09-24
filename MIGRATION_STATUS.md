@@ -4622,4 +4622,10 @@ Testlar: `import-units-prices.test.ts` +3 (ro'yxat asosiy birlikni birinchi qayt
 koeffitsient bilan blokni beradi; bayroqsiz so'rovda `unitOptions` umuman yo'q; begona
 kompaniyaning konversiyasi qo'shilmaydi) → 24/24. Regressiya: `products`, `catalog`, `purchase`,
 `purchase-csv` — 36/36. Frontend to'plami 35 fayl / 166 test yashil; `tsc` (API va web) va
-`eslint` toza. Production deploy QILINMADI.
+`eslint` toza.
+
+**Production (2026-09-24):** commit `62114b9`, `bum-api` va `bum-web` deploy qilindi.
+API toza ko'tarildi (`Migratsiyalar qo'llandi (28ms)`, bitta `Server listening`, crash-loop yo'q),
+`/api/auth/me` tashqaridan 401. Web `build.json` 06:49 dan **09:35:35Z** ga yangilandi va yangi
+bundle'da (`index-0ur1D-oV.js`) `withUnits` hamda `unitOptions` bor — ya'ni yangi kod ishlayapti.
+Yangi migratsiya bu bosqichda yo'q. Tizimga kirgan holda qo'lda sinov — egasi bajaradi.
