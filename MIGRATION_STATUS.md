@@ -4704,3 +4704,8 @@ butun daraxtni yechib tashlaydi, shuning uchun bitta bo'limdagi xato butun ilova
   Blokka o'tilganda 144 000 va "= 12 dona".
 
 Frontend to'plami 37 fayl / 176 test yashil; `tsc` va `eslint` toza.
+
+**Production (2026-09-24):** commit `14c7a33`, `bum-web` (API o'zgarmadi).
+`build.json` → **10:22:21Z**, bundle `index-ChyXOyT_.js`; xato chegarasi matni bundle ichida.
+Dostavka production'da yana yiqilsa — endi oq ekran o'rniga xato matni chiqadi, egasi uni
+nusxalab yuboradi va sabab aniqlanadi.
