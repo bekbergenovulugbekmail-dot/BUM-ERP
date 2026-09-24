@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, CalendarRange, Trash2, Truck } from "lucide-react";
+import { CalendarRange, Info, Trash2, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
@@ -200,18 +200,18 @@ export default function AssignmentsSection() {
                 data-testid={`weekly-day-${day}`}
                 aria-pressed={weekly.days.includes(day)}
                 onClick={() => toggleWeeklyDay(day)}
-                title={busyDays.has(day) ? `${DAY_NAMES[day]}: agent boshqa marshrutda band` : DAY_NAMES[day]}
+                title={busyDays.has(day) ? `${DAY_NAMES[day]}: agentda shu kuni yana marshrut bor` : DAY_NAMES[day]}
                 className={cn(
                   "relative h-9 w-11 rounded-lg border text-xs font-medium transition-colors cursor-pointer",
                   weekly.days.includes(day)
                     ? "border-primary bg-primary text-primary-foreground"
                     : "border-border bg-muted hover:bg-accent",
-                  busyDays.has(day) && !weekly.days.includes(day) && "border-amber-500",
+                  busyDays.has(day) && !weekly.days.includes(day) && "border-muted-foreground/40",
                 )}
               >
                 {label}
                 {busyDays.has(day) && (
-                  <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-amber-500" />
+                  <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
                 )}
               </button>
             ))}
@@ -259,9 +259,11 @@ export default function AssignmentsSection() {
               </div>
             )}
             {conflicts.length > 0 && (
-              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
-                <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
-                  <AlertTriangle className="h-3.5 w-3.5" /> Bu agent o'sha kuni allaqachon band
+              <div className="rounded-lg border border-border bg-card p-2">
+                {/* Bir kunda bir nechta marshrut NORMAL — shuning uchun bu ogohlantirish emas,
+                    saqlashdan oldin kunlik yuk ko'rinib tursin degan ma'lumot. */}
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                  <Info className="h-3.5 w-3.5" /> Bu agentda o'sha kuni yana marshrut bor
                 </p>
                 <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
                   {conflicts.map((row) => (

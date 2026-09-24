@@ -9,9 +9,27 @@ export type AgentScheduleRow = {
   name: string;
   /** UI kuni (0 — dushanba) bo'yicha o'sha kuni yuriladigan marshrutlar. */
   perDay: DistributionRoute[][];
+  /** Kunlik do'kon soni (UI kuni bo'yicha). */
+  perDayStores: number[];
   /** Haftada tashrif buyuriladigan do'konlar yig'indisi (bir do'kon ikki kun bo'lsa ikki marta). */
   stores: number;
+  /** Ish kunlarining o'rtacha yuki — og'ir kunni shu bilan solishtiriladi. */
+  averageStores: number;
 };
+
+/**
+ * Og'ir kun chegarasi: ish kunlari o'rtachasidan shuncha baravar ko'p bo'lsa ajratib ko'rsatiladi.
+ *
+ * Bir kunda bir nechta marshrut bo'lishi ham, bir marshrutga haftada bir necha marta chiqish ham
+ * NORMAL (egasi tasdiqladi) — shuning uchun marshrut SONI emas, aynan kunlik YUK o'lchanadi.
+ */
+export const HEAVY_DAY_RATIO = 1.5;
+
+export function isHeavyDay(row: AgentScheduleRow, day: number): boolean {
+  const stores = row.perDayStores[day] ?? 0;
+  if (stores === 0 || row.averageStores === 0) return false;
+  return stores >= row.averageStores * HEAVY_DAY_RATIO;
+}
 
 /**
  * Marshrutlarni AGENT kesimiga o'giradi.
@@ -26,15 +44,27 @@ export function buildAgentRows(routes: DistributionRoute[]): AgentScheduleRow[] 
     if (!route.salesRepId) continue;
     let row = byAgent.get(route.salesRepId);
     if (!row) {
-      row = { id: route.salesRepId, name: route.salesRepName ?? "—", perDay: Array.from({ length: 7 }, () => []), stores: 0 };
+      row = {
+        id: route.salesRepId,
+        name: route.salesRepName ?? "—",
+        perDay: Array.from({ length: 7 }, () => []),
+        perDayStores: Array.from({ length: 7 }, () => 0),
+        stores: 0,
+        averageStores: 0,
+      };
       byAgent.set(route.salesRepId, row);
     }
     for (let day = 0; day < 7; day += 1) {
       if (route.days.includes(toApiDay(day))) {
         row.perDay[day]!.push(route);
+        row.perDayStores[day] += route.customerCount;
         row.stores += route.customerCount;
       }
     }
+  }
+  for (const row of byAgent.values()) {
+    const workingDays = row.perDayStores.filter((stores) => stores > 0).length;
+    row.averageStores = workingDays === 0 ? 0 : row.stores / workingDays;
   }
   return [...byAgent.values()].sort((a, b) => a.name.localeCompare(b.name));
 }

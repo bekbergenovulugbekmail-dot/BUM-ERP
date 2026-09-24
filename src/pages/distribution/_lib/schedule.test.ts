@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentRows, dayTotals, offScheduleRoutes } from "./schedule.ts";
+import { buildAgentRows, dayTotals, isHeavyDay, offScheduleRoutes } from "./schedule.ts";
 import type { DistributionRoute } from "./types.ts";
 
 /**
@@ -50,6 +50,21 @@ describe("haftalik panorama", () => {
     expect(buildAgentRows(ALL).map((row) => row.name)).toEqual(["Dilshod", "Lochinbek"]);
     expect(buildAgentRows(ALL).find((row) => row.name === "Dilshod")!.perDay.every((day) => day.length === 0)).toBe(true);
     expect(offScheduleRoutes(ALL).map((r) => r.id)).toEqual(["cholish", "kunsiz"]);
+  });
+
+  it("og'ir kun marshrut SONI bilan emas, do'kon yuki bilan o'lchanadi", () => {
+    // Bir kunda bir nechta marshrut ham, bir marshrutga haftada bir necha marta chiqish ham normal.
+    const [lochinbek] = buildAgentRows([hazorasp, pitnak, bogot]);
+    // du 73, se 78, pa 128 → o'rtacha 93; og'ir chegara 139.5 — payshanba hali og'ir emas
+    expect(lochinbek!.perDayStores[3]).toBe(128);
+    expect(isHeavyDay(lochinbek!, 3)).toBe(false);
+    expect(isHeavyDay(lochinbek!, 6)).toBe(false); // ishlamaydigan kun hech qachon og'ir emas
+
+    // Yengil kunlar qo'shilsa o'rtacha tushadi va o'sha kun ajralib qoladi
+    const yengil = route({ id: "kichik", salesRepId: "a1", salesRepName: "Lochinbek", days: [3, 5, 6], customerCount: 10 });
+    const [bilanYengil] = buildAgentRows([hazorasp, pitnak, bogot, yengil]);
+    expect(isHeavyDay(bilanYengil!, 3)).toBe(true);
+    expect(isHeavyDay(bilanYengil!, 2)).toBe(false);
   });
 
   it("kunlik yuk: agent, marshrut va do'kon soni", () => {

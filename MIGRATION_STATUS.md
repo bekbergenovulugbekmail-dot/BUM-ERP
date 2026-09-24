@@ -4473,3 +4473,24 @@ Agent haftalik yuki (tashrif = do'kon × kun):
 
 Haqiqiy tashriflar hali juda kam (30 kunda 7 ta) — tizim sinov bosqichida. MUHIMI:
 "jadvaldan tashqari tashrif" 0 ta, ya'ni kun mosligi amalda ham to'g'ri ishlayapti.
+
+### Egasining qarori: nima muammo emas (2026-09-24)
+Yuqoridagi "e'tibor beriladigan joylar" ro'yxatidan ikkitasi biznes holati ekan:
+
+1. **Bir marshrutga haftada bir necha marta chiqish NORMAL** (Дехкон бозор 3×, Gurlan 2× …).
+2. **`Cholish Marshruti` ataylab bo'sh** — hali tayyorlanmagan.
+
+Shunga ko'ra panorama qayta sozlandi, chunki ilgari ikkalasi ham sariq "ogohlantirish" edi:
+
+- Sariq katak endi marshrut SONIGA emas, kunlik DO'KON YUKIGA qo'yiladi: agentning ish kunlari
+  o'rtachasidan **1.5 baravar** og'ir kun ajratiladi (`HEAVY_DAY_RATIO`). Bir kunda bir nechta
+  marshrut bo'lsa jami do'kon soni neytral yoziladi, xolos.
+  Hozirgi ma'lumotda bu 30 katakdan 3 tasini ajratadi: Султанова Pa 88 va Sh 88 (o'rtacha 57),
+  Сабиров Se 91 (o'rtacha 56) — ya'ni ortiqcha shovqin yo'q.
+- "Jadvalga tushmagan marshrutlar" bloki sariq emas, kulrang ma'lumot: "agentga chiqmaydi
+  (hali tayyor bo'lmasa, normal)".
+- Tahrirlash formasidagi "band" ogohlantirishi ham neytral ma'lumotga aylandi: "Bu agentda
+  o'sha kuni yana marshrut bor" + kunlik jami.
+
+Test: `schedule.test.ts` (+1) — og'ir kun chegarasi (marshrut soni ta'sir qilmasligi va
+ishlanmaydigan kun hech qachon og'ir bo'lmasligi).
