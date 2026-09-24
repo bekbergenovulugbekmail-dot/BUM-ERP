@@ -9,6 +9,8 @@ export type CompanyRole = {
   description: string | null;
   color: string | null;
   permissions: string[];
+  /** Ruxsat bo'yicha "mas'ul bo'lganlari" chegarasi; bo'sh — chegara yo'q. */
+  scopes: Record<string, "responsible">;
   isSystem: boolean;
   isActive: boolean;
   memberCount: number;

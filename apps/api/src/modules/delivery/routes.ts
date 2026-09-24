@@ -87,6 +87,7 @@ import { authOf, requireAuth } from "../auth/guard.js";
 import { SESSION_COOKIE } from "../auth/session.js";
 import { COMPANY_CONTEXT_QUERY, companyKeyFrom } from "../company/company-context.js";
 import { effectivePermissions, requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
+import { effectiveScopes, isResponsibleOnly, responsibleDeliveryAgentIds } from "../company/responsibility.service.js";
 import { recipientCandidates } from "../sales-agent/policy.service.js";
 import { agentCashSummary, handoverAgentCash } from "./agent-cash.service.js";
 import { notifyCustomerPaymentReceived } from "../telegram/notify.service.js";
@@ -381,6 +382,16 @@ function writeTenantWith<T>(req: FastifyRequest, permission: Permission, fn: (tx
   });
 }
 
+/**
+ * "Mas'ul bo'lganlari" chegarasi yoqilgan bo'lsa — foydalanuvchining yetkazuvchi profillari,
+ * aks holda `null` (chegara yo'q).
+ */
+async function deliveryScopeFor(tenant: TenantContext): Promise<string[] | null> {
+  const scopes = await effectiveScopes(db, tenant);
+  if (!isResponsibleOnly(scopes, "delivery.view")) return null;
+  return responsibleDeliveryAgentIds(db, tenant);
+}
+
 async function readAgent(req: FastifyRequest): Promise<{ context: DeliveryAgentContext; permissions: Permission[] }> {
   const tenant = await requireTenant(db, authOf(req).user);
   await requirePermission(db, tenant, "delivery.accept");
@@ -548,7 +559,9 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   app.get("/tasks", async (req) => {
     const query = tasksQuery.parse(req.query);
     const tenant = await readTenantWith(req, "delivery.view");
+    const responsibleAgentIds = await deliveryScopeFor(tenant);
     return listDeliveryTasks(db, tenant, {
+      ...(responsibleAgentIds ? { responsibleAgentIds } : {}),
       dateFrom: query.dateFrom,
       dateTo: query.dateTo,
       statuses: query.status,
@@ -580,7 +593,13 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   app.get("/tasks/:taskId", async (req) => {
     const { taskId } = taskParams.parse(req.params);
     const tenant = await readTenantWith(req, "delivery.view");
-    return { task: await getDeliveryTask(db, tenant.company.id, taskId, { kind: "manager" }) };
+    const task = await getDeliveryTask(db, tenant.company.id, taskId, { kind: "manager" });
+    // Chegara yoqilgan bo'lsa begona yetkazma TOPILMADI bo'lib qaytadi (mavjudligi oshkor bo'lmaydi)
+    const responsibleAgentIds = await deliveryScopeFor(tenant);
+    if (responsibleAgentIds && !responsibleAgentIds.includes(task.deliveryAgentId ?? "")) {
+      throw notFound("Yetkazma topilmadi");
+    }
+    return { task };
   });
 
   app.get("/tasks/:taskId/proofs/:proofId", async (req, reply) => {

@@ -32,7 +32,14 @@
 import type { FastifyInstance } from "fastify";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { PIN_PATTERN, badRequest, forbidden, isPermission, type Permission } from "@bum/shared";
+import {
+  PIN_PATTERN,
+  RESPONSIBLE_SCOPED_PERMISSIONS,
+  badRequest,
+  forbidden,
+  isPermission,
+  type Permission,
+} from "@bum/shared";
 import { db } from "../../db/client.js";
 import { companyMembers } from "../../db/schema/platform.js";
 import { withTransaction, type DbOrTx } from "../../db/transaction.js";
@@ -201,17 +208,28 @@ const permissionList = z
   .array(z.custom<Permission>((v) => typeof v === "string" && isPermission(v), "Noma'lum ruxsat"))
   .max(200);
 const roleColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Rang #RRGGBB ko'rinishida").nullable().optional();
+/**
+ * Mas'uliyat chegarasi: ruxsat → "responsible". Faqat chegara qo'yish MA'NOGA ega bo'lgan
+ * ruxsatlar qabul qilinadi (`RESPONSIBLE_SCOPED_PERMISSIONS`), qolgani serverda tashlab yuboriladi.
+ */
+// `partialRecord` — kalitlar ixtiyoriy: faqat chegara qo'yilgan ruxsatlar yuboriladi.
+// Katalogda yo'q ruxsat yuborilsa so'rov rad etiladi (admin xatoni darhol ko'radi).
+const roleScopes = z
+  .partialRecord(z.enum(RESPONSIBLE_SCOPED_PERMISSIONS), z.literal("responsible"))
+  .optional();
 const roleCreateBody = z.strictObject({
   name: z.string().trim().min(1).max(100),
   description: nullableText(500),
   color: roleColor,
   permissions: permissionList,
+  scopes: roleScopes,
 });
 const rolePatchBody = z.strictObject({
   name: z.string().trim().min(1).max(100).optional(),
   description: nullableText(500),
   color: roleColor,
   permissions: permissionList.optional(),
+  scopes: roleScopes,
   isActive: z.boolean().optional(),
 });
 const roleParams = z.object({ roleId: z.uuid() });

@@ -582,6 +582,13 @@
       "when": 1790208265333,
       "tag": "0082_customer_balance_withdrawal",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1790214534637,
+      "tag": "0083_role_responsibility_scope",
+      "breakpoints": true
     }
   ]
 }

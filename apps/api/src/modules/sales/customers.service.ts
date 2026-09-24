@@ -7,7 +7,7 @@
  *  - kredit limiti saqlanardi, lekin hech qayerda tekshirilmasdi — endi jo'natish va POS nasiyasida
  *  - valyuta erkin edi — faqat kompaniya valyutasi; qarzi bor mijozni faolsizlantirib bo'lmaydi
  */
-import { and, asc, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, ilike, inArray, or, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
 import { customerPayments, customers, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -126,14 +126,21 @@ export async function listCustomers(
     /** Faqat qarzi borlar. */
     withDebt?: boolean;
     sort?: CustomerSort;
+    /**
+     * "Mas'ul bo'lganlari" chegarasi: faqat shu ID'lardagi mijozlar. `null` — chegara yo'q.
+     * Bo'sh massiv — mas'ul mijozi yo'q, ya'ni ro'yxat ham bo'sh bo'ladi.
+     */
+    responsibleIds?: string[] | null;
   },
 ) {
+  const scoped = options.responsibleIds ?? null;
   return conn
     .select(customerFields)
     .from(customers)
     .where(
       and(
         eq(customers.companyId, tenant.company.id),
+        scoped === null ? undefined : scoped.length === 0 ? sql`false` : inArray(customers.id, scoped),
         options.includeInactive ? undefined : eq(customers.isActive, true),
         options.search ? customerSearch(options.search) : undefined,
         // `ilike` joker belgisiz — registrga befarq TENGLIK (hudud ro'yxatidan tanlanadi)
@@ -172,8 +179,16 @@ export async function listCustomerRegions(
     .orderBy(asc(customers.city), asc(customers.district));
 }
 
-export async function getCustomer(conn: DbOrTx, tenant: TenantContext, customerId: string) {
+export async function getCustomer(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  customerId: string,
+  /** "Mas'ul bo'lganlari" chegarasi; `null` — chegara yo'q. */
+  responsibleIds: string[] | null = null,
+) {
   const companyId = tenant.company.id;
+  // Chegara bo'lsa begona mijoz "TOPILMADI" bo'lib qaytadi — mavjudligi ham oshkor bo'lmaydi
+  if (responsibleIds !== null && !responsibleIds.includes(customerId)) throw notFound("Mijoz topilmadi");
   const [customer] = await conn
     .select(customerFields)
     .from(customers)

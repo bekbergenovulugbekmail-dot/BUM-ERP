@@ -15,7 +15,15 @@
  *  - tizim rolining nomi o'zgarsa a'zoliklardagi rol nomi eskirib qolardi
  */
 import { and, count, eq, or } from "drizzle-orm";
-import { badRequest, conflict, forbidden, notFound, type Permission } from "@bum/shared";
+import {
+  badRequest,
+  conflict,
+  forbidden,
+  notFound,
+  sanitizeRoleScopes,
+  type Permission,
+  type RoleScopes,
+} from "@bum/shared";
 import { companyMembers, roles } from "../../db/schema/platform.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
@@ -27,6 +35,7 @@ const roleColumns = {
   description: roles.description,
   color: roles.color,
   permissions: roles.permissions,
+  scopes: roles.scopes,
   isSystem: roles.isSystem,
   isActive: roles.isActive,
   memberCount: roles.memberCount,
@@ -104,6 +113,8 @@ export type NewRole = {
   description?: string | null;
   color?: string | null;
   permissions: Permission[];
+  /** Ruxsat bo'yicha mas'uliyat chegarasi: `{"sales.view": "responsible"}`. */
+  scopes?: RoleScopes;
 };
 
 export async function createRole(tx: Tx, tenant: TenantContext, input: NewRole, meta: RequestMeta) {
@@ -120,6 +131,8 @@ export async function createRole(tx: Tx, tenant: TenantContext, input: NewRole, 
       description: input.description ?? null,
       color: input.color ?? null,
       permissions,
+      // Katalogda yo'q ruxsat yoki noma'lum chegara qiymati saqlanmaydi
+      scopes: sanitizeRoleScopes(input.scopes),
       isSystem: false,
     })
     .returning(roleColumns);
@@ -137,6 +150,7 @@ export type RolePatch = {
   description?: string | null;
   color?: string | null;
   permissions?: Permission[];
+  scopes?: RoleScopes;
   isActive?: boolean;
 };
 
@@ -181,6 +195,13 @@ export async function updateRole(
       await assertCanGrant(tx, tenant, added);
       set.permissions = next;
       changes.push("permissions");
+    }
+  }
+  if (patch.scopes !== undefined) {
+    const next = sanitizeRoleScopes(patch.scopes);
+    if (JSON.stringify(next) !== JSON.stringify(role.scopes ?? {})) {
+      set.scopes = next;
+      changes.push("scopes");
     }
   }
   if (patch.isActive !== undefined && patch.isActive !== role.isActive) {

@@ -451,3 +451,40 @@ export const LEGACY_PERMISSION_ALIASES: Record<string, Permission> = {
   "production.manage": "manufacturing.manage",
   "production.approve": "manufacturing.approve",
 };
+
+/**
+ * MAS'ULIYAT CHEGARASI ("Mas'ul bo'lganlari").
+ *
+ * Ba'zi ruxsatlarga chegara qo'yish mumkin: xodim faqat O'ZIGA biriktirilgan yozuvlar bilan
+ * ishlaydi. Bu ro'yxat — chegara MA'NOGA ega bo'lgan ruxsatlar; qolganlariga qo'yib bo'lmaydi
+ * (masalan sozlamalarda "mas'ul bo'lgani" degan tushuncha yo'q).
+ *
+ * Mas'uliyat mavjud biriktirishlardan o'qiladi, yangi jadval yaratilmaydi:
+ *   agent  → sales_reps → distribution_routes → route_customers → customers
+ *   kuryer → delivery_agents → delivery_tasks
+ */
+export const RESPONSIBLE_SCOPED_PERMISSIONS = [
+  "sales.view",
+  "crm.view",
+  "delivery.view",
+] as const satisfies readonly Permission[];
+
+export type ResponsibleScopedPermission = (typeof RESPONSIBLE_SCOPED_PERMISSIONS)[number];
+
+export type PermissionScope = "responsible";
+/** Rol ruxsatlari bo'yicha chegaralar: ruxsat bu yerda bo'lmasa — chegara yo'q. */
+export type RoleScopes = Partial<Record<ResponsibleScopedPermission, PermissionScope>>;
+
+export function isResponsibleScopable(permission: string): permission is ResponsibleScopedPermission {
+  return (RESPONSIBLE_SCOPED_PERMISSIONS as readonly string[]).includes(permission);
+}
+
+/** Faqat katalogdagi ruxsatlar va faqat ma'lum chegara qiymatlari saqlanadi. */
+export function sanitizeRoleScopes(input: unknown): RoleScopes {
+  if (!input || typeof input !== "object") return {};
+  const result: RoleScopes = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (value === "responsible" && isResponsibleScopable(key)) result[key] = "responsible";
+  }
+  return result;
+}

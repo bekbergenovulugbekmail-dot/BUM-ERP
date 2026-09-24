@@ -80,6 +80,11 @@ import {
   saveCashbackSettings,
 } from "./cashback.service.js";
 import { exportCustomersCsv, importCustomers } from "./customers-csv.service.js";
+import {
+  effectiveScopes,
+  isResponsibleOnly,
+  responsibleCustomerIds,
+} from "../company/responsibility.service.js";
 import { customerTurnover } from "./customer-turnover.service.js";
 import {
   depositToBalance,
@@ -418,6 +423,16 @@ async function readTenant(req: FastifyRequest, permission: Permission): Promise<
   return tenant;
 }
 
+/**
+ * "Mas'ul bo'lganlari" chegarasi yoqilgan bo'lsa — foydalanuvchi mas'ul mijozlari ro'yxati,
+ * aks holda `null` (chegara yo'q). Frontendga ishonilmaydi: filtr shu yerda qo'llanadi.
+ */
+async function customerScopeFor(tenant: TenantContext): Promise<string[] | null> {
+  const scopes = await effectiveScopes(db, tenant);
+  if (!isResponsibleOnly(scopes, "sales.view")) return null;
+  return responsibleCustomerIds(db, tenant);
+}
+
 function writeInTenant<T>(
   req: FastifyRequest,
   permission: Permission,
@@ -456,7 +471,10 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/customers", async (req) => {
     const query = customersQuery.parse(req.query);
-    return { customers: await listCustomers(db, await readTenant(req, "sales.view"), query) };
+    const tenant = await readTenant(req, "sales.view");
+    // "Mas'ul bo'lganlari" chegarasi rolda yoqilgan bo'lsa — faqat o'z mijozlari
+    const responsibleIds = await customerScopeFor(tenant);
+    return { customers: await listCustomers(db, tenant, { ...query, responsibleIds }) };
   });
 
   /** Saralash tanlovlari uchun: mavjud shahar/tuman va mahalla juftliklari va mijozlar soni. */
@@ -484,7 +502,8 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/customers/:customerId", async (req) => {
     const { customerId } = customerParams.parse(req.params);
-    return { customer: await getCustomer(db, await readTenant(req, "sales.view"), customerId) };
+    const tenant = await readTenant(req, "sales.view");
+    return { customer: await getCustomer(db, tenant, customerId, await customerScopeFor(tenant)) };
   });
 
   app.get("/customers/:customerId/balance", async (req) => {

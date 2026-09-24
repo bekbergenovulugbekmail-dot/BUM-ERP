@@ -259,6 +259,12 @@ export const roles = pgTable(
     description: text("description"),
     color: varchar("color", { length: 16 }),
     permissions: text("permissions").array().notNull().default([]),
+    /**
+     * Ruxsat bo'yicha MAS'ULIYAT chegarasi: `{"sales.view": "responsible"}` — xodim faqat
+     * o'ziga biriktirilgan yozuvlarni ko'radi. Ruxsat bu yerda yo'q bo'lsa — chegara yo'q
+     * (mavjud rollar avvalgidek ishlaydi).
+     */
+    scopes: jsonb("scopes").$type<Record<string, "responsible">>().notNull().default({}),
     isSystem: boolean("is_system").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     memberCount: integer("member_count").notNull().default(0),

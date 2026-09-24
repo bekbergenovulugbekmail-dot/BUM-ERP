@@ -10,7 +10,16 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { Plus, Edit2, Trash2, Shield, Check, Lock } from "lucide-react";
-import { ALL_PERMISSIONS, FULL_ACCESS_ROLES, PERMISSIONS, isPermission, type Permission } from "@bum/shared";
+import {
+  ALL_PERMISSIONS,
+  FULL_ACCESS_ROLES,
+  PERMISSIONS,
+  isPermission,
+  isResponsibleScopable,
+  sanitizeRoleScopes,
+  type Permission,
+  type RoleScopes,
+} from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -26,6 +35,8 @@ type RoleFormData = {
   description: string;
   color: string;
   permissions: Permission[];
+  /** "Mas'ul bo'lganlari" chegarasi qo'yilgan ruxsatlar. */
+  scopes: RoleScopes;
 };
 
 type RoleBody = {
@@ -33,6 +44,7 @@ type RoleBody = {
   description: string | null;
   color: string | null;
   permissions: Permission[];
+  scopes: RoleScopes;
 };
 
 const COLORS = ["#6366f1", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#ef4444", "#94a3b8"];
@@ -46,7 +58,7 @@ const groupedPermissions = ALL_PERMISSIONS.reduce<Record<string, Permission[]>>(
   return acc;
 }, {});
 
-const EMPTY_FORM: RoleFormData = { name: "", description: "", color: "#6366f1", permissions: [] };
+const EMPTY_FORM: RoleFormData = { name: "", description: "", color: "#6366f1", permissions: [], scopes: {} };
 
 export default function RolesSection() {
   const { data, error } = useApiQuery<{ roles: CompanyRole[] }>("/api/company/roles");
@@ -73,6 +85,7 @@ export default function RolesSection() {
         description: role.description ?? "",
         color: role.color ?? "#6366f1",
         permissions: role.permissions.filter(isPermission),
+        scopes: sanitizeRoleScopes(role.scopes),
       });
     } else {
       setEditing(null);
@@ -80,6 +93,14 @@ export default function RolesSection() {
     }
     setOpen(true);
   };
+
+  const toggleScope = (p: Permission) =>
+    setForm((f) => {
+      const next = { ...f.scopes };
+      if (next[p as keyof RoleScopes]) delete next[p as keyof RoleScopes];
+      else Object.assign(next, { [p]: "responsible" });
+      return { ...f, scopes: next };
+    });
 
   const togglePermission = (p: Permission) => {
     setForm((f) => ({
@@ -106,6 +127,10 @@ export default function RolesSection() {
       description: form.description.trim() || null,
       color: form.color || null,
       permissions: form.permissions,
+      // Ruxsat olib tashlansa chegarasi ham ketadi — "yetim" chegara qolmaydi
+      scopes: sanitizeRoleScopes(
+        Object.fromEntries(Object.entries(form.scopes).filter(([key]) => form.permissions.includes(key as Permission))),
+      ),
     };
     try {
       if (editing) {
@@ -291,6 +316,30 @@ export default function RolesSection() {
                           </button>
                         );
                       })}
+                      {/*
+                        Mas'uliyat chegarasi — faqat ma'noga ega ruxsatlarda va faqat ruxsat
+                        tanlangan bo'lsa. Yoqilsa xodim o'ziga biriktirilganini ko'radi.
+                      */}
+                      {perms.filter((p) => isResponsibleScopable(p) && form.permissions.includes(p)).map((p) => (
+                        <button
+                          key={`${p}-scope`}
+                          onClick={() => toggleScope(p)}
+                          className={cn(
+                            "col-span-2 flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs transition-colors cursor-pointer",
+                            form.scopes[p] === "responsible" ? "bg-amber-500/15 text-amber-700 dark:text-amber-400" : "text-muted-foreground hover:bg-accent",
+                          )}
+                        >
+                          <div className={cn(
+                            "flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded border",
+                            form.scopes[p] === "responsible" ? "border-amber-500 bg-amber-500" : "border-border",
+                          )}>
+                            {form.scopes[p] === "responsible" && <Check className="h-2.5 w-2.5 text-white" />}
+                          </div>
+                          <span className="truncate">
+                            {PERMISSIONS[p].label} — faqat mas&apos;ul bo&apos;lganlari
+                          </span>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 );

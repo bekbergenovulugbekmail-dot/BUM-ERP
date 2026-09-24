@@ -782,6 +782,11 @@ export type DeliveryTaskFilters = {
   reviewPending?: boolean;
   /** Tovari omborga qaytarilmagan (yetkazilmagan yoki qisman) yetkazmalar. */
   returnPending?: boolean;
+  /**
+   * "Mas'ul bo'lganlari" chegarasi: faqat shu yetkazuvchilarga biriktirilganlar.
+   * Berilmasa (`undefined`) chegara yo'q.
+   */
+  responsibleAgentIds?: string[];
   limit: number;
   cursor?: string;
 };
@@ -805,6 +810,15 @@ export async function listDeliveryTasks(conn: DbOrTx, tenant: TenantContext, fil
   if (filters.dateTo) conditions.push(sql`${deliveryTasks.scheduledDate} <= ${filters.dateTo}::date`);
   if (filters.statuses?.length) conditions.push(inArray(deliveryTasks.status, filters.statuses));
   if (filters.deliveryAgentId) conditions.push(eq(deliveryTasks.deliveryAgentId, filters.deliveryAgentId));
+  // "Mas'ul bo'lganlari" chegarasi: faqat shu agentlarga biriktirilgan yetkazmalar.
+  // Bo'sh massiv — mas'ul yetkazmasi yo'q, ya'ni ro'yxat bo'sh bo'ladi.
+  if (filters.responsibleAgentIds) {
+    conditions.push(
+      filters.responsibleAgentIds.length === 0
+        ? sql`false`
+        : inArray(deliveryTasks.deliveryAgentId, filters.responsibleAgentIds),
+    );
+  }
   if (filters.unassigned) conditions.push(isNull(deliveryTasks.deliveryAgentId));
   if (filters.branchId) conditions.push(eq(deliveryAgents.branchId, filters.branchId));
   if (filters.territory) conditions.push(eq(deliveryAgents.territory, filters.territory));
