@@ -143,3 +143,28 @@ describe("Sotuv agenti xavfsizligi", () => {
     expect(codes[12]).toBe(429);
   });
 });
+
+/**
+ * 4-VAZIFA: "Zakaz olish" — alohida modul emas, SAVDO ichidagi ruxsat (`sales_agent.use`).
+ * Frontendda yashirish yetarli emas: ruxsati yo'q xodim API orqali ham buyurtma yarata olmasligi kerak.
+ */
+describe("Zakaz olish ruxsati", () => {
+  it("ruxsatsiz xodim agent ish joyiga ham, buyurtma yaratishga ham kira olmaydi", async () => {
+    // Ombor menejerida `sales_agent.use` yo'q
+    const warehouse = await addEmployee(app, company, "Ombor menejeri");
+
+    const workspace = await call(warehouse.cookie, "GET", "/api/sales-agent/me");
+    expect(workspace.statusCode, "ish joyi yopiq").toBe(403);
+
+    // Buyurtma qoralamasi idempotent PUT bilan yaratiladi — u ham yopiq bo'lishi kerak.
+    // Tana TO'G'RI shaklda yuboriladi, aks holda 400 (validatsiya) ruxsat tekshiruvini berkitib qo'yadi.
+    const draft = await call(warehouse.cookie, "PUT", `/api/sales-agent/orders/drafts/${randomUUID()}`, {
+      customerId: randomUUID(),
+      items: [{ productId, pieces: "1" }],
+    });
+    expect(draft.statusCode, "buyurtma yaratish ham yopiq").toBe(403);
+
+    const catalog = await call(warehouse.cookie, "GET", "/api/sales-agent/catalog");
+    expect(catalog.statusCode, "katalog ham yopiq").toBe(403);
+  });
+});

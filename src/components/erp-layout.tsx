@@ -169,6 +169,13 @@ function SidebarNav({ collapsed, onToggle, onLinkClick }: SidebarProps) {
                   </p>
                 )}
                 <div className="space-y-0.5">
+                  {/*
+                    "Zakaz olish" — alohida modul EMAS, Savdo ichidagi ruxsatga bog'liq amal
+                    (`sales_agent.use`). Ruxsat o'chirilsa bu yerda ko'rinmaydi va server ham 403 beradi.
+                  */}
+                  {groupId === "operations" && agentWorkspace && (
+                    <OrderTakingLink lng={lng} collapsed={collapsed} onLinkClick={onLinkClick} />
+                  )}
                   {groupModules.map((mod) => {
                     const Icon = getIcon(mod.icon);
                     const to = `/${lng}/${mod.path}`;
@@ -207,27 +214,34 @@ function SidebarNav({ collapsed, onToggle, onLinkClick }: SidebarProps) {
           })}
         </TooltipProvider>
 
-        {/* Mobil agent ish joyi — ERP bo'limi emas, shuning uchun alohida havola */}
-        {agentWorkspace && (
-          <div>
-            {!collapsed && (
-              <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40 select-none">
-                {groupLabels.operations ?? MODULE_GROUPS.operations}
-              </p>
-            )}
-            <NavLink
-              to={`/${lng}/sales-agent`}
-              onClick={onLinkClick}
-              title="Sotuv agenti ish joyi"
-              className="flex items-center gap-3 px-2 py-2 rounded-md text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-            >
-              <Smartphone className={cn("shrink-0", collapsed ? "h-5 w-5" : "h-4 w-4")} />
-              {!collapsed && <span className="truncate">Zakaz olish</span>}
-            </NavLink>
-          </div>
-        )}
       </nav>
     </aside>
+  );
+}
+
+/**
+ * "Zakaz olish" havolasi — Savdo guruhida, `sales_agent.use` ruxsati bilan.
+ * Alohida modul sifatida emas: buyurtma oqimi mavjud agent ish joyiniki, dublikat yo'q.
+ */
+function OrderTakingLink({
+  lng,
+  collapsed,
+  onLinkClick,
+}: {
+  lng: string;
+  collapsed: boolean;
+  onLinkClick?: () => void;
+}) {
+  return (
+    <NavLink
+      to={`/${lng}/sales-agent`}
+      onClick={onLinkClick}
+      title="Zakaz olish"
+      className="flex items-center gap-3 rounded-md px-2 py-2 text-sm text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+    >
+      <Smartphone className={cn("shrink-0", collapsed ? "h-5 w-5" : "h-4 w-4")} />
+      {!collapsed && <span className="truncate">Zakaz olish</span>}
+    </NavLink>
   );
 }
 

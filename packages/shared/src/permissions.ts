@@ -88,7 +88,12 @@ export const PERMISSIONS = {
 
   // ─── Sotuv agenti ──────────────────────────────────────────────────────────
   /** Mobil agent ish joyi — bog'langan agentning o'z marshruti, do'konlari va buyurtmalari. */
-  "sales_agent.use":              { label: "Sotuv agenti ish joyi",        group: "Sotuv agenti" },
+  /**
+   * "Zakaz olish" — alohida modul emas, SAVDO ichidagi ruxsat. Yoqilgan bo'lsa xodim
+   * zakaz olish ish joyiga kiradi va mavjud agent buyurtma oqimidan foydalanadi;
+   * o'chirilgan bo'lsa menyuda ko'rinmaydi VA server 403 qaytaradi.
+   */
+  "sales_agent.use":              { label: "Sotuvda zakaz olish",          group: "Savdo" },
   "sales_agent.supervise":        { label: "Agentlarni nazorat qilish",    group: "Sotuv agenti" },
   /** Lokatsiya — maxfiy operatsion ma'lumot: faqat o'qish rollariga avtomatik berilmaydi. */
   "sales_agent.location.view":    { label: "Agent lokatsiyasini ko'rish",  group: "Sotuv agenti" },
