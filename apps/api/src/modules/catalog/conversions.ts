@@ -8,9 +8,9 @@
  * Mahsulotga xos konversiya umumiysidan ustun. Faqat to'g'ri yo'nalish
  * (birlik → asosiy) qo'llanadi: teskari koeffitsientni bo'lish yaxlitlash beradi.
  */
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { badRequest } from "@bum/shared";
-import { unitConversions } from "../../db/schema/catalog.js";
+import { unitConversions, units } from "../../db/schema/catalog.js";
 import type { DbOrTx } from "../../db/transaction.js";
 
 export async function unitFactorToBase(
@@ -69,4 +69,66 @@ export async function unitFactorsToBase(
     if (Number.isFinite(value) && value > 0) factors.set(row.fromUnitId, value);
   }
   return factors;
+}
+
+/**
+ * Bir necha mahsulot uchun "qaysi birlikda kiritish mumkin" ro'yxati — BITTA so'rovda.
+ *
+ * Hujjat qatorida miqdor asosiy birlikda ham ("dona"), qadoqda ham ("blok") kiritilishi kerak:
+ * ta'minotchi blok bilan sotadi, ombor esa donada yuritiladi. Ro'yxat har doim asosiy birlikdan
+ * boshlanadi, keyin shu mahsulotga konversiyasi bor birliklar (mahsulotga xos konversiya umumiysidan ustun).
+ *
+ * `factor` — 1 birlikda nechta ASOSIY birlik bor (1 blok = 6 dona → "6"). Asosiy birlik uchun "1".
+ */
+export type UnitOption = { unitId: string; name: string; shortName: string; factor: string };
+
+export async function unitOptionsForProducts(
+  conn: DbOrTx,
+  companyId: string,
+  items: { id: string; baseUnitId: string }[],
+): Promise<Map<string, UnitOption[]>> {
+  const result = new Map<string, UnitOption[]>();
+  if (items.length === 0) return result;
+
+  const baseUnitIds = [...new Set(items.map((item) => item.baseUnitId))];
+  const productIds = items.map((item) => item.id);
+
+  const rows = await conn
+    .select({
+      productId: unitConversions.productId,
+      fromUnitId: unitConversions.fromUnitId,
+      toUnitId: unitConversions.toUnitId,
+      factor: unitConversions.factor,
+      name: units.name,
+      shortName: units.shortName,
+    })
+    .from(unitConversions)
+    .innerJoin(units, eq(units.id, unitConversions.fromUnitId))
+    .where(
+      and(
+        eq(unitConversions.companyId, companyId),
+        inArray(unitConversions.toUnitId, baseUnitIds),
+        or(inArray(unitConversions.productId, productIds), isNull(unitConversions.productId)),
+        eq(units.isActive, true),
+      ),
+    );
+
+  const baseUnits = await conn
+    .select({ id: units.id, name: units.name, shortName: units.shortName })
+    .from(units)
+    .where(inArray(units.id, baseUnitIds));
+  const baseById = new Map(baseUnits.map((unit) => [unit.id, unit]));
+
+  for (const item of items) {
+    const base = baseById.get(item.baseUnitId);
+    const options = new Map<string, UnitOption>();
+    if (base) options.set(base.id, { unitId: base.id, name: base.name, shortName: base.shortName, factor: "1" });
+    // Avval umumiy, keyin mahsulotga xos — ikkinchisi birinchisining ustidan yozadi
+    for (const row of rows.filter((r) => r.productId === null).concat(rows.filter((r) => r.productId === item.id))) {
+      if (row.toUnitId !== item.baseUnitId || row.fromUnitId === item.baseUnitId) continue;
+      options.set(row.fromUnitId, { unitId: row.fromUnitId, name: row.name, shortName: row.shortName, factor: row.factor });
+    }
+    result.set(item.id, [...options.values()]);
+  }
+  return result;
 }

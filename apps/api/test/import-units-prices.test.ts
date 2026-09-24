@@ -558,3 +558,63 @@ describe("Xarid importi: qadoq birligi va konversiya", () => {
     expect((await stockOf(product.id)).quantity, "10 blok × 24 = 240 dona").toBe(240);
   });
 });
+
+/**
+ * Xarid hujjatida miqdor "dona" yonida "blok"da ham kiritiladi: ro'yxat shu ikkala birlikni
+ * beradi, aks holda oynada tanlov chiqmaydi va ta'minotchi blok bilan sotganda miqdor
+ * donaga aylanib ketardi.
+ */
+describe("Mahsulot ro'yxati: kiritish birliklari (`?withUnits=true`)", () => {
+  const listWithUnits = async (cookie = company.ownerCookie) =>
+    call(cookie, "GET", "/api/catalog/products?limit=200&withUnits=true");
+
+  it("asosiy birlik birinchi, qadoq birligi koeffitsienti bilan keladi", async () => {
+    expect(
+      (
+        await importProducts([
+          { name: "Suv blokda", sku: "SUV-BL", unit: "dona", purchaseUnit: "bl", unitsPerPackage: "6", purchasePrice: "60 000", salesPrice: "12 000" },
+          { name: "Oddiy suv", sku: "SUV", unit: "dona", purchasePrice: "8 000", salesPrice: "10 000" },
+        ])
+      ).statusCode,
+    ).toBe(200);
+
+    const res = await listWithUnits();
+    expect(res.statusCode, res.body).toBe(200);
+    const rows: { sku: string; baseUnitId: string; purchaseUnitId: string | null; unitOptions: { unitId: string; shortName: string; factor: string }[] }[] =
+      res.json().products;
+
+    const blokli = rows.find((row) => row.sku === "SUV-BL")!;
+    expect(blokli.purchaseUnitId, "xarid birligi blok").toBe(box);
+    expect(blokli.unitOptions.map((unit) => unit.unitId), "asosiy birlik birinchi").toEqual([piece, box]);
+    expect(blokli.unitOptions[0]).toMatchObject({ unitId: piece, shortName: "d", factor: "1" });
+    expect(blokli.unitOptions[1]).toMatchObject({ unitId: box, shortName: "bl", factor: "6.0000" });
+
+    const oddiy = rows.find((row) => row.sku === "SUV")!;
+    expect(oddiy.unitOptions, "qadoqsiz mahsulotda faqat asosiy birlik").toHaveLength(1);
+    expect(oddiy.unitOptions[0]!.unitId).toBe(piece);
+  });
+
+  it("so'ralmasa ro'yxat avvalgidek qoladi (`unitOptions` yo'q)", async () => {
+    expect((await importProducts([{ name: "Oddiy suv", sku: "SUV", unit: "dona", purchasePrice: "8 000", salesPrice: "10 000" }])).statusCode).toBe(200);
+    const rows = (await call(company.ownerCookie, "GET", "/api/catalog/products?limit=200")).json().products;
+    expect(rows[0]).not.toHaveProperty("unitOptions");
+  });
+
+  it("boshqa kompaniyaning konversiyasi qo'shilib ketmaydi", async () => {
+    expect(
+      (
+        await importProducts(
+          [{ name: "Suv blokda", sku: "SUV-BL", unit: "dona", purchaseUnit: "bl", unitsPerPackage: "6", purchasePrice: "60 000", salesPrice: "12 000" }],
+          {},
+          other.ownerCookie,
+        )
+      ).statusCode,
+    ).toBe(200);
+    expect((await importProducts([{ name: "Suv", sku: "SUV-BL", unit: "dona", purchasePrice: "8 000", salesPrice: "10 000" }])).statusCode).toBe(200);
+
+    const rows = (await listWithUnits()).json().products;
+    const suv = rows.find((row: { sku: string }) => row.sku === "SUV-BL")!;
+    expect(suv.unitOptions, "begona kompaniyaning bloki ko'rinmaydi").toHaveLength(1);
+    expect(suv.unitOptions[0].unitId).toBe(piece);
+  });
+});

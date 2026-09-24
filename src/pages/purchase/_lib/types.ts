@@ -102,18 +102,28 @@ export type PurchaseOrderDetail = Omit<PurchaseOrderRow, "itemCount"> & {
 /** `/api/inventory/warehouses` — tanlash uchun kerakli maydonlar. */
 export type WarehouseOption = { id: string; name: string; code: string; isDefault: boolean; isActive: boolean };
 
+/**
+ * Miqdor kiritish mumkin bo'lgan birlik. `factor` — 1 birlikda nechta ASOSIY birlik
+ * ("1 blok = 6 dona" → "6"); asosiy birlik uchun "1".
+ */
+export type UnitOption = { unitId: string; name: string; shortName: string; factor: string };
+
 /** `/api/catalog/products` — tanlash uchun kerakli maydonlar. */
 export type ProductOption = {
   id: string;
   name: string;
   sku: string;
   baseUnitId: string;
+  /** Mahsulot odatda qaysi birlikda xarid qilinadi ("blok"); null — asosiy birlikda. */
+  purchaseUnitId: string | null;
   purchasePrice: string;
   /** Narx valyutasi; null — asosiy valyuta. */
   purchaseCurrency: string | null;
   taxRate: string;
   isActive: boolean;
   isPurchaseable: boolean;
+  /** `?withUnits=true` bilan so'ralganda — shu mahsulot uchun birliklar (asosiysi birinchi). */
+  unitOptions?: UnitOption[];
 };
 
 export const PAYMENT_LABELS: Record<PaymentMethod, string> = {

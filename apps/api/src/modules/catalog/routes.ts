@@ -169,8 +169,10 @@ const productListQuery = z.object({
   isActive: boolQuery,
   limit: z.coerce.number().int().min(1).max(200).default(50),
   cursor: z.string().max(1000).optional(),
+  /** Har mahsulot uchun kiritish mumkin bo'lgan birliklar ("dona", "blok") — xarid hujjati uchun. */
+  withUnits: boolQuery,
 });
-const exportQuery = productListQuery.omit({ limit: true, cursor: true });
+const exportQuery = productListQuery.omit({ limit: true, cursor: true, withUnits: true });
 
 const importCell = z.union([z.string().max(1000), z.number()]).optional();
 const importBody = z.strictObject({

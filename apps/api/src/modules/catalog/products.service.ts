@@ -31,6 +31,7 @@ import { priceSchema, qtySchema } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
+import { unitOptionsForProducts } from "./conversions.js";
 import { assertUnitsActive, listUnits } from "./units.service.js";
 import {
   assertCategoryInScope,
@@ -105,7 +106,7 @@ function stripCost<T extends { purchasePrice?: string }>(row: T, canViewCost: bo
 export async function listProducts(
   conn: DbOrTx,
   tenant: TenantContext,
-  options: ProductFilters & { limit: number; cursor?: string; canViewCost?: boolean },
+  options: ProductFilters & { limit: number; cursor?: string; canViewCost?: boolean; withUnits?: boolean },
 ) {
   let after: { name: string; id: string } | null = null;
   if (options.cursor) {
@@ -138,8 +139,16 @@ export async function listProducts(
 
   const page = rows.slice(0, options.limit);
   const last = page.at(-1);
+  // `withUnits` — hujjat qatorida miqdorni qadoqda ("blok") ham kiritish uchun; qo'shimcha
+  // so'rov faqat shu so'ralganda bajariladi (POS va boshqa ro'yxatlar avvalgidek qoladi).
+  const unitOptions = options.withUnits
+    ? await unitOptionsForProducts(conn, tenant.company.id, page.map((row) => ({ id: row.id, baseUnitId: row.baseUnitId })))
+    : null;
   return {
-    products: page.map((row) => stripCost(row, options.canViewCost === true)),
+    products: page.map((row) => {
+      const stripped = stripCost(row, options.canViewCost === true);
+      return unitOptions ? { ...stripped, unitOptions: unitOptions.get(row.id) ?? [] } : stripped;
+    }),
     nextCursor: rows.length > options.limit && last ? encodeCursor([last.name, last.id]) : null,
   };
 }

@@ -4591,3 +4591,35 @@ production deploy qilinmadi.
 
 **Keyingi qadam:** egasi `/authorize` qiladi → FAZA 1 dan Bito auditi. F-1 va F-2 Bito'siz ham
 asoslangan, shuning uchun egasining ruxsati bilan ular oldinroq ham yopilishi mumkin.
+
+## Xaridda miqdor: "dona" yonida "blok" (2026-09-24)
+
+Egasi so'rovi (15): xarid yaratishda miqdorni dona yonida blokda ham kiritish mumkin bo'lsin —
+dona yozilsa donada, blok yozilsa blokda kirsin.
+
+Ilgari `create-order-dialog.tsx` qator birligini HAR DOIM `product.baseUnitId` qilib qo'yardi va
+oynada birlik tanlovi umuman yo'q edi. Natijada ta'minotchi blok bilan sotsa ham hujjatga dona
+yozilar, narx esa mahsulotning `purchasePrice` idan (import faylida u BLOK narxi bo'ladi) olinardi
+— ya'ni 10 blok 10 dona bo'lib, summa 6 barobar kam chiqardi. Server tomonda konversiya
+(`unitFactorToBase`) allaqachon to'g'ri ishlardi, yetmagani — kirish oynasi.
+
+- **API:** `unitOptionsForProducts` (`catalog/conversions.ts`) — bir necha mahsulot uchun
+  "qaysi birlikda kiritish mumkin" ro'yxatini BITTA so'rovda beradi (asosiy birlik birinchi,
+  keyin konversiyasi bor birliklar; mahsulotga xos konversiya umumiysidan ustun).
+  `GET /api/catalog/products?withUnits=true` — har mahsulotga `unitOptions[]`
+  (`unitId`, `name`, `shortName`, `factor`). Bayroqsiz javob AVVALGIDEK (POS va boshqa
+  ro'yxatlar qo'shimcha so'rov qilmaydi); eksport so'rovida bu parametr yo'q.
+- **Web:** Miqdor katagida birlik tanlovi (mahsulotda qadoq bo'lsa — "Dona" / "Blok").
+  Qator ochilganda mahsulotning XARID birligi qo'yiladi (yo'q bo'lsa — asosiy).
+  Birlik almashtirilsa narx ham o'sha birlikka keltiriladi (6000/dona → Blok(6) → 36000/blok).
+  Miqdor ostida omborga nechta asosiy birlik tushishi ko'rinadi ("= 60 dona").
+  Yangi yaratilgan mahsulotda `unitOptions` bo'lmaydi — birlik nomi `/api/catalog/units` dan.
+
+Qabul tomoni o'zgarmadi: u allaqachon `item.unitName` ni ko'rsatadi va qoldiqqa konversiya bilan
+tushadi.
+
+Testlar: `import-units-prices.test.ts` +3 (ro'yxat asosiy birlikni birinchi qaytaradi va
+koeffitsient bilan blokni beradi; bayroqsiz so'rovda `unitOptions` umuman yo'q; begona
+kompaniyaning konversiyasi qo'shilmaydi) → 24/24. Regressiya: `products`, `catalog`, `purchase`,
+`purchase-csv` — 36/36. Frontend to'plami 35 fayl / 166 test yashil; `tsc` (API va web) va
+`eslint` toza. Production deploy QILINMADI.
