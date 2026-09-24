@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import {
-  Settings, Shield, Users, Building2, ListChecks, Puzzle, Bell, MapPin, Lock, ReceiptText, Tag, Gift, Coins, Monitor, Scale, Send,
+  Settings, Shield, Users, Building2, ListChecks, Puzzle, Bell, MapPin, Lock, ReceiptText, Tag, Gift, Coins, Monitor, Scale, Send, FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import PageTabs from "@/components/page-tabs.tsx";
@@ -16,6 +16,7 @@ import BranchesSection from "./_components/branches-section.tsx";
 import SecuritySection from "./_components/security-section.tsx";
 import ReceiptSection from "./_components/receipt-section.tsx";
 import LabelsSection from "./_components/labels-section.tsx";
+import DocumentsSection from "./_components/documents-section.tsx";
 import CashbackSection from "./_components/cashback-section.tsx";
 import CurrenciesSection from "./_components/currencies-section.tsx";
 import PosDevicesSection from "./_components/pos-devices-section.tsx";
@@ -27,7 +28,7 @@ export default function SettingsPage() {
   const { t } = useTranslation("modules");
   const [tab, setTab] = useState<
     | "company" | "currencies" | "branches" | "receipt" | "labels" | "cashback" | "sales-policy" | "pos-devices" | "modules" | "roles" | "users"
-    | "audit" | "notifications" | "security" | "telegram"
+    | "audit" | "notifications" | "security" | "telegram" | "documents"
   >("company");
 
   const TABS = [
@@ -36,6 +37,7 @@ export default function SettingsPage() {
     { key: "branches"      as const, label: "Filiallar",                 icon: MapPin },
     { key: "receipt"       as const, label: "Chek",                      icon: ReceiptText },
     { key: "labels"        as const, label: "Etiketka",                  icon: Tag },
+    { key: "documents"     as const, label: "Hujjatlar",                 icon: FileText },
     { key: "cashback"      as const, label: "Keshbek",                   icon: Gift },
     { key: "sales-policy"  as const, label: "Savdo siyosati",            icon: Scale },
     { key: "pos-devices"   as const, label: "Kassa qurilmalari",         icon: Monitor },
@@ -68,6 +70,7 @@ export default function SettingsPage() {
         {tab === "branches"      && <BranchesSection />}
         {tab === "receipt"       && <ReceiptSection />}
         {tab === "labels"        && <LabelsSection />}
+        {tab === "documents"     && <DocumentsSection />}
         {tab === "cashback"      && <CashbackSection />}
         {tab === "sales-policy"  && <SalesPolicySection />}
         {tab === "pos-devices"   && <PosDevicesSection />}

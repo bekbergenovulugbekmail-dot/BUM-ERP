@@ -22,6 +22,7 @@ import { aiRoutes } from "./modules/ai/routes.js";
 import { analyticsRoutes } from "./modules/analytics/routes.js";
 import { authRoutes } from "./modules/auth/routes.js";
 import { catalogRoutes } from "./modules/catalog/routes.js";
+import { documentRoutes } from "./modules/documents/routes.js";
 import { registerModuleGuard } from "./modules/company/module-guard.js";
 import { companyRoutes } from "./modules/company/routes.js";
 import { crmRoutes } from "./modules/crm/routes.js";
@@ -115,6 +116,7 @@ export async function buildServer() {
   await app.register(companyRoutes, { prefix: "/api/company" });
   await app.register(subscriptionRoutes, { prefix: "/api/subscription" });
   await app.register(catalogRoutes, { prefix: "/api/catalog" });
+  await app.register(documentRoutes, { prefix: "/api/documents" });
   await app.register(inventoryRoutes, { prefix: "/api/inventory" });
   await app.register(financeRoutes, { prefix: "/api/finance" });
   await app.register(purchaseRoutes, { prefix: "/api/purchase" });

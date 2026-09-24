@@ -6,7 +6,7 @@
 | | |
 |---|---|
 | Boshlandi | 2026-09-24 |
-| Holat | 1-bosqich (audit + shrift) ✅ · 2–6-bosqichlar rejada |
+| Holat | 1–4-bosqich ✅ (audit, shrift, model+API, renderer, dizayner UI) · 5–6 rejada |
 | Production deploy | topshiriq bo'yicha QILINMAYDI |
 
 ---
@@ -133,11 +133,11 @@ faqat tegishli ruxsat bo'lsa ro'yxatga kiradi (`products.view_cost`).
 | # | Bosqich | Holat |
 |---|---|---|
 | 1 | Audit + kirill shrifti | ✅ bajarildi |
-| 2 | Ma'lumot modeli, API, maydonlar katalogi, versiyalash | rejada |
-| 3 | Renderer: shablon JSON → mavjud A4 dvigatel | rejada |
-| 4 | Dizayner UI (A4 tuvali, elementlar, drag/drop, uslub paneli) | rejada |
-| 5 | Shart bo'yicha ko'rsatish, mahsulot jadvali dizayneri, jami/to'lov bloklari | rejada |
-| 6 | Bulk chop etish bilan birlashtirish, eksport/import, qabul testlari | rejada |
+| 2 | Ma'lumot modeli, API, maydonlar katalogi, versiyalash | ✅ bajarildi |
+| 3 | Renderer: shablon JSON → mavjud A4 dvigatel | ✅ bajarildi |
+| 4 | Dizayner UI (Sozlamalar → Hujjatlar, jonli A4) | ✅ bajarildi |
+| 5 | Rasm/QR/sahifa raqami elementlari, ustun kengligi va tartibi sudrab o'zgartirish | rejada |
+| 6 | Mavjud nakladnoy chiqarishni shablonga ulash, bulk print, eksport/import | rejada |
 
 ---
 
@@ -156,3 +156,87 @@ faqat tegishli ruxsat bo'lsa ro'yxatga kiradi (`products.view_cost`).
 TrueType, hujjat `PTSans` bilan ochiladi, kirill matn chiziladi va kengligi hisoblanadi,
 shrift yo'q bo'lsa `helvetica` ga qaytiladi, `setFont("helvetica")` unicode shriftga
 yo'naltiriladi. Mavjud `a4-documents.test.ts` (13) — yashil.
+
+
+---
+
+## 4. 2–4-BOSQICH NATIJASI
+
+### Ma'lumot modeli (migratsiya `0086_document_templates`)
+
+    document_templates          company_id, document_type, name, status, is_default, current_version_id
+    document_template_versions  template_id, version, schema (jsonb), note, created_by
+
+- Shablon O'CHIRILMAYDI — `archived` bo'ladi (tarixdagi hujjat qaysi shablon bilan chiqqani bilinsin).
+- Standart (zavod) shablon BAZADA TURMAYDI: u koddagi `default-templates.ts`. Shuning uchun
+  uni buzib qo'yish imkoni yo'q; foydalanuvchi undan NUSXA olib o'zinikini yaratadi.
+- Bitta hujjat turida bitta standart shablon — qisman unique indeks bilan qulflangan.
+
+### API (`/api/documents`)
+
+| Marshrut | Vazifasi | Ruxsat |
+|---|---|---|
+| `GET /templates` | ro'yxat | `settings.view` |
+| `GET /templates/:id` | shablon + amaldagi sxema | `settings.view` |
+| `GET /templates/:id/versions` | versiyalar tarixi | `settings.view` |
+| `GET /fields?documentType=` | MAYDONLAR KATALOGI | `settings.view` |
+| `GET /active/:documentType` | chizish uchun amaldagi sxema | sessiya |
+| `POST /templates` | yaratish (zavod nusxasidan) | `settings.manage` |
+| `POST /templates/:id/versions` | saqlash = YANGI versiya | `settings.manage` |
+| `POST /templates/:id/restore` | eski versiyaga qaytish | `settings.manage` |
+| `POST /templates/:id/default` | standart qilish | `settings.manage` |
+| `PATCH /templates/:id` | nomini o'zgartirish | `settings.manage` |
+| `DELETE /templates/:id` | ARXIVLASH | `settings.manage` |
+
+### Xavfsizlik — shablon hech qachon "shundayligicha" saqlanmaydi
+
+`sanitize.ts` kelgan JSON ni OQ RO'YXAT bo'yicha QAYTA QURADI: faqat taniydigan kalitlar yangi
+obyektga ko'chiriladi. Natijada:
+
+- noma'lum element turi, `html`, `onClick`, `script` — umuman saqlanmaydi;
+- maydon va ustun faqat katalogdan; **tannarx va marja** `products.view_cost` siz kirmaydi;
+- rang faqat `#rrggbb`; `url(javascript:...)` kabi qiymat tashlanadi;
+- rasm faqat `files` kaliti (`<uuid>.<ext>`) — tashqi URL va `data:` yo'q;
+- shrift, o'lcham, element soni va ustun soni chegaralangan;
+- nima rad etilgani `warnings` da qaytadi — jim yo'qolmaydi.
+
+Tenant: hamma so'rov `company_id` bilan; begona shablon `404`.
+
+### Renderer (`src/lib/pdf/template-renderer.ts`)
+
+Shablon JSON → A4. Yangi chizish dvigateli QURILMADI — hammasi `pdf-utils` orqali, shuning uchun
+ko'p sahifa, jadval sarlavhasining takrorlanishi va footer avvalgidek ishlaydi.
+
+**Moliyaviy yaxlitlik:** renderer qiymat HISOBLAMAYDI. `DocumentData` dagi tayyor qiymatlarni
+joylashtiradi; `text` elementi faqat yorliq. Testda qulflangan: shablon qanday o'zgarsa ham
+summa o'zgarmaydi.
+
+### Dizayner UI (Sozlamalar → **Hujjatlar**)
+
+Uch ustun: elementlar daraxti · **jonli A4** · tanlangan element sozlamalari.
+
+**Asosiy qaror — oldindan ko'rish HAQIQIY PDF:** o'rtadagi varaq shablon bilan chizilgan
+chinakam hujjat (namuna ma'lumotda). Shuning uchun "ko'rgani" va "bosib chiqqani" bir xil;
+alohida HTML maketi yo'q, ya'ni ikki xil ko'rinish muammosi ham yo'q.
+
+Imkoniyatlar: element qo'shish (matn, maydon, jadval, jami, imzo, chiziq), tartibini
+o'zgartirish, o'chirish, matn/yorliqni tahrirlash, maydonni katalogdan tanlash, jadval
+ustunlarini belgilash, jami qatorlarini tanlash, shrift/qalin/tekislash; shablon yaratish,
+nusxa olish, standart qilish, arxivlash, versiyalar tarixi va qaytarish.
+
+Brauzer dialogi (`prompt`/`confirm`) ishlatilmaydi — ichki forma va ikki bosqichli tasdiq.
+
+### Tekshiruv
+
+- **API:** `document-templates.test.ts` (12) — versiyalash, qaytarish, arxivlash, standart
+  yagonaligi, XSS/HTML tashlanishi, begona maydon, rang, rasm kaliti, tenant ajratilishi;
+  `document-sanitize.test.ts` (5) — maxfiy ustun ruxsatsiz tushmasligi.
+- **Frontend:** `template-renderer.test.ts` (10) — ustun tanlash, ustun nomi, shart bo'yicha
+  ko'rsatish, imzo yorliqlari, 90 qatorli hujjatning ko'p sahifaga bo'linishi va
+  MOLIYAVIY YAXLITLIK.
+- **Brauzer (Playwright):** `document-designer.spec.ts` (2) — shablon yaratish → element
+  qo'shish → saqlash → qayta ochilganda joyida; 2-versiyadan 1-versiyaga qaytish.
+  Shu test HAQIQIY xatoni topdi: fonda ketgan qayta so'rov saqlanmagan tahrirni o'chirib
+  yuborardi — tuzatildi.
+- Frontend to'plami 40 fayl / 194 test; API `document*` 17, `catalog`/`products` 17,
+  `security-hardening` 34; `tsc` (API va web), `eslint` va `vite build` toza.

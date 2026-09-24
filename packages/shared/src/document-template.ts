@@ -1,0 +1,142 @@
+/**
+ * Hujjat shabloni — server va brauzer uchun YAGONA ta'rif.
+ *
+ * Shablon PREZENTATSIYA qatlami: u "qaysi qiymat qayerda va qanday ko'rinsin" deydi, xolos.
+ * Qiymatning o'zi hujjat ma'lumotidan keladi, shuning uchun shablonni tahrirlab summani
+ * o'zgartirib bo'lmaydi.
+ *
+ * XAVFSIZLIK: bu yerdagi ro'yxatlar OQ RO'YXAT. Server saqlashdan oldin shablonni shu
+ * ro'yxatlar bo'yicha qayta quradi — noma'lum kalit, HTML, JS yoki ixtiyoriy URL saqlanmaydi.
+ */
+
+/** Qaysi hujjat turi uchun shablon. */
+export const DOCUMENT_TYPES = ["delivery_waybill", "sales_invoice", "purchase_order", "payslip"] as const;
+export type DocumentType = (typeof DOCUMENT_TYPES)[number];
+
+export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
+  delivery_waybill: "Yetkazma nakladnoyi",
+  sales_invoice: "Sotuv hisob-fakturasi",
+  purchase_order: "Xarid buyurtmasi",
+  payslip: "Maosh varaqasi",
+};
+
+/** Sahifadagi uchta mintaqa: sarlavha har sahifada, footer — sozlamaga qarab. */
+export const SECTIONS = ["header", "body", "footer"] as const;
+export type SectionKey = (typeof SECTIONS)[number];
+
+/**
+ * Element turlari. Har biri `pdf-utils` dagi mavjud chizish funksiyasiga tushadi —
+ * yangi chizish dvigateli qurilmaydi.
+ */
+export const ELEMENT_TYPES = [
+  "text", //        erkin matn (yorliq): "Qabul qildi:"
+  "field", //       bitta dinamik qiymat: {{customer.name}}
+  "image", //       kompaniya logotipi yoki yuklangan rasm
+  "line", //        ajratuvchi chiziq
+  "spacer", //      bo'sh joy
+  "itemsTable", //  mahsulot/yetkazma jadvali (ustunlari tanlanadi)
+  "totals", //      jami bloki (qaysi qatorlar ko'rinishi tanlanadi)
+  "payments", //    to'lov usullari bo'yicha taqsimot
+  "signatures", //  imzo joylari
+  "qr", //          hujjat raqami yoki tasdiqlash havolasi
+  "pageNumber", //  "1 / 3"
+] as const;
+export type ElementType = (typeof ELEMENT_TYPES)[number];
+
+export const ALIGNMENTS = ["left", "center", "right"] as const;
+export type Alignment = (typeof ALIGNMENTS)[number];
+
+/** Matn uslubi — faqat shu kalitlar saqlanadi. */
+export type TextStyle = {
+  /** Punktda; hujjat o'lchovlari mm, shrift esa pt (jsPDF shunday ishlaydi). */
+  fontSize?: number;
+  bold?: boolean;
+  italic?: boolean;
+  align?: Alignment;
+  /** `#rrggbb`; boshqa format qabul qilinmaydi (`rgb()`, `url()` — yo'q). */
+  color?: string;
+};
+
+/**
+ * Shart bo'yicha ko'rsatish. Faqat TUZILMALI shart — ifoda matni emas, shuning uchun
+ * `eval` yoki SQL ishlatilmaydi.
+ */
+export const CONDITION_OPERATORS = ["gt", "gte", "lt", "lte", "eq", "ne", "empty", "notEmpty"] as const;
+export type ConditionOperator = (typeof CONDITION_OPERATORS)[number];
+
+export type VisibilityCondition = {
+  /** Bog'lanish yo'li — maydonlar katalogidan (`document.debt`). */
+  field: string;
+  operator: ConditionOperator;
+  /** `empty`/`notEmpty` da ishlatilmaydi. Faqat son yoki matn. */
+  value?: string | number;
+};
+
+export type DocumentElement = {
+  id: string;
+  type: ElementType;
+  /** Erkin matn yoki maydon yorlig'i ("Mijoz:"). Qiymat EMAS. */
+  label?: string;
+  /** `field` uchun: maydonlar katalogidagi yo'l (`customer.name`). */
+  field?: string;
+  /** `itemsTable` uchun: ustunlar (katalogdan) va ularning nomlari. */
+  columns?: { key: string; label?: string; width?: number; align?: Alignment }[];
+  /** `totals` va `payments` uchun: qaysi qatorlar ko'rinadi. */
+  rows?: string[];
+  /** `image` uchun: `files` xizmatidagi kalit (tashqi URL EMAS). */
+  imageKey?: string;
+  /** `qr` uchun: nimani kodlash — faqat ro'yxatdan. */
+  qrSource?: "documentNumber" | "verifyUrl";
+  /** mm; berilmasa element butun kenglikni egallaydi. */
+  width?: number;
+  height?: number;
+  style?: TextStyle;
+  /** Shart bajarilmasa element chizilmaydi. */
+  visibleWhen?: VisibilityCondition;
+};
+
+export type DocumentSection = {
+  key: SectionKey;
+  elements: DocumentElement[];
+};
+
+export type PageSettings = {
+  /** Hozircha A4; kelajakda A5/A3 qo'shiladi. */
+  size: "a4";
+  orientation: "portrait" | "landscape";
+  /** mm */
+  margins: { top: number; right: number; bottom: number; left: number };
+  /** Footer har sahifada chiqadimi yoki faqat oxirgisida. */
+  footerOnEveryPage: boolean;
+  /** Imzo bloki faqat oxirgi sahifada (odatda shunday). */
+  signaturesOnLastPage: boolean;
+};
+
+export type DocumentTemplateSchema = {
+  /** Sxema versiyasi — kelajakdagi migratsiya uchun. */
+  schemaVersion: 1;
+  page: PageSettings;
+  sections: DocumentSection[];
+};
+
+export const DEFAULT_PAGE: PageSettings = {
+  size: "a4",
+  orientation: "portrait",
+  margins: { top: 14, right: 14, bottom: 14, left: 14 },
+  footerOnEveryPage: true,
+  signaturesOnLastPage: true,
+};
+
+/** Uslub chegaralari — nomutanosib qiymat hujjatni buzmasin. */
+export const STYLE_LIMITS = {
+  fontSizeMin: 5,
+  fontSizeMax: 48,
+  widthMax: 420,
+  heightMax: 420,
+} as const;
+
+/** `#rrggbb` (katta-kichik harf farqsiz). Boshqa hech narsa qabul qilinmaydi. */
+export const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+export const MAX_ELEMENTS_PER_SECTION = 60;
+export const MAX_TABLE_COLUMNS = 12;

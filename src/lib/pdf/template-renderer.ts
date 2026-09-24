@@ -1,0 +1,264 @@
+/**
+ * Shablon JSON → A4 hujjat.
+ *
+ * Bu YANGI chizish dvigateli EMAS: hamma chizish `pdf-utils.ts` dagi mavjud funksiyalar bilan
+ * bajariladi (sarlavha, jadval, jami qutisi, imzo, footer, sahifa bo'linishi). Shablon faqat
+ * "qaysi element qayerda va qanday ko'rinsin" deydi.
+ *
+ * MOLIYAVIY YAXLITLIK: renderer qiymat HISOBLAMAYDI. U `DocumentData` dagi tayyor, serverdan
+ * kelgan qiymatlarni joylashtiradi, xolos. Shablonda son yozib qo'yish imkoni yo'q — `text`
+ * elementi faqat YORLIQ, `field` esa bog'lanish nomi.
+ */
+import type jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import type { DocumentElement, DocumentTemplateSchema, TextStyle, VisibilityCondition } from "@bum/shared";
+import {
+  A4,
+  PDF_COLORS,
+  afterTable,
+  contentBottom,
+  createDocument,
+  drawFooter,
+  drawSignatures,
+  drawTotalsBox,
+  ensureSpace,
+  tableOptions,
+  type CompanyInfo,
+  type TotalRow,
+} from "./pdf-utils.ts";
+
+/**
+ * Hujjatning TAYYOR ma'lumoti. Har bir hujjat turi (nakladnoy, hisob-faktura) shuni quradi;
+ * qiymatlar allaqachon formatlangan satr bo'ladi — renderer ularni o'zgartirmaydi.
+ */
+export type DocumentData = {
+  company: CompanyInfo;
+  /** Maydon yo'li → ko'rsatiladigan qiymat: `{"customer.name": "Test Market"}`. */
+  values: Record<string, string>;
+  /** Jadval qatorlari: ustun kaliti → qiymat. */
+  items: Record<string, string>[];
+  /** Jami bloki qatorlari: `{"total": "42 200 so'm"}`. */
+  totals: Record<string, string>;
+  /** To'lov usullari bo'yicha: `{"cash": "500 000"}`. */
+  payments?: Record<string, string>;
+  /** Shart tekshiruvi uchun SON qiymatlar (`finance.debt` > 0). */
+  numbers?: Record<string, number>;
+  /** Ustun sarlavhalari uchun standart nomlar. */
+  columnLabels?: Record<string, string>;
+  /** Jami va to'lov qatorlarining nomlari. */
+  rowLabels?: Record<string, string>;
+};
+
+const DEFAULT_ROW_LABELS: Record<string, string> = {
+  subtotal: "Oraliq summa",
+  discount: "Chegirma",
+  tax: "Soliq",
+  total: "Jami",
+  paid: "To'langan",
+  debt: "Qarz",
+  cash: "Naqd",
+  card: "Karta",
+  bank: "Bank",
+  transfer: "O'tkazma",
+};
+
+const hexToRgb = (hex: string): [number, number, number] => [
+  Number.parseInt(hex.slice(1, 3), 16),
+  Number.parseInt(hex.slice(3, 5), 16),
+  Number.parseInt(hex.slice(5, 7), 16),
+];
+
+/** Shart bajarildimi. Faqat tuzilmali taqqoslash — ifoda bajarilmaydi. */
+export function isVisible(condition: VisibilityCondition | undefined, data: DocumentData): boolean {
+  if (!condition) return true;
+  const raw = data.values[condition.field];
+  const numeric = data.numbers?.[condition.field];
+  switch (condition.operator) {
+    case "empty":
+      return !raw;
+    case "notEmpty":
+      return Boolean(raw);
+    case "eq":
+      return String(raw ?? "") === String(condition.value ?? "");
+    case "ne":
+      return String(raw ?? "") !== String(condition.value ?? "");
+    default: {
+      const left = numeric ?? Number(raw);
+      const right = Number(condition.value);
+      if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+      if (condition.operator === "gt") return left > right;
+      if (condition.operator === "gte") return left >= right;
+      if (condition.operator === "lt") return left < right;
+      return left <= right;
+    }
+  }
+}
+
+function applyStyle(doc: jsPDF, style: TextStyle | undefined, fallbackSize = 9) {
+  doc.setFontSize(style?.fontSize ?? fallbackSize);
+  doc.setFont("helvetica", style?.bold ? "bold" : style?.italic ? "italic" : "normal");
+  const color = style?.color ? hexToRgb(style.color) : PDF_COLORS.textDark;
+  doc.setTextColor(...color);
+}
+
+/** Matn qaysi X dan boshlanadi (tekislashga qarab). */
+function textX(doc: jsPDF, style: TextStyle | undefined, left: number, right: number): { x: number; align: "left" | "center" | "right" } {
+  const align = style?.align ?? "left";
+  if (align === "center") return { x: (left + right) / 2, align };
+  if (align === "right") return { x: right, align };
+  return { x: left, align };
+}
+
+type RenderContext = {
+  doc: jsPDF;
+  data: DocumentData;
+  left: number;
+  right: number;
+  y: number;
+  /** Keyingi sahifalarda takrorlanadigan sarlavha (jadval bo'linganda). */
+  header: { title: string; number: string; date: string };
+};
+
+function drawText(ctx: RenderContext, element: DocumentElement, value: string) {
+  const { doc } = ctx;
+  applyStyle(doc, element.style, element.type === "text" ? 10 : 9);
+  const { x, align } = textX(doc, element.style, ctx.left, ctx.right);
+  const lineHeight = (element.style?.fontSize ?? 10) * 0.42 + 1.5;
+  const text = element.label && element.type === "field" ? `${element.label}: ${value}` : (value || element.label || "");
+  if (!text) return;
+  const lines = doc.splitTextToSize(text, ctx.right - ctx.left);
+  ctx.y = ensureSpace(doc, ctx.y, lines.length * lineHeight + 1);
+  doc.text(lines, x, ctx.y, { align });
+  ctx.y += lines.length * lineHeight + 1;
+}
+
+function drawItemsTable(ctx: RenderContext, element: DocumentElement) {
+  const columns = element.columns ?? [];
+  if (columns.length === 0) return;
+  const labels = ctx.data.columnLabels ?? {};
+  const head = [columns.map((column) => column.label ?? labels[column.key] ?? column.key)];
+  const body = ctx.data.items.map((item, index) =>
+    columns.map((column) => (column.key === "index" ? String(index + 1) : (item[column.key] ?? ""))),
+  );
+  // Ustun tekislash va kengligi shablondan; qolganini autotable o'zi taqsimlaydi
+  const columnStyles: Record<number, { halign?: "left" | "center" | "right"; cellWidth?: number }> = {};
+  columns.forEach((column, index) => {
+    const style: { halign?: "left" | "center" | "right"; cellWidth?: number } = {};
+    if (column.align) style.halign = column.align;
+    if (column.width) style.cellWidth = column.width;
+    if (Object.keys(style).length > 0) columnStyles[index] = style;
+  });
+
+  autoTable(ctx.doc, {
+    ...tableOptions(ctx.doc, ctx.data.company, ctx.header, columnStyles),
+    startY: ctx.y,
+    head,
+    body,
+  });
+  ctx.y = afterTable(ctx.doc);
+}
+
+function drawTotals(ctx: RenderContext, element: DocumentElement, source: Record<string, string>) {
+  const labels = { ...DEFAULT_ROW_LABELS, ...ctx.data.rowLabels };
+  const rows: TotalRow[] = (element.rows ?? [])
+    .filter((key) => source[key] !== undefined)
+    .map((key) => ({ label: labels[key] ?? key, value: source[key]!, bold: key === "total" }));
+  if (rows.length === 0) return;
+  ctx.y = ensureSpace(ctx.doc, ctx.y, rows.length * 6 + 10);
+  ctx.y = drawTotalsBox(ctx.doc, ctx.y, rows);
+}
+
+function drawSignatureBlock(ctx: RenderContext, element: DocumentElement) {
+  // Yorliq "Topshirdi|Qabul qildi" ko'rinishida — foydalanuvchi o'zi yozadi
+  const labels = (element.label ?? "Topshirdi|Qabul qildi")
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+  if (labels.length === 0) return;
+  // Mavjud dvigatel ikkita imzo joyini chizadi; shablon yorliqlarini o'shanga beramiz
+  const pair: [string, string] = [labels[0] ?? "Topshirdi", labels[1] ?? "Qabul qildi"];
+  ctx.y = drawSignatures(ctx.doc, ctx.y, ctx.data.company, ctx.header, pair);
+}
+
+function drawLine(ctx: RenderContext) {
+  ctx.y = ensureSpace(ctx.doc, ctx.y, 4);
+  ctx.doc.setDrawColor(...PDF_COLORS.border);
+  ctx.doc.line(ctx.left, ctx.y, ctx.right, ctx.y);
+  ctx.y += 3;
+}
+
+function renderElement(ctx: RenderContext, element: DocumentElement) {
+  if (!isVisible(element.visibleWhen, ctx.data)) return;
+  switch (element.type) {
+    case "text":
+      drawText(ctx, element, "");
+      break;
+    case "field":
+      drawText(ctx, element, ctx.data.values[element.field ?? ""] ?? "");
+      break;
+    case "itemsTable":
+      drawItemsTable(ctx, element);
+      break;
+    case "totals":
+      drawTotals(ctx, element, ctx.data.totals);
+      break;
+    case "payments":
+      drawTotals(ctx, element, ctx.data.payments ?? {});
+      break;
+    case "signatures":
+      drawSignatureBlock(ctx, element);
+      break;
+    case "line":
+      drawLine(ctx);
+      break;
+    case "spacer":
+      ctx.y += Math.min(element.height ?? 4, 40);
+      break;
+    // `image`, `qr`, `pageNumber` — footer tasmasi va keyingi bosqichda
+    default:
+      break;
+  }
+}
+
+/**
+ * Shablonni chizadi va tayyor hujjatni qaytaradi.
+ *
+ * Sahifa bo'linishi mavjud dvigateldan: jadval o'zi bo'linadi va har sahifada sarlavhasini
+ * takrorlaydi, bloklar esa `ensureSpace` bilan chetga chiqib ketmaydi.
+ */
+export async function renderTemplate(schema: DocumentTemplateSchema, data: DocumentData): Promise<jsPDF> {
+  const doc = await createDocument({ orientation: schema.page.orientation });
+  const left = schema.page.margins.left || A4.marginX;
+  const right = doc.internal.pageSize.getWidth() - (schema.page.margins.right || A4.marginX);
+  // Jadval ikkinchi sahifaga o'tganda sarlavha takrorlanadi — nomi shablondagi birinchi
+  // matn elementidan, raqam va sana esa hujjat ma'lumotidan olinadi
+  const headerSection = schema.sections.find((section) => section.key === "header");
+  const title = headerSection?.elements.find((element) => element.type === "text")?.label ?? "HUJJAT";
+  const ctx: RenderContext = {
+    doc,
+    data,
+    left,
+    right,
+    y: schema.page.margins.top || A4.marginX,
+    header: { title, number: data.values["document.number"] ?? "", date: data.values["document.date"] ?? "" },
+  };
+
+  for (const section of schema.sections) {
+    if (section.key === "footer") {
+      // Footer sahifa tagida — oxirgi bo'lib chiziladi
+      continue;
+    }
+    for (const element of section.elements) renderElement(ctx, element);
+    if (section.key === "header") drawLine(ctx);
+  }
+
+  const footer = schema.sections.find((section) => section.key === "footer");
+  if (footer) {
+    ctx.y = Math.max(ctx.y, contentBottom() - 40);
+    for (const element of footer.elements) renderElement(ctx, element);
+  }
+
+  drawFooter(doc);
+  return doc;
+}
