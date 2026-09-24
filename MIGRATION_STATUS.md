@@ -4629,3 +4629,34 @@ API toza ko'tarildi (`Migratsiyalar qo'llandi (28ms)`, bitta `Server listening`,
 `/api/auth/me` tashqaridan 401. Web `build.json` 06:49 dan **09:35:35Z** ga yangilandi va yangi
 bundle'da (`index-0ur1D-oV.js`) `withUnits` hamda `unitOptions` bor — ya'ni yangi kod ishlayapti.
 Yangi migratsiya bu bosqichda yo'q. Tizimga kirgan holda qo'lda sinov — egasi bajaradi.
+
+### TUZATISH: standart birlik blok emas, DONA (2026-09-24)
+
+Egasi production'da sinab ko'rdi va xatoni topdi: oyna 1 blokni 8 300 so'mda ko'rsatdi —
+ya'ni BITTA DONA narxi blok narxi bo'lib qolgan edi (blokda 12 dona bor).
+
+Sabab: qator ochilganda mahsulotning `purchase_unit_id` (blok) qo'yilardi, narx esa
+`products.purchase_price` dan olinardi — u ASOSIY birlik narxi. Ikkalasi bir-biriga mos emas edi.
+Men buni deploydan oldin qo'lda sinamagan edim; xulosa — "bajarildi" deyishdan oldin real ishlatib
+ko'rish shart.
+
+Tuzatma:
+- Qator endi HAR DOIM asosiy birlikda ochiladi (`defaultUnitId` → `baseUnitId`); blokka
+  foydalanuvchi o'zi o'tadi va o'tganda narx koeffitsientga ko'paytiriladi (8 300 → 99 600).
+- Narx maydonining ostida qaysi birlik uchun ekani yoziladi ("1 blok narxi").
+- Birlik mantig'i `src/pages/purchase/_lib/units.ts` ga chiqarildi (`unitsOf`, `factorOf`,
+  `defaultUnitId`, `convertUnitPrice`) — endi test bilan qulflangan.
+
+Tekshiruv (bu safar REAL):
+- Yangi `create-order-dialog.test.tsx` (7 test) — oynaning O'ZI render qilinib, mahsulot
+  qidiruv orqali qo'shiladi: qator "Dona" da ochiladi, 1 dona → 8 300 so'm, 12 dona → 99 600 so'm.
+  Test eski xulq bilan QIZIL bo'lishi tasdiqlandi (`defaultUnitId` ni vaqtincha qaytarib sinaldi).
+- Lokal to'liq zanjir (demo baza, `EZO-460`: 1 dona = 8 300, 1 blok = 12 dona):
+  1 Blok × 99 600 buyurtma → jami 99 600 → qabul → **omborda 12 dona, tannarx 8 300/dona**.
+- Frontend to'plami 36 fayl / 173 test yashil; `tsc` va `eslint` toza.
+
+OCHIQ SAVOL (egasiga): mahsulot IMPORTIDA narx ustuni qadoq birligi bilan berilsa
+(`purchaseUnit=bl`, `unitsPerPackage=12`, `purchasePrice=60000`), `products.purchase_price` ga
+fayldagi qiymat AYNAN yoziladi — ya'ni blok narxi. Web formasida esa u dona narxi sifatida
+ishlatiladi. Ikkala yo'l bitta ustunga boshqa ma'no yuklayapti; qaysi biri to'g'ri ekanini egasi
+aytishi kerak (tuzatish alohida ish sifatida bajariladi).

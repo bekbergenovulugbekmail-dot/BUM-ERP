@@ -22,6 +22,7 @@ import {
   num, todayLocal,
   type ProductOption, type Supplier, type UnitOption, type WarehouseOption,
 } from "../_lib/types.ts";
+import { convertUnitPrice, defaultUnitId, factorOf, unitsOf } from "../_lib/units.ts";
 import PriceSuggestions from "./price-suggestions.tsx";
 import QuickSupplierDialog from "./quick-supplier-dialog.tsx";
 import QuickProductDialog from "./quick-product-dialog.tsx";
@@ -58,24 +59,6 @@ function lineAmounts(line: LineItem, taxEnabled = true) {
   const tax = taxEnabled ? net * (line.taxRate / 100) : 0;
   return { net, tax, total: net + tax };
 }
-
-/**
- * Miqdorni qaysi birlikda kiritish mumkin: "dona" (asosiy) va qadoq ("blok") — server
- * `?withUnits=true` bilan beradi. Eski mahsulotda yoki shu oynada yangi yaratilganda
- * ro'yxat bo'sh bo'lishi mumkin — u holda faqat asosiy birlik.
- */
-const unitsOf = (product: ProductOption | undefined): UnitOption[] => product?.unitOptions ?? [];
-
-/** 1 birlikda nechta ASOSIY birlik bor (1 blok = 6 dona → 6). Noma'lum birlik — 1. */
-const factorOf = (product: ProductOption | undefined, unitId: string): number =>
-  num(unitsOf(product).find((unit) => unit.unitId === unitId)?.factor) || 1;
-
-/** Qator ochilganda qaysi birlik turadi: mahsulotning xarid birligi ("blok") bo'lsa — o'sha. */
-const defaultUnitId = (product: ProductOption): string => {
-  const options = unitsOf(product);
-  const purchase = product.purchaseUnitId;
-  return purchase && options.some((unit) => unit.unitId === purchase) ? purchase : product.baseUnitId;
-};
 
 /** Ro'yxat oxiridagi "yangi qo'shish" bandlari — tanlanganda qiymat o'zgarmaydi, oyna ochiladi. */
 const NEW_SUPPLIER = "__new_supplier__";
@@ -241,11 +224,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
       // Aks holda blokdagi miqdor donadagi narxga ko'paytirilib, summa 6 barobar kam chiqardi.
       if (field === "unitId" && typeof value === "string") {
         const prod = productOptions.find((p) => p.id === line.productId);
-        const from = factorOf(prod, next[i]!.unitId);
-        const to = factorOf(prod, value);
-        if (line.unitPrice > 0 && from > 0 && to > 0 && from !== to) {
-          line.unitPrice = Math.round((line.unitPrice / from) * to * 100) / 100;
-        }
+        line.unitPrice = convertUnitPrice(line.unitPrice, factorOf(prod, next[i]!.unitId), factorOf(prod, value));
       }
       // Mahsulot tanlanganda birlik, soliq va narx; narx valyutasi xaridda tanlangan bo'lsa — o'zida
       if (field === "productId" && typeof value === "string") {
@@ -507,6 +486,7 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                     const lineUnits = unitsFor(lineProduct);
                     const lineFactor = factorOf(lineProduct, line.unitId);
                     const lineBaseUnit = lineUnits.find((unit) => unit.unitId === lineProduct?.baseUnitId)?.name.toLowerCase() ?? "";
+                    const lineUnitName = lineUnits.find((unit) => unit.unitId === line.unitId)?.name.toLowerCase() ?? "";
 
                     return (
                       <tr key={i}>
@@ -591,6 +571,10 @@ export default function CreateOrderDialog({ onClose, onCreated }: Props) {
                               />
                             )}
                           </div>
+                          {/* Narx qaysi birlik uchun ekani ko'rinib tursin — blok narxi dona narxi bilan adashmasin */}
+                          {lineFactor > 1 && (
+                            <p className="text-[10px] text-muted-foreground mt-0.5">1 {lineUnitName} narxi</p>
+                          )}
                         </td>
                         {taxEnabled && (
                           <td className="px-2 py-2">
