@@ -138,3 +138,90 @@ export function generateDeliveryWaybillPDF(data: DeliveryWaybillData): jsPDF {
   doc.save(`nakladnoy-${data.agentCode}-${data.date}.pdf`);
   return doc;
 }
+
+/** Bitta yetkazma uchun nakladnoy ma'lumoti (ko'pini birdan chiqarishda). */
+export type SingleDeliveryWaybill = {
+  number: string;
+  status: string;
+  scheduledDate: string;
+  orderNumber: string | null;
+  orderTotal: number;
+  customerName: string;
+  customerPhone: string | null;
+  customerAddress: string | null;
+  customerDebt: number | null;
+  warehouseName: string | null;
+  agentCode: string | null;
+  agentName: string | null;
+};
+
+/**
+ * KO'P NAKLADNOY BITTA FAYLDA (7-vazifa).
+ *
+ * Har yetkazma O'Z SAHIFASIDAN boshlanadi — qog'ozlar bir-biriga qo'shilib ketmaydi va
+ * har birini alohida uzib berish mumkin. Ko'rinish boshqa hujjatlar bilan bir xil:
+ * o'sha A4 yordamchilari (kompaniya sarlavhasi, ma'lumot bloki, jami, imzolar).
+ *
+ * Chop etish HUJJAT amali — yetkazma holatini o'zgartirmaydi (buni server ham kafolatlaydi).
+ */
+export function generateBulkDeliveryWaybillsPDF(data: {
+  company: CompanyInfo;
+  currency: string;
+  responsibleName: string;
+  deliveries: SingleDeliveryWaybill[];
+}): jsPDF {
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const showDebt = data.deliveries.some((row) => row.customerDebt !== null);
+
+  data.deliveries.forEach((delivery, index) => {
+    // Birinchisidan keyin har biri yangi sahifada
+    if (index > 0) doc.addPage();
+
+    const header = { title: "YETKAZMA NAKLADNOYI", number: delivery.number, date: delivery.scheduledDate };
+    const columnStyles: Record<number, Record<string, unknown>> = {
+      0: { cellWidth: 46 },
+      1: { halign: "right" as const, fontStyle: "bold" as const },
+    };
+    const options = tableOptions(doc, data.company, header, columnStyles);
+    const headerBottom = drawCompanyHeader(doc, data.company, header.title, header.number, header.date);
+
+    const startY = drawInfoBox(
+      doc,
+      headerBottom,
+      [
+        { label: "Mijoz", value: delivery.customerName },
+        { label: "Telefon", value: dash(delivery.customerPhone) },
+        { label: "Manzil", value: dash(delivery.customerAddress), wide: true },
+        { label: "Yetkazuvchi agent", value: dash(delivery.agentName ?? delivery.agentCode) },
+        { label: "Ombor", value: dash(delivery.warehouseName) },
+        { label: "Buyurtma", value: dash(delivery.orderNumber) },
+        { label: "Mas'ul shaxs", value: data.responsibleName },
+      ],
+      2,
+    );
+
+    const body: string[][] = [
+      ["Yetkazma raqami", delivery.number],
+      ["Sana", delivery.scheduledDate],
+      ["Buyurtma", dash(delivery.orderNumber)],
+      ["Summa", fmtMoney(delivery.orderTotal, data.currency)],
+    ];
+    if (showDebt) {
+      body.push(["Mijoz qarzi", delivery.customerDebt === null ? "—" : fmtMoney(delivery.customerDebt, data.currency)]);
+    }
+    autoTable(doc, { ...options, startY, head: [["Ko'rsatkich", "Qiymat"]], body });
+
+    const totals: TotalRow[] = [
+      { label: "Yetkazma summasi", value: fmtMoney(delivery.orderTotal, data.currency), bold: true },
+    ];
+    if (showDebt && delivery.customerDebt !== null) {
+      totals.push({ label: "Mijoz qarzi", value: fmtMoney(delivery.customerDebt, data.currency), color: PDF_COLORS.red });
+    }
+    const y = drawTotalsBox(doc, afterTable(doc), totals, data.company, header);
+    drawSignatures(doc, y, data.company, header, ["Topshirdi (mas'ul shaxs)", "Qabul qildi (mijoz)"]);
+  });
+
+  drawFooter(doc);
+  doc.save(`nakladnoylar-${data.deliveries.length}-ta.pdf`);
+  return doc;
+}

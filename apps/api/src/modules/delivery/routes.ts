@@ -15,6 +15,7 @@
  *   GET  /reports (?from=&to=&agentId=)            delivery.view_reports
  *   GET  /ready-orders (?search=&limit=)           delivery.manage — yetkazma yaratiladigan buyurtmalar
  *   GET  /waybill (?agentId=&date=)                delivery.view — nakladnoy (qarz faqat finance.view bilan)
+ *   POST /waybills/bulk                            delivery.view — tanlanganlar uchun nakladnoy (holat o'zgarmaydi)
  *   GET  /tasks (?dateFrom=&dateTo=&status=&agentId=&unassigned=&branchId=&territory=&customerId=&search=&overdue=&reviewPending=&limit=&cursor=)   delivery.view
  *   POST /tasks                                    delivery.manage (+ delivery.assign — agent bilan)
  *   GET  /tasks/:taskId, GET /tasks/:taskId/proofs/:proofId   delivery.view
@@ -104,6 +105,7 @@ import { DISPATCH_ASSIGN_MAX, assignDispatch, dispatchBoard } from "./dispatch.s
 import { planAgentDay, tasksInOrder } from "./route-plan.service.js";
 import { CLOSE_CODES, DeliveryRealtimeHub, originAllowed, resolveRealtimeAccess, type RealtimeAccess } from "./realtime.js";
 import { localDate } from "./task.repo.js";
+import { writeAuditLog } from "../../shared/audit.js";
 import {
   acceptDelivery,
   addDeliveryProof,
@@ -129,6 +131,7 @@ import {
   createDeliveryTask,
   getDeliveryTask,
   deliveryWaybill,
+  deliveryWaybillsByIds,
   listDeliveryTasks,
   readyOrdersForDelivery,
   redeliverRemainder,
@@ -181,6 +184,8 @@ const proofParams = z.object({ taskId: z.uuid(), proofId: z.uuid() });
 const agentParams = z.object({ agentId: z.uuid() });
 /** Nakladnoy: qaysi agent va qaysi kun. */
 const waybillQuery = z.object({ agentId: z.uuid(), date: z.iso.date() });
+/** Bir yo'la chiqariladigan yetkazmalar — ro'yxat serverda yana filtrlanadi. */
+const bulkWaybillBody = z.strictObject({ taskIds: z.array(z.uuid()).min(1).max(200) });
 
 const cashHandoverBody = z.strictObject({
   amount: moneySchema,
@@ -549,6 +554,32 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
    * Nakladnoy (dostavka varaqasi) ma'lumoti — agentga biriktirilgan kunlik yetkazmalar.
    * Mijoz qarzi faqat `finance.view` bilan qo'shiladi (qog'ozga chiqadigan maxfiy ma'lumot).
    */
+  /**
+   * Tanlangan yetkazmalar uchun nakladnoy ma'lumoti (ko'pini birdan chiqarish).
+   * Chop etish faqat HUJJAT amali — yetkazma holati o'zgarmaydi. Kim, qachon va qaysi
+   * yetkazmalarni chiqarganini auditga yozamiz.
+   */
+  app.post("/waybills/bulk", async (req) => {
+    const body = bulkWaybillBody.parse(req.body);
+    const tenant = await readTenantWith(req, "delivery.view");
+    const canViewDebt = (await effectivePermissions(db, tenant)).includes("finance.view");
+    const result = await deliveryWaybillsByIds(db, tenant, body.taskIds, canViewDebt);
+    await writeAuditLog(
+      {
+        userId: tenant.user.id,
+        userName: tenant.user.name,
+        companyId: tenant.company.id,
+        action: "DELIVERY_WAYBILLS_PRINTED",
+        resource: "delivery_tasks",
+        resourceId: tenant.company.id,
+        details: { requested: body.taskIds.length, printed: result.tasks.length },
+        ...requestMeta(req),
+      },
+      db,
+    );
+    return result;
+  });
+
   app.get("/waybill", async (req) => {
     const query = waybillQuery.parse(req.query);
     const tenant = await readTenantWith(req, "delivery.view");

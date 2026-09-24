@@ -1119,3 +1119,54 @@ export async function deliveryWaybill(
     })),
   };
 }
+
+/**
+ * TANLANGAN yetkazmalar uchun nakladnoy ma'lumoti (7-vazifa: ko'pini birdan chiqarish).
+ *
+ * Faqat CHIQAYOTGAN yetkazmalar qaytadi: bekor qilingan, yetkazilgan va qaytarilganlari
+ * chiqarilmaydi — server tomonda filtrlanadi, frontenddagi tanlovga ishonilmaydi.
+ * Chop etish HUJJAT amali: yetkazma holati o'zgarmaydi.
+ */
+export async function deliveryWaybillsByIds(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  taskIds: string[],
+  canViewDebt: boolean,
+) {
+  if (taskIds.length === 0) return { tasks: [] };
+  const rows = await conn
+    .select({
+      id: deliveryTasks.id,
+      number: deliveryTasks.number,
+      status: deliveryTasks.status,
+      scheduledDate: deliveryTasks.scheduledDate,
+      orderNumber: salesOrders.number,
+      orderTotal: salesOrders.totalAmount,
+      customerName: customers.name,
+      customerPhone: customers.phone,
+      customerAddress: customers.address,
+      customerDebt: customers.totalDebt,
+      warehouseName: warehouses.name,
+      agentCode: deliveryAgents.code,
+      agentName: users.name,
+    })
+    .from(deliveryTasks)
+    .innerJoin(salesOrders, eq(salesOrders.id, deliveryTasks.orderId))
+    .innerJoin(customers, eq(customers.id, deliveryTasks.customerId))
+    .leftJoin(warehouses, eq(warehouses.id, deliveryTasks.warehouseId))
+    .leftJoin(deliveryAgents, eq(deliveryAgents.id, deliveryTasks.deliveryAgentId))
+    .leftJoin(users, eq(users.id, deliveryAgents.userId))
+    .where(
+      and(
+        eq(deliveryTasks.companyId, tenant.company.id),
+        inArray(deliveryTasks.id, taskIds),
+        // Faqat yo'lga chiqayotganlari — yakunlangan va bekor qilinganlari chiqmaydi
+        inArray(deliveryTasks.status, [...OPEN_DELIVERY_STATUSES]),
+      ),
+    )
+    .orderBy(asc(deliveryTasks.scheduledDate), asc(deliveryTasks.number));
+
+  return {
+    tasks: rows.map(({ customerDebt, ...row }) => ({ ...row, customerDebt: canViewDebt ? customerDebt : null })),
+  };
+}
