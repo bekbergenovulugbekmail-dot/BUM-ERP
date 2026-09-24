@@ -300,3 +300,9 @@ Chop etish yetkazma holatini o'zgartirmaydi (avvalgidek).
 - E2E endi o'zidan keyin tozalaydi (sinov shablonlarini arxivlaydi) — aks holda bir necha
   yurishdan keyin "20 tadan ortiq shablon" chegarasiga urilib, sababsiz qizil bo'lardi.
 - Frontend 40 fayl / **198** test; API `document*` **22**; `tsc`, `eslint`, `vite build` toza.
+
+### Production (2026-09-24, 5–6-bosqich)
+
+Commit `d08063e`. `bum-api`: `Migratsiyalar qo'llandi (63ms)`, bitta `Server listening`,
+500 YO'Q. `bum-web`: `build.json` → **16:03:37Z**.
+`/api/documents/active/delivery_waybill` → **401** (marshrut bor, sessiya kerak).

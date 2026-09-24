@@ -4801,3 +4801,8 @@ Moliyaviy yaxlitlik qat'iy: shablon faqat KO'RINISHni boshqaradi, summa serverda
 Testlar: API 17 (versiyalash, XSS, tannarx ruxsati, tenant), renderer 10 (ko'p sahifa va
 moliyaviy yaxlitlik), brauzer e2e 2 + kirill PDF e2e 2. Frontend 40 fayl / 194 test.
 Production: `5a4696b` — API toza ko'tarildi, web `build.json` 14:46:41Z.
+
+**Hujjat dizayneri 5–6-bosqich (2026-09-24):** rasm (data URL), QR, shtrix-kod va sahifa
+raqami elementlari; jadval ustunlarining tartibi va kengligi; nakladnoy chiqarish shablonga
+ulandi. Shablon tuzilmaguncha nakladnoy AVVALGI ko'rinishda qoladi (`custom: false`).
+Production: `d08063e`, API toza ko'tarildi, web `build.json` 16:03:37Z.
