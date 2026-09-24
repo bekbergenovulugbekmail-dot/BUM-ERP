@@ -18,6 +18,7 @@ import {
   isResponsibleScopable,
   sanitizeRoleScopes,
   type Permission,
+  type ResponsibleScopedPermission,
   type RoleScopes,
 } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
@@ -94,11 +95,11 @@ export default function RolesSection() {
     setOpen(true);
   };
 
-  const toggleScope = (p: Permission) =>
+  const toggleScope = (p: ResponsibleScopedPermission) =>
     setForm((f) => {
-      const next = { ...f.scopes };
-      if (next[p as keyof RoleScopes]) delete next[p as keyof RoleScopes];
-      else Object.assign(next, { [p]: "responsible" });
+      const next: RoleScopes = { ...f.scopes };
+      if (next[p]) delete next[p];
+      else next[p] = "responsible";
       return { ...f, scopes: next };
     });
 
@@ -320,7 +321,9 @@ export default function RolesSection() {
                         Mas'uliyat chegarasi — faqat ma'noga ega ruxsatlarda va faqat ruxsat
                         tanlangan bo'lsa. Yoqilsa xodim o'ziga biriktirilganini ko'radi.
                       */}
-                      {perms.filter((p) => isResponsibleScopable(p) && form.permissions.includes(p)).map((p) => (
+                      {perms
+                        .filter((p): p is ResponsibleScopedPermission => isResponsibleScopable(p) && form.permissions.includes(p))
+                        .map((p) => (
                         <button
                           key={`${p}-scope`}
                           onClick={() => toggleScope(p)}

@@ -111,7 +111,7 @@ type SidebarProps = {
 
 function SidebarNav({ collapsed, onToggle, onLinkClick }: SidebarProps) {
   const { t, i18n } = useTranslation("common");
-  const { lng } = useParams<{ lng: string }>();
+  const { lng = "uz" } = useParams<{ lng: string }>();
   const visibleModules = useVisibleModules();
   const location = useLocation();
   // Supervayzer kabi xodimda ERP ham, agent ish joyi ham bor — ERP menyusidan o'tib zakaz oladi
