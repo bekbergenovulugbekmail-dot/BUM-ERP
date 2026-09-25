@@ -242,6 +242,10 @@ describe("Savdo agenti va yetkazuvchi — har nakladnoy o'ziniki", () => {
     expect(c!["delivery.salesRepName"]).toBe("—");
     expect(c!["delivery.salesRepPhone"]).toBe("—");
     expect(c!["delivery.agentPhone"]).toBe("—");
+    // Birlashgan qatorlar (standart shablon): "ism · telefon", yo'q bo'lsa "—"
+    expect(a!["delivery.salesRep"]).toBe("Karimov Jasur · +998941110001");
+    expect(c!["delivery.salesRep"]).toBe("—");
+    expect(c!["delivery.agent"]).toBe("Sobirov Vali");
   });
 
   it("PDF ichida: har sahifada faqat o'z savdo agenti va yetkazuvchisi", async () => {

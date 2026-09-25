@@ -5,7 +5,7 @@
  * yerda ikkala holat ham tekshiriladi: shablonsiz `custom: false`, shablon tuzilgach `true`.
  */
 import { expect, test } from "@playwright/test";
-import { appPath, login } from "./_lib/accounts.ts";
+import { COMPANY_HEADERS, appPath, login } from "./_lib/accounts.ts";
 
 /**
  * Har test hujjatni HAQIQIY PDF qilib chizadi va birinchisida unicode shrift (~900 KB)
@@ -16,12 +16,16 @@ test.describe.configure({ timeout: 360_000 });
 
 test.afterEach(async ({ page }) => {
   // Tozalash HECH QACHON testni yiqitmasin — u asosiy tekshiruv emas
-  const list = await page.request.get("/api/documents/templates", { timeout: 30_000 }).catch(() => null);
+  // Brauzerdan tashqari so'rov biznesni sarlavhada aytishi SHART — ilgari sarlavhasiz edi va tozalash jimgina ishlamay,
+  // demo bazada faol shablonlar chegarasi (20) to'lib qolgan (keyingi yugurishda yangi shablon yaratilmasdi)
+  const list = await page.request.get("/api/documents/templates", { headers: COMPANY_HEADERS, timeout: 30_000 }).catch(() => null);
   if (!list?.ok()) return;
   const { templates } = (await list.json()) as { templates: { id: string; name: string; isDefault: boolean }[] };
   for (const template of templates) {
     if (!/^Nakladnoy \d+$/.test(template.name)) continue;
-    await page.request.delete(`/api/documents/templates/${template.id}`, { timeout: 30_000 }).catch(() => null);
+    // Standart shablon arxivlanmaydi (keyingi test uni ishlatadi) — qolganlari
+    if (template.isDefault) continue;
+    await page.request.delete(`/api/documents/templates/${template.id}`, { headers: COMPANY_HEADERS, timeout: 30_000 }).catch(() => null);
   }
 });
 

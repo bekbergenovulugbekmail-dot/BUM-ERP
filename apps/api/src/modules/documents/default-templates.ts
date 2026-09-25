@@ -27,11 +27,10 @@ const deliveryWaybill: DocumentTemplateSchema = {
     {
       key: "body",
       elements: [
-        { id: id("b", 6), type: "field", field: "delivery.salesRepName", label: "Savdo agenti" },
-        { id: id("b", 7), type: "field", field: "delivery.salesRepPhone", label: "Savdo agenti tel." },
-        { id: id("b", 1), type: "field", field: "delivery.agentName", label: "Yetkazuvchi" },
-        { id: id("b", 8), type: "field", field: "delivery.agentPhone", label: "Yetkazuvchi tel." },
-        { id: id("b", 2), type: "field", field: "delivery.responsibleName", label: "Masul shaxs" },
+        // Ism va telefon bitta qatorda ("Karimov Jasur · +998 …") — nakladnoy qisqa qoladi, ikkitasi bir A4 ga sig'adi.
+        // "Mas'ul shaxs" standartda yo'q (topshirgan — imzo qatorida); kerak bo'lsa dizaynerda maydon sifatida qo'shiladi
+        { id: id("b", 6), type: "field", field: "delivery.salesRep", label: "Savdo agenti" },
+        { id: id("b", 1), type: "field", field: "delivery.agent", label: "Yetkazuvchi" },
         { id: id("b", 3), type: "field", field: "warehouse.name", label: "Ombor" },
         {
           id: id("b", 4),

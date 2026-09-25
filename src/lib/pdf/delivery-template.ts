@@ -13,7 +13,7 @@ import type { DocumentTemplateSchema } from "@bum/shared";
 import type { CompanyInfo } from "./pdf-utils.ts";
 import { fmtMoney, fmtNum } from "./pdf-utils.ts";
 import type { DocumentData, PackMode } from "./template-renderer.ts";
-import type { SingleDeliveryWaybill } from "./delivery-waybill-pdf.ts";
+import { personLine, type SingleDeliveryWaybill } from "./delivery-waybill-pdf.ts";
 
 const dash = (value: string | null | undefined) => value ?? "—";
 
@@ -45,6 +45,8 @@ export function waybillDocumentData(
       // Savdo agenti: agent buyurtmasi bo'lmasa "—" (boshqa hujjatdan olinmaydi — har nakladnoy o'z yetkazmasidan)
       "delivery.salesRepName": dash(delivery.salesRepName ?? null),
       "delivery.salesRepPhone": dash(delivery.salesRepPhone ?? null),
+      "delivery.salesRep": personLine(delivery.salesRepName, delivery.salesRepPhone),
+      "delivery.agent": personLine(delivery.agentName ?? delivery.agentCode, delivery.agentPhone),
       "delivery.responsibleName": options.responsibleName,
       "warehouse.name": dash(delivery.warehouseName),
       "finance.total": money(total),

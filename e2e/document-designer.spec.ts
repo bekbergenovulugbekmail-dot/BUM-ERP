@@ -5,7 +5,7 @@
  * qo'shiladi, saqlanadi va sahifa qayta ochilganda o'zgarish JOYIDA ekani tekshiriladi.
  */
 import { expect, test, type Page } from "@playwright/test";
-import { appPath, login } from "./_lib/accounts.ts";
+import { COMPANY_HEADERS, appPath, login } from "./_lib/accounts.ts";
 
 /** Shablon yuklanib, varaqdagi elementlar (haqiqiy PDF rasmlari) chizilgunicha kutadi. */
 const waitForPreview = async (page: Page) => {
@@ -30,12 +30,13 @@ test.beforeEach(async ({ page }) => {
  */
 test.afterEach(async ({ page }) => {
   // Tozalash HECH QACHON testni yiqitmasin — u asosiy tekshiruv emas
-  const list = await page.request.get("/api/documents/templates", { timeout: 30_000 }).catch(() => null);
+  // Biznes sarlavhasi SHART (brauzerdan tashqari so'rov) — sarlavhasiz tozalash jimgina ishlamay qolardi
+  const list = await page.request.get("/api/documents/templates", { headers: COMPANY_HEADERS, timeout: 30_000 }).catch(() => null);
   if (!list?.ok()) return;
   const { templates } = (await list.json()) as { templates: { id: string; name: string; isDefault: boolean }[] };
   for (const template of templates) {
     if (!/^(Sinov|Versiya|Nakladnoy) \d+$/.test(template.name)) continue;
-    await page.request.delete(`/api/documents/templates/${template.id}`, { timeout: 30_000 }).catch(() => null);
+    await page.request.delete(`/api/documents/templates/${template.id}`, { headers: COMPANY_HEADERS, timeout: 30_000 }).catch(() => null);
   }
 });
 
