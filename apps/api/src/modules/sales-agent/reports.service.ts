@@ -141,6 +141,7 @@ export async function agentReport(conn: DbOrTx, context: AgentContext, range: { 
       and(
         eq(customerPayments.companyId, companyId),
         eq(agentOrders.salesRepId, salesRepId),
+        eq(customerPayments.status, "posted"),
         gte(customerPayments.paymentDate, range.from),
         lte(customerPayments.paymentDate, range.to),
       ),

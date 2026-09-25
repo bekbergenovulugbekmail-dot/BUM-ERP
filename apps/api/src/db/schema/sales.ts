@@ -360,10 +360,16 @@ export const payments = pgTable(
     /** Qismlar yig'indisi (asosiy valyutada). */
     totalAmount: money("total_amount").notNull(),
     currency: varchar("currency", { length: 3 }).notNull().default("UZS"),
+    /** `posted` | `reversed` — qismlaridan biri emas, BUTUN to'lov bekor qilinadi (aralash to'lov bir hujjat). */
+    status: varchar("status", { length: 16 }).notNull().default("posted"),
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
+    reversedBy: uuid("reversed_by").references(() => users.id, { onDelete: "set null" }),
+    reversalReason: text("reversal_reason"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamps().createdAt,
   },
   (t) => [
+    check("pay_status_known", sql`${t.status} IN ('posted', 'reversed')`),
     uniqueIndex("pay_company_idempotency_key")
       .on(t.companyId, t.idempotencyKey)
       .where(sql`${t.idempotencyKey} IS NOT NULL`),
@@ -408,10 +414,21 @@ export const customerPayments = pgTable(
      * Kassadan tashqari to'lovlarda null.
      */
     posShiftId: uuid("pos_shift_id").references(() => posShifts.id, { onDelete: "set null" }),
+    /**
+     * `posted` | `reversed`. Bekor qilingan to'lov O'CHIRILMAYDI: asl yozuv saqlanadi, teskari kassa
+     * harakati va jurnal yozuvi qo'shiladi (moliyaviy tarix yo'qolmaydi). Hisobotlar faqat `posted` ni oladi.
+     */
+    status: varchar("status", { length: 16 }).notNull().default("posted"),
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
+    reversedBy: uuid("reversed_by").references(() => users.id, { onDelete: "set null" }),
+    reversalReason: text("reversal_reason"),
+    reversalJournalEntryId: uuid("reversal_journal_entry_id").references(() => journalEntries.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     ...timestamps(),
   },
   (t) => [
+    check("cp_status_known", sql`${t.status} IN ('posted', 'reversed')`),
+    check("cp_reversal_complete", sql`${t.status} = 'posted' OR (${t.reversedAt} IS NOT NULL AND ${t.reversalReason} IS NOT NULL)`),
     index("cp_company_customer_idx").on(t.companyId, t.customerId),
     index("cp_payment_idx").on(t.paymentId),
     index("cp_shift_idx").on(t.posShiftId),
@@ -427,6 +444,29 @@ export const customerPayments = pgTable(
 
 // ─── customer_balance_transactions ───────────────────────────────────────────
 
+
+/**
+ * Buyurtmasiz to'lovning ochiq hujjatlarga taqsimoti (eng eski muddat birinchi). To'lov bekor qilinganda
+ * AYNAN shu summalar hujjatlardan qaytariladi — taxmin qilinmaydi.
+ */
+export const customerPaymentAllocations = pgTable(
+  "customer_payment_allocations",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    paymentId: uuid("payment_id").notNull().references(() => customerPayments.id, { onDelete: "restrict" }),
+    orderId: uuid("order_id").notNull().references(() => salesOrders.id, { onDelete: "restrict" }),
+    amount: money("amount").notNull(),
+    createdAt: timestamps().createdAt,
+  },
+  (t) => [
+    index("cpa_payment_idx").on(t.paymentId),
+    index("cpa_order_idx").on(t.orderId),
+    check("cpa_amount_positive", sql`${t.amount} > 0`),
+  ],
+);
 export const customerBalanceTransactions = pgTable(
   "customer_balance_transactions",
   {

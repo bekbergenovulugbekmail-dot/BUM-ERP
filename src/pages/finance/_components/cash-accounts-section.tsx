@@ -210,7 +210,8 @@ export default function CashAccountsSection() {
   const purposeOptions = useApiQuery<{ accounts: Account[] }>(
     txDialog ? "/api/finance/accounts" : null,
     { type: txDialog === "in" ? "income" : "expense" },
-  ).data?.accounts.filter((account) => account.isActive);
+  // Sotuv daromadi va tannarx faqat sotuv hujjati bilan yuritiladi — qo'lda kassa harakati ularga yozilmaydi (server ham rad etadi)
+  ).data?.accounts.filter((account) => account.isActive && !["sales", "cogs"].includes(account.subtype ?? ""));
 
   const updateAccount = useApiMutation(
     ({ id, patch }: { id: string; patch: AccountPatch }) => api.patch(`/api/finance/cash-accounts/${id}`, patch),

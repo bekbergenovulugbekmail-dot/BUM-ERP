@@ -44,7 +44,7 @@ import { fromMinor, rescale, toMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency, financeAudit } from "./accounts.service.js";
 import { currencyRate } from "./currencies.service.js";
-import { assertPeriodOpen, ensureAccountBySubtype, findAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "./journal.service.js";
+import { MANUAL_BLOCKED_SUBTYPES, assertPeriodOpen, ensureAccountBySubtype, findAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "./journal.service.js";
 import { applyOutgoingBankCommission } from "./bank-commission.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...cashAccountFields } = getTableColumns(cashAccounts);
@@ -647,11 +647,16 @@ export async function recordManualCashTransaction(
   let journalEntryId: string;
   {
     const [counter] = await tx
-      .select({ id: accounts.id })
+      .select({ id: accounts.id, subtype: accounts.subtype })
       .from(accounts)
       .where(and(eq(accounts.id, counterAccountId), eq(accounts.companyId, companyId)))
       .limit(1);
     if (!counter) throw badRequest("Qarshi hisob topilmadi");
+    // Audit AUD-012: nazorat hisoblari (debitor, kreditor, zaxira, boshqa kassa/bank, avans…) o'z hujjatlari bilan
+    // yuritiladi — qo'lda kassa harakati ularni o'zgartirsa, mijoz/ta'minotchi qarzi va ombor jurnaldan ajraladi
+    if (counter.subtype && MANUAL_BLOCKED_SUBTYPES.has(counter.subtype)) {
+      throw badRequest("Bu hisob qo'lda kassa harakati uchun qarshi hisob bo'la olmaydi — mijoz/ta'minotchi to'lovi, o'tkazma yoki tegishli hujjatdan foydalaning");
+    }
     const ledger = await ledgerAccountFor(tx, companyId, account);
     if (ledger === counter.id) throw badRequest("Qarshi hisob kassaning o'z hisobi bo'lishi mumkin emas");
 
@@ -715,6 +720,8 @@ export async function transferCash(
 
   const referenceId = randomUUID();
   const txDate = input.txDate ?? todayIso();
+  // Audit AUD-011: foydalanuvchi tanlagan sana yopilgan davrga tushmasin (oflayn kassa sinxroni — istisno)
+  await assertPeriodOpen(tx, companyId, txDate);
   const description = input.description || `${source.name} → ${target.name}`;
   const common = {
     amount: input.amount,

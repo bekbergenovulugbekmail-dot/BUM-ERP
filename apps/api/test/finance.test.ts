@@ -47,7 +47,7 @@ describe("Hisoblar rejasi", () => {
   it("kompaniya yaratilganda standart hisoblar va kassalar ochiladi; setup idempotent", async () => {
     const list = (await api(companyA.ownerCookie, "GET", "/accounts")).json().accounts;
     // 21 asosiy + 5800 "Bank komissiyasi xarajatlari" + 1030 "Kutilayotgan to'lovlar"
-    expect(list).toHaveLength(23);
+    expect(list).toHaveLength(25); // 4300 kassa ortiqchasi va 5900 kassa kamomadi — audit AUD-010
     expect(list[0]).toMatchObject({ code: "1010", type: "asset", subtype: "cash", balance: "0.00" });
 
     const cash = await db.select().from(cashAccounts).where(eq(cashAccounts.companyId, companyA.companyId));
@@ -57,7 +57,7 @@ describe("Hisoblar rejasi", () => {
 
     // Hisoblar rejasi yo'q eski kompaniya
     await db.delete(accounts).where(eq(accounts.companyId, companyB.companyId));
-    expect((await api(companyB.ownerCookie, "POST", "/setup")).json()).toEqual({ accountsCreated: 23, cashAccountsCreated: 0 });
+    expect((await api(companyB.ownerCookie, "POST", "/setup")).json()).toEqual({ accountsCreated: 25, cashAccountsCreated: 0 });
   });
 
   it("yaratish va tahrirlash: kod noyob, ota hisob turi va sikli, ruxsatlar", async () => {

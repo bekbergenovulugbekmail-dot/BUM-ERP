@@ -247,6 +247,7 @@ export async function metricValue(
           and(
             eq(customerPayments.companyId, companyId),
             eq(customerPayments.createdBy, links.userId),
+            eq(customerPayments.status, "posted"),
             gte(customerPayments.paymentDate, start),
             lt(customerPayments.paymentDate, next),
           ),

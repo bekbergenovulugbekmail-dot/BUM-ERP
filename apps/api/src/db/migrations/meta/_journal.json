@@ -610,6 +610,13 @@
       "when": 1790250000000,
       "tag": "0086_document_templates",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1790360000000,
+      "tag": "0087_finance_party_reversal",
+      "breakpoints": true
     }
   ]
 }

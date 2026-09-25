@@ -42,6 +42,8 @@ import { ALLOCATION_METHODS, MAX_PAYMENT_PARTS, type Permission } from "@bum/sha
 import { db } from "../../db/client.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
+import { previewPaymentReversal, reverseCustomerPayment } from "./payment-reversal.service.js";
+import { customerDebtReconciliation, customerStatement, receivablesAsOf, receivablesHistory } from "./customer-statement.service.js";
 import { notifyCustomerPaymentReceived, notifyOrderPurchase } from "../telegram/notify.service.js";
 import { alertBigDiscount, alertShiftDifference } from "../telegram/alerts.service.js";
 import { decimalSchema, moneySchema, percentSchema, priceSchema } from "../../shared/decimal.js";
@@ -276,6 +278,14 @@ const agingQuery = z.object({
   limit: z.coerce.number().int().min(1).max(2000).optional(),
 });
 
+const statementQuery = z.object({ from: z.iso.date().optional(), to: z.iso.date().optional() });
+const asOfQuery = z.object({
+  date: z.iso.date().optional(),
+  includeZero: z.enum(["true", "false"]).transform((value) => value === "true").optional(),
+});
+const historyQuery = z.object({ from: z.iso.date(), to: z.iso.date() });
+const paymentParams = z.object({ paymentId: z.uuid() });
+const reversalBody = z.object({ reason: z.string().trim().min(3, "Bekor qilish sababini yozing").max(500) });
 const paymentsQuery = z.object({
   customerId: z.uuid().optional(),
   orderId: z.uuid().optional(),
@@ -754,6 +764,30 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
 
   // ─── Debitorlik (qarz yoshi) ─────────────────────────────────────────────
 
+  // ─── Mijoz qarzi: akt, istalgan sanaga, oyma-oy (yagona manba — jurnal subhisobi) ────────────
+
+  app.get("/customers/:customerId/statement", async (req) => {
+    const { customerId } = customerParams.parse(req.params);
+    const query = statementQuery.parse(req.query);
+    const tenant = await readTenant(req, "sales.view");
+    return customerStatement(db, tenant, customerId, { ...query, responsibleIds: await customerScopeFor(tenant) });
+  });
+
+  app.get("/receivables/as-of", async (req) => {
+    const query = asOfQuery.parse(req.query);
+    const tenant = await readTenant(req, "sales.view");
+    return receivablesAsOf(db, tenant, { ...query, responsibleIds: await customerScopeFor(tenant) });
+  });
+
+  app.get("/receivables/history", async (req) => {
+    const query = historyQuery.parse(req.query);
+    const tenant = await readTenant(req, "sales.view");
+    return receivablesHistory(db, tenant, { ...query, responsibleIds: await customerScopeFor(tenant) });
+  });
+
+  /** Kesh (`total_debt`) ≠ jurnal subhisobi — yagona manbadan ajralgan mijozlar. */
+  app.get("/receivables/reconciliation", async (req) => customerDebtReconciliation(db, await readTenant(req, "finance.view")));
+
   app.get("/receivables/aging", async (req) => {
     const query = agingQuery.parse(req.query);
     return receivablesAging(db, await readTenant(req, "sales.view"), query);
@@ -764,6 +798,24 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   app.get("/payments", async (req) => {
     const query = paymentsQuery.parse(req.query);
     return listCustomerPayments(db, await readTenant(req, "sales.view"), query);
+  });
+
+  /**
+   * To'lovni bekor qilish — AVVAL ko'rib chiqish: bog'langan operatsiyalar (aralash to'lov qismlari, buyurtmalar,
+   * kassa, hamyon, komissiya, smena, yetkazma), mijoz qarzi oldin/keyin va to'siqlar. Hech narsa yozilmaydi.
+   */
+  app.get("/payments/:paymentId/reversal", async (req) => {
+    const { paymentId } = paymentParams.parse(req.params);
+    return previewPaymentReversal(db, await readTenant(req, "finance.approve"), paymentId);
+  });
+
+  /** To'lovni bekor qilish: teskari yozuvlar, bitta tranzaksiya, sabab majburiy, qayta bekor qilib bo'lmaydi. */
+  app.post("/payments/:paymentId/reverse", async (req) => {
+    const { paymentId } = paymentParams.parse(req.params);
+    const body = reversalBody.parse(req.body ?? {});
+    return writeInTenant(req, "finance.approve", (tx, tenant) =>
+      reverseCustomerPayment(tx, tenant, paymentId, body.reason, requestMeta(req)),
+    );
   });
 
   app.post("/payments", async (req, reply) => {

@@ -83,7 +83,7 @@ export async function refundableByMethod(conn: DbOrTx, orderId: string) {
   const paid = await conn
     .select({ method: customerPayments.method, amount: sumMoney(customerPayments.amount) })
     .from(customerPayments)
-    .where(eq(customerPayments.orderId, orderId))
+    .where(and(eq(customerPayments.orderId, orderId), eq(customerPayments.status, "posted")))
     .groupBy(customerPayments.method);
   for (const row of paid) add(row.method, toMinor(row.amount));
   const previous = await conn
@@ -107,7 +107,7 @@ async function refundAccountPool(conn: DbOrTx, orderId: string, currency: string
   const rows = await conn
     .select({ method: customerPayments.method, cashAccountId: customerPayments.cashAccountId, amount: sumMoney(customerPayments.amount) })
     .from(customerPayments)
-    .where(and(eq(customerPayments.orderId, orderId), eq(customerPayments.currency, currency)))
+    .where(and(eq(customerPayments.orderId, orderId), eq(customerPayments.currency, currency), eq(customerPayments.status, "posted")))
     .groupBy(customerPayments.method, customerPayments.cashAccountId)
     .orderBy(customerPayments.method, customerPayments.cashAccountId);
   for (const row of rows) {
@@ -384,7 +384,7 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
           cashback: sql<string>`coalesce(sum(${customerPayments.amount}) filter (where ${customerPayments.method} = 'cashback'), 0)::numeric(18,2)`,
         })
         .from(customerPayments)
-        .where(eq(customerPayments.orderId, orderId))
+        .where(and(eq(customerPayments.orderId, orderId), eq(customerPayments.status, "posted")))
     : [{ balance: "0", cashback: "0" }];
   const balanceLeft = positive(toMinor(sources!.balance) - toMinor(done!.balance));
   const cashbackLeft = positive(toMinor(sources!.cashback) - toMinor(done!.cashback));
@@ -487,6 +487,7 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
   }
   if (journal.length > 0) {
     await postJournalEntry(tx, companyId, tenant.user.id, {
+      party: order.customerId ? { type: "customer", id: order.customerId } : null,
       entryDate: date,
       description: `Qaytarish: ${number} (${order.number})`,
       referenceType: "sales_return",
@@ -530,6 +531,7 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
       allowOverdraft: offline !== undefined,
     });
     await postJournalEntry(tx, companyId, tenant.user.id, {
+      party: order.customerId ? { type: "customer", id: order.customerId } : null,
       entryDate: date,
       description: `Pul qaytarish: ${number}${suffix ? ` (${REFUND_LABELS[part.method]})` : ""}`,
       referenceType: `sales_return_refund${suffix}`,

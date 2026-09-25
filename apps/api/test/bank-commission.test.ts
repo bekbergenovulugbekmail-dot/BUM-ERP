@@ -56,7 +56,8 @@ const debtOf = async (id: string) => (await db.select({ totalDebt: suppliers.tot
 /** Kirim/chiqim maqsadi endi majburiy — birinchi faol xarajat moddasi. */
 async function expenseAccount() {
   const res = await call(owner(), "GET", "/api/finance/accounts?type=expense");
-  return (res.json().accounts as { id: string; isActive: boolean }[]).find((row) => row.isActive)!.id;
+  // Tannarx (5000) qo'lda kassa harakatiga yaramaydi (audit AUD-012) — oddiy xarajat moddasi olinadi
+  return (res.json().accounts as { id: string; isActive: boolean; subtype: string | null }[]).find((row) => row.isActive && row.subtype !== "cogs")!.id;
 }
 
 const bankFees = () =>

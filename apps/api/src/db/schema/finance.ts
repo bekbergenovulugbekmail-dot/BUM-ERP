@@ -141,10 +141,20 @@ export const journalLines = pgTable(
     debit: money("debit").notNull().default("0"),
     credit: money("credit").notNull().default("0"),
     description: text("description"),
+    /**
+     * Kontragent: mijoz yoki ta'minotchi. Nazorat hisoblari (1100 debitor, 2300 avans, 2400 keshbek, 2000
+     * kreditor) qatorida to'ldiriladi — mijoz/ta'minotchi qarzi, akt va istalgan sanadagi qoldiq SHU
+     * qatorlardan hisoblanadi (alohida qarz bazasi yo'q).
+     */
+    partyType: varchar("party_type", { length: 16 }),
+    partyId: uuid("party_id"),
     createdAt: timestamps().createdAt,
   },
   (t) => [
     index("jl_entry_idx").on(t.entryId),
+    index("jl_company_party_idx").on(t.companyId, t.partyType, t.partyId).where(sql`${t.partyId} IS NOT NULL`),
+    check("jl_party_pair", sql`(${t.partyType} IS NULL) = (${t.partyId} IS NULL)`),
+    check("jl_party_type_known", sql`${t.partyType} IS NULL OR ${t.partyType} IN ('customer', 'supplier')`),
     index("jl_company_account_idx").on(t.companyId, t.accountId),
     check("jl_amounts_non_negative", sql`${t.debit} >= 0 AND ${t.credit} >= 0`),
     /** Bir qatorda faqat bittasi bo'ladi — ikkalasi ham nol emas. */

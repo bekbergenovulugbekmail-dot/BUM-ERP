@@ -236,6 +236,7 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
   const payable = await requireAccountBySubtype(tx, companyId, "payable", "liability", "Kreditorlar");
   if (total > 0n) {
     await postJournalEntry(tx, companyId, tenant.user.id, {
+      party: { type: "supplier", id: order.supplierId },
       entryDate: date,
       description: `Ta'minotchiga qaytarish: ${number} (${order.number})`,
       referenceType: "purchase_return",
@@ -278,6 +279,7 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
       referenceId: returnId,
     });
     await postJournalEntry(tx, companyId, tenant.user.id, {
+      party: { type: "supplier", id: order.supplierId },
       entryDate: date,
       description,
       referenceType: "purchase_return_refund",

@@ -66,6 +66,7 @@ export async function bankCommissionReport(conn: DbOrTx, tenant: TenantContext, 
     .where(
       and(
         eq(customerPayments.companyId, companyId),
+        eq(customerPayments.status, "posted"),
         isNotNull(customerPayments.terminalId),
         query.dateFrom ? gte(customerPayments.paymentDate, query.dateFrom) : undefined,
         query.dateTo ? lte(customerPayments.paymentDate, query.dateTo) : undefined,

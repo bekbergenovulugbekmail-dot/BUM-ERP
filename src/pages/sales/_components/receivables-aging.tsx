@@ -7,12 +7,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { num } from "../_lib/types.ts";
+import CustomerStatementDialog from "./customer-statement-dialog.tsx";
+import ReceivablesHistory from "./receivables-history.tsx";
 
 /**
  * Debitorlik yoshi — ochiq hujjatlarning to'lov muddatiga nisbatan taqsimoti.
  * Manba bitta: yakunlangan sotuvning to'lanmagan qoldig'i (mijoz keshi emas).
  */
-type Bucket = "current" | "d0_30" | "d31_60" | "d61_90" | "d90_plus";
+type Bucket = "current" | "d0_7" | "d8_30" | "d31_60" | "d61_90" | "d90_plus";
 type Totals = Record<Bucket, string> & { total: string };
 
 type AgingCustomer = {
@@ -41,7 +43,8 @@ type AgingItem = {
 
 const BUCKETS: { key: Bucket; label: string; color: string }[] = [
   { key: "current", label: "Muddati kelmagan", color: "text-muted-foreground" },
-  { key: "d0_30", label: "1–30 kun", color: "text-amber-600 dark:text-amber-400" },
+  { key: "d0_7", label: "1–7 kun", color: "text-amber-500 dark:text-amber-300" },
+  { key: "d8_30", label: "8–30 kun", color: "text-amber-600 dark:text-amber-400" },
   { key: "d31_60", label: "31–60 kun", color: "text-orange-600 dark:text-orange-400" },
   { key: "d61_90", label: "61–90 kun", color: "text-red-600 dark:text-red-400" },
   { key: "d90_plus", label: "90+ kun", color: "text-red-700 dark:text-red-300" },
@@ -50,19 +53,45 @@ const BUCKETS: { key: Bucket; label: string; color: string }[] = [
 const fmt = (value: string) => new Intl.NumberFormat("uz-UZ").format(Math.round(num(value)));
 
 export default function ReceivablesAging() {
+  /** Qarz yoshi (bugungi ochiq hujjatlar) | istalgan sanaga | oyma-oy tarix. */
+  const [mode, setMode] = useState<"aging" | "as_of" | "monthly">("aging");
+  const [statementFor, setStatementFor] = useState<string | null>(null);
   const [bucket, setBucket] = useState<"all" | Bucket>("all");
   const [view, setView] = useState<"customers" | "orders">("customers");
 
   const query = useApiQuery<{ asOf: string; totals: Totals; customers: AgingCustomer[]; items: AgingItem[] }>(
-    "/api/sales/receivables/aging",
+    mode === "aging" ? "/api/sales/receivables/aging" : null,
     { bucket: bucket === "all" ? undefined : bucket, limit: 1000 },
   );
   const data = query.data;
 
+  const modes = (
+    <div className="flex flex-wrap gap-1 rounded-lg bg-muted/50 p-1 text-sm" data-testid="receivables-modes">
+      {([["aging", "Qarz yoshi"], ["as_of", "Istalgan sanaga"], ["monthly", "Oyma-oy"]] as const).map(([key, label]) => (
+        <button key={key} type="button" data-testid={`receivables-mode-${key}`}
+          className={cn("rounded-md px-3 py-1.5", mode === key ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground")}
+          onClick={() => setMode(key)}>{label}</button>
+      ))}
+    </div>
+  );
+  const statement = statementFor && <CustomerStatementDialog customerId={statementFor} onClose={() => setStatementFor(null)} />;
+
+  if (mode !== "aging") {
+    return (
+      <div className="flex h-full flex-col gap-4">
+        {modes}
+        <ReceivablesHistory mode={mode} onOpenCustomer={setStatementFor} />
+        {statement}
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col gap-4">
+      {modes}
+      {statement}
       {/* Yosh guruhlari — jami summalar */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
         {BUCKETS.map((item) => (
           <Card key={item.key} className={cn("cursor-pointer transition-colors", bucket === item.key && "border-primary")}>
             <CardContent
@@ -132,7 +161,10 @@ export default function ReceivablesAging() {
               {data.customers.map((row) => (
                 <tr key={row.customerId} className="border-t">
                   <td className="px-3 py-2.5">
-                    <p className="font-medium">{row.customerName}</p>
+                    <button type="button" className="text-left font-medium hover:underline" title="Hisob-kitob akti"
+                      data-testid={`aging-customer-${row.customerId}`} onClick={() => setStatementFor(row.customerId)}>
+                      {row.customerName}
+                    </button>
                     <p className="text-xs text-muted-foreground">{row.customerCode}</p>
                   </td>
                   {BUCKETS.map((item) => (

@@ -68,12 +68,15 @@ describe("Ombor harakatlari buxgalteriyada", () => {
     expect(await ledger("4100")).toBe("1000.00");
     expect(await ledger("1200")).toBe("9000.00");
 
-    // Qarshi hisob tanlansa — shu hisob (kreditorlar); begona va zaxira hisobi rad
-    const received = await move({ type: "receive", quantity: "5", costPrice: "1000", counterAccountId: (await account("2000")).id });
+    // Qarshi hisob tanlansa — shu hisob (kapital); begona, zaxira va kreditor hisobi rad.
+    // Kreditor ta'minotchi subhisobi bilan yuritiladi — qarzga kirim faqat xarid hujjati orqali (audit AUD-012).
+    const received = await move({ type: "receive", quantity: "5", costPrice: "1000", counterAccountId: (await account("3000")).id });
     expect(received.statusCode).toBe(201);
     expect(received.json().journalEntryId).toBeTruthy();
-    expect(await ledger("2000")).toBe("5000.00");
-    const foreign = (await account("2000", other.companyId)).id;
+    expect(await ledger("3000")).toBe("15000.00");
+    expect((await move({ type: "receive", quantity: "1", costPrice: "1000", counterAccountId: (await account("2000")).id })).statusCode).toBe(400);
+    expect(await ledger("2000")).toBe("0.00");
+    const foreign = (await account("3000", other.companyId)).id;
     expect((await move({ type: "receive", quantity: "1", costPrice: "1000", counterAccountId: foreign })).statusCode).toBe(400);
     expect((await move({ type: "receive", quantity: "1", costPrice: "1000", counterAccountId: (await account("1200")).id })).statusCode).toBe(400);
     expect(await ledger("1200")).toBe("14000.00");

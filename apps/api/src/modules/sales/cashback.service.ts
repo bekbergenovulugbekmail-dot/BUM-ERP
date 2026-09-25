@@ -222,6 +222,7 @@ export async function earnCashback(
   const id = randomUUID();
   const amount = fromMinor(input.amount);
   const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+    party: { type: "customer", id: customer.id },
     entryDate: input.date ?? todayIso(),
     description: `Keshbek: ${input.orderNumber}`,
     referenceType: "cashback",
@@ -294,7 +295,7 @@ export async function earnOrderCashback(tx: Tx, tenant: TenantContext, orderId: 
         total: sql<string>`coalesce(sum(${customerPayments.amount}) filter (where ${customerPayments.method} = 'cashback'), 0)::numeric(18,2)`,
       })
       .from(customerPayments)
-      .where(eq(customerPayments.orderId, order.id));
+      .where(and(eq(customerPayments.orderId, order.id), eq(customerPayments.status, "posted")));
     base = total - toMinor(redeemed!.total);
   }
   const amount = await computeCashback(tx, companyId, cashback, lines, total, base);
@@ -351,6 +352,7 @@ export async function redeemCashback(
     })
     .returning({ id: customerPayments.id });
   const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+    party: { type: "customer", id: customer.id },
     entryDate: date,
     description: `Keshbekdan to'lov: ${order.number}`,
     referenceType: "customer_payment",
@@ -452,6 +454,7 @@ export async function reverseCashback(
     const id = randomUUID();
     const amount = fromMinor(input.restore);
     const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+      party: { type: "customer", id: customer.id },
       entryDate: date,
       description: `Keshbek qaytarildi: ${input.label}`,
       referenceType: "cashback",
@@ -482,6 +485,7 @@ export async function reverseCashback(
     const id = randomUUID();
     const amount = fromMinor(reversible);
     const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+      party: { type: "customer", id: customer.id },
       entryDate: date,
       description: `Keshbek bekor qilindi: ${input.label}`,
       referenceType: "cashback",
@@ -548,6 +552,7 @@ export async function setCustomerCashback(
   const amount = fromMinor(delta > 0n ? delta : -delta);
   const liability = await ensureAccountBySubtype(tx, companyId, "cashback_liability");
   const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+    party: { type: "customer", id: customer.id },
     entryDate: date,
     description: `Keshbek to'g'rilandi: ${customer.name} — ${reason}`,
     referenceType: "cashback",

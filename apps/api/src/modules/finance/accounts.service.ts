@@ -37,6 +37,8 @@ export const DEFAULT_ACCOUNTS: { code: string; name: string; type: AccountType; 
   { code: "4000", name: "Sotuv daromadi", type: "income", subtype: "sales" },
   { code: "4100", name: "Boshqa daromadlar", type: "income", subtype: "other" },
   { code: "4200", name: "Kurs farqi daromadi", type: "income", subtype: "fx_gain" },
+  /** Kassa smenasi yopilganda sanalgan naqd kutilganidan ko'p bo'lsa (audit AUD-010). */
+  { code: "4300", name: "Kassa ortiqchasi", type: "income", subtype: "cash_overage" },
   { code: "5000", name: "Tovar tannarxi", type: "expense", subtype: "cogs" },
   { code: "5100", name: "Ish haqi xarajatlari", type: "expense", subtype: "salary" },
   { code: "5200", name: "Ijara xarajatlari", type: "expense", subtype: "rent" },
@@ -46,6 +48,8 @@ export const DEFAULT_ACCOUNTS: { code: string; name: string; type: AccountType; 
   { code: "5600", name: "Keshbek xarajatlari", type: "expense", subtype: "cashback_expense" },
   { code: "5700", name: "Kurs farqi xarajati", type: "expense", subtype: "fx_loss" },
   { code: "5800", name: "Bank komissiyasi xarajatlari", type: "expense", subtype: "bank_fees" },
+  /** Kassa smenasi yopilganda sanalgan naqd kutilganidan kam bo'lsa (audit AUD-010). */
+  { code: "5900", name: "Kassa kamomadi", type: "expense", subtype: "cash_shortage" },
 ];
 
 const { legacyId: _legacyId, companyId: _companyId, ...accountFields } = getTableColumns(accounts);

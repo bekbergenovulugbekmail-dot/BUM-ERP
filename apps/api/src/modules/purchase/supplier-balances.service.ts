@@ -63,6 +63,7 @@ export async function applySupplierBalance(
             { accountId: payable, credit: amount },
           ];
     await postJournalEntry(tx, input.companyId, input.userId, {
+      party: { type: "supplier", id: input.supplierId },
       entryDate: input.date,
       description: `Kurs farqi (${input.currency}): ${input.description}`,
       referenceType: "supplier_fx",

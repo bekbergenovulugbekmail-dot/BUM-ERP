@@ -38,13 +38,27 @@ export type JournalLineInput = {
   description?: string | null;
 };
 
+export type JournalParty = { type: "customer" | "supplier"; id: string };
+
 export type JournalEntryInput = {
   entryDate: string;
   description: string;
   referenceType?: string | null;
   referenceId?: string | null;
   notes?: string | null;
+  /**
+   * Kontragent. Yozuvning shu kontragent turiga tegishli NAZORAT hisobi qatorlariga yoziladi:
+   * mijoz — debitor (1100), mijoz avansi (2300), keshbek (2400); ta'minotchi — kreditor (2000).
+   * Mijoz qarzi, akt va istalgan sanadagi qoldiq shu qatorlardan hisoblanadi.
+   */
+  party?: JournalParty | null;
   lines: JournalLineInput[];
+};
+
+/** Kontragent turiga tegishli nazorat hisoblari (subtype). */
+export const PARTY_SUBTYPES: Record<JournalParty["type"], ReadonlySet<string>> = {
+  customer: new Set(["receivable", "customer_advance", "cashback_liability"]),
+  supplier: new Set(["payable"]),
 };
 
 export async function findAccountBySubtype(conn: DbOrTx, companyId: string, subtype: string, type?: AccountType) {
@@ -158,11 +172,20 @@ export async function postJournalEntry(tx: Tx, companyId: string, createdBy: str
 
   const accountIds = [...new Set(parsed.map((l) => l.accountId))];
   const found = await tx
-    .select({ id: accounts.id, isActive: accounts.isActive })
+    .select({ id: accounts.id, isActive: accounts.isActive, subtype: accounts.subtype })
     .from(accounts)
     .where(and(eq(accounts.companyId, companyId), inArray(accounts.id, accountIds)));
   if (found.length !== accountIds.length) throw badRequest("Hisob topilmadi");
   if (found.some((a) => !a.isActive)) throw badRequest("Hisob faol emas");
+  const subtypeOf = new Map(found.map((a) => [a.id, a.subtype]));
+  const partyFor = (accountId: string) => {
+    const party = input.party;
+    if (!party) return { partyType: null, partyId: null };
+    const subtype = subtypeOf.get(accountId);
+    return subtype && PARTY_SUBTYPES[party.type].has(subtype)
+      ? { partyType: party.type, partyId: party.id }
+      : { partyType: null, partyId: null };
+  };
 
   const number = await nextDocumentNumber(tx, {
     table: journalEntries,
@@ -198,6 +221,7 @@ export async function postJournalEntry(tx: Tx, companyId: string, createdBy: str
       debit: fromMinor(l.debit),
       credit: fromMinor(l.credit),
       description: l.description,
+      ...partyFor(l.accountId),
     })),
   );
   await applyBalances(tx, companyId, parsed, 1n);
@@ -338,7 +362,7 @@ export async function setLockDate(tx: Tx, tenant: TenantContext, lockDate: strin
  * Qo'lda jurnal yozuvi tushmaydigan nazorat hisoblari: ular o'z hujjatlari bilan yuritiladi va qo'lda yozuv jurnalni
  * kassa/bank qoldig'i, mijoz va ta'minotchi qarzi, zaxira, avans va keshbek ro'yxatlaridan ajratib qo'yardi.
  */
-const MANUAL_BLOCKED_SUBTYPES = new Set([
+export const MANUAL_BLOCKED_SUBTYPES = new Set([
   "cash",
   "bank",
   // 1030 kutilayotgan to'lovlar — kassa harakati va qirqim bilan yuritiladi

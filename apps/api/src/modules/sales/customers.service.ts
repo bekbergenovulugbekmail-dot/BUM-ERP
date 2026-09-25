@@ -218,6 +218,7 @@ export async function getCustomer(
       amount: customerPayments.amount,
       method: customerPayments.method,
       paymentDate: customerPayments.paymentDate,
+      status: customerPayments.status,
     })
     .from(customerPayments)
     .where(and(eq(customerPayments.companyId, companyId), eq(customerPayments.customerId, customerId)))

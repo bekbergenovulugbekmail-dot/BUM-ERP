@@ -4926,3 +4926,26 @@ torting → Saqlash → sahifani yangilang → "PDF" tugmasi; Dostavka → 2 yet
 
 **Keyingi qadam:** egasi production'da dizaynerni sinab ko'rsin; `bum-erp.uz` TLS; aylantirish
 (rotation) hali yo'q.
+
+## ERP + moliya auditi — 1-bosqich (2026-09-25/26)
+
+Egasining "PROFESSIONAL ERP + MOLIYA AUDIT" topshirig'i. Doimiy holat: `.claude/ERP-PROFESSIONAL-AUDIT.md`,
+`ERP-AUDIT-PROGRESS.md`, `ERP-AUDIT-ISSUES.md` (AUD-001…027), `ERP-AUDIT-CHECKLIST.md`.
+
+**Yopildi:**
+- AUD-001 (CRITICAL) mijoz to'lovini bekor qilish: ko'rib chiqish + teskari yozuvlar (kassa, jurnal, taqsimot,
+  qarz, hamyon/keshbek, komissiya, smena, yetkazma), atomik, idempotent, `finance.approve`, audit izi.
+- AUD-010 (CRITICAL) kassa smenasi farqi endi kassa va jurnalga tushadi (5900 kamomad / 4300 ortiqcha).
+- AUD-011 davr qulfi foydalanuvchi sanali hujjatlarda; AUD-012 qo'lda kassa/ombor harakati nazorat hisoblariga
+  yozmaydi; AUD-021 inventarizatsiya tuzatmasi 1200 ga tushadi.
+- AUD-005 mijoz akti, istalgan sanaga qarz, oyma-oy, aging 0–7/8–30/31–60/61–90/90+, Excel/PDF.
+- Migratsiya 0087 (qo'shuvchi): `journal_lines.party_*` + backfill, to'lov holati, taqsimot jadvali.
+
+**Tekshirildi:** eslint, `pnpm build`, frontend 268, API 158 fayl (yangi: audit-payment-reversal 8,
+audit-controls 3, audit-customer-statement 3), E2E 33 fayl / 120 test (yangi: audit-customer-debt).
+
+**Brauzerda sinash:** CRM → Mijozlar → mijoz qatoridagi 📄 "Akt"; akt'dagi to'lov qatorida "Bekor qilish";
+Sotuv → Qarzdorlik → "Istalgan sanaga" / "Oyma-oy"; buyurtma kartasidagi to'lovlar ro'yxati.
+
+**Keyingi:** AUD-013 (ta'minotchi to'lovi/xarajat/o'tkazma bekor qilish), AUD-020 ta'minotchi akti, qolgan
+MEDIUM/LOW, 50 modul va 7 biznes senariysi.

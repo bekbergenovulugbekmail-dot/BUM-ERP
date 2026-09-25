@@ -16,6 +16,7 @@ import type { RequestMeta } from "../../shared/audit.js";
 import { fromMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
+import { assertPeriodOpen } from "../finance/journal.service.js";
 import { resolvePaymentParts, type ResolvedPart } from "../finance/payment-parts.service.js";
 import { recordCustomerPayment } from "./payments.service.js";
 
@@ -138,6 +139,8 @@ export async function recordMixedCustomerPayment(
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
+  // Audit AUD-011: qo'lda kiritilgan to'lov sanasi yopilgan davrga tushmasin (kassa/oflayn yo'llar — bugungi yoki qurilma sanasi)
+  if (input.source === "sales_payment" && input.paymentDate) await assertPeriodOpen(tx, companyId, input.paymentDate);
   if (!input.orderId && !input.customerId) throw badRequest("Mijoz yoki buyurtma tanlanishi kerak");
   // To'lov hujjatidagi mijoz buyurtma mijozi bilan bir xil (boshqa kompaniya mijozi yozilib qolmasin)
   if (input.orderId && input.customerId) {

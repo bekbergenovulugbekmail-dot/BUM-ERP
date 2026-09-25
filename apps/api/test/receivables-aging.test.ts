@@ -136,7 +136,7 @@ describe("Debitorlik: to'lov taqsimoti va qarz yoshi", () => {
     await sellOnCredit(shift(-120), "1"); // muddat 110 kun oldin → 90+
     await sellOnCredit(shift(-80), "2"); //  muddat 70 kun oldin  → 61–90
     await sellOnCredit(shift(-45), "3"); //  muddat 35 kun oldin  → 31–60
-    await sellOnCredit(shift(-15), "4"); //  muddat 5 kun oldin   → 0–30
+    await sellOnCredit(shift(-15), "4"); //  muddat 5 kun oldin   → 1–7
     await sellOnCredit(todayIso(), "5"); //  muddati kelmagan     → current
 
     const report = await aging();
@@ -144,7 +144,8 @@ describe("Debitorlik: to'lov taqsimoti va qarz yoshi", () => {
       d90_plus: "100000.00",
       d61_90: "200000.00",
       d31_60: "300000.00",
-      d0_30: "400000.00",
+      d0_7: "400000.00",
+      d8_30: "0.00",
       current: "500000.00",
       total: "1500000.00",
     });

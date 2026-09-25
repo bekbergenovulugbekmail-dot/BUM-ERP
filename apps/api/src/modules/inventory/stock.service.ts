@@ -382,7 +382,9 @@ export async function listMovements(
 export const MANUAL_MOVEMENT_TYPES = ["receive", "issue", "adjust", "writeoff", "return_in", "return_out"] as const;
 
 /** Qo'lda zaxira harakatida qarshi hisob bo'la olmaydigan tizim nazorat hisoblari (aktivlardan tashqari). */
-const STOCK_COUNTER_BLOCKED_SUBTYPES = new Set(["sales", "cogs", "customer_advance", "cashback_liability", "payroll_tax"]);
+// Kreditor — ta'minotchi subhisobi bilan yuritiladi (jurnal qatorida ta'minotchi bo'ladi): qo'lda ombor harakati unga
+// ta'minotchisiz yozsa, ta'minotchi qarzi buxgalteriyadan ajralardi. Qarzga kirim — xarid hujjati orqali.
+const STOCK_COUNTER_BLOCKED_SUBTYPES = new Set(["sales", "cogs", "customer_advance", "cashback_liability", "payroll_tax", "payable"]);
 
 /** Qo'lda kirim tannarxi joriy o'rtacha tannarxdan shuncha marta farq qilsa — moliya ruxsati kerak (xato yoki soxta tannarx). */
 const MANUAL_COST_DEVIATION_FACTOR = 10n;
@@ -470,7 +472,7 @@ export async function postStockJournal(
     // Aktivlar (kassa, bank, debitorlar) va tizim nazorat hisoblari (sotuv daromadi, tannarx, avans, keshbek, soliq)
     // qo'lda zaxira harakati bilan o'zgarmasin — ular o'z hujjatlari (kassa harakati, sotuv) bilan sinxron turadi
     if (account.type === "asset" || (account.subtype !== null && STOCK_COUNTER_BLOCKED_SUBTYPES.has(account.subtype))) {
-      throw badRequest("Bu hisob qo'lda zaxira harakati uchun qarshi hisob bo'la olmaydi (kapital, kreditor, boshqa daromad yoki xarajat tanlang)");
+      throw badRequest("Bu hisob qo'lda zaxira harakati uchun qarshi hisob bo'la olmaydi (kapital, boshqa daromad yoki xarajat tanlang; qarzga kirim — xarid hujjati orqali)");
     }
     counter = account.id;
   }
@@ -739,9 +741,12 @@ export async function compensateCountedMovements(tx: Tx, companyId: string, user
     });
     const value = movementValue(movement.quantity, movement.costPrice);
     const incoming = !movement.quantity.startsWith("-");
+    // Audit AUD-021: sanashning o'z jurnali `inventory_count/<countId>` bilan yozilgan — tuzatma AYNAN shu referens bilan
+    // yozilsa, takroriy yozuv himoyasi uni jimgina tashlab yuborardi (ombor o'zgaradi, 1200 o'zgarmaydi). Endi har
+    // tuzatma — o'z harakati id'si bilan alohida yozuv.
     await postStockJournal(tx, companyId, userId, {
-      referenceType: "inventory_count",
-      referenceId: group.countId,
+      referenceType: "inventory_count_adjustment",
+      referenceId: movement.id,
       date: todayIso(),
       description: `Inventarizatsiya tuzatmasi: ${group.countName}`,
       incoming: incoming ? value : 0n,

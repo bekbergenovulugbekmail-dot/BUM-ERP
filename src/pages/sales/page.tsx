@@ -155,7 +155,7 @@ export default function SalesPage() {
       <PageTabs
         tabs={[
           { key: "orders", label: "Buyurtmalar", icon: ShoppingBag },
-          { key: "aging", label: "Qarz yoshi", icon: CalendarClock },
+          { key: "aging", label: "Qarzdorlik", icon: CalendarClock },
         ]}
         value={tab}
         onChange={(value) => setTab(value as "orders" | "aging")}

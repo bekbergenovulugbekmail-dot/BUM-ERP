@@ -64,7 +64,7 @@ export async function agentDashboard(conn: DbOrTx, context: AgentContext) {
     .select({ amount: sql<string>`coalesce(sum(${customerPayments.amount}), 0)::numeric(18,2)::text` })
     .from(customerPayments)
     .innerJoin(agentOrders, eq(agentOrders.orderId, customerPayments.orderId))
-    .where(and(eq(customerPayments.companyId, companyId), eq(agentOrders.salesRepId, salesRepId), eq(customerPayments.paymentDate, today)));
+    .where(and(eq(customerPayments.companyId, companyId), eq(agentOrders.salesRepId, salesRepId), eq(customerPayments.paymentDate, today), eq(customerPayments.status, "posted")));
 
   const plan = await agentToday(conn, context, null);
   const planned = new Set(plan.stores.map((store) => store.id));

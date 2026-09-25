@@ -32,7 +32,7 @@ import { applyOutgoingBankCommission } from "../finance/bank-commission.service.
 import { ledgerAccountFor, recordCashTransaction, resolvePaymentAccount, todayIso } from "../finance/cash.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
 import { resolvePaymentParts, type PaymentPartInput } from "../finance/payment-parts.service.js";
-import { ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { assertPeriodOpen, ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { applySupplierBalance, lockSupplierBalance } from "./supplier-balances.service.js";
 import { purchaseAudit } from "./suppliers.service.js";
 
@@ -149,6 +149,8 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
   const fx = bookReduction - baseAmount;
 
   const paymentDate = input.paymentDate ?? todayIso();
+  // Audit AUD-011: foydalanuvchi tanlagan sana yopilgan davrga tushmasin (oflayn kassa sinxroni — istisno)
+  if (!input.offline) await assertPeriodOpen(tx, companyId, paymentDate);
   const cashAccountId = await resolvePaymentAccount(tx, companyId, input.method, input.cashAccountId, currency);
 
   const [payment] = await tx
@@ -191,6 +193,7 @@ export async function recordSupplierPayment(tx: Tx, tenant: TenantContext, input
   if (fx > 0n) lines.push({ accountId: await ensureAccountBySubtype(tx, companyId, "fx_gain"), credit: fromMinor(fx) });
   if (fx < 0n) lines.push({ accountId: await ensureAccountBySubtype(tx, companyId, "fx_loss"), debit: fromMinor(-fx) });
   const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+    party: { type: "supplier", id: supplier.id },
     entryDate: paymentDate,
     description,
     referenceType: "supplier_payment",

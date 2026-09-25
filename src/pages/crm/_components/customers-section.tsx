@@ -9,7 +9,7 @@
  */
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, ShieldCheck, ShieldOff, X, PlusCircle, MinusCircle } from "lucide-react";
+import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, ShieldCheck, ShieldOff, X, PlusCircle, MinusCircle, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -28,6 +28,7 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import CustomerMoneyDialog from "./customer-money-dialog.tsx";
+import CustomerStatementDialog from "@/pages/sales/_components/customer-statement-dialog.tsx";
 import SetBalanceDialog from "@/components/balances/set-balance-dialog.tsx";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import CustomerFilters from "@/components/customers/customer-filters.tsx";
@@ -100,6 +101,8 @@ export default function CustomersSection() {
   /** Hisobga pul kirim/chiqimi — to'lov qabul qilish ruxsati (to'g'rilashdan alohida). */
   const canMoveMoney = can("sales.collect_payment");
   const [adjusting, setAdjusting] = useState<Customer | null>(null);
+  /** Hisob-kitob akti ochilgan mijoz. */
+  const [statementFor, setStatementFor] = useState<string | null>(null);
   const [money, setMoney] = useState<{ customer: Customer; direction: "deposit" | "withdraw" } | null>(null);
 
   /** Arxiv ko'rinishi: nofaol qilingan mijozlar (ro'yxatdan chiqarilgan, lekin tarixi saqlanadi). */
@@ -389,6 +392,17 @@ export default function CustomersSection() {
                         </span>
                       )}
                     </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title="Hisob-kitob akti"
+                      aria-label={`${c.name} — hisob-kitob akti`}
+                      data-testid={`customer-statement-${c.code}`}
+                      onClick={() => setStatementFor(c.id)}
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                    </Button>
                     {canMoveMoney && (
                       // Haqiqiy pul harakati — "to'g'rilash" dan alohida tugmalar
                       <>
@@ -460,6 +474,7 @@ export default function CustomersSection() {
                         {c.isActive ? <Archive className="h-3.5 w-3.5" /> : <ArchiveRestore className="h-3.5 w-3.5" />}
                       </Button>
                     )}
+                    {statementFor === c.id && <CustomerStatementDialog customerId={c.id} onClose={() => setStatementFor(null)} />}
                     {money?.customer.id === c.id && (
                       <CustomerMoneyDialog
                         customer={money.customer}

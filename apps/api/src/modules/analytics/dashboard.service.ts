@@ -50,7 +50,7 @@ export async function getDashboard(conn: DbOrTx, tenant: TenantContext) {
   const [receipts] = await conn
     .select({ value: sql<string>`coalesce(sum(${customerPayments.amount}), 0)::numeric(18,2)` })
     .from(customerPayments)
-    .where(and(eq(customerPayments.companyId, companyId), eq(customerPayments.paymentDate, today)));
+    .where(and(eq(customerPayments.companyId, companyId), eq(customerPayments.paymentDate, today), eq(customerPayments.status, "posted")));
 
   const lowStockCondition = sql`${products.minStock} > 0 and ${stockLevels.quantity} <= ${products.minStock}`;
   const [stock] = await conn

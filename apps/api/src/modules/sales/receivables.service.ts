@@ -15,7 +15,7 @@
  * hujjatlarning to'langan summasini yozadi (jami — o'sha to'lov summasi).
  */
 import { and, asc, eq, sql } from "drizzle-orm";
-import { customers, salesOrders, salesReturns } from "../../db/schema/sales.js";
+import { customerPaymentAllocations, customers, salesOrders, salesReturns } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
@@ -23,13 +23,14 @@ import { todayIso } from "../finance/cash.service.js";
 import { COMPLETED_STATUSES } from "./sale-status.js";
 
 /** Yosh guruhlari (kun). Chegaralar hisobot va kredit siyosatida bir xil ishlatiladi. */
-export const AGING_BUCKETS = ["current", "d0_30", "d31_60", "d61_90", "d90_plus"] as const;
+export const AGING_BUCKETS = ["current", "d0_7", "d8_30", "d31_60", "d61_90", "d90_plus"] as const;
 export type AgingBucket = (typeof AGING_BUCKETS)[number];
 
 /** Muddatdan necha kun o'tgan → guruh. Muddati kelmagan qarz — `current`. */
 export function agingBucketOf(daysOverdue: number): AgingBucket {
   if (daysOverdue <= 0) return "current";
-  if (daysOverdue <= 30) return "d0_30";
+  if (daysOverdue <= 7) return "d0_7";
+  if (daysOverdue <= 30) return "d8_30";
   if (daysOverdue <= 60) return "d31_60";
   if (daysOverdue <= 90) return "d61_90";
   return "d90_plus";
@@ -44,16 +45,16 @@ const dayNumber = (date: string) => Math.floor(Date.parse(`${date}T00:00:00Z`) /
  * faqat qolgan tovar uchun qarzdor. Shuning uchun qarz sof summadan hisoblanadi — aks holda
  * qarz yoshi `customers.total_debt` dan katta chiqardi.
  */
-const netAmountSql = sql<string>`(${salesOrders.totalAmount} - coalesce((
+export const netAmountSql = sql<string>`(${salesOrders.totalAmount} - coalesce((
   select sum(r."total_amount") from "sales_returns" r where r."order_id" = ${salesOrders.id}
 ), 0))::numeric(18,2)`;
 
 /** Ochiq qarz hujjati — `completed | shipped | delivered` va to'lanmagan sof qoldiq bilan. */
-const openCondition = sql`${salesOrders.status} in ${sql.raw(`(${COMPLETED_STATUSES.map((status) => `'${status}'`).join(", ")})`)}
+export const openCondition = sql`${salesOrders.status} in ${sql.raw(`(${COMPLETED_STATUSES.map((status) => `'${status}'`).join(", ")})`)}
   and ${netAmountSql} > ${salesOrders.paidAmount}`;
 
 /** To'lov muddati: hujjat sanasi + mijozning to'lov muddati (kun). */
-const dueDateSql = sql<string>`(${salesOrders.orderDate} + ${customers.paymentTermDays})::text`;
+export const dueDateSql = sql<string>`(${salesOrders.orderDate} + ${customers.paymentTermDays})::text`;
 
 /**
  * Mijoz darajasidagi to'lovni ochiq hujjatlarga taqsimlaydi (eng eski muddat birinchi).
@@ -67,6 +68,8 @@ export async function allocateCustomerPayment(
   companyId: string,
   customerId: string,
   amountMinor: bigint,
+  /** To'lov qatori — taqsimot `customer_payment_allocations` ga yoziladi (bekor qilishda aynan shu qaytariladi). */
+  paymentId?: string,
 ): Promise<{ allocations: { orderId: string; number: string; amount: string }[]; unallocated: string }> {
   if (amountMinor <= 0n) return { allocations: [], unallocated: "0.00" };
 
@@ -96,6 +99,9 @@ export async function allocateCustomerPayment(
       .set({ paidAmount: sql`${salesOrders.paidAmount} + ${fromMinor(applied)}::numeric`, updatedAt: new Date() })
       .where(eq(salesOrders.id, order.id));
     allocations.push({ orderId: order.id, number: order.number, amount: fromMinor(applied) });
+    if (paymentId) {
+      await tx.insert(customerPaymentAllocations).values({ companyId, paymentId, orderId: order.id, amount: fromMinor(applied) });
+    }
     left -= applied;
   }
   return { allocations, unallocated: fromMinor(left) };
@@ -121,7 +127,7 @@ export type AgingRow = {
 
 export type AgingTotals = Record<AgingBucket, string> & { total: string };
 
-const emptyTotals = (): AgingTotals => ({ current: "0.00", d0_30: "0.00", d31_60: "0.00", d61_90: "0.00", d90_plus: "0.00", total: "0.00" });
+const emptyTotals = (): AgingTotals => ({ current: "0.00", d0_7: "0.00", d8_30: "0.00", d31_60: "0.00", d61_90: "0.00", d90_plus: "0.00", total: "0.00" });
 
 function sumInto(target: AgingTotals, bucket: AgingBucket, amount: bigint) {
   target[bucket] = fromMinor(toMinor(target[bucket]) + amount);

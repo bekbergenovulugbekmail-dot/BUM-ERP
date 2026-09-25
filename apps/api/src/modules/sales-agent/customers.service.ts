@@ -54,7 +54,7 @@ export async function customerHistory(conn: DbOrTx, context: AgentContext, custo
       lastDate: sql<string | null>`max(${customerPayments.paymentDate})::text`,
     })
     .from(customerPayments)
-    .where(and(eq(customerPayments.companyId, companyId), eq(customerPayments.customerId, customerId)));
+    .where(and(eq(customerPayments.companyId, companyId), eq(customerPayments.customerId, customerId), eq(customerPayments.status, "posted")));
   const visitScope = and(eq(agentVisits.companyId, companyId), eq(agentVisits.customerId, customerId), eq(agentVisits.salesRepId, context.agent.id));
   const [visitStats] = await conn
     .select({
@@ -80,7 +80,7 @@ export async function customerHistory(conn: DbOrTx, context: AgentContext, custo
     .orderBy(desc(salesOrders.orderDate), desc(salesOrders.createdAt))
     .limit(20);
   const payments = await conn
-    .select({ id: customerPayments.id, amount: customerPayments.amount, method: customerPayments.method, paymentDate: customerPayments.paymentDate })
+    .select({ id: customerPayments.id, amount: customerPayments.amount, method: customerPayments.method, paymentDate: customerPayments.paymentDate, status: customerPayments.status })
     .from(customerPayments)
     .where(and(eq(customerPayments.companyId, companyId), eq(customerPayments.customerId, customerId)))
     .orderBy(desc(customerPayments.paymentDate), desc(customerPayments.createdAt))

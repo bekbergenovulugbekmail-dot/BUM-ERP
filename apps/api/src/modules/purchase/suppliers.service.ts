@@ -210,6 +210,7 @@ export async function setSupplierDebt(
   const amount = fromMinor(delta > 0n ? delta : -delta);
   const payable = await requireAccountBySubtype(tx, companyId, "payable", "liability", "Kreditorlar");
   await postJournalEntry(tx, companyId, tenant.user.id, {
+    party: { type: "supplier", id: supplierId },
     entryDate: date,
     description: `Ta'minotchi qarzi to'g'rilandi: ${current.name} — ${reason}`,
     referenceType: "supplier_debt_adjustment",

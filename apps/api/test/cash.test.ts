@@ -56,8 +56,9 @@ async function purposeFor(type: "in" | "out") {
   // Ro'yxat doim egasining cookie'si bilan olinadi — ruxsati yo'q xodim tekshiruvi
   // maqsad qidirishda emas, so'rovning o'zida sodir bo'lishi kerak
   const res = await api(company.ownerCookie, "GET", `/accounts?type=${type === "in" ? "income" : "expense"}`);
-  const accounts = res.json().accounts as { id: string; isActive: boolean }[];
-  return accounts.find((row) => row.isActive)!.id;
+  const accounts = res.json().accounts as { id: string; isActive: boolean; subtype: string | null }[];
+  // Sotuv daromadi (4000) va tannarx (5000) qo'lda kassa harakatiga yaramaydi (audit AUD-012) — oddiy modda olinadi
+  return accounts.find((row) => row.isActive && !["sales", "cogs"].includes(row.subtype ?? ""))!.id;
 }
 
 const record = async (body: { type?: string } & Record<string, unknown>, cookie = company.ownerCookie) =>

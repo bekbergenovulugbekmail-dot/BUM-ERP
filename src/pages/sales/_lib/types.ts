@@ -156,6 +156,9 @@ export type CustomerPayment = {
   paymentDate: string;
   reference: string | null;
   notes: string | null;
+  /** `reversed` — bekor qilingan (teskari yozuv bilan); tarixda qoladi, summalarga kirmaydi. */
+  status?: "posted" | "reversed";
+  reversalReason?: string | null;
 };
 
 export type SalesOrderDetail = Omit<SalesOrderRow, "itemCount"> & {

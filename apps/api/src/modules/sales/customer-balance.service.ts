@@ -134,6 +134,7 @@ export async function depositToBalance(
     referenceId: id,
   });
   const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+    party: { type: "customer", id: customer.id },
     entryDate: date,
     description,
     referenceType: "customer_balance",
@@ -225,6 +226,7 @@ export async function withdrawFromBalance(
     referenceId: id,
   });
   const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+    party: { type: "customer", id: customer.id },
     entryDate: date,
     description,
     referenceType: "customer_balance",
@@ -332,6 +334,7 @@ export async function payFromBalance(
     })
     .returning({ id: customerPayments.id });
   const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+    party: { type: "customer", id: customer.id },
     entryDate: date,
     description,
     referenceType: "customer_payment",
@@ -355,7 +358,7 @@ export async function payFromBalance(
       .where(eq(salesOrders.id, order.id));
   } else {
     // Buyurtmasiz to'lash — naqd to'lov bilan bir xil qoida: ochiq hujjatlarga eng eski muddatdan taqsimlanadi
-    await allocateCustomerPayment(tx, companyId, customer.id, amount);
+    await allocateCustomerPayment(tx, companyId, customer.id, amount, payment!.id);
   }
 
   const balanceAfter = balance - amount;
@@ -403,6 +406,7 @@ export async function refundToBalance(
   const date = input.date ?? todayIso();
   const description = `Balansga qaytarish: ${input.orderNumber}`;
   const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+    party: { type: "customer", id: customer.id },
     entryDate: date,
     description,
     referenceType: "customer_balance",
@@ -478,6 +482,7 @@ export async function setCustomerBalances(
       const amount = fromMinor(delta > 0n ? delta : -delta);
       const advance = await customerAdvanceAccount(tx, companyId);
       const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+        party: { type: "customer", id: customer.id },
         entryDate: date,
         description: `Balans to'g'rilandi: ${customer.name} — ${reason}`,
         referenceType: "customer_balance",
@@ -517,6 +522,7 @@ export async function setCustomerBalances(
       const amount = fromMinor(delta > 0n ? delta : -delta);
       const receivable = await requireAccountBySubtype(tx, companyId, "receivable", "asset", "Debitorlar");
       await postJournalEntry(tx, companyId, tenant.user.id, {
+        party: { type: "customer", id: customer.id },
         entryDate: date,
         description: `Qarz to'g'rilandi: ${customer.name} — ${reason}`,
         referenceType: "customer_debt_adjustment",

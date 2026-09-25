@@ -57,6 +57,15 @@ const DEFAULT_COUNTER: Record<MovementKind, string> = {
   writeoff: "Standart: 5500 Boshqa xarajatlar",
 };
 
+/**
+ * Server qarshi hisob sifatida rad etadigan hisoblar (stock.service.ts): aktivlar va nazorat hisoblari —
+ * ro'yxatda ko'rsatilmaydi, foydalanuvchi rad etiladigan variantni tanlab qolmasin.
+ */
+const COUNTER_BLOCKED = new Set([
+  "inventory", "cash", "bank", "clearing", "receivable",
+  "sales", "cogs", "customer_advance", "cashback_liability", "payroll_tax", "payable",
+]);
+
 type AccountOption = { id: string; code: string; name: string; subtype: string | null; isActive: boolean };
 
 type FormValues = {
@@ -277,7 +286,7 @@ export default function MovementDialog({ type, warehouseId, onClose }: Props) {
                   <SelectContent>
                     <SelectItem value="default">{DEFAULT_COUNTER[type]}</SelectItem>
                     {accountOptions
-                      .filter((a) => a.isActive && a.subtype !== "inventory")
+                      .filter((a) => a.isActive && !COUNTER_BLOCKED.has(a.subtype ?? ""))
                       .map((a) => (
                         <SelectItem key={a.id} value={a.id}>{a.code} — {a.name}</SelectItem>
                       ))}

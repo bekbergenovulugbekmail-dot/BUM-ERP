@@ -53,6 +53,7 @@ import {
 } from "./payment-allocation.service.js";
 import { recordCustomerPayment } from "./payments.service.js";
 import { getSalesPolicy, notifyMembersWithPermission } from "./sales-policy.service.js";
+import { postShiftDifferences } from "./pos-shift-difference.service.js";
 import { addCurrencyAmounts } from "./shift-totals.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...shiftFields } = getTableColumns(posShifts);
@@ -109,6 +110,7 @@ export async function shiftPaymentBreakdown(conn: DbOrTx, companyId: string, shi
       and(
         eq(customerPayments.companyId, companyId),
         or(eq(customerPayments.posShiftId, shiftId), eq(salesOrders.posShiftId, shiftId)),
+        eq(customerPayments.status, "posted"),
       ),
     )
     .groupBy(
@@ -351,6 +353,17 @@ export async function closeShift(
     })
     .where(eq(posShifts.id, shiftId));
 
+  // Farq buxgalteriyaga: kamomad — kassadan chiqim va xarajat, ortiqcha — kirim va daromad (audit AUD-010)
+  const closedAt = input.closedAt ?? new Date();
+  const differencePostings = await postShiftDifferences(tx, tenant, {
+    shiftId,
+    label: `smena ${closedAt.toISOString().slice(0, 10)}, ${shift.cashierName ?? "kassir"}`,
+    date: todayIso(closedAt),
+    baseDifference: difference,
+    foreign: foreignCash.map((row) => ({ currency: row.currency, difference: row.difference })),
+  });
+  const unposted = differencePostings.filter((row) => !row.posted);
+
   await salesAudit(tx, tenant, meta, {
     action: "POS_SHIFT_CLOSED",
     resource: "pos_shifts",
@@ -361,8 +374,18 @@ export async function closeShift(
       difference: fromMinor(difference),
       ...(foreignCash.length > 0 ? { foreignCash } : {}),
       ...(needsReview ? { review: "pending" } : {}),
+      ...(differencePostings.length > 0 ? { differencePostings } : {}),
     },
   });
+  if (unposted.length > 0) {
+    await notifyMembersWithPermission(tx, tenant.company.id, "finance.approve", {
+      title: "Kassa farqi buxgalteriyaga yozilmadi",
+      message: unposted.map((row) => `${row.currency} ${row.difference}: ${row.error ?? ""}`).join("; "),
+      relatedType: "pos_shifts",
+      relatedId: shiftId,
+      link: "/finance",
+    });
+  }
   if (needsReview) {
     await notifyMembersWithPermission(tx, tenant.company.id, "sales.approve", {
       title: "Smena kassa farqini ko'rib chiqing",
@@ -383,6 +406,8 @@ export async function closeShift(
     foreignCash,
     /** `pending` — farq chegaradan oshdi, rahbar ko'rib chiqadi. */
     review: needsReview ? ("pending" as const) : null,
+    /** Farq kassa va jurnalga yozildimi (valyuta bo'yicha). */
+    differencePostings,
   };
 }
 

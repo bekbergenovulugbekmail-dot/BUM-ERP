@@ -8,7 +8,7 @@ import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
-import { cashAccounts } from "../src/db/schema/finance.js";
+import { accounts as ledgerAccounts, cashAccounts } from "../src/db/schema/finance.js";
 import { customerPayments } from "../src/db/schema/sales.js";
 import { buildServer } from "../src/server.js";
 import { caller, deliveryCompany, resetUnits, type DeliveryCompany } from "./delivery-setup.js";
@@ -51,6 +51,16 @@ beforeEach(async () => {
 });
 
 const owner = () => company.ownerCookie;
+
+async function cashBalance(id: string) {
+  const [row] = await db.select().from(cashAccounts).where(eq(cashAccounts.id, id));
+  return row!.balance;
+}
+
+async function ledgerBalance(code: string) {
+  const [row] = await db.select().from(ledgerAccounts).where(and(eq(ledgerAccounts.companyId, company.companyId), eq(ledgerAccounts.code, code)));
+  return row?.balance ?? "0.00";
+}
 
 /** Sessiyani boshlang'ich naqd bilan ochadi. */
 async function openSession(openingCash: string) {
@@ -158,6 +168,30 @@ describe("Kassa sessiyasini yopish", () => {
     expect(closed.statusCode, closed.body).toBe(200);
     // Kutilgan 600 000, sanalgan 580 000 → farq −20 000
     expect(closed.json().shift.cashDifference).toBe("-20000.00");
+    // Audit AUD-010: kamomad kassa qoldig'idan ayriladi va xarajatga yoziladi (ilgari faqat raqam edi)
+    expect(closed.json().differencePostings).toEqual([{ currency: "UZS", difference: "-20000.00", posted: true }]);
+    expect(await cashBalance(mainCash)).toBe("80000.00");
+    expect(await ledgerBalance("1010")).toBe("80000.00");
+    expect(await ledgerBalance("5900")).toBe("20000.00");
+  });
+
+  it("naqd ortiqcha bo'lsa kassaga kirim va daromad (4300) bo'ladi", async () => {
+    const shift = await openSession("0");
+    await sell(shift.id, { paymentMethod: "cash", amountPaid: "100000" });
+    const closed = await call(kassir.cookie, "POST", `/api/sales/pos/shifts/${shift.id}/close`, { closingCash: "105000" });
+    expect(closed.statusCode, closed.body).toBe(200);
+    expect(closed.json().shift.cashDifference).toBe("5000.00");
+    expect(await cashBalance(mainCash)).toBe("105000.00");
+    expect(await ledgerBalance("1010")).toBe("105000.00");
+    expect(await ledgerBalance("4300")).toBe("5000.00");
+  });
+
+  it("farqsiz yopilishda hech narsa yozilmaydi", async () => {
+    const shift = await openSession("0");
+    await sell(shift.id, { paymentMethod: "cash", amountPaid: "100000" });
+    const closed = await call(kassir.cookie, "POST", `/api/sales/pos/shifts/${shift.id}/close`, { closingCash: "100000" });
+    expect(closed.json().differencePostings).toEqual([]);
+    expect(await cashBalance(mainCash)).toBe("100000.00");
   });
 
   it("sessiya yopilgandan keyin yangi sotuv SERVER tomonidan rad etiladi", async () => {

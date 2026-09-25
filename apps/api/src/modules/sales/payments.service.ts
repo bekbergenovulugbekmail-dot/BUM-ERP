@@ -29,7 +29,7 @@ import {
   todayIso,
   type PaymentMethod,
 } from "../finance/cash.service.js";
-import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { assertPeriodOpen, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
 import { findCompanyTerminal } from "../finance/terminals.service.js";
 import { commissionMinor, recordBankCommission } from "../finance/bank-commission.service.js";
@@ -174,6 +174,7 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
     referenceId: payment!.id,
   });
   const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+    party: customerId ? { type: "customer", id: customerId } : null,
     entryDate: paymentDate,
     description,
     referenceType: "customer_payment",
@@ -214,7 +215,7 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
   } else if (customerId) {
     // Buyurtmasiz (umumiy qarz) to'lovi ochiq hujjatlarga taqsimlanadi — eng eski muddat birinchi.
     // Shusiz hujjatlar "to'lanmagan" bo'lib qolar, qarz yoshi va muddat ogohlantirishi noto'g'ri chiqardi.
-    ({ allocations } = await allocateCustomerPayment(tx, companyId, customerId, amount));
+    ({ allocations } = await allocateCustomerPayment(tx, companyId, customerId, amount, payment!.id));
   }
   if (customerId) {
     await tx
@@ -268,7 +269,7 @@ async function foreignPaymentBase(tx: Tx, companyId: string, orderId: string | n
   const payments = await tx
     .select({ currency: customerPayments.currency, amount: customerPayments.amount, foreignAmount: customerPayments.foreignAmount })
     .from(customerPayments)
-    .where(eq(customerPayments.orderId, orderId));
+    .where(and(eq(customerPayments.orderId, orderId), eq(customerPayments.status, "posted")));
   const balance = toMinor(order.totalAmount) - toMinor(order.paidAmount);
 
   const bucket = orderCurrencyBuckets(order.currency, items, payments).find((b) => b.currency === currency);
@@ -297,6 +298,8 @@ export type SalesPaymentInput = Omit<CustomerPaymentInput, "method" | "foreignAm
  * sozlamadagi ulush chegarasida). To'lovdan keyin buyurtma keshbek shartiga yetsa — keshbek beriladi.
  */
 export async function recordSalesPayment(tx: Tx, tenant: TenantContext, input: SalesPaymentInput, meta: RequestMeta) {
+  // Audit AUD-011: qo'lda kiritilgan to'lov sanasi yopilgan davrga tushmasin
+  if (input.paymentDate) await assertPeriodOpen(tx, tenant.company.id, input.paymentDate);
   const companyId = tenant.company.id;
   if (!input.orderId && !input.customerId) throw badRequest("Mijoz yoki buyurtma tanlanishi kerak");
   if (input.reference) {

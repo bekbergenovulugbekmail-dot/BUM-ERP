@@ -60,7 +60,7 @@ export async function customerTurnover(conn: DbOrTx, companyId: string, customer
       totalPaid: sql<string>`coalesce(sum(${customerPayments.amount}), 0)::numeric(18,2)`,
     })
     .from(customerPayments)
-    .where(and(eq(customerPayments.companyId, companyId), eq(customerPayments.customerId, customerId)));
+    .where(and(eq(customerPayments.companyId, companyId), eq(customerPayments.customerId, customerId), eq(customerPayments.status, "posted")));
 
   const gross = Number(orders?.grossSales ?? 0);
   const net = Number(orders?.netSales ?? 0);

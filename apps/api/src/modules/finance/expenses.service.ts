@@ -341,6 +341,8 @@ export async function setExpenseStatus(
 
   let payment: { cashTransactionId: string; journalEntryId: string } | null = null;
   if (input.status === "paid") {
+    // Audit AUD-011: foydalanuvchi tanlagan sana yopilgan davrga tushmasin (oflayn kassa sinxroni — istisno)
+    await assertPeriodOpen(tx, companyId, input.paidDate ?? todayIso());
     payment = await postExpensePayment(tx, tenant, expense, {
       cashAccountId: input.cashAccountId,
       paidDate: input.paidDate ?? todayIso(),

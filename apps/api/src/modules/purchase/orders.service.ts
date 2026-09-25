@@ -45,7 +45,7 @@ import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { todayIso } from "../finance/cash.service.js";
 import { currencyRate } from "../finance/currencies.service.js";
-import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { assertPeriodOpen, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { moveStock } from "../inventory/stock.service.js";
 import { allocateBackorders } from "../inventory/backorders.service.js";
 import { allowedWarehouses, assertWarehouseAccess } from "../inventory/warehouses.service.js";
@@ -630,6 +630,8 @@ export async function receiveGoods(
   const productById = new Map(productRows.map((p) => [p.id, p]));
 
   const receiptDate = input.receiptDate ?? todayIso();
+  // Audit AUD-011: foydalanuvchi tanlagan sana yopilgan davrga tushmasin (oflayn kassa sinxroni — istisno)
+  if (!options.occurredAt) await assertPeriodOpen(tx, companyId, receiptDate);
   const [receipt] = await tx
     .insert(purchaseReceipts)
     .values({
@@ -766,6 +768,7 @@ export async function receiveGoods(
 
   if (total > 0n) {
     await postJournalEntry(tx, companyId, tenant.user.id, {
+      party: { type: "supplier", id: order.supplierId },
       entryDate: receiptDate,
       description: `Tovar qabul: ${order.number}`,
       referenceType: "purchase_receipt",

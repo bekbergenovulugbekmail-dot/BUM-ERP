@@ -5,6 +5,7 @@ import {
   X, CheckCircle, Truck, CreditCard, Ban, ChevronDown, ChevronUp, FileDown, Undo2,
 } from "lucide-react";
 import { generateSalesInvoicePDF } from "@/lib/pdf/invoice-pdf.ts";
+import PaymentReversalDialog from "./payment-reversal-dialog.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -61,6 +62,8 @@ const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n)) 
 
 export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const { can } = usePermissions();
+  /** Bekor qilinayotgan to'lov (ko'rib chiqish oynasi ochiq). */
+  const [reversingPayment, setReversingPayment] = useState<string | null>(null);
   const orderQuery = useApiQuery<{ order: SalesOrderDetail }>(`/api/sales/orders/${orderId}`);
   const order = orderQuery.data?.order;
   const company = useActiveCompany().data?.company;
@@ -574,19 +577,31 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                     <div>
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">To'lovlar</p>
                       {order.payments.map((p) => (
-                        <div key={p.id} className="flex justify-between py-1.5 text-sm border-b border-border/40 last:border-0">
-                          <div>
+                        <div key={p.id} className="flex items-center justify-between gap-2 py-1.5 text-sm border-b border-border/40 last:border-0" data-testid={`order-payment-${p.id}`}>
+                          <div className={cn(p.status === "reversed" && "text-muted-foreground line-through")}>
                             <span className="font-medium">
                               {p.currency !== order.currency ? `${formatMoney(p.foreignAmount, p.currency)} (${fmt(num(p.amount))})` : fmt(num(p.amount))}
                             </span>
                             <span className="text-xs text-muted-foreground ml-2">{PAYMENT_LABELS[p.method] ?? p.method}</span>
                           </div>
-                          <span className="text-xs text-muted-foreground">{p.paymentDate}</span>
+                          <div className="flex items-center gap-2">
+                            {p.status === "reversed" && (
+                              <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive" title={p.reversalReason ?? undefined}>bekor qilingan</span>
+                            )}
+                            <span className="text-xs text-muted-foreground">{p.paymentDate}</span>
+                            {p.status !== "reversed" && can("finance.approve") && (
+                              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" data-testid={`reverse-payment-${p.id}`} onClick={() => setReversingPayment(p.id)}>
+                                Bekor qilish
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
                   </>
                 )}
+
+                {reversingPayment && <PaymentReversalDialog paymentId={reversingPayment} onClose={() => setReversingPayment(null)} />}
 
                 {order.notes && (
                   <>

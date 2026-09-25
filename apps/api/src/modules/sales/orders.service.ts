@@ -514,10 +514,11 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
     .where(eq(customerPayments.orderId, orderId))
     .orderBy(asc(customerPayments.createdAt));
 
-  // Valyuta bo'yicha jami va to'langan — chet valyuta qatnashgan buyurtmada
-  const hasForeign = items.some((item) => item.priceCurrency) || payments.some((payment) => payment.currency !== order.currency);
+  // Valyuta bo'yicha jami va to'langan — chet valyuta qatnashgan buyurtmada (bekor qilingan to'lov hisobga olinmaydi)
+  const posted = payments.filter((payment) => payment.status === "posted");
+  const hasForeign = items.some((item) => item.priceCurrency) || posted.some((payment) => payment.currency !== order.currency);
   const currencyTotals = hasForeign
-    ? orderCurrencyBuckets(order.currency, items, payments).map((bucket) => ({
+    ? orderCurrencyBuckets(order.currency, items, posted).map((bucket) => ({
         currency: bucket.currency,
         totalAmount: fromMinor(bucket.total),
         paidAmount: fromMinor(bucket.paid < bucket.total ? bucket.paid : bucket.total),
@@ -968,6 +969,7 @@ export async function dispatchOrder(
   }
   if (lines.length > 0) {
     await postJournalEntry(tx, companyId, tenant.user.id, {
+      party: order.customerId ? { type: "customer", id: order.customerId } : null,
       entryDate,
       description: `Sotuv: ${order.number}`,
       referenceType: "sales_order",
@@ -1032,6 +1034,7 @@ async function basePaymentComposition(
       and(
         eq(customerPayments.orderId, orderId),
         eq(customerPayments.currency, currency),
+        eq(customerPayments.status, "posted"),
         inArray(customerPayments.method, ["cash", "card", "bank", "transfer"]),
       ),
     )
@@ -1123,6 +1126,7 @@ export async function returnOrder(
   }
   if (lines.length > 0) {
     await postJournalEntry(tx, companyId, tenant.user.id, {
+      party: order.customerId ? { type: "customer", id: order.customerId } : null,
       entryDate: today,
       description: `Qaytarish: ${order.number}`,
       referenceType: "sales_return",
@@ -1150,7 +1154,7 @@ export async function returnOrder(
           cashback: sql<string>`coalesce(sum(${customerPayments.amount}) filter (where ${customerPayments.method} = 'cashback'), 0)::numeric(18,2)`,
         })
         .from(customerPayments)
-        .where(eq(customerPayments.orderId, orderId))
+        .where(and(eq(customerPayments.orderId, orderId), eq(customerPayments.status, "posted")))
     : [{ balance: "0", cashback: "0" }];
   const balancePaid = toMinor(nonCash!.balance);
   const cashbackPaid = toMinor(nonCash!.cashback);
@@ -1165,7 +1169,7 @@ export async function returnOrder(
       cashAccountId: customerPayments.cashAccountId,
     })
     .from(customerPayments)
-    .where(and(eq(customerPayments.orderId, orderId), ne(customerPayments.currency, order.currency)));
+    .where(and(eq(customerPayments.orderId, orderId), ne(customerPayments.currency, order.currency), eq(customerPayments.status, "posted")));
   const foreignPaid = foreignPayments.reduce((sum, payment) => sum + toMinor(payment.amount), 0n);
   const cashPaid = paid - balancePaid - cashbackPaid - foreignPaid;
   // Asosiy valyutadagi pul: usul ko'rsatilsa — shu usulda; aks holda asl to'lov tarkibi bo'yicha (aralash to'lovli chek:
@@ -1207,6 +1211,7 @@ export async function returnOrder(
         referenceId: order.id,
       });
       await postJournalEntry(tx, companyId, tenant.user.id, {
+        party: order.customerId ? { type: "customer", id: order.customerId } : null,
         entryDate: today,
         description: `Pul qaytarish: ${order.number}`,
         referenceType: `sales_refund${suffix}`,
@@ -1260,6 +1265,7 @@ export async function returnOrder(
         referenceId: payment.id,
       });
       await postJournalEntry(tx, companyId, tenant.user.id, {
+        party: order.customerId ? { type: "customer", id: order.customerId } : null,
         entryDate: today,
         description,
         referenceType: "sales_refund_fx",
