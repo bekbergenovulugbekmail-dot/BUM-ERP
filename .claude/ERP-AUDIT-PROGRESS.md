@@ -64,3 +64,19 @@ akti, tarixiy qarz, aging, Excel/PDF.
   E2E 33 fayl / 120 test ✓ (real Chrome).
 - **Keyingi:** A3 (5) — ta'minotchi to'lovi / xarajat / o'tkazma bekor qilish (AUD-013), ta'minotchi akti
   (AUD-020); keyin AUD-022/023/024/025, AUD-004 (boshlang'ich qarz hujjati), AUD-008.
+
+### 2026-09-26 — PRODUCTION DEPLOY (commit 514bb43 + f6ca520)
+- `bum-api` 19:25:23Z bir marta ko'tarildi, "Migratsiyalar qo'llandi (117ms)", qayta yiqilish yo'q;
+  `bum-web` build.json 19:22:17Z. Yangi marshrutlar tashqaridan 401 (mavjud): receivables/as-of, history,
+  payments/:id/reversal.
+- Production (faqat o'qish, `railway ssh`): 1556 mijoz — kesh = jurnal, **0 nomuvofiqlik**, farq 0.00;
+  mijozsiz 1100 qatorlari faqat chakana juftlik (+80 640 / −80 640). Production'da brauzer orqali sinalmadi
+  (kompaniya hisobisiz).
+
+## AUDIT PAUSED (sessiya yakuni, 2026-09-26)
+- Module: Finance / Purchase
+- Step: A3 (5) — AUD-013 (ta'minotchi to'lovi, to'langan xarajat, o'tkazma, xarid qabulini bekor qilish)
+- Completed: A0, A1, A3 (1)–(4), A4; 12/27 topilma yopildi yoki qisman yopildi
+- Current issue: AUD-013 (HIGH), AUD-020 (HIGH, ta'minotchi akti)
+- Next step: supplier-payment reversal (payment-reversal.service naqshi bo'yicha), keyin ta'minotchi akti
+  (`party_type = 'supplier'` qatorlari tayyor), so'ng AUD-004/008/022/023/024/025, 50 modul, 7 biznes.

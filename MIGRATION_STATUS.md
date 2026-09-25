@@ -4949,3 +4949,8 @@ Sotuv → Qarzdorlik → "Istalgan sanaga" / "Oyma-oy"; buyurtma kartasidagi to'
 
 **Keyingi:** AUD-013 (ta'minotchi to'lovi/xarajat/o'tkazma bekor qilish), AUD-020 ta'minotchi akti, qolgan
 MEDIUM/LOW, 50 modul va 7 biznes senariysi.
+
+**Production (2026-09-26):** commit `514bb43`, `bum-api` + `bum-web`. API bir marta ko'tarildi (migratsiya
+0087 qo'llandi, qayta yiqilish yo'q), web `build.json` 19:22:17Z, yangi marshrutlar 401 (mavjud). Production
+bazasida faqat o'qish tekshiruvi: 1556 mijoz — kesh = jurnal subhisobi, 0 nomuvofiqlik. Brauzer orqali
+production'da sinalmadi (kompaniya hisobisiz).
