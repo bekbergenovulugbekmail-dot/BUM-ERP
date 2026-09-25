@@ -175,6 +175,17 @@ export type DocumentElement = {
   /** mm; berilmasa element butun kenglikni egallaydi. */
   width?: number;
   height?: number;
+  /**
+   * ERKIN JOYLASHUV (`page.layout === "free"`): elementning sahifadagi joyi, mm.
+   * Nuqta — sahifaning YUQORI CHAP burchagi (chekkalardan emas), ya'ni dizayner va PDF bitta
+   * koordinata tizimida ishlaydi va zoom/ekran o'lchami joyni o'zgartirmaydi.
+   */
+  x?: number;
+  y?: number;
+  /** Qatlam: kattasi ustida chiziladi. */
+  zIndex?: number;
+  /** Rasm uchun: burchakdan tortilganda nisbat saqlanadimi (standart — ha). */
+  lockRatio?: boolean;
   style?: TextStyle;
   /** Shart bajarilmasa element chizilmaydi. */
   visibleWhen?: VisibilityCondition;
@@ -185,9 +196,19 @@ export type DocumentSection = {
   elements: DocumentElement[];
 };
 
+/**
+ * Joylashuv rejimi.
+ *  - `flow` — elementlar yuqoridan pastga ketma-ket (eski shablonlar shunday qoladi);
+ *  - `free` — har element o'z `x/y/width/height` joyida (vizual dizayner).
+ */
+export const LAYOUT_MODES = ["flow", "free"] as const;
+export type LayoutMode = (typeof LAYOUT_MODES)[number];
+
 export type PageSettings = {
   /** Hozircha A4; kelajakda A5/A3 qo'shiladi. */
   size: "a4";
+  /** Berilmasa — `flow` (eski shablonlar o'zgarmaydi). */
+  layout?: LayoutMode;
   orientation: "portrait" | "landscape";
   /** mm */
   margins: { top: number; right: number; bottom: number; left: number };
@@ -219,6 +240,18 @@ export const STYLE_LIMITS = {
   widthMax: 420,
   heightMax: 420,
 } as const;
+
+/** Sahifa o'lchami, mm (kitob holatida). */
+export const PAGE_SIZES_MM = { a4: { width: 210, height: 297 } } as const;
+
+/** Sahifaning mm dagi eni va bo'yi — yo'nalishga qarab. */
+export function pageSizeMm(page: Pick<PageSettings, "size" | "orientation">): { width: number; height: number } {
+  const base = PAGE_SIZES_MM[page.size] ?? PAGE_SIZES_MM.a4;
+  return page.orientation === "landscape" ? { width: base.height, height: base.width } : { ...base };
+}
+
+/** Erkin joylashuvdami. */
+export const isFreeLayout = (schema: { page: Pick<PageSettings, "layout"> }) => schema.page.layout === "free";
 
 /** `#rrggbb` (katta-kichik harf farqsiz). Boshqa hech narsa qabul qilinmaydi. */
 export const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;

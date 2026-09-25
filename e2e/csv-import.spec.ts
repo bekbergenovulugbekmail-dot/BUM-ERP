@@ -10,7 +10,8 @@ import { ACCOUNTS, PASSWORD, appPath, login } from "./_lib/accounts.ts";
 
 async function openCustomers(page: Page) {
   await login(page, "owner");
-  await page.goto(appPath("sales"), { waitUntil: "domcontentloaded" });
+  // Mijozlar ro'yxati Sotuv bo'limidan CRM ga ko'chirilgan
+  await page.goto(appPath("crm"), { waitUntil: "domcontentloaded" });
   await page.getByRole("tab", { name: "Mijozlar" }).first().click();
   await expect(page.getByTestId("csv-import")).toBeVisible({ timeout: 30_000 });
 }

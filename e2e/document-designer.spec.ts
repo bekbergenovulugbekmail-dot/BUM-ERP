@@ -7,15 +7,15 @@
 import { expect, test, type Page } from "@playwright/test";
 import { appPath, login } from "./_lib/accounts.ts";
 
-/** Shablon yuklanib, A4 ko'rinish chizilgunicha kutadi. */
+/** Shablon yuklanib, varaqdagi elementlar (haqiqiy PDF rasmlari) chizilgunicha kutadi. */
 const waitForPreview = async (page: Page) => {
-  await expect(page.locator("iframe").first()).toHaveAttribute("src", /^blob:/, { timeout: 20_000 });
+  await expect(page.locator("[data-testid=canvas-element] img").first()).toBeVisible({ timeout: 60_000 });
 };
 
 const openDesigner = async (page: Page) => {
   await page.goto(appPath("/settings"));
   await page.getByRole("tab", { name: "Hujjatlar" }).click();
-  await expect(page.getByText(/A4 ko'rinish/)).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("template-select")).toBeVisible({ timeout: 20_000 });
 };
 
 test.beforeEach(async ({ page }) => {
@@ -49,16 +49,13 @@ test("shablon yaratiladi, tahrirlanadi, saqlanadi va qayta ochilganda joyida qol
   await page.getByTestId("template-create-confirm").click();
   await expect(page.getByTestId("template-select")).toContainText(name, { timeout: 20_000 });
 
-  // A4 ko'rinish haqiqiy PDF bo'lib chiziladi
-  const frame = page.locator('iframe[title="A4 ko\'rinish"]');
-  await expect(frame).toBeVisible();
-  await expect(frame).toHaveAttribute("src", /^blob:/);
+  // A4 varaq — elementlar haqiqiy PDF rasmlari
+  await expect(page.getByTestId("design-page")).toBeVisible();
+  await waitForPreview(page);
 
-  // ── Element qo'shish: "Sarlavha" bo'limiga matn ──
-  await page.getByTestId("add-header-text").click();
-
-  // Yangi element tanlanadi va matni o'zgartiriladi
-  await page.getByRole("button", { name: /Matn · Yangi matn/ }).click();
+  // ── Element qo'shish: matn (varaqqa qo'shiladi va darhol tanlanadi) ──
+  await page.getByTestId("add-text").click();
+  await expect(page.getByTestId("layers-panel").getByRole("button", { name: /Matn · Yangi matn/ })).toBeVisible();
   await page.getByTestId("element-label").fill("MENING NAKLADNOYIM");
 
   // ── Saqlash ──
@@ -86,8 +83,7 @@ test("versiyaga qaytish eski ko'rinishni tiklaydi", async ({ page }) => {
 
   // 2-versiya: matn qo'shamiz
   await waitForPreview(page);
-  await page.getByTestId("add-header-text").click();
-  await page.getByRole("button", { name: /Matn · Yangi matn/ }).click();
+  await page.getByTestId("add-text").click();
   await page.getByTestId("element-label").fill("IKKINCHI VERSIYA");
   await page.getByTestId("template-save").click();
   await expect(page.getByText(/2-versiya saqlandi/)).toBeVisible({ timeout: 20_000 });
@@ -101,6 +97,6 @@ test("versiyaga qaytish eski ko'rinishni tiklaydi", async ({ page }) => {
   await openDesigner(page);
   await page.getByTestId("template-select").click();
   await page.getByRole("option", { name: new RegExp(name) }).click();
-  await expect(page.getByText(/A4 ko'rinish/)).toBeVisible();
+  await waitForPreview(page);
   await expect(page.getByRole("button", { name: /IKKINCHI VERSIYA/ }), "eski ko'rinish qaytdi").toHaveCount(0);
 });

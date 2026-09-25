@@ -11,9 +11,7 @@
  */
 import type jsPDF from "jspdf";
 import autoTable, { type CellHookData } from "jspdf-autotable";
-import type {
-  BorderStyle, BoxStyle, DocumentElement, DocumentTemplateSchema, TableStyle, TextStyle, VisibilityCondition,
-} from "@bum/shared";
+import { isFreeLayout, type BoxStyle, type DocumentElement, type DocumentTemplateSchema } from "@bum/shared";
 import {
   A4,
   PDF_COLORS,
@@ -24,116 +22,14 @@ import {
   drawTotalsBox,
   ensureSpace,
   tableOptions,
-  type CompanyInfo,
   type TotalRow,
 } from "./pdf-utils.ts";
+import {
+  DEFAULT_ROW_LABELS, applyStroke, applyStyle, buildCodeImages, clearStroke, hexToRgb, isVisible, itemsTableSetup, textX,
+  type DocumentData,
+} from "./template-common.ts";
 
-/**
- * Hujjatning TAYYOR ma'lumoti. Har bir hujjat turi (nakladnoy, hisob-faktura) shuni quradi;
- * qiymatlar allaqachon formatlangan satr bo'ladi — renderer ularni o'zgartirmaydi.
- */
-export type DocumentData = {
-  company: CompanyInfo;
-  /** Maydon yo'li → ko'rsatiladigan qiymat: `{"customer.name": "Test Market"}`. */
-  values: Record<string, string>;
-  /** Jadval qatorlari: ustun kaliti → qiymat. */
-  items: Record<string, string>[];
-  /** Jami bloki qatorlari: `{"total": "42 200 so'm"}`. */
-  totals: Record<string, string>;
-  /** To'lov usullari bo'yicha: `{"cash": "500 000"}`. */
-  payments?: Record<string, string>;
-  /** Shart tekshiruvi uchun SON qiymatlar (`finance.debt` > 0). */
-  numbers?: Record<string, number>;
-  /** Ustun sarlavhalari uchun standart nomlar. */
-  columnLabels?: Record<string, string>;
-  /** Jami va to'lov qatorlarining nomlari. */
-  rowLabels?: Record<string, string>;
-  /** QR va shtrix-kod ichiga yoziladigan qiymatlar (faqat shu manbalardan). */
-  codes?: Partial<Record<"documentNumber" | "orderNumber" | "customerPhone", string>>;
-};
-
-const DEFAULT_ROW_LABELS: Record<string, string> = {
-  subtotal: "Oraliq summa",
-  discount: "Chegirma",
-  tax: "Soliq",
-  total: "Jami",
-  paid: "To'langan",
-  debt: "Qarz",
-  cash: "Naqd",
-  card: "Karta",
-  bank: "Bank",
-  transfer: "O'tkazma",
-};
-
-const hexToRgb = (hex: string): [number, number, number] => [
-  Number.parseInt(hex.slice(1, 3), 16),
-  Number.parseInt(hex.slice(3, 5), 16),
-  Number.parseInt(hex.slice(5, 7), 16),
-];
-
-/**
- * Chiziq naqshi (mm). `double` alohida ishlanadi — u ikki marta chiziladi.
- */
-const dashPattern = (style: BorderStyle | undefined, width: number): number[] => {
-  if (style === "dashed") return [Math.max(0.8, width * 4), Math.max(0.8, width * 3)];
-  if (style === "dotted") return [Math.max(0.25, width), Math.max(0.6, width * 2.5)];
-  return [];
-};
-
-/** Chiziq/ramka uslubini hujjatga qo'yadi va naqshni qaytaradi (keyin tozalash uchun). */
-function applyStroke(doc: jsPDF, box: BoxStyle | undefined, fallbackWidth: number): number {
-  const width = box?.borderWidth ?? fallbackWidth;
-  doc.setDrawColor(...(box?.borderColor ? hexToRgb(box.borderColor) : PDF_COLORS.border));
-  doc.setLineWidth(width);
-  doc.setLineDashPattern(dashPattern(box?.borderStyle, width), 0);
-  return width;
-}
-
-const clearStroke = (doc: jsPDF) => {
-  doc.setLineDashPattern([], 0);
-  doc.setLineWidth(0.2);
-};
-
-/** Shart bajarildimi. Faqat tuzilmali taqqoslash — ifoda bajarilmaydi. */
-export function isVisible(condition: VisibilityCondition | undefined, data: DocumentData): boolean {
-  if (!condition) return true;
-  const raw = data.values[condition.field];
-  const numeric = data.numbers?.[condition.field];
-  switch (condition.operator) {
-    case "empty":
-      return !raw;
-    case "notEmpty":
-      return Boolean(raw);
-    case "eq":
-      return String(raw ?? "") === String(condition.value ?? "");
-    case "ne":
-      return String(raw ?? "") !== String(condition.value ?? "");
-    default: {
-      const left = numeric ?? Number(raw);
-      const right = Number(condition.value);
-      if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
-      if (condition.operator === "gt") return left > right;
-      if (condition.operator === "gte") return left >= right;
-      if (condition.operator === "lt") return left < right;
-      return left <= right;
-    }
-  }
-}
-
-function applyStyle(doc: jsPDF, style: TextStyle | undefined, fallbackSize = 9) {
-  doc.setFontSize(style?.fontSize ?? fallbackSize);
-  doc.setFont("helvetica", style?.bold ? "bold" : style?.italic ? "italic" : "normal");
-  const color = style?.color ? hexToRgb(style.color) : PDF_COLORS.textDark;
-  doc.setTextColor(...color);
-}
-
-/** Matn qaysi X dan boshlanadi (tekislashga qarab). */
-function textX(doc: jsPDF, style: TextStyle | undefined, left: number, right: number): { x: number; align: "left" | "center" | "right" } {
-  const align = style?.align ?? "left";
-  if (align === "center") return { x: (left + right) / 2, align };
-  if (align === "right") return { x: right, align };
-  return { x: left, align };
-}
+export { isVisible, type DocumentData };
 
 type RenderContext = {
   doc: jsPDF;
@@ -145,7 +41,12 @@ type RenderContext = {
   header: { title: string; number: string; date: string };
   /** Element id → tayyor QR/shtrix-kod rasmi (data URL). */
   codeImages?: Record<string, string>;
+  /** Erkin joylashuvga o'tkazishda: har element qayerda chizilgani. */
+  trace?: TraceEntry[];
 };
+
+/** Oqim rejimida element chizilishidan oldingi va keyingi Y (erkin joylashuvga o'tkazish uchun). */
+type TraceEntry = { element: DocumentElement | null; page: number; before: number; after: number };
 
 function drawText(ctx: RenderContext, element: DocumentElement, value: string) {
   const { doc } = ctx;
@@ -160,111 +61,13 @@ function drawText(ctx: RenderContext, element: DocumentElement, value: string) {
   ctx.y += lines.length * lineHeight + 1;
 }
 
-/**
- * Mahsulot jadvali — chiziqlari SHABLONDAN.
- *
- * Har katakning to'rt tomoni alohida hisoblanadi (autotable `lineWidth` obyektini qabul qiladi),
- * shuning uchun foydalanuvchi tashqi ramkani qoldirib ichki chiziqlarni o'chira oladi va aksincha.
- * Ichki chiziq IKKI MARTA chizilmaydi: gorizontal — yuqoridagi katakning "pastki" tomoni,
- * vertikal — o'ngdagi katakning "chap" tomoni sifatida chiziladi.
- */
+/** Mahsulot jadvali (oqim rejimi) — sozlamasi `itemsTableSetup` dan, erkin rejim bilan bir xil. */
 function drawItemsTable(ctx: RenderContext, element: DocumentElement) {
-  const columns = element.columns ?? [];
-  if (columns.length === 0) return;
-  const labels = ctx.data.columnLabels ?? {};
-  const head = [columns.map((column) => column.label ?? labels[column.key] ?? column.key)];
-  const body = ctx.data.items.map((item, index) =>
-    columns.map((column) => (column.key === "index" ? String(index + 1) : (item[column.key] ?? ""))),
-  );
-
-  // Ustun tekislash va kengligi shablondan; qolganini autotable o'zi taqsimlaydi
-  const columnStyles: Record<number, { halign?: "left" | "center" | "right"; cellWidth?: number }> = {};
-  columns.forEach((column, index) => {
-    const style: { halign?: "left" | "center" | "right"; cellWidth?: number } = {};
-    if (column.align) style.halign = column.align;
-    if (column.width) style.cellWidth = column.width;
-    if (Object.keys(style).length > 0) columnStyles[index] = style;
-  });
-
-  const table: TableStyle = element.table ?? {};
-  const width = table.borderWidth ?? 0.2;
-  const outer = table.outer ?? true;
-  const side = {
-    top: (table.top ?? outer) ? width : 0,
-    bottom: (table.bottom ?? outer) ? width : 0,
-    left: (table.left ?? outer) ? width : 0,
-    right: (table.right ?? outer) ? width : 0,
-  };
-  const inner = { h: (table.horizontal ?? true) ? width : 0, v: (table.vertical ?? true) ? width : 0 };
-  const headerLine = (table.headerBorder ?? true) ? width : 0;
-  const lastColumn = columns.length - 1;
-  const lastRow = body.length - 1;
-  const dash = dashPattern(table.borderStyle, width);
-  const base = tableOptions(ctx.doc, ctx.data.company, ctx.header, columnStyles);
-  /** Jadval haqiqatan qaysi kenglikda chizilgani — `double` ramkasi aynan shunga qo'yiladi. */
-  const bounds = { left: Number.POSITIVE_INFINITY, right: Number.NEGATIVE_INFINITY };
-
-  // Katak ichidagi bo'shliq: berilmasa autotable standarti qoladi
-  const padding =
-    table.paddingX !== undefined || table.paddingY !== undefined
-      ? { top: table.paddingY ?? 1.76, bottom: table.paddingY ?? 1.76, left: table.paddingX ?? 1.76, right: table.paddingX ?? 1.76 }
-      : undefined;
-
-  autoTable(ctx.doc, {
-    ...base,
-    startY: ctx.y,
-    head,
-    body,
-    headStyles: {
-      ...base.headStyles,
-      ...(table.headerFill ? { fillColor: hexToRgb(table.headerFill) } : {}),
-      ...(table.headerText ? { textColor: hexToRgb(table.headerText) } : {}),
-      ...(table.fontSize ? { fontSize: table.fontSize } : {}),
-    },
-    bodyStyles: {
-      ...base.bodyStyles,
-      ...(table.fontSize ? { fontSize: table.fontSize } : {}),
-      ...(table.rowHeight ? { minCellHeight: table.rowHeight } : {}),
-    },
-    // Zebra o'chirilsa qatorlar bir xil oq bo'ladi
-    alternateRowStyles: (table.zebra ?? true) ? base.alternateRowStyles : {},
-    styles: {
-      ...base.styles,
-      lineColor: table.borderColor ? hexToRgb(table.borderColor) : PDF_COLORS.border,
-      ...(table.valign ? { valign: table.valign } : {}),
-      ...(padding ? { cellPadding: padding } : {}),
-    },
-    willDrawCell: (data: CellHookData) => {
-      const isHead = data.section === "head";
-      const column = data.column.index;
-      const row = data.row.index;
-      // autotable `lineWidth` uchun obyektni ham qabul qiladi (har tomon alohida)
-      (data.cell.styles as { lineWidth: unknown }).lineWidth = {
-        // Ichki gorizontal — faqat yuqoridagi katakning pastki tomoni bo'lib chiziladi
-        top: isHead ? side.top : 0,
-        // Qatorsiz jadvalda sarlavhaning pasti — jadvalning pastki chegarasi
-        bottom: isHead ? (lastRow < 0 ? side.bottom : headerLine) : row === lastRow ? side.bottom : inner.h,
-        left: column === 0 ? side.left : inner.v,
-        right: column === lastColumn ? side.right : 0,
-      };
-      bounds.left = Math.min(bounds.left, data.cell.x);
-      bounds.right = Math.max(bounds.right, data.cell.x + data.cell.width);
-      ctx.doc.setLineDashPattern(dash, 0);
-    },
-    didDrawCell: () => { ctx.doc.setLineDashPattern([], 0); },
-  });
-
+  const setup = itemsTableSetup(ctx.doc, element, ctx.data, ctx.header);
+  if (!setup) return;
+  autoTable(ctx.doc, { ...setup.options, startY: ctx.y });
   const finalY = (ctx.doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
-  // `double` — tashqi ramka ikki chiziq bo'lib ko'rinsin (autotable buni o'zi qila olmaydi)
-  if (table.borderStyle === "double" && width > 0) {
-    ctx.doc.setDrawColor(...(table.borderColor ? hexToRgb(table.borderColor) : PDF_COLORS.border));
-    ctx.doc.setLineWidth(width);
-    const gap = Math.max(0.6, width * 2);
-    const left = Number.isFinite(bounds.left) ? bounds.left : ctx.left;
-    const right = Number.isFinite(bounds.right) ? bounds.right : ctx.right;
-    ctx.doc.rect(left - gap, ctx.y - gap, right - left + gap * 2, finalY - ctx.y + gap * 2);
-    clearStroke(ctx.doc);
-  }
+  setup.finish(ctx.y, finalY, { left: ctx.left, right: ctx.right });
   ctx.y = afterTable(ctx.doc);
 }
 
@@ -470,47 +273,6 @@ function renderElement(ctx: RenderContext, element: DocumentElement) {
   }
 }
 
-/**
- * Shablonni chizadi va tayyor hujjatni qaytaradi.
- *
- * Sahifa bo'linishi mavjud dvigateldan: jadval o'zi bo'linadi va har sahifada sarlavhasini
- * takrorlaydi, bloklar esa `ensureSpace` bilan chetga chiqib ketmaydi.
- */
-/**
- * Shablondagi QR va shtrix-kod elementlari uchun rasm tayyorlaydi.
- *
- * Kod ichiga FAQAT ro'yxatdagi manbadan qiymat tushadi (hujjat raqami, buyurtma raqami,
- * mijoz telefoni) — ixtiyoriy URL yoki matn emas, shuning uchun skanerlanganda begona
- * manzilga olib bormaydi.
- */
-async function buildCodeImages(schema: DocumentTemplateSchema, data: DocumentData): Promise<Record<string, string>> {
-  const elements = schema.sections.flatMap((section) => section.elements).filter((element) => element.type === "qr" || element.type === "barcode");
-  if (elements.length === 0) return {};
-  const images: Record<string, string> = {};
-  for (const element of elements) {
-    const value = element.qrSource ? data.codes?.[element.qrSource] : undefined;
-    if (!value) continue;
-    try {
-      if (element.type === "qr") {
-        const QRCode = (await import("qrcode")).default;
-        images[element.id] = await QRCode.toDataURL(value, {
-          margin: element.qrMargin ?? 0,
-          width: 256,
-          errorCorrectionLevel: element.qrLevel ?? "M",
-        });
-      } else {
-        const JsBarcode = (await import("jsbarcode")).default;
-        const canvas = document.createElement("canvas");
-        JsBarcode(canvas, value, { format: "CODE128", displayValue: false, margin: 0, height: 60 });
-        images[element.id] = canvas.toDataURL("image/png");
-      }
-    } catch {
-      // Kod chizilmasa hujjat baribir chiqadi
-    }
-  }
-  return images;
-}
-
 /** Shablonda "sahifa raqami" elementi bormi — taglik o'z raqamini chizmasligi uchun. */
 const pageNumberElement = (schema: DocumentTemplateSchema) =>
   schema.sections.flatMap((section) => section.elements).find((item) => item.type === "pageNumber");
@@ -546,8 +308,9 @@ async function drawDocumentInto(
   schema: DocumentTemplateSchema,
   data: DocumentData,
   startY: number,
+  trace?: TraceEntry[],
 ): Promise<number> {
-  const codeImages = await buildCodeImages(schema, data);
+  const codeImages = await buildCodeImages(schema.sections.flatMap((section) => section.elements), data);
   const left = schema.page.margins.left || A4.marginX;
   const right = doc.internal.pageSize.getWidth() - (schema.page.margins.right || A4.marginX);
   const headerSection = schema.sections.find((section) => section.key === "header");
@@ -560,20 +323,28 @@ async function drawDocumentInto(
     y: startY,
     header: { title, number: data.values["document.number"] ?? "", date: data.values["document.date"] ?? "" },
     codeImages,
+    trace,
   };
 
+  const traced = (element: DocumentElement | null, draw: () => void) => {
+    const before = ctx.y;
+    const page = doc.getCurrentPageInfo().pageNumber;
+    draw();
+    ctx.trace?.push({ element, page, before, after: ctx.y });
+  };
   for (const section of schema.sections) {
     if (section.key === "footer") continue;
-    for (const element of section.elements) renderElement(ctx, element);
-    if (section.key === "header") drawLine(ctx);
+    for (const element of section.elements) traced(element, () => renderElement(ctx, element));
+    if (section.key === "header") traced(null, () => drawLine(ctx));
   }
   const footer = schema.sections.find((section) => section.key === "footer");
-  if (footer) for (const element of footer.elements) renderElement(ctx, element);
+  if (footer) for (const element of footer.elements) traced(element, () => renderElement(ctx, element));
   return ctx.y;
 }
 
 /** Bitta hujjat — o'z sahifasida (mavjud chaqiruvchilar shuni ishlatadi). */
 export async function renderTemplate(schema: DocumentTemplateSchema, data: DocumentData): Promise<jsPDF> {
+  if (isFreeLayout(schema)) return (await import("./template-free.ts")).renderFreeTemplate(schema, data);
   const doc = await createDocument({ orientation: schema.page.orientation });
   await drawDocumentInto(doc, schema, data, schema.page.margins.top || A4.marginX);
   drawFooter(doc, undefined, { pageNumbers: !pageNumberElement(schema) });
@@ -606,6 +377,7 @@ type Measured = { height: number; multiPage: boolean };
  * shrift bilan bog'liq, shuning uchun yagona ishonchli yo'l — haqiqatan chizib ko'rish.
  */
 export async function measureDocument(schema: DocumentTemplateSchema, data: DocumentData): Promise<Measured> {
+  if (isFreeLayout(schema)) return (await import("./template-free.ts")).measureFreeDocument(schema, data);
   const probe = await createDocument({ orientation: schema.page.orientation });
   const top = schema.page.margins.top || A4.marginX;
   const end = await drawDocumentInto(probe, schema, data, top);
@@ -630,6 +402,7 @@ export async function renderDocuments(
   list: DocumentData[],
   mode: PackMode = "smart",
 ): Promise<jsPDF> {
+  if (isFreeLayout(schema)) return (await import("./template-free.ts")).renderFreeDocuments(schema, list, mode);
   const doc = await createDocument({ orientation: schema.page.orientation });
   const top = schema.page.margins.top || A4.marginX;
   const bottom = contentBottom();
@@ -656,4 +429,109 @@ export async function renderDocuments(
   drawFooter(doc, undefined, { pageNumbers: !pageNumberElement(schema) });
   drawPageNumbers(doc, schema);
   return doc;
+}
+
+/**
+ * Oqim shablonini ERKIN JOYLASHUVGA o'tkazadi — ko'rinishi o'zgarmasin.
+ *
+ * Taxmin qilinmaydi: shablon namuna ma'lumot bilan HAQIQATAN chiziladi va har element qaysi
+ * Y oralig'ini egallagani yozib olinadi. Shu joylar elementning `x/y/width/height` iga
+ * aylanadi, ya'ni dizaynerni ochgan foydalanuvchi o'zining eski nakladnoyini o'sha joyida
+ * ko'radi va darhol sichqoncha bilan sura boshlaydi.
+ */
+export async function convertToFreeLayout(schema: DocumentTemplateSchema, data: DocumentData): Promise<DocumentTemplateSchema> {
+  if (isFreeLayout(schema)) return schema;
+  const doc = await createDocument({ orientation: schema.page.orientation });
+  const trace: TraceEntry[] = [];
+  await drawDocumentInto(doc, schema, data, schema.page.margins.top || A4.marginX, trace);
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const left = schema.page.margins.left || A4.marginX;
+  const right = pageWidth - (schema.page.margins.right || A4.marginX);
+  const full = right - left;
+  const round = (value: number) => Math.round(value * 10) / 10;
+  const alignX = (width: number, align: string | undefined) =>
+    align === "center" ? (left + right) / 2 - width / 2 : align === "right" ? right - width : left;
+  /** Keyingi sahifaga o'tgan (namunada kam uchraydi) element — birinchi sahifaning pastiga. */
+  const pageShift = (page: number) => (page - 1) * (pageHeight - 40);
+  const MM_PER_PT = 25.4 / 72;
+
+  const converted = new Map<string, DocumentElement>();
+  const extra: DocumentElement[] = [];
+  trace.forEach((entry, order) => {
+    const before = entry.before + pageShift(entry.page);
+    const after = entry.after + pageShift(entry.page);
+    const element = entry.element;
+    const box = (x: number, y: number, width: number, height: number) => ({
+      x: round(Math.max(0, x)),
+      y: round(Math.min(Math.max(0, y), pageHeight - 2)),
+      width: round(Math.max(1, width)),
+      height: round(Math.max(1, height)),
+      zIndex: order,
+    });
+    if (!element) {
+      // Sarlavhadan keyingi ajratuvchi chiziq — endi oddiy (suriladigan) element
+      extra.push({ id: crypto.randomUUID(), type: "line", ...box(left, before - 1, full, 2) });
+      return;
+    }
+    const align = element.style?.align;
+    switch (element.type) {
+      case "text":
+      case "field": {
+        const size = (element.style?.fontSize ?? (element.type === "text" ? 10 : 9)) * MM_PER_PT;
+        converted.set(element.id, { ...element, ...box(left, before - size * 0.8, full, Math.max(after - before - 1, size * 1.2)) });
+        break;
+      }
+      case "itemsTable":
+        converted.set(element.id, { ...element, ...box(left, before, full, Math.max(10, after - 6 - before)) });
+        break;
+      case "totals":
+      case "payments":
+        converted.set(element.id, { ...element, ...box(A4.width - A4.marginX - 73, before - 2, 75, Math.max(10, after - before)) });
+        break;
+      case "signatures":
+        converted.set(element.id, { ...element, ...box(left, before, full, Math.max(12, after - before)) });
+        break;
+      case "image": {
+        const width = Math.min(element.width ?? 30, full);
+        converted.set(element.id, { ...element, ...box(alignX(width, align), before, width, element.height ?? width * 0.5) });
+        break;
+      }
+      case "qr":
+      case "barcode": {
+        const size = Math.min(element.width ?? (element.type === "qr" ? 22 : 50), full);
+        const height = (element.type === "qr" ? size : (element.height ?? 14)) + (element.label ? 4 : 0);
+        converted.set(element.id, { ...element, ...box(alignX(size, align), before, size, height) });
+        break;
+      }
+      case "line": {
+        const width = Math.min(element.width ?? full, full);
+        converted.set(element.id, { ...element, ...box(alignX(width, align), before - 1, width, 2) });
+        break;
+      }
+      case "rect": {
+        const width = Math.min(element.width ?? full, full);
+        converted.set(element.id, { ...element, ...box(alignX(width, align), before, width, Math.min(element.height ?? 20, 200)) });
+        break;
+      }
+      case "pageNumber":
+        converted.set(element.id, { ...element, ...box(alignX(30, align ?? "right"), contentBottom() - 2, 30, 5) });
+        break;
+      default:
+        // `spacer` — erkin joylashuvda kerak emas (bo'sh joy sichqoncha bilan qoldiriladi)
+        break;
+    }
+  });
+
+  return {
+    ...schema,
+    page: { ...schema.page, margins: { ...schema.page.margins }, layout: "free" },
+    sections: schema.sections.map((section) => ({
+      key: section.key,
+      elements: [
+        ...section.elements.flatMap((element) => (converted.has(element.id) ? [converted.get(element.id)!] : [])),
+        ...(section.key === "header" ? extra : []),
+      ],
+    })),
+  };
 }

@@ -105,14 +105,14 @@ test("standart shablon tuzilgach nakladnoy shablon bo'yicha chiqadi", async ({ p
   await login(page, "owner");
   await page.goto(appPath("/settings"));
   await page.getByRole("tab", { name: "Hujjatlar" }).click();
-  await expect(page.locator("iframe").first()).toHaveAttribute("src", /^blob:/, { timeout: 20_000 });
+  await expect(page.locator("[data-testid=canvas-element] img").first()).toBeVisible({ timeout: 60_000 });
 
   const name = `Nakladnoy ${Date.now()}`;
   await page.getByTestId("template-create").click();
   await page.getByTestId("template-name").fill(name);
   await page.getByTestId("template-create-confirm").click();
   await expect(page.getByTestId("template-select")).toContainText(name, { timeout: 20_000 });
-  await expect(page.locator("iframe").first()).toHaveAttribute("src", /^blob:/, { timeout: 20_000 });
+  await expect(page.locator("[data-testid=canvas-element] img").first()).toBeVisible({ timeout: 60_000 });
 
   // Shu shablonni standart qilamiz
   await page.getByRole("button", { name: "Standart" }).click();

@@ -54,7 +54,7 @@ export default function SettingsPage() {
   // quti kengligi `max-w` ga qarab 1400 px bo'lib qolardi — sahifa yon tomonga suriladigan
   // bo'lib, o'ngdagi panellar ekrandan chiqib ketardi.
   return (
-    <div className="w-full max-w-[1400px] mx-auto p-4 md:p-6 space-y-6">
+    <div className={`w-full ${tab === "documents" ? "max-w-[1840px]" : "max-w-[1400px]"} mx-auto p-4 md:p-6 space-y-6`}>
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-3">
         <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
           <Settings className="h-5 w-5 text-primary" />

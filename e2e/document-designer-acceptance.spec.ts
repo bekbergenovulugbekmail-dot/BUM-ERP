@@ -49,7 +49,7 @@ const byType = (schema: TemplateSchema, type: string) => allElements(schema).fil
 async function openDesigner(page: Page) {
   await page.goto(appPath("/settings"));
   await page.getByRole("tab", { name: "Hujjatlar" }).click();
-  await expect(page.locator("iframe").first()).toHaveAttribute("src", /^blob:/, { timeout: 60_000 });
+  await expect(page.getByTestId("template-select")).toBeVisible({ timeout: 60_000 });
 }
 
 /** Yangi shablon yaratadi (standart ko'rinishdan nusxa) va nomini qaytaradi. */
@@ -59,7 +59,7 @@ async function createTemplate(page: Page): Promise<string> {
   await page.getByTestId("template-name").fill(name);
   await page.getByTestId("template-create-confirm").click();
   await expect(page.getByTestId("template-select")).toContainText(name, { timeout: 60_000 });
-  await expect(page.locator("iframe").first()).toHaveAttribute("src", /^blob:/, { timeout: 60_000 });
+  await expect(page.locator("[data-testid=canvas-element] img").first()).toBeVisible({ timeout: 60_000 });
   return name;
 }
 
@@ -88,7 +88,7 @@ test("jadval chiziqlarini foydalanuvchi o'zi tahrir qiladi", async ({ page }) =>
   const name = await createTemplate(page);
 
   // Mahsulot jadvalini tanlaymiz
-  await page.getByRole("button", { name: /^Jadval/ }).first().click();
+  await page.getByTestId("layers-panel").getByRole("button", { name: /^Jadval/ }).click();
   await expect(page.getByTestId("table-outer")).toBeVisible({ timeout: 30_000 });
 
   // Har chiziq alohida: vertikalni o'chirib, gorizontalni qoldiramiz
@@ -124,7 +124,7 @@ test("ustunlarni olib tashlash, nomlash, kengaytirish va tartibini o'zgartirish"
   await openDesigner(page);
   const name = await createTemplate(page);
 
-  await page.getByRole("button", { name: /^Jadval/ }).first().click();
+  await page.getByTestId("layers-panel").getByRole("button", { name: /^Jadval/ }).click();
   await expect(page.getByTestId("column-customerName")).toBeVisible({ timeout: 30_000 });
 
   // "Qarz" ustunini butunlay olib tashlaymiz
@@ -155,13 +155,13 @@ test("rasm qo'shiladi, o'lchami o'zgaradi va saqlanadi", async ({ page }) => {
   await openDesigner(page);
   const name = await createTemplate(page);
 
-  await page.getByTestId("add-header-image").click();
-  await page.getByRole("button", { name: /^Rasm/ }).first().click();
+  // Yangi element varaqqa qo'shiladi va darhol tanlanadi
+  await page.getByTestId("add-image").click();
   await expect(page.getByTestId("image-upload")).toBeVisible({ timeout: 30_000 });
 
   await page.getByTestId("image-file").setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: LOGO_PNG });
   await expect(page.getByAltText("Tanlangan rasm")).toBeVisible({ timeout: 30_000 });
-  await page.getByTestId("image-width").fill("28");
+  await page.getByTestId("geom-w").fill("28");
 
   await save(page);
 
@@ -176,13 +176,12 @@ test("QR kod qo'shiladi, manbasi tanlanadi va PDF ga tushadi", async ({ page }) 
   await openDesigner(page);
   const name = await createTemplate(page);
 
-  await page.getByTestId("add-footer-qr").click();
-  await page.getByRole("button", { name: /^QR kod/ }).first().click();
+  await page.getByTestId("add-qr").click();
   await expect(page.getByTestId("qr-source")).toBeVisible({ timeout: 30_000 });
 
   await page.getByTestId("qr-source").click();
   await page.getByRole("option", { name: "Buyurtma raqami" }).click();
-  await page.getByTestId("qr-size").fill("26");
+  await page.getByTestId("geom-w").fill("26");
   await page.getByTestId("qr-level").click();
   await page.getByRole("option", { name: /^H/ }).click();
   await page.getByTestId("element-label").fill("Tekshirish kodi");
@@ -240,12 +239,11 @@ test("saqlanadi, sahifa yangilangach o'zgarishlar joyida", async ({ page }) => {
   const name = await createTemplate(page);
 
   // Bir nechta o'zgarish: matn, imzo balandligi, chiziq
-  await page.getByTestId("add-footer-text").click();
-  await page.getByRole("button", { name: /^Matn/ }).last().click();
+  await page.getByTestId("add-text").click();
   await page.getByTestId("element-label").fill("Tovar qabul qilindi, e'tiroz yo'q");
 
-  await page.getByRole("button", { name: /^Imzo/ }).first().click();
-  await page.getByTestId("signature-height").fill("30");
+  await page.getByTestId("layers-panel").getByRole("button", { name: /^Imzo/ }).click();
+  await page.getByTestId("geom-h").fill("30");
 
   await save(page);
 
@@ -255,13 +253,13 @@ test("saqlanadi, sahifa yangilangach o'zgarishlar joyida", async ({ page }) => {
   await expect(page.getByTestId("template-select")).toBeVisible({ timeout: 60_000 });
   await page.getByTestId("template-select").click();
   await page.getByRole("option", { name: new RegExp(name) }).click();
-  await expect(page.locator("iframe").first()).toHaveAttribute("src", /^blob:/, { timeout: 60_000 });
+  await expect(page.locator("[data-testid=canvas-element] img").first()).toBeVisible({ timeout: 60_000 });
 
-  await page.getByRole("button", { name: /Tovar qabul qilindi/ }).first().click();
+  await page.getByTestId("layers-panel").getByRole("button", { name: /Tovar qabul qilindi/ }).click();
   await expect(page.getByTestId("element-label")).toHaveValue("Tovar qabul qilindi, e'tiroz yo'q");
 
-  await page.getByRole("button", { name: /^Imzo/ }).first().click();
-  await expect(page.getByTestId("signature-height")).toHaveValue("30");
+  await page.getByTestId("layers-panel").getByRole("button", { name: /^Imzo/ }).click();
+  await expect(page.getByTestId("geom-h")).toHaveValue("30");
 });
 
 test("versiyani qaytarish eski ko'rinishni tiklaydi", async ({ page }) => {
@@ -270,7 +268,7 @@ test("versiyani qaytarish eski ko'rinishni tiklaydi", async ({ page }) => {
   const id = await templateId(page, name);
 
   // v2: jadvalning vertikal chiziqlarini o'chiramiz
-  await page.getByRole("button", { name: /^Jadval/ }).first().click();
+  await page.getByTestId("layers-panel").getByRole("button", { name: /^Jadval/ }).click();
   await page.getByTestId("table-vertical").click();
   await save(page);
   const v2 = await savedSchema(page, id);
@@ -292,18 +290,16 @@ test("to'liq ssenariy: chiziq + rasm + QR + matn bitta shablonda PDF bo'lib chiq
   await openDesigner(page);
   const name = await createTemplate(page);
 
-  await page.getByRole("button", { name: /^Jadval/ }).first().click();
+  await page.getByTestId("layers-panel").getByRole("button", { name: /^Jadval/ }).click();
   await page.getByTestId("table-border-width").fill("0.5");
   await page.getByTestId("table-vertical").click();
   await page.getByTestId("column-remove-customerDebt").click();
 
-  await page.getByTestId("add-header-image").click();
-  await page.getByRole("button", { name: /^Rasm/ }).first().click();
+  await page.getByTestId("add-image").click();
   await page.getByTestId("image-file").setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: LOGO_PNG });
   await expect(page.getByAltText("Tanlangan rasm")).toBeVisible({ timeout: 30_000 });
 
-  await page.getByTestId("add-footer-qr").click();
-  await page.getByRole("button", { name: /^QR kod/ }).first().click();
+  await page.getByTestId("add-qr").click();
   await expect(page.getByTestId("qr-source")).toBeVisible({ timeout: 30_000 });
 
   await save(page);

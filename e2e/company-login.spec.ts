@@ -37,5 +37,5 @@ test("manzilsiz kirilganda biznes manzili so'raladi", async ({ page, context }) 
   await context.clearCookies();
   await page.goto("/");
   await expect(page.getByText("Biznes manzili")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByPlaceholder("bonnu-market")).toBeVisible();
+  await expect(page.getByPlaceholder("bum")).toBeVisible();
 });

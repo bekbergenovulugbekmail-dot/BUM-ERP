@@ -103,7 +103,7 @@ test("xaridda «Tezda qo'shish»: umumiy maydonlar bir marta, mahsulotlar bitta 
     const inputs = rows.nth(index).locator("input");
     await inputs.nth(0).fill(product); // Mahsulot
     await inputs.nth(1).fill(qty); // Miqdor
-    await inputs.nth(3).fill(price); // Narx (2 - birlik)
+    await inputs.nth(4).fill(price); // Narx (2 - birlik, 3 - birlikdagi dona)
   };
   await fill(0, "Coca Cola 1L", "2", "9000");
   await fill(1, "Nestle suv 0.5L", "3", "2500");

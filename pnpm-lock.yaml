@@ -83,6 +83,9 @@ importers:
       papaparse:
         specifier: ^5.7.0
         version: 5.7.0
+      pdfjs-dist:
+        specifier: ^6.3.289
+        version: 6.3.289
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
@@ -186,9 +189,6 @@ importers:
       jsqr:
         specifier: ^1.4.0
         version: 1.4.0
-      pdfjs-dist:
-        specifier: ^6.3.289
-        version: 6.3.289
       prettier:
         specifier: ^3.9.6
         version: 3.9.6

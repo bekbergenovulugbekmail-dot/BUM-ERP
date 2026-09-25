@@ -197,3 +197,33 @@ describe("Ko'rinish sozlamalari saqlanadi", () => {
     expect(table.borderWidth, "chegaradan oshgani qisqartiriladi").toBe(3);
   });
 });
+
+describe("Erkin joylashuv (vizual dizayner)", () => {
+  const free = (element: Record<string, unknown>, page: Record<string, unknown> = { layout: "free" }) =>
+    sanitizeTemplateSchema({ schemaVersion: 1, page, sections: [{ key: "body", elements: [element] }] }, access([]));
+  const first = (result: ReturnType<typeof sanitizeTemplateSchema>) =>
+    result.schema.sections.find((section) => section.key === "body")!.elements[0]!;
+
+  it("joy, o'lcham va qatlam saqlanadi", () => {
+    const result = free({ id: "a", type: "text", label: "Salom", x: 25.25, y: 40, width: 100, height: 20, zIndex: 3 });
+    expect(result.schema.page.layout).toBe("free");
+    expect(first(result)).toMatchObject({ x: 25.25, y: 40, width: 100, height: 20, zIndex: 3 });
+  });
+
+  it("manfiy, son bo'lmagan va juda katta qiymatlar chegaralanadi", () => {
+    const element = first(free({ id: "a", type: "text", label: "x", x: -50, y: 99999, zIndex: "abc" }));
+    expect(element.x).toBe(0);
+    expect(element.y).toBe(420);
+    expect(element.zIndex).toBeUndefined();
+  });
+
+  it("noma'lum joylashuv rejimi — eski (oqim) rejim qoladi", () => {
+    expect(free({ id: "a", type: "text", label: "x" }, { layout: "<script>" }).schema.page.layout).toBeUndefined();
+  });
+
+  it("rasm uchun nisbat qulfi saqlanadi", () => {
+    const png = "data:image/png;base64,iVBORw0KGgo=";
+    expect(first(free({ id: "i", type: "image", imageData: png, lockRatio: false })).lockRatio).toBe(false);
+  });
+});
+

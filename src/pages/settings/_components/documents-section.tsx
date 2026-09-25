@@ -1,38 +1,48 @@
 /**
  * Hujjat dizayneri: nakladnoy va boshqa qog'ozlarning ko'rinishini foydalanuvchi o'zi tuzadi.
  *
- * Asosiy qaror — OLDINDAN KO'RISH HAQIQIY PDF: o'ng tomondagi A4 varaq shablon bilan chizilgan
- * chinakam hujjat (namuna ma'lumotda). Shuning uchun "ko'rgani" va "bosib chiqqani" bir xil
- * bo'ladi; alohida HTML maketi yo'q, ya'ni ikki xil ko'rinish muammosi ham yo'q.
+ * VIZUAL DIZAYNER (2-bosqich): A4 varaqda elementni sichqoncha bilan ushlab suriladi,
+ * burchak/qirrasidan tortib kattalashtiriladi. Joy millimetrda saqlanadi va PDF xuddi shu
+ * joyga chizadi. Varaqdagi har element — HAQIQIY PDF rendereri chizgan rasm, shuning uchun
+ * "ekranda ko'ringan" va "qog'ozga chiqqan" bir xil.
+ *
+ * Eski (oqim) shablon ochilganda u avtomatik ERKIN JOYLASHUVGA o'tkaziladi — ko'rinishi
+ * o'zgarmaydi, faqat endi har element suriladigan bo'ladi. Saqlanmaguncha bazadagi shablon
+ * va chiqadigan nakladnoy o'zgarmaydi.
  *
  * MOLIYAVIY YAXLITLIK: bu yerda faqat KO'RINISH tahrirlanadi. Summalar serverdan keladi va
  * shablon orqali o'zgartirilmaydi (server ham shablonni oq ro'yxat bo'yicha qayta quradi).
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { Copy, FileText, History, Info, Layers, Plus, RotateCcw, Save, Star, Trash2 } from "lucide-react";
 import {
-  ArrowDown, ArrowUp, Copy, CopyPlus, FileText, History, Plus, RotateCcw, Save, Star, Trash2,
-} from "lucide-react";
-import {
-  DOCUMENT_TYPE_LABELS, DOCUMENT_TYPES, MAX_IMAGE_DATA_LENGTH,
-  type DocumentElement, type DocumentTemplateSchema, type DocumentType, type SectionKey,
+  DOCUMENT_TYPE_LABELS, DOCUMENT_TYPES, MAX_IMAGE_DATA_LENGTH, isFreeLayout, pageSizeMm,
+  type DocumentElement, type DocumentTemplateSchema, type DocumentType,
 } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
-import { Separator } from "@/components/ui/separator.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
 import { cn } from "@/lib/utils.ts";
+import { FREE_DEFAULT_SIZE, boxOf, freeElements, isPageFurniture } from "@/lib/pdf/template-free.ts";
 import {
-  ELEMENT_LABELS, SECTION_LABELS, sampleData,
+  ELEMENT_LABELS, sampleData,
   type FieldCatalog, type TemplateRow, type VersionRow,
 } from "../_lib/document-designer.ts";
+import {
+  PX_PER_MM, alignRects, copiesPerPage, distributeRects, intersects, reorderLayers, round,
+  type AlignMode, type LayerOp, type Rect,
+} from "../_lib/canvas-geometry.ts";
+import { renderDensity, useElementSprites } from "../_lib/element-sprites.ts";
+import { useHistory } from "../_lib/use-history.ts";
+import DesignCanvas, { type CanvasGrid } from "./design-canvas.tsx";
+import DesignerToolbar, { type InsertKind } from "./designer-toolbar.tsx";
 import ElementEditor from "./element-editor.tsx";
-
-const SECTION_ORDER: SectionKey[] = ["header", "body", "footer"];
 
 /**
  * Yangi jadval qaysi ustunlar bilan ochiladi — HUJJAT TURIGA mos.
@@ -47,12 +57,8 @@ const DEFAULT_TABLE_COLUMNS: Record<DocumentType, string[]> = {
   payslip: ["index", "name", "total"],
 };
 
-/** Yangi element — turiga qarab eng kerakli standart qiymat bilan. */
-function newElement(
-  type: DocumentElement["type"],
-  catalog: FieldCatalog | undefined,
-  documentType: DocumentType,
-): DocumentElement {
+/** Yangi element mazmuni — turiga qarab eng kerakli standart qiymat bilan. */
+function newElement(type: DocumentElement["type"], catalog: FieldCatalog | undefined, documentType: DocumentType): DocumentElement {
   const id = crypto.randomUUID();
   if (type === "field") return { id, type, field: catalog?.fields[0]?.path ?? "document.number", label: catalog?.fields[0]?.label };
   if (type === "itemsTable") {
@@ -63,13 +69,48 @@ function newElement(
   if (type === "totals") return { id, type, rows: ["total"] };
   if (type === "payments") return { id, type, rows: ["cash", "card"] };
   if (type === "signatures") return { id, type, label: "Topshirdi|Qabul qildi" };
-  if (type === "text") return { id, type, label: "Yangi matn" };
-  if (type === "qr") return { id, type, qrSource: "documentNumber", width: 22 };
-  if (type === "barcode") return { id, type, qrSource: "documentNumber", width: 50, height: 14 };
-  if (type === "image") return { id, type, width: 40, height: 20, fit: "contain" };
-  if (type === "rect") return { id, type, width: 80, height: 20, box: { borderWidth: 0.3, borderStyle: "solid" } };
+  if (type === "text") return { id, type, label: "Yangi matn", style: { fontSize: 10 } };
+  if (type === "qr") return { id, type, qrSource: "documentNumber" };
+  if (type === "barcode") return { id, type, qrSource: "documentNumber" };
+  if (type === "image") return { id, type, fit: "contain", lockRatio: true };
+  if (type === "rect") return { id, type, box: { borderWidth: 0.3, borderStyle: "solid" } };
+  if (type === "line") return { id, type, box: { borderWidth: 0.3, borderStyle: "solid" } };
   return { id, type };
 }
+
+/** Elementlar ro'yxatini sxemaga qaytaradi (bo'limlari saqlanadi, yangilari "body" ga). */
+function mapElements(schema: DocumentTemplateSchema, update: (element: DocumentElement) => DocumentElement | null): DocumentTemplateSchema {
+  return {
+    ...schema,
+    sections: schema.sections.map((section) => ({
+      ...section,
+      elements: section.elements.flatMap((element) => {
+        const next = update(element);
+        return next ? [next] : [];
+      }),
+    })),
+  };
+}
+
+const draftKey = (templateId: string) => `bum.designer.draft.${templateId}`;
+type Draft = { versionId: string | null; schema: DocumentTemplateSchema; at: number };
+
+function readDraft(templateId: string): Draft | null {
+  try {
+    const raw = localStorage.getItem(draftKey(templateId));
+    return raw ? (JSON.parse(raw) as Draft) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Kiritish maydonida yozilayotganda klaviatura buyruqlari ishlamasin. */
+const isTyping = (target: EventTarget | null) => {
+  const element = target as HTMLElement | null;
+  if (!element) return false;
+  return element.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName)
+    || Boolean(element.closest("[role=listbox],[role=menu],[role=dialog]"));
+};
 
 export default function DocumentsSection() {
   const { can } = usePermissions();
@@ -79,154 +120,304 @@ export default function DocumentsSection() {
 
   const [documentType, setDocumentType] = useState<DocumentType>("delivery_waybill");
   const [templateId, setTemplateId] = useState<string | null>(null);
-  const [schema, setSchema] = useState<DocumentTemplateSchema | null>(null);
-  const [dirty, setDirty] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const history = useHistory<DocumentTemplateSchema>();
+  const { reset: resetHistory, set: setHistory } = history;
+  const schema = history.present;
+  /** Bazadagi (oxirgi saqlangan) holat — `schema` undan farq qilsa, saqlanmagan o'zgarish bor. */
+  const [saved, setSaved] = useState<DocumentTemplateSchema | null>(null);
+  const dirty = schema !== null && schema !== saved;
+  const [selection, setSelection] = useState<string[]>([]);
   const [showVersions, setShowVersions] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  /** Sxema qaysi shablon uchun yuklangani — qayta yuklashni bir marta qilish uchun. */
+  /** Sxema qaysi shablon (va versiya) uchun yuklangani. */
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
-  /** Ochiq nom kiritish formasi: yangi shablon yoki nusxa. */
+  /** Eski shablon erkin joylashuvga o'tkazildi — foydalanuvchiga aytiladi. */
+  const [converted, setConverted] = useState(false);
+  /** Saqlanmagan qoralama topildi (brauzer yopilgan yoki sahifa yangilangan). */
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [creating, setCreating] = useState<"new" | "duplicate" | null>(null);
   const [newName, setNewName] = useState("");
-  /** Arxivlash ikki bosqichda — tasodifan bosilmasin (brauzer dialogisiz). */
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [zoom, setZoom] = useState(0.75);
+  const [grid, setGrid] = useState<CanvasGrid>({ show: false, snap: true, size: 5, outlines: true });
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
   const templatesQuery = useApiQuery<{ templates: TemplateRow[] }>("/api/documents/templates", { documentType });
   const templates = templatesQuery.data?.templates ?? [];
   const catalog = useApiQuery<FieldCatalog>("/api/documents/fields", { documentType }).data;
   /**
    * Tanlangan shablon. Foydalanuvchi (yoki hozirgina yaratish) tanlagan bo'lsa — O'SHA.
-   *
-   * Ro'yxatda bor-yo'qligi TEKSHIRILMAYDI: yangi shablon yaratilganda ro'yxat bir zumga eski
-   * bo'lib turadi va tekshiruv uni "yo'q" deb hisoblab, standart shablonga sakrab ketardi —
-   * shu payt saqlanmagan tahrir yo'qolardi.
+   * Ro'yxatda bor-yo'qligi tekshirilmaydi: yangi shablon yaratilganda ro'yxat bir zum eski
+   * bo'lib turadi va standart shablonga sakrab, saqlanmagan tahrir yo'qolardi.
    */
   const activeId = templateId ?? (templates.find((template) => template.isDefault)?.id ?? templates[0]?.id ?? null);
 
-  const detail = useApiQuery<{ schema: DocumentTemplateSchema }>(activeId ? `/api/documents/templates/${activeId}` : null);
+  const detail = useApiQuery<{ schema: DocumentTemplateSchema; version: { id: string; version: number } | null }>(
+    activeId ? `/api/documents/templates/${activeId}` : null,
+  );
   const versions = useApiQuery<{ versions: VersionRow[] }>(
     showVersions && activeId ? `/api/documents/templates/${activeId}/versions` : null,
   ).data?.versions;
-
   const createTemplate = useApiMutation((body: object) => api.post<{ template: TemplateRow }>("/api/documents/templates", body));
   const invalidate = () => void templatesQuery.refetch();
 
-  // Serverdan kelgan sxemani tahrir holatiga BIR MARTA yuklaymiz (saqlanmagan o'zgarish ustiga yozilmasin).
-  // Render paytida sinxronlash — loyihaning boshqa oynalaridagidek (effekt emas, cascading render yo'q).
-  // `dirty` bo'lsa HECH QACHON ustiga yozilmaydi: fonda ketgan qayta so'rov (mutatsiyadan keyin
-  // hamma so'rov yangilanadi) saqlanmagan tahrirni o'chirib yuborardi.
+  const sample = useMemo(() => sampleData(documentType, companyName), [documentType, companyName]);
   const serverSchema = detail.data?.schema;
-  if (serverSchema && loadedFor !== activeId && !dirty) {
-    setLoadedFor(activeId);
-    setSchema(serverSchema);
-    setDirty(false);
-  }
-  if (!activeId && schema !== null && loadedFor !== null) {
-    setLoadedFor(null);
-    setSchema(null);
-  }
+  const serverVersionId = detail.data?.version?.id ?? null;
+  const loadKey = activeId && serverSchema ? `${activeId}:${serverVersionId ?? "factory"}` : null;
 
-  const elements = useMemo(() => {
-    const map = new Map<SectionKey, DocumentElement[]>();
-    for (const key of SECTION_ORDER) map.set(key, schema?.sections.find((section) => section.key === key)?.elements ?? []);
-    return map;
-  }, [schema]);
-
-  const selected = useMemo(() => {
-    for (const list of elements.values()) {
-      const found = list.find((element) => element.id === selectedId);
-      if (found) return found;
-    }
-    return null;
-  }, [elements, selectedId]);
-
-  /** Sxemani o'zgartirish — har doim yangi obyekt (React qayta chizsin). */
-  const patchSchema = (updater: (current: DocumentTemplateSchema) => DocumentTemplateSchema) => {
-    setSchema((current) => (current ? updater(structuredClone(current)) : current));
-    setDirty(true);
-  };
-
-  const updateElement = (id: string, patch: Partial<DocumentElement>) =>
-    patchSchema((current) => {
-      for (const section of current.sections) {
-        const index = section.elements.findIndex((element) => element.id === id);
-        if (index < 0) continue;
-        const previous = section.elements[index]!;
-        const next = { ...previous, ...patch };
-        /**
-         * Maydon almashtirilganda yorliq ham ergashadi — AGAR foydalanuvchi uni o'zi
-         * yozmagan bo'lsa. Aks holda "Kompaniya nomi: Test Market" kabi chalkash juftlik
-         * qog'ozga tushib ketardi (yorliq eski maydonniki, qiymat yangisiniki).
-         */
-        if (patch.field && patch.field !== previous.field) {
-          const wasAuto = !previous.label || previous.label === catalog?.fields.find((f) => f.path === previous.field)?.label;
-          if (wasAuto) next.label = catalog?.fields.find((f) => f.path === patch.field)?.label;
-        }
-        section.elements[index] = next;
-      }
-      return current;
-    });
-
-  const addElement = (section: SectionKey, type: DocumentElement["type"]) =>
-    patchSchema((current) => {
-      const target = current.sections.find((item) => item.key === section);
-      if (target) target.elements.push(newElement(type, catalog, documentType));
-      return current;
-    });
-
-  const removeElement = (id: string) =>
-    patchSchema((current) => {
-      for (const section of current.sections) section.elements = section.elements.filter((element) => element.id !== id);
-      return current;
-    });
-
-  /** Nusxalash — yonidagi joyga aynan shunday element qo'shadi (yangi id bilan). */
-  const duplicateElement = (id: string) =>
-    patchSchema((current) => {
-      for (const section of current.sections) {
-        const index = section.elements.findIndex((element) => element.id === id);
-        if (index < 0) continue;
-        section.elements.splice(index + 1, 0, { ...structuredClone(section.elements[index]!), id: crypto.randomUUID() });
-      }
-      return current;
-    });
-
-  const moveElement = (id: string, direction: -1 | 1) =>
-    patchSchema((current) => {
-      for (const section of current.sections) {
-        const index = section.elements.findIndex((element) => element.id === id);
-        if (index < 0) continue;
-        const next = index + direction;
-        if (next < 0 || next >= section.elements.length) return current;
-        const [item] = section.elements.splice(index, 1);
-        section.elements.splice(next, 0, item!);
-      }
-      return current;
-    });
-
-  // ── Oldindan ko'rish: HAQIQIY PDF ──
+  /**
+   * Serverdagi shablonni tahrir holatiga yuklash. Saqlanmagan o'zgarish bo'lsa HECH QACHON
+   * ustiga yozilmaydi (fondagi qayta so'rov tahrirni o'chirib yuborardi). Oqim shabloni —
+   * erkin joylashuvga o'tkaziladi (namuna ma'lumot bilan haqiqatan chizib, joylari o'lchanadi).
+   */
   useEffect(() => {
-    if (!schema) return;
+    if (!loadKey || !serverSchema || loadedFor === loadKey || (dirty && loadedFor?.startsWith(`${activeId}:`))) return;
     let cancelled = false;
-    let url: string | null = null;
     void (async () => {
       try {
-        const { renderTemplate } = await import("@/lib/pdf/template-renderer.ts");
-        const doc = await renderTemplate(schema, sampleData(documentType, companyName));
+        const free = isFreeLayout(serverSchema)
+          ? serverSchema
+          : await (await import("@/lib/pdf/template-renderer.ts")).convertToFreeLayout(serverSchema, sample);
         if (cancelled) return;
-        url = doc.output("bloburl") as unknown as string;
-        setPreviewUrl(url);
+        resetHistory(free);
+        // O'tkazilgan shablon hali saqlanmagan — "Saqlash" yonadi
+        setSaved(isFreeLayout(serverSchema) ? free : serverSchema);
+        setConverted(!isFreeLayout(serverSchema));
+        setSelection([]);
+        setLoadedFor(loadKey);
+        const stored = activeId ? readDraft(activeId) : null;
+        setDraft(stored && stored.versionId === serverVersionId && JSON.stringify(stored.schema) !== JSON.stringify(free) ? stored : null);
       } catch (error) {
-        if (!cancelled) toast.error(`Ko'rish xatosi: ${errorMessage(error)}`);
+        if (!cancelled) toast.error(`Shablonni ochib bo'lmadi: ${errorMessage(error)}`);
       }
     })();
     return () => {
       cancelled = true;
-      if (url) URL.revokeObjectURL(url);
     };
-  }, [schema, documentType, companyName]);
+  }, [loadKey, serverSchema, serverVersionId, loadedFor, dirty, activeId, sample, resetHistory]);
+
+  // Qoralama — brauzerda, 800 ms kechikish bilan (har sichqoncha harakatida emas). Server
+  // versiyasi faqat "Saqlash" bilan yaratiladi, ya'ni versiyalar tarixi buzilmaydi.
+  useEffect(() => {
+    if (!dirty || !schema || !activeId) return;
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(draftKey(activeId), JSON.stringify({ versionId: serverVersionId, schema, at: Date.now() } satisfies Draft));
+      } catch {
+        // Xotira to'lgan bo'lsa — qoralamasiz ishlashda davom etamiz
+      }
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [dirty, schema, activeId, serverVersionId]);
+
+  // Saqlanmagan o'zgarish bilan sahifani yopishda ogohlantirish
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  const elements = useMemo(() => (schema ? freeElements(schema) : []), [schema]);
+  const page = schema ? pageSizeMm(schema.page) : { width: 210, height: 297 };
+  const selected = selection.length === 1 ? elements.find((element) => element.id === selection[0]) ?? null : null;
+  const { sprites, pending } = useElementSprites(elements, schema ? sample : null, renderDensity(PX_PER_MM * zoom));
+
+  // ── Tahrirlash amallari ──
+  const patchElements = useCallback((patches: Record<string, Partial<DocumentElement>>, options?: { record?: boolean; key?: string }) =>
+    setHistory((current) => mapElements(current, (element) => (patches[element.id] ? { ...element, ...patches[element.id] } : element)), options), [setHistory]);
+
+  const liveChange = useCallback((patches: Record<string, Partial<DocumentElement>>) => patchElements(patches, { record: false }), [patchElements]);
+
+  const updateElement = (id: string, patch: Partial<DocumentElement>) => {
+    const previous = elements.find((element) => element.id === id);
+    const next = { ...patch };
+    /**
+     * Maydon almashtirilganda yorliq ham ergashadi — AGAR foydalanuvchi uni o'zi yozmagan
+     * bo'lsa. Aks holda "Kompaniya nomi: Test Market" kabi chalkash juftlik chiqardi.
+     */
+    if (previous && patch.field && patch.field !== previous.field) {
+      const wasAuto = !previous.label || previous.label === catalog?.fields.find((field) => field.path === previous.field)?.label;
+      if (wasAuto) next.label = catalog?.fields.find((field) => field.path === patch.field)?.label;
+    }
+    patchElements({ [id]: next }, { key: `${id}:${Object.keys(patch).sort().join(",")}` });
+  };
+
+  const topZ = () => elements.reduce((max, element) => Math.max(max, element.zIndex ?? 0), 0);
+
+  /**
+   * Yangi element — varaqdagi BIRINCHI BO'SH joyga (mavjud jadval yoki matn ustiga tushib, uni
+   * yopib qo'ymasin), qatlamning eng ustiga, darhol tanlanadi. Bo'sh joy bo'lmasa — o'rtaga.
+   */
+  const insert = (element: DocumentElement, size?: { w: number; h: number }) => {
+    if (!schema) return;
+    const base = size ?? FREE_DEFAULT_SIZE[element.type];
+    const { margins } = schema.page;
+    const w = Math.min(base.w, page.width - margins.left - margins.right);
+    const x = round((page.width - w) / 2);
+    const taken = elements.filter((item) => !isPageFurniture(item)).map((item) => boxOf(item));
+    let y: number | null = null;
+    for (let top = margins.top; top + base.h <= page.height - margins.bottom; top += 2) {
+      const candidate = { x, y: top, w, h: base.h };
+      if (!taken.some((box) => intersects(candidate, { x: box.x - 1, y: box.y - 1, w: box.w + 2, h: box.h + 2 }))) {
+        y = top;
+        break;
+      }
+    }
+    const placed: DocumentElement = {
+      ...element,
+      x,
+      y: round(y ?? Math.min(page.height - base.h - 10, 40 + (elements.length % 8) * 6)),
+      width: round(w),
+      height: base.h,
+      zIndex: topZ() + 1,
+    };
+    history.set((current) => ({
+      ...current,
+      sections: current.sections.map((section) => (section.key === "body" ? { ...section, elements: [...section.elements, placed] } : section)),
+    }));
+    setSelection([placed.id]);
+  };
+
+  const insertKind = (kind: InsertKind) => {
+    if (kind === "vline") {
+      insert(newElement("line", catalog, documentType), { w: 2, h: 60 });
+      return;
+    }
+    insert(newElement(kind, catalog, documentType), kind === "qr" ? { w: 24, h: 24 } : undefined);
+  };
+
+  const removeSelected = () => {
+    if (selection.length === 0) return;
+    const doomed = new Set(selection);
+    history.set((current) => mapElements(current, (element) => (doomed.has(element.id) ? null : element)));
+    setSelection([]);
+  };
+
+  /** Nusxa — 5 mm pastroq-o'ngroqda, eng ustki qatlamda. */
+  const duplicateSelected = () => {
+    if (selection.length === 0) return;
+    const chosen = new Set(selection);
+    const copies: string[] = [];
+    let z = topZ();
+    history.set((current) => ({
+      ...current,
+      sections: current.sections.map((section) => ({
+        ...section,
+        elements: section.elements.flatMap((element) => {
+          if (!chosen.has(element.id)) return [element];
+          const box = boxOf(element);
+          const copy: DocumentElement = {
+            ...structuredClone(element),
+            id: crypto.randomUUID(),
+            x: round(Math.min(box.x + 5, page.width - box.w)),
+            y: round(Math.min(box.y + 5, page.height - box.h)),
+            zIndex: (z += 1),
+          };
+          copies.push(copy.id);
+          return [element, copy];
+        }),
+      })),
+    }));
+    setSelection(copies);
+  };
+
+  const rectsOf = (ids: string[]) => ids.map((id) => boxOf(elements.find((element) => element.id === id)!));
+
+  const applyRects = (ids: string[], rects: Rect[]) =>
+    patchElements(Object.fromEntries(ids.map((id, index) => [id, { x: rects[index]!.x, y: rects[index]!.y }])));
+
+  const align = (mode: AlignMode) => applyRects(selection, alignRects(rectsOf(selection), mode, page));
+  const distribute = (axis: "horizontal" | "vertical") => applyRects(selection, distributeRects(rectsOf(selection), axis));
+
+  const layer = (op: LayerOp) => {
+    const order = reorderLayers(elements.map((element) => element.id), selection, op);
+    patchElements(Object.fromEntries(order.map((id, index) => [id, { zIndex: index }])));
+  };
+
+  const nudge = (dx: number, dy: number) => {
+    const rects = rectsOf(selection);
+    const patches: Record<string, Partial<DocumentElement>> = {};
+    selection.forEach((id, index) => {
+      const rect = rects[index]!;
+      patches[id] = {
+        x: round(Math.min(Math.max(0, rect.x + dx), page.width - rect.w)),
+        y: round(Math.min(Math.max(0, rect.y + dy), page.height - rect.h)),
+      };
+    });
+    patchElements(patches, { key: `nudge:${selection.join(",")}` });
+  };
+
+  const handleSave = async () => {
+    if (!activeId || !schema) return;
+    setSaving(true);
+    try {
+      const result = await api.post<{ version: { version: number }; warnings: string[] }>(
+        `/api/documents/templates/${activeId}/versions`,
+        { schema },
+      );
+      setSaved(schema);
+      setConverted(false);
+      setDraft(null);
+      try { localStorage.removeItem(draftKey(activeId)); } catch { /* e'tiborsiz */ }
+      // Yangi versiya — shu holatning o'zi; qayta yuklab ustiga yozmaymiz
+      setLoadedFor(null);
+      await detail.refetch();
+      toast.success(`${result.version.version}-versiya saqlandi`);
+      for (const warning of result.warnings.slice(0, 3)) toast.warning(warning);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Klaviatura: Ctrl+Z/Y, Delete, Esc, strelkalar, Ctrl+D/S/A
+  const keyHandler = useRef<(event: KeyboardEvent) => void>(() => undefined);
+  useEffect(() => {
+    keyHandler.current = (event: KeyboardEvent) => {
+      if (!schema || isTyping(event.target)) return;
+      const mod = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+      if (mod && key === "s") {
+        event.preventDefault();
+        if (dirty && canManage) void handleSave();
+        return;
+      }
+      if (!canManage) return;
+      if (mod && key === "z" && !event.shiftKey) { event.preventDefault(); history.undo(); return; }
+      if (mod && (key === "y" || (key === "z" && event.shiftKey))) { event.preventDefault(); history.redo(); return; }
+      if (mod && key === "a") { event.preventDefault(); setSelection(elements.map((element) => element.id)); return; }
+      if (event.key === "Escape") { setSelection([]); return; }
+      if (selection.length === 0) return;
+      if (mod && key === "d") { event.preventDefault(); duplicateSelected(); return; }
+      if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); removeSelected(); return; }
+      const step = event.shiftKey ? 10 : event.altKey ? 0.1 : 1;
+      const moves: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+      const move = moves[event.key];
+      if (move) {
+        event.preventDefault();
+        nudge(move[0], move[1]);
+      }
+    };
+  });
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => keyHandler.current(event);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+
+  const openPdf = async () => {
+    if (!schema) return;
+    try {
+      const { renderTemplate } = await import("@/lib/pdf/template-renderer.ts");
+      const doc = await renderTemplate(schema, sample);
+      setPdfUrl(doc.output("bloburl") as unknown as string);
+    } catch (error) {
+      toast.error(`PDF xatosi: ${errorMessage(error)}`);
+    }
+  };
 
   /** Nom kiritish ichki formada — brauzer dialogi ilovani bloklaydi va sinovga ham to'siq. */
   const handleCreate = async () => {
@@ -241,30 +432,13 @@ export default function DocumentsSection() {
       toast.success("Shablon yaratildi");
       setCreating(null);
       setNewName("");
+      history.reset(null);
+      setSaved(null);
       setTemplateId(created.template.id);
       setLoadedFor(null);
       invalidate();
     } catch (error) {
       toast.error(errorMessage(error));
-    }
-  };
-
-  const handleSave = async () => {
-    if (!activeId || !schema) return;
-    setSaving(true);
-    try {
-      const result = await api.post<{ version: { version: number }; warnings: string[] }>(
-        `/api/documents/templates/${activeId}/versions`,
-        { schema },
-      );
-      setDirty(false);
-      void detail.refetch();
-      toast.success(`${result.version.version}-versiya saqlandi`);
-      for (const warning of result.warnings.slice(0, 3)) toast.warning(warning);
-    } catch (error) {
-      toast.error(errorMessage(error));
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -274,6 +448,11 @@ export default function DocumentsSection() {
       await api.post(`/api/documents/templates/${activeId}/${path}`, body ?? {});
       toast.success(message);
       invalidate();
+      if (path === "restore") {
+        history.reset(null);
+        setSaved(null);
+        setLoadedFor(null);
+      }
       void detail.refetch();
     } catch (error) {
       toast.error(errorMessage(error));
@@ -286,19 +465,46 @@ export default function DocumentsSection() {
       await api.delete(`/api/documents/templates/${activeId}`);
       toast.success("Arxivlandi");
       setTemplateId(null);
-      setSchema(null);
+      history.reset(null);
+      setSaved(null);
+      setLoadedFor(null);
       invalidate();
     } catch (error) {
       toast.error(errorMessage(error));
     }
   };
 
+  const switchTemplate = (id: string | null, type = documentType) => {
+    history.reset(null);
+    setSaved(null);
+    setLoadedFor(null);
+    setSelection([]);
+    setDocumentType(type);
+    setTemplateId(id);
+  };
+
+  // Hujjat balandligi — bir nechta nakladnoy bitta A4 ga nechtadan sig'adi
+  const extent = useMemo(() => {
+    const content = elements.filter((element) => !isPageFurniture(element));
+    if (!schema || content.length === 0) return null;
+    const rects = content.map((element) => {
+      const box = boxOf(element);
+      const natural = element.type === "itemsTable" ? sprites.get(element.id)?.natural ?? 0 : 0;
+      return { top: box.y, bottom: box.y + Math.max(box.h, natural) };
+    });
+    const top = Math.min(...rects.map((rect) => rect.top));
+    const bottom = Math.max(...rects.map((rect) => rect.bottom));
+    return { height: bottom - top, copies: copiesPerPage(top, bottom, page.height - schema.page.margins.bottom) };
+  }, [schema, elements, sprites, page.height]);
+
+  const readOnly = !canManage;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-48">
           <Label className="text-xs">Hujjat turi</Label>
-          <Select value={documentType} onValueChange={(value) => { setDocumentType(value as DocumentType); setTemplateId(null); setLoadedFor(null); setDirty(false); }}>
+          <Select value={documentType} onValueChange={(value) => switchTemplate(null, value as DocumentType)}>
             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
             <SelectContent>
               {DOCUMENT_TYPES.map((type) => (
@@ -309,7 +515,7 @@ export default function DocumentsSection() {
         </div>
         <div className="min-w-56">
           <Label className="text-xs">Shablon</Label>
-          <Select value={activeId ?? ""} onValueChange={(value) => { setTemplateId(value); setDirty(false); }}>
+          <Select value={activeId ?? ""} onValueChange={(value) => switchTemplate(value)}>
             <SelectTrigger className="h-9" data-testid="template-select">
               <SelectValue placeholder={templates.length === 0 ? "Shablon yo'q" : "Tanlang"} />
             </SelectTrigger>
@@ -322,38 +528,48 @@ export default function DocumentsSection() {
             </SelectContent>
           </Select>
         </div>
-        {canManage && (
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" onClick={() => { setCreating("new"); setNewName("Mening shablonim"); }} data-testid="template-create">
-              <Plus className="mr-1.5 h-3.5 w-3.5" /> Yangi
-            </Button>
-            <Button size="sm" variant="secondary" disabled={!schema}
-              onClick={() => { setCreating("duplicate"); setNewName(`${templates.find((t) => t.id === activeId)?.name ?? "Shablon"} nusxasi`); }}>
-              <Copy className="mr-1.5 h-3.5 w-3.5" /> Nusxa
-            </Button>
-            <Button size="sm" disabled={!dirty || saving} onClick={() => void handleSave()} data-testid="template-save">
-              <Save className="mr-1.5 h-3.5 w-3.5" /> Saqlash
-            </Button>
-            <Button size="sm" variant="secondary" disabled={!activeId} onClick={() => void templateAction("default", "Standart qilindi")}>
-              <Star className="mr-1.5 h-3.5 w-3.5" /> Standart
-            </Button>
-            <Button size="sm" variant="secondary" disabled={!activeId} onClick={() => setShowVersions((value) => !value)}>
-              <History className="mr-1.5 h-3.5 w-3.5" /> Versiyalar
-            </Button>
-            {confirmArchive ? (
-              <>
-                <Button size="sm" variant="ghost" onClick={() => { setConfirmArchive(false); void handleArchive(); }} data-testid="template-archive-confirm">
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5 text-destructive" /> Arxivlash — tasdiqlang
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setConfirmArchive(false)}>Bekor</Button>
-              </>
-            ) : (
-              <Button size="sm" variant="ghost" disabled={!activeId} onClick={() => setConfirmArchive(true)} data-testid="template-archive">
-                <Trash2 className="mr-1.5 h-3.5 w-3.5 text-destructive" /> Arxiv
+        <div className="flex flex-wrap gap-2">
+          {canManage && (
+            <>
+              <Button size="sm" variant="secondary" onClick={() => { setCreating("new"); setNewName("Mening shablonim"); }} data-testid="template-create">
+                <Plus className="mr-1.5 h-3.5 w-3.5" /> Yangi
               </Button>
-            )}
-          </div>
-        )}
+              <Button size="sm" variant="secondary" disabled={!schema}
+                onClick={() => { setCreating("duplicate"); setNewName(`${templates.find((t) => t.id === activeId)?.name ?? "Shablon"} nusxasi`); }}>
+                <Copy className="mr-1.5 h-3.5 w-3.5" /> Nusxa
+              </Button>
+              <Button size="sm" disabled={!dirty || saving} onClick={() => void handleSave()} data-testid="template-save">
+                <Save className="mr-1.5 h-3.5 w-3.5" /> Saqlash
+              </Button>
+            </>
+          )}
+          <Button size="sm" variant="secondary" disabled={!schema} onClick={() => void openPdf()} data-testid="pdf-preview-open">
+            <FileText className="mr-1.5 h-3.5 w-3.5" /> PDF
+          </Button>
+          {canManage && (
+            <>
+              <Button size="sm" variant="secondary" disabled={!activeId} onClick={() => void templateAction("default", "Standart qilindi")}>
+                <Star className="mr-1.5 h-3.5 w-3.5" /> Standart
+              </Button>
+              <Button size="sm" variant="secondary" disabled={!activeId} onClick={() => setShowVersions((value) => !value)}>
+                <History className="mr-1.5 h-3.5 w-3.5" /> Versiyalar
+              </Button>
+              {confirmArchive ? (
+                <>
+                  <Button size="sm" variant="ghost" onClick={() => { setConfirmArchive(false); void handleArchive(); }} data-testid="template-archive-confirm">
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5 text-destructive" /> Arxivlash — tasdiqlang
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmArchive(false)}>Bekor</Button>
+                </>
+              ) : (
+                <Button size="sm" variant="ghost" disabled={!activeId} onClick={() => setConfirmArchive(true)} data-testid="template-archive">
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5 text-destructive" /> Arxiv
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+        {dirty && <span className="pb-2 text-xs text-amber-600" data-testid="unsaved">● Saqlanmagan o'zgarish</span>}
       </div>
 
       {creating && (
@@ -374,6 +590,29 @@ export default function DocumentsSection() {
           Bu hujjat turida shablon yo'q — hujjat tizim standarti bilan chiqadi. "Yangi" tugmasi standart
           ko'rinishdan nusxa ochadi va uni istagancha o'zgartirasiz.
         </p>
+      )}
+
+      {draft && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200" data-testid="draft-banner">
+          <Info className="h-3.5 w-3.5" />
+          Saqlanmagan qoralama topildi ({new Date(draft.at).toLocaleString("uz-UZ")}).
+          <Button size="sm" variant="secondary" className="h-7" data-testid="draft-restore"
+            onClick={() => { history.set(draft.schema); setDraft(null); }}>Tiklash</Button>
+          <Button size="sm" variant="ghost" className="h-7"
+            onClick={() => { if (activeId) try { localStorage.removeItem(draftKey(activeId)); } catch { /* e'tiborsiz */ } setDraft(null); }}>
+            O'chirish
+          </Button>
+        </div>
+      )}
+
+      {converted && (
+        <div className="flex items-start gap-2 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:bg-sky-950/40 dark:text-sky-200" data-testid="converted-banner">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            Bu shablon <b>erkin joylashuvga</b> o'tkazildi: endi har elementni sichqoncha bilan surish va burchagidan
+            tortib kattalashtirish mumkin. Ko'rinish o'zgarmadi. Saqlaganingizdan keyin nakladnoy aynan shu varaqdagidek chiqadi.
+          </span>
+        </div>
       )}
 
       {showVersions && versions && (
@@ -399,90 +638,119 @@ export default function DocumentsSection() {
         </div>
       )}
 
+      {schema && (
+        <DesignerToolbar
+          catalog={catalog}
+          readOnly={readOnly}
+          selection={selection}
+          textElement={selected && ["text", "field", "pageNumber"].includes(selected.type) ? selected : null}
+          canUndo={history.canUndo}
+          canRedo={history.canRedo}
+          zoom={zoom}
+          grid={grid}
+          onInsert={insertKind}
+          onInsertField={(path, label) => insert({ id: crypto.randomUUID(), type: "field", field: path, label })}
+          onUndo={history.undo}
+          onRedo={history.redo}
+          onDuplicate={duplicateSelected}
+          onDelete={removeSelected}
+          onAlign={align}
+          onDistribute={distribute}
+          onLayer={layer}
+          onZoom={setZoom}
+          onGrid={setGrid}
+          onStyle={(style) => selected && updateElement(selected.id, { style })}
+        />
+      )}
+
       {/*
-        `minmax(0,1fr)` — `1fr` ning o'zi `minmax(auto,1fr)` degani, ya'ni ustun ichidagi
-        eng tor kenglikdan pastga tushmaydi. Shu sababli A4 ko'rinishi butun sahifani
-        cho'zib, o'ng tomondagi sozlamalar paneli ekrandan chiqib ketardi.
+        `minmax(0,1fr)` — `1fr` ning o'zi `minmax(auto,1fr)` degani, ya'ni ustun ichidagi eng
+        tor kenglikdan pastga tushmaydi va o'ngdagi panel ekrandan chiqib ketardi.
       */}
-      <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_308px]">
-        {/* Elementlar daraxti */}
-        <div className="min-w-0 space-y-3 rounded-xl border border-border p-3">
-          {SECTION_ORDER.map((section) => (
-            <div key={section}>
-              <div className="mb-1.5 flex items-center justify-between">
-                <p className="text-xs font-semibold">{SECTION_LABELS[section]}</p>
-                {canManage && schema && (
-                  <div className="flex flex-wrap justify-end gap-1">
-                    {/* Bir bosishda qo'shiladi — ko'p qadamli menyu tez ishlashga xalaqit beradi */}
-                    {(["text", "field", "itemsTable", "totals", "signatures", "image", "qr", "barcode", "pageNumber", "line", "rect", "spacer"] as const).map((type) => (
-                      <button
-                        key={type}
-                        type="button"
-                        data-testid={`add-${section}-${type}`}
-                        className="rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-accent"
-                        onClick={() => addElement(section, type)}
-                      >
-                        + {ELEMENT_LABELS[type]}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="space-y-1">
-                {(elements.get(section) ?? []).map((element) => (
-                  <div
-                    key={element.id}
-                    className={cn(
-                      "flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs",
-                      selectedId === element.id ? "border-primary bg-primary/5" : "border-transparent hover:bg-accent/40",
-                    )}
-                  >
-                    <button type="button" className="flex-1 truncate text-left" onClick={() => setSelectedId(element.id)}>
-                      <span className="text-muted-foreground">{ELEMENT_LABELS[element.type]}</span>
-                      {element.label ? ` · ${element.label}` : element.field ? ` · ${element.field}` : ""}
-                    </button>
-                    {canManage && (
-                      <>
-                        <button type="button" aria-label="Yuqoriga" onClick={() => moveElement(element.id, -1)}><ArrowUp className="h-3 w-3" /></button>
-                        <button type="button" aria-label="Pastga" onClick={() => moveElement(element.id, 1)}><ArrowDown className="h-3 w-3" /></button>
-                        <button type="button" aria-label="Nusxalash" data-testid={`duplicate-${element.id}`}
-                          onClick={() => duplicateElement(element.id)}><CopyPlus className="h-3 w-3" /></button>
-                        <button type="button" aria-label="O'chirish" onClick={() => removeElement(element.id)}>
-                          <Trash2 className="h-3 w-3 text-destructive" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ))}
-                {(elements.get(section) ?? []).length === 0 && (
-                  <p className="px-2 py-1 text-[11px] text-muted-foreground">Bo'sh</p>
-                )}
-              </div>
-              <Separator className="mt-2" />
-            </div>
+      <div className="grid gap-3 lg:grid-cols-[210px_minmax(0,1fr)] xl:grid-cols-[210px_minmax(0,1fr)_300px]">
+        {/* Qatlamlar — yuqoridagisi ustida chiziladi */}
+        <div className="min-w-0 space-y-1 rounded-xl border border-border p-2" data-testid="layers-panel">
+          <p className="mb-1 flex items-center gap-1.5 px-1 text-xs font-semibold"><Layers className="h-3.5 w-3.5" /> Qatlamlar</p>
+          {[...elements].reverse().map((element) => (
+            <button
+              key={element.id}
+              type="button"
+              data-testid={`layer-${element.id}`}
+              className={cn(
+                "flex w-full items-center gap-1 truncate rounded-md border px-2 py-1 text-left text-[11px]",
+                selection.includes(element.id) ? "border-primary bg-primary/5" : "border-transparent hover:bg-accent/50",
+              )}
+              onClick={(event) => {
+                const additive = event.ctrlKey || event.metaKey || event.shiftKey;
+                setSelection(additive
+                  ? (selection.includes(element.id) ? selection.filter((id) => id !== element.id) : [...selection, element.id])
+                  : [element.id]);
+              }}
+            >
+              <span className="text-muted-foreground">{ELEMENT_LABELS[element.type]}</span>
+              <span className="truncate">
+                {element.label ? ` · ${element.label}` : ""}
+                {element.field ? <code className="ml-1 text-[10px] text-muted-foreground">{`{{${element.field}}}`}</code> : null}
+              </span>
+            </button>
           ))}
+          {elements.length === 0 && <p className="px-1 text-[11px] text-muted-foreground">Bo'sh varaq — yuqoridan element qo'shing</p>}
         </div>
 
-        {/* A4 — HAQIQIY PDF. `min-w-0`: shusiz iframe ustunni cho'zib, o'ng paneli ekrandan chiqib ketardi */}
-        <div className="min-w-0 rounded-xl border border-border bg-muted/30 p-2">
-          <div className="mb-2 flex items-center gap-2 px-1 text-xs text-muted-foreground">
-            <FileText className="h-3.5 w-3.5" /> A4 ko'rinish (namuna ma'lumot bilan) — chop etilganda aynan shunday chiqadi
-          </div>
-          {previewUrl ? (
-            <iframe title="A4 ko'rinish" src={previewUrl} className="h-[70vh] w-full rounded-lg border border-border bg-white" />
+        <div className="min-w-0 space-y-1.5">
+          {schema ? (
+            <DesignCanvas
+              schema={schema}
+              elements={elements}
+              sprites={sprites}
+              selection={selection}
+              zoom={zoom}
+              grid={grid}
+              readOnly={readOnly}
+              onSelect={setSelection}
+              onBeginChange={history.checkpoint}
+              onLiveChange={liveChange}
+              onZoom={setZoom}
+              onEditText={(id) => {
+                setSelection([id]);
+                window.setTimeout(() => document.querySelector<HTMLInputElement>("[data-testid=element-label]")?.focus(), 0);
+              }}
+            />
           ) : (
-            <div className="flex h-[70vh] items-center justify-center text-sm text-muted-foreground">Shablon tanlang</div>
+            <div className="flex h-[72vh] items-center justify-center rounded-lg border border-border text-sm text-muted-foreground">
+              {activeId ? "Shablon ochilmoqda…" : "Shablon tanlang"}
+            </div>
           )}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-muted-foreground" data-testid="canvas-status">
+            {selected && (() => {
+              const box = boxOf(selected);
+              return <span data-testid="selection-geometry">X {box.x} · Y {box.y} · {box.w} × {box.h} mm</span>;
+            })()}
+            {selection.length > 1 && <span>{selection.length} ta element tanlangan</span>}
+            {extent && (
+              <span data-testid="document-extent">
+                Hujjat balandligi: {Math.round(extent.height)} mm — bitta A4 ga {extent.copies} ta sig'adi
+              </span>
+            )}
+            {pending && <span>chizilmoqda…</span>}
+            <span className="ml-auto hidden md:inline">Surish — sichqoncha · aniq — strelkalar (Shift ×10) · Ctrl+Z / Ctrl+Y · Delete · Esc</span>
+          </div>
         </div>
 
         {/* Tanlangan element sozlamalari */}
-        <div className="space-y-3 rounded-xl border border-border p-3">
-          {!selected && <p className="text-xs text-muted-foreground">Chapdan element tanlang</p>}
+        <div className="space-y-3 rounded-xl border border-border p-3 lg:col-span-2 xl:col-span-1" data-testid="properties-panel">
+          {!selected && (
+            <p className="text-xs text-muted-foreground">
+              {selection.length > 1
+                ? `${selection.length} ta element tanlangan — birga surish, tekislash, taqsimlash yoki o'chirish mumkin.`
+                : "Varaqdagi elementni bosing. Sichqoncha bilan suring, burchagidan tortib kattalashtiring."}
+            </p>
+          )}
           {selected && (
             <ElementEditor
               element={selected}
               catalog={catalog}
-              disabled={!canManage}
+              disabled={readOnly}
               maxImageLength={MAX_IMAGE_DATA_LENGTH}
               companyLogoUrl={activeCompany?.logoUrl}
               onChange={(patch) => updateElement(selected.id, patch)}
@@ -490,6 +758,13 @@ export default function DocumentsSection() {
           )}
         </div>
       </div>
+
+      <Dialog open={pdfUrl !== null} onOpenChange={(open) => { if (!open && pdfUrl) { URL.revokeObjectURL(pdfUrl); setPdfUrl(null); } }}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader><DialogTitle>PDF (namuna ma'lumot bilan) — chop etilganda aynan shunday</DialogTitle></DialogHeader>
+          {pdfUrl && <iframe title="PDF" src={pdfUrl} data-testid="pdf-preview" className="h-[78vh] w-full rounded-lg border border-border bg-white" />}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

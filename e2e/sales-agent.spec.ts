@@ -20,11 +20,11 @@ const STORE = { name: "Baraka do'koni", latitude: 41.311081, longitude: 69.24056
 /** ~4 km narida — geofence rad etishi kerak. */
 const FAR = { latitude: 41.345, longitude: 69.29 };
 
-/** 1x1 PNG — "kamera" o'rniga fayl sifatida beriladi. */
-const PNG = Buffer.from(
-  "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005fb02fe4f9a2e8e0000000049454e44ae426082",
-  "hex",
-);
+// Soxta kamera: haqiqiy qurilmasiz ham `getUserMedia` oqim beradi, ruxsat so'ralmaydi
+test.use({
+  launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] },
+  permissions: ["camera"],
+});
 
 /** Sinov uchun siyosat: geofence 300 m, minimal tashrif vaqti yo'q, vitrina rasmi majburiy. */
 async function setPolicy(page: Page) {
@@ -104,14 +104,22 @@ async function startWork(page: Page) {
   await expect(page.getByRole("button", { name: "ISHNI YAKUNLASH" })).toBeVisible({ timeout: 30_000 });
 }
 
-/** Vitrina/polka rasmini "olish" — yashirin fayl input'iga PNG beriladi. */
+/**
+ * Vitrina/polka rasmini olish — ILOVANING O'Z KAMERASI bilan (galereyadan fayl tanlash imkoni
+ * ataylab olib tashlangan). Chrome soxta kamera oqimini beradi, test esa foydalanuvchidek
+ * tugmani bosib, rasmga oladi va yuboradi.
+ */
 async function takePhoto(page: Page, buttonName: RegExp) {
   const button = page.getByRole("button", { name: buttonName });
   await expect(button).toBeEnabled({ timeout: 20_000 });
-  const chooser = page.waitForEvent("filechooser");
   await button.click();
-  await (await chooser).setFiles({ name: "vitrina.png", mimeType: "image/png", buffer: PNG });
+  const shutter = page.getByTestId("camera-shutter");
+  await expect(shutter, "kamera oqimi ochilmadi").toBeVisible({ timeout: 20_000 });
+  await shutter.click();
+  await page.getByTestId("camera-confirm").click();
+  await expect(page.getByTestId("camera-confirm")).toBeHidden({ timeout: 30_000 });
 }
+
 
 test.describe("Sotuv agenti ish joyi (brauzer)", () => {
   /** Ochiq GPS oqimi — har test oxirida to'xtatiladi. */
@@ -229,7 +237,8 @@ test.describe("Sotuv agenti ish joyi (brauzer)", () => {
     await storeLink.click();
 
     // UI: uzoqlik haqida ogohlantiradi
-    await expect(page.getByText(/uzoqdasiz|ruxsat:/i).first()).toBeVisible({ timeout: 25_000 });
+    // Yangi tashrifda — "Do'kongacha … (ruxsat: … m)"; ochiq tashrif bo'lsa — "hududidan chiqdingiz"
+    await expect(page.getByText(/uzoqdasiz|ruxsat:|hududidan chiqdingiz/i).first()).toBeVisible({ timeout: 25_000 });
 
     // Server: UI'ni chetlab o'tib to'g'ridan-to'g'ri so'rov ham rad etiladi
     const storeId = page.url().split("/stores/")[1].split("/")[0];

@@ -5,7 +5,7 @@
  * miqdorlar hujjatdan keladi, shablon ularga tegmaydi (server ham shablonni oq ro'yxat
  * bo'yicha qayta quradi).
  */
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { toast } from "sonner";
 import { ArrowDown, ArrowUp, ImageUp, Trash2 } from "lucide-react";
 import {
@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
 import { errorMessage } from "@/lib/api.ts";
+import { boxOf } from "@/lib/pdf/template-free.ts";
 import { ELEMENT_LABELS, GROUP_LABELS, type ColumnRow, type FieldCatalog } from "../_lib/document-designer.ts";
 
 const BORDER_STYLE_LABELS: Record<string, string> = {
@@ -279,6 +280,39 @@ function TableEditor({
 }
 
 /**
+ * ANIQ JOYLASHUV — sichqonchaga qo'shimcha. Asosiy usul varaqda surish va burchakdan tortish;
+ * bu maydonlar esa millimetr aniqligida qo'yish uchun (masalan, ikki elementni bir chiziqqa).
+ */
+function GeometryEditor({
+  element, onChange, disabled,
+}: { element: DocumentElement; onChange: (patch: Partial<DocumentElement>) => void; disabled: boolean }) {
+  const box = boxOf(element);
+  const ratio = box.h > 0 ? box.w / box.h : 1;
+  const locked = element.type === "qr" || (element.type === "image" && element.lockRatio !== false);
+  return (
+    <div className="space-y-2" data-testid="geometry-editor">
+      <p className="text-[11px] font-semibold">Joylashuv (mm)</p>
+      <div className="flex gap-2">
+        <Num label="X" value={box.x} min={0} max={420} step={0.5} disabled={disabled} testId="geom-x"
+          onChange={(value) => onChange({ x: value ?? 0 })} />
+        <Num label="Y" value={box.y} min={0} max={420} step={0.5} disabled={disabled} testId="geom-y"
+          onChange={(value) => onChange({ y: value ?? 0 })} />
+      </div>
+      <div className="flex gap-2">
+        <Num label="Eni" value={box.w} min={1} max={420} step={0.5} disabled={disabled} testId="geom-w"
+          onChange={(value) => value && onChange(locked ? { width: value, height: Math.round((value / ratio) * 10) / 10 } : { width: value })} />
+        <Num label="Bo'yi" value={box.h} min={1} max={420} step={0.5} disabled={disabled} testId="geom-h"
+          onChange={(value) => value && onChange(locked ? { height: value, width: Math.round(value * ratio * 10) / 10 } : { height: value })} />
+      </div>
+      {element.type === "image" && (
+        <Toggle label="Nisbatni saqlash (burchakdan tortganda cho'zilmaydi)" checked={element.lockRatio !== false} disabled={disabled}
+          testId="image-lock-ratio" onChange={(value) => onChange({ lockRatio: value })} />
+      )}
+    </div>
+  );
+}
+
+/**
  * Rasmni shablonga sig'adigan holga keltiradi: kengligi 384 px gacha kichraytiriladi va
  * data URL bo'lib saqlanadi. Server ham aynan shu formatni kutadi (tashqi URL emas —
  * hujjat chiqarilganda begona manzilga so'rov ketmasin).
@@ -314,12 +348,9 @@ function ImageEditor({
   companyLogoUrl?: string | null;
 }) {
   const input = useRef<HTMLInputElement>(null);
-  /** Nisbat qulfi — kenglik o'zgarsa balandlik o'zi ergashadi (logotip cho'zilib ketmasin). */
-  const [lock, setLock] = useState(true);
-  const [ratio, setRatio] = useState<number | null>(null);
 
+  /** Yangi rasm — qutining eni saqlanadi, bo'yi rasm nisbatidan (logotip cho'zilmasin). */
   const apply = (dataUrl: string, aspect: number) => {
-    setRatio(aspect);
     const width = element.width ?? 40;
     onChange({ imageData: dataUrl, width, height: Math.round(width * aspect * 10) / 10 });
     toast.success("Rasm qo'shildi");
@@ -381,16 +412,6 @@ function ImageEditor({
           Kompaniya logotipini olish
         </Button>
       )}
-      <div className="flex gap-2">
-        <Num label="Kenglik (mm)" value={element.width} min={1} max={190} step={1} placeholder="40" disabled={disabled}
-          testId="image-width"
-          onChange={(value) => onChange(
-            lock && ratio && value ? { width: value, height: Math.round(value * ratio * 10) / 10 } : { width: value },
-          )} />
-        <Num label="Balandlik (mm)" value={element.height} min={1} max={250} step={1} placeholder="20" disabled={disabled}
-          testId="image-height" onChange={(value) => onChange({ height: value })} />
-      </div>
-      <Toggle label="Nisbatni saqlash" checked={lock} disabled={disabled} onChange={setLock} />
       <Pick label="Katakka joylashuvi" value={element.fit} options={IMAGE_FITS} labels={FIT_LABELS}
         disabled={disabled} onChange={(value) => onChange({ fit: value })} />
       <BoxEditor box={element.box} disabled={disabled} withFill onChange={(box) => onChange({ box })} />
@@ -424,12 +445,16 @@ export default function ElementEditor({
   };
 
   const hasText = element.type === "text" || element.type === "field";
-  const sized = ["text", "field", "pageNumber", "rect", "qr", "barcode", "signatures"].includes(element.type);
-  const aligned = ["text", "field", "pageNumber", "image", "qr", "barcode", "line", "rect"].includes(element.type);
+  const sized = ["text", "field", "pageNumber", "rect", "qr", "barcode", "signatures", "totals", "payments"].includes(element.type);
+  // Erkin joylashuvda joy — `x/y`; tekislash faqat matnning O'Z qutisi ichida
+  const aligned = ["text", "field", "pageNumber"].includes(element.type);
 
   return (
     <div className="space-y-3">
-      <p className="text-xs font-semibold">{ELEMENT_LABELS[element.type]}</p>
+      <p className="text-xs font-semibold" data-testid="element-editor-title">{ELEMENT_LABELS[element.type]}</p>
+
+      <GeometryEditor element={element} disabled={disabled} onChange={onChange} />
+      <Separator />
 
       {(hasText || element.type === "signatures" || element.type === "qr"
         || element.type === "barcode" || element.type === "rect") && (
@@ -476,15 +501,6 @@ export default function ElementEditor({
         <div className="space-y-2">
           <Pick label="Nima kodlanadi" value={element.qrSource} options={QR_SOURCES} labels={QR_SOURCE_LABELS}
             disabled={disabled} onChange={(value) => onChange({ qrSource: value })} testId="qr-source" />
-          <div className="flex gap-2">
-            <Num label={element.type === "qr" ? "O'lcham (mm)" : "Kenglik (mm)"} value={element.width}
-              min={8} max={120} step={1} placeholder={element.type === "qr" ? "22" : "50"} disabled={disabled}
-              testId="qr-size" onChange={(value) => onChange({ width: value })} />
-            {element.type === "barcode" && (
-              <Num label="Balandlik (mm)" value={element.height} min={5} max={60} step={1} placeholder="14"
-                disabled={disabled} onChange={(value) => onChange({ height: value })} />
-            )}
-          </div>
           {element.type === "qr" && (
             <div className="flex gap-2">
               <Pick label="Xatolikka chidamlilik" value={element.qrLevel} options={QR_LEVELS}
@@ -503,29 +519,11 @@ export default function ElementEditor({
 
       {(element.type === "line" || element.type === "rect") && (
         <div className="space-y-2">
-          <div className="flex gap-2">
-            <Num label={element.type === "line" ? "Uzunlik (mm)" : "Kenglik (mm)"} value={element.width}
-              min={1} max={190} step={1} placeholder="to'liq" disabled={disabled} testId="shape-width"
-              onChange={(value) => onChange({ width: value })} />
-            {element.type === "rect" && (
-              <Num label="Balandlik (mm)" value={element.height} min={1} max={200} step={1} placeholder="20"
-                disabled={disabled} onChange={(value) => onChange({ height: value })} />
-            )}
-          </div>
           <BoxEditor box={element.box} disabled={disabled} withFill={element.type === "rect"}
             onChange={(box) => onChange({ box })} />
         </div>
       )}
 
-      {element.type === "signatures" && (
-        <Num label="Blok balandligi (mm)" value={element.height} min={12} max={70} step={1} placeholder="22"
-          disabled={disabled} testId="signature-height" onChange={(value) => onChange({ height: value })} />
-      )}
-
-      {element.type === "spacer" && (
-        <Num label="Balandlik (mm)" value={element.height} min={1} max={40} step={1} placeholder="4"
-          disabled={disabled} onChange={(value) => onChange({ height: value })} />
-      )}
 
       {(element.type === "totals" || element.type === "payments") && (
         <div>
@@ -546,17 +544,25 @@ export default function ElementEditor({
           {sized && (
             <div className="flex items-end gap-2">
               <Num label="Shrift (pt)" value={element.style?.fontSize} min={5} max={48} step={0.5} placeholder="10"
-                disabled={disabled} onChange={(value) => onChange({ style: { ...element.style, fontSize: value } })} />
+                disabled={disabled} testId="font-size"
+                onChange={(value) => onChange({ style: { ...element.style, fontSize: value } })} />
               <label className="flex items-center gap-1.5 pb-1.5 text-xs">
                 <Checkbox checked={element.style?.bold === true} disabled={disabled}
                   onCheckedChange={(value) => onChange({ style: { ...element.style, bold: value === true } })} />
                 Qalin
               </label>
+              {hasText && (
+                <label className="flex items-center gap-1.5 pb-1.5 text-xs">
+                  <Checkbox checked={element.style?.italic === true} disabled={disabled}
+                    onCheckedChange={(value) => onChange({ style: { ...element.style, italic: value === true } })} />
+                  Qiya
+                </label>
+              )}
             </div>
           )}
           {aligned && (
             <div className="flex gap-2">
-              <Pick label="Tekislash" value={element.style?.align} options={["left", "center", "right"] as const}
+              <Pick label="Qutida tekislash" value={element.style?.align} options={["left", "center", "right"] as const}
                 labels={ALIGN_LABELS} disabled={disabled} testId="element-align"
                 onChange={(value) => onChange({ style: { ...element.style, align: value } })} />
               {hasText && (

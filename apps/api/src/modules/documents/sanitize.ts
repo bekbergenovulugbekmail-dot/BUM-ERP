@@ -26,6 +26,7 @@ import {
   IMAGE_DATA_PREFIX,
   MAX_IMAGE_DATA_LENGTH,
   IMAGE_FITS,
+  LAYOUT_MODES,
   QR_LEVELS,
   QR_SOURCES,
   VALIGNMENTS,
@@ -179,6 +180,14 @@ function sanitizeElement(value: unknown, access: CatalogAccess, warnings: string
   const height = clamp(value.height, 1, STYLE_LIMITS.heightMax);
   if (height !== undefined) element.height = height;
 
+  // Erkin joylashuv: sahifadagi joy (mm) va qatlam. Sahifadan tashqariga chiqib ketmasin.
+  const x = clamp(value.x, 0, STYLE_LIMITS.widthMax);
+  if (x !== undefined) element.x = x;
+  const y = clamp(value.y, 0, STYLE_LIMITS.heightMax);
+  if (y !== undefined) element.y = y;
+  const zIndex = clamp(value.zIndex, -1000, 1000);
+  if (zIndex !== undefined) element.zIndex = Math.round(zIndex);
+
   const style = sanitizeStyle(value.style);
   if (style) element.style = style;
 
@@ -256,6 +265,8 @@ function sanitizeElement(value: unknown, access: CatalogAccess, warnings: string
       return null;
     }
     element.imageData = raw;
+    const lockRatio = bool(value.lockRatio);
+    if (lockRatio !== undefined) element.lockRatio = lockRatio;
     const fit = pick<ImageFit>(value.fit, IMAGE_FITS);
     if (fit) element.fit = fit;
   }
@@ -279,8 +290,10 @@ function sanitizeElement(value: unknown, access: CatalogAccess, warnings: string
 function sanitizePage(value: unknown): PageSettings {
   if (!isRecord(value)) return { ...DEFAULT_PAGE, margins: { ...DEFAULT_PAGE.margins } };
   const margins = isRecord(value.margins) ? value.margins : {};
+  const layout = pick(value.layout, LAYOUT_MODES);
   return {
     size: "a4",
+    ...(layout === "free" ? { layout } : {}),
     orientation: pick(value.orientation, ["portrait", "landscape"] as const) ?? DEFAULT_PAGE.orientation,
     margins: {
       top: clamp(margins.top, 0, 60) ?? DEFAULT_PAGE.margins.top,
