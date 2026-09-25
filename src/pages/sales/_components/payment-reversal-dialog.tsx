@@ -36,6 +36,8 @@ type Preview = {
   legacyAllocation: boolean;
   delivery: { taskId: string; collectedBefore: string; collectedAfter: string }[];
   shift: { id: string; open: boolean } | null;
+  /** Bank tushumining avans qismi — to'lov bilan birga bekor qilinadi. */
+  advance?: { amount: string; accountName: string; walletBefore: string; walletAfter: string } | null;
   blockers: string[];
 };
 
@@ -128,6 +130,12 @@ export default function PaymentReversalDialog({ paymentId, onClose }: { paymentI
                 )}
               </div>
             )}
+            {data.advance && (
+              <div className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2" data-testid="reversal-advance">
+                <span>Avans qismi ({money(data.advance.amount)}) — {data.advance.accountName}dan qaytadi; hamyon</span>
+                <Change before={data.advance.walletBefore} after={data.advance.walletAfter} />
+              </div>
+            )}
             {data.delivery.length > 0 && (
               <p className="text-xs text-muted-foreground">Yetkazmada yig'ilgan summa ham kamayadi ({data.delivery.length} ta vazifa).</p>
             )}
@@ -158,7 +166,7 @@ export default function PaymentReversalDialog({ paymentId, onClose }: { paymentI
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>Yopish</Button>
           <Button variant="destructive" data-testid="reversal-confirm" disabled={blocked || reason.trim().length < 3 || reverse.isPending} onClick={() => void submit()}>
-            {data ? `${money(data.total)} so'mni bekor qilish` : "Bekor qilish"}
+            {data ? `${money(data.advance ? String(Number(data.total) + Number(data.advance.amount)) : data.total)} so'mni bekor qilish` : "Bekor qilish"}
           </Button>
         </DialogFooter>
       </DialogContent>

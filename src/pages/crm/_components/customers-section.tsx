@@ -9,7 +9,7 @@
  */
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, ShieldCheck, ShieldOff, X, PlusCircle, MinusCircle, FileText } from "lucide-react";
+import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, ShieldCheck, ShieldOff, X, PlusCircle, MinusCircle, FileText, Landmark } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -28,6 +28,7 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import CustomerMoneyDialog from "./customer-money-dialog.tsx";
+import BankReceiptDialog from "./bank-receipt-dialog.tsx";
 import CustomerStatementDialog from "@/pages/sales/_components/customer-statement-dialog.tsx";
 import SetBalanceDialog from "@/components/balances/set-balance-dialog.tsx";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
@@ -104,6 +105,7 @@ export default function CustomersSection() {
   /** Hisob-kitob akti ochilgan mijoz. */
   const [statementFor, setStatementFor] = useState<string | null>(null);
   const [money, setMoney] = useState<{ customer: Customer; direction: "deposit" | "withdraw" } | null>(null);
+  const [bankReceipt, setBankReceipt] = useState<Customer | null>(null);
 
   /** Arxiv ko'rinishi: nofaol qilingan mijozlar (ro'yxatdan chiqarilgan, lekin tarixi saqlanadi). */
   const [showArchive, setShowArchive] = useState(false);
@@ -410,6 +412,17 @@ export default function CustomersSection() {
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"
+                          title="Bank orqali to'lov (qarz + avans)"
+                          aria-label={`${c.name} — bank orqali to'lov`}
+                          data-testid={`customer-bank-receipt-${c.code}`}
+                          onClick={() => setBankReceipt(c)}
+                        >
+                          <Landmark className="h-3.5 w-3.5 text-sky-600" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
                           title="Hisobiga pul qo'shish"
                           aria-label={`${c.name} hisobiga pul qo'shish`}
                           onClick={() => setMoney({ customer: c, direction: "deposit" })}
@@ -475,6 +488,7 @@ export default function CustomersSection() {
                       </Button>
                     )}
                     {statementFor === c.id && <CustomerStatementDialog customerId={c.id} onClose={() => setStatementFor(null)} />}
+                    {bankReceipt?.id === c.id && <BankReceiptDialog customer={c} onClose={() => setBankReceipt(null)} />}
                     {money?.customer.id === c.id && (
                       <CustomerMoneyDialog
                         customer={money.customer}

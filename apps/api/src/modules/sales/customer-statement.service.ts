@@ -54,6 +54,7 @@ export function operationKind(referenceType: string | null): { kind: string; lab
   if (type === "customer_payment") return { kind: "payment", label: "To'lov" };
   if (type === "customer_payment_reversal") return { kind: "payment_reversal", label: "To'lov bekor qilindi" };
   if (type === "customer_balance") return { kind: "wallet", label: "Hamyon harakati" };
+  if (type === "customer_balance_reversal") return { kind: "wallet_reversal", label: "Avans kirimi bekor qilindi" };
   if (type === "cashback") return { kind: "cashback", label: "Keshbek" };
   if (type === "customer_debt_adjustment" || type === "customer_balance_adjustment") return { kind: "adjustment", label: "Tuzatish" };
   if (type === "customer_opening_balance") return { kind: "opening", label: "Boshlang'ich qoldiq" };
@@ -177,10 +178,10 @@ async function resolveDocuments(conn: DbOrTx, companyId: string, lines: RawLine[
     });
   }
   const wallet = await conn
-    .select({ id: customerBalanceTransactions.id, type: customerBalanceTransactions.type })
+    .select({ id: customerBalanceTransactions.id, type: customerBalanceTransactions.type, status: customerBalanceTransactions.status })
     .from(customerBalanceTransactions)
     .where(and(eq(customerBalanceTransactions.companyId, companyId), inArray(customerBalanceTransactions.id, ids)));
-  for (const row of wallet) docs.set(row.id, { type: "customer_balance", id: row.id, number: row.type, orderNumber: null, status: null });
+  for (const row of wallet) docs.set(row.id, { type: "customer_balance", id: row.id, number: row.type, orderNumber: null, status: row.status });
   const cashback = await conn
     .select({ id: customerCashbackTransactions.id, type: customerCashbackTransactions.type })
     .from(customerCashbackTransactions)

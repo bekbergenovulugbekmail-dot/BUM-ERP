@@ -33,7 +33,9 @@ const call = (cookie: string, method: Method, url: string, payload?: object) =>
   app.inject({ method, url, headers: { cookie }, ...(payload ? { payload } : {}) });
 
 const money = (value: string | number | null | undefined) => Number(value ?? 0);
-const shift = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+/** MAHALLIY sana (server `todayIso` bilan bir xil) — UTC sana 00:00–05:00 oralig'ida bir kun orqada qoladi. */
+const localIso = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const shift = (days: number) => localIso(new Date(Date.now() + days * 86_400_000));
 
 const debtOf = async (id: string) =>
   (await db.select({ debt: customers.totalDebt }).from(customers).where(eq(customers.id, id)))[0]!.debt;

@@ -55,5 +55,5 @@ export const unauthenticated = (m = "Tizimga kiring") => new AppError("UNAUTHENT
 export const forbidden = (m = "Ruxsat yo'q") => new AppError("FORBIDDEN", m);
 export const notFound = (m = "Topilmadi") => new AppError("NOT_FOUND", m);
 export const badRequest = (m: string, d?: unknown) => new AppError("BAD_REQUEST", m, d);
-export const conflict = (m: string) => new AppError("CONFLICT", m);
+export const conflict = (m: string, d?: unknown) => new AppError("CONFLICT", m, d);
 export const rateLimited = (m = "Juda ko'p urinish. Biroz kuting.") => new AppError("RATE_LIMITED", m);

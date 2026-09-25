@@ -353,7 +353,10 @@ export async function assertPeriodOpen(conn: DbOrTx, companyId: string, date: st
 }
 
 export async function setLockDate(tx: Tx, tenant: TenantContext, lockDate: string | null, meta: RequestMeta) {
-  if (lockDate && lockDate > new Date().toISOString().slice(0, 10)) throw badRequest("Kelajakdagi sanani yopib bo'lmaydi");
+  // Biznes sanasi (Toshkent, `todayIso` bilan bir xil) — UTC sanasi 00:00–05:00 da bir kun orqada qolib, bugunni yopishga
+  // yo'l qo'ymasdi. cash.service'ni import qilmaymiz (u bu modulni import qiladi — aylana bog'liqlik).
+  const businessToday = new Date(Date.now() + Number(process.env.BUSINESS_UTC_OFFSET_MINUTES ?? 300) * 60_000).toISOString().slice(0, 10);
+  if (lockDate && lockDate > businessToday) throw badRequest("Kelajakdagi sanani yopib bo'lmaydi");
   await upsertCompanySetting(tx, tenant, { key: LOCK_DATE_KEY, value: lockDate ?? "", group: "finance", description: "Yopilgan davr" }, meta);
   return lockDate;
 }

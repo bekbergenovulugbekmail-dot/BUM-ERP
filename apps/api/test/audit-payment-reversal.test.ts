@@ -30,7 +30,9 @@ let mainWh: string;
 let mainCash: string;
 let bank: string;
 
-const today = new Date().toISOString().slice(0, 10);
+/** MAHALLIY sana (server `todayIso` bilan bir xil) — UTC sana 00:00–05:00 oralig'ida bir kun orqada qoladi. */
+const localIso = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const today = localIso(new Date());
 
 beforeAll(async () => {
   app = await buildServer();

@@ -617,6 +617,13 @@
       "when": 1790360000000,
       "tag": "0087_finance_party_reversal",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1790450000000,
+      "tag": "0088_bank_receipt",
+      "breakpoints": true
     }
   ]
 }

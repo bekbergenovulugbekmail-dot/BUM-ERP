@@ -36,6 +36,7 @@ import type { TenantContext } from "../company/tenant.js";
 import { ensureAccountBySubtype, assertPeriodOpen, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { ledgerAccountFor, recordCashTransaction, todayIso } from "../finance/cash.service.js";
 import { salesAudit } from "./customers.service.js";
+import { depositReversalBlockers, lockHeaderDeposits, reverseDepositRows } from "./bank-receipt.service.js";
 
 const MONEY_METHODS = new Set(["cash", "bank", "card", "transfer"]);
 
@@ -61,6 +62,8 @@ export type ReversalEffect = {
   legacyAllocation: boolean;
   delivery: { taskId: string; collectedBefore: string; collectedAfter: string }[];
   shift: { id: string; open: boolean } | null;
+  /** Bank tushumining avans qismi — hujjat bilan birga bekor qilinadi (hamyon kamayadi, pul bankdan qaytadi). */
+  advance: { amount: string; accountName: string; walletBefore: string; walletAfter: string } | null;
   /** Bajarib bo'lmaydigan sabablar — bo'sh bo'lsa, bekor qilish mumkin. */
   blockers: string[];
 };
@@ -207,6 +210,25 @@ async function buildEffect(conn: DbOrTx, companyId: string, group: PartRow[]): P
     delivery.push({ taskId: link.taskId, collectedBefore: link.collected, collectedAfter: fromMinor(after < 0n ? 0n : after) });
   }
 
+  // Bank tushumi: hujjatga bog'langan avans kirimi ham birga qaytadi — hamyon va hisob yetarli bo'lishi kerak
+  let advance: ReversalEffect["advance"] = null;
+  const headerId = group[0]!.paymentId;
+  if (headerId) {
+    const deposits = (await lockHeaderDeposits(conn, headerId, false)).filter((row) => row.status === "posted");
+    if (deposits.length > 0) {
+      blockers.push(...(await depositReversalBlockers(conn, deposits, needByAccount)));
+      const sum = deposits.reduce((acc, row) => acc + toMinor(row.amount), 0n);
+      const [wallet] = await conn.select({ balance: customers.balance }).from(customers).where(eq(customers.id, deposits[0]!.customerId)).limit(1);
+      const [account] = await conn.select({ name: cashAccounts.name }).from(cashAccounts).where(eq(cashAccounts.id, deposits[0]!.cashAccountId ?? "")).limit(1);
+      advance = {
+        amount: fromMinor(sum),
+        accountName: account?.name ?? "—",
+        walletBefore: wallet?.balance ?? "0",
+        walletAfter: fromMinor(toMinor(wallet?.balance ?? "0") - sum),
+      };
+    }
+  }
+
   let shift: ReversalEffect["shift"] = null;
   const shiftId = group.find((part) => part.posShiftId)?.posShiftId;
   if (shiftId) {
@@ -223,6 +245,7 @@ async function buildEffect(conn: DbOrTx, companyId: string, group: PartRow[]): P
     legacyAllocation,
     delivery,
     shift,
+    advance,
     blockers: [...new Set(blockers)],
   };
 }
@@ -238,6 +261,9 @@ export async function reverseCustomerPayment(tx: Tx, tenant: TenantContext, part
   // Qulflash tartibi tizimdagidek: to'lov qatorlari → mijoz → hujjatlar
   const group = await lockGroup(tx, companyId, partId, true);
   if (group.some((part) => part.status === "reversed")) throw conflict("To'lov allaqachon bekor qilingan");
+  const deposits = group[0]!.paymentId
+    ? (await lockHeaderDeposits(tx, group[0]!.paymentId, true)).filter((row) => row.status === "posted")
+    : [];
   const customerId = group[0]!.customerId;
   if (customerId) await tx.select({ id: customers.id }).from(customers).where(eq(customers.id, customerId)).for("update");
   const effect = await buildEffect(tx, companyId, group);
@@ -399,7 +425,10 @@ export async function reverseCustomerPayment(tx: Tx, tenant: TenantContext, part
     await tx.update(deliveryTasks).set({ collectedAmount: link.collectedAfter, updatedAt: new Date() }).where(eq(deliveryTasks.id, link.taskId));
   }
 
-  // 6) To'lov hujjati (aralash to'lov sarlavhasi)
+  // 6) Bank tushumining avans qismi — teskari yozuvlar, hamyon kamayadi
+  if (deposits.length > 0) reversalEntries.push(...(await reverseDepositRows(tx, tenant, deposits, cleanReason)));
+
+  // 7) To'lov hujjati (aralash to'lov sarlavhasi)
   const headerId = group[0]!.paymentId;
   if (headerId) {
     await tx

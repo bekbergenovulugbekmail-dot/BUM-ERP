@@ -24,6 +24,7 @@ import {
   type CustomerStatement, type StatementAgingBucket,
 } from "../_lib/customer-statement.ts";
 import PaymentReversalDialog from "./payment-reversal-dialog.tsx";
+import DepositReversalDialog from "./deposit-reversal-dialog.tsx";
 
 const iso = (date: Date) => new Date(date.getTime() + 5 * 3600_000).toISOString().slice(0, 10);
 const today = () => iso(new Date());
@@ -53,6 +54,7 @@ const KIND_COLORS: Record<string, string> = {
 export default function CustomerStatementDialog({ customerId, onClose }: { customerId: string; onClose: () => void }) {
   const [range, setRange] = useState(() => presets()[3]!);
   const [reversing, setReversing] = useState<string | null>(null);
+  const [reversingDeposit, setReversingDeposit] = useState<string | null>(null);
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const { can } = usePermissions();
   const company = useActiveCompany().data?.company;
@@ -164,7 +166,7 @@ export default function CustomerStatementDialog({ customerId, onClose }: { custo
                       <td className={cn("px-3 py-2", KIND_COLORS[line.kind])}>{line.label}</td>
                       <td className="px-3 py-2">
                         {documentText(line)}
-                        {line.document.status === "reversed" && line.kind === "payment" && <Badge variant="outline" className="ml-1 text-[10px]">bekor</Badge>}
+                        {line.document.status === "reversed" && (line.kind === "payment" || line.kind === "wallet") && <Badge variant="outline" className="ml-1 text-[10px]">bekor</Badge>}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">{Number(line.debit) ? money(line.debit) : ""}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{Number(line.credit) ? money(line.credit) : ""}</td>
@@ -173,6 +175,11 @@ export default function CustomerStatementDialog({ customerId, onClose }: { custo
                       <td className="px-3 py-2 text-right">
                         {line.kind === "payment" && line.document.type === "customer_payment" && line.document.status === "posted" && line.document.id && can("finance.approve") && (
                           <Button size="sm" variant="ghost" className="h-7 text-xs" data-testid={`reverse-${line.document.id}`} onClick={() => setReversing(line.document.id)}>
+                            <Undo2 className="mr-1 h-3 w-3" /> Bekor qilish
+                          </Button>
+                        )}
+                        {line.kind === "wallet" && line.document.type === "customer_balance" && line.document.number === "deposit" && line.document.status === "posted" && line.document.id && can("finance.approve") && (
+                          <Button size="sm" variant="ghost" className="h-7 text-xs" data-testid={`reverse-deposit-${line.document.id}`} onClick={() => setReversingDeposit(line.document.id)}>
                             <Undo2 className="mr-1 h-3 w-3" /> Bekor qilish
                           </Button>
                         )}
@@ -236,6 +243,7 @@ export default function CustomerStatementDialog({ customerId, onClose }: { custo
         )}
 
         {reversing && <PaymentReversalDialog paymentId={reversing} onClose={() => setReversing(null)} />}
+        {reversingDeposit && <DepositReversalDialog customerId={customerId} depositId={reversingDeposit} onClose={() => setReversingDeposit(null)} />}
       </DialogContent>
     </Dialog>
   );

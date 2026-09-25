@@ -30,7 +30,7 @@ export {
   type Settlement,
 } from "../finance/payment-parts.service.js";
 
-export type PaymentSource = "pos" | "pos_device" | "delivery" | "sales_payment" | "pos_customer_payment";
+export type PaymentSource = "pos" | "pos_device" | "delivery" | "sales_payment" | "pos_customer_payment" | "bank_receipt";
 
 /** Idempotentlik kaliti bo'yicha mavjud hujjat va uning qismlari. */
 export async function findPaymentByKey(conn: DbOrTx, companyId: string, idempotencyKey: string) {

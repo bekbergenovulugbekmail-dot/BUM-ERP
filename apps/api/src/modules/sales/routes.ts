@@ -14,6 +14,10 @@
  *   POST   /orders/:orderId/return-items                  sales.refund   (qisman qaytarish)
  *   GET    /payments (?customerId=&orderId=&limit=&cursor=)   sales.view
  *   POST   /payments                                      finance.manage (201 yangi / 200 takroriy reference)
+ *   GET    /bank-receipts (?customerId=&limit=), /bank-receipts/preview (?customerId=&amount=), /bank-receipts/accounts   sales.view
+ *   POST   /bank-receipts                                 sales.collect_payment | finance.manage — qarz + avans (2300)
+ *   GET    /bank-receipts/:paymentId/reversal, POST /bank-receipts/:paymentId/reverse   finance.approve
+ *   POST   /customers/:customerId/balance-deposits/:depositId/reverse                   finance.approve
  *   GET    /pos/shifts (?warehouseId=&status=&limit=), /pos/shifts/open?warehouseId=, /pos/shifts/:shiftId   pos.use
  *   POST   /pos/shifts, /pos/shifts/:shiftId/close        pos.use (yopish — kassirning o'zi yoki sales.approve)
  *   GET    /pos/shift-reviews (?status=&limit=)            sales.approve (kassa farqi chegaradan oshgan smenalar)
@@ -38,11 +42,22 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { ALLOCATION_METHODS, MAX_PAYMENT_PARTS, type Permission } from "@bum/shared";
+import { and, eq } from "drizzle-orm";
+import { ALLOCATION_METHODS, MAX_PAYMENT_PARTS, notFound, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
 import { previewPaymentReversal, reverseCustomerPayment } from "./payment-reversal.service.js";
+import { customerBalanceTransactions } from "../../db/schema/sales.js";
+import {
+  bankReceiptAccounts,
+  bankReceiptReversalTarget,
+  depositReversalBlockers,
+  listBankReceipts,
+  previewBankReceipt,
+  recordBankReceipt,
+  reverseBalanceDeposit,
+} from "./bank-receipt.service.js";
 import { customerDebtReconciliation, customerStatement, receivablesAsOf, receivablesHistory } from "./customer-statement.service.js";
 import { notifyCustomerPaymentReceived, notifyOrderPurchase } from "../telegram/notify.service.js";
 import { alertBigDiscount, alertShiftDifference } from "../telegram/alerts.service.js";
@@ -285,6 +300,19 @@ const asOfQuery = z.object({
 });
 const historyQuery = z.object({ from: z.iso.date(), to: z.iso.date() });
 const paymentParams = z.object({ paymentId: z.uuid() });
+const bankReceiptBody = z.strictObject({
+  customerId: z.uuid(),
+  cashAccountId: z.uuid(),
+  amount: positiveMoney,
+  paymentDate: z.iso.date().optional(),
+  reference: z.string().trim().max(100).nullish(),
+  notes: z.string().trim().max(500).nullish(),
+  expectedAdvance: moneySchema.optional(),
+  requestId: z.uuid().optional(),
+});
+const bankReceiptPreviewQuery = z.object({ customerId: z.uuid(), amount: positiveMoney });
+const bankReceiptsQuery = z.object({ customerId: z.uuid().optional(), limit: z.coerce.number().int().min(1).max(200).default(50) });
+const depositParams = z.object({ customerId: z.uuid(), depositId: z.uuid() });
 const reversalBody = z.object({ reason: z.string().trim().min(3, "Bekor qilish sababini yozing").max(500) });
 const paymentsQuery = z.object({
   customerId: z.uuid().optional(),
@@ -816,6 +844,63 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     return writeInTenant(req, "finance.approve", (tx, tenant) =>
       reverseCustomerPayment(tx, tenant, paymentId, body.reason, requestMeta(req)),
     );
+  });
+
+  // ─── Bank tushumi: mijoz bank orqali to'ladi — qarzgacha to'lov, qolgani avans (bitta hujjat) ─────────
+
+  app.get("/bank-receipts/accounts", async (req) => ({ accounts: await bankReceiptAccounts(db, await readTenant(req, "sales.view")) }));
+
+  app.get("/bank-receipts/preview", async (req) => {
+    const query = bankReceiptPreviewQuery.parse(req.query);
+    return previewBankReceipt(db, await readTenant(req, "sales.view"), query);
+  });
+
+  app.get("/bank-receipts", async (req) => {
+    const query = bankReceiptsQuery.parse(req.query);
+    return listBankReceipts(db, await readTenant(req, "sales.view"), query);
+  });
+
+  app.post("/bank-receipts", async (req, reply) => {
+    const body = bankReceiptBody.parse(req.body);
+    const result = await writeInTenantAny(req, PAYMENT_PERMISSIONS, (tx, tenant) => recordBankReceipt(tx, tenant, body, requestMeta(req)));
+    reply.status(result.created ? 201 : 200);
+    return result;
+  });
+
+  /** Bekor qilishni ko'rib chiqish: qarz qismi bor bo'lsa — to'lov bekor qilish natijasi (avans ham ichida). */
+  app.get("/bank-receipts/:paymentId/reversal", async (req) => {
+    const { paymentId } = paymentParams.parse(req.params);
+    const tenant = await readTenant(req, "finance.approve");
+    const target = await bankReceiptReversalTarget(db, tenant, paymentId);
+    if (target.kind === "payment") return { kind: target.kind, effect: await previewPaymentReversal(db, tenant, target.id) };
+    const [row] = await db.select().from(customerBalanceTransactions).where(eq(customerBalanceTransactions.id, target.id)).limit(1);
+    return { kind: target.kind, amount: row!.amount, blockers: await depositReversalBlockers(db, [row!]) };
+  });
+
+  app.post("/bank-receipts/:paymentId/reverse", async (req) => {
+    const { paymentId } = paymentParams.parse(req.params);
+    const body = reversalBody.parse(req.body ?? {});
+    return writeInTenant(req, "finance.approve", async (tx, tenant) => {
+      const target = await bankReceiptReversalTarget(tx, tenant, paymentId);
+      return target.kind === "payment"
+        ? reverseCustomerPayment(tx, tenant, target.id, body.reason, requestMeta(req))
+        : reverseBalanceDeposit(tx, tenant, target.id, body.reason, requestMeta(req));
+    });
+  });
+
+  /** Balansni to'ldirishni (avans kirimini) bekor qilish — o'chirilmaydi, teskari yozuvlar bilan. */
+  app.post("/customers/:customerId/balance-deposits/:depositId/reverse", async (req) => {
+    const { customerId, depositId } = depositParams.parse(req.params);
+    const body = reversalBody.parse(req.body ?? {});
+    return writeInTenant(req, "finance.approve", async (tx, tenant) => {
+      const [row] = await tx
+        .select({ customerId: customerBalanceTransactions.customerId })
+        .from(customerBalanceTransactions)
+        .where(and(eq(customerBalanceTransactions.id, depositId), eq(customerBalanceTransactions.companyId, tenant.company.id)))
+        .limit(1);
+      if (!row || row.customerId !== customerId) throw notFound("Avans kirimi topilmadi");
+      return reverseBalanceDeposit(tx, tenant, depositId, body.reason, requestMeta(req));
+    });
   });
 
   app.post("/payments", async (req, reply) => {

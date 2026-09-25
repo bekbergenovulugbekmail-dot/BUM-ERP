@@ -72,7 +72,15 @@ tushuntiriladi va tasdiqsiz bajarilmaydi (xotira: financial-integrity-gate).
 - W2 ✅ Ombor eksporti: `GET /api/inventory/stock/export` (warehouse.view, ombor ruxsati, kategoriya doirasi, tannarx —
   products.view_cost), UI: "Eksport" (tanlangan ombor, miqdorsiz) va "Ombordagi miqdori bilan eksport" (barcha ochiq
   omborlar + "Jami" varag'i). Testlar: `inventory.test.ts` (Qoldiq eksporti), `stock-export.test.ts`. Brauzer — W7 E2E.
-- W3 Mijozning bank orqali to'lovi: hisob, sana, reference, izoh; qarz + avans (Z3); UI.
+- W3 ✅ Bank tushumi: `POST /api/sales/bank-receipts` — bitta `payments` hujjati (source `bank_receipt`, reference, izoh,
+  hisob, sana): qarzgacha `recordCustomerPayment` (DR bank / CR 1100, taqsimot) + qolgani `depositToBalance` (DR bank /
+  CR 2300). `expectedAdvance` (ko'rsatilgan taqsimot) mos kelmasa 409; requestId idempotent; bank hujjati raqami
+  hisobda takrorlanmaydi; faqat faol bank hisobi, asosiy valyuta. Migratsiya 0088 (qo'shuvchi). Bekor qilish: qarz
+  qismi bor — `reverseCustomerPayment` avansni ham qaytaradi; faqat avans — `reverseBalanceDeposit`; avans ishlatilgan
+  bo'lsa rad. Oddiy "balansni to'ldirish" ham endi bekor qilinadi (akt dialogidan). UI: mijozlar ro'yxatida bank
+  tugmasi + taqsimot ko'rinishi. Test: `audit-bank-receipt.test.ts` (5). Yo'l-yo'lakay: `setLockDate` UTC sanasi xatosi
+  (00:00–05:00 da bugunni yopib bo'lmasdi) tuzatildi; 3 test UTC sana bilan tunda yiqilardi — mahalliy sanaga o'tkazildi.
+  Eslatma: boshqa ko'p testlar ham `toISOString().slice(0,10)` ishlatadi — tunda yiqilsa, shu sabab.
 - W4 Kassa: `cash.own` (Z4), kassa hujjatlari (o'tkazma, tuzatish, to'lov usulini ayirboshlash, valyuta ayirboshlash
   kurs snapshoti bilan, kategoriyali kirim/chiqim), bekor qilish, davriy kassa hisoboti, UI.
 - W5 Qaytarishlar: "Yetkazilmadi" (Z1) va mijoz qaytarishi + disposition (sotuvga / karantin / shikastlangan).

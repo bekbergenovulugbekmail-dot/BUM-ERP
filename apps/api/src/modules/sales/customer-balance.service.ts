@@ -112,6 +112,10 @@ export async function depositToBalance(
     allowInactive?: boolean;
     /** Takroriy yuborishdan himoya: so'rov kaliti yozuv ID'si bo'ladi. */
     id?: string;
+    /** To'lov hujjati (bank tushumining avans qismi) — hujjat bekor qilinsa kirim ham bekor bo'ladi. */
+    paymentHeaderId?: string | null;
+    /** Kassa/bank tarixidagi izoh (standart: "Balansni to'ldirish: <mijoz>"). */
+    description?: string;
   },
   meta: RequestMeta,
 ) {
@@ -122,7 +126,7 @@ export async function depositToBalance(
 
   const id = input.id ?? randomUUID();
   const date = input.date ?? todayIso();
-  const description = input.type === "change" ? `Qaytim balansga: ${customer.name}` : `Balansni to'ldirish: ${customer.name}`;
+  const description = input.description ?? (input.type === "change" ? `Qaytim balansga: ${customer.name}` : `Balansni to'ldirish: ${customer.name}`);
   const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
     cashAccountId: await resolvePaymentAccount(tx, companyId, input.method, input.cashAccountId),
     type: "in",
@@ -162,6 +166,7 @@ export async function depositToBalance(
     cashAccountId: account.id,
     journalEntryId: entry.id,
     notes: input.notes ?? null,
+    paymentHeaderId: input.paymentHeaderId ?? null,
   });
 
   await salesAudit(tx, tenant, meta, {

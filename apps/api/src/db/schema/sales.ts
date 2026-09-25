@@ -80,6 +80,7 @@ export const customerBalanceTxType = pgEnum("customer_balance_tx_type", [
   "refund", //       qaytarilgan chekning balansdan to'langan qismi
   "adjustment", //   qo'lda tuzatish: balansni to'g'ri qiymatga o'rnatish (sabab bilan, audit va jurnal yozuvi)
   "withdrawal", //   balansdagi pul mijozga QAYTARILDI (haqiqiy pul chiqimi — tuzatish emas)
+  "deposit_reversal", // noto'g'ri kiritilgan kirim BEKOR QILINDI (asl qator `reversed`, pul hisobdan qaytadi)
 ]);
 
 /** Keshbek hisobi harakati — pul balansidan alohida. */
@@ -352,7 +353,7 @@ export const payments = pgTable(
     companyId: uuid("company_id")
       .notNull()
       .references(() => companies.id, { onDelete: "restrict" }),
-    /** pos | pos_device | delivery | sales_payment | pos_customer_payment */
+    /** pos | pos_device | delivery | sales_payment | pos_customer_payment | bank_receipt */
     source: varchar("source", { length: 24 }).notNull(),
     idempotencyKey: varchar("idempotency_key", { length: 120 }),
     customerId: uuid("customer_id").references(() => customers.id, { onDelete: "restrict" }),
@@ -365,10 +366,18 @@ export const payments = pgTable(
     reversedAt: timestamp("reversed_at", { withTimezone: true }),
     reversedBy: uuid("reversed_by").references(() => users.id, { onDelete: "set null" }),
     reversalReason: text("reversal_reason"),
+    /** Bank tushumi (`bank_receipt`): bank hujjati raqami, izoh, hisob va sana — avans qismi ham shu hujjatda. */
+    reference: varchar("reference", { length: 100 }),
+    notes: text("notes"),
+    cashAccountId: uuid("cash_account_id").references(() => cashAccounts.id, { onDelete: "set null" }),
+    paymentDate: date("payment_date"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamps().createdAt,
   },
   (t) => [
+    uniqueIndex("pay_company_bank_reference_key")
+      .on(t.companyId, t.cashAccountId, t.reference)
+      .where(sql`${t.source} = 'bank_receipt' AND ${t.reference} IS NOT NULL AND ${t.status} = 'posted'`),
     check("pay_status_known", sql`${t.status} IN ('posted', 'reversed')`),
     uniqueIndex("pay_company_idempotency_key")
       .on(t.companyId, t.idempotencyKey)
@@ -376,7 +385,7 @@ export const payments = pgTable(
     index("pay_company_order_idx").on(t.companyId, t.orderId),
     index("pay_company_customer_idx").on(t.companyId, t.customerId),
     check("pay_total_positive", sql`${t.totalAmount} > 0`),
-    check("pay_source_valid", sql`${t.source} in ('pos', 'pos_device', 'delivery', 'sales_payment', 'pos_customer_payment')`),
+    check("pay_source_valid", sql`${t.source} in ('pos', 'pos_device', 'delivery', 'sales_payment', 'pos_customer_payment', 'bank_receipt')`),
   ],
 );
 
@@ -490,10 +499,20 @@ export const customerBalanceTransactions = pgTable(
     journalEntryId: uuid("journal_entry_id").references(() => journalEntries.id, { onDelete: "set null" }),
 
     notes: text("notes"),
+    /** To'lov hujjati (bank tushumining avans qismi) — hujjat bekor qilinsa bu kirim ham bekor bo'ladi. */
+    paymentHeaderId: uuid("payment_header_id").references(() => payments.id, { onDelete: "set null" }),
+    /** `posted` | `reversed` — kirim o'chirilmaydi, bekor qilinadi (teskari qator `deposit_reversal`). */
+    status: varchar("status", { length: 16 }).notNull().default("posted"),
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
+    reversedBy: uuid("reversed_by").references(() => users.id, { onDelete: "set null" }),
+    reversalReason: text("reversal_reason"),
+    reversalJournalEntryId: uuid("reversal_journal_entry_id").references(() => journalEntries.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     ...timestamps(),
   },
   (t) => [
+    check("cbt_status_known", sql`${t.status} IN ('posted', 'reversed')`),
+    index("cbt_payment_header_idx").on(t.paymentHeaderId).where(sql`${t.paymentHeaderId} IS NOT NULL`),
     index("cbt_company_customer_idx").on(t.companyId, t.customerId, t.createdAt),
     index("cbt_order_idx").on(t.orderId),
     check("cbt_amount_non_zero", sql`${t.amount} <> 0`),
