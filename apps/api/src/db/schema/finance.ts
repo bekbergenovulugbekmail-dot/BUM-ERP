@@ -15,6 +15,7 @@ import {
   check,
   date,
   index,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -263,6 +264,92 @@ export const cashTransactions = pgTable(
     index("ct_company_account_date_idx").on(t.companyId, t.cashAccountId, t.txDate),
     index("ct_reference_idx").on(t.referenceType, t.referenceId),
     check("ct_amount_positive", sql`${t.amount} > 0`),
+  ],
+);
+
+// ─── cash_categories / cash_documents ────────────────────────────────────────
+
+/**
+ * Kassa kirim/chiqim kategoriyasi — sabab + buxgalteriya qarshi hisobi (masalan, "Ijara daromadi" → 4900).
+ * Nazorat hisoblari (debitor, kreditor, zaxira, kassa, avans…) qarshi hisob bo'la olmaydi — ular o'z hujjatlari bilan.
+ */
+export const cashCategories = pgTable(
+  "cash_categories",
+  {
+    id: pk(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "restrict" }),
+    name: varchar("name", { length: 120 }).notNull(),
+    /** `in` — kirim, `out` — chiqim. */
+    direction: varchar("direction", { length: 8 }).notNull(),
+    parentId: uuid("parent_id").references((): AnyPgColumn => cashCategories.id, { onDelete: "set null" }),
+    counterAccountId: uuid("counter_account_id").notNull().references(() => accounts.id, { onDelete: "restrict" }),
+    isActive: boolean("is_active").notNull().default(true),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("cc_company_direction_name_key").on(t.companyId, t.direction, t.name),
+    check("cc_direction_known", sql`${t.direction} IN ('in', 'out')`),
+  ],
+);
+
+/**
+ * Kassa HUJJATI — pul harakatining sababi va izi (raqam, mas'ul, kiritgan, tasdiqlagan, sabab). Pulning o'zi
+ * `cash_transactions` va jurnalda (reference = `cash_document`, hujjat id'si) — alohida "kassa qoldig'i" yo'q.
+ * Bekor qilinganda holati `reversed`, teskari yozuvlar qo'shiladi; hujjat o'chirilmaydi.
+ */
+export const cashDocuments = pgTable(
+  "cash_documents",
+  {
+    id: pk(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "restrict" }),
+    number: varchar("number", { length: 32 }).notNull(),
+    /** transfer | method_exchange | method_correction | currency_exchange | income | expense */
+    kind: varchar("kind", { length: 24 }).notNull(),
+    status: varchar("status", { length: 16 }).notNull().default("posted"),
+    docDate: date("doc_date").notNull(),
+    fromCashAccountId: uuid("from_cash_account_id").references(() => cashAccounts.id, { onDelete: "restrict" }),
+    toCashAccountId: uuid("to_cash_account_id").references(() => cashAccounts.id, { onDelete: "restrict" }),
+    amount: money("amount").notNull(),
+    currency: varchar("currency", { length: 3 }).notNull(),
+    toAmount: money("to_amount"),
+    toCurrency: varchar("to_currency", { length: 3 }),
+    dealRate: numeric("deal_rate", { precision: 18, scale: 6 }),
+    bookRateFrom: price("book_rate_from"),
+    bookRateTo: price("book_rate_to"),
+    baseAmount: money("base_amount").notNull(),
+    difference: money("difference").notNull().default("0"),
+    categoryId: uuid("category_id").references(() => cashCategories.id, { onDelete: "restrict" }),
+    counterpartyType: varchar("counterparty_type", { length: 16 }),
+    counterpartyName: varchar("counterparty_name", { length: 200 }),
+    /** Mas'ul xodim (FK yo'q — hr → finance importi aylanma bo'lmasin; kodda tekshiriladi). */
+    responsibleEmployeeId: uuid("responsible_employee_id"),
+    reason: text("reason").notNull(),
+    reference: varchar("reference", { length: 100 }),
+    notes: text("notes"),
+    correctsType: varchar("corrects_type", { length: 40 }),
+    correctsId: uuid("corrects_id"),
+    journalEntryId: uuid("journal_entry_id").references(() => journalEntries.id, { onDelete: "set null" }),
+    requestId: uuid("request_id"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
+    reversedBy: uuid("reversed_by").references(() => users.id, { onDelete: "set null" }),
+    reversalReason: text("reversal_reason"),
+    reversalJournalEntryId: uuid("reversal_journal_entry_id").references(() => journalEntries.id, { onDelete: "set null" }),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("cd_company_number_key").on(t.companyId, t.number),
+    uniqueIndex("cd_company_request_key").on(t.companyId, t.requestId).where(sql`${t.requestId} IS NOT NULL`),
+    index("cd_company_date_idx").on(t.companyId, t.docDate),
+    index("cd_from_idx").on(t.fromCashAccountId),
+    index("cd_to_idx").on(t.toCashAccountId),
+    check("cd_kind_known", sql`${t.kind} IN ('transfer', 'method_exchange', 'method_correction', 'currency_exchange', 'income', 'expense')`),
+    check("cd_status_known", sql`${t.status} IN ('posted', 'reversed')`),
+    check("cd_amount_positive", sql`${t.amount} > 0`),
+    check("cd_accounts_differ", sql`${t.fromCashAccountId} IS NULL OR ${t.toCashAccountId} IS NULL OR ${t.fromCashAccountId} <> ${t.toCashAccountId}`),
   ],
 );
 

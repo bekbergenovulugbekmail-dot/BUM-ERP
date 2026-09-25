@@ -19,6 +19,7 @@ import PurchasePage from "./pages/purchase/page.tsx";
 import SalesPage from "./pages/sales/page.tsx";
 import POSPage from "./pages/pos/page.tsx";
 import FinancePage from "./pages/finance/page.tsx";
+import CashPage from "./pages/cash/page.tsx";
 import CRMPage from "./pages/crm/page.tsx";
 import DistributionPage from "./pages/distribution/page.tsx";
 import ModuleGuard from "./components/module-guard.tsx";
@@ -203,6 +204,7 @@ function MainApp() {
             <Route path="distribution" element={<ModuleGuard module="distribution"><DistributionPage /></ModuleGuard>} />
             <Route path="delivery" element={<ModuleGuard module="delivery"><DeliveryPage /></ModuleGuard>} />
             <Route path="finance" element={<ModuleGuard module="finance"><FinancePage /></ModuleGuard>} />
+            <Route path="cash" element={<ModuleGuard module="cash"><CashPage /></ModuleGuard>} />
             <Route path="hr" element={<ModuleGuard module="hr"><HRPage /></ModuleGuard>} />
             <Route path="reports" element={<ModuleGuard module="reports"><AnalyticsPage /></ModuleGuard>} />
             <Route path="analytics" element={<ModuleGuard module="analytics"><AnalyticsPage /></ModuleGuard>} />

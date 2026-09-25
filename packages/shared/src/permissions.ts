@@ -72,6 +72,11 @@ export const PERMISSIONS = {
   "finance.manage":       { label: "Moliyani boshqarish",          group: "Moliya" },
   "finance.approve":      { label: "Xarajat tasdiqlash",           group: "Moliya" },
   "finance.export":       { label: "Moliyaviy eksport",            group: "Moliya" },
+  /**
+   * O'z kassasi: faqat mas'ul qilib biriktirilgan kassa(lar)ni ko'radi va ishlatadi (kirim, o'tkazma, ayirboshlash,
+   * hisobot). Kassa ochish, mas'ul biriktirish, qoldiqni o'rnatish va bekor qilish — `finance.manage`/`finance.approve`.
+   */
+  "cash.own":             { label: "O'z kassasi bilan ishlash",    group: "Moliya" },
   /** Valyuta kurslari va ularning o'zgarish tarixini ko'rish (web va kassa). */
   "currency_rates.view":  { label: "Valyuta kurslarini ko'rish",   group: "Moliya" },
   /** Bitta valyuta kursini o'zgartirish — web yoki kassadan (tarix va audit bilan). */
@@ -352,6 +357,8 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "warehouse.view",
       // Kassada kursni ko'radi; o'zgartirish (`currency_rates.manage`) — rahbar beradi
       "currency_rates.view",
+      // Mas'ul qilib biriktirilgan kassasi bo'lsa — faqat o'shani ko'radi va ishlatadi
+      "cash.own",
       // Tarozidan og'irlik o'qish va holatni ko'rish; sozlash va yuborish — rahbar yoki omborchi
       "scale.view",
     ],

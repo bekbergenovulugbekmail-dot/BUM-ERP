@@ -14,6 +14,7 @@ import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import CashAccountsSection from "./_components/cash-accounts-section.tsx";
+import RegistersPanel from "@/pages/cash/_components/registers-panel.tsx";
 import ExpensesSection from "./_components/expenses-section.tsx";
 import ProfitLossSection from "./_components/profit-loss-section.tsx";
 import AccountsSection from "./_components/accounts-section.tsx";
@@ -22,6 +23,8 @@ import { fmt, toNum, type Account, type Expense, type ExpenseStats, type Finance
 const TABS = [
   { key: "overview", label: "Umumiy ko'rinish", icon: BarChart3 },
   { key: "cash", label: "Kassa & Bank", icon: Wallet },
+  /** Kassalar mas'ul bilan: kirim/chiqim, o'tkazma, ayirboshlash, tuzatish, hisobot va hujjatlar (bekor qilish bilan). */
+  { key: "registers", label: "Kassalar", icon: Building2 },
   { key: "expenses", label: "Xarajatlar", icon: Receipt },
   /** Foyda ko'rsatadigan hisobot — alohida ruxsat (`analytics.view_profit`) bilan. */
   { key: "pnl", label: "Daromad & Zarar", icon: TrendingUp, permission: "analytics.view_profit" as const },
@@ -166,6 +169,7 @@ export default function FinancePage() {
       {/* Tab content */}
       {tab === "overview" && <OverviewTab stats={stats} expStats={expStats} />}
       {tab === "cash" && <CashAccountsSection />}
+      {tab === "registers" && <RegistersPanel />}
       {tab === "expenses" && <ExpensesSection />}
       {tab === "pnl" && canSeeProfit && <ProfitLossSection />}
       {tab === "accounts" && <AccountsSection />}

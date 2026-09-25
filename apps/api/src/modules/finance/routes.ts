@@ -36,6 +36,18 @@
  *   PUT    /currencies, POST /currencies/refresh               settings.manage
  *   PUT    /currencies/:code/rate                              currency_rates.manage (bitta kurs; tarix va audit)
  *   GET    /currencies/history (?code=&limit=)                 currency_rates.view (eski → yangi kurs, kim, qaysi kassa)
+ *
+ * Kassalar va kassa hujjatlari (mas'ul xodim — `cash.own`: faqat o'ziga biriktirilgan kassalar; rahbar — `finance.view`):
+ *   GET    /cash/registers                                     finance.view | cash.own
+ *   GET    /cash/targets                                       finance.view | cash.own (o'tkazma uchun kassalar — qoldiqsiz)
+ *   GET    /cash/registers/:cashAccountId/report (?from=&to=)  finance.view | cash.own (boshlang'ich → yakuniy)
+ *   GET    /cash/registers/:cashAccountId/transactions         finance.view | cash.own
+ *   GET    /cash-categories                                    finance.view | cash.own
+ *   POST   /cash-categories, PATCH /cash-categories/:categoryId   finance.manage
+ *   GET    /cash-documents (?cashAccountId=&kind=&dateFrom=&dateTo=&limit=), /cash-documents/:documentId   finance.view | cash.own
+ *   POST   /cash-documents                                     finance.manage | cash.own (o'z kassasi)
+ *   POST   /cash-documents/:documentId/approve                 finance.approve (boshqa xodim kiritgani)
+ *   GET    /cash-documents/:documentId/reversal, POST /cash-documents/:documentId/reverse   finance.approve
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -105,6 +117,24 @@ import {
   summariesFor,
 } from "./handover.service.js";
 import { listPendingSettlements, settleCashAccount } from "./settlement.service.js";
+import {
+  CASH_DOCUMENT_KINDS,
+  COUNTERPARTY_TYPES,
+  approveCashDocument,
+  assertInScope,
+  cashRegisterReport,
+  cashScope,
+  createCashCategory,
+  createCashDocument,
+  getCashDocument,
+  listCashCategories,
+  listCashDocuments,
+  listRegisters,
+  previewCashDocumentReversal,
+  reverseCashDocument,
+  transferTargets,
+  updateCashCategory,
+} from "./cash-documents.service.js";
 import { createTerminal, getTerminal, listTerminals, updateTerminal } from "./terminals.service.js";
 
 const nullableText = (max: number) =>
@@ -360,6 +390,45 @@ const handoverListQuery = z.object({
 });
 
 const cashAccountParams = z.object({ cashAccountId: z.uuid() });
+const cashDocumentParams = z.object({ documentId: z.uuid() });
+const cashCategoryParams = z.object({ categoryId: z.uuid() });
+const cashDocumentBody = z.strictObject({
+  kind: z.enum(CASH_DOCUMENT_KINDS),
+  docDate: isoDate.optional(),
+  fromCashAccountId: z.uuid().nullish(),
+  toCashAccountId: z.uuid().nullish(),
+  amount: positiveMoney,
+  toAmount: positiveMoney.nullish(),
+  categoryId: z.uuid().nullish(),
+  counterpartyType: z.enum(COUNTERPARTY_TYPES).nullish(),
+  counterpartyName: nullableText(200),
+  responsibleEmployeeId: z.uuid().nullish(),
+  reason: z.string().trim().min(3, "Sababni yozing").max(500),
+  reference: nullableText(100),
+  notes: nullableText(1000),
+  correctsPaymentId: z.uuid().nullish(),
+  requestId: z.uuid().nullish(),
+});
+const cashDocumentsQuery = z.object({
+  cashAccountId: z.uuid().optional(),
+  kind: z.enum(CASH_DOCUMENT_KINDS).optional(),
+  dateFrom: isoDate.optional(),
+  dateTo: isoDate.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+const cashReportQuery = z.object({ from: isoDate, to: isoDate });
+const cashCategoryBody = z.strictObject({
+  name: z.string().trim().min(2).max(120),
+  direction: z.enum(["in", "out"]),
+  counterAccountId: z.uuid(),
+  parentId: z.uuid().nullish(),
+});
+const cashCategoryPatch = z.strictObject({
+  name: z.string().trim().min(2).max(120).optional(),
+  counterAccountId: z.uuid().optional(),
+  isActive: z.boolean().optional(),
+});
+const reverseBody = z.object({ reason: z.string().trim().min(3, "Bekor qilish sababini yozing").max(500) });
 const expenseParams = z.object({ expenseId: z.uuid() });
 const includeInactiveQuery = z.object({ includeInactive: boolQuery });
 
@@ -480,6 +549,99 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
       voidManualEntry(tx, tenant, entryId, requestMeta(req)),
     );
     return { entry };
+  });
+
+  // ─── Kassalar (mas'ul bilan) va kassa hujjatlari ─────────────────────────
+
+  /** Doira: rahbar — hammasi, mas'ul (`cash.own`) — faqat o'z kassalari. */
+  const scoped = async (req: FastifyRequest) => {
+    const tenant = await requireTenant(db, authOf(req).user);
+    return { tenant, scope: await cashScope(db, tenant) };
+  };
+
+  app.get("/cash/registers", async (req) => {
+    const { tenant, scope } = await scoped(req);
+    return { registers: await listRegisters(db, tenant, scope), scope: scope.all ? "all" : "own" };
+  });
+
+  app.get("/cash/targets", async (req) => {
+    const { tenant } = await scoped(req);
+    return { targets: await transferTargets(db, tenant) };
+  });
+
+  app.get("/cash/registers/:cashAccountId/report", async (req) => {
+    const { cashAccountId } = cashAccountParams.parse(req.params);
+    const query = cashReportQuery.parse(req.query);
+    const { tenant, scope } = await scoped(req);
+    return cashRegisterReport(db, tenant, scope, { cashAccountId, ...query });
+  });
+
+  app.get("/cash/registers/:cashAccountId/transactions", async (req) => {
+    const { cashAccountId } = cashAccountParams.parse(req.params);
+    const query = cashTransactionsQuery.parse(req.query);
+    const { tenant, scope } = await scoped(req);
+    assertInScope(scope, cashAccountId);
+    return listCashTransactions(db, tenant, { ...query, cashAccountId });
+  });
+
+  app.get("/cash-categories", async (req) => {
+    const { tenant } = await scoped(req);
+    return { categories: await listCashCategories(db, tenant) };
+  });
+
+  app.post("/cash-categories", async (req, reply) => {
+    const body = cashCategoryBody.parse(req.body);
+    const category = await writeInTenant(req, "finance.manage", (tx, tenant) => createCashCategory(tx, tenant, body, requestMeta(req)));
+    reply.status(201);
+    return { category };
+  });
+
+  app.patch("/cash-categories/:categoryId", async (req) => {
+    const { categoryId } = cashCategoryParams.parse(req.params);
+    const patch = cashCategoryPatch.parse(req.body);
+    return { category: await writeInTenant(req, "finance.manage", (tx, tenant) => updateCashCategory(tx, tenant, categoryId, patch, requestMeta(req))) };
+  });
+
+  app.get("/cash-documents", async (req) => {
+    const query = cashDocumentsQuery.parse(req.query);
+    const { tenant, scope } = await scoped(req);
+    return { documents: await listCashDocuments(db, tenant, scope, query) };
+  });
+
+  app.get("/cash-documents/:documentId", async (req) => {
+    const { documentId } = cashDocumentParams.parse(req.params);
+    const { tenant, scope } = await scoped(req);
+    const document = await getCashDocument(db, tenant, documentId);
+    if (!scope.all && !scope.accountIds.some((id) => id === document.fromCashAccountId || id === document.toCashAccountId)) {
+      throw forbidden("Bu hujjat sizning kassangizga tegishli emas");
+    }
+    return { document };
+  });
+
+  app.post("/cash-documents", async (req, reply) => {
+    const body = cashDocumentBody.parse(req.body);
+    const result = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      return createCashDocument(tx, tenant, body, requestMeta(req));
+    });
+    reply.status(result.created ? 201 : 200);
+    return result;
+  });
+
+  app.post("/cash-documents/:documentId/approve", async (req) => {
+    const { documentId } = cashDocumentParams.parse(req.params);
+    return { document: await writeInTenant(req, "finance.approve", (tx, tenant) => approveCashDocument(tx, tenant, documentId, requestMeta(req))) };
+  });
+
+  app.get("/cash-documents/:documentId/reversal", async (req) => {
+    const { documentId } = cashDocumentParams.parse(req.params);
+    return previewCashDocumentReversal(db, await readTenant(req, "finance.approve"), documentId);
+  });
+
+  app.post("/cash-documents/:documentId/reverse", async (req) => {
+    const { documentId } = cashDocumentParams.parse(req.params);
+    const body = reverseBody.parse(req.body ?? {});
+    return { document: await writeInTenant(req, "finance.approve", (tx, tenant) => reverseCashDocument(tx, tenant, documentId, body.reason, requestMeta(req))) };
   });
 
   // ─── Kassa va bank ───────────────────────────────────────────────────────

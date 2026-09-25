@@ -13,6 +13,7 @@ export type ModuleId =
   | "distribution"
   | "delivery"
   | "finance"
+  | "cash"
   | "hr"
   | "reports"
   | "analytics"
@@ -45,6 +46,8 @@ export const ERP_MODULES: ModuleConfig[] = [
   { id: "distribution", labelKey: "nav.distribution", path: "distribution", icon: "Truck", defaultEnabled: true, group: "business", permission: "distribution.view", moduleKey: "distribution" },
   { id: "delivery", labelKey: "nav.delivery", path: "delivery", icon: "PackageCheck", defaultEnabled: true, group: "business", permission: "delivery.view", moduleKey: "delivery" },
   { id: "finance", labelKey: "nav.finance", path: "finance", icon: "DollarSign", defaultEnabled: true, group: "business", permission: "finance.view", moduleKey: "finance" },
+  /** Kassa mas'uli — faqat o'ziga biriktirilgan kassalar (`cash.own`). Rahbar — Moliya → "Kassalar". */
+  { id: "cash", labelKey: "nav.cash", path: "cash", icon: "Landmark", defaultEnabled: true, group: "business", permission: "cash.own", moduleKey: "finance" },
   { id: "hr", labelKey: "nav.hr", path: "hr", icon: "UserCheck", defaultEnabled: true, group: "business", permission: "hr.view", moduleKey: "hr" },
   { id: "reports", labelKey: "nav.reports", path: "reports", icon: "FileBarChart", defaultEnabled: true, group: "insights", permission: "analytics.view", moduleKey: "reports" },
   { id: "analytics", labelKey: "nav.analytics", path: "analytics", icon: "BarChart3", defaultEnabled: true, group: "insights", permission: "analytics.view", moduleKey: "reports" },

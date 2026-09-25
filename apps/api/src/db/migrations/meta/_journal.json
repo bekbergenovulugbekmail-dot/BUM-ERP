@@ -624,6 +624,20 @@
       "when": 1790450000000,
       "tag": "0088_bank_receipt",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1790460000000,
+      "tag": "0089_cash_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1790470000000,
+      "tag": "0090_cash_own_role",
+      "breakpoints": true
     }
   ]
 }

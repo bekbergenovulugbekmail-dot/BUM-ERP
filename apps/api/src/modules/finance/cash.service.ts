@@ -32,7 +32,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { badRequest, conflict, notFound } from "@bum/shared";
+import { badRequest, conflict, forbidden, notFound } from "@bum/shared";
 import { accounts, cashAccounts, cashTransactions, companyCurrencies } from "../../db/schema/finance.js";
 import { employees } from "../../db/schema/hr.js";
 import { purchaseOrders } from "../../db/schema/purchase.js";
@@ -320,6 +320,20 @@ async function assertEmployee(conn: DbOrTx, companyId: string, employeeId: strin
   if (employee.status !== "active") throw badRequest("Xodim faol emas");
 }
 
+/**
+ * Z4: kassaning mas'uli O'Z kassasining qoldig'ini o'rnatmaydi, mas'ulini almashtirmaydi va uni yopmaydi — bu
+ * boshqa rahbarning ishi (vazifalar ajratimi). Kompaniya egasi istisno.
+ */
+async function assertNotOwnRegister(conn: DbOrTx, tenant: TenantContext, employeeId: string | null) {
+  if (!employeeId || tenant.company.ownerId === tenant.user.id) return;
+  const [row] = await conn
+    .select({ userId: employees.userId })
+    .from(employees)
+    .where(and(eq(employees.id, employeeId), eq(employees.companyId, tenant.company.id)))
+    .limit(1);
+  if (row?.userId === tenant.user.id) throw forbidden("O'zingiz mas'ul bo'lgan kassada bu amalni boshqa rahbar bajaradi");
+}
+
 /** Kutilayotgan hisob (karta terminali, elektron hamyon): pul qirqimgacha shu hisobda turadi. */
 export function isPendingAccountType(type: CashAccountType) {
   return type === "card" || type === "ewallet";
@@ -436,6 +450,7 @@ export async function updateCashAccount(
     .limit(1)
     .for("update");
   if (!current) throw notFound("Kassa topilmadi");
+  if (patch.employeeId !== undefined || patch.isActive !== undefined) await assertNotOwnRegister(tx, tenant, current.employeeId);
 
   if (patch.settlesToCashAccountId !== undefined || patch.settlementCommissionPercent !== undefined) {
     if (!isPendingAccountType(current.type)) throw badRequest("Qirqim sozlamasi faqat kutilayotgan hisobda (karta, hamyon) bo'ladi");
@@ -501,6 +516,7 @@ export async function setCashAccountBalance(
     .for("update");
   if (!current) throw notFound("Kassa topilmadi");
   if (!current.isActive) throw badRequest("Kassa faol emas");
+  await assertNotOwnRegister(tx, tenant, current.employeeId);
 
   const delta = target - toMinor(current.balance);
   if (delta === 0n) return { cashAccount: current, transaction: null, delta: "0.00" };

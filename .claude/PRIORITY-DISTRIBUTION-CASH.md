@@ -81,8 +81,18 @@ tushuntiriladi va tasdiqsiz bajarilmaydi (xotira: financial-integrity-gate).
   tugmasi + taqsimot ko'rinishi. Test: `audit-bank-receipt.test.ts` (5). Yo'l-yo'lakay: `setLockDate` UTC sanasi xatosi
   (00:00–05:00 da bugunni yopib bo'lmasdi) tuzatildi; 3 test UTC sana bilan tunda yiqilardi — mahalliy sanaga o'tkazildi.
   Eslatma: boshqa ko'p testlar ham `toISOString().slice(0,10)` ishlatadi — tunda yiqilsa, shu sabab.
-- W4 Kassa: `cash.own` (Z4), kassa hujjatlari (o'tkazma, tuzatish, to'lov usulini ayirboshlash, valyuta ayirboshlash
-  kurs snapshoti bilan, kategoriyali kirim/chiqim), bekor qilish, davriy kassa hisoboti, UI.
+- W4 ✅ Kassa: ruxsat `cash.own` (Kassir roliga; migratsiya 0090) — mas'ul faqat o'ziga biriktirilgan kassani ko'radi
+  va ishlatadi; o'z kassasining qoldig'ini o'rnatish/mas'ulini almashtirish/yopish rahbarga ham taqiqlangan (ega —
+  istisno). `cash_documents` (0089, qo'shuvchi): transfer, method_correction (asl to'lovga havola, ikki marta emas),
+  method_exchange (farq → 4100/5500), currency_exchange (kelishilgan kurs + hisob kurslari snapshot, farq 4200/5700),
+  income/expense (kategoriya → qarshi hisob; nazorat hisoblari va mijoz/ta'minotchi kontragent taqiqlangan).
+  Pul — cash_transactions + jurnal (reference `cash_document`); bekor qilish — hammasining teskarisi (asl kursda),
+  pul yetmasa rad. Tasdiq (imzo) — finance.approve, o'zi kiritganini emas. Hisobot: boshlang'ich + kirim − chiqim ±
+  o'tkazma ± ayirboshlash ± tuzatish ± bekor = yakuniy (= haqiqiy qoldiq, `consistent`). UI: "Kassalar" sahifasi
+  (cash.own) va Moliya → "Kassalar" tabi. Test: `audit-cash-documents.test.ts` (10).
+  Qarorlar: (1) kassa hujjatlari bank komissiyasini avtomatik yechmaydi — bekor qilish har doim toza; eski
+  `/cash-transfers` API o'zgarmadi; (2) hisob-faktura bo'yicha xarajat — mavjud Xarajatlar moduli (tasdiq bilan),
+  kassadagi mayda chiqim — `expense` hujjati; (3) to'langan xarajatni bekor qilish hali yo'q (audit ro'yxatiga).
 - W5 Qaytarishlar: "Yetkazilmadi" (Z1) va mijoz qaytarishi + disposition (sotuvga / karantin / shikastlangan).
 - W6 Yetkazma reysi: snapshot, 3 hujjat (mijoz nakladnoyi, omborchi yig'ma ×2, yetkazuvchi marshrut varag'i),
   terish/yuklash holati, "Yetkazishga chiqadiganlar" + hammasini tanlash.
