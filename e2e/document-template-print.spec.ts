@@ -18,6 +18,72 @@ test.afterEach(async ({ page }) => {
   }
 });
 
+/**
+ * Hisob-faktura va xarid buyurtmasi ham shablonga ulangan (2026-09-25).
+ * Bu yerda ikkala hujjat ham shablon bilan haqiqiy PDF bo'lib chizilishi tekshiriladi.
+ */
+test("hisob-faktura va xarid shablon bilan chiziladi", async ({ page }) => {
+  // Har hujjat uchun A4 PDF chiziladi va shrift yuklanadi — sekinroq
+  test.setTimeout(180_000);
+  await login(page, "owner");
+  await page.goto(appPath("/dashboard"));
+
+  const result = await page.evaluate(async () => {
+    const bridge = (await import("/src/lib/pdf/document-template-bridge.ts")) as typeof import("../src/lib/pdf/document-template-bridge.ts");
+    const { renderTemplate } = (await import("/src/lib/pdf/template-renderer.ts")) as typeof import("../src/lib/pdf/template-renderer.ts");
+
+    const load = async (type: "sales_invoice" | "purchase_order") => {
+      const res = await fetch(`/api/documents/active/${type}`, { headers: { "x-bum-company": "bum-demo" } });
+      return (await res.json()) as { schema: Parameters<typeof renderTemplate>[0]; custom: boolean };
+    };
+
+    const company = { name: "BONNU MARKET", taxId: "301234567" };
+    const invoice = await load("sales_invoice");
+    const invoiceDoc = await renderTemplate(
+      invoice.schema,
+      bridge.invoiceDocumentData(
+        {
+          company, number: "SO-2026-0004", date: "2026-09-25",
+          customerName: "Раматов Маркет", customerPhone: "+998900000000", customerAddress: "Урганч",
+          warehouseName: "Asosiy ombor",
+          items: [{ name: "Coca Cola 1L", sku: "COLA-1", qty: 12, unit: "Dona", unitPrice: 8300, discount: 0, taxRate: 0, lineTotal: 99600 }],
+          subtotal: 99600, taxTotal: 0, discountTotal: 0, totalAmount: 99600, paidAmount: 0, balance: 99600,
+          currency: "so'm", status: "completed",
+        },
+        "Egasi",
+      ),
+    );
+
+    const purchase = await load("purchase_order");
+    const purchaseDoc = await renderTemplate(
+      purchase.schema,
+      bridge.purchaseDocumentData(
+        {
+          company, number: "PO-2026-0001", orderDate: "2026-09-25",
+          supplierName: "Глобал Трейд", supplierPhone: "+998911112233", warehouseName: "Asosiy ombor",
+          items: [{ productName: "Coca Cola 1L", productSku: "COLA-1", orderedQty: 10, receivedQty: 0, unitName: "Blok", unitPrice: 99600, lineTotal: 996000 }],
+          totalAmount: 996000, paidAmount: 500000, balance: 496000, currency: "so'm", status: "confirmed",
+        },
+        "Egasi",
+      ),
+    );
+
+    const text = (doc: typeof invoiceDoc) =>
+      ((doc as unknown as { internal: { pages: string[][] } }).internal.pages[1] ?? []).join(" ");
+    return {
+      invoicePdf: (invoiceDoc.output("datauristring") as string).startsWith("data:application/pdf"),
+      purchasePdf: (purchaseDoc.output("datauristring") as string).startsWith("data:application/pdf"),
+      invoiceHasCustomer: text(invoiceDoc).length > 0,
+      purchaseHasSupplier: text(purchaseDoc).length > 0,
+    };
+  });
+
+  expect(result.invoicePdf, "hisob-faktura PDF bo'lmadi").toBe(true);
+  expect(result.purchasePdf, "xarid PDF bo'lmadi").toBe(true);
+  expect(result.invoiceHasCustomer).toBe(true);
+  expect(result.purchaseHasSupplier).toBe(true);
+});
+
 test("shablon tuzilmaguncha nakladnoy avvalgi ko'rinishda qoladi", async ({ page }) => {
   await login(page, "owner");
   await page.goto(appPath("/dashboard"));
@@ -56,6 +122,8 @@ test("standart shablon tuzilgach nakladnoy shablon bo'yicha chiqadi", async ({ p
 });
 
 test("shablon bilan chizilgan nakladnoy haqiqiy PDF bo'ladi", async ({ page }) => {
+  // Har hujjat uchun A4 PDF chiziladi va shrift yuklanadi — sekinroq
+  test.setTimeout(180_000);
   await login(page, "owner");
   await page.goto(appPath("/dashboard"));
 

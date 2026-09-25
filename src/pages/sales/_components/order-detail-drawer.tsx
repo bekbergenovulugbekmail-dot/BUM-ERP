@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
+import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import {
   PAYMENT_LABELS, companyInfo, newReference, num, todayLocal,
@@ -63,6 +64,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const orderQuery = useApiQuery<{ order: SalesOrderDetail }>(`/api/sales/orders/${orderId}`);
   const order = orderQuery.data?.order;
   const company = useActiveCompany().data?.company;
+  const me = useCurrentUser();
 
   const confirmOrder = useApiMutation(() => api.post(`/api/sales/orders/${orderId}/confirm`));
   const shipOrder = useApiMutation(() => api.post(`/api/sales/orders/${orderId}/ship`));
@@ -168,7 +170,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
 
   const handlePrintInvoice = async () => {
     if (!order) return;
-    await generateSalesInvoicePDF({
+    const invoice = {
       company: companyInfo(company),
       number: order.number,
       date: order.orderDate,
@@ -195,7 +197,19 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
       currency: order.currency,
       notes: order.notes ?? undefined,
       status: order.status,
-    });
+    };
+
+    /**
+     * Kompaniya O'Z shablonini tuzgan bo'lsa — hisob-faktura o'sha bo'yicha chiqadi.
+     * Aks holda avvalgi qat'iy ko'rinish: shablon yaratilmaguncha hech narsa o'zgarmaydi.
+     */
+    const { activeTemplate, invoiceDocumentData, saveWithTemplate } = await import("@/lib/pdf/document-template-bridge.ts");
+    const schema = await activeTemplate("sales_invoice");
+    if (schema) {
+      await saveWithTemplate(schema, invoiceDocumentData(invoice, me?.name ?? "—"), `hisob-faktura-${order.number}.pdf`);
+      return;
+    }
+    await generateSalesInvoicePDF(invoice);
   };
 
   const balance = order ? num(order.balance) : 0;

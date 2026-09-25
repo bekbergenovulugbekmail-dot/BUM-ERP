@@ -13,8 +13,8 @@ Kim uchun: kompaniya egasi, administrator, ombor mudiri, dostavka boshqaruvchisi
    qanday o'zgartirmang, qog'ozdagi pul ERPdagi pul bo'lib qoladi.
 2. **Shablon tuzmaguningizcha hech narsa o'zgarmaydi.** Nakladnoy avvalgi ko'rinishda chiqaveradi.
    Yangi ko'rinish siz shablonni **"Standart"** qilganingizdan keyin boshlanadi.
-3. **Hozir shablon FAQAT yetkazma nakladnoyiga ta'sir qiladi.** Sotuv hisob-fakturasi, xarid
-   buyurtmasi va maosh varaqasi uchun shablon tuzish mumkin va u saqlanadi, lekin o'sha hujjatlar
+3. **Shablon uchta hujjatda ishlaydi:** yetkazma nakladnoyi, sotuv hisob-fakturasi va xarid
+   buyurtmasi. Maosh varaqasi uchun shablon tuzish mumkin va u saqlanadi, lekin o'sha hujjat
    hozircha eski qat'iy ko'rinishda chiqadi.
 4. **Chop etish — PDF fayl orqali.** Tugmani bosganingizda brauzerning chop etish oynasi ochilmaydi:
    kompyuterga `nakladnoylar-3-ta.pdf` kabi fayl yuklanadi. Chop etish o'sha faylni ochib qilinadi.
@@ -368,6 +368,31 @@ Tizim "bu nakladnoy falon shablon bilan chiqarilgan" deb hech narsa saqlamaydi. 
 - Allaqachon **bosib chiqarilgan qog'oz** albatta o'zgarmaydi.
 - Hujjatdagi **summalar hech qachon o'zgarmaydi** — ular sotuv va yetkazma ma'lumotidan keladi.
 
+### Qaysi hujjat qayerdan chiqadi
+
+| Hujjat turi | Qayerdan chiqariladi | Shablon ishlaydimi |
+|---|---|---|
+| **Yetkazma nakladnoyi** | Dostavka → Yetkazmalar → belgilang → "Nakladnoy (N)" | ✅ ha |
+| **Sotuv hisob-fakturasi** | Sotuv → buyurtmani oching → **"Hisob-faktura"** tugmasi | ✅ ha |
+| **Xarid buyurtmasi** | Xarid → buyurtmani oching → **"PDF"** tugmasi | ✅ ha |
+| Maosh varaqasi | Xodimlar → Maosh | ❌ hali ulanmagan |
+
+Har uchala ishlaydigan hujjatda qoida bir xil: **shablon "Standart" qilingan bo'lsa** — u
+bo'yicha chiqadi, aks holda avvalgi qat'iy ko'rinishda.
+
+### Hisob-faktura va xarid shabloni nimasi bilan farq qiladi
+
+Yetkazma nakladnoyida jadval qatori — mijoz; bu ikkalasida esa **mahsulot**. Shuning uchun
+bu yerda `Mahsulot`, `SKU`, `Birlik`, `Miqdor`, `Narx`, `Summa` ustunlari **to'ladi**.
+
+| Maydon | Hisob-faktura | Xarid buyurtmasi |
+|---|---|---|
+| Mijoz nomi / telefoni / manzili | ✅ | ❌ (mijoz yo'q) |
+| Ta'minotchi / Ta'minotchi telefoni | ❌ | ✅ |
+| Oraliq summa, Chegirma, Soliq | ✅ | ❌ |
+| Jami, To'langan, Qarz | ✅ | ✅ |
+| Jadvaldagi `Chegirma` ustuni | ✅ | ❌ |
+
 ---
 
 ## 11. Dostavkadan real nakladnoy chiqarish
@@ -660,6 +685,6 @@ Chalkashmaslik uchun ochiq ro'yxat:
 | Shablonni butunlay o'chirish | ❌ Mavjud emas — faqat **arxivlash** (ataylab: tarix saqlanadi) |
 | "To'lovlar" va "Bo'sh joy" elementlari | ❌ Oynadan qo'shib bo'lmaydi |
 | Ikkitadan ortiq imzo joyi | ❌ Mavjud emas — hozircha ikkita |
-| Sotuv hisob-fakturasi / xarid buyurtmasi / maosh varaqasini shablon bilan chiqarish | ❌ Shablon saqlanadi, lekin hujjat hali eski ko'rinishda chiqadi |
+| Maosh varaqasini shablon bilan chiqarish | ❌ Shablon saqlanadi, lekin hujjat hali eski ko'rinishda chiqadi |
 | Agentning kunlik nakladnoyini shablon bilan chiqarish | ❌ U eski qat'iy ko'rinishda |
 | Brauzerning chop etish oynasi | ❌ Ishlatilmaydi — hujjat PDF fayl bo'lib yuklanadi |

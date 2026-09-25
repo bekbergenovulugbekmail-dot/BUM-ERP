@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
+import { useCurrentUser } from "@/hooks/use-auth.ts";
 import {
   PAYMENT_LABELS, newReference, num, todayLocal,
   type PaymentMethod, type PurchaseOrderDetail,
@@ -73,6 +74,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const orderQuery = useApiQuery<{ order: PurchaseOrderDetail }>(`/api/purchase/orders/${orderId}`);
   const order = orderQuery.data?.order;
   const company = useActiveCompany().data?.company;
+  const me = useCurrentUser();
   const currencies = useCurrencies();
 
   const confirmOrder = useApiMutation(() => api.post(`/api/purchase/orders/${orderId}/confirm`));
@@ -256,7 +258,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
 
   const handlePrintPO = async () => {
     if (!order) return;
-    await generatePurchaseOrderPDF({
+    const purchase = {
       company: {
         name: company?.name ?? "BUM ERP",
         legalName: company?.legalName ?? undefined,
@@ -288,7 +290,19 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
       notes: order.notes ?? undefined,
       status: order.status,
       paymentTerms: undefined,
-    });
+    };
+
+    /**
+     * Kompaniya O'Z shablonini tuzgan bo'lsa — xarid buyurtmasi o'sha bo'yicha chiqadi.
+     * Aks holda avvalgi qat'iy ko'rinish.
+     */
+    const { activeTemplate, purchaseDocumentData, saveWithTemplate } = await import("@/lib/pdf/document-template-bridge.ts");
+    const schema = await activeTemplate("purchase_order");
+    if (schema) {
+      await saveWithTemplate(schema, purchaseDocumentData(purchase, me?.name ?? "—"), `xarid-${order.number}.pdf`);
+      return;
+    }
+    await generatePurchaseOrderPDF(purchase);
   };
 
   const canComplete =

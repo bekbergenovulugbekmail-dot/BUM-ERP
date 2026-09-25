@@ -4813,3 +4813,10 @@ Qo'llanmani yozayotganda nuqson topildi: dizaynerdagi "Shtrix-kod" elementining 
 `ELEMENT_LABELS` da yo'q edi, shuning uchun tugma nomsiz chiqardi — yorliq qo'shildi.
 Production: `a1a7466`, faqat `bum-web` (API o'zgarmadi), `build.json` → 2026-09-25T02:35:41Z,
 bundle `index-jYkSBk2l.js`.
+
+**Hisob-faktura va xarid shablonga ulandi (2026-09-25):** yangi
+`src/lib/pdf/document-template-bridge.ts` — sotuv hisob-fakturasi va xarid buyurtmasi ham
+kompaniyaning shabloni bilan chiqadi. Qoida o'sha: shablon "Standart" qilinmaguncha hujjat
+AVVALGI ko'rinishda qoladi. Ko'prik qiymatni ko'chiradi, qayta hisoblamaydi (test bilan
+qulflangan). Testlar: yangi `document-template-bridge.test.ts` (11) va brauzer e2e (+1);
+frontend 41 fayl / 209 test. Qolgan hujjat — maosh varaqasi.

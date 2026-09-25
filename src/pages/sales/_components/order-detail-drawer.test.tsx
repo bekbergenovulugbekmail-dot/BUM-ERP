@@ -97,6 +97,8 @@ vi.mock("@/lib/api.ts", () => ({
   },
   errorMessage: (error: unknown) => String(error),
 }));
+// Hujjatni kim chiqarayotgani hisob-fakturada ko'rsatiladi
+vi.mock("@/hooks/use-auth.ts", () => ({ useCurrentUser: () => ({ name: "Menejer" }) }));
 vi.mock("@/hooks/use-company.ts", () => ({
   usePermissions: () => ({ can: () => true }),
   useActiveCompany: () => ({ name: "BUM", currency: "UZS" }),

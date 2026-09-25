@@ -306,3 +306,56 @@ Chop etish yetkazma holatini o'zgartirmaydi (avvalgidek).
 Commit `d08063e`. `bum-api`: `Migratsiyalar qo'llandi (63ms)`, bitta `Server listening`,
 500 YO'Q. `bum-web`: `build.json` → **16:03:37Z**.
 `/api/documents/active/delivery_waybill` → **401** (marshrut bor, sessiya kerak).
+
+
+---
+
+## 6. HISOB-FAKTURA VA XARID SHABLONGA ULANDI (2026-09-25)
+
+Yetkazma nakladnoyidagi naqsh ikkita hujjatga kengaytirildi. Yangi dvigatel qurilmadi —
+o'sha `renderTemplate` va `pdf-utils`.
+
+### Yangi ko'prik — `src/lib/pdf/document-template-bridge.ts`
+
+| Funksiya | Vazifasi |
+|---|---|
+| `invoiceDocumentData` | Sotuv hisob-fakturasi → shablon ma'lumoti |
+| `purchaseDocumentData` | Xarid buyurtmasi → shablon ma'lumoti |
+| `activeTemplate` | Kompaniyaning shabloni bormi (`custom`), yo'qmi — `null` |
+| `saveWithTemplate` | Shablon bilan chizib faylni saqlaydi |
+
+Ko'prik qiymatlarni faqat KO'CHIRADI. Masalan hisob-fakturada qatorlar yig'indisi 168 000
+bo'lsa ham, jami hujjatdagidek **164 400** bo'lib qoladi (chegirma hisobga olingan) — bu
+test bilan qulflangan.
+
+### Chaqiruv joylari
+
+| Hujjat | Joy | Xulq |
+|---|---|---|
+| Sotuv hisob-fakturasi | `sales/_components/order-detail-drawer.tsx` → "Hisob-faktura" | shablon bo'lsa — u, aks holda `generateSalesInvoicePDF` |
+| Xarid buyurtmasi | `purchase/_components/order-detail-drawer.tsx` → "PDF" | shablon bo'lsa — u, aks holda `generatePurchaseOrderPDF` |
+
+Fayl nomlari: `hisob-faktura-SO-2026-0004.pdf`, `xarid-PO-2026-0001.pdf`.
+
+### Farqlar (yetkazma nakladnoyiga nisbatan)
+
+Yetkazmada jadval qatori — mijoz; bu ikkalasida — **mahsulot**. Shuning uchun `Mahsulot`,
+`SKU`, `Birlik`, `Miqdor`, `Narx`, `Summa` ustunlari to'ladi.
+
+| Maydon | Hisob-faktura | Xarid |
+|---|---|---|
+| Mijoz nomi / telefoni / manzili | ✅ | ❌ |
+| Ta'minotchi / telefoni | ❌ | ✅ |
+| Oraliq summa, Chegirma, Soliq | ✅ | ❌ |
+| Jami, To'langan, Qarz | ✅ | ✅ |
+
+### Tekshiruv
+
+- Yangi `document-template-bridge.test.ts` (**11**) — maydonlar to'lishi, jadval qatori
+  mahsulot ekani, MOLIYAVIY YAXLITLIK (summa qayta hisoblanmaydi), chegirmasiz qatorda
+  ustun bo'sh qolishi, xaridda mijoz maydonlari umuman yo'qligi, QR manbalari.
+- `document-template-print.spec.ts` ga 4-test qo'shildi — HAQIQIY brauzerda ikkala hujjat
+  ham shablon bilan chizilib, yaroqli PDF bo'lishi (kirill nomlar bilan).
+- Frontend to'plami **41 fayl / 209 test**; `tsc`, `eslint`, `vite build` toza.
+
+Qolgan yagona hujjat — **maosh varaqasi** (hali ulanmagan).
