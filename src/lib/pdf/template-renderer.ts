@@ -25,7 +25,7 @@ import {
   type TotalRow,
 } from "./pdf-utils.ts";
 import {
-  DEFAULT_ROW_LABELS, applyStroke, applyStyle, buildCodeImages, clearStroke, hexToRgb, isVisible, itemsTableSetup, textX,
+  DEFAULT_ROW_LABELS, applyStroke, applyStyle, buildCodeImages, clearStroke, hexToRgb, isVisible, itemsTableSetup, nextCodeAlias, textX,
   type DocumentData,
 } from "./template-common.ts";
 
@@ -177,7 +177,7 @@ function drawCode(ctx: RenderContext, element: DocumentElement) {
   const align = element.style?.align ?? "left";
   const x = align === "center" ? (ctx.left + ctx.right) / 2 - size / 2 : align === "right" ? ctx.right - size : ctx.left;
   try {
-    ctx.doc.addImage(image, x, ctx.y, size, height);
+    ctx.doc.addImage(image, x, ctx.y, size, height, nextCodeAlias());
   } catch {
     // e'tiborsiz
   }

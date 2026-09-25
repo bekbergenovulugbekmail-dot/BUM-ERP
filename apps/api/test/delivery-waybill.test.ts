@@ -203,6 +203,9 @@ describe("Nakladnoy: buyurtma qatorlari", () => {
     expect(Array.isArray(row!.items), "items massiv emas").toBe(true);
     expect(row!.items.length, "mahsulot qatori yo'q").toBeGreaterThan(0);
 
+    // To'liq buyurtma yetkazilmoqda — reys summasi buyurtma jami bilan bir xil
+    expect((row as unknown as { taskTotal: string; orderTotal: string }).taskTotal).toBe((row as unknown as { orderTotal: string }).orderTotal);
+
     const first = row!.items[0]!;
     expect(first.productName).toBeTruthy();
     expect(Number(first.quantity)).toBeGreaterThan(0);

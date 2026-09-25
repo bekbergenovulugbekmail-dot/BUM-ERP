@@ -80,3 +80,11 @@ akti, tarixiy qarz, aging, Excel/PDF.
 - Current issue: AUD-013 (HIGH), AUD-020 (HIGH, ta'minotchi akti)
 - Next step: supplier-payment reversal (payment-reversal.service naqshi bo'yicha), keyin ta'minotchi akti
   (`party_type = 'supplier'` qatorlari tayyor), so'ng AUD-004/008/022/023/024/025, 50 modul, 7 biznes.
+
+## AUDIT PAUSED — 2026-09-26 (TEMPORARY PRIORITY TASK boshlandi)
+- Current module: Finance / Purchase
+- Completed: A0, A1, A3 (1)–(4), A4 (12/27 topilma yopilgan yoki qisman)
+- Current issue: AUD-013 (ta'minotchi to'lovi/xarajat/o'tkazma/xarid qabulini bekor qilish), AUD-020
+- Next (audit resumed bo'lganda): AUD-013 → AUD-020 → AUD-004/008/022/023/024/025 → 50 modul → 7 biznes
+- Priority task: "DISTRIBUTION + FINANCE + CASH + DELIVERY RETURN + DOCUMENTS" (egasi, 2026-09-26) —
+  holati `.claude/PRIORITY-DISTRIBUTION-CASH.md` da.

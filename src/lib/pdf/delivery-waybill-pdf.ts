@@ -15,7 +15,7 @@ import {
   createDocument,
   PDF_COLORS,
   afterTable, drawCompanyHeader, drawFooter, drawInfoBox, drawNotes, drawSignatures, drawTotalsBox,
-  fmtMoney, tableOptions,
+  fmtMoney, fmtNum, tableOptions,
 } from "./pdf-utils.ts";
 
 /** Nakladnoydagi bitta yetkazma qatori. */
@@ -145,9 +145,12 @@ export async function generateDeliveryWaybillPDF(data: DeliveryWaybillData): Pro
 export type WaybillOrderItem = {
   productName: string;
   productSku: string | null;
+  productBarcode?: string | null;
+  /** Yetkazma (reys) miqdori — buyurtma birligida. */
   quantity: string;
   unitName: string | null;
   unitPrice: string;
+  discountPercent?: string;
   lineTotal: string;
 };
 
@@ -164,9 +167,21 @@ export type SingleDeliveryWaybill = {
   warehouseName: string | null;
   agentCode: string | null;
   agentName: string | null;
+  /** Yetkazuvchi telefoni (foydalanuvchi profilidan). */
+  agentPhone?: string | null;
+  /** Buyurtmani olgan savdo agenti — agent buyurtmasi bo'lmasa null. */
+  salesRepName?: string | null;
+  salesRepCode?: string | null;
+  salesRepPhone?: string | null;
+  /** Shu reysdagi tovar summasi (yetkazma qatorlaridan); yo'q bo'lsa — buyurtma summasi. */
+  taskTotal?: number | string;
   /** Serverdan keladi; eski javoblarda bo'lmasligi mumkin. */
   items?: WaybillOrderItem[];
 };
+
+/** "Ism · telefon"; ikkalasi ham bo'lmasa — "—" (nakladnoyda bo'sh joy qolmasin). */
+export const personLine = (name: string | null | undefined, phone: string | null | undefined) =>
+  [name, phone].filter((part) => part && part.trim()).join(" · ") || "—";
 
 /**
  * KO'P NAKLADNOY BITTA FAYLDA (7-vazifa).
@@ -205,7 +220,8 @@ export async function generateBulkDeliveryWaybillsPDF(data: {
         { label: "Mijoz", value: delivery.customerName },
         { label: "Telefon", value: dash(delivery.customerPhone) },
         { label: "Manzil", value: dash(delivery.customerAddress), wide: true },
-        { label: "Yetkazuvchi agent", value: dash(delivery.agentName ?? delivery.agentCode) },
+        { label: "Savdo agenti", value: personLine(delivery.salesRepName, delivery.salesRepPhone) },
+        { label: "Yetkazuvchi", value: personLine(delivery.agentName ?? delivery.agentCode, delivery.agentPhone) },
         { label: "Ombor", value: dash(delivery.warehouseName) },
         { label: "Buyurtma", value: dash(delivery.orderNumber) },
         { label: "Mas'ul shaxs", value: data.responsibleName },
@@ -213,19 +229,34 @@ export async function generateBulkDeliveryWaybillsPDF(data: {
       2,
     );
 
-    const body: string[][] = [
-      ["Yetkazma raqami", delivery.number],
-      ["Sana", delivery.scheduledDate],
-      ["Buyurtma", dash(delivery.orderNumber)],
-      ["Summa", fmtMoney(delivery.orderTotal, data.currency)],
-    ];
-    if (showDebt) {
-      body.push(["Mijoz qarzi", delivery.customerDebt === null ? "—" : fmtMoney(delivery.customerDebt, data.currency)]);
+    // Mahsulotlar — dostavshik do'konda aynan shu ro'yxat bo'yicha topshiradi (reys miqdori)
+    const total = Number(delivery.taskTotal ?? delivery.orderTotal);
+    if (delivery.items && delivery.items.length > 0) {
+      autoTable(doc, {
+        ...tableOptions(doc, data.company, header, { 0: { cellWidth: 9, halign: "center" as const }, 2: { halign: "right" as const }, 4: { halign: "right" as const }, 5: { halign: "right" as const } }),
+        startY,
+        head: [["№", "Mahsulot", "Miqdor", "Birlik", "Narx", "Summa"]],
+        body: delivery.items.map((item, row) => [
+          String(row + 1),
+          item.productName,
+          fmtNum(Number(item.quantity), 2),
+          dash(item.unitName),
+          fmtMoney(Number(item.unitPrice), data.currency),
+          fmtMoney(Number(item.lineTotal), data.currency),
+        ]),
+      });
+    } else {
+      const body: string[][] = [
+        ["Yetkazma raqami", delivery.number],
+        ["Sana", delivery.scheduledDate],
+        ["Buyurtma", dash(delivery.orderNumber)],
+        ["Summa", fmtMoney(total, data.currency)],
+      ];
+      autoTable(doc, { ...options, startY, head: [["Ko'rsatkich", "Qiymat"]], body });
     }
-    autoTable(doc, { ...options, startY, head: [["Ko'rsatkich", "Qiymat"]], body });
 
     const totals: TotalRow[] = [
-      { label: "Yetkazma summasi", value: fmtMoney(delivery.orderTotal, data.currency), bold: true },
+      { label: "Yetkazma summasi", value: fmtMoney(total, data.currency), bold: true },
     ];
     if (showDebt && delivery.customerDebt !== null) {
       totals.push({ label: "Mijoz qarzi", value: fmtMoney(delivery.customerDebt, data.currency), color: PDF_COLORS.red });

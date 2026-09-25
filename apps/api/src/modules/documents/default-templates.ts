@@ -27,7 +27,10 @@ const deliveryWaybill: DocumentTemplateSchema = {
     {
       key: "body",
       elements: [
+        { id: id("b", 6), type: "field", field: "delivery.salesRepName", label: "Savdo agenti" },
+        { id: id("b", 7), type: "field", field: "delivery.salesRepPhone", label: "Savdo agenti tel." },
         { id: id("b", 1), type: "field", field: "delivery.agentName", label: "Yetkazuvchi" },
+        { id: id("b", 8), type: "field", field: "delivery.agentPhone", label: "Yetkazuvchi tel." },
         { id: id("b", 2), type: "field", field: "delivery.responsibleName", label: "Masul shaxs" },
         { id: id("b", 3), type: "field", field: "warehouse.name", label: "Ombor" },
         {

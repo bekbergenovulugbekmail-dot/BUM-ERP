@@ -210,3 +210,62 @@ describe("A4 ga aqlli joylashuv", () => {
     expect(doc.getNumberOfPages()).toBeLessThan(20);
   });
 });
+
+describe("Savdo agenti va yetkazuvchi — har nakladnoy o'ziniki", () => {
+  const agentSchema: DocumentTemplateSchema = {
+    ...schema,
+    sections: schema.sections.map((section) =>
+      section.key !== "body" ? section : {
+        ...section,
+        elements: [
+          { id: "r1", type: "field", field: "delivery.salesRepName", label: "Savdo agenti" },
+          { id: "r2", type: "field", field: "delivery.salesRepPhone", label: "SA tel" },
+          { id: "r3", type: "field", field: "delivery.agentName", label: "Yetkazuvchi" },
+          { id: "r4", type: "field", field: "delivery.agentPhone", label: "YA tel" },
+          ...section.elements,
+        ],
+      }),
+  };
+  const three = (): Waybill[] => [
+    { ...waybill("DL-A", "Test Market", "2026-09-26", [item("Cola", 1_000)], 1_000), salesRepName: "Karimov Jasur", salesRepPhone: "+998941110001", agentName: "Rasulov Ali", agentPhone: "+998931110001" },
+    { ...waybill("DL-B", "Bonnu Market", "2026-09-26", [item("Cola", 2_000)], 2_000), salesRepName: "Olimov Bek", salesRepPhone: "+998941110002", agentName: "Sobirov Vali", agentPhone: "+998931110002" },
+    // Agent buyurtmasi emas (menejer yaratgan) va yetkazuvchi telefoni yo'q — "—", qo'shnisiniki emas
+    { ...waybill("DL-C", "Anor Market", "2026-09-26", [item("Chips", 3_000)], 3_000), salesRepName: null, salesRepPhone: null, agentName: "Sobirov Vali", agentPhone: null },
+  ];
+
+  it("ma'lumot darajasida: har hujjatda faqat o'z agentlari, yo'q bo'lsa \"—\"", () => {
+    const [a, b, c] = three().map((row) => waybillDocumentData(row, options).values);
+    expect(a!["delivery.salesRepName"]).toBe("Karimov Jasur");
+    expect(a!["delivery.agentPhone"]).toBe("+998931110001");
+    expect(b!["delivery.salesRepPhone"]).toBe("+998941110002");
+    expect(b!["delivery.agentName"]).toBe("Sobirov Vali");
+    expect(c!["delivery.salesRepName"]).toBe("—");
+    expect(c!["delivery.salesRepPhone"]).toBe("—");
+    expect(c!["delivery.agentPhone"]).toBe("—");
+  });
+
+  it("PDF ichida: har sahifada faqat o'z savdo agenti va yetkazuvchisi", async () => {
+    const doc = await renderWaybillsWithTemplate(agentSchema, three(), { ...options, mode: "full" });
+    expect(doc.getNumberOfPages()).toBe(3);
+    // Sahifalarni alohida hujjatga bo'lib o'qish o'rniga: har sahifa matnini `extractText` bilan olish uchun
+    // hujjat qayta chiziladi — bittadan. Birgalikdagi fayldagi natija bittalik bilan bir xil bo'lishi kerak.
+    const all = extractText(doc);
+    for (const row of three()) {
+      const single = extractText(await renderWaybillsWithTemplate(agentSchema, [row], { ...options, mode: "full" }));
+      expect(all).toContain(row.customerName);
+      if (row.salesRepName) expect(single).toContain(row.salesRepName);
+    }
+    const onlyC = extractText(await renderWaybillsWithTemplate(agentSchema, [three()[2]!], { ...options, mode: "full" }));
+    expect(onlyC, "Anor nakladnoyiga boshqa savdo agenti tushmasin").not.toContain("Karimov");
+    expect(onlyC).not.toContain("Olimov");
+    expect(onlyC).not.toContain("+998931110002");
+    expect(all.match(/Karimov Jasur/gu)?.length, "har agent faqat bir marta").toBe(1);
+    expect(all.match(/Olimov Bek/gu)?.length).toBe(1);
+  });
+
+  it("reys summasi (qayta yetkazishda) buyurtma summasidan ustun", () => {
+    const partial = { ...three()[0]!, orderTotal: 6_000, taskTotal: "1000.00" };
+    const data = waybillDocumentData(partial, options);
+    expect(data.numbers?.["finance.total"]).toBe(1_000);
+  });
+});

@@ -22,6 +22,7 @@ import { users } from "../../db/schema/platform.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import { customers, salesOrderItems, salesOrders, salesReturns } from "../../db/schema/sales.js";
 import { agentOrders } from "../../db/schema/sales-agent.js";
+import { salesReps } from "../../db/schema/crm.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { fromMinor, mulDivRound, toMinor } from "../../shared/decimal.js";
@@ -1128,6 +1129,20 @@ export async function deliveryWaybill(
  * chiqarilmaydi — server tomonda filtrlanadi, frontenddagi tanlovga ishonilmaydi.
  * Chop etish HUJJAT amali: yetkazma holati o'zgarmaydi.
  */
+type WaybillItem = {
+  productName: string;
+  productSku: string | null;
+  productBarcode: string | null;
+  quantity: string;
+  unitName: string | null;
+  unitPrice: string;
+  discountPercent: string;
+  lineTotal: string;
+};
+
+/** Savdo agentining foydalanuvchisi (yetkazuvchi `users` bilan to'qnashmasin). */
+const waybillRepUser = alias(users, "waybill_rep_user");
+
 export async function deliveryWaybillsByIds(
   conn: DbOrTx,
   tenant: TenantContext,
@@ -1151,9 +1166,17 @@ export async function deliveryWaybillsByIds(
       warehouseName: warehouses.name,
       agentCode: deliveryAgents.code,
       agentName: users.name,
+      agentPhone: users.phone,
+      // Buyurtmani olgan savdo agenti (agent buyurtmasi bo'lmasa — null): o'z telefoni, bo'lmasa foydalanuvchinikidan
+      salesRepName: salesReps.name,
+      salesRepCode: salesReps.code,
+      salesRepPhone: sql<string | null>`coalesce(${salesReps.phone}, ${waybillRepUser.phone})`,
     })
     .from(deliveryTasks)
     .innerJoin(salesOrders, eq(salesOrders.id, deliveryTasks.orderId))
+    .leftJoin(agentOrders, eq(agentOrders.orderId, salesOrders.id))
+    .leftJoin(salesReps, eq(salesReps.id, agentOrders.salesRepId))
+    .leftJoin(waybillRepUser, eq(waybillRepUser.id, salesReps.userId))
     .innerJoin(customers, eq(customers.id, deliveryTasks.customerId))
     .leftJoin(warehouses, eq(warehouses.id, deliveryTasks.warehouseId))
     .leftJoin(deliveryAgents, eq(deliveryAgents.id, deliveryTasks.deliveryAgentId))
@@ -1169,41 +1192,106 @@ export async function deliveryWaybillsByIds(
     .orderBy(asc(deliveryTasks.scheduledDate), asc(deliveryTasks.number));
 
   /**
-   * Nakladnoyga BUYURTMA QATORLARI ham kerak: dostavshik qo'liga beriladigan qog'ozda
-   * "qaysi mahsulotdan nechta" yozilmasa, do'konda nimani solishtirishni bilmaydi.
-   * Shuning uchun bitta qo'shimcha so'rovda hamma buyurtmaning qatorlari olinadi.
+   * Nakladnoy qatorlari — YETKAZMA qatorlaridan (`delivery_task_items`), buyurtma qatoridan emas.
+   *
+   * Ilgari buyurtma qatori olinardi: qisman yetkazilgandan keyin qolganini qayta yetkazishda (yoki qisman
+   * qaytarilgan buyurtmada) nakladnoyda buyurtmaning TO'LIQ miqdori chiqardi — dostavshik ortiqcha tovar bilan
+   * yuborilardi. Summa ham shu reysdagi miqdor ulushidan (narx va chegirma buyurtma qatoridagidek).
+   * Qatorlari yo'q eski yetkazmada — buyurtma qatorlari (avvalgi xulq).
    */
-  const orderIds = [...new Set(rows.map((row) => row.orderId).filter((id): id is string => Boolean(id)))];
-  const itemRows = orderIds.length
+  const taskIds2 = rows.map((row) => row.id);
+  const taskItemRows = taskIds2.length
+    ? await conn
+        .select({
+          taskId: deliveryTaskItems.taskId,
+          productName: products.name,
+          productSku: products.sku,
+          productBarcode: products.barcode,
+          quantity: deliveryTaskItems.quantity,
+          orderQuantity: salesOrderItems.quantity,
+          unitName: units.shortName,
+          unitPrice: salesOrderItems.unitPrice,
+          discountPercent: salesOrderItems.discountPercent,
+          orderLineTotal: salesOrderItems.lineTotal,
+        })
+        .from(deliveryTaskItems)
+        .innerJoin(salesOrderItems, eq(salesOrderItems.id, deliveryTaskItems.orderItemId))
+        .innerJoin(products, eq(products.id, deliveryTaskItems.productId))
+        .leftJoin(units, eq(units.id, salesOrderItems.unitId))
+        .where(inArray(deliveryTaskItems.taskId, taskIds2))
+        .orderBy(asc(salesOrderItems.createdAt), asc(salesOrderItems.id))
+    : [];
+  const itemsByTask = new Map<string, WaybillItem[]>();
+  for (const row of taskItemRows) {
+    const list = itemsByTask.get(row.taskId) ?? [];
+    const orderQty = toMinor(row.orderQuantity, 4);
+    list.push({
+      productName: row.productName,
+      productSku: row.productSku,
+      productBarcode: row.productBarcode,
+      quantity: row.quantity,
+      unitName: row.unitName,
+      unitPrice: row.unitPrice,
+      discountPercent: row.discountPercent,
+      lineTotal: orderQty > 0n ? fromMinor(mulDivRound(toMinor(row.orderLineTotal), toMinor(row.quantity, 4), orderQty)) : "0.00",
+    });
+    itemsByTask.set(row.taskId, list);
+  }
+
+  const legacyOrders = rows.filter((row) => !itemsByTask.has(row.id)).map((row) => row.orderId);
+  const legacyRows = legacyOrders.length
     ? await conn
         .select({
           orderId: salesOrderItems.orderId,
           productName: products.name,
           productSku: products.sku,
+          productBarcode: products.barcode,
           quantity: salesOrderItems.quantity,
           unitName: units.shortName,
           unitPrice: salesOrderItems.unitPrice,
+          discountPercent: salesOrderItems.discountPercent,
           lineTotal: salesOrderItems.lineTotal,
         })
         .from(salesOrderItems)
         .innerJoin(products, eq(products.id, salesOrderItems.productId))
         .leftJoin(units, eq(units.id, salesOrderItems.unitId))
-        .where(and(eq(salesOrderItems.companyId, tenant.company.id), inArray(salesOrderItems.orderId, orderIds)))
+        .where(and(eq(salesOrderItems.companyId, tenant.company.id), inArray(salesOrderItems.orderId, legacyOrders)))
         .orderBy(asc(salesOrderItems.createdAt), asc(salesOrderItems.id))
     : [];
-
-  const itemsByOrder = new Map<string, Omit<(typeof itemRows)[number], "orderId">[]>();
-  for (const { orderId, ...item } of itemRows) {
+  const itemsByOrder = new Map<string, WaybillItem[]>();
+  for (const { orderId, ...item } of legacyRows) {
     const list = itemsByOrder.get(orderId) ?? [];
     list.push(item);
     itemsByOrder.set(orderId, list);
   }
 
+  /**
+   * Reys summasi. Butun buyurtma yetkazilayotgan bo'lsa (qatorlar yig'indisi buyurtma qatorlari yig'indisiga teng) —
+   * buyurtmaning o'z jami (`total_amount`: umumiy chegirma va soliq bilan), aks holda qatorlar yig'indisi
+   * (qayta yetkazmaning `expectedAmount` i ham xuddi shunday — qatorlar ulushidan hisoblanadi).
+   */
+  const orderIds = [...new Set(rows.map((row) => row.orderId))];
+  const orderLineSums = orderIds.length
+    ? await conn
+        .select({ orderId: salesOrderItems.orderId, sum: sql<string>`coalesce(sum(${salesOrderItems.lineTotal}), 0)::numeric(18,2)` })
+        .from(salesOrderItems)
+        .where(and(eq(salesOrderItems.companyId, tenant.company.id), inArray(salesOrderItems.orderId, orderIds)))
+        .groupBy(salesOrderItems.orderId)
+    : [];
+  const lineSumByOrder = new Map(orderLineSums.map((row) => [row.orderId, toMinor(row.sum)]));
+
   return {
-    tasks: rows.map(({ customerDebt, orderId, ...row }) => ({
-      ...row,
-      customerDebt: canViewDebt ? customerDebt : null,
-      items: orderId ? (itemsByOrder.get(orderId) ?? []) : [],
-    })),
+    tasks: rows.map(({ customerDebt, orderId, ...row }) => {
+      const items = itemsByTask.get(row.id) ?? itemsByOrder.get(orderId) ?? [];
+      const linesSum = items.reduce((sum, item) => sum + toMinor(item.lineTotal), 0n);
+      const wholeOrder = items.length > 0 && linesSum === (lineSumByOrder.get(orderId) ?? -1n);
+      return {
+        ...row,
+        customerDebt: canViewDebt ? customerDebt : null,
+        /** Shu reysdagi tovar summasi — to'liq buyurtma summasi `orderTotal` da. */
+        taskTotal: wholeOrder ? row.orderTotal : fromMinor(linesSum),
+        items,
+      };
+    }),
   };
 }

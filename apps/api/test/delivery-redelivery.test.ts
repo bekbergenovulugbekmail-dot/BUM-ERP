@@ -106,6 +106,34 @@ async function readyAgent() {
 }
 
 describe("Qoldiqni qayta yetkazish", () => {
+  it("nakladnoy (bulk) qayta yetkazmada faqat QOLDIQ miqdor va summani ko'rsatadi, yetkazuvchi telefoni bilan", async () => {
+    const agent = await readyAgent();
+    const { taskId } = await partiallyDelivered(agent);
+    const child = (await redeliver(taskId, { deliveryAgentId: agent.id })).json().task as { id: string };
+
+    const res = await call(owner(), "POST", "/api/delivery/waybills/bulk", { taskIds: [child.id] });
+    expect(res.statusCode, res.body).toBe(200);
+    const [row] = res.json().tasks as {
+      orderTotal: string; taskTotal: string; agentName: string | null; agentPhone: string | null;
+      salesRepName: string | null; salesRepPhone: string | null;
+      items: { quantity: string; lineTotal: string }[];
+    }[];
+    expect(row!.items).toHaveLength(1);
+    expect(Number(row!.items[0]!.quantity), "buyurtmaning 10 tasi emas — qoldiq 4").toBe(4);
+    expect(Number(row!.items[0]!.lineTotal)).toBe(20_000);
+    expect(Number(row!.taskTotal), "reys summasi").toBe(20_000);
+    expect(Number(row!.orderTotal), "buyurtma summasi alohida").toBe(50_000);
+    expect(row!.agentName).toBeTruthy();
+    expect(row!.agentPhone, "yetkazuvchi telefoni nakladnoyda").toBeTruthy();
+    // Menejer yaratgan buyurtma — savdo agenti yo'q, boshqa buyurtmanikidan olinmaydi
+    expect(row!.salesRepName).toBeNull();
+    expect(row!.salesRepPhone).toBeNull();
+
+    // Asl (to'liq) yetkazma yopilgan — bulk faqat ochiqlarini beradi
+    const origin = await call(owner(), "POST", "/api/delivery/waybills/bulk", { taskIds: [taskId] });
+    expect(origin.json().tasks).toEqual([]);
+  });
+
   it("qoldiq uchun yangi yetkazma ochiladi: faqat qolgan miqdor, qoldiq summasi; buyurtma, zaxira va qarz o'zgarmaydi", async () => {
     const agent = await readyAgent();
     const { taskId, orderId } = await partiallyDelivered(agent);

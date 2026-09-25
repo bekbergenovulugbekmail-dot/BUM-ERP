@@ -18,7 +18,7 @@ import { __createTable, __drawTable, type Table } from "jspdf-autotable";
 import { pageSizeMm, type DocumentElement, type DocumentTemplateSchema, type ElementType } from "@bum/shared";
 import { A4, PDF_COLORS, createDocument } from "./pdf-utils.ts";
 import {
-  DEFAULT_ROW_LABELS, applyStroke, applyStyle, buildCodeImages, clearStroke, hexToRgb, isVisible, itemsTableSetup,
+  DEFAULT_ROW_LABELS, applyStroke, applyStyle, buildCodeImages, clearStroke, hexToRgb, isVisible, itemsTableSetup, nextCodeAlias,
   type DocumentData,
 } from "./template-common.ts";
 
@@ -263,7 +263,7 @@ function drawCode(ctx: FreeContext, element: DocumentElement, box: Box) {
   const x = box.x + (box.w - w) / 2;
   if (image) {
     try {
-      doc.addImage(image, x, box.y, w, h);
+      doc.addImage(image, x, box.y, w, h, nextCodeAlias());
     } catch {
       // e'tiborsiz
     }

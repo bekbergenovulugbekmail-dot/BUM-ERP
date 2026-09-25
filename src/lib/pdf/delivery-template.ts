@@ -23,6 +23,8 @@ export function waybillDocumentData(
   options: { company: CompanyInfo; currency: string; responsibleName: string },
 ): DocumentData {
   const debt = delivery.customerDebt ?? 0;
+  // Shu reysdagi tovar summasi (qisman/qayta yetkazishda buyurtmaning to'liq summasi emas)
+  const total = Number(delivery.taskTotal ?? delivery.orderTotal);
   const money = (value: number) => fmtMoney(value, options.currency);
   return {
     company: options.company,
@@ -39,16 +41,19 @@ export function waybillDocumentData(
       "customer.phone": dash(delivery.customerPhone),
       "customer.address": dash(delivery.customerAddress),
       "delivery.agentName": dash(delivery.agentName ?? delivery.agentCode),
-      "delivery.agentPhone": "",
+      "delivery.agentPhone": dash(delivery.agentPhone ?? null),
+      // Savdo agenti: agent buyurtmasi bo'lmasa "—" (boshqa hujjatdan olinmaydi — har nakladnoy o'z yetkazmasidan)
+      "delivery.salesRepName": dash(delivery.salesRepName ?? null),
+      "delivery.salesRepPhone": dash(delivery.salesRepPhone ?? null),
       "delivery.responsibleName": options.responsibleName,
       "warehouse.name": dash(delivery.warehouseName),
-      "finance.total": money(delivery.orderTotal),
+      "finance.total": money(total),
       "finance.debt": money(debt),
       "user.name": options.responsibleName,
       "system.printedAt": new Date().toLocaleString("uz-UZ"),
     },
     // Shart tekshiruvi uchun sonlar (masalan "qarz > 0 bo'lsa ogohlantirish chiqsin")
-    numbers: { "finance.total": delivery.orderTotal, "finance.debt": debt },
+    numbers: { "finance.total": total, "finance.debt": debt },
     /**
      * Jadval qatorlari — BUYURTMADAGI MAHSULOTLAR (serverdan keladi). Mijoz ustunlari
      * har qatorda takrorlanadi, chunki nakladnoy bitta mijozga tegishli: shu bilan
@@ -62,6 +67,8 @@ export function waybillDocumentData(
         ? delivery.items.map((item) => ({
             name: item.productName,
             sku: dash(item.productSku),
+            barcode: dash(item.productBarcode ?? null),
+            discount: item.discountPercent && Number(item.discountPercent) > 0 ? `${fmtNum(Number(item.discountPercent), 2)}%` : "",
             unit: dash(item.unitName),
             quantity: fmtNum(Number(item.quantity), 2),
             price: money(Number(item.unitPrice)),
@@ -76,16 +83,17 @@ export function waybillDocumentData(
               customerName: delivery.customerName,
               customerPhone: dash(delivery.customerPhone),
               customerAddress: dash(delivery.customerAddress),
-              total: money(delivery.orderTotal),
+              total: money(total),
               customerDebt: money(debt),
             },
           ],
-    totals: { total: money(delivery.orderTotal), debt: money(debt) },
+    totals: { total: money(total), debt: money(debt) },
     // Ustun nomlari — shablonda nom yozilmagan bo'lsa shular chiqadi (xom kalit emas)
     columnLabels: {
       index: "№",
       name: "Mahsulot",
       sku: "SKU",
+      barcode: "Shtrix-kod",
       unit: "Birlik",
       quantity: "Miqdor",
       price: "Narx",

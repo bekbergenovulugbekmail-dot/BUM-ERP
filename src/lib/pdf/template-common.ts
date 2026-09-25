@@ -271,3 +271,11 @@ export function itemsTableSetup(
 
   return { options, finish };
 }
+
+let codeAliasSeq = 0;
+/**
+ * QR/shtrix-kod rasmi uchun jsPDF ichidagi noyob nom. jsPDF rasmlarni ma'lumot xeshi bo'yicha qayta ishlatadi —
+ * ommaviy chop etishda (bir faylda ko'p nakladnoy) xesh to'qnashuvi bir hujjatga boshqasining QR kodini qo'yib
+ * yuborishi nazariy jihatdan mumkin. Har chizishga alohida nom berilsa, har hujjat faqat o'z kodini oladi.
+ */
+export const nextCodeAlias = () => `bum-code-${++codeAliasSeq}`;
