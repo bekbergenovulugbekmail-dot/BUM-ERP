@@ -125,7 +125,7 @@ import {
 } from "./pos.service.js";
 import { getSalesPolicy, salesPolicySchema, saveSalesPolicy } from "./sales-policy.service.js";
 import { CASH_MOVEMENT_KINDS, listCashMovements, posCashMovement } from "./pos-cash.service.js";
-import { REFUND_METHODS, returnSaleItems } from "./returns.service.js";
+import { REFUND_METHODS, RETURN_DISPOSITIONS, returnSaleItems } from "./returns.service.js";
 
 const nullableText = (max: number) =>
   z
@@ -229,6 +229,11 @@ const returnItemsBody = z.strictObject({
   reason: nullableText(1000),
   /** Pul qaytaradigan ochiq web kassa smenasi (ixtiyoriy). */
   shiftId: z.uuid().nullable().optional(),
+  /** Qaytgan tovar holati qator bo'yicha (sotuvga / karantin / shikastlangan / hisobdan chiqarish / ta'minotchiga). */
+  dispositions: z
+    .array(z.strictObject({ orderItemId: z.uuid(), disposition: z.enum(RETURN_DISPOSITIONS), warehouseId: z.uuid().nullish() }))
+    .max(500)
+    .optional(),
 });
 
 const paymentBody = z.strictObject({

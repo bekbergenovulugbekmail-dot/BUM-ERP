@@ -127,6 +127,16 @@ export type SalesOrderItem = {
 };
 
 /** Qaytarish hujjati va uning qatorlari (nakladnoy ichidan qisman qaytarish tarixi). */
+/** Qaytgan tovar holati. */
+export type ReturnDisposition = "sellable" | "quarantine" | "damaged" | "write_off" | "supplier_return";
+export const DISPOSITION_LABELS: Record<ReturnDisposition, string> = {
+  sellable: "Sotuvga",
+  quarantine: "Karantin",
+  damaged: "Shikastlangan",
+  write_off: "Hisobdan chiqarish",
+  supplier_return: "Ta'minotchiga qaytarish",
+};
+
 export type SalesReturnRecord = {
   id: string;
   number: string;
@@ -134,6 +144,8 @@ export type SalesReturnRecord = {
   refundMethod: string;
   refundAmount: string;
   reason: string | null;
+  /** `return` — mijoz qaytardi; `delivery_refusal` — "Yetkazilmadi" (yetkazishda rad etilgan). */
+  kind?: "return" | "delivery_refusal";
   createdAt: string;
   /** Kim qabul qilgan (hisob o'chirilgan bo'lsa null). */
   createdByName: string | null;
@@ -143,6 +155,7 @@ export type SalesReturnRecord = {
     productName: string;
     quantity: string;
     lineTotal: string;
+    disposition?: ReturnDisposition;
   }[];
 };
 

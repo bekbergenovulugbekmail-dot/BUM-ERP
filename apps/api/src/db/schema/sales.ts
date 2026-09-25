@@ -585,11 +585,19 @@ export const salesReturns = pgTable(
     cashbackReversed: money("cashback_reversed").notNull().default("0"),
 
     reason: text("reason"),
+    /**
+     * `return` — sotuvdan keyingi qaytarish (mijoz qaytardi); `delivery_refusal` — "Yetkazilmadi": yetkazishda rad
+     * etilgan yoki qisman yetkazilgan tovar omborga qaytdi. Arifmetika bir xil, hujjat turi, raqami va jurnal turi alohida.
+     */
+    kind: varchar("kind", { length: 24 }).notNull().default("return"),
+    deliveryTaskId: uuid("delivery_task_id"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     ...timestamps(),
   },
   (t) => [
     uniqueIndex("sr_company_number_key").on(t.companyId, t.number),
+    index("sr_company_kind_idx").on(t.companyId, t.kind, t.createdAt),
+    check("sr_kind_known", sql`${t.kind} IN ('return', 'delivery_refusal')`),
     index("sr_order_idx").on(t.orderId),
     index("sr_shift_idx").on(t.posShiftId),
     index("sr_company_created_idx").on(t.companyId, t.createdAt),
@@ -614,10 +622,15 @@ export const salesReturnItems = pgTable(
     quantity: qty("quantity").notNull(),
     lineTotal: money("line_total").notNull(),
     cogs: money("cogs").notNull().default("0"),
+    /** Qaytgan tovar holati: sotuvga | karantin | shikastlangan | hisobdan chiqarish | ta'minotchiga qaytarish uchun. */
+    disposition: varchar("disposition", { length: 16 }).notNull().default("sellable"),
+    /** Karantin / ta'minotchiga qaytarish — tovar o'tkazilgan ombor. */
+    dispositionWarehouseId: uuid("disposition_warehouse_id").references(() => warehouses.id, { onDelete: "restrict" }),
     ...timestamps(),
   },
   (t) => [
     index("sri_return_idx").on(t.returnId),
+    check("sri_disposition_known", sql`${t.disposition} IN ('sellable', 'quarantine', 'damaged', 'write_off', 'supplier_return')`),
     index("sri_order_item_idx").on(t.orderItemId),
     check("sri_qty_positive", sql`${t.quantity} > 0`),
   ],

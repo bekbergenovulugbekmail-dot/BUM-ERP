@@ -37,7 +37,7 @@ import { unitFactorToBase } from "../catalog/conversions.js";
 import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { ledgerAccountFor, recordCashTransaction, resolvePaymentAccount, todayIso } from "../finance/cash.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
-import { moveStock } from "../inventory/stock.service.js";
+import { moveStock, postStockJournal, transferStock } from "../inventory/stock.service.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
 import { reverseCashback } from "./cashback.service.js";
 import { refundToBalance } from "./customer-balance.service.js";
@@ -47,6 +47,16 @@ import { isCompletedSale } from "./sale-status.js";
 import { assertShiftOperator, type SaleConflict } from "./pos.service.js";
 
 export const REFUND_METHODS = ["cash", "card", "bank", "balance"] as const;
+/** Qaytgan tovar holati (sotuvdan keyingi qaytarishda). */
+export const RETURN_DISPOSITIONS = ["sellable", "quarantine", "damaged", "write_off", "supplier_return"] as const;
+export type ReturnDisposition = (typeof RETURN_DISPOSITIONS)[number];
+const DISPOSITION_LABELS: Record<ReturnDisposition, string> = {
+  sellable: "sotuvga",
+  quarantine: "karantin",
+  damaged: "shikastlangan",
+  write_off: "hisobdan chiqarildi",
+  supplier_return: "ta'minotchiga qaytarish uchun",
+};
 export type RefundMethod = (typeof REFUND_METHODS)[number];
 type RefundPart = { method: RefundMethod; amount: bigint };
 const REFUND_LABELS: Record<RefundMethod, string> = { cash: "Naqd", card: "Karta", bank: "Bank", balance: "Balans" };
@@ -61,6 +71,14 @@ export type ReturnItemsInput = {
   shiftId?: string | null;
   /** Desktop kassa sinxroni: qurilmadagi ID, raqam, vaqt va qurilma. */
   offline?: { id: string; number: string; returnedAt: Date; deviceId: string };
+  /**
+   * `delivery_refusal` — "Yetkazilmadi" (yetkazma bo'limi chaqiradi): alohida raqam (YT-), jurnal turi
+   * `delivery_refusal`, qaytarish hisobotlariga kirmaydi. Pul, zaxira va qarz arifmetikasi aynan bir xil.
+   */
+  kind?: "return" | "delivery_refusal";
+  deliveryTaskId?: string | null;
+  /** Qator bo'yicha tovar holati (faqat sotuvdan keyingi qaytarishda); berilmasa — sotuvga. */
+  dispositions?: { orderItemId: string; disposition: ReturnDisposition; warehouseId?: string | null }[];
 };
 
 const minBig = (a: bigint, b: bigint) => (a < b ? a : b);
@@ -226,9 +244,88 @@ async function refundParts(
   return requested;
 }
 
+/**
+ * Qaytgan tovar holati. Tovar avval o'z omboriga sotuvdagi tannarxda qaytadi (return_in) — sotuv va tannarx teskari
+ * bo'ladi; keyin holatga qarab:
+ *   sellable                      — o'sha omborda qoladi (sotuvga yaroqli)
+ *   quarantine / supplier_return  — tanlangan omborga o'tkaziladi (sotuvga yaroqsiz zaxira alohida turadi)
+ *   damaged / write_off           — hisobdan chiqariladi: DR 5500 Boshqa xarajatlar / CR 1200 Tovar zaxirasi
+ * Zaxira va jurnal har doim teng: kirim tannarxi = chiqim tannarxi, ombor manfiyga tushmaydi.
+ */
+async function applyDisposition(
+  tx: Tx,
+  tenant: TenantContext,
+  input: {
+    disposition: ReturnDisposition;
+    targetWarehouseId: string | null;
+    warehouseId: string;
+    productId: string;
+    baseQty: bigint;
+    cogs: bigint;
+    returnId: string;
+    number: string;
+    orderNumber: string;
+    date: string;
+  },
+  meta: RequestMeta,
+) {
+  if (input.disposition === "sellable") return;
+  const label = `Qaytgan tovar ${DISPOSITION_LABELS[input.disposition]}: ${input.number} (${input.orderNumber})`;
+  if (input.disposition === "damaged" || input.disposition === "write_off") {
+    await moveStock(tx, tenant.company.id, tenant.user.id, {
+      type: "writeoff",
+      productId: input.productId,
+      warehouseId: input.warehouseId,
+      quantity: fromMinor(input.baseQty, 4),
+      costPrice: fromMinor(mulDivRound(input.cogs, 1_000_000n, input.baseQty), 4),
+      referenceType: "sales_return_writeoff",
+      referenceId: input.returnId,
+      notes: label,
+    });
+    await postStockJournal(tx, tenant.company.id, tenant.user.id, {
+      referenceType: "sales_return_writeoff",
+      referenceId: input.returnId,
+      date: input.date,
+      description: label,
+      incoming: 0n,
+      outgoing: input.cogs,
+      incomingCounter: "other_income",
+    });
+    return;
+  }
+  // Karantin / ta'minotchiga qaytarish: sotuvga yaroqsiz zaxira alohida omborda (jurnal o'zgarmaydi — bir xil 1200)
+  await transferStock(
+    tx,
+    tenant,
+    {
+      productId: input.productId,
+      fromWarehouseId: input.warehouseId,
+      toWarehouseId: input.targetWarehouseId!,
+      quantity: fromMinor(input.baseQty, 4),
+      notes: label,
+    },
+    meta,
+  );
+}
+
 export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: string, input: ReturnItemsInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
   const offline = input.offline;
+  const kind = input.kind ?? "return";
+  const docType = kind === "delivery_refusal" ? "delivery_refusal" : "sales_return";
+  const docLabel = kind === "delivery_refusal" ? "Yetkazilmadi" : "Qaytarish";
+  const dispositions = new Map((input.dispositions ?? []).map((row) => [row.orderItemId, row]));
+  if (kind === "delivery_refusal" && dispositions.size > 0) throw badRequest("Yetkazilmagan tovar holati — omborga sotuvga qaytadi");
+  const dispositionOf = (orderItemId: string) => {
+    const row = dispositions.get(orderItemId);
+    return { disposition: (row?.disposition ?? "sellable") as ReturnDisposition, targetWarehouseId: row?.warehouseId ?? null };
+  };
+  for (const row of dispositions.values()) {
+    if (!input.items.some((item) => item.orderItemId === row.orderItemId)) throw badRequest("Holat qaytarilmayotgan qatorga berilgan");
+    const needsWarehouse = row.disposition === "quarantine" || row.disposition === "supplier_return";
+    if (needsWarehouse && !row.warehouseId) throw badRequest("Karantin / ta'minotchiga qaytarish uchun omborni tanlang");
+    if (!needsWarehouse && row.warehouseId) throw badRequest("Bu holatda ombor tanlanmaydi");
+  }
 
   const [order] = await tx
     .select({
@@ -356,7 +453,7 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
       column: salesReturns.number,
       companyColumn: salesReturns.companyId,
       companyId,
-      prefix: `QR-${date.slice(0, 4)}-`,
+      prefix: `${kind === "delivery_refusal" ? "YT" : "QR"}-${date.slice(0, 4)}-`,
       width: 4,
     }));
 
@@ -439,6 +536,8 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
     refundMethod: refundMethodValue,
     refunds: pieces.length > 0 ? storedRefunds : null,
     reason: input.reason ?? null,
+    kind,
+    deliveryTaskId: input.deliveryTaskId ?? null,
     createdBy: tenant.user.id,
     ...(offline ? { createdAt: offline.returnedAt } : {}),
   });
@@ -452,6 +551,8 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
       quantity: fromMinor(line.qty, 4),
       lineTotal: fromMinor(line.value),
       cogs: fromMinor(line.cogs),
+      disposition: dispositionOf(line.row.id).disposition,
+      dispositionWarehouseId: dispositionOf(line.row.id).targetWarehouseId,
     });
     const factor = toMinor(await unitFactorToBase(tx, companyId, line.product, line.row.unitId), 4);
     const baseQty = rescale(line.qty * factor, 8, 4);
@@ -461,11 +562,22 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
       warehouseId: order.warehouseId,
       quantity: fromMinor(baseQty, 4),
       costPrice: fromMinor(mulDivRound(line.cogs, 1_000_000n, baseQty), 4),
-      referenceType: "sales_return",
+      referenceType: docType,
       referenceId: returnId,
-      notes: `Qaytarish: ${number} (${order.number})`,
+      notes: `${docLabel}: ${number} (${order.number})`,
       occurredAt: offline?.returnedAt,
     });
+    await applyDisposition(tx, tenant, {
+      ...dispositionOf(line.row.id),
+      productId: line.row.productId,
+      warehouseId: order.warehouseId,
+      baseQty,
+      cogs: line.cogs,
+      returnId,
+      number,
+      orderNumber: order.number,
+      date,
+    }, meta);
     await tx
       .update(salesOrderItems)
       .set({ returnedQty: sql`${salesOrderItems.returnedQty} + ${fromMinor(line.qty, 4)}::numeric`, updatedAt: new Date() })
@@ -489,8 +601,8 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
     await postJournalEntry(tx, companyId, tenant.user.id, {
       party: order.customerId ? { type: "customer", id: order.customerId } : null,
       entryDate: date,
-      description: `Qaytarish: ${number} (${order.number})`,
-      referenceType: "sales_return",
+      description: `${docLabel}: ${number} (${order.number})`,
+      referenceType: docType,
       referenceId: returnId,
       lines: journal,
     });

@@ -19,9 +19,10 @@ import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import {
-  PAYMENT_LABELS, companyInfo, newReference, num, todayLocal,
-  type PaymentMethod, type SalesOrderDetail, type SalesOrderItem,
+  DISPOSITION_LABELS, PAYMENT_LABELS, companyInfo, newReference, num, todayLocal,
+  type PaymentMethod, type ReturnDisposition, type SalesOrderDetail, type SalesOrderItem,
 } from "../_lib/types.ts";
+import { Badge } from "@/components/ui/badge.tsx";
 
 type Props = {
   orderId: string;
@@ -96,6 +97,11 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const [refundMethod, setRefundMethod] = useState<PaymentMethod>("cash");
   /** Qator id → qaytariladigan miqdor (matn): nakladnoydan aynan kerakli mahsulotni qaytarish. */
   const [returnQty, setReturnQty] = useState<Record<string, string>>({});
+  /** Qator id → qaytgan tovar holati (standart — sotuvga). */
+  const [returnDisposition, setReturnDisposition] = useState<Record<string, ReturnDisposition>>({});
+  /** Karantin / ta'minotchiga qaytarish uchun ombor. */
+  const [dispositionWarehouseId, setDispositionWarehouseId] = useState<string | null>(null);
+  const warehouseOptions = useApiQuery<{ warehouses: { id: string; name: string }[] }>(showReturn ? "/api/inventory/warehouses" : null).data?.warehouses ?? [];
   const [loading, setLoading] = useState(false);
 
   const handleConfirm = async () => {
@@ -155,10 +161,18 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
     setLoading(true);
     try {
       // Qatorlar bo'yicha qaytarish — mavjud `return-items` oqimi (zaxira, qarz va jurnal shu yerda)
+      const dispositions = returnLines
+        .map((line) => ({ orderItemId: line.item.id, disposition: returnDisposition[line.item.id] ?? "sellable" }))
+        .filter((row) => row.disposition !== "sellable")
+        .map((row) => ({
+          ...row,
+          warehouseId: row.disposition === "quarantine" || row.disposition === "supplier_return" ? dispositionWarehouseId : null,
+        }));
       const result = await returnItems.mutateAsync({
         items: returnLines.map((line) => ({ orderItemId: line.item.id, quantity: String(line.quantity) })),
         refundMethod: refund ? refundMethod : "balance",
         reason: returnReason.trim() || null,
+        ...(dispositions.length > 0 ? { dispositions } : {}),
       });
       const refunded = num(result.return?.refundAmount ?? "0");
       toast.success(refunded > 0
@@ -167,6 +181,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
       setShowReturn(false);
       setReturnReason("");
       setReturnQty({});
+      setReturnDisposition({});
     } catch (err) { toast.error(errorMessage(err)); }
     finally { setLoading(false); }
   };
@@ -420,6 +435,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                             <th className="px-2 py-2 text-right font-medium text-muted-foreground">Qaytarilgan</th>
                             <th className="px-2 py-2 text-right font-medium text-muted-foreground">Qolgan</th>
                             <th className="px-2 py-2 text-right font-medium text-muted-foreground w-28">Qaytarish</th>
+                            <th className="px-2 py-2 font-medium text-muted-foreground w-36">Holati</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -451,6 +467,20 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                                     placeholder="0"
                                   />
                                 </td>
+                                <td className="px-2 py-1.5">
+                                  <Select
+                                    value={returnDisposition[item.id] ?? "sellable"}
+                                    onValueChange={(value) => setReturnDisposition((prev) => ({ ...prev, [item.id]: value as ReturnDisposition }))}
+                                    disabled={remaining <= 0}
+                                  >
+                                    <SelectTrigger className="h-7 text-xs" data-testid={`return-disposition-${item.productSku}`}><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                      {(Object.keys(DISPOSITION_LABELS) as ReturnDisposition[]).map((key) => (
+                                        <SelectItem key={key} value={key}>{DISPOSITION_LABELS[key]}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </td>
                               </tr>
                             );
                           })}
@@ -462,6 +492,20 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                       <p className="text-xs text-destructive">
                         {overLimit[0]!.item.productName}: qolganidan ko'p ({remainingOf(overLimit[0]!.item)} gacha)
                       </p>
+                    )}
+
+                    {returnLines.some((line) => ["quarantine", "supplier_return"].includes(returnDisposition[line.item.id] ?? "sellable")) && (
+                      <div>
+                        <Label className="text-xs">Karantin / qaytarish ombori</Label>
+                        <Select value={dispositionWarehouseId ?? undefined} onValueChange={setDispositionWarehouseId}>
+                          <SelectTrigger className="h-8 text-xs" data-testid="return-disposition-warehouse"><SelectValue placeholder="Omborni tanlang" /></SelectTrigger>
+                          <SelectContent>
+                            {warehouseOptions.filter((row) => row.id !== order.warehouseId).map((row) => (
+                              <SelectItem key={row.id} value={row.id}>{row.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     )}
 
                     <div>
@@ -544,7 +588,10 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                         {order.returns.map((record) => (
                           <div key={record.id} className="rounded-lg border border-border/60 p-2.5">
                             <div className="flex flex-wrap items-baseline justify-between gap-2">
-                              <span className="font-mono text-xs font-semibold">{record.number}</span>
+                              <span className="font-mono text-xs font-semibold">
+                                {record.number}
+                                {record.kind === "delivery_refusal" && <Badge variant="outline" className="ml-1.5 text-[10px]">Yetkazilmadi</Badge>}
+                              </span>
                               <span className="text-sm font-semibold text-destructive">{fmt(num(record.totalAmount))}</span>
                             </div>
                             <p className="text-[11px] text-muted-foreground">
@@ -556,7 +603,10 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                             <ul className="mt-1 space-y-0.5">
                               {record.items.map((line) => (
                                 <li key={line.orderItemId + line.productId} className="flex justify-between text-xs">
-                                  <span className="truncate">{line.productName}</span>
+                                  <span className="truncate">
+                                    {line.productName}
+                                    {line.disposition && line.disposition !== "sellable" && <span className="text-muted-foreground"> · {DISPOSITION_LABELS[line.disposition]}</span>}
+                                  </span>
                                   <span className="ml-3 shrink-0 tabular-nums text-muted-foreground">
                                     {num(line.quantity)} · {fmt(num(line.lineTotal))}
                                   </span>

@@ -912,6 +912,9 @@ export async function returnDeliveryGoods(
         items: remaining.map((item) => ({ orderItemId: item.orderItemId, quantity: fromMinor(item.remaining, 4) })),
         refundMethod: input.refundMethod,
         reason: `Yetkazma ${task.number} qaytdi${input.reason ? `: ${input.reason}` : ""}`,
+        // Z1: sotuvdan keyingi qaytarish EMAS — "Yetkazilmadi" hujjati (YT-), o'z jurnal turi bilan
+        kind: "delivery_refusal",
+        deliveryTaskId: task.id,
       },
       meta,
     );

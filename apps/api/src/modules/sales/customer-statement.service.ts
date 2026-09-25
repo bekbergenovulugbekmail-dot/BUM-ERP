@@ -50,6 +50,7 @@ export function operationKind(referenceType: string | null): { kind: string; lab
   const type = referenceType ?? "";
   if (type === "sales_order") return { kind: "sale", label: "Sotuv" };
   if (type === "sales_return") return { kind: "return", label: "Qaytarish" };
+  if (type === "delivery_refusal") return { kind: "refusal", label: "Yetkazilmadi" };
   if (type.startsWith("sales_refund") || type.startsWith("sales_return_refund")) return { kind: "refund", label: "Pul qaytarildi" };
   if (type === "customer_payment") return { kind: "payment", label: "To'lov" };
   if (type === "customer_payment_reversal") return { kind: "payment_reversal", label: "To'lov bekor qilindi" };
@@ -152,11 +153,11 @@ async function resolveDocuments(conn: DbOrTx, companyId: string, lines: RawLine[
     .where(and(eq(salesOrders.companyId, companyId), inArray(salesOrders.id, ids)));
   for (const row of orders) docs.set(row.id, { type: "sales_order", id: row.id, number: row.number, orderNumber: row.number, status: row.status });
   const returns = await conn
-    .select({ id: salesReturns.id, number: salesReturns.number, orderNumber: salesOrders.number })
+    .select({ id: salesReturns.id, number: salesReturns.number, orderNumber: salesOrders.number, kind: salesReturns.kind })
     .from(salesReturns)
     .innerJoin(salesOrders, eq(salesOrders.id, salesReturns.orderId))
     .where(and(eq(salesReturns.companyId, companyId), inArray(salesReturns.id, ids)));
-  for (const row of returns) docs.set(row.id, { type: "sales_return", id: row.id, number: row.number, orderNumber: row.orderNumber, status: null });
+  for (const row of returns) docs.set(row.id, { type: row.kind === "delivery_refusal" ? "delivery_refusal" : "sales_return", id: row.id, number: row.number, orderNumber: row.orderNumber, status: null });
   const payments = await conn
     .select({
       id: customerPayments.id,

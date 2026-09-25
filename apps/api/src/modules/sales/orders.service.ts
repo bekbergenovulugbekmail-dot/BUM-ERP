@@ -540,6 +540,7 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
       refundMethod: salesReturns.refundMethod,
       refundAmount: salesReturns.refundAmount,
       reason: salesReturns.reason,
+      kind: salesReturns.kind,
       createdAt: salesReturns.createdAt,
       createdByName: users.name,
     })
@@ -557,6 +558,7 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
           productName: products.name,
           quantity: salesReturnItems.quantity,
           lineTotal: salesReturnItems.lineTotal,
+          disposition: salesReturnItems.disposition,
         })
         .from(salesReturnItems)
         .innerJoin(products, eq(products.id, salesReturnItems.productId))

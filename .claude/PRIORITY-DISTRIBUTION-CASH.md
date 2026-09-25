@@ -93,7 +93,14 @@ tushuntiriladi va tasdiqsiz bajarilmaydi (xotira: financial-integrity-gate).
   Qarorlar: (1) kassa hujjatlari bank komissiyasini avtomatik yechmaydi — bekor qilish har doim toza; eski
   `/cash-transfers` API o'zgarmadi; (2) hisob-faktura bo'yicha xarajat — mavjud Xarajatlar moduli (tasdiq bilan),
   kassadagi mayda chiqim — `expense` hujjati; (3) to'langan xarajatni bekor qilish hali yo'q (audit ro'yxatiga).
-- W5 Qaytarishlar: "Yetkazilmadi" (Z1) va mijoz qaytarishi + disposition (sotuvga / karantin / shikastlangan).
+- W5 ✅ Qaytarishlar (0091, qo'shuvchi): `sales_returns.kind` = return | delivery_refusal, `delivery_task_id`. Yetkazmada
+  rad etilgan/qisman yetkazilgan qoldiq — "Yetkazilmadi" (YT- raqam, jurnal va ombor harakati turi `delivery_refusal`,
+  aktda "Yetkazilmadi"); pul/zaxira/qarz arifmetikasi o'zgarmadi (bir xil `returnSaleItems`). Sotuvdan keyingi qaytarish
+  (QR-) qator bo'yicha holat bilan: sotuvga | karantin / ta'minotchiga (tanlangan omborga o'tkaziladi) | shikastlangan /
+  hisobdan chiqarish (DR 5500 / CR 1200). UI: buyurtma oynasida holat tanlash, tarixda "Yetkazilmadi" belgisi.
+  Test: `audit-return-kinds.test.ts` (3; 1200 = ombor qiymati, aylanma balans). Eslatma: POS qurilma analitikasi
+  qaytarishlarni daromaddan ayirishda davom etadi (sof daromad to'g'ri bo'lishi uchun) — rad etish u yerda alohida
+  ko'rsatilmaydi (keyingi bosqich).
 - W6 Yetkazma reysi: snapshot, 3 hujjat (mijoz nakladnoyi, omborchi yig'ma ×2, yetkazuvchi marshrut varag'i),
   terish/yuklash holati, "Yetkazishga chiqadiganlar" + hammasini tanlash.
 - W7 23-bo'lim senariysi (3 mijoz) — API reconciliation, E2E, PDF QA, tenant.

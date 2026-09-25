@@ -47,6 +47,8 @@ const KIND_COLORS: Record<string, string> = {
   payment: "text-emerald-700 dark:text-emerald-400",
   payment_reversal: "text-destructive",
   return: "text-sky-700 dark:text-sky-400",
+  refusal: "text-orange-700 dark:text-orange-400",
+  wallet_reversal: "text-destructive",
   refund: "text-amber-700 dark:text-amber-400",
   adjustment: "text-violet-700 dark:text-violet-400",
 };
