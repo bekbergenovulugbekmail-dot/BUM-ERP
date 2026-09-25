@@ -4806,3 +4806,10 @@ Production: `5a4696b` — API toza ko'tarildi, web `build.json` 14:46:41Z.
 raqami elementlari; jadval ustunlarining tartibi va kengligi; nakladnoy chiqarish shablonga
 ulandi. Shablon tuzilmaguncha nakladnoy AVVALGI ko'rinishda qoladi (`custom: false`).
 Production: `d08063e`, API toza ko'tarildi, web `build.json` 16:03:37Z.
+
+**Nakladnoy qo'llanmasi (2026-09-25):** `docs/NAKLADNOY-QOLLANMA.md` — shablon yaratishdan
+A4da chop etishgacha amaliy qo'llanma (xodimlar uchun ulashiladigan sahifa ham chiqarildi).
+Qo'llanmani yozayotganda nuqson topildi: dizaynerdagi "Shtrix-kod" elementining nomi
+`ELEMENT_LABELS` da yo'q edi, shuning uchun tugma nomsiz chiqardi — yorliq qo'shildi.
+Production: `a1a7466`, faqat `bum-web` (API o'zgarmadi), `build.json` → 2026-09-25T02:35:41Z,
+bundle `index-jYkSBk2l.js`.
