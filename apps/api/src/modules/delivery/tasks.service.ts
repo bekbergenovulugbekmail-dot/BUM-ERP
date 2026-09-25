@@ -1130,6 +1130,7 @@ export async function deliveryWaybill(
  * Chop etish HUJJAT amali: yetkazma holati o'zgarmaydi.
  */
 type WaybillItem = {
+  productId: string;
   productName: string;
   productSku: string | null;
   productBarcode: string | null;
@@ -1204,6 +1205,7 @@ export async function deliveryWaybillsByIds(
     ? await conn
         .select({
           taskId: deliveryTaskItems.taskId,
+          productId: deliveryTaskItems.productId,
           productName: products.name,
           productSku: products.sku,
           productBarcode: products.barcode,
@@ -1226,6 +1228,7 @@ export async function deliveryWaybillsByIds(
     const list = itemsByTask.get(row.taskId) ?? [];
     const orderQty = toMinor(row.orderQuantity, 4);
     list.push({
+      productId: row.productId,
       productName: row.productName,
       productSku: row.productSku,
       productBarcode: row.productBarcode,
@@ -1243,6 +1246,7 @@ export async function deliveryWaybillsByIds(
     ? await conn
         .select({
           orderId: salesOrderItems.orderId,
+          productId: salesOrderItems.productId,
           productName: products.name,
           productSku: products.sku,
           productBarcode: products.barcode,

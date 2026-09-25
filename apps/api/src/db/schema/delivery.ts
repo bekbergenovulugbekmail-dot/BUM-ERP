@@ -19,6 +19,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   time,
   timestamp,
@@ -487,4 +488,82 @@ export const deliveryLocationLatest = pgTable(
     suspicious: boolean("suspicious").notNull().default(false),
   },
   (t) => [index("dll_company_idx").on(t.companyId)],
+);
+
+// ─── delivery_trips ──────────────────────────────────────────────────────────
+
+/**
+ * Yetkazma reysi — tanlangan yetkazmalarning O'ZGARMAS snapshoti (yetkazuvchi + ombor + sana bo'yicha). Uchta hujjat
+ * (mijoz nakladnoylari, omborchining yig'ma ro'yxati, marshrut varag'i) faqat shu snapshotdan chiqadi — bir-biriga teng.
+ * Terish va yuklash faqat qayd: ombordan chiqim avvalgidek yetkazma "boshlash"ida (Z2).
+ */
+export const deliveryTrips = pgTable(
+  "delivery_trips",
+  {
+    id: pk(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "restrict" }),
+    number: varchar("number", { length: 32 }).notNull(),
+    tripDate: date("trip_date").notNull(),
+    deliveryAgentId: uuid("delivery_agent_id").notNull().references(() => deliveryAgents.id, { onDelete: "restrict" }),
+    warehouseId: uuid("warehouse_id").notNull().references(() => warehouses.id, { onDelete: "restrict" }),
+    /** picking | loaded | out_for_delivery | cancelled */
+    status: varchar("status", { length: 20 }).notNull().default("picking"),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+    totalAmount: money("total_amount").notNull(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    loadedBy: uuid("loaded_by").references(() => users.id, { onDelete: "set null" }),
+    loadedAt: timestamp("loaded_at", { withTimezone: true }),
+    outAt: timestamp("out_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelReason: text("cancel_reason"),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("dtr_company_number_key").on(t.companyId, t.number),
+    index("dtr_company_date_idx").on(t.companyId, t.tripDate),
+    check("dtr_status_known", sql`${t.status} IN ('picking', 'loaded', 'out_for_delivery', 'cancelled')`),
+  ],
+);
+
+export const deliveryTripTasks = pgTable(
+  "delivery_trip_tasks",
+  {
+    tripId: uuid("trip_id").notNull().references(() => deliveryTrips.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").notNull().references(() => deliveryTasks.id, { onDelete: "restrict" }),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "restrict" }),
+    position: integer("position").notNull(),
+    /** Reys bekor qilinsa false — yetkazma yangi reysga kira oladi. */
+    active: boolean("active").notNull().default(true),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tripId, t.taskId] }),
+    uniqueIndex("dtt_active_task_key").on(t.taskId).where(sql`${t.active}`),
+  ],
+);
+
+/** Omborchining yig'ma ro'yxati qatori: mahsulot × birlik, kerakli va terilgan miqdor, holat. */
+export const deliveryTripLines = pgTable(
+  "delivery_trip_lines",
+  {
+    id: pk(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "restrict" }),
+    tripId: uuid("trip_id").notNull().references(() => deliveryTrips.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+    productName: varchar("product_name", { length: 300 }).notNull(),
+    productSku: varchar("product_sku", { length: 100 }),
+    unitName: varchar("unit_name", { length: 32 }).notNull(),
+    requiredQty: qty("required_qty").notNull(),
+    pickedQty: qty("picked_qty"),
+    /** pending | picked | partially_picked | missing */
+    pickStatus: varchar("pick_status", { length: 20 }).notNull().default("pending"),
+    note: text("note"),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("dtl_trip_product_unit_key").on(t.tripId, t.productId, t.unitName),
+    check("dtl_status_known", sql`${t.pickStatus} IN ('pending', 'picked', 'partially_picked', 'missing')`),
+    check("dtl_required_positive", sql`${t.requiredQty} > 0`),
+    check("dtl_picked_range", sql`${t.pickedQty} IS NULL OR (${t.pickedQty} >= 0 AND ${t.pickedQty} <= ${t.requiredQty})`),
+  ],
 );

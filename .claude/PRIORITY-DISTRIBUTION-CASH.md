@@ -101,6 +101,13 @@ tushuntiriladi va tasdiqsiz bajarilmaydi (xotira: financial-integrity-gate).
   Test: `audit-return-kinds.test.ts` (3; 1200 = ombor qiymati, aylanma balans). Eslatma: POS qurilma analitikasi
   qaytarishlarni daromaddan ayirishda davom etadi (sof daromad to'g'ri bo'lishi uchun) — rad etish u yerda alohida
   ko'rsatilmaydi (keyingi bosqich).
-- W6 Yetkazma reysi: snapshot, 3 hujjat (mijoz nakladnoyi, omborchi yig'ma ×2, yetkazuvchi marshrut varag'i),
-  terish/yuklash holati, "Yetkazishga chiqadiganlar" + hammasini tanlash.
+- W6 ✅ Yetkazma reysi (0092, qo'shuvchi): `delivery_trips` (O'ZGARMAS snapshot — W1 nakladnoy manbasidan, qarzsiz),
+  `delivery_trip_tasks` (bitta yetkazma — bitta faol reys), `delivery_trip_lines` (mahsulot × birlik; terish holati
+  pending/picked/partially_picked/missing). Reys = yetkazuvchi × ombor × kun (RS- raqam). Statuslar: picking → loaded →
+  out_for_delivery (+ cancelled); hammasi faqat QAYD (Z2) — ombor/qarz/jurnal o'zgarmaydi. "Yetkazishga chiqadiganlar":
+  `GET /api/delivery/trips/outgoing` (serverdagi to'liq ro'yxat). 3 hujjat: nakladnoylar (mavjud shablon/qat'iy PDF),
+  yig'ma ro'yxat ×2 (`trip-pdf.ts`), marshrut varag'i (albom, ustunlar 8 tadan guruh); chop etishdan oldin
+  `reconcileTrip` (miqdor mahsulot×birlik va summa) — farq bo'lsa chop etilmaydi. UI: Dostavka → "Reyslar".
+  Testlar: `simulation-distribution.test.ts` (23-bo'lim senariysi to'liq: Test/Bonnu/Anor, Cola 6 blok, rad etish YT-,
+  Anor qaytarishi QR-, qarz kesh = jurnal, 1200 = ombor, aylanma balans), `trip-documents.test.ts` (5).
 - W7 23-bo'lim senariysi (3 mijoz) — API reconciliation, E2E, PDF QA, tenant.

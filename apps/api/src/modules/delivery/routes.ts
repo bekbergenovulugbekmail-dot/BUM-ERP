@@ -106,6 +106,7 @@ import { planAgentDay, tasksInOrder } from "./route-plan.service.js";
 import { CLOSE_CODES, DeliveryRealtimeHub, originAllowed, resolveRealtimeAccess, type RealtimeAccess } from "./realtime.js";
 import { localDate } from "./task.repo.js";
 import { writeAuditLog } from "../../shared/audit.js";
+import { cancelTrip, createTrips, getTrip, listTrips, loadTrip, markTripOut, outgoingTaskIds, recordPicking } from "./trips.service.js";
 import {
   acceptDelivery,
   addDeliveryProof,
@@ -186,6 +187,14 @@ const agentParams = z.object({ agentId: z.uuid() });
 const waybillQuery = z.object({ agentId: z.uuid(), date: z.iso.date() });
 /** Bir yo'la chiqariladigan yetkazmalar — ro'yxat serverda yana filtrlanadi. */
 const bulkWaybillBody = z.strictObject({ taskIds: z.array(z.uuid()).min(1).max(200) });
+const tripCreateBody = z.strictObject({ taskIds: z.array(z.uuid()).min(1).max(500) });
+const tripParams = z.object({ tripId: z.uuid() });
+const tripListQuery = z.object({ date: z.iso.date().optional(), limit: z.coerce.number().int().min(1).max(200).default(50) });
+const outgoingQuery = z.object({ date: z.iso.date(), deliveryAgentId: z.uuid().optional() });
+const pickingBody = z.strictObject({
+  lines: z.array(z.strictObject({ lineId: z.uuid(), pickedQty: qtySchema, note: z.string().trim().max(500).nullish() })).min(1).max(500),
+});
+const tripCancelBody = z.strictObject({ reason: z.string().trim().min(3, "Sababni yozing").max(500) });
 
 const cashHandoverBody = z.strictObject({
   amount: moneySchema,
@@ -554,6 +563,66 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
    * Nakladnoy (dostavka varaqasi) ma'lumoti — agentga biriktirilgan kunlik yetkazmalar.
    * Mijoz qarzi faqat `finance.view` bilan qo'shiladi (qog'ozga chiqadigan maxfiy ma'lumot).
    */
+  // ─── Yetkazma reysi: snapshot, 3 hujjat, terish va yuklash (faqat qayd) ──────
+
+  /** "Yetkazishga chiqadiganlar" — hammasini tanlash uchun serverdagi to'liq ro'yxat (sahifadagi emas). */
+  app.get("/trips/outgoing", async (req) => {
+    const query = outgoingQuery.parse(req.query);
+    return { taskIds: await outgoingTaskIds(db, await readTenantWith(req, "delivery.view"), query) };
+  });
+
+  app.get("/trips", async (req) => {
+    const query = tripListQuery.parse(req.query);
+    return { trips: await listTrips(db, await readTenantWith(req, "delivery.view"), query) };
+  });
+
+  app.get("/trips/:tripId", async (req) => {
+    const { tripId } = tripParams.parse(req.params);
+    const tenant = await readTenantWith(req, "delivery.view");
+    const canViewDebt = (await effectivePermissions(db, tenant)).includes("finance.view");
+    return { trip: await getTrip(db, tenant, tripId, canViewDebt) };
+  });
+
+  app.post("/trips", async (req, reply) => {
+    const body = tripCreateBody.parse(req.body);
+    const trips = await writeTenantWith(req, "delivery.manage", (tx, tenant) => createTrips(tx, tenant, body, requestMeta(req)));
+    reply.status(201);
+    return { trips };
+  });
+
+  /** Terish va yuklash — omborchi (warehouse.manage) yoki dostavka menejeri. */
+  const writePicking = <T>(req: FastifyRequest, fn: (tx: Tx, tenant: TenantContext) => Promise<T>) =>
+    withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      const permissions = await effectivePermissions(tx, tenant);
+      if (!permissions.includes("warehouse.manage") && !permissions.includes("delivery.manage")) {
+        await requirePermission(tx, tenant, "warehouse.manage");
+      }
+      return fn(tx, tenant);
+    });
+
+  app.post("/trips/:tripId/picking", async (req) => {
+    const { tripId } = tripParams.parse(req.params);
+    const body = pickingBody.parse(req.body);
+    return { trip: await writePicking(req, (tx, tenant) => recordPicking(tx, tenant, tripId, body, requestMeta(req))) };
+  });
+
+  app.post("/trips/:tripId/load", async (req) => {
+    const { tripId } = tripParams.parse(req.params);
+    return { trip: await writePicking(req, (tx, tenant) => loadTrip(tx, tenant, tripId, requestMeta(req))) };
+  });
+
+  app.post("/trips/:tripId/out", async (req) => {
+    const { tripId } = tripParams.parse(req.params);
+    return { trip: await writeTenantWith(req, "delivery.manage", (tx, tenant) => markTripOut(tx, tenant, tripId, requestMeta(req))) };
+  });
+
+  app.post("/trips/:tripId/cancel", async (req) => {
+    const { tripId } = tripParams.parse(req.params);
+    const body = tripCancelBody.parse(req.body);
+    return { trip: await writeTenantWith(req, "delivery.manage", (tx, tenant) => cancelTrip(tx, tenant, tripId, body.reason, requestMeta(req))) };
+  });
+
   /**
    * Tanlangan yetkazmalar uchun nakladnoy ma'lumoti (ko'pini birdan chiqarish).
    * Chop etish faqat HUJJAT amali — yetkazma holati o'zgarmaydi. Kim, qachon va qaysi

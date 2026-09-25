@@ -7,7 +7,7 @@
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  BarChart3, ClipboardList, LayoutDashboard, MapPinned, PackageCheck, PackagePlus, ShieldCheck, SlidersHorizontal, Sparkles, Users,
+  BarChart3, ClipboardList, LayoutDashboard, MapPinned, PackageCheck, PackagePlus, Route, ShieldCheck, SlidersHorizontal, Sparkles, Users,
   type LucideIcon,
 } from "lucide-react";
 import type { Permission } from "@bum/shared";
@@ -28,14 +28,17 @@ import ReadySection from "./_components/ready-section.tsx";
 import ReportsSection from "./_components/reports-section.tsx";
 import TaskDrawer from "./_components/task-drawer.tsx";
 import TasksSection from "./_components/tasks-section.tsx";
+import TripsSection from "./_components/trips-section.tsx";
 import TodaySection from "./_components/today-section.tsx";
 import { EMPTY_FILTERS, type TaskFilters } from "./_lib/filters.ts";
 
-type TabKey = "today" | "tasks" | "ready" | "agents" | "map" | "control" | "reports" | "policy";
+type TabKey = "today" | "tasks" | "trips" | "ready" | "agents" | "map" | "control" | "reports" | "policy";
 
 const TABS: { key: TabKey; icon: LucideIcon; permission: Permission }[] = [
   { key: "today", icon: LayoutDashboard, permission: "delivery.view" },
   { key: "tasks", icon: ClipboardList, permission: "delivery.view" },
+  /** Reyslar: "Yetkazishga chiqadiganlar", 3 hujjat (nakladnoy, yig'ma ro'yxat ×2, marshrut varag'i), terish/yuklash. */
+  { key: "trips", icon: Route, permission: "delivery.view" },
   { key: "ready", icon: PackagePlus, permission: "delivery.manage" },
   { key: "agents", icon: Users, permission: "delivery.view" },
   { key: "map", icon: MapPinned, permission: "delivery.view_location" },
@@ -90,6 +93,7 @@ export default function DeliveryPage() {
 
         {active === "today" && <TodaySection money={money} onOpenTasks={openTasks} onOpenControl={() => setTab("control")} />}
         {active === "tasks" && <TasksSection filters={filters} onFiltersChange={setFilters} money={money} onOpenTask={setOpenTaskId} />}
+        {active === "trips" && <TripsSection money={money} />}
         {active === "ready" && <ReadySection money={money} onOpenTask={setOpenTaskId} />}
         {active === "agents" && <AgentsSection />}
         {active === "map" && <MapSection onOpenTask={setOpenTaskId} />}
