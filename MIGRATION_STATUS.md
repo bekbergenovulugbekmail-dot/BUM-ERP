@@ -4829,3 +4829,7 @@ frontend 41 fayl / 209 test. Qolgan hujjat — maosh varaqasi.
 Kirill va tezlik tekshirildi — muammo emas (CMap'da `Р` bor; 5 nakladnoy 141 ms).
 Testlar: `delivery-template.test.ts` (9), `delivery-waybill.test.ts` (+1), brauzer e2e;
 frontend 42 fayl / 218 test.
+
+**Production (2026-09-25):** commit `0a93bf0`, `bum-api` va `bum-web`.
+API toza ko'tarildi (`Migratsiyalar qo'llandi (28ms)`, bitta `Server listening`, 500 yo'q);
+`/api/delivery/waybills/bulk` → 401 (marshrut bor). Web `build.json` → 04:07:57Z.
