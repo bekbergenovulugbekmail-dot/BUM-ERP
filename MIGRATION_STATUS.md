@@ -4845,3 +4845,48 @@ frontend 43 fayl / 228 test.
 **Production (2026-09-25):** commit `b10fbb5`, faqat `bum-web` (API o'zgarmadi).
 `build.json` → 07:30:21Z, bundle `index-3ShcvU5O.js`; renderer bo'lagi
 `template-renderer-UtUbeZvh.js` ichida `renderDocuments` bor, sahifa nusxalash kodi yo'q.
+
+**Nakladnoy real qabul sinovi (2026-09-25):** egasi dasturda sinab ko'rib rad etdi — ikkita
+nakladnoy hamon ikki varaqqa chiqardi, jadval chiziqlari / rasm / QR tahrirlanmasdi. Sabablar
+va yechimlar:
+
+- **Ikkitasi bitta A4 ga sig'masdi**, chunki bitta nakladnoy 133 mm edi. `pdf-utils.drawSignatures`
+  imzo blokiga 34 mm ajratib, tagiga yana bugungi sanani yozardi. Shablon renderi uchun ixcham
+  imzo bloki yozildi (standart 22 mm, `height` bilan 12–70 mm). Nakladnoy 115 mm bo'ldi →
+  ikkitasi bitta varaqda. Shablonsiz hujjatlar eski ko'rinishida qoldi.
+- **Taglikda sahifa raqami ikki marta** chizilib ustma-ust tushardi (`drawFooter` va shablonning
+  "sahifa raqami" elementi). `drawFooter(doc, tagline, { pageNumbers: false })` qo'shildi.
+- **Dizaynerda sozlama paneli ko'rinmasdi**: Sozlamalar sahifasining `max-w-[1400px] mx-auto`
+  qutisi flex ustunida cho'zilmay, 1400 px bo'lib qolardi va sahifa yon tomonga surilardi.
+  `w-full` qo'shildi; jadval ustunlari `minmax(0,1fr)` ga o'tdi.
+- **Oldindan ko'rishda QR umuman chizilmasdi** — namuna ma'lumotda `codes` yo'q edi.
+
+Yangi imkoniyatlar (hammasi oq ro'yxat orqali, server tomonda qayta quriladi):
+`TableStyle` (har tomon alohida, chiziq turi to'liq/uzuq/nuqtali/qo'sh, qalinlik, rang, katak
+bo'shlig'i, qator balandligi, shrift, zebra, sarlavha ranglari, vertikal tekislash),
+`BoxStyle` (rasm/chiziq/to'rtburchak ramkasi), `rect` elementi, rasm yuklash + nisbat qulfi +
+`fit`, QR `qrLevel`/`qrMargin`/yozuv, ustun tartibi/nomi/kengligi, element nusxalash.
+
+Yo'l-yo'lakay tuzatildi: `pnpm build` (`tsc -b`) uchta eski tip xatosida yiqilardi (deploy
+faqat `vite build` ishlatgani uchun sezilmagan) — nakladnoy funksiyasining qaytish turi,
+`UnitOption` importi, sotuv agenti `ErrorBoundary` ning `resetKey` i (`location.pathname`
+geolokatsiya obyektida yo'q edi). PT Sans da qiya shrift yo'qligi ham tuzatildi.
+
+Sinov: `e2e/nakladnoy-acceptance.spec.ts` (5) — haqiqiy brauzerda Dostavka bo'limidan 2/3/4/10
+yetkazma tanlanadi, "Nakladnoy" bosiladi, yuklab olingan PDF pdf.js bilan rasmga aylantirilib
+sahifa soni va matni tekshiriladi (rasmlar `e2e/.artifacts/nakladnoy/`).
+`e2e/document-designer-acceptance.spec.ts` (7) — chiziq, ustun, rasm yuklash, QR, saqlash +
+sahifani yangilash, versiyani qaytarish; QR jsQR bilan DEKODLANADI va buyurtma raqamini
+ko'rsatishi tasdiqlanadi. `src/lib/pdf/template-style.test.ts` (6) — PDF ichidagi chizish
+buyruqlari. Frontend 44 fayl / 234 test, API hujjat testlari 24 ta.
+To'liq e2e: 104 o'tdi, 6 yiqildi — hammasi SHU ISHDAN OLDIN HAM yiqilardi (o'zgarishlarni
+`git stash` qilib tasdiqlandi): `company-login` (1), `csv-import` (2), `quick-add` (1),
+`sales-agent` (2). Ular alohida ish sifatida qoldi.
+
+**Production (2026-09-25):** commit `1f99e19`, `bum-api` + `bum-web`.
+API konteyneri 10:07:23Z da qayta ko'tarildi (migratsiyalar bir marta, qayta yiqilish yo'q),
+`build.json` → 10:10:40Z, bundle `index-ip19EFl8.js` (yangi yozuvlar bor: "Aqlli A4",
+"Jadval chiziqlari", "Rasm yuklash", "Nima kodlanadi", "Xatolikka chidamlilik"),
+renderer bo'lagi `template-renderer-COHbuNrS.js` → 200. `/api/documents/fields` va
+`/api/documents/templates` → 401 (marshrut bor). Production bazasida shablon SAQLAB
+KO'RILMADI — egasining ma'lumotiga tegmaslik uchun; o'sha kod lokalda to'liq sinovdan o'tgan.
