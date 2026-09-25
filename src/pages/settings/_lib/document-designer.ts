@@ -56,6 +56,7 @@ export const ELEMENT_LABELS: Record<string, string> = {
   payments: "To'lovlar",
   signatures: "Imzo",
   qr: "QR kod",
+  barcode: "Shtrix-kod",
   pageNumber: "Sahifa raqami",
 };
 
