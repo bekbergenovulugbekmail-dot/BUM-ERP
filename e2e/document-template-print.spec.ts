@@ -7,6 +7,13 @@
 import { expect, test } from "@playwright/test";
 import { appPath, login } from "./_lib/accounts.ts";
 
+/**
+ * Har test hujjatni HAQIQIY PDF qilib chizadi va birinchisida unicode shrift (~900 KB)
+ * yuklanadi. Dev serverda modul grafigi har safar qayta hal qilinadi, shuning uchun
+ * to'plam bo'lib yurganda standart 90 soniya yetmaydi.
+ */
+test.describe.configure({ timeout: 240_000 });
+
 test.afterEach(async ({ page }) => {
   // Tozalash HECH QACHON testni yiqitmasin — u asosiy tekshiruv emas
   const list = await page.request.get("/api/documents/templates", { timeout: 30_000 }).catch(() => null);
@@ -23,8 +30,6 @@ test.afterEach(async ({ page }) => {
  * Bu yerda ikkala hujjat ham shablon bilan haqiqiy PDF bo'lib chizilishi tekshiriladi.
  */
 test("hisob-faktura va xarid shablon bilan chiziladi", async ({ page }) => {
-  // Har hujjat uchun A4 PDF chiziladi va shrift yuklanadi — sekinroq
-  test.setTimeout(180_000);
   await login(page, "owner");
   await page.goto(appPath("/dashboard"));
 
@@ -122,8 +127,6 @@ test("standart shablon tuzilgach nakladnoy shablon bo'yicha chiqadi", async ({ p
 });
 
 test("shablon bilan chizilgan nakladnoy haqiqiy PDF bo'ladi", async ({ page }) => {
-  // Har hujjat uchun A4 PDF chiziladi va shrift yuklanadi — sekinroq
-  test.setTimeout(180_000);
   await login(page, "owner");
   await page.goto(appPath("/dashboard"));
 
@@ -139,6 +142,11 @@ test("shablon bilan chizilgan nakladnoy haqiqiy PDF bo'ladi", async ({ page }) =
           orderTotal: 42_200, customerName: "Раматов Маркет", customerPhone: "+998900000000",
           customerAddress: "Урганч", customerDebt: 0, warehouseName: "Asosiy ombor",
           agentCode: "AG-01", agentName: "Раматов Расул",
+          // Mahsulot qatorlari — jadval bo'sh chiqmasligi kerak (2026-09-25 regressiyasi)
+          items: [
+            { productName: "EZO Osvijitel 460 ml", productSku: "EZO-460", quantity: "1", unitName: "d", unitPrice: "17200", lineTotal: "17200" },
+            { productName: "Gel jidkiy 900", productSku: "GEL-900", quantity: "1", unitName: "d", unitPrice: "16500", lineTotal: "16500" },
+          ],
         },
         {
           number: "DL-2026-0006", status: "assigned", scheduledDate: "2026-09-25", orderNumber: "SO-2026-0005",

@@ -141,6 +141,16 @@ export async function generateDeliveryWaybillPDF(data: DeliveryWaybillData): Pro
 }
 
 /** Bitta yetkazma uchun nakladnoy ma'lumoti (ko'pini birdan chiqarishda). */
+/** Nakladnoydagi buyurtma qatori — dostavshik do'konda shu ro'yxat bo'yicha solishtiradi. */
+export type WaybillOrderItem = {
+  productName: string;
+  productSku: string | null;
+  quantity: string;
+  unitName: string | null;
+  unitPrice: string;
+  lineTotal: string;
+};
+
 export type SingleDeliveryWaybill = {
   number: string;
   status: string;
@@ -154,6 +164,8 @@ export type SingleDeliveryWaybill = {
   warehouseName: string | null;
   agentCode: string | null;
   agentName: string | null;
+  /** Serverdan keladi; eski javoblarda bo'lmasligi mumkin. */
+  items?: WaybillOrderItem[];
 };
 
 /**

@@ -182,3 +182,30 @@ describe("Belgilangan yetkazmalar uchun nakladnoy", () => {
     expect((limited.json().tasks as { customerDebt: string | null }[])[0]!.customerDebt).toBeNull();
   });
 });
+
+/**
+ * Nakladnoyga BUYURTMA QATORLARI ham kerak.
+ *
+ * Regressiya (2026-09-25): egasi chiqargan nakladnoyda mahsulot jadvali bo'sh edi —
+ * server qatorlarni umuman yubormasdi, dostavshik do'konda nimani solishtirishni bilmasdi.
+ */
+describe("Nakladnoy: buyurtma qatorlari", () => {
+  it("har yetkazma o'z buyurtmasining mahsulotlari bilan keladi", async () => {
+    const task = await assignedTask(localToday());
+    const res = await call(company.ownerCookie, "POST", "/api/delivery/waybills/bulk", { taskIds: [task.id] });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const [row] = res.json().tasks as {
+      number: string;
+      items: { productName: string; productSku: string | null; quantity: string; unitName: string | null; unitPrice: string; lineTotal: string }[];
+    }[];
+    expect(row, "yetkazma qaytmadi").toBeTruthy();
+    expect(Array.isArray(row!.items), "items massiv emas").toBe(true);
+    expect(row!.items.length, "mahsulot qatori yo'q").toBeGreaterThan(0);
+
+    const first = row!.items[0]!;
+    expect(first.productName).toBeTruthy();
+    expect(Number(first.quantity)).toBeGreaterThan(0);
+    expect(Number(first.lineTotal)).toBeGreaterThan(0);
+  });
+});

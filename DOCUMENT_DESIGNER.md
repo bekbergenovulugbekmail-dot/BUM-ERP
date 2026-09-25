@@ -359,3 +359,61 @@ Yetkazmada jadval qatori — mijoz; bu ikkalasida — **mahsulot**. Shuning uchu
 - Frontend to'plami **41 fayl / 209 test**; `tsc`, `eslint`, `vite build` toza.
 
 Qolgan yagona hujjat — **maosh varaqasi** (hali ulanmagan).
+
+
+---
+
+## 7. NAKLADNOY "CHALA" EDI — TO'RTTA TUZATMA (2026-09-25)
+
+Egasi shablon bilan chiqarilgan PDF'ni yubordi. Fayl dekodlab tekshirildi va to'rtta aniq
+kamchilik topildi.
+
+### 7.1 Mahsulotlar umuman yo'q edi (asosiy sabab)
+
+`POST /api/delivery/waybills/bulk` javobida BUYURTMA QATORLARI yo'q edi — faqat yetkazma
+sarlavhasi. Shuning uchun jadvalda bitta yarim bo'sh qator chiqardi, dostavshik esa do'konda
+nimani solishtirishni bilmasdi.
+
+Tuzatma: `deliveryWaybillsByIds` endi bitta qo'shimcha so'rovda hamma buyurtmaning qatorlarini
+oladi (`productName`, `productSku`, `quantity`, `unitName`, `unitPrice`, `lineTotal`) va har
+yetkazmaga `items` bo'lib biriktiradi.
+
+Ko'prikda (`waybillDocumentData`) har mahsulot — bitta jadval qatori; mijoz ustunlari har
+qatorda takrorlanadi, shuning uchun foydalanuvchi mijoz ustunini ham, mahsulot ustunini ham
+tanlay oladi. Mahsulotsiz buyurtmada avvalgidek bitta yig'ma qator qoladi.
+
+### 7.2 Ustun sarlavhalari XOM KALIT bo'lib chiqardi
+
+Qog'ozda `index`, `name`, `quantity`, `total` yozilgan edi. Sabab: `waybillDocumentData`
+`columnLabels` bermasdi va renderer kalitning o'ziga tushardi. Endi o'zbekcha nomlar
+beriladi (№, Mahsulot, Birlik, Miqdor, Narx, Summa, Mijoz, Telefon, Manzil, Qarz).
+
+### 7.3 Yangi jadval NOTO'G'RI ustunlar bilan ochilardi
+
+Dizaynerda "+ Jadval" bosilganda katalogning birinchi to'rttasi olinardi
+(`index`, `name`, `sku`, `barcode`) — yetkazmada bular bo'sh chiqar, foydalanuvchi nega
+bo'shligini bilmasdi. Endi standart ustunlar HUJJAT TURIGA mos (`DEFAULT_TABLE_COLUMNS`).
+
+### 7.4 Yorliq maydonga ergashmasdi
+
+Qog'ozda `Kompaniya nomi: Test Market` chiqqan: element qo'shilganda yorliq katalogning
+birinchi maydoni bo'yicha qo'yilar, foydalanuvchi maydonni almashtirsa yorliq eski holicha
+qolardi. Endi yorliq — agar foydalanuvchi uni O'ZI yozmagan bo'lsa — yangi maydon nomiga
+o'zgaradi.
+
+### Tekshirilgan, lekin muammo EMAS
+
+- **Kirill** — PDF ichidagi CMap tekshirildi: `<0159><0420>` ya'ni `Р` to'g'ri xaritalangan.
+  Shrift joyida, matn buzilmagan.
+- **Tezlik** — brauzerda o'lchandi: 1 nakladnoy 2.5 s (shrift yuklanishi bilan), keyin
+  2 tasi 68 ms, 5 tasi 141 ms. Sekinlik yo'q.
+
+### Tekshiruv
+
+- Yangi `delivery-template.test.ts` (**9**) — mahsulot qatorlari, mijoz ustunlarining
+  takrorlanishi, mahsulotsiz holat, eski javob (`items` yo'q), MOLIYAVIY YAXLITLIK,
+  o'zbekcha ustun nomlari, foydalanuvchi yozgan nomning ustunligi, ko'p sahifa.
+- `delivery-waybill.test.ts` (+1) — server javobida `items` borligi.
+- `document-template-print.spec.ts` — nakladnoy mahsulot qatorlari bilan chiziladi
+  (brauzerda); to'plam vaqti 240 s ga ko'tarildi (har test haqiqiy PDF chizadi).
+- Frontend **42 fayl / 218 test**; `tsc`, `eslint` toza.

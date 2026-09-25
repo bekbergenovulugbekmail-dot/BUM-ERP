@@ -57,12 +57,30 @@ async function imageToDataUrl(file: File): Promise<string> {
   return dataUrl;
 }
 
+/**
+ * Yangi jadval qaysi ustunlar bilan ochiladi — HUJJAT TURIGA mos.
+ *
+ * Ilgari katalogning birinchi to'rttasi olinardi (index, name, sku, barcode) — yetkazma
+ * nakladnoyida bu ustunlar bo'sh chiqar, foydalanuvchi esa nega bo'shligini bilmasdi.
+ */
+const DEFAULT_TABLE_COLUMNS: Record<DocumentType, string[]> = {
+  delivery_waybill: ["index", "name", "unit", "quantity", "total"],
+  sales_invoice: ["index", "name", "unit", "quantity", "price", "total"],
+  purchase_order: ["index", "name", "unit", "quantity", "price", "total"],
+  payslip: ["index", "name", "total"],
+};
+
 /** Yangi element — turiga qarab eng kerakli standart qiymat bilan. */
-function newElement(type: DocumentElement["type"], catalog: FieldCatalog | undefined): DocumentElement {
+function newElement(
+  type: DocumentElement["type"],
+  catalog: FieldCatalog | undefined,
+  documentType: DocumentType,
+): DocumentElement {
   const id = crypto.randomUUID();
   if (type === "field") return { id, type, field: catalog?.fields[0]?.path ?? "document.number", label: catalog?.fields[0]?.label };
   if (type === "itemsTable") {
-    const keys = (catalog?.columns ?? []).slice(0, 4).map((column) => ({ key: column.key }));
+    const allowed = new Set((catalog?.columns ?? []).map((column) => column.key));
+    const keys = DEFAULT_TABLE_COLUMNS[documentType].filter((key) => allowed.has(key)).map((key) => ({ key }));
     return { id, type, columns: keys.length > 0 ? keys : [{ key: "name" }] };
   }
   if (type === "totals") return { id, type, rows: ["total"] };
@@ -155,7 +173,19 @@ export default function DocumentsSection() {
     patchSchema((current) => {
       for (const section of current.sections) {
         const index = section.elements.findIndex((element) => element.id === id);
-        if (index >= 0) section.elements[index] = { ...section.elements[index]!, ...patch };
+        if (index < 0) continue;
+        const previous = section.elements[index]!;
+        const next = { ...previous, ...patch };
+        /**
+         * Maydon almashtirilganda yorliq ham ergashadi — AGAR foydalanuvchi uni o'zi
+         * yozmagan bo'lsa. Aks holda "Kompaniya nomi: Test Market" kabi chalkash juftlik
+         * qog'ozga tushib ketardi (yorliq eski maydonniki, qiymat yangisiniki).
+         */
+        if (patch.field && patch.field !== previous.field) {
+          const wasAuto = !previous.label || previous.label === catalog?.fields.find((f) => f.path === previous.field)?.label;
+          if (wasAuto) next.label = catalog?.fields.find((f) => f.path === patch.field)?.label;
+        }
+        section.elements[index] = next;
       }
       return current;
     });
@@ -163,7 +193,7 @@ export default function DocumentsSection() {
   const addElement = (section: SectionKey, type: DocumentElement["type"]) =>
     patchSchema((current) => {
       const target = current.sections.find((item) => item.key === section);
-      if (target) target.elements.push(newElement(type, catalog));
+      if (target) target.elements.push(newElement(type, catalog, documentType));
       return current;
     });
 

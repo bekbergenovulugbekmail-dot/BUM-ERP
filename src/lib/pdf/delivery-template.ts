@@ -11,7 +11,7 @@
 import type jsPDF from "jspdf";
 import type { DocumentTemplateSchema } from "@bum/shared";
 import type { CompanyInfo } from "./pdf-utils.ts";
-import { fmtMoney } from "./pdf-utils.ts";
+import { fmtMoney, fmtNum } from "./pdf-utils.ts";
 import type { DocumentData } from "./template-renderer.ts";
 import type { SingleDeliveryWaybill } from "./delivery-waybill-pdf.ts";
 
@@ -49,16 +49,52 @@ export function waybillDocumentData(
     },
     // Shart tekshiruvi uchun sonlar (masalan "qarz > 0 bo'lsa ogohlantirish chiqsin")
     numbers: { "finance.total": delivery.orderTotal, "finance.debt": debt },
-    items: [
-      {
-        customerName: delivery.customerName,
-        customerPhone: dash(delivery.customerPhone),
-        customerAddress: dash(delivery.customerAddress),
-        total: money(delivery.orderTotal),
-        customerDebt: money(debt),
-      },
-    ],
+    /**
+     * Jadval qatorlari — BUYURTMADAGI MAHSULOTLAR (serverdan keladi). Mijoz ustunlari
+     * har qatorda takrorlanadi, chunki nakladnoy bitta mijozga tegishli: shu bilan
+     * foydalanuvchi mijoz ustunini ham, mahsulot ustunini ham tanlay oladi.
+     *
+     * Mahsulotsiz (eski javob yoki qatorsiz buyurtma) — bitta yig'ma qator qoladi,
+     * aks holda jadval umuman bo'sh chiqardi.
+     */
+    items:
+      delivery.items && delivery.items.length > 0
+        ? delivery.items.map((item) => ({
+            name: item.productName,
+            sku: dash(item.productSku),
+            unit: dash(item.unitName),
+            quantity: fmtNum(Number(item.quantity), 2),
+            price: money(Number(item.unitPrice)),
+            total: money(Number(item.lineTotal)),
+            customerName: delivery.customerName,
+            customerPhone: dash(delivery.customerPhone),
+            customerAddress: dash(delivery.customerAddress),
+            customerDebt: money(debt),
+          }))
+        : [
+            {
+              customerName: delivery.customerName,
+              customerPhone: dash(delivery.customerPhone),
+              customerAddress: dash(delivery.customerAddress),
+              total: money(delivery.orderTotal),
+              customerDebt: money(debt),
+            },
+          ],
     totals: { total: money(delivery.orderTotal), debt: money(debt) },
+    // Ustun nomlari — shablonda nom yozilmagan bo'lsa shular chiqadi (xom kalit emas)
+    columnLabels: {
+      index: "№",
+      name: "Mahsulot",
+      sku: "SKU",
+      unit: "Birlik",
+      quantity: "Miqdor",
+      price: "Narx",
+      total: "Summa",
+      customerName: "Mijoz",
+      customerPhone: "Telefon",
+      customerAddress: "Manzil",
+      customerDebt: "Qarz",
+    },
     codes: {
       documentNumber: delivery.number,
       orderNumber: delivery.orderNumber ?? undefined,

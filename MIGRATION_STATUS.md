@@ -4820,3 +4820,12 @@ kompaniyaning shabloni bilan chiqadi. Qoida o'sha: shablon "Standart" qilinmagun
 AVVALGI ko'rinishda qoladi. Ko'prik qiymatni ko'chiradi, qayta hisoblamaydi (test bilan
 qulflangan). Testlar: yangi `document-template-bridge.test.ts` (11) va brauzer e2e (+1);
 frontend 41 fayl / 209 test. Qolgan hujjat — maosh varaqasi.
+
+**Nakladnoy "chala" edi — tuzatildi (2026-09-25):** egasi yuborgan PDF dekodlab tekshirildi.
+(1) Server nakladnoyga BUYURTMA QATORLARINI yubormasdi — endi `items` bilan keladi;
+(2) ustun sarlavhalari xom kalit (`quantity`) bo'lib chiqardi — o'zbekcha nomlar qo'shildi;
+(3) dizaynerda yangi jadval noto'g'ri ustunlar bilan ochilardi — endi hujjat turiga mos;
+(4) maydon almashtirilganda yorliq ergashmasdi (`Kompaniya nomi: Test Market`) — tuzatildi.
+Kirill va tezlik tekshirildi — muammo emas (CMap'da `Р` bor; 5 nakladnoy 141 ms).
+Testlar: `delivery-template.test.ts` (9), `delivery-waybill.test.ts` (+1), brauzer e2e;
+frontend 42 fayl / 218 test.

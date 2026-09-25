@@ -1086,6 +1086,7 @@ export async function deliveryWaybill(
   const rows = await conn
     .select({
       number: deliveryTasks.number,
+      orderId: salesOrders.id,
       orderNumber: salesOrders.number,
       orderTotal: salesOrders.totalAmount,
       customerName: customers.name,
@@ -1140,6 +1141,7 @@ export async function deliveryWaybillsByIds(
       number: deliveryTasks.number,
       status: deliveryTasks.status,
       scheduledDate: deliveryTasks.scheduledDate,
+      orderId: salesOrders.id,
       orderNumber: salesOrders.number,
       orderTotal: salesOrders.totalAmount,
       customerName: customers.name,
@@ -1166,7 +1168,42 @@ export async function deliveryWaybillsByIds(
     )
     .orderBy(asc(deliveryTasks.scheduledDate), asc(deliveryTasks.number));
 
+  /**
+   * Nakladnoyga BUYURTMA QATORLARI ham kerak: dostavshik qo'liga beriladigan qog'ozda
+   * "qaysi mahsulotdan nechta" yozilmasa, do'konda nimani solishtirishni bilmaydi.
+   * Shuning uchun bitta qo'shimcha so'rovda hamma buyurtmaning qatorlari olinadi.
+   */
+  const orderIds = [...new Set(rows.map((row) => row.orderId).filter((id): id is string => Boolean(id)))];
+  const itemRows = orderIds.length
+    ? await conn
+        .select({
+          orderId: salesOrderItems.orderId,
+          productName: products.name,
+          productSku: products.sku,
+          quantity: salesOrderItems.quantity,
+          unitName: units.shortName,
+          unitPrice: salesOrderItems.unitPrice,
+          lineTotal: salesOrderItems.lineTotal,
+        })
+        .from(salesOrderItems)
+        .innerJoin(products, eq(products.id, salesOrderItems.productId))
+        .leftJoin(units, eq(units.id, salesOrderItems.unitId))
+        .where(and(eq(salesOrderItems.companyId, tenant.company.id), inArray(salesOrderItems.orderId, orderIds)))
+        .orderBy(asc(salesOrderItems.createdAt), asc(salesOrderItems.id))
+    : [];
+
+  const itemsByOrder = new Map<string, Omit<(typeof itemRows)[number], "orderId">[]>();
+  for (const { orderId, ...item } of itemRows) {
+    const list = itemsByOrder.get(orderId) ?? [];
+    list.push(item);
+    itemsByOrder.set(orderId, list);
+  }
+
   return {
-    tasks: rows.map(({ customerDebt, ...row }) => ({ ...row, customerDebt: canViewDebt ? customerDebt : null })),
+    tasks: rows.map(({ customerDebt, orderId, ...row }) => ({
+      ...row,
+      customerDebt: canViewDebt ? customerDebt : null,
+      items: orderId ? (itemsByOrder.get(orderId) ?? []) : [],
+    })),
   };
 }
