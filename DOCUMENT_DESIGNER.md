@@ -417,3 +417,79 @@ o'zgaradi.
 - `document-template-print.spec.ts` — nakladnoy mahsulot qatorlari bilan chiziladi
   (brauzerda); to'plam vaqti 240 s ga ko'tarildi (har test haqiqiy PDF chizadi).
 - Frontend **42 fayl / 218 test**; `tsc`, `eslint` toza.
+
+
+---
+
+## 8. KO'P NAKLADNOY: GLIF BUZILISHI VA A4 GA AQLLI JOYLASHUV (2026-09-25)
+
+### 8.1 Root cause — ma'lumot emas, GLIF aralashuvi
+
+Egasi yuborgan PDF: 1-sahifada `Кроп Шоп` va 35 200 — TO'G'RI. 2-sahifada mahsulot nomlari
+teshik (`EZ  сви  ит  л`), jami esa `42,200` o'rniga **`2,200`** (boshidagi `4` yo'qolgan).
+
+Dastlabki taxmin — "ma'lumot aralashib ketgan" — NOTO'G'RI edi. Har sahifada o'z mijozi va
+o'z mahsulotlari turgan; buzilgani faqat HARFLAR.
+
+Sabab `renderWaybillsWithTemplate` da edi: har nakladnoy ALOHIDA jsPDF hujjati qilinib,
+sahifasi birinchisiga nusxalanardi. jsPDF hujjatga faqat O'SHA hujjat ishlatgan gliflarni
+joylaydi (subset). Nusxalangan sahifadagi glif raqamlari birinchi hujjatning boshqa
+to'plamiga tegib, harflar yo'qolardi yoki almashardi.
+
+**Dalil (test bilan):** 1-hujjat faqat lotin, 2-hujjat kirill ishlatganda yakuniy PDF
+shriftida kirill glifi UMUMAN yo'q edi (`CMAP KIRILL: false`).
+
+**Tuzatma:** sahifa nusxalash olib tashlandi. `renderDocuments` hamma hujjatni BITTA jsPDF
+ichiga chizadi — shrift to'plami bitta, glif raqamlari mos.
+
+### 8.2 A4 ga aqlli joylashuv
+
+`renderDocuments(schema, list, mode)`:
+
+| Qoida | Xulq |
+|---|---|
+| Hujjat o'rtasidan bo'linmaydi | Sig'masa butunlay keyingi varaqqa |
+| Sig'sa — birga | Ajratgich (uzuq chiziq) bilan o'sha varaqda davom etadi |
+| Uzun hujjat (50+ mahsulot) | O'z varag'idan boshlanadi |
+| Tartib | Foydalanuvchi tanlagan tartib saqlanadi (birinchi-mos, qayta saralanmaydi) |
+| Kichraytirish | YO'Q — o'qilishi muhimroq; sig'masa keyingi varaq |
+
+**Balandlik qanday o'lchanadi:** taxmin yoki CSS `scale` emas — hujjat chetga tashlanadigan
+nusxada HAQIQATAN chiziladi va tugash nuqtasi olinadi. Balandlik matn uzunligi, jadval
+qatorlari va shriftga bog'liq, shuning uchun yagona ishonchli yo'l shu.
+
+**Nega scale (95/90/85%) qilinmadi:** o'lchash asosidagi joylashtirish uni keraksiz qiladi —
+sig'adigani sig'adi, sig'maydigani keyingi varaqqa o'tadi. jsPDF'da shriftni kichraytirish
+qator uzilishlarini qayta hisoblaydi, ya'ni o'lchov yana o'zgaradi; foyda esa kam. Bu
+ataylab qilingan qaror.
+
+### 8.3 Foydalanuvchi tanlovi
+
+Dostavka → Yetkazmalar, "Nakladnoy" tugmasi yonida:
+
+- **Aqlli A4 (sig'gani birga)** — standart
+- **Har biri alohida varaq** — eski xulq
+
+Tanlov brauzerda eslab qolinadi.
+
+### 8.4 Testlar
+
+Yangi `bulk-print.test.ts` (**9**) — PDF ichidan MATN AJRATIB tekshiradi ("PDF yaratildi"
+degan tekshiruv bu xatoni tutmasdi, chunki fayl yaratilgan edi):
+
+- ikkita nakladnoy: har biri o'z mijozi va summasi bilan, `42 200` buzilmaydi;
+- to'rtta turli mijoz (lotin va kirill aralash) — hammasi butun;
+- kirill glifi shriftga kiradi (nusxalashda yo'qolardi);
+- 2 va 3 qisqa nakladnoy — bitta A4;
+- uzun nakladnoy o'z sahifasidan boshlanadi;
+- `full` rejimi eski xulqni beradi;
+- tartib saqlanadi;
+- 20 ta nakladnoy — hammasi chiqadi, sahifa soni 20 dan kam.
+
+Har testda `expect(text).not.toContain("?")` — xaritada yo'q glif qolmasligi.
+
+Brauzerda: yangi `e2e/bulk-print.spec.ts` (**4**) — 2, 4 va 20 nakladnoy hamda `full` rejimi;
+PDF matni brauzerda ajratib olinadi.
+
+**Moliyaviy yaxlitlik:** chop etish avvalgidek READ-ONLY — holat, to'lov, qarz, zaxira va
+jurnal o'zgarmaydi (server ham shuni kafolatlaydi; `delivery-waybill.test.ts` qulflagan).

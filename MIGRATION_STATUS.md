@@ -4833,3 +4833,12 @@ frontend 42 fayl / 218 test.
 **Production (2026-09-25):** commit `0a93bf0`, `bum-api` va `bum-web`.
 API toza ko'tarildi (`Migratsiyalar qo'llandi (28ms)`, bitta `Server listening`, 500 yo'q);
 `/api/delivery/waybills/bulk` → 401 (marshrut bor). Web `build.json` → 04:07:57Z.
+
+**Ko'p nakladnoy: glif buzilishi va aqlli A4 (2026-09-25):** egasi yuborgan PDF'da 2-sahifada
+nomlar teshik, jami `42,200` o'rniga `2,200` edi. Sabab ma'lumotda emas — har nakladnoy
+alohida PDF qilinib sahifasi nusxalanardi, glif to'plamlari esa mos kelmasdi (test bilan
+tasdiqlandi: kirill glifi yakuniy shriftga umuman kirmagan). Endi hammasi BITTA hujjatga
+chiziladi. Qo'shimcha: nakladnoylar A4 ga aqlli joylashadi (sig'gani birga, hujjat
+o'rtasidan bo'linmaydi, kichraytirish yo'q), "Aqlli A4 / Har biri alohida varaq" tanlovi.
+Testlar: `bulk-print.test.ts` (9, PDF matnini ajratib tekshiradi), `e2e/bulk-print.spec.ts` (4);
+frontend 43 fayl / 228 test. Production deploy QILINMADI (topshiriq shunday).

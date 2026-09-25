@@ -48,6 +48,17 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
   const [printing, setPrinting] = useState(false);
   /** Nakladnoy chiqarish uchun belgilangan yetkazmalar (faqat yo'lga chiqayotganlari). */
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /**
+   * Qog'ozdan qanday foydalanish: `smart` — sig'gani bir varaqqa (standart),
+   * `full` — har nakladnoy alohida varaqda. Tanlov eslab qolinadi.
+   */
+  const [packMode, setPackMode] = useState<"smart" | "full">(() => {
+    try {
+      return localStorage.getItem("bum.waybill.pack") === "full" ? "full" : "smart";
+    } catch {
+      return "smart";
+    }
+  });
   /** Serverdan yuklangan nakladnoy ma'lumoti — oyna ochiq turgani shu qiymat bilan bilinadi. */
   const [waybill, setWaybill] = useState<{
     agentCode: string;
@@ -121,7 +132,7 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
         .catch(() => null);
       if (active?.custom) {
         const { renderWaybillsWithTemplate } = await import("@/lib/pdf/delivery-template.ts");
-        const doc = await renderWaybillsWithTemplate(active.schema, deliveries, options);
+        const doc = await renderWaybillsWithTemplate(active.schema, deliveries, { ...options, mode: packMode });
         doc.save(`nakladnoylar-${deliveries.length}-ta.pdf`);
       } else {
         await generateBulkDeliveryWaybillsPDF({ ...options, deliveries });
@@ -316,6 +327,25 @@ export default function TasksSection({ filters, onFiltersChange, money, onOpenTa
             Ilgari ikkita alohida tugma edi: qator belgilanganda ham "Nakladnoy" o'chiq turar,
             foydalanuvchi esa nega yonmaganini bilmasdi.
           */}
+          {/* Qog'ozdan foydalanish rejimi — nakladnoy tugmasi yonida */}
+          <Select
+            value={packMode}
+            onValueChange={(value) => {
+              const next = value === "full" ? "full" : "smart";
+              setPackMode(next);
+              try {
+                localStorage.setItem("bum.waybill.pack", next);
+              } catch {
+                // Saqlanmasa ham ishlayveradi
+              }
+            }}
+          >
+            <SelectTrigger className="h-8 w-[168px] text-xs" data-testid="waybill-pack-mode"><SelectValue /></SelectTrigger>
+            <SelectContent position="popper">
+              <SelectItem value="smart">Aqlli A4 (sig'gani birga)</SelectItem>
+              <SelectItem value="full">Har biri alohida varaq</SelectItem>
+            </SelectContent>
+          </Select>
           <Button
             size="sm"
             data-testid="waybill-print"

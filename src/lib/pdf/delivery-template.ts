@@ -12,7 +12,7 @@ import type jsPDF from "jspdf";
 import type { DocumentTemplateSchema } from "@bum/shared";
 import type { CompanyInfo } from "./pdf-utils.ts";
 import { fmtMoney, fmtNum } from "./pdf-utils.ts";
-import type { DocumentData } from "./template-renderer.ts";
+import type { DocumentData, PackMode } from "./template-renderer.ts";
 import type { SingleDeliveryWaybill } from "./delivery-waybill-pdf.ts";
 
 const dash = (value: string | null | undefined) => value ?? "—";
@@ -89,6 +89,7 @@ export function waybillDocumentData(
       unit: "Birlik",
       quantity: "Miqdor",
       price: "Narx",
+      discount: "Chegirma",
       total: "Summa",
       customerName: "Mijoz",
       customerPhone: "Telefon",
@@ -104,31 +105,18 @@ export function waybillDocumentData(
 }
 
 /**
- * Ko'p yetkazma — har biri O'Z SAHIFASIDA, shablon bo'yicha.
+ * Ko'p yetkazma — hammasi BITTA PDF ichida, A4 varaqlarga aqlli joylashtiriladi.
  *
- * `renderTemplate` bitta hujjat chizadi, shuning uchun bu yerda sahifalar birlashtiriladi:
- * har yetkazma alohida chiziladi va sahifalari umumiy hujjatga ko'chiriladi.
+ * Ilgari har yetkazma alohida PDF qilinib, sahifasi birinchisiga nusxalanardi. Bu gliflarni
+ * buzardi (har PDF faqat o'zi ishlatgan harflarni ichiga oladi), natijada nomlar teshik va
+ * summalar noto'g'ri chiqardi. Endi `renderDocuments` hammasini bitta hujjatga chizadi.
  */
 export async function renderWaybillsWithTemplate(
   schema: DocumentTemplateSchema,
   deliveries: SingleDeliveryWaybill[],
-  options: { company: CompanyInfo; currency: string; responsibleName: string },
+  options: { company: CompanyInfo; currency: string; responsibleName: string; mode?: PackMode },
 ): Promise<jsPDF> {
-  const { renderTemplate } = await import("./template-renderer.ts");
-  const [first, ...rest] = deliveries;
-  if (!first) return renderTemplate(schema, waybillDocumentData({} as SingleDeliveryWaybill, options));
-
-  const doc = await renderTemplate(schema, waybillDocumentData(first, options));
-  for (const delivery of rest) {
-    const next = await renderTemplate(schema, waybillDocumentData(delivery, options));
-    const pages = next.getNumberOfPages();
-    for (let page = 1; page <= pages; page += 1) {
-      doc.addPage();
-      // jsPDF sahifa tarkibini nusxalash: ichki `pages` massivi — chizilgan buyruqlar oqimi
-      const source = (next as unknown as { internal: { pages: string[][] } }).internal.pages[page];
-      const target = (doc as unknown as { internal: { pages: string[][] } }).internal.pages;
-      if (source) target[target.length - 1] = [...source];
-    }
-  }
-  return doc;
+  const { renderDocuments } = await import("./template-renderer.ts");
+  const list = deliveries.map((delivery) => waybillDocumentData(delivery, options));
+  return renderDocuments(schema, list.length > 0 ? list : [waybillDocumentData({} as SingleDeliveryWaybill, options)], options.mode ?? "smart");
 }

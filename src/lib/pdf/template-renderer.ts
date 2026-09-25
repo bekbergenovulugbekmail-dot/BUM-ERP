@@ -321,13 +321,23 @@ function drawPageNumbers(doc: jsPDF, schema: DocumentTemplateSchema) {
   }
 }
 
-export async function renderTemplate(schema: DocumentTemplateSchema, data: DocumentData): Promise<jsPDF> {
-  const doc = await createDocument({ orientation: schema.page.orientation });
+/**
+ * Bitta hujjatni MAVJUD PDF ichiga chizadi va tugagan Y ni qaytaradi.
+ *
+ * Nega shu kerak: bir nechta nakladnoyni alohida PDF qilib, keyin sahifasini nusxalash
+ * MUMKIN EMAS. Har PDF o'ziga faqat ISHLATGAN gliflarini joylaydi; nusxalangan sahifadagi
+ * glif raqamlari boshqa to'plamga tegib, harflar yo'qoladi (2026-09-25: "42,200" → "2,200",
+ * kirill nomlar teshik bo'lib chiqqan). Shuning uchun hammasi BITTA hujjat ichida chiziladi.
+ */
+async function drawDocumentInto(
+  doc: jsPDF,
+  schema: DocumentTemplateSchema,
+  data: DocumentData,
+  startY: number,
+): Promise<number> {
   const codeImages = await buildCodeImages(schema, data);
   const left = schema.page.margins.left || A4.marginX;
   const right = doc.internal.pageSize.getWidth() - (schema.page.margins.right || A4.marginX);
-  // Jadval ikkinchi sahifaga o'tganda sarlavha takrorlanadi — nomi shablondagi birinchi
-  // matn elementidan, raqam va sana esa hujjat ma'lumotidan olinadi
   const headerSection = schema.sections.find((section) => section.key === "header");
   const title = headerSection?.elements.find((element) => element.type === "text")?.label ?? "HUJJAT";
   const ctx: RenderContext = {
@@ -335,24 +345,99 @@ export async function renderTemplate(schema: DocumentTemplateSchema, data: Docum
     data,
     left,
     right,
-    y: schema.page.margins.top || A4.marginX,
+    y: startY,
     header: { title, number: data.values["document.number"] ?? "", date: data.values["document.date"] ?? "" },
     codeImages,
   };
 
   for (const section of schema.sections) {
-    if (section.key === "footer") {
-      // Footer sahifa tagida — oxirgi bo'lib chiziladi
-      continue;
-    }
+    if (section.key === "footer") continue;
     for (const element of section.elements) renderElement(ctx, element);
     if (section.key === "header") drawLine(ctx);
   }
-
   const footer = schema.sections.find((section) => section.key === "footer");
-  if (footer) {
-    ctx.y = Math.max(ctx.y, contentBottom() - 40);
-    for (const element of footer.elements) renderElement(ctx, element);
+  if (footer) for (const element of footer.elements) renderElement(ctx, element);
+  return ctx.y;
+}
+
+/** Bitta hujjat — o'z sahifasida (mavjud chaqiruvchilar shuni ishlatadi). */
+export async function renderTemplate(schema: DocumentTemplateSchema, data: DocumentData): Promise<jsPDF> {
+  const doc = await createDocument({ orientation: schema.page.orientation });
+  await drawDocumentInto(doc, schema, data, schema.page.margins.top || A4.marginX);
+  drawFooter(doc);
+  drawPageNumbers(doc, schema);
+  return doc;
+}
+
+/** Hujjatlar orasidagi ajratgich — qayerda biri tugab, ikkinchisi boshlangani ko'rinsin. */
+function drawSeparator(doc: jsPDF, y: number, schema: DocumentTemplateSchema): number {
+  const left = schema.page.margins.left || A4.marginX;
+  const right = doc.internal.pageSize.getWidth() - (schema.page.margins.right || A4.marginX);
+  const at = y + 5;
+  doc.setDrawColor(...PDF_COLORS.border);
+  doc.setLineDashPattern([1.5, 1.5], 0);
+  doc.line(left, at, right, at);
+  doc.setLineDashPattern([], 0);
+  return at + 7;
+}
+
+export type PackMode = "smart" | "full";
+
+/** O'lchash natijasi: hujjat qancha joy oladi va bitta sahifaga sig'adimi. */
+type Measured = { height: number; multiPage: boolean };
+
+/**
+ * Hujjat balandligini O'LCHAYDI — chetga tashlanadigan nusxada chizib ko'radi.
+ *
+ * CSS `scale` yoki taxminiy hisob ishlatilmaydi: balandlik matn uzunligi, jadval qatorlari va
+ * shrift bilan bog'liq, shuning uchun yagona ishonchli yo'l — haqiqatan chizib ko'rish.
+ */
+async function measureDocument(schema: DocumentTemplateSchema, data: DocumentData): Promise<Measured> {
+  const probe = await createDocument({ orientation: schema.page.orientation });
+  const top = schema.page.margins.top || A4.marginX;
+  const end = await drawDocumentInto(probe, schema, data, top);
+  const pages = probe.getNumberOfPages();
+  return { height: pages > 1 ? Number.POSITIVE_INFINITY : end - top, multiPage: pages > 1 };
+}
+
+/**
+ * Bir nechta hujjat — A4 varaqlarga AQLLI joylashtiriladi.
+ *
+ * Qoidalar:
+ *  1. Hujjat O'RTASIDAN bo'linmaydi: sig'masa butunlay keyingi sahifaga o'tadi.
+ *  2. Sig'sa — o'sha sahifada, ajratgich chizig'i bilan davom etadi.
+ *  3. Bitta sahifaga sig'maydigan uzun hujjat (50+ mahsulot) o'z sahifasidan boshlanadi.
+ *  4. Tartib foydalanuvchi tanlagan tartibda qoladi (birinchi-mos, qayta saralamaydi).
+ *  5. Kichraytirish YO'Q — o'qilishi muhimroq; sig'masa keyingi varaq.
+ *
+ * `mode: "full"` — eski xulq: har hujjat o'z sahifasida.
+ */
+export async function renderDocuments(
+  schema: DocumentTemplateSchema,
+  list: DocumentData[],
+  mode: PackMode = "smart",
+): Promise<jsPDF> {
+  const doc = await createDocument({ orientation: schema.page.orientation });
+  const top = schema.page.margins.top || A4.marginX;
+  const bottom = contentBottom();
+  let y = top;
+
+  for (const [index, data] of list.entries()) {
+    if (index > 0) {
+      let newPage = true;
+      if (mode === "smart") {
+        const measured = await measureDocument(schema, data);
+        // Sig'sa — shu sahifada davom etadi
+        newPage = measured.multiPage || y + 5 + measured.height > bottom;
+      }
+      if (newPage) {
+        doc.addPage();
+        y = top;
+      } else {
+        y = drawSeparator(doc, y, schema);
+      }
+    }
+    y = await drawDocumentInto(doc, schema, data, y);
   }
 
   drawFooter(doc);

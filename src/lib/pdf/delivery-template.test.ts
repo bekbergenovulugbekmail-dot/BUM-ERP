@@ -136,12 +136,21 @@ describe("Ustun sarlavhalari", () => {
 });
 
 describe("Ko'p yetkazma", () => {
-  it("har yetkazma o'z sahifasida chiqadi", async () => {
+  it("qisqa yetkazmalar bitta A4 ga joylashadi (aqlli rejim — standart)", async () => {
     const doc = await renderWaybillsWithTemplate(
       tableSchema([{ key: "name" }, { key: "total" }]),
       [delivery(ITEMS), { ...delivery(ITEMS), number: "DL-2026-0006" }],
       options,
     );
-    expect(doc.getNumberOfPages()).toBeGreaterThanOrEqual(2);
+    expect(doc.getNumberOfPages(), "ikkitasi bir varaqqa sig'adi").toBe(1);
+  });
+
+  it("`full` rejimda har yetkazma o'z sahifasida qoladi", async () => {
+    const doc = await renderWaybillsWithTemplate(
+      tableSchema([{ key: "name" }, { key: "total" }]),
+      [delivery(ITEMS), { ...delivery(ITEMS), number: "DL-2026-0006" }],
+      { ...options, mode: "full" },
+    );
+    expect(doc.getNumberOfPages()).toBe(2);
   });
 });

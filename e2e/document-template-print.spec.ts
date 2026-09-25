@@ -12,7 +12,7 @@ import { appPath, login } from "./_lib/accounts.ts";
  * yuklanadi. Dev serverda modul grafigi har safar qayta hal qilinadi, shuning uchun
  * to'plam bo'lib yurganda standart 90 soniya yetmaydi.
  */
-test.describe.configure({ timeout: 240_000 });
+test.describe.configure({ timeout: 360_000 });
 
 test.afterEach(async ({ page }) => {
   // Tozalash HECH QACHON testni yiqitmasin — u asosiy tekshiruv emas
