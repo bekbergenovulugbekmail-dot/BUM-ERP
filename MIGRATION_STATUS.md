@@ -4841,4 +4841,7 @@ tasdiqlandi: kirill glifi yakuniy shriftga umuman kirmagan). Endi hammasi BITTA 
 chiziladi. Qo'shimcha: nakladnoylar A4 ga aqlli joylashadi (sig'gani birga, hujjat
 o'rtasidan bo'linmaydi, kichraytirish yo'q), "Aqlli A4 / Har biri alohida varaq" tanlovi.
 Testlar: `bulk-print.test.ts` (9, PDF matnini ajratib tekshiradi), `e2e/bulk-print.spec.ts` (4);
-frontend 43 fayl / 228 test. Production deploy QILINMADI (topshiriq shunday).
+frontend 43 fayl / 228 test.
+**Production (2026-09-25):** commit `b10fbb5`, faqat `bum-web` (API o'zgarmadi).
+`build.json` → 07:30:21Z, bundle `index-3ShcvU5O.js`; renderer bo'lagi
+`template-renderer-UtUbeZvh.js` ichida `renderDocuments` bor, sahifa nusxalash kodi yo'q.
