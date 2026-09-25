@@ -20,7 +20,7 @@ test.afterEach(async ({ page }) => {
   if (!list?.ok()) return;
   const { templates } = (await list.json()) as { templates: { id: string; name: string; isDefault: boolean }[] };
   for (const template of templates) {
-    if (!/^Nakladnoy \d+$/.test(template.name) || template.isDefault) continue;
+    if (!/^Nakladnoy \d+$/.test(template.name)) continue;
     await page.request.delete(`/api/documents/templates/${template.id}`, { timeout: 30_000 }).catch(() => null);
   }
 });
@@ -161,5 +161,6 @@ test("shablon bilan chizilgan nakladnoy haqiqiy PDF bo'ladi", async ({ page }) =
   });
 
   expect(result.isPdf).toBe(true);
-  expect(result.pages, "har yetkazma o'z sahifasida").toBeGreaterThanOrEqual(2);
+  // "Aqlli A4" — ikkita qisqa nakladnoy bitta varaqda (2026-09-25 dan beri standart xulq)
+  expect(result.pages, "ikkita qisqa nakladnoy bitta varaqqa sig'adi").toBe(1);
 });

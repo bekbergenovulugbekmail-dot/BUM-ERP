@@ -143,6 +143,8 @@ export default function SalesAgentLayout() {
     policy?.trackingIntervalSeconds ?? DEFAULT_SALES_AGENT_POLICY.trackingIntervalSeconds,
     onSessionEnded,
   );
+  // Xato chegarasi sahifa almashganda tiklanishi uchun — YO'L, joylashuv holati emas
+  const { pathname } = useLocation();
   const online = useOnline();
 
   if (currentUser === null) return <Navigate to={`/${lng}/login`} replace />;
@@ -203,7 +205,7 @@ export default function SalesAgentLayout() {
           ) : onDuty && location.status === "denied" ? (
             <LocationRequired onRequest={location.request} />
           ) : (
-            <ErrorBoundary area="Sotuv agenti" resetKey={location.pathname}>
+            <ErrorBoundary area="Sotuv agenti" resetKey={pathname}>
               <Outlet context={meQuery.data} />
             </ErrorBoundary>
           )}

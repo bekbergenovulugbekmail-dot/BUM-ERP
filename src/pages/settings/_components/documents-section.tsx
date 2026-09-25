@@ -11,51 +11,28 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
-  ArrowDown, ArrowUp, Copy, FileText, History, Plus, RotateCcw, Save, Star, Trash2,
+  ArrowDown, ArrowUp, Copy, CopyPlus, FileText, History, Plus, RotateCcw, Save, Star, Trash2,
 } from "lucide-react";
 import {
-  DOCUMENT_TYPE_LABELS, DOCUMENT_TYPES, MAX_IMAGE_DATA_LENGTH, QR_SOURCES,
+  DOCUMENT_TYPE_LABELS, DOCUMENT_TYPES, MAX_IMAGE_DATA_LENGTH,
   type DocumentElement, type DocumentTemplateSchema, type DocumentType, type SectionKey,
 } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
-import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
 import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
 import { cn } from "@/lib/utils.ts";
 import {
-  ELEMENT_LABELS, GROUP_LABELS, SECTION_LABELS, sampleData,
-  type ColumnRow, type FieldCatalog, type TemplateRow, type VersionRow,
+  ELEMENT_LABELS, SECTION_LABELS, sampleData,
+  type FieldCatalog, type TemplateRow, type VersionRow,
 } from "../_lib/document-designer.ts";
+import ElementEditor from "./element-editor.tsx";
 
 const SECTION_ORDER: SectionKey[] = ["header", "body", "footer"];
-
-/**
- * Rasmni shablonga sig'adigan holga keltiradi: kengligi 384 px gacha kichraytiriladi va
- * data URL bo'lib saqlanadi (chek logotipidagi kabi). Server ham shu formatni kutadi.
- */
-async function imageToDataUrl(file: File): Promise<string> {
-  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) throw new Error("PNG, JPEG yoki WebP rasm tanlang");
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 384 / bitmap.width);
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Rasmni o'qib bo'lmadi");
-  context.fillStyle = "#fff";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-  let dataUrl = canvas.toDataURL("image/png");
-  if (dataUrl.length > MAX_IMAGE_DATA_LENGTH) dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-  if (dataUrl.length > MAX_IMAGE_DATA_LENGTH) throw new Error("Rasm juda katta — kichikroq fayl tanlang");
-  return dataUrl;
-}
 
 /**
  * Yangi jadval qaysi ustunlar bilan ochiladi — HUJJAT TURIGA mos.
@@ -89,14 +66,16 @@ function newElement(
   if (type === "text") return { id, type, label: "Yangi matn" };
   if (type === "qr") return { id, type, qrSource: "documentNumber", width: 22 };
   if (type === "barcode") return { id, type, qrSource: "documentNumber", width: 50, height: 14 };
-  if (type === "image") return { id, type, width: 40, height: 20 };
+  if (type === "image") return { id, type, width: 40, height: 20, fit: "contain" };
+  if (type === "rect") return { id, type, width: 80, height: 20, box: { borderWidth: 0.3, borderStyle: "solid" } };
   return { id, type };
 }
 
 export default function DocumentsSection() {
   const { can } = usePermissions();
   const canManage = can("settings.manage");
-  const companyName = useActiveCompany().data?.company.name ?? "BUM ERP";
+  const activeCompany = useActiveCompany().data?.company;
+  const companyName = activeCompany?.name ?? "BUM ERP";
 
   const [documentType, setDocumentType] = useState<DocumentType>("delivery_waybill");
   const [templateId, setTemplateId] = useState<string | null>(null);
@@ -200,6 +179,17 @@ export default function DocumentsSection() {
   const removeElement = (id: string) =>
     patchSchema((current) => {
       for (const section of current.sections) section.elements = section.elements.filter((element) => element.id !== id);
+      return current;
+    });
+
+  /** Nusxalash — yonidagi joyga aynan shunday element qo'shadi (yangi id bilan). */
+  const duplicateElement = (id: string) =>
+    patchSchema((current) => {
+      for (const section of current.sections) {
+        const index = section.elements.findIndex((element) => element.id === id);
+        if (index < 0) continue;
+        section.elements.splice(index + 1, 0, { ...structuredClone(section.elements[index]!), id: crypto.randomUUID() });
+      }
       return current;
     });
 
@@ -409,9 +399,14 @@ export default function DocumentsSection() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[320px_1fr_300px]">
+      {/*
+        `minmax(0,1fr)` — `1fr` ning o'zi `minmax(auto,1fr)` degani, ya'ni ustun ichidagi
+        eng tor kenglikdan pastga tushmaydi. Shu sababli A4 ko'rinishi butun sahifani
+        cho'zib, o'ng tomondagi sozlamalar paneli ekrandan chiqib ketardi.
+      */}
+      <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_308px]">
         {/* Elementlar daraxti */}
-        <div className="space-y-3 rounded-xl border border-border p-3">
+        <div className="min-w-0 space-y-3 rounded-xl border border-border p-3">
           {SECTION_ORDER.map((section) => (
             <div key={section}>
               <div className="mb-1.5 flex items-center justify-between">
@@ -419,7 +414,7 @@ export default function DocumentsSection() {
                 {canManage && schema && (
                   <div className="flex flex-wrap justify-end gap-1">
                     {/* Bir bosishda qo'shiladi — ko'p qadamli menyu tez ishlashga xalaqit beradi */}
-                    {(["text", "field", "itemsTable", "totals", "signatures", "image", "qr", "barcode", "pageNumber", "line"] as const).map((type) => (
+                    {(["text", "field", "itemsTable", "totals", "signatures", "image", "qr", "barcode", "pageNumber", "line", "rect", "spacer"] as const).map((type) => (
                       <button
                         key={type}
                         type="button"
@@ -450,6 +445,8 @@ export default function DocumentsSection() {
                       <>
                         <button type="button" aria-label="Yuqoriga" onClick={() => moveElement(element.id, -1)}><ArrowUp className="h-3 w-3" /></button>
                         <button type="button" aria-label="Pastga" onClick={() => moveElement(element.id, 1)}><ArrowDown className="h-3 w-3" /></button>
+                        <button type="button" aria-label="Nusxalash" data-testid={`duplicate-${element.id}`}
+                          onClick={() => duplicateElement(element.id)}><CopyPlus className="h-3 w-3" /></button>
                         <button type="button" aria-label="O'chirish" onClick={() => removeElement(element.id)}>
                           <Trash2 className="h-3 w-3 text-destructive" />
                         </button>
@@ -466,8 +463,8 @@ export default function DocumentsSection() {
           ))}
         </div>
 
-        {/* A4 — HAQIQIY PDF */}
-        <div className="rounded-xl border border-border bg-muted/30 p-2">
+        {/* A4 — HAQIQIY PDF. `min-w-0`: shusiz iframe ustunni cho'zib, o'ng paneli ekrandan chiqib ketardi */}
+        <div className="min-w-0 rounded-xl border border-border bg-muted/30 p-2">
           <div className="mb-2 flex items-center gap-2 px-1 text-xs text-muted-foreground">
             <FileText className="h-3.5 w-3.5" /> A4 ko'rinish (namuna ma'lumot bilan) — chop etilganda aynan shunday chiqadi
           </div>
@@ -486,150 +483,12 @@ export default function DocumentsSection() {
               element={selected}
               catalog={catalog}
               disabled={!canManage}
+              maxImageLength={MAX_IMAGE_DATA_LENGTH}
+              companyLogoUrl={activeCompany?.logoUrl}
               onChange={(patch) => updateElement(selected.id, patch)}
             />
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function ElementEditor({
-  element,
-  catalog,
-  disabled,
-  onChange,
-}: {
-  element: DocumentElement;
-  catalog: FieldCatalog | undefined;
-  disabled: boolean;
-  onChange: (patch: Partial<DocumentElement>) => void;
-}) {
-  const grouped = useMemo(() => {
-    const map = new Map<string, FieldCatalog["fields"]>();
-    for (const field of catalog?.fields ?? []) {
-      const list = map.get(field.group) ?? [];
-      list.push(field);
-      map.set(field.group, list);
-    }
-    return [...map.entries()];
-  }, [catalog]);
-
-  const toggleColumn = (column: ColumnRow, checked: boolean) => {
-    const columns = element.columns ?? [];
-    onChange({
-      columns: checked
-        ? [...columns, { key: column.key }]
-        : columns.filter((item) => item.key !== column.key),
-    });
-  };
-
-  const toggleRow = (row: string, checked: boolean) => {
-    const rows = element.rows ?? [];
-    onChange({ rows: checked ? [...rows, row] : rows.filter((item) => item !== row) });
-  };
-
-  return (
-    <div className="space-y-3">
-      <p className="text-xs font-semibold">{ELEMENT_LABELS[element.type]}</p>
-
-      {(element.type === "text" || element.type === "field" || element.type === "signatures") && (
-        <div>
-          <Label className="text-[11px]">
-            {element.type === "signatures" ? "Imzo yorliqlari (| bilan ajratiladi)" : "Matn / yorliq"}
-          </Label>
-          <Input className="h-8 text-xs" disabled={disabled} value={element.label ?? ""} data-testid="element-label"
-            onChange={(e) => onChange({ label: e.target.value })} />
-        </div>
-      )}
-
-      {element.type === "field" && (
-        <div>
-          <Label className="text-[11px]">Qiymat</Label>
-          <Select value={element.field ?? ""} disabled={disabled} onValueChange={(value) => onChange({ field: value })}>
-            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Maydon" /></SelectTrigger>
-            <SelectContent>
-              {grouped.map(([group, fields]) => (
-                <div key={group}>
-                  <p className="px-2 py-1 text-[10px] font-semibold text-muted-foreground">{GROUP_LABELS[group] ?? group}</p>
-                  {fields.map((field) => (
-                    <SelectItem key={field.path} value={field.path}>{field.label}</SelectItem>
-                  ))}
-                </div>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      {element.type === "itemsTable" && (
-        <div>
-          <Label className="text-[11px]">Ustunlar</Label>
-          <div className="mt-1 space-y-1">
-            {(catalog?.columns ?? []).map((column) => {
-              const checked = (element.columns ?? []).some((item) => item.key === column.key);
-              return (
-                <label key={column.key} className="flex items-center gap-2 text-xs">
-                  <Checkbox checked={checked} disabled={disabled} onCheckedChange={(value) => toggleColumn(column, value === true)} />
-                  {column.label}
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {(element.type === "totals" || element.type === "payments") && (
-        <div>
-          <Label className="text-[11px]">Qatorlar</Label>
-          <div className="mt-1 space-y-1">
-            {((element.type === "totals" ? catalog?.totalRows : catalog?.paymentRows) ?? []).map((row) => (
-              <label key={row} className="flex items-center gap-2 text-xs">
-                <Checkbox
-                  checked={(element.rows ?? []).includes(row)}
-                  disabled={disabled}
-                  onCheckedChange={(value) => toggleRow(row, value === true)}
-                />
-                {row}
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {(element.type === "text" || element.type === "field") && (
-        <div className="space-y-2">
-          <div className="flex items-end gap-2">
-            <div className="w-20">
-              <Label className="text-[11px]">Shrift</Label>
-              <Input type="number" min="5" max="48" className="h-8 text-xs" disabled={disabled}
-                value={element.style?.fontSize ?? 10}
-                onChange={(e) => onChange({ style: { ...element.style, fontSize: e.target.valueAsNumber || 10 } })} />
-            </div>
-            <label className="flex items-center gap-1.5 pb-1.5 text-xs">
-              <Checkbox checked={element.style?.bold === true} disabled={disabled}
-                onCheckedChange={(value) => onChange({ style: { ...element.style, bold: value === true } })} />
-              Qalin
-            </label>
-          </div>
-          <div>
-            <Label className="text-[11px]">Tekislash</Label>
-            <Select value={element.style?.align ?? "left"} disabled={disabled}
-              onValueChange={(value) => onChange({ style: { ...element.style, align: value as "left" | "center" | "right" } })}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="left">Chapga</SelectItem>
-                <SelectItem value="center">Markazga</SelectItem>
-                <SelectItem value="right">O'ngga</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      )}
-
-      <div className="rounded-lg bg-muted/50 p-2 text-[10px] text-muted-foreground">
-        Shablon faqat KO'RINISHni belgilaydi. Summa va miqdor hujjatdan keladi — bu yerdan o'zgartirilmaydi.
       </div>
     </div>
   );

@@ -79,6 +79,13 @@ export async function applyUnicodeFont(doc: jsPDF): Promise<string> {
 export function redirectHelvetica(doc: jsPDF, fontName: string): void {
   if (fontName === "helvetica") return;
   const original = doc.setFont.bind(doc);
-  doc.setFont = ((family: string, style?: string) =>
-    original(family === "helvetica" ? fontName : family, style)) as typeof doc.setFont;
+  doc.setFont = ((family: string, style?: string) => {
+    if (family !== "helvetica") return original(family, style);
+    /**
+     * PT Sans'da faqat `normal` va `bold` bor. `italic` so'ralsa jsPDF shriftni topa olmay
+     * standart Times-Italic'ga tushardi — u esa kirillni bilmaydi, ya'ni qiya yozilgan
+     * matndagi kirill yana buzilardi. Shuning uchun qiya → oddiy.
+     */
+    return original(fontName, style === "bold" || style === "bolditalic" ? "bold" : "normal");
+  }) as typeof doc.setFont;
 }

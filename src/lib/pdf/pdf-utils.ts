@@ -297,9 +297,16 @@ export function drawInfoBox(
 }
 
 /**
- * Draw footer with page numbers and a tagline.
+ * Taglik tasmasi: nom va sahifa raqami.
+ *
+ * `pageNumbers: false` — shablonning O'Z "sahifa raqami" elementi bo'lganda. Aks holda ikkala
+ * yozuv bir joyga tushib, ustma-ust chiqardi ("2026-09-25 — 1/1" va "1 / 1" qo'shilib ketardi).
  */
-export function drawFooter(doc: jsPDF, tagline = "BUM ERP — Generated automatically"): void {
+export function drawFooter(
+  doc: jsPDF,
+  tagline = "BUM ERP — Generated automatically",
+  options: { pageNumbers?: boolean } = {},
+): void {
   const pw = doc.internal.pageSize.getWidth();
   const ph = doc.internal.pageSize.getHeight();
   const pageCount = doc.getNumberOfPages();
@@ -312,12 +319,10 @@ export function drawFooter(doc: jsPDF, tagline = "BUM ERP — Generated automati
     doc.setFontSize(7.5);
     doc.setTextColor(...PDF_COLORS.textMuted);
     doc.text(tagline, 14, ph - 5);
-    doc.text(
-      `${new Date().toLocaleDateString("uz-UZ")}  —  ${i} / ${pageCount}`,
-      pw - 14,
-      ph - 5,
-      { align: "right" }
-    );
+    const right = options.pageNumbers === false
+      ? new Date().toLocaleDateString("uz-UZ")
+      : `${new Date().toLocaleDateString("uz-UZ")}  —  ${i} / ${pageCount}`;
+    doc.text(right, pw - 14, ph - 5, { align: "right" });
   }
 }
 

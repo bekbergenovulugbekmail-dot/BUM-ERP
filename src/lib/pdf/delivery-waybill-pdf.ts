@@ -182,7 +182,7 @@ export async function generateBulkDeliveryWaybillsPDF(data: {
   currency: string;
   responsibleName: string;
   deliveries: SingleDeliveryWaybill[];
-}): jsPDF {
+}): Promise<jsPDF> {
   const doc = await createDocument();
   const showDebt = data.deliveries.some((row) => row.customerDebt !== null);
 

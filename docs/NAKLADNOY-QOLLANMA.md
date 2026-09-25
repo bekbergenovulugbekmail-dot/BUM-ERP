@@ -86,11 +86,23 @@ emas, ya'ni hamma narsani noldan qo'yish shart emas.
 
 **2-qadam.** Ro'yxatda paydo bo'lgan **"Rasm"** qatorini bosing — o'ng ustunda sozlamalari ochiladi.
 
-**3-qadam.** **"Rasm (PNG, JPEG yoki WebP)"** — faylni tanlang.
+**3-qadam.** **"Rasm yuklash (PNG, JPEG, WebP)"** tugmasi — faylni tanlang. Tanlangandan keyin
+o'sha yerda kichik ko'rinishi chiqadi, yonida **"Almashtirish"** va o'chirish tugmasi turadi.
 
-**4-qadam.** **"Eni (mm)"** va **"Bo'yi (mm)"** ni yozing. Logo uchun odatda `35 × 18` mm yetarli.
+**4-qadam.** **"Kenglik (mm)"** va **"Balandlik (mm)"** ni yozing. Logo uchun odatda `35 × 18` mm yetarli.
 
-**5-qadam.** Tekislash uchun element tartibini yuqoriga/pastga o'zgartiring (strelkalar bilan).
+> **"Nisbatni saqlash"** belgilangan turganda kenglikni o'zgartirsangiz balandlik o'zi ergashadi —
+> logo cho'zilib ketmaydi. Balandlikni alohida qo'yish kerak bo'lsa belgini olib tashlang.
+
+**5-qadam.** **"Tekislash"** — chapga, markazga yoki o'ngga.
+
+**6-qadam (ixtiyoriy).** **"Katakka joylashuvi"**: `Sig'diriladi` (nisbat saqlanadi, standart)
+yoki `Cho'ziladi` (butun katakni to'ldiradi). Pastda ramka ham bor: **chiziq turi**
+(to'liq / uzuq / nuqtali / qo'sh), **qalinligi**, **rangi**, **fon** va **burchak radiusi**.
+
+Kompaniya sozlamalarida logotip havolasi saqlangan bo'lsa, **"Kompaniya logotipini olish"**
+tugmasi ham chiqadi. U rasmni yuklab olib shablon ichiga ko'chiradi. Tashqi sayt ruxsat
+bermasa (bu ko'p uchraydi) xabar chiqadi — bunday holda faylni qurilmangizdan yuklang.
 
 ### Qaysi format ishlaydi
 
@@ -124,7 +136,7 @@ uchun:
 
 **2-qadam.** Ro'yxatdan **"QR kod"** qatorini bosing.
 
-**3-qadam.** O'ng ustundagi **"Kod ichida nima bo'lsin"** ro'yxatidan tanlang:
+**3-qadam.** O'ng ustundagi **"Nima kodlanadi"** ro'yxatidan tanlang:
 
 - **Hujjat raqami** — nakladnoy raqami (`DL-2026-0005`)
 - **Buyurtma raqami** — sotuv buyurtmasi raqami (`SO-2026-0004`)
@@ -138,8 +150,18 @@ qolardi. Shuning uchun QR faqat tizimning o'z ma'lumotidan to'ldiriladi.
 
 ### O'lcham va joy
 
-QR kvadrat bo'ladi; o'lchami **"Eni (mm)"** dan olinadi (standart 22 mm). Qog'ozda yaxshi
-skanerlanishi uchun **20 mm dan kichik qilmang**.
+QR kvadrat bo'ladi; o'lchami **"O'lcham (mm)"** dan olinadi (standart 22 mm). Qog'ozda yaxshi
+skanerlanishi uchun **20 mm dan kichik qilmang**. Tekislashni ham shu yerdan tanlaysiz.
+
+Yana ikkita sozlama bor:
+
+- **"Xatolikka chidamlilik"** — `L` (7%), `M` (15%, standart), `Q` (25%), `H` (30%).
+  Qog'oz bujmayadigan yoki muhr tushadigan joyda `H` ni tanlang: kodning bir qismi
+  ko'rinmay qolsa ham o'qiladi. Evaziga naqsh zichroq bo'ladi.
+- **"Chekka (modul)"** — QR atrofidagi oq hoshiya. Ramka yoki chiziq yaqinida `2` qo'ying.
+
+**"Kod ostidagi yozuv"** maydoniga matn yozsangiz (masalan `Tekshirish kodi`), u QR ostida
+kichik harflarda chiqadi.
 
 > **Eslatma:** agar tanlangan manba bo'sh bo'lsa (masalan, yetkazmada buyurtma raqami yo'q),
 > QR jimgina chizilmaydi — hujjat baribir chiqadi.
@@ -152,7 +174,7 @@ skanerlanishi uchun **20 mm dan kichik qilmang**.
 
 **2-qadam.** Ro'yxatdan **"Shtrix-kod"** ni tanlang.
 
-**3-qadam.** **"Kod ichida nima bo'lsin"** — QR dagi bilan bir xil uchta manba.
+**3-qadam.** **"Nima kodlanadi"** — QR dagi bilan bir xil uchta manba.
 
 **Formati:** CODE128 (raqam va harfni qamraydi, nakladnoy raqami uchun to'g'ri keladi).
 
@@ -223,23 +245,22 @@ O'ng ustunda ikkita ro'yxat bor:
 Ustun **tartibi** qog'ozdagi tartib bilan aynan bir xil: ro'yxatda yuqorida turgan ustun
 qog'ozda chap tomonda bo'ladi.
 
-### ⚠️ Yetkazma nakladnoyi uchun MUHIM
+### Yetkazma nakladnoyida qaysi ustun to'ladi
 
-Yetkazma nakladnoyida jadvalning har bir qatori — **mahsulot emas, MIJOZ**. Shuning uchun:
+Har bir qator — buyurtmadagi **bitta mahsulot**. Mijoz ustunlari har qatorda takrorlanadi,
+chunki nakladnoy bitta mijozga tegishli: shu bilan ikkala turdagi ustunni ham tanlay olasiz.
 
 | Ustun | Yetkazma nakladnoyida |
 |---|---|
-| **Mijoz** (`customerName`) | ✅ to'ladi |
-| **Telefon** (`customerPhone`) | ✅ to'ladi |
-| **Manzil** (`customerAddress`) | ✅ to'ladi |
-| **Summa** (`total`) | ✅ to'ladi |
-| **Qarz** (`customerDebt`) | ✅ to'ladi |
 | № | ✅ avtomatik raqamlanadi |
-| Mahsulot, SKU, Shtrix-kod, Birlik, Miqdor, Narx, Chegirma | ❌ **bo'sh chiqadi** |
-| Tannarx, Marja | ❌ bo'sh (va ruxsat kerak) |
+| **Mahsulot** (`name`), **SKU**, **Birlik**, **Miqdor**, **Narx**, **Summa** | ✅ to'ladi |
+| **Mijoz**, **Telefon**, **Manzil**, **Qarz** | ✅ to'ladi (har qatorda bir xil) |
+| Chegirma | ❌ bo'sh — yetkazmada qator chegirmasi yuritilmaydi |
+| Shtrix-kod | ❌ bo'sh |
+| Tannarx, Marja | ruxsat bo'lsa to'ladi (`Mahsulot: tannarxni ko'rish`) |
 
-Ya'ni yetkazma nakladnoyida mahsulotlar ro'yxati **mavjud emas** — hujjat "qaysi mijozga qancha
-pulga bormoqda" degan qog'oz. Mahsulot ustunlarini tanlasangiz katakchalar bo'sh qoladi.
+> Buyurtmada mahsulot qatori bo'lmasa (eski yozuvlar) jadval bitta yig'ma qatorga tushadi —
+> mijoz nomi va umumiy summa bilan.
 
 ### Ustun kengligi — A4 ga sig'adigan misol
 
@@ -262,6 +283,42 @@ Yetkazma nakladnoyi uchun ishlaydigan taqsimot:
 Kenglik maydonini bo'shatib qo'ysangiz — o'sha ustun yana avtomatik taqsimotga qaytadi.
 
 **Cheklov:** bitta jadvalda ko'pi bilan **12 ta** ustun.
+
+### Ustun nomini o'zgartirish
+
+Har ustun qatorida nom maydoni bor. Bo'sh qoldirsangiz tizimning o'z nomi chiqadi
+(`Mijoz`, `Summa`), o'zingiz yozsangiz — qog'ozda aynan shu yozuv turadi (`Do'kon nomi`).
+
+### Jadval chiziqlari
+
+Ustunlar ro'yxati ostida **"Jadval chiziqlari"** bo'limi bor. Har chiziq ALOHIDA boshqariladi:
+
+| Sozlama | Nima qiladi |
+|---|---|
+| **Chiziq turi** | To'liq · Uzuq · Nuqtali · Qo'sh |
+| **Qalinlik (mm)** | `0` — chiziq umuman chizilmaydi; standart `0.2` |
+| **Tashqi ramka** | To'rt tomonni birdan yoqadi/o'chiradi |
+| **Yuqori · Past · Chap · O'ng** | Har tomonni alohida |
+| **Gorizontal** | Qatorlar orasidagi chiziqlar |
+| **Vertikal** | Ustunlar orasidagi chiziqlar |
+| **Sarlavha chizig'i** | Sarlavha ostidagi chiziq |
+| **Chiziq rangi** | Ranglar oynasidan |
+
+Masalan "faqat gorizontal chiziqli, ochiq ko'rinish" uchun: **Vertikal** va **Tashqi ramka**
+ni o'chiring, **Gorizontal** ni qoldiring.
+
+### Kataklar
+
+| Sozlama | Nima qiladi |
+|---|---|
+| **Bo'shliq X / Y (mm)** | Katak ichidagi chekinish |
+| **Qator balandligi (mm)** | Eng kam balandlik (bo'sh — matnga qarab) |
+| **Shrift (pt)** | Jadval matni (standart 8.5) |
+| **Vertikal tekislash** | Matn katak ichida yuqorida / o'rtada / pastda |
+| **Navbatma-navbat fon** | Juft qatorlarni ochiq rang bilan bo'yash |
+| **Sarlavha foni / matni** | Sarlavha qatorining rangi |
+
+> Bu sozlamalarning hech biri SUMMAGA tegmaydi — faqat ko'rinish. Qiymatlar hujjatdan keladi.
 
 ---
 
@@ -291,8 +348,35 @@ yoki
 Dostavshik|Do'kon egasi
 ```
 
-Qog'ozda ikkita imzo chizig'i va tagida shu yozuvlar chiqadi. Hozircha **ikkita** imzo joyi
-chiziladi.
+Qog'ozda har yorliq uchun bitta imzo chizig'i va tagida yozuv chiqadi. **To'rttagacha**
+yorliq yozish mumkin (`Dostavshik|Ombor|Buxgalter|Do'kon egasi`) — chiziqlar kenglikka
+teng bo'linadi.
+
+**"Blok balandligi (mm)"** — chiziq ustidagi bo'sh joy, ya'ni qo'l bilan imzo qo'yiladigan joy.
+Standart `22` mm. Kamaytirsangiz nakladnoy ixchamlashadi va bitta A4 ga ko'proq sig'adi;
+oshirsangiz imzo uchun ko'proq joy qoladi. Chegara: `12`–`70` mm.
+
+---
+
+## 8a. Chiziq, to'rtburchak va nusxalash
+
+**"+ Chiziq"** — ajratuvchi chiziq. Sozlamalari: **uzunlik (mm)** (bo'sh — butun kenglik),
+**tekislash**, **chiziq turi** (to'liq / uzuq / nuqtali), **qalinlik** va **rang**.
+
+**"+ To'rtburchak"** — ramka yoki bo'yalgan quti (izoh joyi, qo'lda to'ldiriladigan katak).
+Sozlamalari: **kenglik**, **balandlik**, **tekislash**, ramka (**turi**, **qalinligi**,
+**rangi**), **burchak radiusi** va **fon**. Ichiga yozuv ham qo'yish mumkin — **"Matn / yorliq"**.
+
+> **Vertikal chiziq** alohida element sifatida mavjud emas. Kerak bo'lsa to'rtburchakdan
+> foydalaning: kengligi `0.3` mm, balandligi kerakli qiymat.
+
+**Nusxalash.** Elementlar ro'yxatidagi har qatorda ikkita varaq belgisi bor — u elementni
+barcha sozlamalari bilan **aynan nusxalaydi** va yoniga qo'yadi. Bir xil ko'rinishdagi ikkinchi
+matn yoki ramka kerak bo'lganda qulay.
+
+**Tartib.** ↑ va ↓ strelkalari elementni bo'lim ichida yuqoriga/pastga suradi. Qog'ozda
+elementlar aynan shu tartibda, yuqoridan pastga chiziladi — ular bir-birining ustiga
+tushmaydi, shuning uchun "qatlam" (z-index) sozlamasi **mavjud emas**.
 
 ---
 
@@ -415,22 +499,41 @@ bu yerda `Mahsulot`, `SKU`, `Birlik`, `Miqdor`, `Narx`, `Summa` ustunlari **to'l
 > **Bekor qilingan va yakunlangan yetkazmalarning katakchasi o'chiq** — ular nakladnoyga
 > tushmaydi. Nakladnoy faqat **yo'lga chiqayotgan** yetkazmalar uchun.
 
-**5-qadam.** **"Nakladnoy (3)"** tugmasini bosing — qavs ichida nechta belgilaganingiz turadi.
+**5-qadam.** Tugma yonidagi ro'yxatdan qog'oz rejimini tanlang:
 
-**6-qadam.** Kompyuterga `nakladnoylar-3-ta.pdf` fayli yuklanadi.
+| Rejim | Nima bo'ladi |
+|---|---|
+| **Aqlli A4 (sig'gani birga)** | Bir varaqqa sig'adigancha nakladnoy joylashtiriladi (standart) |
+| **Har biri alohida varaq** | Har nakladnoy o'z sahifasida — avvalgi xulq |
 
-### Bir nechta yetkazma tanlansa
+Tanlov brauzerda eslab qolinadi.
 
-Har bir yetkazma **o'z alohida sahifasida** chiqadi:
+**6-qadam.** **"Nakladnoy (3)"** tugmasini bosing — qavs ichida nechta belgilaganingiz turadi.
+
+**7-qadam.** Kompyuterga `nakladnoylar-3-ta.pdf` fayli yuklanadi.
+
+### "Aqlli A4" qanday hisoblaydi
+
+Tizim har nakladnoyni AVVAL chizib ko'radi va haqiqiy balandligini o'lchaydi, keyin A4 ning
+ishchi maydoniga (chekinishlardan keyin ~267 mm) sig'adimi-yo'qmi deb qaraydi:
 
 ```
-1-sahifa → DL-2026-0005 nakladnoyi
-2-sahifa → DL-2026-0006 nakladnoyi
-3-sahifa → DL-2026-0007 nakladnoyi
+Nakladnoy A = 115 mm
+Nakladnoy B = 115 mm
+A + ajratgich + B = 240 mm  →  IKKALASI BITTA A4 DA
 ```
 
-Shuning uchun chop etgandan keyin qog'ozlarni shunchaki ajratib, har dostavshikka o'zinikini
-berish mumkin.
+Qoidalar:
+
+- Nakladnoy **hech qachon o'rtasidan bo'linmaydi** — sig'masa butunlay keyingi varaqqa o'tadi.
+- **Kichraytirish yo'q** — shrift o'zgarmaydi, o'qilishi muhimroq.
+- Tanlagan **tartibingiz saqlanadi** — qayta saralanmaydi.
+- Juda uzun nakladnoy (50+ qator) o'z sahifasidan boshlanadi va o'zi bir necha varaqqa cho'ziladi.
+
+Nakladnoylar orasida **uzuq chiziq** turadi — qayerdan qirqishni shu chiziq ko'rsatadi.
+
+Qisqa nakladnoylarda odatda bir varaqqa **ikkitadan** tushadi; shablonni ixchamlashtirsangiz
+(imzo blokining balandligini kamaytirish, ortiqcha maydonlarni olib tashlash) uchtasi ham sig'adi.
 
 ### Tugma o'chiq bo'lsa
 
@@ -520,7 +623,7 @@ Faylni qayta nomlash mumkin — masalan `Bonnu-nakladnoy-25-09.pdf`.
 | | |
 |---|---|
 | **Sabab** | Tanlangan manba bo'sh. Masalan "Buyurtma raqami" tanlangan, lekin yetkazmada buyurtma yo'q |
-| **Tekshirish** | O'ng ustunda "Kod ichida nima bo'lsin" nima turibdi? |
+| **Tekshirish** | O'ng ustunda "Nima kodlanadi" nima turibdi? |
 | **Yechim** | **"Hujjat raqami"** ga o'tkazing — u har doim to'ladi |
 
 ### 3. Shtrix-kod chiqmayapti

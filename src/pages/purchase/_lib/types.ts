@@ -102,7 +102,9 @@ export type PurchaseOrderDetail = Omit<PurchaseOrderRow, "itemCount"> & {
 /** `/api/inventory/warehouses` — tanlash uchun kerakli maydonlar. */
 export type WarehouseOption = { id: string; name: string; code: string; isDefault: boolean; isActive: boolean };
 
-export type { UnitOption } from "@/lib/units.ts";
+// Qayta eksport + shu fayl ichida ishlatish uchun import (`export ... from` nomni bu yerga olib kelmaydi)
+import type { UnitOption } from "@/lib/units.ts";
+export type { UnitOption };
 
 /** `/api/catalog/products` — tanlash uchun kerakli maydonlar. */
 export type ProductOption = {

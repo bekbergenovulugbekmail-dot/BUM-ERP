@@ -57,6 +57,7 @@ export const ELEMENT_LABELS: Record<string, string> = {
   signatures: "Imzo",
   qr: "QR kod",
   barcode: "Shtrix-kod",
+  rect: "To'rtburchak",
   pageNumber: "Sahifa raqami",
 };
 
@@ -112,6 +113,12 @@ export function sampleData(documentType: DocumentType, companyName: string): Doc
       debt: "450 000 so'm",
     },
     payments: { cash: "300 000 so'm", card: "200 000 so'm" },
+    /**
+     * QR va shtrix-kod namunasi. Shusiz oldindan ko'rishda kod UMUMAN chizilmasdi
+     * (manba bo'sh bo'lsa element o'tkazib yuboriladi) va foydalanuvchi QR ishlamayapti deb
+     * o'ylardi — 2026-09-25 da aynan shu shikoyat kelgan.
+     */
+    codes: { documentNumber: "NAMUNA-0001", orderNumber: "SO-NAMUNA-0001", customerPhone: "+998900000000" },
     columnLabels: {
       index: "№",
       name: "Mahsulot",

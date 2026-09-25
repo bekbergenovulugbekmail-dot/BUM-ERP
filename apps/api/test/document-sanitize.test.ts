@@ -136,3 +136,64 @@ describe("Rasm va kod xavfsizligi", () => {
     expect(columns[0]?.width).toBeLessThanOrEqual(420);
   });
 });
+
+/**
+ * 2026-09-25: foydalanuvchi "jadval chiziqlarini tahrir qilib bo'lmayapti" dedi.
+ * Sozlama UI da o'zgarsa ham, sanitizatsiya uni tashlab yuborsa saqlanmay qolardi —
+ * shuning uchun har yangi kalit shu yerda qulflanadi.
+ */
+describe("Ko'rinish sozlamalari saqlanadi", () => {
+  const view = {
+    schemaVersion: 1,
+    sections: [
+      {
+        key: "body",
+        elements: [
+          {
+            id: "t",
+            type: "itemsTable",
+            columns: [{ key: "name", label: "Tovar", width: 50, align: "right" }],
+            table: {
+              borderStyle: "dashed", borderWidth: 0.6, borderColor: "#FF0000",
+              outer: true, top: false, horizontal: true, vertical: false, headerBorder: false,
+              paddingX: 3, paddingY: 1, rowHeight: 8, fontSize: 9,
+              headerFill: "#1e2850", headerText: "#ffffff", zebra: false, valign: "middle",
+            },
+          },
+          { id: "r", type: "rect", width: 80, height: 20, box: { borderStyle: "double", borderWidth: 0.5, borderColor: "#123456", radius: 2, fill: "#eeeeee" } },
+          { id: "q", type: "qr", qrSource: "orderNumber", width: 26, qrLevel: "H", qrMargin: 2 },
+        ],
+      },
+    ],
+  };
+
+  it("jadval chiziqlari, ustun kengligi, ramka va QR sozlamalari qoladi", () => {
+    const { schema } = sanitizeTemplateSchema(view, access(["products.view_cost"]));
+    const elements = schema.sections.find((section) => section.key === "body")!.elements;
+    const table = elements.find((element) => element.type === "itemsTable")!;
+    expect(table.columns?.[0]).toMatchObject({ key: "name", label: "Tovar", width: 50, align: "right" });
+    expect(table.table).toMatchObject({
+      borderStyle: "dashed", borderWidth: 0.6, borderColor: "#ff0000",
+      outer: true, top: false, horizontal: true, vertical: false, headerBorder: false,
+      paddingX: 3, paddingY: 1, rowHeight: 8, fontSize: 9, zebra: false, valign: "middle",
+    });
+    expect(elements.find((element) => element.type === "rect")?.box).toMatchObject({
+      borderStyle: "double", borderWidth: 0.5, borderColor: "#123456", radius: 2, fill: "#eeeeee",
+    });
+    expect(elements.find((element) => element.type === "qr")).toMatchObject({ qrLevel: "H", qrMargin: 2, width: 26 });
+  });
+
+  it("noto'g'ri qiymat jimgina saqlanmaydi", () => {
+    const { schema } = sanitizeTemplateSchema(
+      {
+        schemaVersion: 1,
+        sections: [{ key: "body", elements: [{ id: "t", type: "itemsTable", columns: [{ key: "name" }], table: { borderStyle: "groove", borderColor: "red", borderWidth: 99 } }] }],
+      },
+      access([]),
+    );
+    const table = schema.sections.find((section) => section.key === "body")!.elements[0]!.table!;
+    expect(table.borderStyle, "ro'yxatda yo'q chiziq turi").toBeUndefined();
+    expect(table.borderColor, "`#rrggbb` bo'lmagan rang").toBeUndefined();
+    expect(table.borderWidth, "chegaradan oshgani qisqartiriladi").toBe(3);
+  });
+});

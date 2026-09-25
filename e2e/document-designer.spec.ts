@@ -34,7 +34,7 @@ test.afterEach(async ({ page }) => {
   if (!list?.ok()) return;
   const { templates } = (await list.json()) as { templates: { id: string; name: string; isDefault: boolean }[] };
   for (const template of templates) {
-    if (!/^(Sinov|Versiya|Nakladnoy) \d+$/.test(template.name) || template.isDefault) continue;
+    if (!/^(Sinov|Versiya|Nakladnoy) \d+$/.test(template.name)) continue;
     await page.request.delete(`/api/documents/templates/${template.id}`, { timeout: 30_000 }).catch(() => null);
   }
 });

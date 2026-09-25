@@ -14,6 +14,7 @@
 import { randomUUID } from "node:crypto";
 import {
   ALIGNMENTS,
+  BORDER_STYLES,
   DEFAULT_PAGE,
   ELEMENT_TYPES,
   HEX_COLOR,
@@ -24,17 +25,26 @@ import {
   CONDITION_OPERATORS,
   IMAGE_DATA_PREFIX,
   MAX_IMAGE_DATA_LENGTH,
+  IMAGE_FITS,
+  QR_LEVELS,
   QR_SOURCES,
+  VALIGNMENTS,
   type Alignment,
+  type BorderStyle,
+  type BoxStyle,
   type ConditionOperator,
   type DocumentElement,
   type DocumentSection,
   type DocumentTemplateSchema,
   type ElementType,
+  type ImageFit,
   type PageSettings,
+  type QrLevel,
   type QrSource,
   type SectionKey,
+  type TableStyle,
   type TextStyle,
+  type VAlignment,
   type VisibilityCondition,
 } from "@bum/shared";
 import { isColumnAllowed, isFieldAllowed, PAYMENT_ROWS, TOTAL_ROWS, type CatalogAccess } from "./field-catalog.js";
@@ -71,6 +81,64 @@ function sanitizeStyle(value: unknown): TextStyle | undefined {
   // Rang faqat `#rrggbb`: `rgb()`, `url(...)` va boshqa ifodalar chizishga umuman yetmaydi
   if (typeof value.color === "string" && HEX_COLOR.test(value.color)) style.color = value.color.toLowerCase();
   return Object.keys(style).length > 0 ? style : undefined;
+}
+
+/** `#rrggbb` bo'lsa qaytaradi, aks holda `undefined` — boshqa ifoda saqlanmaydi. */
+const hex = (value: unknown): string | undefined =>
+  typeof value === "string" && HEX_COLOR.test(value) ? value.toLowerCase() : undefined;
+
+/** `true`/`false` bo'lsa o'sha, aks holda `undefined` (= standart ko'rinish). */
+const bool = (value: unknown): boolean | undefined => (typeof value === "boolean" ? value : undefined);
+
+/**
+ * Jadval chiziqlari. Har kalit alohida tekshiriladi va faqat berilganlari saqlanadi:
+ * berilmagani standart ko'rinishda qoladi, ya'ni eski shablonlar o'zgarmaydi.
+ */
+function sanitizeTableStyle(value: unknown): TableStyle | undefined {
+  if (!isRecord(value)) return undefined;
+  const style: TableStyle = {};
+  const borderStyle = pick<BorderStyle>(value.borderStyle, BORDER_STYLES);
+  if (borderStyle) style.borderStyle = borderStyle;
+  const borderWidth = clamp(value.borderWidth, 0, 3);
+  if (borderWidth !== undefined) style.borderWidth = borderWidth;
+  const borderColor = hex(value.borderColor);
+  if (borderColor) style.borderColor = borderColor;
+  for (const key of ["outer", "top", "bottom", "left", "right", "horizontal", "vertical", "headerBorder", "zebra"] as const) {
+    const flag = bool(value[key]);
+    if (flag !== undefined) style[key] = flag;
+  }
+  const paddingX = clamp(value.paddingX, 0, 10);
+  if (paddingX !== undefined) style.paddingX = paddingX;
+  const paddingY = clamp(value.paddingY, 0, 10);
+  if (paddingY !== undefined) style.paddingY = paddingY;
+  const rowHeight = clamp(value.rowHeight, 0, 40);
+  if (rowHeight !== undefined) style.rowHeight = rowHeight;
+  const fontSize = clamp(value.fontSize, STYLE_LIMITS.fontSizeMin, STYLE_LIMITS.fontSizeMax);
+  if (fontSize !== undefined) style.fontSize = fontSize;
+  const headerFill = hex(value.headerFill);
+  if (headerFill) style.headerFill = headerFill;
+  const headerText = hex(value.headerText);
+  if (headerText) style.headerText = headerText;
+  const valign = pick<VAlignment>(value.valign, VALIGNMENTS);
+  if (valign) style.valign = valign;
+  return Object.keys(style).length > 0 ? style : undefined;
+}
+
+/** Rasm/to'rtburchak ramkasi. */
+function sanitizeBoxStyle(value: unknown): BoxStyle | undefined {
+  if (!isRecord(value)) return undefined;
+  const box: BoxStyle = {};
+  const borderStyle = pick<BorderStyle>(value.borderStyle, BORDER_STYLES);
+  if (borderStyle) box.borderStyle = borderStyle;
+  const borderWidth = clamp(value.borderWidth, 0, 3);
+  if (borderWidth !== undefined) box.borderWidth = borderWidth;
+  const borderColor = hex(value.borderColor);
+  if (borderColor) box.borderColor = borderColor;
+  const radius = clamp(value.radius, 0, 20);
+  if (radius !== undefined) box.radius = radius;
+  const fill = hex(value.fill);
+  if (fill) box.fill = fill;
+  return Object.keys(box).length > 0 ? box : undefined;
 }
 
 function sanitizeCondition(value: unknown, access: CatalogAccess, warnings: string[]): VisibilityCondition | undefined {
@@ -152,6 +220,13 @@ function sanitizeElement(value: unknown, access: CatalogAccess, warnings: string
       return null;
     }
     element.columns = columns;
+    const table = sanitizeTableStyle(value.table);
+    if (table) element.table = table;
+  }
+
+  if (type === "image" || type === "rect" || type === "line") {
+    const box = sanitizeBoxStyle(value.box);
+    if (box) element.box = box;
   }
 
   if (type === "totals" || type === "payments") {
@@ -181,6 +256,8 @@ function sanitizeElement(value: unknown, access: CatalogAccess, warnings: string
       return null;
     }
     element.imageData = raw;
+    const fit = pick<ImageFit>(value.fit, IMAGE_FITS);
+    if (fit) element.fit = fit;
   }
 
   if (type === "qr" || type === "barcode") {
@@ -190,6 +267,10 @@ function sanitizeElement(value: unknown, access: CatalogAccess, warnings: string
       return null;
     }
     element.qrSource = source;
+    const level = pick<QrLevel>(value.qrLevel, QR_LEVELS);
+    if (level) element.qrLevel = level;
+    const margin = clamp(value.qrMargin, 0, 8);
+    if (margin !== undefined) element.qrMargin = margin;
   }
 
   return element;

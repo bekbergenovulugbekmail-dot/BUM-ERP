@@ -38,6 +38,7 @@ export const ELEMENT_TYPES = [
   "totals", //      jami bloki (qaysi qatorlar ko'rinishi tanlanadi)
   "payments", //    to'lov usullari bo'yicha taqsimot
   "signatures", //  imzo joylari
+  "rect", //        to'rtburchak ramka (ajratish, imzo qutisi)
   "qr", //          hujjat raqami yoki buyurtma raqami (ixtiyoriy URL emas)
   "barcode", //     shtrix-kod (Code128) — o'sha manbalardan
   "pageNumber", //  "1 / 3"
@@ -46,6 +47,74 @@ export type ElementType = (typeof ELEMENT_TYPES)[number];
 
 export const ALIGNMENTS = ["left", "center", "right"] as const;
 export type Alignment = (typeof ALIGNMENTS)[number];
+
+export const VALIGNMENTS = ["top", "middle", "bottom"] as const;
+export type VAlignment = (typeof VALIGNMENTS)[number];
+
+/** Chiziq ko'rinishi — jadval va ramkalar uchun. */
+export const BORDER_STYLES = ["solid", "dashed", "dotted", "double"] as const;
+export type BorderStyle = (typeof BORDER_STYLES)[number];
+
+/**
+ * Jadval chiziqlari va kataklari. HAR CHIZIQ ALOHIDA boshqariladi: foydalanuvchi
+ * tashqi ramkani qoldirib ichki chiziqlarni o'chirishi (yoki aksincha) mumkin.
+ *
+ * `undefined` = standart ko'rinish (hozirgi nakladnoydagidek) — eski shablonlar
+ * shu sababli o'zgarmaydi.
+ */
+export type TableStyle = {
+  borderStyle?: BorderStyle;
+  /** mm: 0 = chiziq yo'q. */
+  borderWidth?: number;
+  /** `#rrggbb`. */
+  borderColor?: string;
+  /** Tashqi ramka (to'rt tomon birdan). */
+  outer?: boolean;
+  top?: boolean;
+  bottom?: boolean;
+  left?: boolean;
+  right?: boolean;
+  /** Qatorlar orasidagi gorizontal chiziqlar. */
+  horizontal?: boolean;
+  /** Ustunlar orasidagi vertikal chiziqlar. */
+  vertical?: boolean;
+  /** Sarlavha ostidagi chiziq. */
+  headerBorder?: boolean;
+  /** Katak ichidagi bo'shliq, mm. */
+  paddingX?: number;
+  paddingY?: number;
+  /** Qatorning eng kam balandligi, mm. */
+  rowHeight?: number;
+  /** Jadval matni, pt. */
+  fontSize?: number;
+  /** Sarlavha foni va matni, `#rrggbb`. */
+  headerFill?: string;
+  headerText?: string;
+  /** Qatorlarni navbat bilan bo'yash. */
+  zebra?: boolean;
+  /** Katak ichida matn vertikal qayerda turadi. */
+  valign?: VAlignment;
+};
+
+/** Rasm va to'rtburchak uchun ramka. */
+export type BoxStyle = {
+  borderStyle?: BorderStyle;
+  /** mm */
+  borderWidth?: number;
+  borderColor?: string;
+  /** Burchak radiusi, mm. */
+  radius?: number;
+  /** Ichini bo'yash, `#rrggbb`. */
+  fill?: string;
+};
+
+/** QR xatolikka chidamliligi — qancha yuqori bo'lsa shuncha zichroq, lekin ishonchliroq. */
+export const QR_LEVELS = ["L", "M", "Q", "H"] as const;
+export type QrLevel = (typeof QR_LEVELS)[number];
+
+/** Rasm katagiga qanday joylashadi. */
+export const IMAGE_FITS = ["contain", "fill"] as const;
+export type ImageFit = (typeof IMAGE_FITS)[number];
 
 /** Matn uslubi — faqat shu kalitlar saqlanadi. */
 export type TextStyle = {
@@ -80,8 +149,17 @@ export type DocumentElement = {
   label?: string;
   /** `field` uchun: maydonlar katalogidagi yo'l (`customer.name`). */
   field?: string;
-  /** `itemsTable` uchun: ustunlar (katalogdan) va ularning nomlari. */
+  /** `itemsTable` uchun: ustunlar (katalogdan), nomi, kengligi va tekislashi. */
   columns?: { key: string; label?: string; width?: number; align?: Alignment }[];
+  /** `itemsTable` uchun: chiziqlar va katak sozlamalari. */
+  table?: TableStyle;
+  /** `image` va `rect` uchun: ramka, radius, fon. */
+  box?: BoxStyle;
+  /** `image` uchun: katakka sig'dirish (nisbatni saqlab) yoki cho'zish. */
+  fit?: ImageFit;
+  /** `qr` uchun: xatolikka chidamlilik va chekka (modul soni). */
+  qrLevel?: QrLevel;
+  qrMargin?: number;
   /** `totals` va `payments` uchun: qaysi qatorlar ko'rinadi. */
   rows?: string[];
   /**
