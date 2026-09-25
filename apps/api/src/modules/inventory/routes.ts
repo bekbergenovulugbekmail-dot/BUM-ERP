@@ -5,6 +5,7 @@
  *   GET    /warehouses/:warehouseId                       a'zo
  *   POST   /warehouses, PATCH /warehouses/:warehouseId    warehouses.manage
  *   GET    /stock (?warehouseId=&search=&lowStockOnly=)   warehouse.view
+ *   GET    /stock/export (?warehouseId=&inStockOnly=)    warehouse.view (tannarx — products.view_cost)
  *   GET    /stock/stats (?warehouseId=)                   warehouse.view
  *   GET    /stock/products/:productId                     warehouse.view
  *   GET    /stock/movements (?warehouseId=&productId=&type=&limit=&cursor=)   warehouse.view
@@ -45,6 +46,7 @@ import {
 import {
   MANUAL_MOVEMENT_TYPES,
   listMovements,
+  exportStock,
   listStock,
   productStock,
   recordManualMovement,
@@ -83,6 +85,7 @@ const stockQuery = z.object({
   lowStockOnly: boolQuery,
 });
 const statsQuery = z.object({ warehouseId: z.uuid() });
+const exportQuery = z.object({ warehouseId: z.uuid().optional(), inStockOnly: boolQuery });
 const movementTypes = [
   "receive", "issue", "transfer_out", "transfer_in", "adjust", "writeoff", "return_in", "return_out", "count",
 ] as const;
@@ -254,6 +257,14 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
     const query = stockQuery.parse(req.query);
     const tenant = await readTenant(req, "warehouse.view");
     return { stock: hideCost(await listStock(db, tenant, query), await canViewCost(tenant)) };
+  });
+
+  // Eksport: barcha ochiq omborlar (yoki bittasi) — mahsulot × ombor; tannarx faqat `products.view_cost` bilan
+  app.get("/stock/export", async (req) => {
+    const query = exportQuery.parse(req.query);
+    const tenant = await readTenant(req, "warehouse.view");
+    const allowed = await canViewCost(tenant);
+    return { rows: hideCost(await exportStock(db, tenant, query), allowed), costVisible: allowed };
   });
 
   app.get("/stock/stats", async (req) => {

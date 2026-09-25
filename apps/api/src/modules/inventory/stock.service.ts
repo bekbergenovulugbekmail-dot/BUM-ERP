@@ -20,7 +20,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, lt, or, sql } from "drizzle-orm";
 import { badRequest, forbidden, notFound } from "@bum/shared";
-import { batches, products, units } from "../../db/schema/catalog.js";
+import { batches, categories, products, units } from "../../db/schema/catalog.js";
 import { accounts } from "../../db/schema/finance.js";
 import {
   inventoryCountItems,
@@ -262,6 +262,57 @@ export async function listStock(
       ),
     )
     .orderBy(asc(products.name));
+}
+
+/**
+ * Ombor qoldig'i EKSPORTI — foydalanuvchiga ochiq BARCHA omborlar (yoki bittasi), mahsulot × ombor qatori.
+ *
+ * Faqat O'QISH: qoldiq, band va mavjud (`quantity − reserved`) `stock_levels` dan — alohida "eksport
+ * jadvali" yo'q. Ombor ruxsati (`allowedWarehouseIds`) va kategoriya doirasi `listStock` dagidek; tannarx
+ * marshrutda `products.view_cost` bilan yashiriladi. Arxivlangan mahsulot chiqmaydi (`listStock` dagidek); nofaol
+ * omborda qolgan tovar esa CHIQADI — eksport ombordagi haqiqiy qoldiq bilan to'liq mos bo'lishi kerak.
+ */
+export async function exportStock(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  options: { warehouseId?: string; inStockOnly?: boolean },
+) {
+  if (options.warehouseId) assertWarehouseAccess(tenant, options.warehouseId);
+  const allowed = allowedWarehouses(tenant);
+  return conn
+    .select({
+      warehouseId: stockLevels.warehouseId,
+      warehouseName: warehouses.name,
+      productId: stockLevels.productId,
+      productSku: products.sku,
+      productBarcode: products.barcode,
+      productName: products.name,
+      categoryName: categories.name,
+      unitName: units.shortName,
+      quantity: stockLevels.quantity,
+      reservedQty: stockLevels.reservedQty,
+      availableQty: sql<string>`(${stockLevels.quantity} - ${stockLevels.reservedQty})::numeric(18,4)`,
+      avgCostPrice: stockLevels.avgCostPrice,
+      retailPrice: products.retailPrice,
+      wholesalePrice: products.wholesalePrice,
+    })
+    .from(stockLevels)
+    .innerJoin(products, eq(products.id, stockLevels.productId))
+    .innerJoin(warehouses, eq(warehouses.id, stockLevels.warehouseId))
+    .innerJoin(units, eq(units.id, products.baseUnitId))
+    .leftJoin(categories, eq(categories.id, products.categoryId))
+    .where(
+      and(
+        eq(stockLevels.companyId, tenant.company.id),
+        eq(warehouses.companyId, tenant.company.id),
+        eq(products.isActive, true),
+        options.warehouseId ? eq(stockLevels.warehouseId, options.warehouseId) : undefined,
+        allowed ? inArray(stockLevels.warehouseId, allowed) : undefined,
+        productScopeCondition(await categoryScope(conn, tenant)),
+        options.inStockOnly ? sql`${stockLevels.quantity} <> 0` : undefined,
+      ),
+    )
+    .orderBy(asc(warehouses.name), asc(products.name), asc(products.id));
 }
 
 export async function productStock(conn: DbOrTx, tenant: TenantContext, productId: string) {

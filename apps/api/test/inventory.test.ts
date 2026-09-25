@@ -266,3 +266,68 @@ describe("Qoldiq, statistika va harakatlar jurnali", () => {
     expect((await api(hr.cookie, "GET", `/stock?warehouseId=${mainA}`)).statusCode).toBe(403);
   });
 });
+
+/**
+ * Ombor qoldig'i EKSPORTI: barcha ochiq omborlar, mavjud = qoldiq − band, tannarx faqat ruxsat bilan,
+ * ombor ruxsati va kompaniya chegarasi. Eksport — faqat o'qish: qoldiq manbai `stock_levels`.
+ */
+describe("Qoldiq eksporti", () => {
+  type Row = {
+    warehouseId: string; warehouseName: string; productSku: string; productBarcode: string | null; categoryName: string | null;
+    unitName: string; quantity: string; reservedQty: string; availableQty: string; avgCostPrice: string | null; retailPrice: string | null;
+  };
+  const exported = async (cookie: string, query = "") => {
+    const res = await api(cookie, "GET", `/stock/export${query}`);
+    expect(res.statusCode, res.body).toBe(200);
+    return res.json() as { rows: Row[]; costVisible: boolean };
+  };
+
+  it("barcha omborlar, mavjud = qoldiq − band, sotuv narxi va kategoriya bilan; bitta ombor va faqat bor qoldiq filtri", async () => {
+    const second = (await api(companyA.ownerCookie, "POST", "/warehouses", { name: "Ikkinchi", code: "WH-002" })).json().warehouse as { id: string };
+    const cola = await product(companyA, "COLA", { barcode: "4780000000011", retailPrice: "12000" });
+    const chips = await product(companyA, "CHIPS");
+    await move(companyA.ownerCookie, { type: "receive", productId: cola, warehouseId: mainA, quantity: "60", costPrice: "9000" });
+    await move(companyA.ownerCookie, { type: "receive", productId: cola, warehouseId: second.id, quantity: "12", costPrice: "9000" });
+    await move(companyA.ownerCookie, { type: "receive", productId: chips, warehouseId: mainA, quantity: "3", costPrice: "5000" });
+    await move(companyA.ownerCookie, { type: "issue", productId: chips, warehouseId: mainA, quantity: "3" });
+    // Band miqdor — tasdiqlangan buyurtma zaxirasi (bu testda to'g'ridan-to'g'ri)
+    await db.update(stockLevels).set({ reservedQty: "6" }).where(and(eq(stockLevels.productId, cola), eq(stockLevels.warehouseId, mainA)));
+
+    const all = await exported(companyA.ownerCookie);
+    expect(all.costVisible).toBe(true);
+    const colaMain = all.rows.find((row) => row.productSku === "COLA" && row.warehouseId === mainA)!;
+    expect(colaMain).toMatchObject({ quantity: "60.0000", reservedQty: "6.0000", availableQty: "54.0000", productBarcode: "4780000000011", unitName: "d" });
+    expect(Number(colaMain.avgCostPrice)).toBe(9000);
+    expect(Number(colaMain.retailPrice)).toBe(12000);
+    expect(all.rows.filter((row) => row.productSku === "COLA").map((row) => Number(row.quantity)).sort((a, b) => a - b)).toEqual([12, 60]);
+
+    // Eksport = stock_levels: har ombor bo'yicha yig'indi aynan mos
+    const levels = await db.select().from(stockLevels).where(eq(stockLevels.companyId, companyA.companyId));
+    expect(all.rows).toHaveLength(levels.length);
+
+    const onlyMain = await exported(companyA.ownerCookie, `?warehouseId=${mainA}`);
+    expect(new Set(onlyMain.rows.map((row) => row.warehouseId))).toEqual(new Set([mainA]));
+    const inStock = await exported(companyA.ownerCookie, "?inStockOnly=true");
+    expect(inStock.rows.some((row) => row.productSku === "CHIPS"), "nol qoldiq chiqmaydi").toBe(false);
+  });
+
+  it("tannarx ruxsatsiz null; ombor ruxsati cheklaydi; begona kompaniya ko'rmaydi; HR 403", async () => {
+    const second = (await api(companyA.ownerCookie, "POST", "/warehouses", { name: "Ikkinchi", code: "WH-002" })).json().warehouse as { id: string };
+    const cola = await product(companyA, "COLA");
+    await move(companyA.ownerCookie, { type: "receive", productId: cola, warehouseId: mainA, quantity: "5", costPrice: "9000" });
+    await move(companyA.ownerCookie, { type: "receive", productId: cola, warehouseId: second.id, quantity: "7", costPrice: "9000" });
+
+    const manager = await addEmployee(app, companyA, "Ombor menejeri");
+    await db.update(companyMembers).set({ allowedWarehouseIds: [mainA] }).where(eq(companyMembers.userId, manager.id));
+    const limited = await exported(manager.cookie);
+    expect(limited.costVisible).toBe(false);
+    expect(limited.rows.map((row) => row.warehouseId)).toEqual([mainA]);
+    expect(limited.rows.every((row) => row.avgCostPrice === null), "tannarx yashirin").toBe(true);
+    expect((await api(manager.cookie, "GET", `/stock/export?warehouseId=${second.id}`)).statusCode).toBe(403);
+
+    expect((await exported(companyB.ownerCookie)).rows, "begona kompaniya qoldig'i ko'rinmaydi").toEqual([]);
+    // HR menejerida `warehouse.view` yo'q
+    const hr = await addEmployee(app, companyA, "HR menejeri");
+    expect((await api(hr.cookie, "GET", "/stock/export")).statusCode).toBe(403);
+  });
+});

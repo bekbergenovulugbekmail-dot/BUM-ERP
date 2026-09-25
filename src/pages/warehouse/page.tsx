@@ -4,8 +4,9 @@ import {
   Warehouse, PackagePlus, PackageMinus, ArrowLeftRight,
   ClipboardList, TrendingUp, TrendingDown, AlertTriangle, PackageSearch,
   BarChart3, Search, SlidersHorizontal, History, ScanLine,
-  Boxes,
+  Boxes, FileSpreadsheet,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
@@ -15,7 +16,11 @@ import PageTabs from "@/components/page-tabs.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
 import { useApiQuery } from "@/lib/query.ts";
-import { usePermissions } from "@/hooks/use-company.ts";
+import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
+import { api, errorMessage } from "@/lib/api.ts";
+import { downloadBlob } from "@/components/csv/xlsx.ts";
+import { localIsoDate } from "./_lib/dates.ts";
+import type { StockExportKind, StockExportRow } from "./_lib/stock-export.ts";
 import { useDebounce } from "@/hooks/use-debounce.ts";
 import WarehouseSelector from "./_components/warehouse-selector.tsx";
 import StockTable from "./_components/stock-table.tsx";
@@ -64,6 +69,40 @@ export default function WarehousePage() {
   const canReceive = can("warehouse.receive");
   const canManage = can("warehouse.manage");
   const canTransfer = can("warehouse.transfer");
+  const company = useActiveCompany().data?.company;
+  const [exporting, setExporting] = useState<StockExportKind | null>(null);
+
+  /**
+   * Eksport: "Eksport" — tanlangan ombordagi mahsulotlar (miqdorsiz); "Ombordagi miqdori bilan" — ochiq BARCHA
+   * omborlar, faqat qoldig'i borlari, har ombor alohida + "Jami". Qiymatlar serverdan, tannarx ruxsat bilan.
+   */
+  const handleExport = async (kind: StockExportKind) => {
+    if (kind === "catalog" && !selectedWarehouseId) return;
+    setExporting(kind);
+    try {
+      const query = kind === "catalog" ? `?warehouseId=${selectedWarehouseId}` : "?inStockOnly=true";
+      const data = await api.get<{ rows: StockExportRow[]; costVisible: boolean }>(`/api/inventory/stock/export${query}`);
+      if (data.rows.length === 0) {
+        toast.error("Eksport qilinadigan qoldiq yo'q");
+        return;
+      }
+      const { buildStockXlsx } = await import("./_lib/stock-export.ts");
+      const warehouseLabel = kind === "catalog"
+        ? warehouses?.find((w) => w.id === selectedWarehouseId)?.name ?? "ombor"
+        : (warehouses?.length ?? 0) > 1 ? "barcha omborlar" : warehouses?.[0]?.name ?? "ombor";
+      const file = await buildStockXlsx(kind, data.rows, {
+        costVisible: data.costVisible,
+        companyName: company?.name ?? "BUM ERP",
+        warehouseLabel,
+        date: localIsoDate(),
+      });
+      downloadBlob(file.blob, file.filename);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setExporting(null);
+    }
+  };
 
   const formatMoney = (n: number) =>
     new Intl.NumberFormat("uz-UZ", { notation: "compact" }).format(n) + " so'm";
@@ -116,6 +155,12 @@ export default function WarehousePage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" data-testid="stock-export" disabled={!selectedWarehouseId || exporting !== null} onClick={() => void handleExport("catalog")}>
+            <FileSpreadsheet className="h-4 w-4 mr-1.5" /> {exporting === "catalog" ? "Tayyorlanmoqda…" : "Eksport"}
+          </Button>
+          <Button variant="outline" size="sm" data-testid="stock-export-quantities" disabled={exporting !== null} onClick={() => void handleExport("quantities")}>
+            <FileSpreadsheet className="h-4 w-4 mr-1.5" /> {exporting === "quantities" ? "Tayyorlanmoqda…" : "Ombordagi miqdori bilan eksport"}
+          </Button>
           {canTransfer && (warehouses?.length ?? 0) > 1 && (
             <Button variant="secondary" size="sm" disabled={!selectedWarehouseId} onClick={() => setTransferOpen(true)}>
               <ArrowLeftRight className="h-4 w-4 mr-1.5" /> Ko'chirish

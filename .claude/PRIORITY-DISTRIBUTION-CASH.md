@@ -69,7 +69,9 @@ tushuntiriladi va tasdiqsiz bajarilmaydi (xotira: financial-integrity-gate).
 - W1 ✅ Nakladnoy: savdo agenti va yetkazuvchi (ism, telefon, yo'q bo'lsa "—"), bulk miqdor/summa yetkazma qatoridan
   (`taskTotal`; butun buyurtma bo'lsa — buyurtma jami), QR alias (`nextCodeAlias`), shablon maydonlari, izolyatsiya testlari
   (`bulk-print.test.ts`, `delivery-redelivery.test.ts`). Savdo agentli buyurtma izolyatsiyasi — W7 senariysida.
-- W2 Ombor eksporti: miqdor/band/mavjud (+tannarx ruxsat bilan), omborlar alohida, CSV/Excel.
+- W2 ✅ Ombor eksporti: `GET /api/inventory/stock/export` (warehouse.view, ombor ruxsati, kategoriya doirasi, tannarx —
+  products.view_cost), UI: "Eksport" (tanlangan ombor, miqdorsiz) va "Ombordagi miqdori bilan eksport" (barcha ochiq
+  omborlar + "Jami" varag'i). Testlar: `inventory.test.ts` (Qoldiq eksporti), `stock-export.test.ts`. Brauzer — W7 E2E.
 - W3 Mijozning bank orqali to'lovi: hisob, sana, reference, izoh; qarz + avans (Z3); UI.
 - W4 Kassa: `cash.own` (Z4), kassa hujjatlari (o'tkazma, tuzatish, to'lov usulini ayirboshlash, valyuta ayirboshlash
   kurs snapshoti bilan, kategoriyali kirim/chiqim), bekor qilish, davriy kassa hisoboti, UI.
