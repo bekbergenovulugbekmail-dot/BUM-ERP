@@ -4890,3 +4890,39 @@ API konteyneri 10:07:23Z da qayta ko'tarildi (migratsiyalar bir marta, qayta yiq
 renderer bo'lagi `template-renderer-COHbuNrS.js` → 200. `/api/documents/fields` va
 `/api/documents/templates` → 401 (marshrut bor). Production bazasida shablon SAQLAB
 KO'RILMADI — egasining ma'lumotiga tegmaslik uchun; o'sha kod lokalda to'liq sinovdan o'tgan.
+
+### Hujjat dizayneri 2-bosqich — VIZUAL (sichqoncha bilan) dizayner (2026-09-25)
+
+**Nima qilindi (commit `7b8676b`):** shablon endi ERKIN JOYLASHUVDA (`page.layout: "free"`):
+har element `x/y/width/height` (mm, varaqning yuqori-chap burchagidan) va `zIndex` bilan.
+Sozlamalar → Hujjatlar: A4 varaqda element sichqoncha bilan suriladi, 8 tutqich bilan
+kattalashtiriladi/kichraytiriladi (rasm va QR nisbati saqlanadi), Ctrl+bosish/ramka bilan ko'p
+tanlash, tekislash (6), taqsimlash (2), qatlam (4), nusxa, Delete/Esc, strelka (1 mm / Shift
+10 mm), Ctrl+Z/Y, zoom 25–200%, mm chizg'ich, katak va yopishish, aniq X/Y/eni/bo'yi, shrift
+quti o'lchamidan alohida, `{{maydon}}` qo'shish, brauzerda qoralama (versiya faqat "Saqlash"
+bilan). Varaqdagi har element — haqiqiy PDF rendereri chizgan rasm (pdf.js), shuning uchun
+dizayner va PDF bir xil. Eski (oqim) shablon ochilganda o'lchab erkin joylashuvga o'tkaziladi;
+saqlanmaguncha bazadagi shablon o'zgarmaydi. Jadval o'ssa faqat uning ostidagilar suriladi;
+sahifa raqami hujjat balandligiga kirmaydi (2 nakladnoy → 1 A4 saqlanadi).
+
+**Tekshirildi (lokal):** `pnpm build` (tsc -b + vite) ✓, eslint ✓, frontend 46 fayl / 268 test ✓,
+API 155 fayl / 1078 test ✓ (bo'lak-bo'lak). Haqiqiy Chrome, sichqoncha bilan 9 ta qabul testi
+(`e2e/document-designer-visual.spec.ts`) ✓: logo/maydon/QR/jadval/imzo/to'rtburchak/chiziq
+surildi, kattalashtirildi, saqlandi, sahifa yangilanib joyi tekshirildi; dizayner va PDF
+pikselma-piksel 100% mos; QR PDF dan dekoder bilan o'qilib joyi ±0.5 mm; Dostavkadan
+2 nakladnoy → 1 A4. To'liq E2E: hammasi o'tdi. Oldingi 6 ta "eski" yiqilish (oldingi commitda
+ham yiqilardi — `git stash` bilan tasdiqlandi) eskirgan testlar edi va tuzatildi: kirish namunasi
+`bum`, mijozlar CRM da, "Birlikdagi dona" ustuni, sotuv agentida ilova kamerasi.
+
+**Production (2026-09-25):** `bum-api` + `bum-web`. API 15:20:45Z da bir marta ko'tarildi
+(migratsiya bir marta, qayta yiqilish yo'q), `build.json` → 15:19:41Z, bundle `index-CHrAL6jl.js`
+ichida `template-free-*.js` va `pdf.worker.min-*.js` (ikkalasi 200, `application/javascript`).
+`/api/auth/me` → 401. **Production'da brauzer orqali sinalmadi** — kompaniya hisobisiz kirib
+bo'lmaydi va egasining ma'lumotiga tegilmadi. `bum-erp.uz` TLS muammosi hamon ochiq
+(`curl` 60), tekshiruv `bum-web-production.up.railway.app` orqali.
+
+**Brauzerda sinash:** Sozlamalar → Hujjatlar → shablon → elementni ushlab suring, burchagidan
+torting → Saqlash → sahifani yangilang → "PDF" tugmasi; Dostavka → 2 yetkazma → Nakladnoy.
+
+**Keyingi qadam:** egasi production'da dizaynerni sinab ko'rsin; `bum-erp.uz` TLS; aylantirish
+(rotation) hali yo'q.
