@@ -159,7 +159,11 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
   `{referenceId,…}` qaytaradi); raqam `count(*)+1` (:57-63). **STATUS:** OPEN
 
 ## AUD-020 — Ta'minotchi bilan solishtirish akti yo'q
-- **SEVERITY:** HIGH · **MODULE:** Suppliers / Reports (F-3 ning ta'minotchi qismi) · **STATUS:** OPEN
+- **SEVERITY:** HIGH · **MODULE:** Suppliers / Reports (F-3 ning ta'minotchi qismi)
+- **STATUS:** FIXED (API, 2026-09-26) — `GET /api/purchase/suppliers/:id/statement` (jurnal 2000 subhisobi: boshlang'ich,
+  har operatsiya, yakuniy, valyuta bo'yicha qoldiq, kesh bilan solishtiruv) va `GET /api/purchase/suppliers-reconciliation`
+  (finance.view). VERIFIED: `acceptance-minimarket.test.ts` PHASE 21–22 (3 ta'minotchi, kesh = jurnal = akt).
+  UI (akt oynasi, Excel/PDF) — keyingi bosqich.
 
 ## AUD-021 — Inventarizatsiya tuzatmasining jurnali jimgina tashlab yuboriladi
 - **SEVERITY:** HIGH · **MODULE:** Stock / Accounting
@@ -208,3 +212,28 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 - Kompaniya faqat sessiyadan (`requireTenant`, company/tenant.ts:66-137), so'rovdan emas; id bo'yicha
   so'rovlar kompaniya bo'yicha qulflangan ota qatordan keyin. RLS yo'q (faqat ilova darajasi).
   Test: `e2e/tenant-isolation.spec.ts` (7 ✓, 2026-09-25). **STATUS:** VERIFIED (kod + E2E)
+
+
+## Mini Market qabul testi (BUSINESS 01, 2026-09-26) topilmalari
+
+## AUD-028 — Mijoz balansi importi (boshlang'ich qoldiq) foyda-zararga tushadi
+- **SEVERITY:** HIGH · **MODULE:** Customers / Accounting
+- **SCENARIO:** eski tizimdan mijozning 2 000 000 avansi import qilinadi.
+- **EXPECTED:** 2300 +2 mln, qarshi hisob — kapital (boshlang'ich qoldiq), foyda-zarar o'zgarmaydi.
+- **ACTUAL:** DR 5500 "Boshqa xarajatlar" 2 mln — sof foyda 2 mln kamayadi (qarz importi — "Boshqa daromadlar"ga).
+- **ROOT CAUSE:** `customer-balance-csv.service.ts` → `setCustomerBalances` (hayotdagi tuzatish qoidasi, qarshi hisob P&L).
+- **FIX:** `setCustomerBalances({ counter: "equity" })` — import 3000 Ustav kapitaliga yozadi (kassa boshlang'ich qoldig'i kabi);
+  qo'lda tuzatish avvalgidek P&L. Tarixiy jurnal o'zgartirilmadi. **STATUS:** FIXED — VERIFIED PHASE 11 (foyda o'zgarmaydi).
+
+## AUD-029 — Web qisman qaytarishida so'rov kaliti yo'q (ikki marta bosish → ikki qaytarish)
+- **SEVERITY:** MEDIUM · **MODULE:** Sales return
+- **FIX:** `return-items` `requestId` qabul qiladi (hujjat id si); takror — 200 va o'sha hujjat; buyurtma qatori qulfi bilan
+  parallel xavfsiz. **STATUS:** FIXED — VERIFIED PHASE 12.
+
+## AUD-030 — Omborlararo o'tkazmada so'rov kaliti yo'q
+- **SEVERITY:** MEDIUM · **MODULE:** Stock transfer
+- **FIX:** `stock/transfers` `requestId` (harakat referensi); takror — 200, ikkinchi o'tkazma yo'q. **STATUS:** FIXED — VERIFIED PHASE 15.
+
+## AUD-031 — Parallel takroriy mijoz to'lovi 409 qaytaradi (200 emas)
+- **SEVERITY:** LOW · **MODULE:** Payments — moliyaviy ta'sir BIR marta (unique indeks), faqat javob kodi farq qiladi.
+  **STATUS:** OPEN (qabul qilingan xulq; mijoz qayta so'rasa 200 va mavjud to'lov qaytadi).

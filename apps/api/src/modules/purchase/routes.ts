@@ -22,6 +22,7 @@
  *   POST   /payments                                      purchase.approve (201 yangi / 200 takroriy reference)
  */
 import { previewSupplierPaymentReversal, reverseSupplierPayment } from "./payment-reversal.service.js";
+import { supplierDebtReconciliation, supplierStatement } from "./supplier-statement.service.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { ALLOCATION_METHODS, MAX_PAYMENT_PARTS, type Permission } from "@bum/shared";
@@ -297,6 +298,17 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
     const query = suppliersQuery.parse(req.query);
     return { suppliers: await listSuppliers(db, await readTenant(req, "purchase.view"), query) };
   });
+
+  /** AUD-020: ta'minotchi bilan solishtirish akti — yagona manba jurnal (2000, kontragent = ta'minotchi). */
+  const statementQuery = z.object({ from: z.iso.date().optional(), to: z.iso.date().optional() });
+  app.get("/suppliers/:supplierId/statement", async (req) => {
+    const { supplierId } = supplierParams.parse(req.params);
+    const query = statementQuery.parse(req.query);
+    return supplierStatement(db, await readTenant(req, "purchase.view"), supplierId, query);
+  });
+
+  /** Barcha ta'minotchilar: kesh va jurnal solishtiruvi (nomuvofiqlar). */
+  app.get("/suppliers-reconciliation", async (req) => supplierDebtReconciliation(db, await readTenant(req, "finance.view")));
 
   app.get("/suppliers/:supplierId", async (req) => {
     const { supplierId } = supplierParams.parse(req.params);

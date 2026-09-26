@@ -4991,3 +4991,13 @@ xarajatni bekor qilish; POS qurilma analitikasida rad etish alohida emas. Keyin 
 `/api/finance/cash/registers`, `/api/finance/cash-documents`, `/api/inventory/stock/export`, `/api/delivery/trips`) 401 —
 mavjud. Production bazasida faqat o'qish: 1556 mijoz — kesh = jurnal, 0 nomuvofiqlik; aylanma balans farqi 0.00;
 yangi jadvallar va ustunlar bor; 4 ta Kassir rolida `cash.own`. Production'da brauzer orqali sinalmadi.
+
+## BUSINESS 01 — MINI MARKET real biznes qabul testi (2026-09-26)
+
+`apps/api/test/acceptance-minimarket.test.ts` — 26 bosqich, izolyatsiyalangan test bazada (`TEST-01-MINIMARKET` +
+`TEST-01-FOREIGN`), har bosqichdan keyin kassa, bank, ombor (1200 = Σ qoldiq × AVCO), mijoz/ta'minotchi qarzi (kesh = jurnal),
+jurnal balansi va foyda-zarar mustaqil hisob bilan 1 so'm aniqlikda solishtiriladi. Natija: 26/26 ✓.
+Topildi va tuzatildi: AUD-028 (HIGH — mijoz balansi importi foyda-zararga tushardi → endi kapital 3000), AUD-029 (qisman
+qaytarishda so'rov kaliti), AUD-030 (o'tkazmada so'rov kaliti); AUD-020 ta'minotchi akti (API). Qoldi: AUD-031 (LOW).
+Tekshiruv: API 164 fayl / 1147 test ✓, frontend 278 ✓, E2E 35 spec / 126 test ✓ (real Chrome), tsc ✓, eslint ✓.
+**Production'ga deploy qilinmagan** (topshiriq talabi).

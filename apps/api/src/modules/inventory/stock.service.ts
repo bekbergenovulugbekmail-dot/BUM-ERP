@@ -658,6 +658,8 @@ export async function transferStock(
     /** O'tgan sana bilan kiritish; berilmasa — hozir. */
     occurredAt?: Date;
     notes?: string | null;
+    /** So'rov kaliti — takroriy yuborish ikkinchi o'tkazma yaratmaydi (Mini Market qabul testi, 2026-09-26). */
+    requestId?: string | null;
   },
   meta: RequestMeta,
 ) {
@@ -680,7 +682,31 @@ export async function transferStock(
     .orderBy(asc(stockLevels.warehouseId))
     .for("update");
 
-  const referenceId = randomUUID();
+  // Takroriy so'rov: qoldiq qatorlari qulflangan — parallel ikkinchisi birinchisi tugagach uning harakatini ko'radi
+  if (input.requestId) {
+    const moves = await tx
+      .select({ type: stockMovements.type, companyId: stockMovements.companyId, productId: stockMovements.productId, costPrice: stockMovements.costPrice })
+      .from(stockMovements)
+      .where(and(eq(stockMovements.referenceType, "transfer"), eq(stockMovements.referenceId, input.requestId)));
+    if (moves.length > 0) {
+      if (moves.some((move) => move.companyId !== tenant.company.id || move.productId !== input.productId)) {
+        throw badRequest("So'rov kaliti boshqa hujjatga tegishli");
+      }
+      const levels = await tx
+        .select()
+        .from(stockLevels)
+        .where(and(eq(stockLevels.companyId, tenant.company.id), eq(stockLevels.productId, input.productId), inArray(stockLevels.warehouseId, [input.fromWarehouseId, input.toWarehouseId])));
+      return {
+        referenceId: input.requestId,
+        from: levels.find((level) => level.warehouseId === input.fromWarehouseId)!,
+        to: levels.find((level) => level.warehouseId === input.toWarehouseId)!,
+        costPrice: moves.find((move) => move.type === "transfer_out")?.costPrice ?? "0",
+        duplicate: true as const,
+      };
+    }
+  }
+
+  const referenceId = input.requestId ?? randomUUID();
   const { quantity } = await toBaseUnit(tx, tenant.company.id, input);
   const base = {
     productId: input.productId,

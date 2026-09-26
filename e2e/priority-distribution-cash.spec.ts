@@ -107,7 +107,7 @@ test("mijozning bank orqali to'lovi: qarzdan ortig'i avansga — ko'rsatiladi va
   await expect(dialog).toBeVisible();
   await dialog.getByTestId("bank-receipt-amount").fill(String(paying));
   await dialog.getByTestId("bank-receipt-reference").fill(`PP-${Date.now()}`);
-  await expect(dialog.getByTestId("bank-receipt-to-advance")).toHaveText(/50[\s,.  ]?000/, { timeout: 15_000 });
+  await expect(dialog.getByTestId("bank-receipt-to-advance")).toHaveText(/50[\s,.00a0202f]?000/, { timeout: 15_000 });
   await page.screenshot({ path: resolve(ARTIFACTS, "bank-receipt-split.png") });
   await dialog.getByTestId("bank-receipt-confirm").click();
   await expect(dialog).toBeHidden({ timeout: 15_000 });
@@ -150,8 +150,8 @@ test("kassir faqat o'z kassasini ko'radi va topshiradi; rahbar hujjatni bekor qi
   await dialog.getByTestId("cash-document-reason").fill("Kun oxiri topshirish (E2E)");
   await dialog.getByTestId("cash-document-submit").click();
   await expect(dialog).toBeHidden({ timeout: 15_000 });
-  await expect(panel.getByTestId(`register-balance-${created.json.cashAccount.id}`)).toHaveText(/40[\s,.  ]?000/, { timeout: 15_000 });
-  await expect(page.getByTestId("report-closing")).toContainText(/40[\s,.  ]?000/);
+  await expect(panel.getByTestId(`register-balance-${created.json.cashAccount.id}`)).toHaveText(/40[\s,.00a0202f]?000/, { timeout: 15_000 });
+  await expect(page.getByTestId("report-closing")).toContainText(/40[\s,.00a0202f]?000/);
   await page.screenshot({ path: resolve(ARTIFACTS, "cashier-register.png") });
 
   // ── Rahbar: Moliya → Kassalar → hujjatni bekor qilish
@@ -166,7 +166,7 @@ test("kassir faqat o'z kassasini ko'radi va topshiradi; rahbar hujjatni bekor qi
   await reverseDialog.getByRole("textbox").fill("E2E: noto'g'ri kassa");
   await reverseDialog.getByRole("button", { name: "Bekor qilish" }).click();
   await expect(reverseDialog).toBeHidden({ timeout: 15_000 });
-  await expect(ownerPanel.getByTestId(`register-balance-${created.json.cashAccount.id}`)).toHaveText(/100[\s,.  ]?000/, { timeout: 15_000 });
+  await expect(ownerPanel.getByTestId(`register-balance-${created.json.cashAccount.id}`)).toHaveText(/100[\s,.00a0202f]?000/, { timeout: 15_000 });
   await page.screenshot({ path: resolve(ARTIFACTS, "owner-register-reversed.png") });
 });
 

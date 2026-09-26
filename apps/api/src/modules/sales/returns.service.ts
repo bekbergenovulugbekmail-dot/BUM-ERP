@@ -77,6 +77,11 @@ export type ReturnItemsInput = {
    */
   kind?: "return" | "delivery_refusal";
   deliveryTaskId?: string | null;
+  /**
+   * So'rov kaliti (web): ikki marta bosish yoki tarmoq qayta urinishi IKKINCHI qaytarish yaratmaydi — hujjat id si shu
+   * kalit bo'ladi, mavjud bo'lsa o'sha hujjat qaytariladi (Mini Market qabul testi, 2026-09-26).
+   */
+  requestId?: string | null;
   /** Qator bo'yicha tovar holati (faqat sotuvdan keyingi qaytarishda); berilmasa — sotuvga. */
   dispositions?: { orderItemId: string; disposition: ReturnDisposition; warehouseId?: string | null }[];
 };
@@ -345,6 +350,34 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
     .limit(1)
     .for("update");
   if (!order) throw notFound("Chek topilmadi");
+  // Takroriy so'rov: buyurtma qatori qulflangan — parallel ikkinchi so'rov birinchisi tugagach shu yerda uni ko'radi
+  if (input.requestId && !offline) {
+    const [existing] = await tx
+      .select()
+      .from(salesReturns)
+      .where(eq(salesReturns.id, input.requestId))
+      .limit(1);
+    if (existing) {
+      // Boshqa kompaniya yoki boshqa chekning kaliti — ma'lumot oshkor qilinmaydi, oddiy rad
+      if (existing.companyId !== companyId || existing.orderId !== orderId) throw badRequest("So'rov kaliti boshqa hujjatga tegishli");
+      return {
+        return: {
+          id: existing.id,
+          number: existing.number,
+          totalAmount: existing.totalAmount,
+          refundMethod: existing.refundMethod,
+          refundAmount: existing.refundAmount,
+          refunds: (existing.refunds ?? []).map((part) => ({ method: part.method, amount: part.amount })),
+          balanceRestored: existing.balanceRestored,
+          cashbackRestored: existing.cashbackRestored,
+          cashbackReversed: existing.cashbackReversed,
+        },
+        order: await getOrder(tx, tenant, orderId),
+        conflicts: [] as SaleConflict[],
+        duplicate: true,
+      };
+    }
+  }
   if (!isCompletedSale(order.status)) throw badRequest("Faqat yakunlangan chekdagi mahsulot qaytariladi");
   assertWarehouseAccess(tenant, order.warehouseId);
   const conflicts: SaleConflict[] = [];
@@ -445,7 +478,7 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
   );
 
   const date = offline ? offline.returnedAt.toISOString().slice(0, 10) : todayIso();
-  const returnId = offline?.id ?? randomUUID();
+  const returnId = offline?.id ?? input.requestId ?? randomUUID();
   const number =
     offline?.number ??
     (await nextDocumentNumber(tx, {

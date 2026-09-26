@@ -95,3 +95,10 @@ akti, tarixiy qarz, aging, Excel/PDF.
 - AUD-013 FIXED: ta'minotchi to'lovi va to'langan xarajatni bekor qilish (umumiy `reversal.service.ts`), migratsiya 0093,
   UI (xarajatlar ro'yxati, xarid buyurtmasi oynasi). API testlar 5 + bog'liq to'plamlar ✓, E2E 2 ✓, frontend 278 ✓.
 - **Keyingi:** AUD-020 (ta'minotchi akti, HIGH), keyin AUD-022/023/024/025, AUD-004, AUD-008, AUD-014/015/016/018/019/026.
+
+### 2026-09-26 — BUSINESS 01 MINI MARKET qabul testi
+- `apps/api/test/acceptance-minimarket.test.ts` — 26 bosqich (0→100): bootstrap, rollar, 20 mahsulot, blok/pachka, xarid,
+  ta'minotchi to'lovi, AVCO, narx (kelishilgan, manipulyatsiya rad), POS naqd/aralash/nasiya, limit bloki, mijoz to'lovi,
+  boshlang'ich balans, qaytarish, xarajat, o'tkazma, inventarizatsiya, hisobotlar, kassa/bank/ombor/qarz/jurnal/foyda
+  solishtiruvi, idempotentlik, parallel, tenant, rollar, kun yakuni — 26/26 ✓.
+- Topildi va tuzatildi: AUD-028 (HIGH), AUD-029, AUD-030 (MEDIUM); AUD-020 API yopildi. Qoldi: AUD-031 (LOW).

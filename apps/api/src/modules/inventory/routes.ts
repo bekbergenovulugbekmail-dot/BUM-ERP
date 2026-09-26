@@ -127,6 +127,8 @@ const transferBody = z.strictObject({
   unitId: z.uuid().nullable().optional(),
   occurredAt: z.iso.datetime({ offset: true }).transform((v) => new Date(v)).optional(),
   notes: nullableText(2000),
+  /** So'rov kaliti — takroriy yuborish ikkinchi o'tkazma yaratmaydi. */
+  requestId: z.uuid().optional(),
 });
 
 const countListQuery = z.object({
@@ -303,7 +305,7 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
     const result = await writeInTenant(req, ["warehouse.transfer"], (tx, tenant) =>
       transferStock(tx, tenant, body, requestMeta(req)),
     );
-    reply.status(201);
+    reply.status("duplicate" in result && result.duplicate ? 200 : 201);
     return result;
   });
 

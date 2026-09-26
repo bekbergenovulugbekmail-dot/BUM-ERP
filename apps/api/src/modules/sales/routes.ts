@@ -229,6 +229,8 @@ const returnItemsBody = z.strictObject({
   reason: nullableText(1000),
   /** Pul qaytaradigan ochiq web kassa smenasi (ixtiyoriy). */
   shiftId: z.uuid().nullable().optional(),
+  /** So'rov kaliti — takroriy yuborish ikkinchi qaytarish yaratmaydi. */
+  requestId: z.uuid().optional(),
   /** Qaytgan tovar holati qator bo'yicha (sotuvga / karantin / shikastlangan / hisobdan chiqarish / ta'minotchiga). */
   dispositions: z
     .array(z.strictObject({ orderItemId: z.uuid(), disposition: z.enum(RETURN_DISPOSITIONS), warehouseId: z.uuid().nullish() }))
@@ -791,7 +793,7 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     const result = await writeInTenant(req, "sales.refund", (tx, tenant) =>
       returnSaleItems(tx, tenant, orderId, body, requestMeta(req)),
     );
-    reply.status(201);
+    reply.status("duplicate" in result && result.duplicate ? 200 : 201);
     return result;
   });
 

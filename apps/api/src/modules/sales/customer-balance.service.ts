@@ -460,7 +460,20 @@ export async function refundToBalance(
 export async function setCustomerBalances(
   tx: Tx,
   tenant: TenantContext,
-  input: { customerId: string; balance?: string; totalDebt?: string; cashback?: string; reason: string; date?: string },
+  input: {
+    customerId: string;
+    balance?: string;
+    totalDebt?: string;
+    cashback?: string;
+    reason: string;
+    date?: string;
+    /**
+     * Qarshi hisob: `pnl` (standart) — hayotdagi tuzatish, farq "Boshqa daromad/xarajat"; `equity` — BOSHLANG'ICH qoldiq
+     * (boshqa tizimdan ko'chirish, import): farq Ustav kapitaliga (3000) — foyda-zararga tushmaydi, kassa boshlang'ich
+     * qoldig'i bilan bir xil qoida (Mini Market qabul testi, 2026-09-26).
+     */
+    counter?: "pnl" | "equity";
+  },
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
@@ -474,8 +487,10 @@ export async function setCustomerBalances(
   await assertPeriodOpen(tx, companyId, date);
   const customer = await lockCustomer(tx, companyId, input.customerId);
   const before = { balance: customer.balance, totalDebt: customer.totalDebt };
-  const otherIncome = () => requireAccountBySubtype(tx, companyId, "other", "income", "Boshqa daromadlar");
-  const otherExpense = () => requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar");
+  const equity = () => requireAccountBySubtype(tx, companyId, "capital", "equity", "Ustav kapitali");
+  const opening = input.counter === "equity";
+  const otherIncome = () => (opening ? equity() : requireAccountBySubtype(tx, companyId, "other", "income", "Boshqa daromadlar"));
+  const otherExpense = () => (opening ? equity() : requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"));
   let transaction: Awaited<ReturnType<typeof insertBalanceTx>> | null = null;
 
   if (input.balance !== undefined) {

@@ -121,7 +121,8 @@ export async function importCustomerBalances(
       await setCustomerBalances(
         tx,
         tenant,
-        { customerId, balance: amount.toFixed(2), reason: row.reason?.trim() || DEFAULT_REASON },
+        // Boshlang'ich qoldiq — qarshi hisob kapital (3000): foyda-zararga tushmaydi
+        { customerId, balance: amount.toFixed(2), reason: row.reason?.trim() || DEFAULT_REASON, counter: "equity" },
         meta,
       );
       applied += 1;
