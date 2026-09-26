@@ -5082,3 +5082,5 @@ yo'q), web `build.json` 10:54:58Z (bundle'da ERP'ga qaytish tugmasi bor, "A4 his
 
 **Tekshirildi:** frontend 51 fayl / 312 ✓ (yangi: transliteratsiya 24, plagin 4, ustun tanlash, supervayzer roli), E2E 38 spec ✓
 (yangi: `uz-cyrillic`, surish testi `sales-agent`), tsc ✓, eslint ✓, `vite build` ✓.
+
+**Production (2026-09-26 14:44Z):** `00feb5e` — faqat `bum-web` (API o'zgarmagan); `build.json` 14:44:34Z, bundle'da ustun tanlash va "Ўзбекча" bor. Production'da brauzer orqali sinalmadi.
