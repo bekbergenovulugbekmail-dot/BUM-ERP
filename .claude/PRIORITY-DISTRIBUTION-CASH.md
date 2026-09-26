@@ -110,4 +110,5 @@ tushuntiriladi va tasdiqsiz bajarilmaydi (xotira: financial-integrity-gate).
   `reconcileTrip` (miqdor mahsulot×birlik va summa) — farq bo'lsa chop etilmaydi. UI: Dostavka → "Reyslar".
   Testlar: `simulation-distribution.test.ts` (23-bo'lim senariysi to'liq: Test/Bonnu/Anor, Cola 6 blok, rad etish YT-,
   Anor qaytarishi QR-, qarz kesh = jurnal, 1200 = ombor, aylanma balans), `trip-documents.test.ts` (5).
-- W7 23-bo'lim senariysi (3 mijoz) — API reconciliation, E2E, PDF QA, tenant.
+- W7 ✅ 23-bo'lim senariysi, API 162 fayl, frontend 278, E2E hammasi, PDF QA, tenant — production'ga deploy (2026-09-26 00:36Z),
+  prod tekshiruv: qarz kesh = jurnal (0 farq), aylanma balans 0.00. KEYINGI: AUDIT RESUMED (AUD-013).

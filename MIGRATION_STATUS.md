@@ -6,7 +6,7 @@
 | | |
 |---|---|
 | Branch | `feat/postgres-migration` |
-| Oxirgi yangilanish | 2026-09-20 |
+| Oxirgi yangilanish | 2026-09-26 |
 | Umumiy holat | 16 / 16 PHASE — kod tayyor; qolgan: brauzerda qo'lda sinov, production deploy va ma'lumot importi |
 | Ishlab turgan ilova | Yangi versiya Railway'da ishlayapti: https://bum-web-production.up.railway.app (bum-erp.uz DNS o'zgarishini kutmoqda). Eski Convex versiyasi `main` da |
 
@@ -4954,3 +4954,40 @@ MEDIUM/LOW, 50 modul va 7 biznes senariysi.
 0087 qo'llandi, qayta yiqilish yo'q), web `build.json` 19:22:17Z, yangi marshrutlar 401 (mavjud). Production
 bazasida faqat o'qish tekshiruvi: 1556 mijoz — kesh = jurnal subhisobi, 0 nomuvofiqlik. Brauzer orqali
 production'da sinalmadi (kompaniya hisobisiz).
+
+## Distribution + moliya + kassa + qaytarish + hujjatlar (2026-09-26)
+
+Egasining ustuvor vazifasi (audit AUD-013 da PAUSE). Doimiy holat: `.claude/PRIORITY-DISTRIBUTION-CASH.md`.
+Qarorlar (egasi): Z1 rad etish — alohida hujjat; Z2 yuklash faqat qayd; Z3 qarzdan ortiq bank to'lovi — qarz + avans;
+Z4 mas'ul faqat o'z kassasi.
+
+**Tayyor (commitlar `92efdfe`…`d89f52d`, migratsiyalar 0088–0092 — faqat qo'shuvchi):**
+- W1 nakladnoy: savdo agenti va yetkazuvchi (ism · telefon, yo'q bo'lsa "—"), bulk nakladnoy yetkazma qatoridan
+  (qayta yetkazishda to'liq buyurtma miqdori chiqmaydi), QR alias; standart shablonda ixcham 2 qator.
+- W2 ombor eksporti: `GET /api/inventory/stock/export`, "Eksport" va "Ombordagi miqdori bilan eksport" (Excel).
+- W3 bank tushumi: `POST /api/sales/bank-receipts` — qarzgacha to'lov + qolgani avans (2300), bitta hujjat,
+  bekor qilish avansni ham qaytaradi; balans to'ldirishni bekor qilish.
+- W4 kassalar: `cash.own` (Kassir roliga), kassa hujjatlari (o'tkazma, to'lov usulini tuzatish/ayirboshlash,
+  valyuta ayirboshlash kurs snapshoti bilan, kategoriyali kirim/chiqim), bekor qilish, kassa hisoboti; UI "Kassalar".
+- W5 "Yetkazilmadi" (YT-, `delivery_refusal`) sotuvdan keyingi qaytarishdan ajratildi; qaytgan tovar holati
+  (sotuvga / karantin / ta'minotchiga / shikastlangan / hisobdan chiqarish).
+- W6 reys: snapshot, 3 hujjat (nakladnoy, yig'ma ×2, marshrut varag'i) mos kelishi tekshiriladi, terish/yuklash.
+- Yo'l-yo'lakay: `setLockDate` UTC sana xatosi; E2E shablon tozalashi (biznes sarlavhasi); pos-mobile smenani o'zi ochadi.
+
+**Tekshirildi:** tsc, eslint (butun repo), frontend 278 test, API 162 fayl (5 fayl tunda UTC sana tufayli yiqiladi —
+`BUSINESS_UTC_OFFSET_MINUTES=0` bilan hammasi o'tadi, regressiya emas), 23-bo'lim senariysi testi
+(`simulation-distribution.test.ts`), E2E barcha spec'lar (yangi: `priority-distribution-cash`), PDF QA (rasmlar).
+
+**Brauzerda sinash:** Ombor → "Ombordagi miqdori bilan eksport"; CRM → Mijozlar → 🏛 "Bank orqali to'lov";
+Moliya → "Kassalar" (rahbar), "Kassalar" menyusi (kassir, kassa biriktirilgan bo'lsa); Dostavka → "Reyslar";
+buyurtma → Qaytarish → qator holati.
+
+**Ochiq (keyingi):** kompaniyaning o'z nakladnoy shablonida yangi maydonlar dizaynerda qo'shiladi (avtomatik
+o'zgartirilmaydi); standart nakladnoy jadvalida mahsulot ustunlari yo'q (mijoz ustunlari) — tavsiya; to'langan
+xarajatni bekor qilish; POS qurilma analitikasida rad etish alohida emas. Keyin — AUDIT RESUMED (AUD-013).
+
+**Production (2026-09-26 00:36Z):** `bum-api` + `bum-web` deploy qilindi (commit `d89f52d`). API bir marta ko'tarildi
+(0088–0092 qo'llandi, qayta yiqilish yo'q), web `build.json` 00:36:08Z; yangi marshrutlar (`/api/sales/bank-receipts`,
+`/api/finance/cash/registers`, `/api/finance/cash-documents`, `/api/inventory/stock/export`, `/api/delivery/trips`) 401 —
+mavjud. Production bazasida faqat o'qish: 1556 mijoz — kesh = jurnal, 0 nomuvofiqlik; aylanma balans farqi 0.00;
+yangi jadvallar va ustunlar bor; 4 ta Kassir rolida `cash.own`. Production'da brauzer orqali sinalmadi.
