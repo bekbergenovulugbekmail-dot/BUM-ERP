@@ -5001,3 +5001,7 @@ Topildi va tuzatildi: AUD-028 (HIGH — mijoz balansi importi foyda-zararga tush
 qaytarishda so'rov kaliti), AUD-030 (o'tkazmada so'rov kaliti); AUD-020 ta'minotchi akti (API). Qoldi: AUD-031 (LOW).
 Tekshiruv: API 164 fayl / 1147 test ✓, frontend 278 ✓, E2E 35 spec / 126 test ✓ (real Chrome), tsc ✓, eslint ✓.
 **Production'ga deploy qilinmagan** (topshiriq talabi).
+
+**Production (2026-09-26 06:27Z):** `447e968` deploy qilindi (egasi tasdig'i bilan) — AUD-013, AUD-020 (API), AUD-028/029/030,
+"Zakaz olish" menyudan olingan, nakladnoy va reys hujjatlarida marshrut. API bir marta ko'tarildi (qayta yiqilish yo'q), web
+build 06:26:41Z, yangi marshrutlar 401. Production (faqat o'qish): 1556 mijoz — kesh = jurnal, 0 farq; aylanma balans 0.00.
