@@ -4,7 +4,7 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 import { appPath, login } from "./_lib/accounts.ts";
-import { openCart } from "./_lib/pos.ts";
+import { ensureShift, openCart } from "./_lib/pos.ts";
 
 const PHONES = [
   { name: "360", width: 360, height: 800 },
@@ -22,8 +22,13 @@ async function noHorizontalOverflow(page: Page) {
 async function openPos(page: Page) {
   await login(page, "kassir");
   await page.goto(appPath("pos"));
+  // Smena yopiq bo'lsa (oldingi kassa testi yopgan bo'lishi mumkin) — o'zi ochadi; test tashqi holatga bog'liq bo'lmasin
   const search = page.getByPlaceholder(/Mahsulot nomi, SKU yoki barkod/);
-  await expect(search, "smena ochiq bo'lishi kerak (db:seed-demo + smena)").toBeVisible({ timeout: 30_000 });
+  await expect(async () => {
+    if (await search.isVisible()) return;
+    if (await page.getByRole("button", { name: "Smena ochish" }).first().isVisible()) await ensureShift(page);
+    await expect(search).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 45_000 });
   return search;
 }
 
