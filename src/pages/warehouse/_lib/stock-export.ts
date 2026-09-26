@@ -34,31 +34,42 @@ export type StockExportKind = "catalog" | "quantities";
  * `width` — Excel ustun kengligi (belgi). Kengliklar A4 ga mo'ljallangan: miqdorli eksport (12 ustun) — albom, katalog —
  * kitob varag'i; chop etishda bir sahifa kengligiga siqiladi (`fitToWidth`), uzun nom katakda qatorga bo'linadi.
  */
-type Column = { header: string; width: number; value: (row: StockExportRow) => string | number | null; number?: "qty" | "money"; wrap?: boolean };
+export type Column = { key: string; header: string; width: number; value: (row: StockExportRow) => string | number | null; number?: "qty" | "money"; wrap?: boolean };
 
 const num = (value: string | null) => (value === null || value === "" ? null : Number(value));
 
-export function exportColumns(kind: StockExportKind, costVisible: boolean): Column[] {
+/**
+ * `selected` — foydalanuvchi tanlagan ustunlar (kalitlar); berilmasa yoki bo'sh bo'lsa — hammasi. Tannarx ruxsatisiz
+ * tanlangan bo'lsa ham chiqmaydi (server `null` beradi, ustunning o'zi yo'q).
+ */
+export function exportColumns(kind: StockExportKind, costVisible: boolean, selected?: readonly string[]): Column[] {
+  const all = allExportColumns(kind, costVisible);
+  if (!selected || selected.length === 0) return all;
+  const picked = all.filter((column) => selected.includes(column.key));
+  return picked.length > 0 ? picked : all;
+}
+
+function allExportColumns(kind: StockExportKind, costVisible: boolean): Column[] {
   const head: Column[] = [
-    { header: "SKU", width: 12, value: (row) => row.productSku ?? "", wrap: true },
-    { header: "Shtrix-kod", width: 14, value: (row) => row.productBarcode ?? "" },
-    { header: "Mahsulot", width: 30, value: (row) => row.productName, wrap: true },
-    { header: "Kategoriya", width: 13, value: (row) => row.categoryName ?? "", wrap: true },
-    { header: "Birlik", width: 6, value: (row) => row.unitName },
+    { key: "sku", header: "SKU", width: 12, value: (row) => row.productSku ?? "", wrap: true },
+    { key: "barcode", header: "Shtrix-kod", width: 14, value: (row) => row.productBarcode ?? "" },
+    { key: "name", header: "Mahsulot", width: 30, value: (row) => row.productName, wrap: true },
+    { key: "category", header: "Kategoriya", width: 13, value: (row) => row.categoryName ?? "", wrap: true },
+    { key: "unit", header: "Birlik", width: 6, value: (row) => row.unitName },
   ];
   const quantities: Column[] = kind === "quantities"
     ? [
-        { header: "Ombor", width: 12, value: (row) => row.warehouseName, wrap: true },
-        { header: "Haqiqiy qoldiq", width: 9, value: (row) => num(row.quantity), number: "qty" },
-        { header: "Band (buyurtmalar)", width: 10, value: (row) => num(row.reservedQty), number: "qty" },
-        { header: "Mavjud (sotish mumkin)", width: 10, value: (row) => num(row.availableQty), number: "qty" },
+        { key: "warehouse", header: "Ombor", width: 12, value: (row) => row.warehouseName, wrap: true },
+        { key: "quantity", header: "Haqiqiy qoldiq", width: 9, value: (row) => num(row.quantity), number: "qty" },
+        { key: "reserved", header: "Band (buyurtmalar)", width: 10, value: (row) => num(row.reservedQty), number: "qty" },
+        { key: "available", header: "Mavjud (sotish mumkin)", width: 10, value: (row) => num(row.availableQty), number: "qty" },
       ]
     : [];
   const prices: Column[] = [
-    ...(costVisible ? [{ header: "Tannarx", width: 11, value: (row: StockExportRow) => num(row.avgCostPrice), number: "money" as const }] : []),
+    ...(costVisible ? [{ key: "cost", header: "Tannarx", width: 11, value: (row: StockExportRow) => num(row.avgCostPrice), number: "money" as const }] : []),
     // Asosiy sotuv narxi (mahsulot kartochkasi); qo'yilmagan (0) bo'lsa — chakana narx
-    { header: "Sotuv narxi", width: 11, value: (row) => num(row.salesPrice && Number(row.salesPrice) > 0 ? row.salesPrice : row.retailPrice), number: "money" },
-    { header: "Ulgurji narx", width: 11, value: (row) => num(row.wholesalePrice), number: "money" },
+    { key: "salesPrice", header: "Sotuv narxi", width: 11, value: (row) => num(row.salesPrice && Number(row.salesPrice) > 0 ? row.salesPrice : row.retailPrice), number: "money" },
+    { key: "wholesalePrice", header: "Ulgurji narx", width: 11, value: (row) => num(row.wholesalePrice), number: "money" },
   ];
   return [...head, ...quantities, ...prices];
 }
@@ -105,7 +116,7 @@ function uniqueProducts(rows: StockExportRow[]) {
 export async function buildStockXlsx(
   kind: StockExportKind,
   rows: StockExportRow[],
-  options: { costVisible: boolean; companyName: string; warehouseLabel: string; date: string },
+  options: { costVisible: boolean; companyName: string; warehouseLabel: string; date: string; columns?: readonly string[] },
 ): Promise<{ blob: Blob; filename: string }> {
   const ExcelJS = (await import("exceljs")).default;
   const workbook = new ExcelJS.Workbook();
@@ -120,7 +131,7 @@ export async function buildStockXlsx(
    * siqish (balandligi — kerakcha sahifa), tor chetlar, jadval sarlavhasi har sahifada takrorlanadi, pastda sahifa raqami.
    */
   const addSheet = (name: string, title: string, data: StockExportRow[]) => {
-    const columns = exportColumns(kind, options.costVisible);
+    const columns = exportColumns(kind, options.costVisible, options.columns);
     const landscape = columns.length > 8;
     const sheet = workbook.addWorksheet(name, {
       pageSetup: {

@@ -5065,3 +5065,20 @@ Egasining talabi (skrinshotlar bilan):
 **Production (2026-09-26 10:55Z):** `5be8fd4` deploy qilindi — `bum-api` + `bum-web`; API bir marta ko'tarildi (yangi migratsiya
 yo'q), web `build.json` 10:54:58Z (bundle'da ERP'ga qaytish tugmasi bor, "A4 hisobot" yo'q); `/api/sales-agent/supervisor/profile` —
 401 (mavjud). Production'da brauzer orqali sinalmadi.
+
+## Supervayzer (rol bo'yicha), ustun tanlash, kirill interfeys, mahsulotni surish (2026-09-26)
+
+- **Supervayzer zakazi agentdek:** Ezo'da "Supervayzer" roliga `sales.create` qo'shilgan edi — shuning uchun oddiy "Sotuv" ochilardi.
+  Endi "Supervayzer" roli (ruxsatlari o'zgartirilgan bo'lsa ham) yoki agent + nazorat ruxsati bor, sotuv yaratmaydigan rol —
+  "Sotuv" agent ish joyini ochadi. Direktor, egasi, sotuv menejeri — oddiy Sotuv (`src/lib/agent-access.ts`).
+- **Ombordagi miqdori bilan eksport:** ustun tanlash oynasi (belgilash, "Hammasi"/"Tozalash"), tanlov qurilmada eslab qolinadi;
+  kam ustunda A4 kitob varag'i, ko'pida albom.
+- **Kirill interfeys ("Ўзбекча", kod `oz`):** tarjima fayllari lotindan avtomatik o'giriladi (`src/lib/uz-cyrl.ts`); komponentlardagi
+  yozilgan matn build paytida belgilanadi (`vite-plugin-uz-cyrl.ts`: JSX matni, yorliq atributlari/xususiyatlari, `*_LABELS`,
+  toast, " so'm"), runtime'da faqat `oz` tilida o'giriladi. Ma'lumot (mahsulot/mijoz nomi, SKU, raqam) o'zgarmaydi; server
+  xabarlarida qo'shtirnoq ichi o'zgarmaydi. PDF hujjatlar lotinda. Til menyusida "Ўзбекча".
+- **Buyurtma katalogi:** mahsulot oynasida chapga surish — keyingi, o'ngga — oldingi mahsulot (va ‹ › tugmalari, "3 / 20");
+  kiritilgan miqdor o'tishda saqlanadi.
+
+**Tekshirildi:** frontend 51 fayl / 312 ✓ (yangi: transliteratsiya 24, plagin 4, ustun tanlash, supervayzer roli), E2E 38 spec ✓
+(yangi: `uz-cyrillic`, surish testi `sales-agent`), tsc ✓, eslint ✓, `vite build` ✓.

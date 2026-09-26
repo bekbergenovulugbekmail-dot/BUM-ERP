@@ -1,8 +1,11 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
+import { CYRILLIC_LOCALE, setCyrillicActive, toCyrillic } from "./lib/uz-cyrl.ts";
 
 export const SUPPORTED_LOCALES = {
   uz: { code: "uz", emoji: "🇺🇿", name: "Uzbek", nativeName: "O'zbek", dir: "ltr" },
+  // O'zbek kirill: tarjimalar lotindan avtomatik o'giriladi (`lib/uz-cyrl.ts`), kod gov.uz dagidek `oz`
+  oz: { code: "oz", emoji: "🇺🇿", name: "Uzbek (Cyrillic)", nativeName: "Ўзбекча", dir: "ltr" },
   ru: { code: "ru", emoji: "🇷🇺", name: "Russian", nativeName: "Русский", dir: "ltr" },
   kk: { code: "kk", emoji: "🇰🇿", name: "Kazakh", nativeName: "Қазақша", dir: "ltr" },
 } as const;
@@ -62,7 +65,7 @@ export async function changeLocale(lng: SupportedLocale) {
   try {
     await i18n.changeLanguage(lng);
     const localeMetadata = SUPPORTED_LOCALES[lng];
-    document.documentElement.lang = lng;
+    document.documentElement.lang = lng === CYRILLIC_LOCALE ? "uz-Cyrl" : lng;
     document.documentElement.dir = localeMetadata.dir ?? "ltr";
     try {
       localStorage.setItem("erp_locale", lng);
@@ -92,6 +95,18 @@ for (const [path, module] of Object.entries(translationModules)) {
     resources[lng][ns] = module.default;
   }
 }
+
+// "Ўзбекча" (kirill) — o'zbekcha tarjimalardan (lotin) avtomatik; alohida fayllar yuritilmaydi
+resources[CYRILLIC_LOCALE] = Object.fromEntries(
+  Object.entries(resources.uz ?? {}).map(([ns, entries]) => [
+    ns,
+    Object.fromEntries(Object.entries(entries).map(([key, value]) => [key, typeof value === "string" ? toCyrillic(value) : value])),
+  ]),
+);
+
+// Komponentlardagi matn (`__cyr`) faol tilga qarab o'giriladi
+setCyrillicActive(SAVED_OR_DEFAULT_LOCALE === CYRILLIC_LOCALE);
+i18n.on("languageChanged", (lng) => setCyrillicActive(lng === CYRILLIC_LOCALE));
 
 i18n.use(initReactI18next).init({
   resources,

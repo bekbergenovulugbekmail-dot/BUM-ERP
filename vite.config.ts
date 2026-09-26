@@ -2,6 +2,7 @@ import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react-swc";
 import { defineConfig, type Plugin } from "vite";
+import { uzCyrl } from "./vite-plugin-uz-cyrl.ts";
 
 /**
  * Har build o'z belgisini oladi va u `build.json` da ham chiqadi.
@@ -42,7 +43,8 @@ export default defineConfig({
   define: {
     __BUILD_ID__: JSON.stringify(BUILD_ID),
   },
-  plugins: [react(), tailwindcss(), buildStamp()],
+  // uzCyrl — SWC dan oldin: interfeys matni "Ўзбекча (кирилл)" tili uchun belgilanadi
+  plugins: [uzCyrl(), react(), tailwindcss(), buildStamp()],
   resolve: {
     alias: {
       // API bilan umumiy: ruxsatlar katalogi, telefon formati, xato kodlari

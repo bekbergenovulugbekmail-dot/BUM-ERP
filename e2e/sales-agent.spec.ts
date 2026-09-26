@@ -262,4 +262,60 @@ test.describe("Sotuv agenti ish joyi (brauzer)", () => {
     expect(direct.status, direct.body).toBeGreaterThanOrEqual(400);
     expect(direct.body).toMatch(/geofence|uzoq/i);
   });
+
+  test("buyurtma: mahsulot oynasida chapga/o'ngga surish — keyingi/oldingi mahsulot, miqdor saqlanadi", async ({ page, context }) => {
+    await login(page, "owner");
+    await page.goto(appPath("dashboard"));
+    await ensureRoute(page);
+    await context.grantPermissions(["geolocation"]);
+    stopGps = await startGeoFeed(context, { latitude: STORE.latitude, longitude: STORE.longitude, accuracy: 10 });
+    await login(page, "agent");
+    await page.setViewportSize({ width: 412, height: 915 });
+    await page.goto(appPath("sales-agent/customers"));
+    await page.getByPlaceholder(/Nomi, telefon/i).first().fill("Baraka");
+    const storeLink = page.getByRole("link", { name: new RegExp(STORE.name) }).first();
+    await expect(storeLink).toBeVisible({ timeout: 20_000 });
+    await storeLink.click();
+    await expect(page).toHaveURL(/\/stores\//, { timeout: 20_000 });
+    const storeId = page.url().split("/stores/")[1]!.split("/")[0]!;
+    // Oldingi yugurishlardan qolgan qoralama bo'lmasin
+    await page.evaluate((id) => localStorage.removeItem(`bum:agent-order:${id}`), storeId);
+    await page.goto(appPath(`sales-agent/stores/${storeId}/order`));
+
+    const cards = page.locator("button").filter({ has: page.locator("p.line-clamp-2") });
+    await expect(cards.nth(1)).toBeVisible({ timeout: 30_000 });
+    await cards.first().click();
+    const dialog = page.getByTestId("product-dialog");
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    const position = dialog.getByTestId("product-position");
+    await expect(position).toContainText(/^1 \//);
+    const firstName = await dialog.getByRole("heading").first().innerText();
+    await dialog.getByRole("spinbutton").first().fill("1");
+
+    // Tugma bilan keyingisiga (1 dona saqlanadi)
+    await dialog.getByTestId("product-next").click();
+    await expect(position).toContainText(/^2 \//);
+    const secondName = await dialog.getByRole("heading").first().innerText();
+    expect(secondName).not.toBe(firstName);
+    await dialog.getByRole("spinbutton").first().fill("2");
+
+    // Barmoq bilan o'ngga surish — oldingi mahsulot, uning miqdori (1) joyida
+    const box = (await dialog.boundingBox())!;
+    const y = box.y + box.height / 2;
+    await dialog.dispatchEvent("touchstart", { touches: [{ identifier: 1, clientX: box.x + 60, clientY: y }], changedTouches: [{ identifier: 1, clientX: box.x + 60, clientY: y }] });
+    await dialog.dispatchEvent("touchend", { touches: [], changedTouches: [{ identifier: 1, clientX: box.x + 260, clientY: y + 5 }] });
+    await expect(position).toContainText(/^1 \//);
+    await expect(dialog.getByRole("spinbutton").first()).toHaveValue("1");
+
+    // Chapga surish — yana keyingisi, miqdori (2) saqlangan
+    await dialog.dispatchEvent("touchstart", { touches: [{ identifier: 2, clientX: box.x + 260, clientY: y }], changedTouches: [{ identifier: 2, clientX: box.x + 260, clientY: y }] });
+    await dialog.dispatchEvent("touchend", { touches: [], changedTouches: [{ identifier: 2, clientX: box.x + 40, clientY: y }] });
+    await expect(position).toContainText(/^2 \//);
+    await expect(dialog.getByRole("spinbutton").first()).toHaveValue("2");
+    await page.screenshot({ path: "e2e/.screenshots/agent-product-swipe.png" });
+    await dialog.getByRole("button", { name: /SAQLASH/i }).click();
+    await expect(dialog).toBeHidden({ timeout: 15_000 });
+    await expect(page.getByText(/2 ta mahsulot/)).toBeVisible({ timeout: 15_000 });
+    await page.evaluate((id) => localStorage.removeItem(`bum:agent-order:${id}`), storeId);
+  });
 });

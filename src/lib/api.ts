@@ -7,6 +7,7 @@
  * - `VITE_API_URL` bo'sh bo'lsa so'rovlar shu domenga ketadi (dev'da Vite proxy, prod'da bir domen)
  */
 import { ACT_AS_HEADER, actAsHeaderFor } from "./act-as.ts";
+import { cyrMessage } from "./uz-cyrl.ts";
 
 const BASE_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 
@@ -146,6 +147,7 @@ export const api = {
 
 /** Foydalanuvchiga ko'rsatiladigan xabar — `catch` bloklari uchun. */
 export function errorMessage(error: unknown, fallback = "Xatolik yuz berdi"): string {
-  if (error instanceof ApiError || error instanceof Error) return error.message || fallback;
-  return fallback;
+  // Kirill rejimida server xabari ham o'giriladi (qo'shtirnoq ichidagi ma'lumot — o'zgarmaydi)
+  if (error instanceof ApiError || error instanceof Error) return cyrMessage(error.message || fallback);
+  return cyrMessage(fallback);
 }

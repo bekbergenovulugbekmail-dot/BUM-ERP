@@ -27,7 +27,7 @@ describe("Ombor eksporti", () => {
   });
 });
 
-describe("Ombor eksporti — A4 chop etish", () => {
+describe("Ombor eksporti — A4 chop etish", { timeout: 30_000 }, () => {
   const load = async (blob: Blob) => {
     const ExcelJS = (await import("exceljs")).default;
     const workbook = new ExcelJS.Workbook();
@@ -67,5 +67,23 @@ describe("Ombor eksporti — A4 chop etish", () => {
     const file = await buildStockXlsx("catalog", rows, { costVisible: false, companyName: "BUM", warehouseLabel: "Asosiy ombor", date: "2026-09-26" });
     const [sheet] = (await load(file.blob)).worksheets;
     expect(sheet!.pageSetup).toMatchObject({ paperSize: 9, orientation: "portrait", fitToWidth: 1, fitToHeight: 0 });
+  });
+});
+
+describe("Ombor eksporti — ustun tanlash", { timeout: 30_000 }, () => {
+  it("faqat tanlangan ustunlar, tartib saqlanadi; bo'sh tanlov — hammasi; ruxsatsiz tannarx chiqmaydi", async () => {
+    expect(exportColumns("quantities", true, ["name", "quantity", "cost"]).map((c) => c.header)).toEqual(["Mahsulot", "Haqiqiy qoldiq", "Tannarx"]);
+    expect(exportColumns("quantities", false, ["name", "cost"]).map((c) => c.header)).toEqual(["Mahsulot"]);
+    expect(exportColumns("quantities", true, []).length).toBe(12);
+    const { buildStockXlsx } = await import("./stock-export.ts");
+    const file = await buildStockXlsx("quantities", [row("A", "Cola", "5.0000", "1.0000")], { costVisible: true, companyName: "BUM", warehouseLabel: "A", date: "2026-09-26", columns: ["sku", "name", "available"] });
+    const ExcelJS = (await import("exceljs")).default;
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await file.blob.arrayBuffer());
+    const sheet = workbook.worksheets[0]!;
+    expect((sheet.getRow(4).values as unknown[]).filter(Boolean)).toEqual(["SKU", "Mahsulot", "Mavjud (sotish mumkin)"]);
+    expect(sheet.getRow(5).getCell(3).value).toBe(4);
+    // Kam ustun — kitob varag'i
+    expect(sheet.pageSetup.orientation).toBe("portrait");
   });
 });

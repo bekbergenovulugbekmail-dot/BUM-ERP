@@ -30,6 +30,7 @@ import MovementHistory from "./_components/movement-history.tsx";
 import InventoryCountSection from "./_components/inventory-count-section.tsx";
 import CatalogSection from "./_components/catalog-section.tsx";
 import BackordersSection from "./_components/backorders-section.tsx";
+import ExportColumnsDialog from "./_components/export-columns-dialog.tsx";
 import BarcodeScanner from "@/components/barcode-scanner.tsx";
 import { toNumber } from "@/pages/products/_lib/types.ts";
 import type { WarehouseItem, WarehouseStats } from "./_lib/types.ts";
@@ -76,7 +77,8 @@ export default function WarehousePage() {
    * Eksport: "Eksport" — tanlangan ombordagi mahsulotlar (miqdorsiz); "Ombordagi miqdori bilan" — ochiq BARCHA
    * omborlar, faqat qoldig'i borlari, har ombor alohida + "Jami". Qiymatlar serverdan, tannarx ruxsat bilan.
    */
-  const handleExport = async (kind: StockExportKind) => {
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const handleExport = async (kind: StockExportKind, columns?: string[]) => {
     if (kind === "catalog" && !selectedWarehouseId) return;
     setExporting(kind);
     try {
@@ -95,6 +97,7 @@ export default function WarehousePage() {
         companyName: company?.name ?? "BUM ERP",
         warehouseLabel,
         date: localIsoDate(),
+        columns,
       });
       downloadBlob(file.blob, file.filename);
     } catch (error) {
@@ -158,7 +161,7 @@ export default function WarehousePage() {
           <Button variant="outline" size="sm" data-testid="stock-export" disabled={!selectedWarehouseId || exporting !== null} onClick={() => void handleExport("catalog")}>
             <FileSpreadsheet className="h-4 w-4 mr-1.5" /> {exporting === "catalog" ? "Tayyorlanmoqda…" : "Eksport"}
           </Button>
-          <Button variant="outline" size="sm" data-testid="stock-export-quantities" disabled={exporting !== null} onClick={() => void handleExport("quantities")}>
+          <Button variant="outline" size="sm" data-testid="stock-export-quantities" disabled={exporting !== null} onClick={() => setColumnsOpen(true)}>
             <FileSpreadsheet className="h-4 w-4 mr-1.5" /> {exporting === "quantities" ? "Tayyorlanmoqda…" : "Ombordagi miqdori bilan eksport"}
           </Button>
           {canTransfer && (warehouses?.length ?? 0) > 1 && (
@@ -333,6 +336,15 @@ export default function WarehousePage() {
           type={movementDialog.type}
           warehouseId={selectedWarehouseId}
           onClose={() => setMovementDialog((p) => ({ ...p, open: false }))}
+        />
+      )}
+
+      {columnsOpen && (
+        <ExportColumnsDialog
+          costVisible={can("products.view_cost")}
+          busy={exporting !== null}
+          onClose={() => setColumnsOpen(false)}
+          onExport={(columns) => void handleExport("quantities", columns).then(() => setColumnsOpen(false))}
         />
       )}
 

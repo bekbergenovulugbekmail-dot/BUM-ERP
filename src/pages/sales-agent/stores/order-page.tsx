@@ -3,7 +3,7 @@ import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
-import { ArrowLeft, CheckCircle2, ImageIcon, Loader2, Minus, Plus, Save, Search } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, ImageIcon, Loader2, Minus, Plus, Save, Search } from "lucide-react";
 import type { SalesAgentPolicy } from "@bum/shared";
 import { Button } from "@/components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.tsx";
@@ -159,22 +159,54 @@ function ProductCard({
 }
 
 /** Mahsulot oynasi: katta rasm, narx, qoldiq, aksiya qoidasi, dona/blok; SAQLASH ro'yxatga qaytaradi (qidiruv va sahifa saqlanadi). */
+/** Gorizontal surish (px): shundan kam — tasodifiy tegish, surish emas. */
+const SWIPE_MIN_PX = 60;
+
 function ProductDialog({
   product,
   line,
   money,
   onSave,
   onClose,
+  onMove,
+  hasPrev = false,
+  hasNext = false,
+  position,
 }: {
   product: RowProduct;
   line: DraftLine | undefined;
   money: (value: number | string) => string;
   onSave: (pieces: number, boxes: number) => void;
   onClose: () => void;
+  /**
+   * Chapga surish — keyingi, o'ngga — oldingi mahsulot (yoki ‹ › tugmalari). Kiritilgan miqdor o'tishda saqlanadi —
+   * orqaga qaytib keyingi mahsulotni qidirish shart emas.
+   */
+  onMove?: (direction: 1 | -1, pieces: number, boxes: number) => void;
+  hasPrev?: boolean;
+  hasNext?: boolean;
+  /** Ro'yxatdagi o'rni: "3 / 20". */
+  position?: string;
 }) {
   const { t } = useTranslation("agent");
   const [pieces, setPieces] = useState(line?.pieces ?? 0);
   const [boxes, setBoxes] = useState(line?.boxes ?? 0);
+  const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
+  const move = (direction: 1 | -1) => {
+    if (!onMove || (direction === 1 ? !hasNext : !hasPrev)) return;
+    onMove(direction, pieces, boxes);
+  };
+  const onTouchEnd = (event: React.TouchEvent) => {
+    const start = touchStart;
+    setTouchStart(null);
+    const touch = event.changedTouches[0];
+    if (!start || !touch) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    // Faqat aniq gorizontal surish (vertikal aylantirish bilan adashmasin)
+    if (Math.abs(dx) < SWIPE_MIN_PX || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    move(dx < 0 ? 1 : -1);
+  };
   const clean = (value: number) => Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
   const totalPieces = pieces + boxes * num(product.box?.factor);
   const lineTotal = pieces * num(product.piecePrice) + boxes * num(product.box?.price);
@@ -183,11 +215,30 @@ function ProductDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[92vh] max-w-md overflow-y-auto">
+      <DialogContent
+        className="max-h-[92vh] max-w-md overflow-y-auto animate-in fade-in-0 duration-150"
+        data-testid="product-dialog"
+        onTouchStart={(event) => {
+          const touch = event.touches[0];
+          if (touch) setTouchStart({ x: touch.clientX, y: touch.clientY });
+        }}
+        onTouchEnd={onTouchEnd}
+      >
         <DialogHeader>
           <DialogTitle className="pr-6">{product.name}</DialogTitle>
           <DialogDescription>{subtitle || t("order.catalog")}</DialogDescription>
         </DialogHeader>
+        {onMove && (hasPrev || hasNext) && (
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <Button variant="secondary" size="icon" className="h-9 w-9" disabled={!hasPrev} aria-label={t("order.prev_product")} data-testid="product-prev" onClick={() => move(-1)}>
+              <ChevronLeft className="h-5 w-5" />
+            </Button>
+            <span className="tabular-nums" data-testid="product-position">{position} · {t("order.swipe_hint")}</span>
+            <Button variant="secondary" size="icon" className="h-9 w-9" disabled={!hasNext} aria-label={t("order.next_product")} data-testid="product-next" onClick={() => move(1)}>
+              <ChevronRight className="h-5 w-5" />
+            </Button>
+          </div>
+        )}
         {product.imageUrl ? (
           <img src={imageSrc(product.imageUrl)!} alt={product.name} className="max-h-72 w-full rounded-xl bg-muted object-contain" />
         ) : (
@@ -366,6 +417,9 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
   const selectedOnly: RowProduct[] = draft.lines
     .filter((line) => !shownIds.has(line.productId))
     .map((line) => ({ ...line, hasImage: false, imageUrl: null, available: null, promotions: [], brandName: null, categoryName: null }));
+  // Mahsulot oynasida surib o'tish tartibi — ekrandagi bilan bir xil: avval "Tanlangan", keyin katalog sahifasi
+  const navList = [...selectedOnly, ...catalogRows];
+  const openIndex = openProduct ? navList.findIndex((row) => row.productId === openProduct.productId) : -1;
   const totalPieces = draft.lines.reduce((sum, line) => sum + line.pieces + line.boxes * num(line.box?.factor), 0);
   const total = draft.lines.reduce((sum, line) => sum + line.pieces * num(line.piecePrice) + line.boxes * num(line.box?.price), 0);
   const busy = save.isPending || submit.isPending;
@@ -575,6 +629,17 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
           onSave={(pieces, boxes) => {
             setLine(openProduct, pieces, boxes);
             setOpenProduct(null);
+          }}
+          hasPrev={openIndex > 0}
+          hasNext={openIndex >= 0 && openIndex < navList.length - 1}
+          position={openIndex >= 0 ? `${openIndex + 1} / ${navList.length}` : undefined}
+          onMove={(direction, pieces, boxes) => {
+            // Qo'shni mahsulot ro'yxat O'ZGARMASDAN oldin topiladi (nol qilingan "tanlangan" qator ro'yxatdan chiqadi)
+            const target = navList[openIndex + direction];
+            if (!target) return;
+            const current = lineOf(openProduct.productId);
+            if ((current?.pieces ?? 0) !== pieces || (current?.boxes ?? 0) !== boxes) setLine(openProduct, pieces, boxes);
+            setOpenProduct(target);
           }}
         />
       )}

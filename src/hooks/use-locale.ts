@@ -7,12 +7,14 @@ import { useTranslation } from "react-i18next";
 
 const LOCALE_MAP: Record<string, string> = {
   uz: "uz-UZ",
+  oz: "uz-UZ",
   ru: "ru-RU",
   kk: "kk-KZ",
 };
 
 const CURRENCY_MAP: Record<string, string> = {
   uz: "UZS",
+  oz: "UZS",
   ru: "RUB",
   kk: "KZT",
 };

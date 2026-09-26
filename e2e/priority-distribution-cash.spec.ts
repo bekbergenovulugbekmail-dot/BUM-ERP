@@ -71,7 +71,11 @@ test("ombor eksporti: barcha omborlar, band va mavjud ustunlari bilan Excel", as
   await page.goto(appPath("/warehouse"));
   const button = page.getByTestId("stock-export-quantities");
   await expect(button).toBeEnabled({ timeout: 30_000 });
-  const [download] = await Promise.all([page.waitForEvent("download"), button.click()]);
+  // Tugma avval ustun tanlash oynasini ochadi — hammasini belgilab eksport
+  await button.click();
+  const picker = page.getByTestId("export-columns-dialog");
+  await picker.getByRole("button", { name: "Hammasi" }).click();
+  const [download] = await Promise.all([page.waitForEvent("download"), picker.getByTestId("export-columns-confirm").click()]);
   expect(download.suggestedFilename()).toMatch(/^ombor-qoldigi-.*\.xlsx$/);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile((await download.path())!);

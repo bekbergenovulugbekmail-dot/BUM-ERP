@@ -37,15 +37,26 @@ test("ombor: faqat 4 ta tugma; 'Ombordagi miqdori bilan eksport' Excel'i A4 ga t
   const button = page.getByTestId("stock-export-quantities");
   await expect(button).toBeEnabled({ timeout: 30_000 });
   await expect(page.getByTestId("stock-export")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Chiqarish" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Qabul qilish" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Chiqarish" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Qabul qilish" }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: /A4 hisobot/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Excel import/ })).toHaveCount(0);
   await page.screenshot({ path: resolve(ARTIFACTS, "warehouse-header.png") });
 
-  const [download] = await Promise.all([page.waitForEvent("download"), button.click()]);
+  // Ustun tanlash: shtrix-kod va ulgurji narx kerak emas
+  await button.click();
+  const picker = page.getByTestId("export-columns-dialog");
+  await picker.getByRole("button", { name: "Hammasi" }).click();
+  await picker.getByTestId("export-column-barcode").click();
+  await picker.getByTestId("export-column-wholesalePrice").click();
+  const [download] = await Promise.all([page.waitForEvent("download"), picker.getByTestId("export-columns-confirm").click()]);
+  await expect(picker).toBeHidden({ timeout: 30_000 });
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile((await download.path())!);
+  const headers = (workbook.worksheets[0]!.getRow(4).values as unknown[]).filter(Boolean);
+  expect(headers).not.toContain("Shtrix-kod");
+  expect(headers).not.toContain("Ulgurji narx");
+  expect(headers).toEqual(expect.arrayContaining(["SKU", "Mahsulot", "Haqiqiy qoldiq", "Sotuv narxi"]));
   for (const sheet of workbook.worksheets) {
     expect(sheet.pageSetup, `${sheet.name}: A4 chop etish`).toMatchObject({ paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: "4:4" });
     expect(sheet.getRow(4).getCell(1).value).toBe("SKU");

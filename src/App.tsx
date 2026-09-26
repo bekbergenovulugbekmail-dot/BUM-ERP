@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import { CYRILLIC_LOCALE } from "@/lib/uz-cyrl.ts";
 import { Suspense, useEffect } from "react";
 import { toast } from "sonner";
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
@@ -225,11 +227,14 @@ export default function App() {
   // Android apparat "orqaga" tugmasi: oldingi sahifaga qaytadi, ilovadan chiqmaydi (brauzerda ta'sirsiz)
   useEffect(() => listenAndroidBack({ onConfirmExit: (message) => toast(message) }), []);
   const onAdminSurface = isAdminSubdomain();
+  // Lotin ↔ kirill almashganda ilova qayta chiziladi: komponentlardagi matn (`__cyr`) render paytida o'giriladi
+  const { i18n } = useTranslation();
+  const script = i18n.language === CYRILLIC_LOCALE ? "cyrl" : "latn";
 
   return (
     <DefaultProviders>
       <BrowserRouter>
-        {onAdminSurface ? <AdminSubdomainApp /> : <MainApp />}
+        {onAdminSurface ? <AdminSubdomainApp key={script} /> : <MainApp key={script} />}
         {/* Yangi web build chiqqanda — brauzerda ham, ilovada ham (bitta bosishda yangilanadi) */}
         <NewBuildBanner />
         {/* Telefon ilovasida yangi APK chiqqanda xabar (brauzerda ko'rinmaydi) */}
