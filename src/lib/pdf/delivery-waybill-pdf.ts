@@ -175,6 +175,8 @@ export type SingleDeliveryWaybill = {
   salesRepPhone?: string | null;
   /** Shu reysdagi tovar summasi (yetkazma qatorlaridan); yo'q bo'lsa — buyurtma summasi. */
   taskTotal?: number | string;
+  /** Qaysi marshrutga ketadi (agent tashrifi yoki mijozning marshruti); yo'q bo'lsa null. */
+  routeName?: string | null;
   /** Serverdan keladi; eski javoblarda bo'lmasligi mumkin. */
   items?: WaybillOrderItem[];
 };
@@ -222,6 +224,7 @@ export async function generateBulkDeliveryWaybillsPDF(data: {
         { label: "Manzil", value: dash(delivery.customerAddress), wide: true },
         { label: "Savdo agenti", value: personLine(delivery.salesRepName, delivery.salesRepPhone) },
         { label: "Yetkazuvchi", value: personLine(delivery.agentName ?? delivery.agentCode, delivery.agentPhone) },
+        { label: "Marshrut", value: dash(delivery.routeName ?? null) },
         { label: "Ombor", value: dash(delivery.warehouseName) },
         { label: "Buyurtma", value: dash(delivery.orderNumber) },
         { label: "Mas'ul shaxs", value: data.responsibleName },

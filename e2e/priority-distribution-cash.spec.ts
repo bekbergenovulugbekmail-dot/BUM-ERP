@@ -180,8 +180,13 @@ test("reys: yetkazishga chiqadiganlar → 3 hujjat mos (PDF) → terish → yukl
   const stamp = Date.now();
   const names = [`Test Market ${stamp}`, `Bonnu Market ${stamp}`, `Anor Market ${stamp}`];
   const taskIds: string[] = [];
+  // Test Market marshrutda — nakladnoy va reys hujjatlarida marshrut nomi chiqishi kerak
+  const routeName = `Shovot-${stamp}`;
+  const createdRoute = await api<{ route: { id: string } }>(page, "POST", "/api/distribution/routes", { name: routeName, days: [0, 1, 2, 3, 4, 5, 6] });
+  expect(createdRoute.status, JSON.stringify(createdRoute.json)).toBe(201);
   for (const [index, customerName] of names.entries()) {
     const customer = await api<{ customer: { id: string } }>(page, "POST", "/api/sales/customers", { name: customerName });
+    if (index === 0) expect((await api(page, "POST", `/api/distribution/routes/${createdRoute.json.route.id}/customers`, { customerId: customer.json.customer.id })).status).toBe(201);
     const order = await api<{ order: { id: string } }>(page, "POST", "/api/sales/orders", {
       customerId: customer.json.customer.id,
       warehouseId: warehouses[0]!.id,
@@ -223,6 +228,8 @@ test("reys: yetkazishga chiqadiganlar → 3 hujjat mos (PDF) → terish → yukl
   const [waybills, pickList, route] = downloads;
   const waybillText = (await inspectPdf(page, waybills!, "trip-waybills")).join(" ");
   for (const customerName of names) expect(waybillText, `nakladnoyda ${customerName}`).toContain(customerName);
+  expect(waybillText, "nakladnoyda marshrut").toContain(routeName);
+  await expect(detail.getByTestId("trip-routes")).toContainText(routeName);
   const pickText = await inspectPdf(page, pickList!, "trip-picklist");
   expect(pickText, "yig'ma ro'yxat 2 nusxa").toHaveLength(2);
   expect(pickText[0]).toContain("1-nusxa");
@@ -230,6 +237,7 @@ test("reys: yetkazishga chiqadiganlar → 3 hujjat mos (PDF) → terish → yukl
   const routeText = (await inspectPdf(page, route!, "trip-route")).join(" ");
   for (const customerName of names) expect(routeText, `marshrutda ${customerName}`).toContain(customerName);
   expect(routeText).toContain("MARSHRUT");
+  expect(routeText, "marshrut varag'ida marshrut nomi").toContain(routeName);
 
   // Terish: hammasi to'liq → yuklash
   const lines = detail.locator("[data-testid^='trip-pick-']");

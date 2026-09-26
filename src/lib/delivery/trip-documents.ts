@@ -98,6 +98,7 @@ export function routeSheet(snapshot: TripSnapshot) {
       customerPhone: task.customerPhone,
       customerAddress: task.customerAddress,
       salesRepName: task.salesRepName ?? null,
+      routeName: task.routeName ?? null,
       cells: Object.fromEntries([...cells].map(([key, value]) => [key, fromMinor(value, QTY)])),
       amount: fromMinor(amount, MONEY),
     };
@@ -139,6 +140,17 @@ export function reconcileTrip(snapshot: TripSnapshot) {
     mismatches.push(`Summa: nakladnoylar ${fromMinor(waybillAmount, MONEY)}, marshrut ${sheet.grandAmount}, reys ${snapshot.totals.amount}`);
   }
   return { ok: mismatches.length === 0, mismatches };
+}
+
+/** Reysdagi marshrutlar (takrorlanmasdan, reys tartibida). */
+export function tripRoutes(snapshot: TripSnapshot) {
+  const names: string[] = [];
+  for (const task of snapshot.tasks) {
+    for (const name of (task.routeName ?? "").split(",").map((part) => part.trim()).filter(Boolean)) {
+      if (!names.includes(name)) names.push(name);
+    }
+  }
+  return names;
 }
 
 export const PICK_STATUS_LABELS: Record<TripLine["pickStatus"], string> = {

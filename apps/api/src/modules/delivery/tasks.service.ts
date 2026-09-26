@@ -21,8 +21,8 @@ import { deliveryAgents, deliveryEvents, deliveryPayments, deliveryProofs, deliv
 import { users } from "../../db/schema/platform.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import { customers, salesOrderItems, salesOrders, salesReturns } from "../../db/schema/sales.js";
-import { agentOrders } from "../../db/schema/sales-agent.js";
-import { salesReps } from "../../db/schema/crm.js";
+import { agentOrders, agentVisits } from "../../db/schema/sales-agent.js";
+import { distributionRoutes, routeCustomers, salesReps } from "../../db/schema/crm.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { fromMinor, mulDivRound, toMinor } from "../../shared/decimal.js";
@@ -1172,6 +1172,9 @@ export async function deliveryWaybillsByIds(
       salesRepName: salesReps.name,
       salesRepCode: salesReps.code,
       salesRepPhone: sql<string | null>`coalesce(${salesReps.phone}, ${waybillRepUser.phone})`,
+      customerId: deliveryTasks.customerId,
+      // Buyurtma agent tashrifida olingan bo'lsa — o'sha tashrifning marshruti (eng aniq manba)
+      visitRouteName: sql<string | null>`(select r.name from ${agentVisits} v join ${distributionRoutes} r on r.id = v.route_id where v.id = ${agentOrders.visitId})`,
     })
     .from(deliveryTasks)
     .innerJoin(salesOrders, eq(salesOrders.id, deliveryTasks.orderId))
@@ -1284,9 +1287,32 @@ export async function deliveryWaybillsByIds(
     : [];
   const lineSumByOrder = new Map(orderLineSums.map((row) => [row.orderId, toMinor(row.sum)]));
 
+  /**
+   * Marshrut: agent tashrifi marshruti; bo'lmasa mijozning faol marshruti (bir nechta bo'lsa — yetkazma kuni hafta kuniga
+   * mos keladigani, u ham bo'lmasa hammasi). Mijoz marshrutda bo'lmasa — null ("—").
+   */
+  const customerIds = [...new Set(rows.map((row) => row.customerId))];
+  const customerRoutes = customerIds.length
+    ? await conn
+        .select({ customerId: routeCustomers.customerId, name: distributionRoutes.name, days: distributionRoutes.days })
+        .from(routeCustomers)
+        .innerJoin(distributionRoutes, eq(distributionRoutes.id, routeCustomers.routeId))
+        .where(and(eq(distributionRoutes.companyId, tenant.company.id), eq(distributionRoutes.isActive, true), inArray(routeCustomers.customerId, customerIds)))
+        .orderBy(asc(distributionRoutes.name))
+    : [];
+  const routeOf = (row: { customerId: string; scheduledDate: string; visitRouteName: string | null }) => {
+    if (row.visitRouteName) return row.visitRouteName;
+    const own = customerRoutes.filter((route) => route.customerId === row.customerId);
+    if (own.length <= 1) return own[0]?.name ?? null;
+    const weekday = new Date(`${row.scheduledDate}T12:00:00Z`).getUTCDay();
+    const today = own.filter((route) => route.days.includes(weekday));
+    return (today.length > 0 ? today : own).map((route) => route.name).join(", ");
+  };
+
   return {
-    tasks: rows.map(({ customerDebt, orderId, ...row }) => {
+    tasks: rows.map(({ customerDebt, orderId, customerId, visitRouteName, ...row }) => {
       const items = itemsByTask.get(row.id) ?? itemsByOrder.get(orderId) ?? [];
+      const routeName = routeOf({ customerId, scheduledDate: row.scheduledDate, visitRouteName });
       const linesSum = items.reduce((sum, item) => sum + toMinor(item.lineTotal), 0n);
       const wholeOrder = items.length > 0 && linesSum === (lineSumByOrder.get(orderId) ?? -1n);
       return {
@@ -1294,6 +1320,8 @@ export async function deliveryWaybillsByIds(
         customerDebt: canViewDebt ? customerDebt : null,
         /** Shu reysdagi tovar summasi — to'liq buyurtma summasi `orderTotal` da. */
         taskTotal: wholeOrder ? row.orderTotal : fromMinor(linesSum),
+        /** Qaysi marshrutga ketadi (nakladnoy va reys hujjatlarida). */
+        routeName,
         items,
       };
     }),

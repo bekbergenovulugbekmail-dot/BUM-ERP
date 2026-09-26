@@ -56,6 +56,8 @@ export const FIELD_CATALOG: readonly FieldDefinition[] = [
   { path: "supplier.name", label: "Taminotchi", group: "supplier", kind: "text", documentTypes: ["purchase_order"] },
   { path: "supplier.phone", label: "Taminotchi telefoni", group: "supplier", kind: "text", documentTypes: ["purchase_order"] },
 
+  { path: "delivery.route", label: "Marshrut", group: "delivery", kind: "text", documentTypes: ["delivery_waybill"] },
+  { path: "delivery.routeWarehouse", label: "Marshrut · ombor", group: "delivery", kind: "text", documentTypes: ["delivery_waybill"] },
   { path: "delivery.salesRep", label: "Savdo agenti (ism · telefon)", group: "delivery", kind: "text", documentTypes: ["delivery_waybill"] },
   { path: "delivery.agent", label: "Yetkazuvchi (ism · telefon)", group: "delivery", kind: "text", documentTypes: ["delivery_waybill"] },
   { path: "delivery.salesRepName", label: "Savdo agenti", group: "delivery", kind: "text", documentTypes: ["delivery_waybill"] },

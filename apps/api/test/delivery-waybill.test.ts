@@ -7,7 +7,10 @@
  */
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { closeDb } from "../src/db/client.js";
+import { eq } from "drizzle-orm";
+import { closeDb, db } from "../src/db/client.js";
+import { distributionRoutes, routeCustomers } from "../src/db/schema/crm.js";
+import { deliveryTasks } from "../src/db/schema/delivery.js";
 import { buildServer } from "../src/server.js";
 import {
   caller,
@@ -210,5 +213,33 @@ describe("Nakladnoy: buyurtma qatorlari", () => {
     expect(first.productName).toBeTruthy();
     expect(Number(first.quantity)).toBeGreaterThan(0);
     expect(Number(first.lineTotal)).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Nakladnoyda MARSHRUT: mijozning faol marshruti; bir nechta bo'lsa — yetkazma kuni hafta kuniga mos keladigani;
+ * marshrutsiz mijozda null ("—"). Agent tashrifida olingan buyurtma — tashrif marshruti (tasks.service).
+ */
+describe("Nakladnoy: qaysi marshrutga ketadi", () => {
+  it("mijoz marshruti; ikki marshrutdan — yetkazma kuniga mosi; marshrutsiz — null", async () => {
+    const task = await assignedTask(localToday());
+    const bulk = async () => (await call(company.ownerCookie, "POST", "/api/delivery/waybills/bulk", { taskIds: [task.id] })).json().tasks[0] as { routeName: string | null };
+    expect((await bulk()).routeName, "marshrutsiz mijoz").toBeNull();
+
+    const [row] = await db.select({ customerId: deliveryTasks.customerId, date: deliveryTasks.scheduledDate }).from(deliveryTasks).where(eq(deliveryTasks.id, task.id));
+    const weekday = new Date(`${row!.date}T12:00:00Z`).getUTCDay();
+    const [today] = await db.insert(distributionRoutes).values({ companyId: company.companyId, name: "Shovot-01", days: [weekday] }).returning();
+    const [other] = await db.insert(distributionRoutes).values({ companyId: company.companyId, name: "Urganch-02", days: [(weekday + 3) % 7] }).returning();
+    await db.insert(routeCustomers).values([
+      { companyId: company.companyId, routeId: other!.id, customerId: row!.customerId },
+      { companyId: company.companyId, routeId: today!.id, customerId: row!.customerId },
+    ]);
+    expect((await bulk()).routeName, "yetkazma kuniga mos marshrut").toBe("Shovot-01");
+
+    // Begona kompaniya marshruti hech qachon chiqmaydi
+    const outsider = await deliveryCompany(app, adminCookie, "Marshrut begona");
+    const [foreign] = await db.insert(distributionRoutes).values({ companyId: outsider.companyId, name: "BEGONA", days: [weekday] }).returning();
+    await db.insert(routeCustomers).values({ companyId: outsider.companyId, routeId: foreign!.id, customerId: row!.customerId }).catch(() => undefined);
+    expect((await bulk()).routeName).toBe("Shovot-01");
   });
 });

@@ -5,7 +5,7 @@
  */
 import type jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { pickList, reconcileTrip, routeSheet, PICK_STATUS_LABELS, type Trip } from "@/lib/delivery/trip-documents.ts";
+import { pickList, reconcileTrip, routeSheet, tripRoutes, PICK_STATUS_LABELS, type Trip } from "@/lib/delivery/trip-documents.ts";
 import type { CompanyInfo } from "./pdf-utils.ts";
 import { A4, PDF_COLORS, afterTable, createDocument, drawCompanyHeader, drawFooter, drawInfoBox, fmtMoney, fmtNum, tableOptions } from "./pdf-utils.ts";
 
@@ -55,7 +55,7 @@ export async function generateTripPickListPDF(trip: Trip, company: CompanyInfo):
         { label: "Sana", value: trip.tripDate },
         { label: "Ombor", value: dash(trip.snapshot.warehouse.name) },
         { label: "Yetkazuvchi", value: person(trip.snapshot.agent.name ?? trip.snapshot.agent.code, trip.snapshot.agent.phone) },
-        { label: "Mijozlar", value: String(trip.snapshot.totals.tasks) },
+        { label: "Marshrut", value: tripRoutes(trip.snapshot).join(", ") || "—" },
         { label: "Nusxa", value: copy },
       ],
       2,
@@ -117,14 +117,14 @@ export async function generateRouteSheetPDF(trip: Trip, company: CompanyInfo, cu
         { label: "Yetkazuvchi", value: person(trip.snapshot.agent.name ?? trip.snapshot.agent.code, trip.snapshot.agent.phone) },
         { label: "Ombor", value: dash(trip.snapshot.warehouse.name) },
         { label: "Sana", value: trip.tripDate },
-        { label: "Mijozlar", value: String(sheet.rows.length) },
+        { label: "Marshrut", value: tripRoutes(trip.snapshot).join(", ") || "—" },
       ],
       4,
     );
     const head = [["№", "Mijoz", ...columns.map((column) => `${column.productName} (${column.unitName})`), ...(last ? ["Summa", "Imzo"] : [])]];
     const body = sheet.rows.map((row) => [
       String(row.index),
-      [row.customerName, dash(row.customerPhone), row.customerAddress ?? "", row.orderNumber ? `№ ${row.orderNumber}` : ""].filter(Boolean).join("\n"),
+      [row.customerName, dash(row.customerPhone), row.customerAddress ?? "", row.routeName ? `Marshrut: ${row.routeName}` : "", row.orderNumber ? `№ ${row.orderNumber}` : ""].filter(Boolean).join("\n"),
       ...columns.map((column) => (row.cells[column.key] ? fmtNum(Number(row.cells[column.key]), 2) : "")),
       ...(last ? [fmtMoney(Number(row.amount), currency), ""] : []),
     ]);

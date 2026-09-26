@@ -48,6 +48,9 @@ export function waybillDocumentData(
       "delivery.salesRep": personLine(delivery.salesRepName, delivery.salesRepPhone),
       "delivery.agent": personLine(delivery.agentName ?? delivery.agentCode, delivery.agentPhone),
       "delivery.responsibleName": options.responsibleName,
+      "delivery.route": dash(delivery.routeName ?? null),
+      // Standart shablonda bitta qator: "Shovot-01 · Asosiy ombor" (nakladnoy ixcham qoladi)
+      "delivery.routeWarehouse": [delivery.routeName, delivery.warehouseName].filter((part) => part && part.trim()).join(" · ") || "—",
       "warehouse.name": dash(delivery.warehouseName),
       "finance.total": money(total),
       "finance.debt": money(debt),

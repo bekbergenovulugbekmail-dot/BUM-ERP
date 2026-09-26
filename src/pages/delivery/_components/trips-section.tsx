@@ -20,7 +20,7 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { cn } from "@/lib/utils.ts";
-import { PICK_STATUS_LABELS, TRIP_STATUS_LABELS, reconcileTrip, type Trip } from "@/lib/delivery/trip-documents.ts";
+import { PICK_STATUS_LABELS, TRIP_STATUS_LABELS, reconcileTrip, tripRoutes, type Trip } from "@/lib/delivery/trip-documents.ts";
 import type { SingleDeliveryWaybill } from "@/lib/pdf/delivery-waybill-pdf.ts";
 
 type TripRow = { id: string; number: string; tripDate: string; status: Trip["status"]; totalAmount: string; agentName: string | null; tasks: number; warehouseName: string | null };
@@ -170,7 +170,7 @@ function TripDetail({ tripId, money }: { tripId: string; money: (value: string |
         <div className="min-w-0 flex-1">
           <p className="text-lg font-semibold">{trip.number} · {trip.tripDate}</p>
           <p className="text-sm text-muted-foreground">
-            {trip.snapshot.agent.name ?? trip.snapshot.agent.code} {trip.snapshot.agent.phone ? `· ${trip.snapshot.agent.phone}` : ""} · {trip.snapshot.warehouse.name ?? "—"} · {trip.snapshot.totals.tasks} mijoz · {money(trip.totalAmount)}
+            {trip.snapshot.agent.name ?? trip.snapshot.agent.code} {trip.snapshot.agent.phone ? `· ${trip.snapshot.agent.phone}` : ""} · Marshrut: <span data-testid="trip-routes">{tripRoutes(trip.snapshot).join(", ") || "—"}</span> · {trip.snapshot.warehouse.name ?? "—"} · {trip.snapshot.totals.tasks} mijoz · {money(trip.totalAmount)}
           </p>
         </div>
         <Badge data-testid="trip-status">{TRIP_STATUS_LABELS[trip.status]}</Badge>

@@ -88,6 +88,8 @@ export function sampleData(documentType: DocumentType, companyName: string): Doc
       "customer.address": "Urganch sh., Bozor ko'chasi 5",
       "supplier.name": "Global Trade MCHJ",
       "supplier.phone": "+998 91 111 22 33",
+      "delivery.route": "Shovot-01",
+      "delivery.routeWarehouse": "Shovot-01 · Asosiy ombor",
       "delivery.salesRep": "Karimov Jasur · +998 94 555 66 77",
       "delivery.agent": "Raxmatov Rasul · +998 93 222 33 44",
       "delivery.salesRepName": "Karimov Jasur",

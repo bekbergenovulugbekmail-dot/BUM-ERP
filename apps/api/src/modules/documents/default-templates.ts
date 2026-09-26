@@ -31,7 +31,8 @@ const deliveryWaybill: DocumentTemplateSchema = {
         // "Mas'ul shaxs" standartda yo'q (topshirgan — imzo qatorida); kerak bo'lsa dizaynerda maydon sifatida qo'shiladi
         { id: id("b", 6), type: "field", field: "delivery.salesRep", label: "Savdo agenti" },
         { id: id("b", 1), type: "field", field: "delivery.agent", label: "Yetkazuvchi" },
-        { id: id("b", 3), type: "field", field: "warehouse.name", label: "Ombor" },
+        // Qaysi marshrutga ketadi va qaysi ombordan — bitta qatorda (ikkita nakladnoy bitta A4 ga sig'sin)
+        { id: id("b", 3), type: "field", field: "delivery.routeWarehouse", label: "Marshrut · ombor" },
         {
           id: id("b", 4),
           type: "itemsTable",
