@@ -3,7 +3,7 @@
  * bank hisobi va karta turi (UZCARD, HUMO ...) bo'yicha; kartadan tushum (brutto) va hisobga sof tushgan summa.
  * Manba — avtomatik "bank komissiyasi" xarajatlari (`bank-commission.service.ts`); qo'lda kiritilgan xarajatlar kirmaydi.
  */
-import { and, desc, eq, gte, isNotNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, lte, ne, sql } from "drizzle-orm";
 import { cashAccounts, cashTransactions, expenses, paymentTerminals } from "../../db/schema/finance.js";
 import { customerPayments } from "../../db/schema/sales.js";
 import type { DbOrTx } from "../../db/transaction.js";
@@ -48,6 +48,8 @@ export async function bankCommissionReport(conn: DbOrTx, tenant: TenantContext, 
         eq(expenses.companyId, companyId),
         eq(expenses.category, BANK_FEE_CATEGORY),
         isNotNull(expenses.referenceType),
+        // Bekor qilingan to'lovning komissiyasi qaytgan (AUD-013)
+        ne(expenses.status, "reversed"),
         query.dateFrom ? gte(expenses.expenseDate, query.dateFrom) : undefined,
         query.dateTo ? lte(expenses.expenseDate, query.dateTo) : undefined,
         query.cashAccountId ? eq(cashTransactions.cashAccountId, query.cashAccountId) : undefined,

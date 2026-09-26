@@ -12,7 +12,7 @@
  *  - `list`, `getStats` ruxsat tekshirmasdi — `finance.view`; statistika oxirgi 500 ta
  *    emas, barcha yozuvlardan
  */
-import { and, desc, eq, getTableColumns, gte, lt, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, gte, lt, lte, ne, or, sql } from "drizzle-orm";
 import { ALLOCATION_METHODS, badRequest, forbidden, notFound } from "@bum/shared";
 import { accounts, expenses } from "../../db/schema/finance.js";
 import { employees } from "../../db/schema/hr.js";
@@ -35,7 +35,9 @@ export type ExpenseStatus = (typeof expenses.status.enumValues)[number];
 const TRANSITIONS: Record<ExpenseStatus, ExpenseStatus[]> = {
   pending: ["approved"],
   approved: ["pending", "paid"],
+  // To'langan xarajat holat o'zgartirish bilan emas, faqat bekor qilish (`reverseExpense`) bilan `reversed` bo'ladi
   paid: [],
+  reversed: [],
 };
 
 /** Frontend kategoriyalari → hisoblar rejasi; qolganlari "Boshqa xarajatlar". */
@@ -153,12 +155,13 @@ export async function expenseStats(conn: DbOrTx, tenant: TenantContext) {
       pendingAmount: sql<string>`coalesce(sum(${expenses.amount}) filter (where ${expenses.status} = 'pending'), 0)::numeric(18,2)`,
     })
     .from(expenses)
-    .where(eq(expenses.companyId, companyId));
+    // Bekor qilingan xarajat (AUD-013) statistikaga kirmaydi
+    .where(and(eq(expenses.companyId, companyId), ne(expenses.status, "reversed")));
 
   const byCategory = await conn
     .select({ category: expenses.category, total: sql<string>`sum(${expenses.amount})::numeric(18,2)` })
     .from(expenses)
-    .where(and(eq(expenses.companyId, companyId), gte(expenses.expenseDate, monthStart)))
+    .where(and(eq(expenses.companyId, companyId), ne(expenses.status, "reversed"), gte(expenses.expenseDate, monthStart)))
     .groupBy(expenses.category)
     .orderBy(desc(sql`sum(${expenses.amount})`));
 

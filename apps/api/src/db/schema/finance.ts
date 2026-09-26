@@ -38,7 +38,7 @@ export const accountType = pgEnum("account_type", [
 ]);
 
 export const journalStatus = pgEnum("journal_status", ["draft", "posted", "voided"]);
-export const expenseStatus = pgEnum("expense_status", ["pending", "approved", "paid"]);
+export const expenseStatus = pgEnum("expense_status", ["pending", "approved", "paid", "reversed"]);
 /**
  * Kassa/hisob turi: naqd, bank, hamda "kutilayotgan" hisoblar — karta terminali (UZCARD, HUMO) va elektron hamyon
  * (Payme, Click). Kutilayotgan hisobga tushgan pul bank hisobiga qirqim (settlement) bilan o'tadi: komissiya o'shanda
@@ -427,6 +427,10 @@ export const expenses = pgTable(
     attachmentKey: text("attachment_key"),
 
     status: expenseStatus("status").notNull().default("pending"),
+    /** To'langan xarajat bekor qilinganda (holat `reversed`): kim, qachon, nima uchun. */
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
+    reversedBy: uuid("reversed_by").references(() => users.id, { onDelete: "set null" }),
+    reversalReason: text("reversal_reason"),
     notes: text("notes"),
     /**
      * Avtomatik xarajat manbai (masalan, bank komissiyasi: `customer_payment`, `supplier_payment` + ID). Qo'lda

@@ -298,7 +298,7 @@ export async function deviceAnalytics(conn: DbOrTx, context: DeviceContext, rang
   const [expenseTotal] = await conn
     .select({ total: MONEY_SUM(expenses.amount) })
     .from(expenses)
-    .where(and(eq(expenses.companyId, companyId), ne(expenses.status, "pending"), gte(expenses.expenseDate, range.from), lte(expenses.expenseDate, range.to)));
+    .where(and(eq(expenses.companyId, companyId), ne(expenses.status, "pending"), ne(expenses.status, "reversed"), gte(expenses.expenseDate, range.from), lte(expenses.expenseDate, range.to)));
 
   // ─── Kirim-chiqim (kompaniya kassa va bank hisoblari) ────────────────────
   const flowKey = sql<string>`coalesce(${cashTransactions.referenceType}, 'other')`;

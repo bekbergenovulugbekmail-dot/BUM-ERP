@@ -17,6 +17,7 @@ import {
   pgEnum,
   pgTable,
   text,
+  timestamp,
   uniqueIndex,
   uuid,
   varchar,
@@ -279,10 +280,17 @@ export const supplierPayments = pgTable(
     notes: text("notes"),
     cashAccountId: uuid("cash_account_id").references(() => cashAccounts.id, { onDelete: "set null" }),
     journalEntryId: uuid("journal_entry_id").references(() => journalEntries.id, { onDelete: "set null" }),
+    /** `posted` | `reversed` — bekor qilingan to'lov o'chirilmaydi (teskari yozuvlar bilan). */
+    status: varchar("status", { length: 16 }).notNull().default("posted"),
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
+    reversedBy: uuid("reversed_by").references(() => users.id, { onDelete: "set null" }),
+    reversalReason: text("reversal_reason"),
+    reversalJournalEntryId: uuid("reversal_journal_entry_id").references(() => journalEntries.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     ...timestamps(),
   },
   (t) => [
+    check("sp_status_known", sql`${t.status} IN ('posted', 'reversed')`),
     index("sp_company_supplier_idx").on(t.companyId, t.supplierId),
     index("sp_company_date_idx").on(t.companyId, t.paymentDate),
     /** Takroriy yuborish (ikki marta bosish) ikkinchi to'lov yaratmasin. */

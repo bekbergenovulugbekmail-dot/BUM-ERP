@@ -124,7 +124,7 @@ export type FinanceDashboard = {
   accounts: CashAccount[];
 };
 
-export type ExpenseStatus = "pending" | "approved" | "paid";
+export type ExpenseStatus = "pending" | "approved" | "paid" | "reversed";
 
 export type Expense = {
   id: string;
@@ -139,6 +139,9 @@ export type Expense = {
   attachmentKey: string | null;
   status: ExpenseStatus;
   notes: string | null;
+  /** Avtomatik xarajat manbai (bank komissiyasi) — bunday xarajat o'z hujjati bilan bekor qilinadi. */
+  referenceType?: string | null;
+  reversalReason?: string | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;

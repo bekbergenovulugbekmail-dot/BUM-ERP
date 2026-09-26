@@ -88,6 +88,9 @@ export type SupplierPayment = {
   paymentDate: string;
   reference: string | null;
   notes: string | null;
+  /** `posted` | `reversed` (AUD-013: bekor qilingan to'lov o'chirilmaydi). */
+  status?: "posted" | "reversed";
+  reversalReason?: string | null;
 };
 
 export type PurchaseOrderDetail = Omit<PurchaseOrderRow, "itemCount"> & {

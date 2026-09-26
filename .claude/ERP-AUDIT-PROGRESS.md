@@ -88,3 +88,10 @@ akti, tarixiy qarz, aging, Excel/PDF.
 - Next (audit resumed bo'lganda): AUD-013 → AUD-020 → AUD-004/008/022/023/024/025 → 50 modul → 7 biznes
 - Priority task: "DISTRIBUTION + FINANCE + CASH + DELIVERY RETURN + DOCUMENTS" (egasi, 2026-09-26) —
   holati `.claude/PRIORITY-DISTRIBUTION-CASH.md` da.
+
+### 2026-09-26 — AUDIT RESUMED (ustuvor vazifa yakunlangach)
+- Ustuvor vazifa (distribution/kassa/qaytarish/hujjatlar) production'da — `.claude/PRIORITY-DISTRIBUTION-CASH.md`.
+  Yo'l-yo'lakay yopildi: AUD-019 qismi emas; kassa hujjatlari o'tkazmani bekor qilishni qamradi.
+- AUD-013 FIXED: ta'minotchi to'lovi va to'langan xarajatni bekor qilish (umumiy `reversal.service.ts`), migratsiya 0093,
+  UI (xarajatlar ro'yxati, xarid buyurtmasi oynasi). API testlar 5 + bog'liq to'plamlar ✓, E2E 2 ✓, frontend 278 ✓.
+- **Keyingi:** AUD-020 (ta'minotchi akti, HIGH), keyin AUD-022/023/024/025, AUD-004, AUD-008, AUD-014/015/016/018/019/026.

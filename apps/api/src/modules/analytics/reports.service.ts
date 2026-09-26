@@ -130,6 +130,8 @@ export async function expenseSummary(conn: DbOrTx, tenant: TenantContext, days: 
   const condition = and(
     eq(expenses.companyId, tenant.company.id),
     ne(expenses.status, "pending"),
+    // Bekor qilingan xarajat (AUD-013) hisobotga kirmaydi — puli qaytgan
+    ne(expenses.status, "reversed"),
     gte(expenses.expenseDate, sinceDate(days)),
   );
   const [totals] = await conn

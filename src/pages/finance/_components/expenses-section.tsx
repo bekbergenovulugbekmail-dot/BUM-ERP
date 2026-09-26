@@ -13,6 +13,7 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { BankCommissionHint } from "@/components/payments/bank-commission-hint.tsx";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
+import ReversalDialog from "@/components/reversal-dialog.tsx";
 import {
   fmt, localIsoDate, toNum,
   type CashAccount, type Expense, type ExpenseStats, type ExpenseStatus,
@@ -24,12 +25,13 @@ const CATEGORIES = [
 ];
 
 const STATUS_LABELS: Record<string, string> = {
-  pending: "Kutilmoqda", approved: "Tasdiqlangan", paid: "To'langan",
+  pending: "Kutilmoqda", approved: "Tasdiqlangan", paid: "To'langan", reversed: "Bekor qilingan",
 };
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-muted text-muted-foreground",
   approved: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
   paid: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+  reversed: "bg-rose-100 text-rose-700 line-through dark:bg-rose-900/30 dark:text-rose-400",
 };
 
 type ExpenseBody = {
@@ -79,6 +81,7 @@ export default function ExpensesSection() {
   const [payoutKind, setPayoutKind] = useState<PayoutKind>("salary");
 
   const [payExpense, setPayExpense] = useState<Expense | null>(null);
+  const [reversing, setReversing] = useState<Expense | null>(null);
   const [payCashAccount, setPayCashAccount] = useState(DEFAULT_CASH);
   const [payDate, setPayDate] = useState(localIsoDate());
 
@@ -173,7 +176,7 @@ export default function ExpensesSection() {
 
       <div className="flex items-center justify-between">
         <div className="flex gap-2">
-          {(["all", "pending", "approved", "paid"] as const).map((s) => (
+          {(["all", "pending", "approved", "paid", "reversed"] as const).map((s) => (
             <button key={s} onClick={() => setStatusFilter(s)}
               className={cn(
                 "px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer",
@@ -272,7 +275,12 @@ export default function ExpensesSection() {
                           </Button>
                         </>
                       )}
-                      {exp.status !== "paid" && canManage && (
+                      {exp.status === "paid" && canApprove && !exp.referenceType && (
+                        <Button size="sm" variant="ghost" className="h-7 text-xs" data-testid={`expense-reverse-${exp.number}`} onClick={() => setReversing(exp)}>
+                          <Undo2 className="h-3 w-3 mr-0.5" /> Bekor qilish
+                        </Button>
+                      )}
+                      {exp.status !== "paid" && exp.status !== "reversed" && canManage && (
                         <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleDelete(exp.id)}>
                           <Trash2 className="h-3.5 w-3.5 text-destructive" />
                         </Button>
@@ -284,6 +292,17 @@ export default function ExpensesSection() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {reversing && (
+        <ReversalDialog
+          title={`${reversing.number} — xarajatni bekor qilish`}
+          description="Xarajat o'chirilmaydi: pul kassaga qaytadi, jurnal teskari yoziladi, xarajat hisobotlardan chiqadi."
+          previewUrl={`/api/finance/expenses/${reversing.id}/reversal`}
+          reverseUrl={`/api/finance/expenses/${reversing.id}/reverse`}
+          invalidate={["/api/finance/expenses", "/api/finance/cash-accounts", "/api/finance/dashboard"]}
+          onClose={() => setReversing(null)}
+        />
       )}
 
       {/* Create dialog */}

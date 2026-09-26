@@ -21,6 +21,7 @@
  *   GET    /payments (?supplierId=&orderId=&limit=&cursor=)   purchase.view
  *   POST   /payments                                      purchase.approve (201 yangi / 200 takroriy reference)
  */
+import { previewSupplierPaymentReversal, reverseSupplierPayment } from "./payment-reversal.service.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { ALLOCATION_METHODS, MAX_PAYMENT_PARTS, type Permission } from "@bum/shared";
@@ -266,6 +267,8 @@ const supplierDebtBody = z.strictObject({
   date: isoDate.optional(),
 });
 const orderParams = z.object({ orderId: z.uuid() });
+const supplierPaymentParams = z.object({ paymentId: z.uuid() });
+const supplierReversalBody = z.object({ reason: z.string().trim().min(3, "Bekor qilish sababini yozing").max(500) });
 
 async function readTenant(req: FastifyRequest, permission: Permission): Promise<TenantContext> {
   const tenant = await requireTenant(db, authOf(req).user);
@@ -446,6 +449,18 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   app.get("/payments", async (req) => {
     const query = paymentsQuery.parse(req.query);
     return listSupplierPayments(db, await readTenant(req, "purchase.view"), query);
+  });
+
+  /** AUD-013: ta'minotchi to'lovini bekor qilish — avval ko'rib chiqish, keyin teskari yozuvlar (finance.approve). */
+  app.get("/payments/:paymentId/reversal", async (req) => {
+    const { paymentId } = supplierPaymentParams.parse(req.params);
+    return previewSupplierPaymentReversal(db, await readTenant(req, "finance.approve"), paymentId);
+  });
+
+  app.post("/payments/:paymentId/reverse", async (req) => {
+    const { paymentId } = supplierPaymentParams.parse(req.params);
+    const body = supplierReversalBody.parse(req.body ?? {});
+    return writeInTenant(req, "finance.approve", (tx, tenant) => reverseSupplierPayment(tx, tenant, paymentId, body.reason, requestMeta(req)));
   });
 
   app.post("/payments", async (req, reply) => {

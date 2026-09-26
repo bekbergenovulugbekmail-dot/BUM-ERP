@@ -652,6 +652,13 @@
       "when": 1790490000000,
       "tag": "0092_delivery_trips",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1790500000000,
+      "tag": "0093_supplier_expense_reversal",
+      "breakpoints": true
     }
   ]
 }

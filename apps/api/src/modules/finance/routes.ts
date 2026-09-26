@@ -117,6 +117,7 @@ import {
   summariesFor,
 } from "./handover.service.js";
 import { listPendingSettlements, settleCashAccount } from "./settlement.service.js";
+import { previewExpenseReversal, reverseExpense } from "./expense-reversal.service.js";
 import {
   CASH_DOCUMENT_KINDS,
   COUNTERPARTY_TYPES,
@@ -912,6 +913,18 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
     const { expenseId } = expenseParams.parse(req.params);
     await writeInTenant(req, "finance.manage", (tx, tenant) => deleteExpense(tx, tenant, expenseId, requestMeta(req)));
     return reply.status(204).send();
+  });
+
+  /** AUD-013: to'langan xarajatni bekor qilish — ko'rib chiqish va teskari yozuvlar (finance.approve). */
+  app.get("/expenses/:expenseId/reversal", async (req) => {
+    const { expenseId } = expenseParams.parse(req.params);
+    return previewExpenseReversal(db, await readTenant(req, "finance.approve"), expenseId);
+  });
+
+  app.post("/expenses/:expenseId/reverse", async (req) => {
+    const { expenseId } = expenseParams.parse(req.params);
+    const body = reverseBody.parse(req.body ?? {});
+    return writeInTenant(req, "finance.approve", (tx, tenant) => reverseExpense(tx, tenant, expenseId, body.reason, requestMeta(req)));
   });
 
   app.post("/expenses/:expenseId/status", async (req) => {

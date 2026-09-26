@@ -22,6 +22,7 @@ import { api, errorMessage } from "@/lib/api.ts";
 import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
+import ReversalDialog from "@/components/reversal-dialog.tsx";
 import {
   PAYMENT_LABELS, newReference, num, todayLocal,
   type PaymentMethod, type PurchaseOrderDetail,
@@ -71,6 +72,7 @@ const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n)) 
 
 export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   const { can } = usePermissions();
+  const [reversingPayment, setReversingPayment] = useState<string | null>(null);
   const orderQuery = useApiQuery<{ order: PurchaseOrderDetail }>(`/api/purchase/orders/${orderId}`);
   const order = orderQuery.data?.order;
   const company = useActiveCompany().data?.company;
@@ -704,9 +706,27 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                               </span>
                             )}
                           </div>
-                          <span className="text-muted-foreground text-xs">{p.paymentDate}</span>
+                          <span className="flex items-center gap-2 text-muted-foreground text-xs">
+                            {p.paymentDate}
+                            {p.status === "reversed" && <span className="rounded bg-rose-100 px-1.5 text-rose-700 dark:bg-rose-900/30">bekor</span>}
+                            {p.status !== "reversed" && can("finance.approve") && (
+                              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" data-testid={`supplier-payment-reverse-${p.id}`} onClick={() => setReversingPayment(p.id)}>
+                                Bekor qilish
+                              </Button>
+                            )}
+                          </span>
                         </div>
                       ))}
+                      {reversingPayment && (
+                        <ReversalDialog
+                          title="Ta'minotchiga to'lovni bekor qilish"
+                          description="To'lov o'chirilmaydi: pul kassaga qaytadi, ta'minotchi qarzi va buyurtma qoldig'i tiklanadi, jurnal teskari yoziladi."
+                          previewUrl={`/api/purchase/payments/${reversingPayment}/reversal`}
+                          reverseUrl={`/api/purchase/payments/${reversingPayment}/reverse`}
+                          invalidate={["/api/purchase", "/api/finance/cash-accounts", "/api/finance/dashboard"]}
+                          onClose={() => setReversingPayment(null)}
+                        />
+                      )}
                     </div>
                   </>
                 )}

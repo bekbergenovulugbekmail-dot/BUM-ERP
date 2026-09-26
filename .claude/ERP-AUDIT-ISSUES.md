@@ -119,7 +119,15 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 - **ROOT CAUSE:** bu hujjatlar uchun reverse/cancel yo'li umuman yo'q; tasdiqlangan buyurtmaga avans
   to'langandan keyin buyurtma bekor qilinmaydi (purchase/orders.service.ts:556-559).
   Tuzatishning yagona yo'llari — `set-debt`/`set-balance` (xarajat/daromadga hisobdan chiqarish).
-- **STATUS:** OPEN (AUD-001 bilan bir arxitektura: umumiy reversal mexanizmi)
+- **STATUS:** FIXED (2026-09-26) — umumiy teskari yozuv qatlami `finance/reversal.service.ts`
+  (kassa harakatlari + jurnal, kontragent bilan, asl summalarda). Ta'minotchi to'lovi:
+  `GET/POST /api/purchase/payments/:id/reversal|reverse` — pul qaytadi, bank komissiyasi va uning xarajati qaytadi,
+  buyurtma to'langani kamayadi ("paid" → "received"), ta'minotchi qarzi va kitob qiymati tiklanadi. To'langan xarajat:
+  `GET/POST /api/finance/expenses/:id/reversal|reverse` (holat `reversed`, hisobot va statistikadan chiqadi, kiritgan
+  xodim o'zi bekor qilmaydi). O'tkazma — kassa hujjatlari (`cash_documents`, W4) orqali bekor qilinadi. Xarid qabuli —
+  mavjud xarid qaytarishi bilan tuzatiladi (alohida "qabulni bekor qilish" kiritilmadi: ombor harakati sotilgan tovarga
+  tegishi mumkin). Migratsiya 0093 (qo'shuvchi). VERIFIED: `test/audit-supplier-expense-reversal.test.ts` (5),
+  `e2e/audit-reversal-aud013.spec.ts` (2, real Chrome).
 
 ## AUD-014 — `setSupplierDebt` valyutalarni aralashtiradi
 - **SEVERITY:** MEDIUM · **MODULE:** Suppliers
