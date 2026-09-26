@@ -5037,4 +5037,10 @@ E2E 36 spec / 128 test ✓ (yangi `supervisor-warehouse`: Excel → preview → 
 **Brauzerda sinash:** Ombor → "Excel import" (shablon) va "A4 hisobot"; Distributsiya → "Supervayzer" → "Agent nomidan";
 Sozlamalar → Rollar → Supervayzer → "faqat mas'ul bo'lganlari".
 
-**Production'ga deploy QILINMAGAN** (topshiriq talabi). Keyingi: deploy (egasi tasdig'i bilan), audit AUD-022…026.
+Keyingi: audit AUD-022…026.
+
+**Production (2026-09-26 10:03Z):** `ee8e64f` deploy qilindi (egasi: "Deploy qil") — `bum-api` + `bum-web`. API bir marta ko'tarildi
+(0094 qo'llandi, 95 migratsiya, qayta yiqilish yo'q), web `build.json` 10:02:52Z (bundle'da yangi supervayzer/ombor kodi);
+`/api/sales-agent/supervisor/overview` va `/api/inventory/stock/import` — 401 (mavjud). Production bazasida faqat o'qish:
+`agent_orders.acting_user_id`, `submit_override_reason` bor; 1557 mijoz — qarz keshi = jurnal, 0 farq. Brauzer orqali
+production'da sinalmadi (kompaniya hisobisiz).
