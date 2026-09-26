@@ -5061,3 +5061,7 @@ Egasining talabi (skrinshotlar bilan):
 
 **Tekshirildi:** API ta'sirlangan 26 fayl / 122 test ✓ (`supervisor-operations` 20), frontend 48 fayl / 280 ✓, E2E
 `supervisor-warehouse` 3, `priority-distribution-cash`, `sales-agent`, `agent-mobile`, `warehouse-catalog` ✓, tsc ✓, eslint ✓.
+
+**Production (2026-09-26 10:55Z):** `5be8fd4` deploy qilindi — `bum-api` + `bum-web`; API bir marta ko'tarildi (yangi migratsiya
+yo'q), web `build.json` 10:54:58Z (bundle'da ERP'ga qaytish tugmasi bor, "A4 hisobot" yo'q); `/api/sales-agent/supervisor/profile` —
+401 (mavjud). Production'da brauzer orqali sinalmadi.
