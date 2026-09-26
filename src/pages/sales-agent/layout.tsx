@@ -4,19 +4,20 @@
  * (bo'lmasa — "biriktirilmagan" ekrani). Lokatsiya kuzatuvi shu yerda bitta; ruxsat berilmasa ish joyi bloklanadi.
  * Asosiy himoya — serverda.
  */
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import ErrorBoundary from "@/components/error-boundary.tsx";
 import { NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
-  LayoutDashboard, ShoppingCart, Users, BadgePercent, BarChart3, LogOut, Globe, UserX, RefreshCw, MapPin, MapPinOff, WifiOff, UserCheck,
+  LayoutDashboard, ShoppingCart, Users, Home, BadgePercent, BarChart3, LogOut, Globe, UserX, RefreshCw, MapPin, MapPinOff, WifiOff, UserCheck,
   type LucideIcon,
 } from "lucide-react";
 import { DEFAULT_SALES_AGENT_POLICY, type SalesAgentPolicy } from "@bum/shared";
 import { cn } from "@/lib/utils.ts";
-import { ApiError, errorMessage } from "@/lib/api.ts";
-import { useApiQuery } from "@/lib/query.ts";
+import { ApiError, api, errorMessage } from "@/lib/api.ts";
+import { isAgentOnly } from "@/lib/agent-access.ts";
+import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useAuth, useCurrentUser } from "@/hooks/use-auth.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { Button } from "@/components/ui/button.tsx";
@@ -128,7 +129,7 @@ export default function SalesAgentLayout() {
   const { lng = "uz" } = useParams<{ lng: string }>();
   const { signout } = useAuth();
   const currentUser = useCurrentUser();
-  const { can, isLoading: permissionsLoading } = usePermissions();
+  const { can, permissions, isLoading: permissionsLoading } = usePermissions();
   // Supervayzer agent nomidan: agent ish joyi shu agent kontekstida (server `sales_agent.supervise` va jamoani tekshiradi)
   const actAs = useActAs();
   const acting = Boolean(actAs && can("sales_agent.supervise"));
@@ -152,6 +153,14 @@ export default function SalesAgentLayout() {
   const { pathname } = useLocation();
   const online = useOnline();
   const navigate = useNavigate();
+  // Supervayzer agentdek savdo qiladi: o'z savdo profili bo'lmasa — bir marta yaratiladi (server faqat o'ziga yaratadi)
+  const ensureProfile = useApiMutation(() => api.post("/api/sales-agent/supervisor/profile"), { invalidate: ["/api/sales-agent"] });
+  const needsOwnProfile =
+    !acting && can("sales_agent.supervise") && meQuery.error instanceof ApiError && meQuery.error.status === 403;
+  const { mutate: createProfile, isIdle: profileIdle } = ensureProfile;
+  useEffect(() => {
+    if (needsOwnProfile && profileIdle) createProfile();
+  }, [needsOwnProfile, profileIdle, createProfile]);
 
   if (currentUser === null) return <Navigate to={`/${lng}/login`} replace />;
   if (currentUser === undefined) return <Spinner />;
@@ -182,6 +191,13 @@ export default function SalesAgentLayout() {
         <p className="text-[11px] text-muted-foreground truncate">{currentUser.companyName}</p>
       </div>
       {meQuery.data && <LocationIndicator location={location} onDuty={onDuty} />}
+      {permissions && !isAgentOnly(permissions) && (
+        <Button asChild variant="ghost" size="icon" className="h-10 w-10" title="ERP">
+          <NavLink to={`/${lng}/dashboard`} aria-label="ERP" data-testid="agent-back-to-erp">
+            <Home className="h-5 w-5" />
+          </NavLink>
+        </Button>
+      )}
       <LanguageMenu />
       <Button variant="ghost" size="icon" className="h-10 w-10" title={t("logout")} onClick={() => signout()}>
         <LogOut className="h-5 w-5" />
@@ -189,6 +205,9 @@ export default function SalesAgentLayout() {
     </header>
     </>
   );
+
+  // Supervayzer profili yaratilmoqda — "bog'lanmagan" xabari ko'rsatilmaydi
+  if (meQuery.isError && needsOwnProfile && ((!ensureProfile.isSuccess && !ensureProfile.isError) || meQuery.isFetching)) return <Spinner />;
 
   if (meQuery.isError) {
     const notLinked = meQuery.error instanceof ApiError && (meQuery.error.status === 403 || meQuery.error.status === 404);

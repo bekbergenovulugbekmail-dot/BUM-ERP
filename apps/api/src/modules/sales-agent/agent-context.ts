@@ -24,7 +24,14 @@ export type AgentProfile = {
  */
 export type ActingContext = { supervisorUserId: string; supervisorName: string; salesRepId: string };
 
-export type AgentContext = TenantContext & { agent: AgentProfile; acting?: ActingContext };
+/**
+ * Supervayzer O'ZI savdo qilganda (o'z agent profili bilan): agentdek do'konga kiradi, lekin do'konlari — jamoasi
+ * marshrutlari (`salesRepIds`; `null` — jamoa chegarasi yo'q, kompaniyaning barcha faol marshrutlari) va o'z marshrutlari.
+ * GPS, geofence, tashrif, ish vaqti — agentniki bilan AYNAN bir xil qoidalar.
+ */
+export type SupervisorRoutes = { salesRepIds: string[] | null };
+
+export type AgentContext = TenantContext & { agent: AgentProfile; acting?: ActingContext; supervisorRoutes?: SupervisorRoutes };
 
 /** So'rov sarlavhasi: supervayzer qaysi agent nomidan ishlayapti. */
 export const ACT_AS_HEADER = "x-act-as-sales-rep";

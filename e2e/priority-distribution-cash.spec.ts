@@ -75,7 +75,7 @@ test("ombor eksporti: barcha omborlar, band va mavjud ustunlari bilan Excel", as
   expect(download.suggestedFilename()).toMatch(/^ombor-qoldigi-.*\.xlsx$/);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile((await download.path())!);
-  const sheet = workbook.getWorksheet("Omborlar bo'yicha")!;
+  const sheet = workbook.getWorksheet("Omborlar boʻyicha")!;
   const header = (sheet.getRow(4).values as (string | undefined)[]).filter(Boolean);
   expect(header).toEqual(expect.arrayContaining(["SKU", "Shtrix-kod", "Mahsulot", "Kategoriya", "Birlik", "Ombor", "Haqiqiy qoldiq", "Band (buyurtmalar)", "Mavjud (sotish mumkin)", "Sotuv narxi"]));
   expect(sheet.rowCount, "kamida bitta mahsulot qatori").toBeGreaterThan(4);

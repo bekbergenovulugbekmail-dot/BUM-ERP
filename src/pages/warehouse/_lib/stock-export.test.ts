@@ -26,3 +26,46 @@ describe("Ombor eksporti", () => {
     expect(totals.map((t) => t.productName)).toEqual(["Chips", "Cola"]);
   });
 });
+
+describe("Ombor eksporti — A4 chop etish", () => {
+  const load = async (blob: Blob) => {
+    const ExcelJS = (await import("exceljs")).default;
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await blob.arrayBuffer());
+    return workbook;
+  };
+  const rows = Array.from({ length: 120 }, (_, index) => ({
+    ...row("Asosiy ombor", `P${index}`, "10.0000", "1.0000"),
+    productName: `Juda uzun mahsulot nomi ${index} — Coca Cola Zero Sugar 1.5 L plastik shishada`,
+    salesPrice: "15000.00",
+    retailPrice: null,
+  }));
+
+  it("miqdorli eksport: A4 albom, bir sahifa kengligi, sarlavha har sahifada, chegaralar, uzun nom bo'linadi", async () => {
+    const { buildStockXlsx } = await import("./stock-export.ts");
+    const file = await buildStockXlsx("quantities", rows, { costVisible: true, companyName: "BUM", warehouseLabel: "Asosiy ombor", date: "2026-09-26" });
+    const workbook = await load(file.blob);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(["Omborlar boʻyicha", "Jami"]);
+    for (const sheet of workbook.worksheets) {
+      expect(sheet.pageSetup).toMatchObject({ paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: "4:4" });
+      const header = sheet.getRow(4);
+      expect(header.getCell(1).value).toBe("SKU");
+      expect(header.getCell(1).border?.top?.style).toBe("thin");
+      const name = sheet.getRow(5).getCell(3);
+      expect(name.alignment?.wrapText).toBe(true);
+      expect(sheet.getRow(5).getCell(1).border?.bottom?.style).toBe("thin");
+      // Sotuv narxi — asosiy narx (retail bo'sh bo'lsa ham)
+      expect(sheet.getRow(5).getCell(11).value).toBe(15000);
+    }
+    // 12 ustun kengligi A4 albomga yaqin (siqish kichik bo'lsin — o'qiladigan shrift)
+    const total = workbook.worksheets[0]!.columns.reduce((sum, column) => sum + (column.width ?? 0), 0);
+    expect(total).toBeLessThanOrEqual(150);
+  });
+
+  it("katalog eksporti (kam ustun): A4 kitob varag'i", async () => {
+    const { buildStockXlsx } = await import("./stock-export.ts");
+    const file = await buildStockXlsx("catalog", rows, { costVisible: false, companyName: "BUM", warehouseLabel: "Asosiy ombor", date: "2026-09-26" });
+    const [sheet] = (await load(file.blob)).worksheets;
+    expect(sheet!.pageSetup).toMatchObject({ paperSize: 9, orientation: "portrait", fitToWidth: 1, fitToHeight: 0 });
+  });
+});

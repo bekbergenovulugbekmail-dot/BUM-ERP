@@ -76,6 +76,7 @@ import { storageProvider } from "../../shared/storage.js";
 import { authOf, requireAuth } from "../auth/guard.js";
 import {
   effectivePermissions,
+  hasPermission,
   requirePermission,
   requireTenant,
   requireTenantForWrite,
@@ -86,6 +87,7 @@ import { todayIso } from "../finance/cash.service.js";
 import { ACT_AS_HEADER, actingAgent, requireAgent, type AgentContext } from "./agent-context.js";
 import { assertRepInScope, supervisedSalesRepIds } from "../company/responsibility.service.js";
 import { deliveryScope } from "../delivery/scope.js";
+import { ensureOwnSalesRep } from "../distribution/sales-reps.service.js";
 import { supervisorOrderChain, supervisorOverview } from "./supervisor-overview.service.js";
 import {
   agentCatalog,
@@ -382,7 +384,12 @@ async function resolveAgent(conn: DbOrTx, tenant: TenantContext, req: FastifyReq
   const salesRepId = typeof header === "string" ? header.trim() : "";
   if (!salesRepId) {
     await requirePermission(conn, tenant, "sales_agent.use");
-    return requireAgent(conn, tenant);
+    const context = await requireAgent(conn, tenant);
+    // Supervayzer o'zi savdo qilmoqda: agentdek, do'konlari — jamoasi marshrutlari (chegara bo'lmasa — hammasi)
+    if (await hasPermission(conn, tenant, "sales_agent.supervise")) {
+      return { ...context, supervisorRoutes: { salesRepIds: await supervisedSalesRepIds(conn, tenant) } };
+    }
+    return context;
   }
   if (!access.actAs) {
     throw forbidden("Bu amal agent nomidan bajarilmaydi — GPS, tashrif, ish vaqti va naqd pul faqat agentning o'zida");
@@ -948,6 +955,20 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
     const query = supervisorOrdersQuery.parse(req.query);
     const tenant = await readTenantWith(req, "sales_agent.supervise");
     return { orders: await supervisorOrders(db, tenant, { ...query, salesRepIds: await supervisedSalesRepIds(db, tenant) }) };
+  });
+
+  /**
+   * Supervayzerning O'Z savdo profili (agentdek savdo qilishi uchun): bo'lmasa yaratiladi, bor bo'lsa o'sha qaytadi.
+   * Faqat o'ziga — boshqa foydalanuvchi uchun profil yaratilmaydi.
+   */
+  app.post("/supervisor/profile", async (req) => {
+    const salesRep = await withTransaction(async (tx) => {
+      const tenant = await requireTenantForWrite(tx, authOf(req).user);
+      await requirePermission(tx, tenant, "sales_agent.supervise");
+      await requirePermission(tx, tenant, "sales_agent.use");
+      return ensureOwnSalesRep(tx, tenant, requestMeta(req));
+    });
+    return { salesRep };
   });
 
   // Supervayzer paneli: jamoa KPI (oy/bugun), qarz, agentdagi naqd, yetkazish holati — mavjud manbalardan

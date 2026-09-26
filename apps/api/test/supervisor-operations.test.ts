@@ -21,7 +21,7 @@ import { auditLogs } from "../src/db/schema/platform.js";
 import { salesOrders } from "../src/db/schema/sales.js";
 import { agentOrders } from "../src/db/schema/sales-agent.js";
 import { buildServer } from "../src/server.js";
-import { setAgentPolicy } from "./agent-policy.js";
+import { LEGACY_VISIT_POLICY, setAgentPolicy } from "./agent-policy.js";
 import { NO_PROOFS, agentAction, deliveryAgent, deliveryCompany, iso, near, resetUnits, setPolicy, shop, startShift, type DeliveryCompany } from "./delivery-setup.js";
 import { addEmployee, login, resetDatabase, signedIn, uniquePhone } from "./helpers.js";
 
@@ -347,5 +347,40 @@ describe("Supervayzer operatsiyalari", () => {
     expect(agents.map((row) => row.id)).not.toContain(S.agent1.repId);
     const overview = (await call(foreignSupervisor.cookie, "GET", "/api/sales-agent/supervisor/overview")).json();
     expect(overview.agents).toHaveLength(0);
+  });
+
+  it("20 — supervayzer O'ZI savdo qiladi: agentdek (o'z profili, jamoa do'konlari, ish vaqti, GPS geofence — chetlab o'tishsiz)", async () => {
+    await setAgentPolicy(company.companyId, { creditLimitPolicy: "approval", ...LEGACY_VISIT_POLICY });
+    // Profil bo'lmasa — agent ish joyi "bog'lanmagan"; o'zi yaratadi (takroriy chaqiruv o'sha profilni qaytaradi)
+    expect((await call(S.supervisor.cookie, "GET", "/api/sales-agent/me")).statusCode).toBe(403);
+    const profile = await call(S.supervisor.cookie, "POST", "/api/sales-agent/supervisor/profile");
+    expect(profile.statusCode, profile.body).toBe(200);
+    const ownRep = profile.json().salesRep.id as string;
+    expect((await call(S.supervisor.cookie, "POST", "/api/sales-agent/supervisor/profile")).json().salesRep.id).toBe(ownRep);
+    expect((await call(S.agent1.cookie, "POST", "/api/sales-agent/supervisor/profile")).statusCode, "oddiy agent — yo'q").toBe(403);
+
+    // Do'konlar: jamoa (Agent 1) marshrutidagi Mijoz A; boshqa jamoa Mijoz B — yo'q
+    const stores = (await call(S.supervisor.cookie, "GET", "/api/sales-agent/stores?scope=all")).json().stores as { id: string }[];
+    expect(stores.map((row) => row.id)).toEqual([S.customerA]);
+    const today = (await call(S.supervisor.cookie, "GET", "/api/sales-agent/stores?scope=today")).json().stores as { id: string }[];
+    expect(today.map((row) => row.id)).toContain(S.customerA);
+    expect((await call(S.supervisor.cookie, "GET", `/api/sales-agent/stores/${S.customerB}`)).statusCode).toBe(404);
+
+    // Ish vaqti — agentdek; buyurtma do'kon yonida (GPS) yuboriladi, uzoqdan — yo'q, chetlab o'tish — yo'q
+    expect((await call(S.supervisor.cookie, "POST", "/api/sales-agent/work-session/start", near(15))).statusCode).toBeLessThan(300);
+    const draft = await call(S.supervisor.cookie, "PUT", `/api/sales-agent/orders/drafts/${randomUUID()}`, { customerId: S.customerA, paymentType: "cash", items: [{ productId: company.productId, pieces: "1" }] });
+    expect(draft.statusCode, draft.body).toBe(200);
+    const orderId = draft.json().order.id as string;
+    expect((await call(S.supervisor.cookie, "POST", `/api/sales-agent/orders/${orderId}/submit`, office)).statusCode).toBe(403);
+    expect((await call(S.supervisor.cookie, "POST", `/api/sales-agent/orders/${orderId}/submit`, { ...office, overrideReason: "Ofisdan yuboraman" })).statusCode).toBe(403);
+    const submitted = await call(S.supervisor.cookie, "POST", `/api/sales-agent/orders/${orderId}/submit`, near(10));
+    expect(submitted.statusCode, submitted.body).toBe(200);
+    const [row] = await db.select().from(agentOrders).where(eq(agentOrders.orderId, orderId));
+    expect(row).toMatchObject({ salesRepId: ownRep, actingUserId: null, submitOverrideReason: null });
+    expect(row!.submitDistanceMeters!).toBeLessThanOrEqual(15);
+    // Chegarasiz supervayzer o'zi savdo qilganda — kompaniyaning barcha marshrut do'konlari
+    await call(S.otherSupervisor.cookie, "POST", "/api/sales-agent/supervisor/profile");
+    const all = (await call(S.otherSupervisor.cookie, "GET", "/api/sales-agent/stores?scope=all")).json().stores as { id: string }[];
+    expect(all.map((store) => store.id).sort()).toEqual([S.customerA, S.customerB].sort());
   });
 });

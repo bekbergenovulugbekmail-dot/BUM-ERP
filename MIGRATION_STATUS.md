@@ -5044,3 +5044,20 @@ Keyingi: audit AUD-022…026.
 `/api/sales-agent/supervisor/overview` va `/api/inventory/stock/import` — 401 (mavjud). Production bazasida faqat o'qish:
 `agent_orders.acting_user_id`, `submit_override_reason` bor; 1557 mijoz — qarz keshi = jurnal, 0 farq. Brauzer orqali
 production'da sinalmadi (kompaniya hisobisiz).
+
+## Supervayzer agentdek savdo + ombor sarlavhasi va A4 Excel (2026-09-26)
+
+Egasining talabi (skrinshotlar bilan):
+- **Supervayzer ham agentdek sotadi:** maydondagi supervayzerning (`sales_agent.use` + `sales_agent.supervise`, `sales.create`
+  yo'q) "Sotuv" menyusi agent ish joyiga olib boradi; o'z savdo profili birinchi kirishda avtomatik yaratiladi
+  (`POST /api/sales-agent/supervisor/profile`, faqat o'ziga). Do'konlari — jamoasi marshrutlari (chegara bo'lmasa — barcha
+  faol marshrutlar) va o'zinikilar; ish vaqti, GPS, geofence, tashrif, buyurtma — agentniki bilan AYNAN bir xil (chetlab o'tish
+  yo'q). Agent ish joyida ERP'ga qaytish tugmasi.
+- **Ombor sarlavhasi:** faqat Eksport, Ombordagi miqdori bilan eksport, Chiqarish, Qabul qilish ("Ko'chirish" — 2+ ombor
+  bo'lsagina, boshqa yo'li yo'q). "A4 hisobot" va "Excel import" UI olib tashlandi (API `stock/import` qoldi, UI yo'q).
+- **Excel A4 ga tayyor:** A4, ko'p ustunda albom, bir sahifa kengligiga siqish, 4-qator sarlavha har sahifada, chop etish
+  maydoni, tor chetlar, katak chegaralari, uzun nom qatorga bo'linadi, pastda sahifa raqami; "Sotuv narxi" — asosiy narx.
+  Varaq nomi `Omborlar boʻyicha` (ASCII apostrof ExcelJS print-title havolasini buzardi).
+
+**Tekshirildi:** API ta'sirlangan 26 fayl / 122 test ✓ (`supervisor-operations` 20), frontend 48 fayl / 280 ✓, E2E
+`supervisor-warehouse` 3, `priority-distribution-cash`, `sales-agent`, `agent-mobile`, `warehouse-catalog` ✓, tsc ✓, eslint ✓.

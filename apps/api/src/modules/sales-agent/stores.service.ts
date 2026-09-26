@@ -29,8 +29,30 @@ export const DUE_SOON_DAYS = 3;
 export type TodayRoute = { id: string; name: string; color: string | null; days: number[]; deliveryDate: string | null };
 
 /** Agentning shu kungi marshrutlari (agent ish joyi va supervayzer ko'rinishi uchun). */
-export function todayRoutes(conn: DbOrTx, context: AgentContext, date = todayIso()): Promise<TodayRoute[]> {
-  return routesForAgent(conn, context.company.id, context.agent.id, date);
+export async function todayRoutes(conn: DbOrTx, context: AgentContext, date = todayIso()): Promise<TodayRoute[]> {
+  const own = await routesForAgent(conn, context.company.id, context.agent.id, date);
+  if (!context.supervisorRoutes) return own;
+  // Supervayzer: o'z marshrutlari + jamoasining shu hafta kunidagi marshrutlari
+  const team = await conn
+    .select({ id: distributionRoutes.id, name: distributionRoutes.name, color: distributionRoutes.color, days: distributionRoutes.days })
+    .from(distributionRoutes)
+    .where(
+      and(
+        eq(distributionRoutes.companyId, context.company.id),
+        eq(distributionRoutes.isActive, true),
+        sql`${weekday(date)} = any("distribution_routes"."days")`,
+        teamRouteCondition(context.supervisorRoutes),
+      ),
+    )
+    .orderBy(asc(distributionRoutes.name));
+  const seen = new Set(own.map((route) => route.id));
+  return [...own, ...team.filter((route) => !seen.has(route.id)).map((route) => ({ ...route, deliveryDate: null }))];
+}
+
+/** Supervayzer jamoasi marshrutlari sharti (`null` — kompaniyaning barcha faol marshrutlari). */
+function teamRouteCondition(scope: { salesRepIds: string[] | null }) {
+  if (!scope.salesRepIds) return undefined;
+  return scope.salesRepIds.length > 0 ? inArray(distributionRoutes.salesRepId, scope.salesRepIds) : sql`false`;
 }
 
 /** Shu kunga biriktirish ustun, bo'lmasa hafta kuni bo'yicha agentning o'z marshrutlari. */
@@ -84,6 +106,8 @@ async function assignedRouteIds(conn: DbOrTx, context: AgentContext, date = toda
         or(
           eq(distributionRoutes.salesRepId, context.agent.id),
           sql`exists (select 1 from "route_assignments" ra where ra."route_id" = "distribution_routes"."id" and ra."sales_rep_id" = ${context.agent.id} and ra."assign_date" = ${date})`,
+          // Supervayzer o'zi savdo qilganda — jamoasi marshrutlaridagi do'konlar ham
+          context.supervisorRoutes ? (teamRouteCondition(context.supervisorRoutes) ?? sql`true`) : undefined,
         ),
       ),
     );

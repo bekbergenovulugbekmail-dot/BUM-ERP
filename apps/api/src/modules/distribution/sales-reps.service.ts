@@ -213,3 +213,19 @@ export async function deleteSalesRep(tx: Tx, tenant: TenantContext, salesRepId: 
     details: { code: rep.code },
   });
 }
+
+/**
+ * Foydalanuvchining O'Z savdo profili (supervayzer agentdek savdo qilishi uchun): bor bo'lsa — o'sha (faol bo'lmasa
+ * qayta yoqilmaydi, rahbar qaror qiladi), yo'q bo'lsa — ism va telefon bilan yaratiladi. Takroriy chaqiruv xavfsiz.
+ */
+export async function ensureOwnSalesRep(tx: Tx, tenant: TenantContext, meta: RequestMeta) {
+  // Bir foydalanuvchining parallel so'rovlari bitta profil yaratadi
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`own-sales-rep:${tenant.company.id}:${tenant.user.id}`}))`);
+  const [existing] = await tx
+    .select(repFields)
+    .from(salesReps)
+    .where(and(eq(salesReps.companyId, tenant.company.id), eq(salesReps.userId, tenant.user.id)))
+    .limit(1);
+  if (existing) return existing;
+  return createSalesRep(tx, tenant, { name: tenant.user.name?.trim() || tenant.user.phone, phone: tenant.user.phone, userId: tenant.user.id }, meta);
+}

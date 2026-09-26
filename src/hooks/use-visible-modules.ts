@@ -8,10 +8,13 @@ import { useCurrentUser } from "@/hooks/use-auth.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { ERP_MODULES, EXPIRED_SUBSCRIPTION_MODULES, type ModuleConfig } from "@/lib/modules.ts";
 import { subscriptionBlocked } from "@/lib/subscription.ts";
+import { isFieldSupervisor } from "@/lib/agent-access.ts";
 
 export function useVisibleModules(): ModuleConfig[] {
   const { isEnabled } = useModules();
-  const { can } = usePermissions();
+  const { can, permissions } = usePermissions();
+  // Maydondagi supervayzerning "Sotuv"i — agent ish joyi (xuddi sotuv agentidek)
+  const fieldSupervisor = isFieldSupervisor(permissions ?? []);
   const blocked = subscriptionBlocked(useCurrentUser()?.subscription);
   return ERP_MODULES.filter(
     (m) =>
@@ -19,5 +22,5 @@ export function useVisibleModules(): ModuleConfig[] {
       (m.id === "subscription" || isEnabled(m.id)) &&
       (!m.permission || can(m.permission)) &&
       (!blocked || EXPIRED_SUBSCRIPTION_MODULES.includes(m.id)),
-  );
+  ).map((m) => (fieldSupervisor && m.id === "sales" ? { ...m, path: "sales-agent" } : m));
 }
