@@ -32,7 +32,6 @@ import {
   Lock,
   KeyRound,
   ExternalLink,
-  Smartphone,
   type LucideIcon,
 } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -116,10 +115,6 @@ function SidebarNav({ collapsed, onToggle, onLinkClick }: SidebarProps) {
   const { lng = "uz" } = useParams<{ lng: string }>();
   const visibleModules = useVisibleModules();
   const location = useLocation();
-  // Supervayzer kabi xodimda ERP ham, agent ish joyi ham bor — ERP menyusidan o'tib zakaz oladi
-  // (faqat agent ruxsati bo'lsa foydalanuvchi allaqachon agent ish joyiga yo'naltiriladi)
-  const { can } = usePermissions();
-  const agentWorkspace = can("sales_agent.use");
 
   const GROUP_LABELS: Record<string, Record<string, string>> = {
     uz: { main: "Asosiy", operations: "Operatsiyalar", business: "Biznes", insights: "Tahlil", system: "Tizim" },
@@ -171,13 +166,6 @@ function SidebarNav({ collapsed, onToggle, onLinkClick }: SidebarProps) {
                   </p>
                 )}
                 <div className="space-y-0.5">
-                  {/*
-                    "Zakaz olish" — alohida modul EMAS, Savdo ichidagi ruxsatga bog'liq amal
-                    (`sales_agent.use`). Ruxsat o'chirilsa bu yerda ko'rinmaydi va server ham 403 beradi.
-                  */}
-                  {groupId === "operations" && agentWorkspace && (
-                    <OrderTakingLink lng={lng} collapsed={collapsed} onLinkClick={onLinkClick} />
-                  )}
                   {groupModules.map((mod) => {
                     const Icon = getIcon(mod.icon);
                     const to = `/${lng}/${mod.path}`;
@@ -218,32 +206,6 @@ function SidebarNav({ collapsed, onToggle, onLinkClick }: SidebarProps) {
 
       </nav>
     </aside>
-  );
-}
-
-/**
- * "Zakaz olish" havolasi — Savdo guruhida, `sales_agent.use` ruxsati bilan.
- * Alohida modul sifatida emas: buyurtma oqimi mavjud agent ish joyiniki, dublikat yo'q.
- */
-function OrderTakingLink({
-  lng,
-  collapsed,
-  onLinkClick,
-}: {
-  lng: string;
-  collapsed: boolean;
-  onLinkClick?: () => void;
-}) {
-  return (
-    <NavLink
-      to={`/${lng}/sales-agent`}
-      onClick={onLinkClick}
-      title="Zakaz olish"
-      className="flex items-center gap-3 rounded-md px-2 py-2 text-sm text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-    >
-      <Smartphone className={cn("shrink-0", collapsed ? "h-5 w-5" : "h-4 w-4")} />
-      {!collapsed && <span className="truncate">Zakaz olish</span>}
-    </NavLink>
   );
 }
 
