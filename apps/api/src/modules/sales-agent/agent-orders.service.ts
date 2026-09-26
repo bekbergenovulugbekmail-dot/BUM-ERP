@@ -39,7 +39,7 @@ import { agreedPricesFor } from "../sales/customer-prices.service.js";
 import { activePromotions, applyPromotions, saveOrderPromotions } from "./promotions.service.js";
 import { accessibleStore, todayRoutes } from "./stores.service.js";
 import { assertVisitReady, finishVisitWithOrder, openStoreVisit } from "./visits.service.js";
-import { requireWorkSession } from "./work-session.repo.js";
+import { activeWorkSession, requireWorkSession } from "./work-session.repo.js";
 
 /** Shu vaqt ichida qurilma soxta joylashuv (mock GPS) bildirgan bo'lsa — buyurtma geofence'dan o'tmaydi. */
 const MOCK_LOCATION_WINDOW_MS = 15 * 60_000;
@@ -58,8 +58,16 @@ const formatMeters = (meters: number) => (meters < 1000 ? `${meters} m` : `${(me
 /** Toshkent vaqti HH:MM. */
 const clock = (date: Date) => new Date(date.getTime() + 5 * 3_600_000).toISOString().slice(11, 16);
 
-function audit(tx: Tx, tenant: TenantContext, meta: RequestMeta, entry: Omit<AuditEntry, "userId" | "userName" | "companyId">) {
-  return writeAuditLog({ userId: tenant.user.id, userName: tenant.user.name, companyId: tenant.company.id, ...entry, ...meta }, tx);
+/**
+ * Audit: `userId` — haqiqiy bajaruvchi (supervayzer agent nomidan ishlasa ham — o'zi), agent nomidan bo'lsa
+ * `details.actingAs` da agent (kim nomidan).
+ */
+function audit(tx: Tx, tenant: TenantContext | AgentContext, meta: RequestMeta, entry: Omit<AuditEntry, "userId" | "userName" | "companyId">) {
+  const acting = "acting" in tenant && tenant.acting
+    ? { actingAs: { salesRepId: tenant.agent.id, salesRepName: tenant.agent.name, supervisorUserId: tenant.acting.supervisorUserId } }
+    : null;
+  const details = acting ? { ...(entry.details ?? {}), ...acting } : entry.details;
+  return writeAuditLog({ userId: tenant.user.id, userName: tenant.user.name, companyId: tenant.company.id, ...entry, details, ...meta }, tx);
 }
 
 // ─── Katalog ─────────────────────────────────────────────────────────────────
@@ -433,6 +441,8 @@ const orderFields = {
 type OrderFilter = {
   orderId?: string;
   salesRepId?: string;
+  /** Supervayzer jamoasi chegarasi (`null`/yo'q — chegara yo'q). */
+  salesRepIds?: string[] | null;
   customerId?: string;
   approval?: ApprovalStatus;
   state?: "draft" | "submitted";
@@ -451,6 +461,7 @@ function findOrders(conn: DbOrTx, companyId: string, filter: OrderFilter, limit:
         eq(agentOrders.companyId, companyId),
         filter.orderId ? eq(agentOrders.orderId, filter.orderId) : undefined,
         filter.salesRepId ? eq(agentOrders.salesRepId, filter.salesRepId) : undefined,
+        filter.salesRepIds ? (filter.salesRepIds.length > 0 ? inArray(agentOrders.salesRepId, filter.salesRepIds) : sql`false`) : undefined,
         filter.customerId ? eq(agentOrders.customerId, filter.customerId) : undefined,
         filter.approval ? eq(agentOrders.approvalStatus, filter.approval) : undefined,
         filter.state === "draft" ? and(isNull(agentOrders.submittedAt), eq(salesOrders.status, "draft")) : undefined,
@@ -580,6 +591,7 @@ export async function saveAgentDraft(tx: Tx, context: AgentContext, clientReques
       paymentType: input.paymentType,
       paymentDueDate,
       lines,
+      actingUserId: context.acting?.supervisorUserId ?? null,
     });
     await audit(tx, context, meta, {
       action: "ORDER_DRAFT",
@@ -598,9 +610,26 @@ export async function submitAgentOrder(
   tx: Tx,
   context: AgentContext,
   orderId: string,
-  input: LocationInput,
+  input: LocationInput & { overrideReason?: string },
   meta: RequestMeta,
 ): Promise<OrderOutcome<AgentOrderView>> {
+  // Chetlab o'tish — faqat supervayzer agent nomidan yuborganda; agentning o'zi GPS/tashrif shartini chetlab o'ta olmaydi
+  if (input.overrideReason && !context.acting) {
+    throw new AppError("FORBIDDEN", "Shartni chetlab o'tish faqat supervayzerga (agent nomidan) ruxsat etilgan", { reason: "override_forbidden" });
+  }
+  const acting = context.acting ?? null;
+  /** Supervayzer sabab bilan chetlab o'tgan shartlar (alohida audit). */
+  const overridden: string[] = [];
+  const needOverride = (condition: string, error: AppError) => {
+    if (acting && input.overrideReason) {
+      overridden.push(condition);
+      return null;
+    }
+    return new AppError(error.code, `${error.message}. Agent nomidan yuborish uchun sabab kiriting (alohida audit)`, {
+      ...(error.details ?? {}),
+      overrideAvailable: true,
+    });
+  };
   const companyId = context.company.id;
   const [row] = await tx
     .select({
@@ -623,7 +652,26 @@ export async function submitAgentOrder(
   // Takroriy yuborish (javob yetib kelmay qayta urinish) — natija o'zgarmaydi
   if (row.submittedAt) return { order: await orderView(tx, companyId, orderId, context.agent.id) };
   if (row.status !== "draft") throw conflict("Buyurtma qoralama emas");
-  await requireWorkSession(tx, context.agent.id);
+  if (acting) {
+    // Agent ishda bo'lmasa (masalan, telefon orqali buyurtma) — faqat sabab bilan
+    if (!(await activeWorkSession(tx, context.agent.id))) {
+      const blocked = needOverride("work_session", new AppError("CONFLICT", "Agent ish vaqtida emas", { reason: "work_session_required" }));
+      if (blocked) throw blocked;
+    }
+    // Supervayzer qurilmasi soxta joylashuv bildirsa — hech qanday sabab bilan o'tmaydi
+    if (input.mocked) {
+      await audit(tx, context, meta, {
+        action: "GEOFENCE_ORDER_ATTEMPT",
+        resource: "sales_orders",
+        resourceId: orderId,
+        severity: "warning",
+        details: { reason: "mock_location", number: row.number },
+      });
+      return { blocked: new AppError("FORBIDDEN", "Qurilmada soxta joylashuv (mock GPS) aniqlangan — buyurtma yuborilmaydi", { reason: "mock_location" }) };
+    }
+  } else {
+    await requireWorkSession(tx, context.agent.id);
+  }
 
   const store = await accessibleStore(tx, context, row.customerId);
   const policy = await getSalesAgentPolicy(tx, companyId);
@@ -635,7 +683,10 @@ export async function submitAgentOrder(
   }
   // Qurilma yaqinda soxta joylashuv (mock GPS) bildirgan — geofence natijasiga ishonib bo'lmaydi: buyurtma yuborilmaydi,
   // hodisa va audit supervayzerga ko'rinadi
-  const [mockedRecently] = await tx
+  // Agent qurilmasining mock hodisalari — agent o'zi yuborganda (supervayzer boshqa qurilmada)
+  const [mockedRecently] = acting
+    ? []
+    : await tx
     .select({ id: agentLocationEvents.id })
     .from(agentLocationEvents)
     .where(
@@ -664,7 +715,17 @@ export async function submitAgentOrder(
     });
   }
   const distance = Math.round(distanceMeters(input, storePoint));
-  if (distance > policy.geofenceRadiusMeters) {
+  if (acting && distance > policy.geofenceRadiusMeters) {
+    const blocked = needOverride(
+      "geofence",
+      new AppError("FORBIDDEN", `Siz do'kondan ${distance} m uzoqdasiz — buyurtma ${policy.geofenceRadiusMeters} m ichida yuboriladi`, {
+        reason: "geofence",
+        distanceMeters: distance,
+        radiusMeters: policy.geofenceRadiusMeters,
+      }),
+    );
+    if (blocked) return { blocked };
+  } else if (distance > policy.geofenceRadiusMeters) {
     const details = {
       action: "order_submit",
       orderId,
@@ -698,7 +759,10 @@ export async function submitAgentOrder(
 
   // Tashrif: shu do'konda ochiq, hududdan chiqib bekor bo'lmagan, rasmlar va minimal vaqt (siyosat bo'yicha)
   const storeVisit = policy.orderRequiresVisit ? await openStoreVisit(tx, context.agent.id, row.customerId) : null;
-  if (policy.orderRequiresVisit) {
+  if (policy.orderRequiresVisit && acting && (!storeVisit || storeVisit.invalidatedAt)) {
+    const blocked = needOverride("visit", badRequest("Do'konda agentning ochiq tashrifi yo'q", { reason: "visit_required" }));
+    if (blocked) throw blocked;
+  } else if (policy.orderRequiresVisit) {
     if (!storeVisit) {
       throw badRequest("Buyurtma do'kondagi tashrifda yuboriladi — avval tashrifni boshlang", { reason: "visit_required" });
     }
@@ -794,6 +858,7 @@ export async function submitAgentOrder(
       submitDistanceMeters: distance,
       visitId: openVisit?.id ?? null,
       approvalStatus: pendingApproval ? "pending" : null,
+      submitOverrideReason: overridden.length > 0 ? (input.overrideReason ?? null) : null,
       updatedAt: now,
     })
     .where(eq(agentOrders.orderId, orderId));
@@ -823,6 +888,24 @@ export async function submitAgentOrder(
       pendingApproval,
     },
   });
+  if (overridden.length > 0) {
+    // Alohida audit: supervayzer qaysi shartni, qaysi sabab bilan chetlab o'tdi (haqiqiy joylashuvi va masofasi bilan)
+    await audit(tx, context, meta, {
+      action: "AGENT_ORDER_SUPERVISOR_OVERRIDE",
+      resource: "sales_orders",
+      resourceId: orderId,
+      severity: "warning",
+      details: {
+        number: row.number,
+        conditions: overridden,
+        reason: input.overrideReason,
+        latitude: input.latitude,
+        longitude: input.longitude,
+        distanceMeters: distance,
+        radiusMeters: policy.geofenceRadiusMeters,
+      },
+    });
+  }
   for (const promotion of priced.applied) {
     await audit(tx, context, meta, {
       action: "PROMOTION_APPLIED",
@@ -839,8 +922,8 @@ export async function submitAgentOrder(
       details: { number: row.number, totalAmount: order!.totalAmount, paymentDueDate: row.paymentDueDate },
     });
   }
-  // Tashrif buyurtma bilan yakunlanadi — agent bugungi marshrutga qaytadi
-  if (storeVisit) await finishVisitWithOrder(tx, context, storeVisit, policy, input, distance, meta);
+  // Tashrif buyurtma bilan yakunlanadi — agent bugungi marshrutga qaytadi (supervayzer agentning tashrifini yopmaydi)
+  if (storeVisit && !acting) await finishVisitWithOrder(tx, context, storeVisit, policy, input, distance, meta);
   return { order: await orderView(tx, companyId, orderId, context.agent.id) };
 }
 
@@ -869,12 +952,12 @@ export async function cancelAgentOrder(tx: Tx, context: AgentContext, orderId: s
 export function supervisorOrders(
   conn: DbOrTx,
   tenant: TenantContext,
-  options: { approval?: ApprovalStatus; date?: string; salesRepId?: string; limit: number },
+  options: { approval?: ApprovalStatus; date?: string; salesRepId?: string; salesRepIds?: string[] | null; limit: number },
 ) {
   return findOrders(conn, tenant.company.id, { ...options, state: "submitted" }, options.limit);
 }
 
-async function lockPending(tx: Tx, tenant: TenantContext, orderId: string) {
+async function lockPending(tx: Tx, tenant: TenantContext, orderId: string, scope: string[] | null) {
   const [row] = await tx
     .select({
       approvalStatus: agentOrders.approvalStatus,
@@ -883,6 +966,8 @@ async function lockPending(tx: Tx, tenant: TenantContext, orderId: string) {
       warehouseId: salesOrders.warehouseId,
       lines: agentOrders.lines,
       agentUserId: salesReps.userId,
+      salesRepId: agentOrders.salesRepId,
+      actingUserId: agentOrders.actingUserId,
     })
     .from(agentOrders)
     .innerJoin(salesOrders, eq(salesOrders.id, agentOrders.orderId))
@@ -890,15 +975,18 @@ async function lockPending(tx: Tx, tenant: TenantContext, orderId: string) {
     .where(and(eq(agentOrders.orderId, orderId), eq(agentOrders.companyId, tenant.company.id)))
     .limit(1)
     .for("update", { of: agentOrders });
-  if (!row) throw notFound("Buyurtma topilmadi");
+  // Jamoa chegarasi: boshqa supervayzer agentining buyurtmasi — TOPILMADI
+  if (!row || (scope && !scope.includes(row.salesRepId))) throw notFound("Buyurtma topilmadi");
   if (row.approvalStatus !== "pending" || row.status !== "draft") throw conflict("Buyurtma tasdiq kutmayapti");
   return row;
 }
 
-export async function approveAgentOrder(tx: Tx, tenant: TenantContext, orderId: string, meta: RequestMeta) {
-  const row = await lockPending(tx, tenant, orderId);
+export async function approveAgentOrder(tx: Tx, tenant: TenantContext, orderId: string, meta: RequestMeta, scope: string[] | null = null) {
+  const row = await lockPending(tx, tenant, orderId, scope);
   // Vazifalar ajratimi: kredit limitidan oshgan buyurtmani uni yuborgan agentning o'zi (supervayzer ruxsati bo'lsa ham) tasdiqlamaydi
-  if (row.agentUserId && row.agentUserId === tenant.user.id && tenant.company.ownerId !== tenant.user.id) {
+  // Supervayzer agent nomidan kiritgan buyurtmani ham o'zi tasdiqlamaydi
+  const ownOrder = (row.agentUserId !== null && row.agentUserId === tenant.user.id) || row.actingUserId === tenant.user.id;
+  if (ownOrder && tenant.company.ownerId !== tenant.user.id) {
     throw new AppError("FORBIDDEN", "O'zingiz yuborgan buyurtmani tasdiqlay olmaysiz — boshqa supervayzer tasdiqlaydi", { reason: "self_approval" });
   }
   // Yuborilgandagi qatorlar (aksiya bepul miqdori bilan) — qayta narxlanmaydi
@@ -918,8 +1006,8 @@ export async function approveAgentOrder(tx: Tx, tenant: TenantContext, orderId: 
   return orderView(tx, tenant.company.id, orderId);
 }
 
-export async function rejectAgentOrder(tx: Tx, tenant: TenantContext, orderId: string, reason: string, meta: RequestMeta) {
-  const row = await lockPending(tx, tenant, orderId);
+export async function rejectAgentOrder(tx: Tx, tenant: TenantContext, orderId: string, reason: string, meta: RequestMeta, scope: string[] | null = null) {
+  const row = await lockPending(tx, tenant, orderId, scope);
   await cancelOrder(tx, tenant, orderId, reason, meta);
   const now = new Date();
   await tx

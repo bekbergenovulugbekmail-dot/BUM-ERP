@@ -30,6 +30,7 @@ import { nextDocumentNumber } from "../../shared/numbering.js";
 import type { TenantContext } from "../company/tenant.js";
 import { isCompletedSale } from "../sales/sale-status.js";
 import { getDeliveryPolicy } from "./policy.service.js";
+import { orderScopeCondition, taskScopeCondition, type DeliveryScope } from "./scope.js";
 import { applyAutoAssign } from "./auto-assign.service.js";
 import { publishDeliveryEvent } from "./realtime-bus.js";
 import { assertTransition, deliveryAudit, hhmm, insertDeliveryEvent, localDate, localTime, lockTask, type DeliveryTaskRow } from "./task.repo.js";
@@ -784,10 +785,10 @@ export type DeliveryTaskFilters = {
   /** Tovari omborga qaytarilmagan (yetkazilmagan yoki qisman) yetkazmalar. */
   returnPending?: boolean;
   /**
-   * "Mas'ul bo'lganlari" chegarasi: faqat shu yetkazuvchilarga biriktirilganlar.
-   * Berilmasa (`undefined`) chegara yo'q.
+   * "Mas'ul bo'lganlari" chegarasi (`scope.ts`): o'z/jamoa yetkazuvchilari va jamoa agentlari buyurtmalari.
+   * Berilmasa (`null`/`undefined`) chegara yo'q.
    */
-  responsibleAgentIds?: string[];
+  scope?: DeliveryScope;
   limit: number;
   cursor?: string;
 };
@@ -811,15 +812,8 @@ export async function listDeliveryTasks(conn: DbOrTx, tenant: TenantContext, fil
   if (filters.dateTo) conditions.push(sql`${deliveryTasks.scheduledDate} <= ${filters.dateTo}::date`);
   if (filters.statuses?.length) conditions.push(inArray(deliveryTasks.status, filters.statuses));
   if (filters.deliveryAgentId) conditions.push(eq(deliveryTasks.deliveryAgentId, filters.deliveryAgentId));
-  // "Mas'ul bo'lganlari" chegarasi: faqat shu agentlarga biriktirilgan yetkazmalar.
-  // Bo'sh massiv — mas'ul yetkazmasi yo'q, ya'ni ro'yxat bo'sh bo'ladi.
-  if (filters.responsibleAgentIds) {
-    conditions.push(
-      filters.responsibleAgentIds.length === 0
-        ? sql`false`
-        : inArray(deliveryTasks.deliveryAgentId, filters.responsibleAgentIds),
-    );
-  }
+  // "Mas'ul bo'lganlari" chegarasi: mas'ul yetkazmasi bo'lmasa ro'yxat bo'sh bo'ladi
+  conditions.push(taskScopeCondition(filters.scope ?? null));
   if (filters.unassigned) conditions.push(isNull(deliveryTasks.deliveryAgentId));
   if (filters.branchId) conditions.push(eq(deliveryAgents.branchId, filters.branchId));
   if (filters.territory) conditions.push(eq(deliveryAgents.territory, filters.territory));
@@ -1013,9 +1007,10 @@ export async function getDeliveryTask(conn: DbOrTx, companyId: string, taskId: s
 }
 
 /** Yetkazma yaratish mumkin bo'lgan buyurtmalar: tasdiqlangan/jo'natilgan, mijozli, kassa emas, ochiq yoki yetkazilgan yetkazmasiz. */
-export async function readyOrdersForDelivery(conn: DbOrTx, tenant: TenantContext, options: { search?: string; limit: number }) {
+export async function readyOrdersForDelivery(conn: DbOrTx, tenant: TenantContext, options: { search?: string; limit: number; scope?: DeliveryScope }) {
   const conditions: (SQL | undefined)[] = [
     eq(salesOrders.companyId, tenant.company.id),
+    orderScopeCondition(options.scope ?? null),
     inArray(salesOrders.status, ["confirmed", "completed", "shipped", "delivered"]),
     eq(salesOrders.isPos, false),
     isNotNull(salesOrders.customerId),

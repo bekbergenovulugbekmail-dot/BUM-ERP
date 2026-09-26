@@ -18,6 +18,7 @@ import type { DeliveryAgentContext } from "./agent-context.js";
 import { hhmm, localDate, localDayStart } from "./task.repo.js";
 import { isOverdue, overdueCondition, presentTask, returnPendingCondition, taskListQuery } from "./tasks.service.js";
 import { currentDeliverySession } from "./tracking.service.js";
+import { agentScopeCondition, taskScopeCondition, type DeliveryScope } from "./scope.js";
 
 const OPEN = [...OPEN_DELIVERY_STATUSES] as DeliveryStatus[];
 const FINAL: DeliveryStatus[] = ["delivered", "partially_delivered", "failed", "returned", "cancelled"];
@@ -254,8 +255,11 @@ export function reportRange(from?: string, to?: string) {
 }
 
 /** Davr bo'yicha agentlar kesimi (bitta agent yoki hammasi). */
-async function periodRows(conn: DbOrTx, companyId: string, range: ReturnType<typeof reportRange>, deliveryAgentId?: string) {
-  const agentCondition = deliveryAgentId ? eq(deliveryTasks.deliveryAgentId, deliveryAgentId) : isNotNull(deliveryTasks.deliveryAgentId);
+async function periodRows(conn: DbOrTx, companyId: string, range: ReturnType<typeof reportRange>, deliveryAgentId?: string, scope: DeliveryScope = null) {
+  const agentCondition = and(
+    deliveryAgentId ? eq(deliveryTasks.deliveryAgentId, deliveryAgentId) : isNotNull(deliveryTasks.deliveryAgentId),
+    taskScopeCondition(scope),
+  );
   const tasks = await conn
     .select({
       deliveryAgentId: deliveryTasks.deliveryAgentId,
@@ -352,14 +356,24 @@ export async function agentReport(conn: DbOrTx, context: DeliveryAgentContext, f
   };
 }
 
-export async function supervisorReport(conn: DbOrTx, tenant: TenantContext, options: { from?: string; to?: string; deliveryAgentId?: string }) {
+export async function supervisorReport(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  options: { from?: string; to?: string; deliveryAgentId?: string; scope?: DeliveryScope },
+) {
   const range = reportRange(options.from, options.to);
-  const { tasks, payments, failures } = await periodRows(conn, tenant.company.id, range, options.deliveryAgentId);
+  const { tasks, payments, failures } = await periodRows(conn, tenant.company.id, range, options.deliveryAgentId, options.scope ?? null);
   const agents = await conn
     .select({ id: deliveryAgents.id, code: deliveryAgents.code, name: users.name, territory: deliveryAgents.territory, branchId: deliveryAgents.branchId })
     .from(deliveryAgents)
     .innerJoin(users, eq(users.id, deliveryAgents.userId))
-    .where(and(eq(deliveryAgents.companyId, tenant.company.id), options.deliveryAgentId ? eq(deliveryAgents.id, options.deliveryAgentId) : undefined))
+    .where(
+      and(
+        eq(deliveryAgents.companyId, tenant.company.id),
+        options.deliveryAgentId ? eq(deliveryAgents.id, options.deliveryAgentId) : undefined,
+        agentScopeCondition(options.scope ?? null),
+      ),
+    )
     .orderBy(asc(users.name));
   const rows = agents
     .map((agent) => {
@@ -371,29 +385,31 @@ export async function supervisorReport(conn: DbOrTx, tenant: TenantContext, opti
   return { from: range.from, to: range.to, agents: rows, collected: collectedBy(payments), failureReasons: failures };
 }
 
-export async function supervisorDashboard(conn: DbOrTx, tenant: TenantContext, date = localDate()) {
+export async function supervisorDashboard(conn: DbOrTx, tenant: TenantContext, date = localDate(), scope: DeliveryScope = null) {
   const companyId = tenant.company.id;
+  // "Mas'ul bo'lganlari": faqat jamoa yetkazmalari (chegara bo'lmasa — `undefined`, ya'ni butun kompaniya)
+  const inScope = taskScopeCondition(scope);
   const statuses = await conn
     .select({ status: deliveryTasks.status, count: sql<number>`count(*)::int` })
     .from(deliveryTasks)
-    .where(and(eq(deliveryTasks.companyId, companyId), eq(deliveryTasks.scheduledDate, date)))
+    .where(and(eq(deliveryTasks.companyId, companyId), eq(deliveryTasks.scheduledDate, date), inScope))
     .groupBy(deliveryTasks.status);
   const byStatus = (list: DeliveryStatus[]) => statuses.filter((row) => list.includes(row.status)).reduce((sum, row) => sum + row.count, 0);
-  const [overdue] = await conn.select({ count: sql<number>`count(*)::int` }).from(deliveryTasks).where(and(eq(deliveryTasks.companyId, companyId), overdueCondition()));
+  const [overdue] = await conn.select({ count: sql<number>`count(*)::int` }).from(deliveryTasks).where(and(eq(deliveryTasks.companyId, companyId), overdueCondition(), inScope));
   const [reviews] = await conn
     .select({ count: sql<number>`count(*)::int` })
     .from(deliveryTasks)
-    .where(and(eq(deliveryTasks.companyId, companyId), eq(deliveryTasks.paymentReview, "pending")));
+    .where(and(eq(deliveryTasks.companyId, companyId), eq(deliveryTasks.paymentReview, "pending"), inScope));
   const [returnsPending] = await conn
     .select({ count: sql<number>`count(*)::int` })
     .from(deliveryTasks)
-    .where(and(eq(deliveryTasks.companyId, companyId), returnPendingCondition()));
+    .where(and(eq(deliveryTasks.companyId, companyId), returnPendingCondition(), inScope));
   const dayStart = localDayStart(date);
   const payments = await conn
     .select({ deliveryAgentId: deliveryTasks.deliveryAgentId, method: deliveryPayments.method, total: sql<string>`coalesce(sum(${deliveryPayments.amount}), 0)::numeric(18,2)` })
     .from(deliveryPayments)
     .innerJoin(deliveryTasks, eq(deliveryTasks.id, deliveryPayments.taskId))
-    .where(and(eq(deliveryTasks.companyId, companyId), gte(deliveryPayments.collectedAt, dayStart), lt(deliveryPayments.collectedAt, new Date(dayStart.getTime() + DAY_MS))))
+    .where(and(eq(deliveryTasks.companyId, companyId), gte(deliveryPayments.collectedAt, dayStart), lt(deliveryPayments.collectedAt, new Date(dayStart.getTime() + DAY_MS)), inScope))
     .groupBy(deliveryTasks.deliveryAgentId, deliveryPayments.method);
   const perAgent = await conn
     .select({
@@ -408,7 +424,7 @@ export async function supervisorDashboard(conn: DbOrTx, tenant: TenantContext, d
     .from(deliveryTasks)
     .innerJoin(deliveryAgents, eq(deliveryAgents.id, deliveryTasks.deliveryAgentId))
     .innerJoin(users, eq(users.id, deliveryAgents.userId))
-    .where(and(eq(deliveryTasks.companyId, companyId), eq(deliveryTasks.scheduledDate, date)))
+    .where(and(eq(deliveryTasks.companyId, companyId), eq(deliveryTasks.scheduledDate, date), inScope))
     .groupBy(deliveryTasks.deliveryAgentId, users.name, deliveryAgents.code)
     .orderBy(asc(users.name));
   return {

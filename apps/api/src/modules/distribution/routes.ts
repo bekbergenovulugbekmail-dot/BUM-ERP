@@ -21,7 +21,10 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { Permission } from "@bum/shared";
+import { forbidden, notFound, type Permission } from "@bum/shared";
+import { and, eq } from "drizzle-orm";
+import { distributionRoutes as routesTable, routeAssignments } from "../../db/schema/crm.js";
+import { assertRepInScope, supervisedSalesRepIds } from "../company/responsibility.service.js";
 import { db } from "../../db/client.js";
 import { withTransaction, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
@@ -208,17 +211,62 @@ function writeInTenant<T>(req: FastifyRequest, fn: (tx: Tx, tenant: TenantContex
   });
 }
 
+/**
+ * Supervayzer jamoasi chegarasi (`sales_agent.supervise` — "faqat mas'ul bo'lganlari"): marshrut, agent, sanaga
+ * biriktirish va tashrif faqat O'Z jamoasi agentlariniki bo'lsa ko'rinadi va o'zgartiriladi. Server qo'riqchisi —
+ * UI'dagi tugmaga ishonilmaydi; begona yozuv TOPILMADI bo'lib qaytadi.
+ */
+async function enforceTeamScope(req: FastifyRequest) {
+  // `routeOptions.url` — to'liq yo'l (prefiks bilan): /api/distribution/...
+  const url = (req.routeOptions.url ?? "").replace(/^\/api\/distribution/, "");
+  const tenant = await requireTenant(db, authOf(req).user);
+  const scope = await supervisedSalesRepIds(db, tenant);
+  if (!scope) return;
+  // Butun kompaniya marshrutlarini birdan yozadigan/chiqaradigan amallar — chegarali xodimga yopiq
+  if (url === "/routes/import" || url === "/routes/export") throw forbidden("Marshrutlar importi/eksporti butun kompaniya bo'yicha — mas'ul chegarali xodimga yopiq");
+  const params = (req.params ?? {}) as { salesRepId?: string; routeId?: string; assignmentId?: string };
+  const body = (req.body && typeof req.body === "object" ? req.body : {}) as { salesRepId?: unknown; routeId?: unknown };
+  if (params.salesRepId) assertRepInScope(scope, params.salesRepId);
+  if (typeof body.salesRepId === "string") assertRepInScope(scope, body.salesRepId);
+  // Yangi marshrut jamoadan tashqarida (agentsiz) yaratilmaydi — aks holda keyin uni ko'ra olmay qoladi
+  if (req.method === "POST" && url === "/routes" && typeof body.salesRepId !== "string") throw forbidden("Marshrutga jamoangizdagi agentni tanlang");
+  for (const routeId of [params.routeId, typeof body.routeId === "string" ? body.routeId : undefined]) {
+    if (!routeId || !/^[0-9a-f-]{36}$/i.test(routeId)) continue;
+    const [route] = await db
+      .select({ salesRepId: routesTable.salesRepId })
+      .from(routesTable)
+      .where(and(eq(routesTable.id, routeId), eq(routesTable.companyId, tenant.company.id)))
+      .limit(1);
+    if (!route || !route.salesRepId || !scope.includes(route.salesRepId)) throw notFound("Marshrut topilmadi");
+  }
+  if (params.assignmentId && /^[0-9a-f-]{36}$/i.test(params.assignmentId)) {
+    const [assignment] = await db
+      .select({ salesRepId: routeAssignments.salesRepId })
+      .from(routeAssignments)
+      .where(and(eq(routeAssignments.id, params.assignmentId), eq(routeAssignments.companyId, tenant.company.id)))
+      .limit(1);
+    if (!assignment || !scope.includes(assignment.salesRepId)) throw notFound("Biriktirish topilmadi");
+  }
+}
+
+/** Ro'yxatni jamoa bilan cheklash (chegara bo'lmasa — o'zgarmaydi). */
+async function teamOnly<T>(req: FastifyRequest, rows: T[], repOf: (row: T) => string | null | undefined): Promise<T[]> {
+  const scope = await supervisedSalesRepIds(db, await requireTenant(db, authOf(req).user));
+  return scope ? rows.filter((row) => { const id = repOf(row); return Boolean(id && scope.includes(id)); }) : rows;
+}
+
 export async function distributionRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", requireAuth);
+  app.addHook("preHandler", enforceTeamScope);
 
   // ─── Savdo agentlari ─────────────────────────────────────────────────────
 
   app.get("/sales-reps", async (req) => {
     const { includeInactive } = includeInactiveQuery.parse(req.query);
-    return { salesReps: await listSalesReps(db, await readTenant(req), includeInactive ?? false) };
+    return { salesReps: await teamOnly(req, await listSalesReps(db, await readTenant(req), includeInactive ?? false), (row) => row.id) };
   });
 
-  app.get("/sales-reps/stats", async (req) => ({ salesReps: await salesRepStats(db, await readTenant(req)) }));
+  app.get("/sales-reps/stats", async (req) => ({ salesReps: await teamOnly(req, await salesRepStats(db, await readTenant(req)), (row) => row.id) }));
 
   // Agentdagi topshirilmagan naqd va uni kassaga topshirish (yetkazuvchidagi bilan bir xil qoida)
   app.get("/sales-reps/:salesRepId/cash", async (req) => {
@@ -293,7 +341,7 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/routes", async (req) => {
     const { includeInactive } = includeInactiveQuery.parse(req.query);
-    return { routes: await listRoutes(db, await readTenant(req), includeInactive ?? false) };
+    return { routes: await teamOnly(req, await listRoutes(db, await readTenant(req), includeInactive ?? false), (row) => row.salesRepId) };
   });
 
   app.get("/routes/export", async (req, reply) => {
@@ -372,7 +420,10 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
     return { route, plan, applied };
   });
 
-  app.get("/map", async (req) => distributionMap(db, await readTenant(req)));
+  app.get("/map", async (req) => {
+    const map = await distributionMap(db, await readTenant(req));
+    return { ...map, routes: await teamOnly(req, map.routes, (row) => row.salesRepId) };
+  });
 
   app.delete("/routes/:routeId/customers/:memberId", async (req, reply) => {
     const { routeId, memberId } = memberParams.parse(req.params);
@@ -384,7 +435,7 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/visits", async (req) => {
     const query = visitsQuery.parse(req.query);
-    return { visits: await listVisits(db, await readTenant(req), query) };
+    return { visits: await teamOnly(req, await listVisits(db, await readTenant(req), query), (row) => row.salesRepId) };
   });
 
   app.post("/visits", async (req, reply) => {
@@ -404,7 +455,7 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/assignments", async (req) => {
     const query = assignmentsQuery.parse(req.query);
-    return { assignments: await listAssignments(db, await readTenant(req), query) };
+    return { assignments: await teamOnly(req, await listAssignments(db, await readTenant(req), query), (row) => row.salesRepId) };
   });
 
   app.post("/assignments", async (req, reply) => {

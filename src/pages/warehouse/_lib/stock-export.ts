@@ -22,6 +22,8 @@ export type StockExportRow = {
   reservedQty: string;
   availableQty: string;
   avgCostPrice: string | null;
+  /** Asosiy sotuv narxi (mahsulot kartochkasi); eski javobda bo'lmasligi mumkin. */
+  salesPrice?: string | null;
   retailPrice: string | null;
   wholesalePrice: string | null;
 };

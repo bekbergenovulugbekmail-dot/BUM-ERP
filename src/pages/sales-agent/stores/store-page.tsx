@@ -18,9 +18,12 @@ import WorkSessionCard from "../_components/work-session-card.tsx";
 import VisitPanel from "../_components/visit-panel.tsx";
 import { originParams, useAgentLocation } from "../_lib/agent-location.ts";
 import { formatDistance, num, type AgentMe, type CustomerHistory, type StoreProfile } from "../_lib/types.ts";
+import { useActAs } from "@/lib/act-as.ts";
 
 /** Mijoz profili: tashrif, aloqa, qarz va kredit, tarix (buyurtmalar, to'lovlar, tashriflar), tahrirlash, joylashuv va rasm. */
 export default function AgentStorePage() {
+  // Supervayzer agent nomidan: GPS, tashrif, ish vaqti va naqd — faqat agentning o'zida (server ham bloklaydi)
+  const acting = Boolean(useActAs());
   const { t } = useTranslation("agent");
   const { lng = "uz", customerId } = useParams<{ lng: string; customerId: string }>();
   const { company } = useOutletContext<AgentMe>();
@@ -75,11 +78,11 @@ export default function AgentStorePage() {
         <p className="text-xs text-muted-foreground">{store.code} · {store.routes.map((route) => route.name).join(", ")}</p>
       </div>
 
-      <WorkSessionCard variant="compact" />
-      <LocationBanner location={position} />
-      <VisitPanel store={store} />
+      {!acting && <WorkSessionCard variant="compact" />}
+      {!acting && <LocationBanner location={position} />}
+      {!acting && <VisitPanel store={store} />}
       <OrderEntry customerId={store.id} />
-      <PaymentPanel store={store} currency={company.currency} />
+      {!acting && <PaymentPanel store={store} currency={company.currency} />}
 
       <div className="rounded-2xl border border-border bg-card p-4 space-y-2.5 text-sm">
         {store.contactName && (

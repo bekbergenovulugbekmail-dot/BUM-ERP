@@ -237,3 +237,31 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 ## AUD-031 — Parallel takroriy mijoz to'lovi 409 qaytaradi (200 emas)
 - **SEVERITY:** LOW · **MODULE:** Payments — moliyaviy ta'sir BIR marta (unique indeks), faqat javob kodi farq qiladi.
   **STATUS:** OPEN (qabul qilingan xulq; mijoz qayta so'rasa 200 va mavjud to'lov qaytadi).
+
+
+## Supervayzer + ombor Excel importi (2026-09-26) topilmalari
+
+## AUD-032 — Supervayzer chegarasi faqat ruxsat bo'yicha (butun kompaniya); `supervisor_user_id` hech narsani cheklamaydi
+- **SEVERITY:** MEDIUM · **MODULE:** RBAC / Distribution / Delivery
+- **SCENARIO:** kompaniyada 2 supervayzer; A faqat o'z jamoasini boshqarishi kerak.
+- **ACTUAL (oldin):** `sales_reps.supervisor_user_id`, `delivery_agents.supervisor_user_id` faqat ko'rsatish uchun; supervayzer
+  endpointlari (agentlar, jonli xarita, tashriflar, buyurtma tasdig'i, yetkazish paneli, biriktirish, naqd topshirish,
+  marshrutlar) butun kompaniya bo'yicha. "Mas'ul bo'lganlari" faqat O'Z profiliga (jamoaga emas).
+- **FIX:** `sales_agent.supervise` — chegaralanadigan ruxsat; `responsibleSalesRepIds` / `responsibleDeliveryAgentIds` jamoani
+  (`supervisor_user_id`) qamraydi; server qo'riqchilari: sales-agent supervisor endpointlari, `delivery/scope.ts`
+  (`enforceDeliveryScope` preHandler — /tasks/:id, /agents/:id, body.deliveryAgentId/taskIds/orderIds), distribution
+  (`enforceTeamScope`). Chegara yoqilmagan rollarda xulq o'zgarmadi. **STATUS:** FIXED — VERIFIED
+  `test/supervisor-operations.test.ts` (19 ✓).
+
+## AUD-033 — Supervayzer agent nomidan buyurtma kirita olmaydi (faqat o'z agent profili orqali)
+- **SEVERITY:** LOW (funksional bo'shliq) · **MODULE:** Sales agent
+- **FIX:** `x-act-as-sales-rep` — mavjud agent oqimi (alohida engine yo'q), faqat buyurtma/o'qish endpointlari; GPS, tashrif,
+  ish vaqti, naqd — 403. `agent_orders.acting_user_id`, `sales_orders.created_by` = supervayzer, audit `details.actingAs`;
+  GPS/tashrif/ish vaqti shartini chetlab o'tish faqat sabab bilan + `AGENT_ORDER_SUPERVISOR_OVERRIDE` audit; soxta GPS hech
+  qachon o'tmaydi; o'zi kiritgan nasiya buyurtmasini o'zi tasdiqlamaydi. Migratsiya 0094 (qo'shuvchi). **STATUS:** FIXED — VERIFIED.
+
+## AUD-034 — Ombor qoldig'ini Excel'dan yuklash yo'q (faqat qo'lda kirim)
+- **SEVERITY:** LOW (funksional bo'shliq) · **MODULE:** Warehouse
+- **FIX:** `POST /api/inventory/stock/import` (preview → hammasi-yoki-hech-narsa, `importId` bilan takrorsiz), mavjud qo'lda kirim
+  yo'li orqali (konversiya bir marta, AVCO, 1200 / 3000 jurnal); A4 hisobot (AVCO). **STATUS:** FIXED — VERIFIED
+  `test/stock-import.test.ts` (5 ✓), `e2e/supervisor-warehouse.spec.ts`.

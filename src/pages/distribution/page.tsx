@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import {
   Truck, Route, Users, CalendarRange, Radar, SlidersHorizontal, ClipboardCheck, ShoppingCart, BadgePercent, UserPlus,
-  MapPinned, UserCheck, CalendarCheck, CircleDollarSign, Store,
+  MapPinned, UserCheck, CalendarCheck, CircleDollarSign, Store, Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import PageTabs from "@/components/page-tabs.tsx";
@@ -20,18 +21,22 @@ import PromotionsSection from "./_components/promotions-section.tsx";
 import ProspectsSection from "./_components/prospects-section.tsx";
 import AgentPolicySection from "./_components/agent-policy-section.tsx";
 import StoresMapSection from "./_components/stores-map-section.tsx";
+import SupervisorSection from "./_components/supervisor-section.tsx";
 import { num, type DistributionRoute, type SalesRepStats } from "./_lib/types.ts";
 
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
 
-type TabKey = "routes" | "map" | "customers" | "assignments" | "reps" | "orders" | "visits" | "prospects" | "promotions" | "monitoring" | "policy";
+type TabKey = "supervisor" | "routes" | "map" | "customers" | "assignments" | "reps" | "orders" | "visits" | "prospects" | "promotions" | "monitoring" | "policy";
 
 export default function DistributionPage() {
   const { t } = useTranslation("distribution");
   const { can } = usePermissions();
-  const [tab, setTab] = useState<TabKey>("routes");
+  // `?tab=supervisor` — "agent nomidan" rejimidan qaytganda panelga
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<TabKey>(() => (searchParams.get("tab") as TabKey | null) ?? "routes");
 
   const tabs = [
+    { key: "supervisor" as const, icon: Gauge, visible: can("sales_agent.supervise") },
     { key: "routes" as const, icon: Route, visible: true },
     { key: "map" as const, icon: MapPinned, visible: true },
     { key: "customers" as const, icon: Store, visible: true },
@@ -153,6 +158,7 @@ export default function DistributionPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.15 }}
       >
+        {activeTab === "supervisor" && <SupervisorSection />}
         {activeTab === "routes" && <RoutesSection />}
         {activeTab === "map" && <StoresMapSection />}
         {activeTab === "customers" && <CustomersSection />}

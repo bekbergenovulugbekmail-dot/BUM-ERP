@@ -293,6 +293,8 @@ export async function exportStock(
       reservedQty: stockLevels.reservedQty,
       availableQty: sql<string>`(${stockLevels.quantity} - ${stockLevels.reservedQty})::numeric(18,4)`,
       avgCostPrice: stockLevels.avgCostPrice,
+      /** Asosiy sotuv narxi (mahsulot kartochkasi) — A4 hisobotdagi "Sotuv narxi" va marja manbai. */
+      salesPrice: products.salesPrice,
       retailPrice: products.retailPrice,
       wholesalePrice: products.wholesalePrice,
     })
@@ -590,18 +592,21 @@ export async function recordManualMovement(
     unitId?: string | null;
     /** Buxgalteriyadagi qarshi hisob; berilmasa — standart (`postStockJournal`). */
     counterAccountId?: string | null;
+    /** Manba hujjat (masalan, Excel import) — takroriy yuklashni aniqlash uchun; qo'lda harakatda yo'q. */
+    source?: { type: string; id: string } | null;
   },
   meta: RequestMeta,
 ) {
   assertWarehouseAccess(tenant, input.warehouseId);
   await assertProductsInScope(tx, tenant, [input.productId]);
-  const { unitId, counterAccountId, ...move } = input;
+  const { unitId, counterAccountId, source, ...move } = input;
   const base = await toBaseUnit(tx, tenant.company.id, input);
   await assertManualCostPlausible(tx, tenant, input, base.costPrice);
   const result = await moveStock(tx, tenant.company.id, tenant.user.id, {
     ...move,
     quantity: base.quantity,
     costPrice: base.costPrice,
+    ...(source ? { referenceType: source.type, referenceId: source.id } : {}),
   });
 
   // Buxgalteriya: harakat tannarxda (kirim — zaxira ko'payadi, chiqim — kamayadi)

@@ -3,7 +3,7 @@
  * lokatsiya tarixi va hodisalar. Faqat tenant ichida; tarixni ko'rish audit qilinadi.
  * Kun chegarasi — O'zbekiston vaqti (UTC+5).
  */
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lt, sql, type AnyColumn } from "drizzle-orm";
 import { AGENT_ONLINE_MINUTES, notFound } from "@bum/shared";
 import { salesReps } from "../../db/schema/crm.js";
 import { companies } from "../../db/schema/platform.js";
@@ -19,6 +19,10 @@ import type { LocationEventType } from "./location.service.js";
 import { agentToday, routesForAgent } from "./stores.service.js";
 import { currentVisit, storeVisitStatuses } from "./visits.service.js";
 import { sessionsSince } from "./work-session.service.js";
+
+/** Supervayzer jamoasi chegarasi: `null` — chegara yo'q, bo'sh massiv — hech narsa. */
+const repIn = (column: AnyColumn, ids: string[] | null | undefined) =>
+  ids ? (ids.length > 0 ? inArray(column, ids) : sql`false`) : undefined;
 
 const HISTORY_POINT_LIMIT = 5000;
 const DAY_MS = 86_400_000;
@@ -39,7 +43,7 @@ const latestFields = {
 };
 
 /** Faol agentlar: oxirgi joy, onlayn holati va bugungi marshrut. */
-export async function supervisorAgents(conn: DbOrTx, tenant: TenantContext) {
+export async function supervisorAgents(conn: DbOrTx, tenant: TenantContext, salesRepIds: string[] | null = null) {
   const onlineSince = Date.now() - AGENT_ONLINE_MINUTES * 60_000;
   const rows = await conn
     .select({
@@ -55,7 +59,7 @@ export async function supervisorAgents(conn: DbOrTx, tenant: TenantContext) {
     .from(salesReps)
     .leftJoin(agentLocationLatest, eq(agentLocationLatest.salesRepId, salesReps.id))
     .leftJoin(agentWorkSessions, and(eq(agentWorkSessions.salesRepId, salesReps.id), eq(agentWorkSessions.status, "active")))
-    .where(and(eq(salesReps.companyId, tenant.company.id), eq(salesReps.isActive, true)))
+    .where(and(eq(salesReps.companyId, tenant.company.id), eq(salesReps.isActive, true), repIn(salesReps.id, salesRepIds)))
     .orderBy(asc(salesReps.name));
 
   const date = todayIso();
@@ -135,12 +139,12 @@ export async function supervisorAgentDetail(conn: DbOrTx, tenant: TenantContext,
 }
 
 /** Jonli xarita: `since` dan keyin yangilangan oxirgi joylar. */
-export async function supervisorLive(conn: DbOrTx, tenant: TenantContext, since: Date) {
+export async function supervisorLive(conn: DbOrTx, tenant: TenantContext, since: Date, salesRepIds: string[] | null = null) {
   return conn
     .select({ salesRepId: agentLocationLatest.salesRepId, name: salesReps.name, ...latestFields })
     .from(agentLocationLatest)
     .innerJoin(salesReps, eq(salesReps.id, agentLocationLatest.salesRepId))
-    .where(and(eq(agentLocationLatest.companyId, tenant.company.id), gt(agentLocationLatest.receivedAt, since)))
+    .where(and(eq(agentLocationLatest.companyId, tenant.company.id), gt(agentLocationLatest.receivedAt, since), repIn(agentLocationLatest.salesRepId, salesRepIds)))
     .orderBy(desc(agentLocationLatest.receivedAt));
 }
 
@@ -222,7 +226,7 @@ export async function agentLocationHistory(
 export async function locationEvents(
   conn: DbOrTx,
   tenant: TenantContext,
-  options: { date: string; type?: LocationEventType; salesRepId?: string; limit: number },
+  options: { date: string; type?: LocationEventType; salesRepId?: string; salesRepIds?: string[] | null; limit: number },
 ) {
   const { from, to } = dayRange(options.date);
   return conn
@@ -246,6 +250,7 @@ export async function locationEvents(
         lt(agentLocationEvents.occurredAt, to),
         options.type ? eq(agentLocationEvents.type, options.type) : undefined,
         options.salesRepId ? eq(agentLocationEvents.salesRepId, options.salesRepId) : undefined,
+        repIn(agentLocationEvents.salesRepId, options.salesRepIds),
       ),
     )
     .orderBy(desc(agentLocationEvents.occurredAt))

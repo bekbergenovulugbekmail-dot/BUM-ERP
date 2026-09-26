@@ -88,7 +88,6 @@ import { authOf, requireAuth } from "../auth/guard.js";
 import { SESSION_COOKIE } from "../auth/session.js";
 import { COMPANY_CONTEXT_QUERY, companyKeyFrom } from "../company/company-context.js";
 import { effectivePermissions, requirePermission, requireTenant, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
-import { effectiveScopes, isResponsibleOnly, responsibleDeliveryAgentIds } from "../company/responsibility.service.js";
 import { recipientCandidates } from "../sales-agent/policy.service.js";
 import { agentCashSummary, handoverAgentCash } from "./agent-cash.service.js";
 import { notifyCustomerPaymentReceived } from "../telegram/notify.service.js";
@@ -150,6 +149,7 @@ import {
   recordDeliveryLocations,
   startDeliverySession,
 } from "./tracking.service.js";
+import { assertAgentInScope, assertOrdersInScope, assertTasksInScope, deliveryScope, type DeliveryScope } from "./scope.js";
 
 // ─── Sxemalar ────────────────────────────────────────────────────────────────
 
@@ -396,14 +396,35 @@ function writeTenantWith<T>(req: FastifyRequest, permission: Permission, fn: (tx
   });
 }
 
+/** "Mas'ul bo'lganlari" chegarasi (`scope.ts`): yoqilmagan bo'lsa `null`. */
+function deliveryScopeFor(tenant: TenantContext): Promise<DeliveryScope> {
+  return deliveryScope(db, tenant);
+}
+
 /**
- * "Mas'ul bo'lganlari" chegarasi yoqilgan bo'lsa — foydalanuvchining yetkazuvchi profillari,
- * aks holda `null` (chegara yo'q).
+ * Chegarali xodim uchun YAGONA server qo'riqchisi — har bir menejer endpointi (ko'rish ham, o'zgartirish ham):
+ *   /tasks/:taskId…      — yetkazma chegarada bo'lishi shart,
+ *   /agents/:agentId…    — yetkazuvchi chegarada bo'lishi shart,
+ *   body.deliveryAgentId — biriktiriladigan yetkazuvchi chegarada, body.taskIds / body.orderIds — chegarada.
+ * Aks holda TOPILMADI (mavjudligi oshkor bo'lmaydi). UI'da tugmani yashirish yetarli emas — shu yerda to'xtatiladi.
  */
-async function deliveryScopeFor(tenant: TenantContext): Promise<string[] | null> {
-  const scopes = await effectiveScopes(db, tenant);
-  if (!isResponsibleOnly(scopes, "delivery.view")) return null;
-  return responsibleDeliveryAgentIds(db, tenant);
+async function enforceDeliveryScope(req: FastifyRequest) {
+  // `routeOptions.url` — to'liq yo'l (prefiks bilan): /api/delivery/...
+  const url = (req.routeOptions.url ?? "").replace(/^\/api\/delivery/, "");
+  if (url.startsWith("/agent/")) return; // yetkazuvchining o'z ish joyi — o'z konteksti bilan
+  const params = (req.params ?? {}) as { taskId?: string; agentId?: string };
+  const body = (req.body && typeof req.body === "object" ? req.body : {}) as { deliveryAgentId?: unknown; taskIds?: unknown; orderIds?: unknown };
+  const touches = params.taskId || params.agentId || typeof body.deliveryAgentId === "string" || Array.isArray(body.taskIds) || Array.isArray(body.orderIds);
+  if (!touches) return;
+  const tenant = await requireTenant(db, authOf(req).user);
+  const scope = await deliveryScopeFor(tenant);
+  if (!scope) return;
+  const ids = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && /^[0-9a-f-]{36}$/i.test(item)) : []);
+  if (params.taskId) await assertTasksInScope(db, tenant.company.id, scope, [params.taskId]);
+  if (params.agentId) assertAgentInScope(scope, params.agentId);
+  if (typeof body.deliveryAgentId === "string") assertAgentInScope(scope, body.deliveryAgentId);
+  await assertTasksInScope(db, tenant.company.id, scope, ids(body.taskIds));
+  await assertOrdersInScope(db, tenant.company.id, scope, ids(body.orderIds));
 }
 
 async function readAgent(req: FastifyRequest): Promise<{ context: DeliveryAgentContext; permissions: Permission[] }> {
@@ -456,6 +477,7 @@ async function agentPermissions(context: DeliveryAgentContext) {
 
 export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", requireAuth);
+  app.addHook("preHandler", enforceDeliveryScope);
 
   // ─── Siyosat ─────────────────────────────────────────────────────────────
 
@@ -482,7 +504,7 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   app.get("/agents", async (req) => {
     const query = agentsQuery.parse(req.query);
     const tenant = await readTenantWith(req, "delivery.view");
-    return { agents: await listDeliveryAgents(db, tenant, query) };
+    return { agents: await listDeliveryAgents(db, tenant, { ...query, scope: await deliveryScopeFor(tenant) }) };
   });
 
   app.get("/agents/supervisors", async (req) => {
@@ -499,7 +521,7 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/agents/live", async (req) => {
     const tenant = await readTenantWith(req, "delivery.view_location");
-    return { agents: await deliveryLive(db, tenant), serverTime: new Date() };
+    return { agents: await deliveryLive(db, tenant, new Date(), await deliveryScopeFor(tenant)), serverTime: new Date() };
   });
 
   app.patch("/agents/:agentId", async (req) => {
@@ -542,13 +564,13 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   app.get("/dashboard", async (req) => {
     const { date } = dateQuery.parse(req.query);
     const tenant = await readTenantWith(req, "delivery.view");
-    return { dashboard: await supervisorDashboard(db, tenant, date) };
+    return { dashboard: await supervisorDashboard(db, tenant, date, await deliveryScopeFor(tenant)) };
   });
 
   app.get("/reports", async (req) => {
     const query = reportQuery.parse(req.query);
     const tenant = await readTenantWith(req, "delivery.view_reports");
-    return { report: await supervisorReport(db, tenant, { from: query.from, to: query.to, deliveryAgentId: query.agentId }) };
+    return { report: await supervisorReport(db, tenant, { from: query.from, to: query.to, deliveryAgentId: query.agentId, scope: await deliveryScopeFor(tenant) }) };
   });
 
   // ─── Yetkazmalar ─────────────────────────────────────────────────────────
@@ -556,7 +578,7 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   app.get("/ready-orders", async (req) => {
     const query = readyQuery.parse(req.query);
     const tenant = await readTenantWith(req, "delivery.manage");
-    return { orders: await readyOrdersForDelivery(db, tenant, query) };
+    return { orders: await readyOrdersForDelivery(db, tenant, { ...query, scope: await deliveryScopeFor(tenant) }) };
   });
 
   /**
@@ -659,9 +681,8 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   app.get("/tasks", async (req) => {
     const query = tasksQuery.parse(req.query);
     const tenant = await readTenantWith(req, "delivery.view");
-    const responsibleAgentIds = await deliveryScopeFor(tenant);
     return listDeliveryTasks(db, tenant, {
-      ...(responsibleAgentIds ? { responsibleAgentIds } : {}),
+      scope: await deliveryScopeFor(tenant),
       dateFrom: query.dateFrom,
       dateTo: query.dateTo,
       statuses: query.status,
@@ -693,13 +714,8 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   app.get("/tasks/:taskId", async (req) => {
     const { taskId } = taskParams.parse(req.params);
     const tenant = await readTenantWith(req, "delivery.view");
-    const task = await getDeliveryTask(db, tenant.company.id, taskId, { kind: "manager" });
-    // Chegara yoqilgan bo'lsa begona yetkazma TOPILMADI bo'lib qaytadi (mavjudligi oshkor bo'lmaydi)
-    const responsibleAgentIds = await deliveryScopeFor(tenant);
-    if (responsibleAgentIds && !responsibleAgentIds.includes(task.deliveryAgentId ?? "")) {
-      throw notFound("Yetkazma topilmadi");
-    }
-    return { task };
+    // Chegara yoqilgan bo'lsa begona yetkazma TOPILMADI (`enforceDeliveryScope` — so'rov boshida)
+    return { task: await getDeliveryTask(db, tenant.company.id, taskId, { kind: "manager" }) };
   });
 
   app.get("/tasks/:taskId/proofs/:proofId", async (req, reply) => {
@@ -832,6 +848,11 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
       message: "Yetkazma takrorlangan",
     });
 
+  // Avtomatik biriktirish butun kompaniya yetkazmalarini taqsimlaydi — chegarali xodimga yopiq (qo'lda biriktiradi)
+  const assertCompanyWideAssign = async (tenant: TenantContext) => {
+    if (await deliveryScopeFor(tenant)) throw forbidden("Avtomatik biriktirish butun kompaniya bo'yicha — mas'ul chegarali xodim qo'lda biriktiradi");
+  };
+
   const assertAutoAssign = (policy: DeliveryPolicy, date: string) => {
     if (!policy.autoAssign.enabled) {
       throw new AppError("CONFLICT", "Avtomatik biriktirish siyosatda o'chirilgan", { reason: "auto_assign_disabled" });
@@ -842,6 +863,7 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   app.post("/auto-assign/preview", async (req) => {
     const body = autoAssignPreviewBody.parse(req.body);
     const tenant = await readTenantWith(req, "delivery.assign");
+    await assertCompanyWideAssign(tenant);
     const policy = await getDeliveryPolicy(db, tenant.company.id);
     assertAutoAssign(policy, body.date);
     return { plan: await planAutoAssign(db, tenant.company.id, policy, body) };
@@ -850,6 +872,7 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
   app.post("/auto-assign", async (req) => {
     const body = autoAssignApplyBody.parse(req.body);
     const result = await writeTenantWith(req, "delivery.assign", async (tx, tenant) => {
+      await assertCompanyWideAssign(tenant);
       const policy = await getDeliveryPolicy(tx, tenant.company.id);
       assertAutoAssign(policy, body.date);
       return applyAutoAssign(tx, tenant, policy, body, requestMeta(req), "manual");
@@ -907,7 +930,7 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/dispatch", async (req) => {
     const tenant = await readTenantWith(req, "delivery.manage");
-    return dispatchBoard(db, tenant);
+    return dispatchBoard(db, tenant, await deliveryScopeFor(tenant));
   });
 
   app.post("/dispatch/assign", async (req) => {

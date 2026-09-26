@@ -10,6 +10,7 @@
  *   GET    /stock/products/:productId                     warehouse.view
  *   GET    /stock/movements (?warehouseId=&productId=&type=&limit=&cursor=)   warehouse.view
  *   POST   /stock/movements                               receive → warehouse.receive; boshqalar → warehouse.manage
+ *   POST   /stock/import (dryRun → preview)               warehouse.receive (Excel qoldiq kirimi)
  *   POST   /stock/transfers                               warehouse.transfer
  *   GET    /counts (?warehouseId=&status=)                              warehouse.view
  *   GET    /counts/:countId (?search=&limit=)                          warehouse.view
@@ -54,6 +55,7 @@ import {
   warehouseStats,
 } from "./stock.service.js";
 import { createWarehouse, getWarehouse, listWarehouses, updateWarehouse } from "./warehouses.service.js";
+import { importStock } from "./stock-import.service.js";
 import { allocateBackorders, listBackorders } from "./backorders.service.js";
 
 const nullableText = (max: number) =>
@@ -169,6 +171,17 @@ const allocateBody = z.strictObject({
   warehouseId: z.uuid(),
   /** Berilmasa — shu ombordagi barcha ochiq backorder mahsulotlari. */
   productIds: z.array(z.uuid()).min(1).max(200).optional(),
+});
+
+const cell = z.union([z.string().max(200), z.number()]).nullable().optional();
+const stockImportBody = z.strictObject({
+  warehouseId: z.uuid(),
+  importId: z.string().trim().min(8).max(100).optional(),
+  dryRun: z.boolean().optional(),
+  rows: z
+    .array(z.object({ sku: cell, barcode: cell, name: cell, unit: cell, warehouse: cell, quantity: z.union([z.string().max(40), z.number()]), costPrice: cell, salesPrice: cell }))
+    .min(1)
+    .max(2000),
 });
 
 async function readTenant(req: FastifyRequest, permission?: Permission): Promise<TenantContext> {
@@ -298,6 +311,12 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
     );
     reply.status(201);
     return result;
+  });
+
+  // Excel'dan qoldiq kirimi: dryRun — preview (hech narsa yozilmaydi), aks holda hammasi yoki hech narsa
+  app.post("/stock/import", async (req) => {
+    const body = stockImportBody.parse(req.body);
+    return writeInTenant(req, ["warehouse.receive"], (tx, tenant) => importStock(tx, tenant, body, requestMeta(req)));
   });
 
   app.post("/stock/transfers", async (req, reply) => {

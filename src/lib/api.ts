@@ -6,6 +6,8 @@
  * - himoyalangan so'rov 401 qaytarsa `UNAUTHENTICATED_EVENT` — sessiya tugagan, login sahifasiga o'tiladi
  * - `VITE_API_URL` bo'sh bo'lsa so'rovlar shu domenga ketadi (dev'da Vite proxy, prod'da bir domen)
  */
+import { ACT_AS_HEADER, actAsHeaderFor } from "./act-as.ts";
+
 const BASE_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 
 export const UNAUTHENTICATED_EVENT = "bum:unauthenticated";
@@ -90,6 +92,9 @@ async function send(method: string, path: string, options: RequestOptions): Prom
   if (company) headers[COMPANY_HEADER] = company;
   // Qurilma identifikatori — yangi qurilmadan kirishni egasi tasdiqlashi uchun (sir emas)
   headers["x-device-id"] = deviceId();
+  // Supervayzer agent nomidan ishlayotgan bo'lsa (faqat agent ish joyi API'si) — ruxsat serverda tekshiriladi
+  const actingFor = actAsHeaderFor(path);
+  if (actingFor) headers[ACT_AS_HEADER] = actingFor;
   try {
     response = await fetch(buildUrl(path, options.query), {
       method,

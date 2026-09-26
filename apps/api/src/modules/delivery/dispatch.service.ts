@@ -16,15 +16,16 @@ import type { RequestMeta } from "../../shared/audit.js";
 import type { TenantContext } from "../company/tenant.js";
 import { deliveryAudit } from "./task.repo.js";
 import { assignDeliveryTask, createDeliveryTask, readyOrdersForDelivery, taskListQuery } from "./tasks.service.js";
+import { taskScopeCondition, type DeliveryScope } from "./scope.js";
 
 export const DISPATCH_LIMIT = 500;
 export const DISPATCH_ASSIGN_MAX = 200;
 
-export async function dispatchBoard(conn: DbOrTx, tenant: TenantContext) {
+export async function dispatchBoard(conn: DbOrTx, tenant: TenantContext, scope: DeliveryScope = null) {
   const companyId = tenant.company.id;
-  const orders = await readyOrdersForDelivery(conn, tenant, { limit: DISPATCH_LIMIT });
+  const orders = await readyOrdersForDelivery(conn, tenant, { limit: DISPATCH_LIMIT, scope });
   const tasks = await taskListQuery(conn)
-    .where(and(eq(deliveryTasks.companyId, companyId), isNull(deliveryTasks.deliveryAgentId), eq(deliveryTasks.status, "ready")))
+    .where(and(eq(deliveryTasks.companyId, companyId), isNull(deliveryTasks.deliveryAgentId), eq(deliveryTasks.status, "ready"), taskScopeCondition(scope)))
     .orderBy(asc(deliveryTasks.scheduledDate), asc(deliveryTasks.createdAt))
     .limit(DISPATCH_LIMIT);
 

@@ -9,9 +9,10 @@
  * Biriktirishlar MAVJUD jadvallardan o'qiladi — parallel "assignment" jadvali yaratilmagan:
  *   agent  → `sales_reps` → `distribution_routes` → `route_customers` → `customers`
  *   kuryer → `delivery_agents` → `delivery_tasks`
+ *   supervayzer → o'zi bog'langan profil + `supervisor_user_id` = o'zi bo'lgan agentlar va yetkazuvchilar (jamoasi)
  */
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
-import { isResponsibleScopable, sanitizeRoleScopes, type Permission, type RoleScopes } from "@bum/shared";
+import { isResponsibleScopable, notFound, sanitizeRoleScopes, type Permission, type RoleScopes } from "@bum/shared";
 import { distributionRoutes, routeCustomers, salesReps } from "../../db/schema/crm.js";
 import { deliveryAgents } from "../../db/schema/delivery.js";
 import { roles } from "../../db/schema/platform.js";
@@ -48,10 +49,7 @@ export function isResponsibleOnly(scopes: RoleScopes, permission: Permission): b
  */
 export async function responsibleCustomerIds(conn: DbOrTx, tenant: TenantContext): Promise<string[]> {
   const companyId = tenant.company.id;
-  const reps = await conn
-    .select({ id: salesReps.id })
-    .from(salesReps)
-    .where(and(eq(salesReps.companyId, companyId), eq(salesReps.userId, tenant.user.id)));
+  const reps = (await responsibleSalesRepIds(conn, tenant)).map((id) => ({ id }));
   if (reps.length === 0) return [];
 
   const routes = await conn
@@ -77,11 +75,43 @@ export async function responsibleCustomerIds(conn: DbOrTx, tenant: TenantContext
   return [...new Set(rows.map((row) => row.customerId))];
 }
 
-/** Foydalanuvchining yetkazuvchi profillari — yetkazmalarni chegaralash uchun. */
+/**
+ * Foydalanuvchi mas'ul savdo agentlari: o'zi bog'langan agent profili va u SUPERVAYZERI bo'lgan agentlar
+ * (`sales_reps.supervisor_user_id`). Faqat shu kompaniya ichida.
+ */
+export async function responsibleSalesRepIds(conn: DbOrTx, tenant: TenantContext): Promise<string[]> {
+  const rows = await conn
+    .select({ id: salesReps.id })
+    .from(salesReps)
+    .where(and(eq(salesReps.companyId, tenant.company.id), or(eq(salesReps.userId, tenant.user.id), eq(salesReps.supervisorUserId, tenant.user.id))));
+  return rows.map((row) => row.id);
+}
+
+/** Foydalanuvchining yetkazuvchi profillari va u supervayzeri bo'lgan yetkazuvchilar — yetkazmalarni chegaralash uchun. */
 export async function responsibleDeliveryAgentIds(conn: DbOrTx, tenant: TenantContext): Promise<string[]> {
   const rows = await conn
     .select({ id: deliveryAgents.id })
     .from(deliveryAgents)
-    .where(and(eq(deliveryAgents.companyId, tenant.company.id), eq(deliveryAgents.userId, tenant.user.id)));
+    .where(
+      and(
+        eq(deliveryAgents.companyId, tenant.company.id),
+        or(eq(deliveryAgents.userId, tenant.user.id), eq(deliveryAgents.supervisorUserId, tenant.user.id)),
+      ),
+    );
   return rows.map((row) => row.id);
+}
+
+/**
+ * Supervayzer chegarasi (`sales_agent.supervise` — "faqat mas'ul bo'lganlari"): jamoadagi agentlar ro'yxati,
+ * chegara bo'lmasa `null` (butun kompaniya).
+ */
+export async function supervisedSalesRepIds(conn: DbOrTx, tenant: TenantContext): Promise<string[] | null> {
+  const scopes = await effectiveScopes(conn, tenant);
+  if (!isResponsibleOnly(scopes, "sales_agent.supervise")) return null;
+  return responsibleSalesRepIds(conn, tenant);
+}
+
+/** Chegara bor va agent unga kirmasa — TOPILMADI (mavjudligi oshkor bo'lmaydi). */
+export function assertRepInScope(scope: string[] | null, salesRepId: string | null | undefined) {
+  if (scope && (!salesRepId || !scope.includes(salesRepId))) throw notFound("Agent topilmadi");
 }

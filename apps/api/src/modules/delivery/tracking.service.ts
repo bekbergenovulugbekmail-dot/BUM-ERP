@@ -39,6 +39,7 @@ import type { DeliveryAgentContext } from "./agent-context.js";
 import { getDeliveryPolicy } from "./policy.service.js";
 import { publishDeliveryEvent } from "./realtime-bus.js";
 import { localDate, localDayStart } from "./task.repo.js";
+import { agentScopeCondition, type DeliveryScope } from "./scope.js";
 
 const REQUESTS_PER_MINUTE = 12;
 /** Oflayn yig'ilgan nuqtalar shu vaqtgacha qabul qilinadi (joriy sessiya ichida). */
@@ -222,7 +223,7 @@ export async function recordDeliveryLocations(tx: Tx, context: DeliveryAgentCont
 // ─── Supervayzer ─────────────────────────────────────────────────────────────
 
 /** Faol yetkazuvchilar: joriy joy, aniqlik, oxirgi yangilanish, ish sessiyasi, yo'ldagi yetkazma, bugungi progress. */
-export async function deliveryLive(conn: DbOrTx, tenant: TenantContext, now = new Date()) {
+export async function deliveryLive(conn: DbOrTx, tenant: TenantContext, now = new Date(), scope: DeliveryScope = null) {
   const companyId = tenant.company.id;
   const rows = await conn
     .select({
@@ -246,7 +247,7 @@ export async function deliveryLive(conn: DbOrTx, tenant: TenantContext, now = ne
     .innerJoin(users, eq(users.id, deliveryAgents.userId))
     .leftJoin(deliveryLocationLatest, eq(deliveryLocationLatest.deliveryAgentId, deliveryAgents.id))
     .leftJoin(deliveryWorkSessions, and(eq(deliveryWorkSessions.deliveryAgentId, deliveryAgents.id), eq(deliveryWorkSessions.status, "active")))
-    .where(and(eq(deliveryAgents.companyId, companyId), eq(deliveryAgents.isActive, true)))
+    .where(and(eq(deliveryAgents.companyId, companyId), eq(deliveryAgents.isActive, true), agentScopeCondition(scope)))
     .orderBy(asc(users.name));
 
   const today = localDate(now);

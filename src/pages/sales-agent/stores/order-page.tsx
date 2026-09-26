@@ -21,6 +21,7 @@ import { todayLocal } from "@/pages/sales/_lib/types.ts";
 import { originParams, useAgentLocation } from "../_lib/agent-location.ts";
 import { clearLocalDraft, initialDraft, stampDraft, writeLocalDraft, type DraftLine, type LocalDraft } from "../_lib/order-draft.ts";
 import { freshPosition, visitErrorMessage } from "../_lib/visit-api.ts";
+import { useActAs } from "@/lib/act-as.ts";
 import {
   formatDistance,
   num,
@@ -248,6 +249,10 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
   const [brandId, setBrandId] = useState(ALL);
   const [offset, setOffset] = useState(0);
   const [confirming, setConfirming] = useState(false);
+  // Supervayzer agent nomidan: GPS/tashrif/ish vaqti sharti bajarilmasa — sabab bilan (server alohida audit yozadi)
+  const acting = useActAs();
+  const [overrideNeeded, setOverrideNeeded] = useState<string | null>(null);
+  const [overrideReason, setOverrideReason] = useState("");
   const [openProduct, setOpenProduct] = useState<RowProduct | null>(null);
 
   const catalog = useApiQuery<{ products: CatalogProduct[]; nextOffset: number | null }>(
@@ -293,7 +298,8 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
     { invalidate: false },
   );
   const submit = useApiMutation(
-    async (orderId: string) => api.post<{ order: AgentOrder }>(`/api/sales-agent/orders/${orderId}/submit`, await freshPosition()),
+    async ({ orderId, reason }: { orderId: string; reason?: string }) =>
+      api.post<{ order: AgentOrder }>(`/api/sales-agent/orders/${orderId}/submit`, { ...(await freshPosition()), ...(reason ? { overrideReason: reason } : {}) }),
     { invalidate: ["/api/sales-agent"] },
   );
 
@@ -326,13 +332,19 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
   const handleSubmit = async () => {
     if (!saved) return;
     try {
-      const { order } = await submit.mutateAsync(saved.id);
+      const reason = overrideNeeded && overrideReason.trim().length >= 5 ? overrideReason.trim() : undefined;
+      const { order } = await submit.mutateAsync({ orderId: saved.id, reason });
       clearLocalDraft(customerId);
       setConfirming(false);
       toast.success(order.approvalStatus === "pending" ? t("order.pending_approval") : t("order.submitted", { number: order.number }));
       // Tashrif buyurtma bilan yakunlandi — bugungi marshrutga qaytish
       navigate(`/${lng}/sales-agent/sales`);
     } catch (err) {
+      const details = err instanceof ApiError ? (err.details as { overrideAvailable?: boolean } | undefined) : undefined;
+      if (acting && details?.overrideAvailable) {
+        setOverrideNeeded(errorMessage(err));
+        return;
+      }
       toast.error(visitErrorMessage(err, t, "order"));
     }
   };
@@ -619,11 +631,18 @@ function OrderEditor({ customerId, serverDraft }: { customerId: string; serverDr
               <SummaryRow label={t("order.total")} value={money(saved.totalAmount)} strong />
             </div>
           )}
+          {acting && overrideNeeded && (
+            <div className="space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm" data-testid="act-as-override">
+              <p className="text-amber-800 dark:text-amber-300">{overrideNeeded}</p>
+              <Label htmlFor="override-reason">Sabab (supervayzer, alohida auditga yoziladi)</Label>
+              <Textarea id="override-reason" rows={2} maxLength={500} value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder="Masalan: mijoz telefon orqali buyurtma berdi" />
+            </div>
+          )}
           <DialogFooter className="gap-2">
             <Button variant="secondary" className="h-12" onClick={() => setConfirming(false)}>
               {t("visit.cancel")}
             </Button>
-            <Button className="h-12" disabled={submit.isPending} onClick={() => void handleSubmit()}>
+            <Button className="h-12" disabled={submit.isPending || Boolean(overrideNeeded && overrideReason.trim().length < 5)} onClick={() => void handleSubmit()}>
               {submit.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t("order.confirm")}
             </Button>

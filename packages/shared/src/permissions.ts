@@ -469,11 +469,17 @@ export const LEGACY_PERMISSION_ALIASES: Record<string, Permission> = {
  * Mas'uliyat mavjud biriktirishlardan o'qiladi, yangi jadval yaratilmaydi:
  *   agent  → sales_reps → distribution_routes → route_customers → customers
  *   kuryer → delivery_agents → delivery_tasks
+ *   supervayzer → sales_reps / delivery_agents (`supervisor_user_id`) → yuqoridagi zanjir
  */
 export const RESPONSIBLE_SCOPED_PERMISSIONS = [
   "sales.view",
   "crm.view",
   "delivery.view",
+  /**
+   * Supervayzer: faqat O'Z jamoasi — o'zi bog'langan agent va `sales_reps.supervisor_user_id` = o'zi bo'lgan agentlar
+   * (monitoring, tashriflar, buyurtmalarni tasdiqlash, agent nomidan buyurtma, marshrutlar).
+   */
+  "sales_agent.supervise",
 ] as const satisfies readonly Permission[];
 
 export type ResponsibleScopedPermission = (typeof RESPONSIBLE_SCOPED_PERMISSIONS)[number];

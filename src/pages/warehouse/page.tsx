@@ -4,7 +4,7 @@ import {
   Warehouse, PackagePlus, PackageMinus, ArrowLeftRight,
   ClipboardList, TrendingUp, TrendingDown, AlertTriangle, PackageSearch,
   BarChart3, Search, SlidersHorizontal, History, ScanLine,
-  Boxes, FileSpreadsheet,
+  Boxes, FileSpreadsheet, FileText, Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button.tsx";
@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { cn } from "@/lib/utils.ts";
 import { useApiQuery } from "@/lib/query.ts";
 import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
+import { useAuth } from "@/hooks/use-auth.ts";
 import { api, errorMessage } from "@/lib/api.ts";
 import { downloadBlob } from "@/components/csv/xlsx.ts";
 import { localIsoDate } from "./_lib/dates.ts";
@@ -30,6 +31,7 @@ import MovementHistory from "./_components/movement-history.tsx";
 import InventoryCountSection from "./_components/inventory-count-section.tsx";
 import CatalogSection from "./_components/catalog-section.tsx";
 import BackordersSection from "./_components/backorders-section.tsx";
+import StockImportDialog from "./_components/stock-import-dialog.tsx";
 import BarcodeScanner from "@/components/barcode-scanner.tsx";
 import { toNumber } from "@/pages/products/_lib/types.ts";
 import type { WarehouseItem, WarehouseStats } from "./_lib/types.ts";
@@ -47,6 +49,9 @@ export default function WarehousePage() {
   }>({ open: false, type: "receive" });
   const [transferOpen, setTransferOpen] = useState(false);
   const [warehouseScannerOpen, setWarehouseScannerOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const { user } = useAuth();
 
   // Asosiy ombor kompaniya yaratilganda serverda ochiladi (seedDefault kerak emas);
   // ro'yxat a'zoning ruxsat etilgan omborlari bilan cheklangan
@@ -101,6 +106,40 @@ export default function WarehousePage() {
       toast.error(errorMessage(error));
     } finally {
       setExporting(null);
+    }
+  };
+
+  /**
+   * A4 hisobot (tanlangan ombor, qoldig'i bor mahsulotlar): qoldiq va AVCO tannarx serverdan (`/stock/export`),
+   * tannarx ruxsatsiz — tannarx/qiymat/marja ustunlari chiqmaydi.
+   */
+  const handleA4Report = async () => {
+    if (!selectedWarehouseId) return;
+    setPrinting(true);
+    try {
+      const data = await api.get<{ rows: StockExportRow[]; costVisible: boolean }>(`/api/inventory/stock/export?warehouseId=${selectedWarehouseId}&inStockOnly=true`);
+      if (data.rows.length === 0) {
+        toast.error("Omborda qoldiq yo'q");
+        return;
+      }
+      const { generateStockReportPDF } = await import("@/lib/pdf/stock-report-pdf.ts");
+      await generateStockReportPDF(data.rows, {
+        company: {
+          name: company?.name ?? "BUM ERP",
+          legalName: company?.legalName ?? undefined,
+          taxId: company?.taxId ?? undefined,
+          address: company?.address ?? undefined,
+          phone: company?.phone ?? undefined,
+        },
+        warehouseName: warehouses?.find((w) => w.id === selectedWarehouseId)?.name ?? "Ombor",
+        costVisible: data.costVisible,
+        generatedBy: user?.name ?? "—",
+        currency: company?.currency ?? "so'm",
+      });
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setPrinting(false);
     }
   };
 
@@ -161,6 +200,14 @@ export default function WarehousePage() {
           <Button variant="outline" size="sm" data-testid="stock-export-quantities" disabled={exporting !== null} onClick={() => void handleExport("quantities")}>
             <FileSpreadsheet className="h-4 w-4 mr-1.5" /> {exporting === "quantities" ? "Tayyorlanmoqda…" : "Ombordagi miqdori bilan eksport"}
           </Button>
+          <Button variant="outline" size="sm" data-testid="stock-a4-report" disabled={!selectedWarehouseId || printing} onClick={() => void handleA4Report()}>
+            <FileText className="h-4 w-4 mr-1.5" /> {printing ? "Tayyorlanmoqda…" : "A4 hisobot"}
+          </Button>
+          {canReceive && (
+            <Button variant="outline" size="sm" data-testid="stock-import" disabled={!selectedWarehouseId} onClick={() => setImportOpen(true)}>
+              <Upload className="h-4 w-4 mr-1.5" /> Excel import
+            </Button>
+          )}
           {canTransfer && (warehouses?.length ?? 0) > 1 && (
             <Button variant="secondary" size="sm" disabled={!selectedWarehouseId} onClick={() => setTransferOpen(true)}>
               <ArrowLeftRight className="h-4 w-4 mr-1.5" /> Ko'chirish
@@ -341,6 +388,14 @@ export default function WarehousePage() {
           fromWarehouseId={selectedWarehouseId}
           warehouses={warehouses ?? []}
           onClose={() => setTransferOpen(false)}
+        />
+      )}
+
+      {importOpen && selectedWarehouseId && (
+        <StockImportDialog
+          warehouseId={selectedWarehouseId}
+          warehouseName={warehouses?.find((w) => w.id === selectedWarehouseId)?.name ?? "Ombor"}
+          onClose={() => setImportOpen(false)}
         />
       )}
 

@@ -9,9 +9,12 @@ import WorkSessionCard from "../_components/work-session-card.tsx";
 import StoreCard from "../_components/store-card.tsx";
 import { originParams, useAgentLocation } from "../_lib/agent-location.ts";
 import type { AgentMe, AgentToday, AgentVisit } from "../_lib/types.ts";
+import { useActAs } from "@/lib/act-as.ts";
 
 /** Sotuv: bugungi marshrut va do'konlar (marshrut tartibida). */
 export default function AgentSalesPage() {
+  // Supervayzer agent nomidan: GPS, tashrif, ish vaqti va naqd — faqat agentning o'zida (server ham bloklaydi)
+  const acting = Boolean(useActAs());
   const { t } = useTranslation("agent");
   const { lng = "uz" } = useParams<{ lng: string }>();
   const { company } = useOutletContext<AgentMe>();
@@ -26,7 +29,7 @@ export default function AgentSalesPage() {
 
   return (
     <div className="p-4 space-y-4">
-      <WorkSessionCard variant="compact" />
+      {!acting && <WorkSessionCard variant="compact" />}
       <LocationBanner location={position} />
       {openVisit && (
         <Link

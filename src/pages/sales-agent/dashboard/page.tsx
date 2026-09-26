@@ -8,6 +8,7 @@ import { useApiQuery } from "@/lib/query.ts";
 import WorkSessionCard from "../_components/work-session-card.tsx";
 import { AgentCashCard } from "../_components/payment-panel.tsx";
 import { num, type AgentDashboard, type AgentMe } from "../_lib/types.ts";
+import { useActAs } from "@/lib/act-as.ts";
 
 function Progress({ value }: { value: number }) {
   return (
@@ -22,6 +23,8 @@ function Progress({ value }: { value: number }) {
  * (bajarilgan, qolgan, kuniga kerak) va professional ko'rsatkichlar (oy bo'yicha o'rin, eng yaxshi kun). Hisob serverda.
  */
 export default function AgentDashboardPage() {
+  // Supervayzer agent nomidan: GPS, tashrif, ish vaqti va naqd — faqat agentning o'zida (server ham bloklaydi)
+  const acting = Boolean(useActAs());
   const { t } = useTranslation("agent");
   const { lng = "uz" } = useParams<{ lng: string }>();
   const { agent, company } = useOutletContext<AgentMe>();
@@ -38,7 +41,7 @@ export default function AgentDashboardPage() {
         </p>
       </div>
 
-      <WorkSessionCard />
+      {!acting && <WorkSessionCard />}
 
       {!data ? (
         <div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}</div>

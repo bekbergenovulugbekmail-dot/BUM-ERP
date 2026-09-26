@@ -53,7 +53,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { forbidden, notFound, type Permission } from "@bum/shared";
+import { badRequest, forbidden, notFound, type Permission } from "@bum/shared";
 import { db } from "../../db/client.js";
 import { products } from "../../db/schema/catalog.js";
 import { companies } from "../../db/schema/platform.js";
@@ -67,7 +67,7 @@ import {
 } from "../../db/schema/sales-agent.js";
 import { loadProductImage } from "../files/files.service.js";
 import { sendStoredImage } from "../files/routes.js";
-import { withTransaction, type Tx } from "../../db/transaction.js";
+import { withTransaction, type DbOrTx, type Tx } from "../../db/transaction.js";
 import { requestMeta } from "../../shared/audit.js";
 import { MAX_PAYMENT_PARTS } from "@bum/shared";
 import { moneySchema, percentSchema, qtySchema } from "../../shared/decimal.js";
@@ -83,7 +83,10 @@ import {
 } from "../company/tenant.js";
 import { VIEW_TTL } from "../files/files.service.js";
 import { todayIso } from "../finance/cash.service.js";
-import { requireAgent, type AgentContext } from "./agent-context.js";
+import { ACT_AS_HEADER, actingAgent, requireAgent, type AgentContext } from "./agent-context.js";
+import { assertRepInScope, supervisedSalesRepIds } from "../company/responsibility.service.js";
+import { deliveryScope } from "../delivery/scope.js";
+import { supervisorOrderChain, supervisorOverview } from "./supervisor-overview.service.js";
 import {
   agentCatalog,
   approveAgentOrder,
@@ -180,6 +183,12 @@ const locationFields = {
   recordedAt: z.iso.datetime({ offset: true }).transform((value) => new Date(value)),
 };
 const locationBody = z.strictObject({ ...locationFields, mocked: z.boolean().optional() });
+/**
+ * Buyurtmani yuborish. `overrideReason` — faqat supervayzer agent nomidan yuborganda: GPS/tashrif/ish vaqti sharti
+ * bajarilmasa (masalan, telefon orqali buyurtma) sabab bilan yuboriladi va alohida audit yoziladi. Joylashuv — haqiqiy
+ * qurilma joylashuvi (soxtalashtirilmaydi, masofa bilan saqlanadi).
+ */
+const submitBody = z.strictObject({ ...locationFields, mocked: z.boolean().optional(), overrideReason: z.string().trim().min(5).max(500).optional() });
 const sessionEndBody = z
   .strictObject({
     latitude: z.number().min(-90).max(90).optional(),
@@ -360,28 +369,62 @@ const promotionPatch = z.strictObject(promotionShape).partial();
 const originOf = (query: { lat?: number; lng?: number }): GeoPoint | null =>
   query.lat !== undefined && query.lng !== undefined ? { latitude: query.lat, longitude: query.lng } : null;
 
-async function readAgent(req: FastifyRequest): Promise<AgentContext> {
-  const tenant = await requireTenant(db, authOf(req).user);
-  await requirePermission(db, tenant, "sales_agent.use");
-  return requireAgent(db, tenant);
+/**
+ * AGENT NOMIDAN (supervayzer): `x-act-as-sales-rep` sarlavhasi bo'lsa — alohida sales engine EMAS, xuddi shu agent
+ * oqimi agent kontekstida ishlaydi, `user` esa supervayzer (audit, `created_by`). Faqat `actAs` belgilangan
+ * endpointlarda (do'konlar, katalog, buyurtma, hisobotlar); GPS, tashrif, ish vaqti, naqd pul — faqat agentning o'zi.
+ * Ruxsat `sales_agent.supervise` va jamoa chegarasi ("mas'ul bo'lganlari") SERVERDA tekshiriladi.
+ */
+type AgentAccess = { actAs?: boolean };
+
+async function resolveAgent(conn: DbOrTx, tenant: TenantContext, req: FastifyRequest, access: AgentAccess): Promise<AgentContext> {
+  const header = req.headers[ACT_AS_HEADER];
+  const salesRepId = typeof header === "string" ? header.trim() : "";
+  if (!salesRepId) {
+    await requirePermission(conn, tenant, "sales_agent.use");
+    return requireAgent(conn, tenant);
+  }
+  if (!access.actAs) {
+    throw forbidden("Bu amal agent nomidan bajarilmaydi — GPS, tashrif, ish vaqti va naqd pul faqat agentning o'zida");
+  }
+  if (!z.uuid().safeParse(salesRepId).success) throw badRequest("Agent identifikatori noto'g'ri");
+  await requirePermission(conn, tenant, "sales_agent.supervise");
+  assertRepInScope(await supervisedSalesRepIds(conn, tenant), salesRepId);
+  return actingAgent(conn, tenant, salesRepId);
 }
 
-function writeAgent<T>(req: FastifyRequest, fn: (tx: Tx, context: AgentContext) => Promise<T>): Promise<T> {
+async function readAgent(req: FastifyRequest, access: AgentAccess = {}): Promise<AgentContext> {
+  const tenant = await requireTenant(db, authOf(req).user);
+  return resolveAgent(db, tenant, req, access);
+}
+
+function writeAgent<T>(req: FastifyRequest, fn: (tx: Tx, context: AgentContext) => Promise<T>, access: AgentAccess = {}): Promise<T> {
   return withTransaction(async (tx) => {
     const tenant = await requireTenantForWrite(tx, authOf(req).user);
-    await requirePermission(tx, tenant, "sales_agent.use");
-    return fn(tx, await requireAgent(tx, tenant));
+    return fn(tx, await resolveAgent(tx, tenant, req, access));
   });
 }
 
-/** Agent amali qo'shimcha ruxsat bilan (masalan, mijozni tahrirlash). */
+/** Agent amali qo'shimcha ruxsat bilan (masalan, mijozni tahrirlash). Agent nomidan bajarilmaydi. */
 function writeAgentWith<T>(req: FastifyRequest, permission: Permission, fn: (tx: Tx, context: AgentContext) => Promise<T>): Promise<T> {
   return withTransaction(async (tx) => {
     const tenant = await requireTenantForWrite(tx, authOf(req).user);
-    await requirePermission(tx, tenant, "sales_agent.use");
+    const context = await resolveAgent(tx, tenant, req, {});
     await requirePermission(tx, tenant, permission);
-    return fn(tx, await requireAgent(tx, tenant));
+    return fn(tx, context);
   });
+}
+
+/** Jamoa chegarasi bo'lsa — tashrif jamoa agentiniki bo'lishi shart (aks holda TOPILMADI). */
+async function assertVisitInScope(tenant: TenantContext, visitId: string) {
+  const scope = await supervisedSalesRepIds(db, tenant);
+  if (!scope) return;
+  const [visit] = await db
+    .select({ salesRepId: agentVisits.salesRepId })
+    .from(agentVisits)
+    .where(and(eq(agentVisits.id, visitId), eq(agentVisits.companyId, tenant.company.id)))
+    .limit(1);
+  if (!visit || !scope.includes(visit.salesRepId)) throw notFound("Tashrif topilmadi");
 }
 
 async function readTenantWith(req: FastifyRequest, permission: Permission): Promise<TenantContext> {
@@ -426,7 +469,7 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
   // ─── Agent ish joyi ──────────────────────────────────────────────────────
 
   app.get("/me", async (req) => {
-    const context = await readAgent(req);
+    const context = await readAgent(req, { actAs: true });
     const [company] = await db
       .select({ id: companies.id, name: companies.name, currency: companies.currency })
       .from(companies)
@@ -437,7 +480,7 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/today", async (req) => {
     const query = originQuery.parse(req.query);
-    const context = await readAgent(req);
+    const context = await readAgent(req, { actAs: true });
     const today = await agentToday(db, context, originOf(query));
     const statuses = await storeVisitStatuses(db, context, today.stores.map((store) => store.id), today.date);
     return { ...today, stores: today.stores.map((store) => ({ ...store, visitStatus: statuses.get(store.id) ?? "waiting" })) };
@@ -445,13 +488,13 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/stores", async (req) => {
     const query = storesQuery.parse(req.query);
-    return { stores: await agentStores(db, await readAgent(req), { ...query, origin: originOf(query) }) };
+    return { stores: await agentStores(db, await readAgent(req, { actAs: true }), { ...query, origin: originOf(query) }) };
   });
 
   app.get("/stores/:customerId", async (req) => {
     const { customerId } = storeParams.parse(req.params);
     const query = originQuery.parse(req.query);
-    const context = await readAgent(req);
+    const context = await readAgent(req, { actAs: true });
     const store = await agentStore(db, context, customerId, originOf(query));
     return { store: { ...store, todayVisit: await latestStoreVisit(db, context, customerId) } };
   });
@@ -461,7 +504,7 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
   // kimda qancha borligi moliyada ko'rinib turadi.
 
   app.get("/cash", async (req) => {
-    const context = await readAgent(req);
+    const context = await readAgent(req, { actAs: true });
     return repCashSummary(db, context.company.id, context.agent.id);
   });
 
@@ -501,14 +544,14 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/debtors", async (req) => {
     const query = debtorsQuery.parse(req.query);
-    return { debtors: await agentDebtors(db, await readAgent(req), { filter: query.filter, origin: originOf(query) }) };
+    return { debtors: await agentDebtors(db, await readAgent(req, { actAs: true }), { filter: query.filter, origin: originOf(query) }) };
   });
 
   // ─── Mijozlar ────────────────────────────────────────────────────────────
 
   app.get("/customers/:customerId/history", async (req) => {
     const { customerId } = storeParams.parse(req.params);
-    return customerHistory(db, await readAgent(req), customerId);
+    return customerHistory(db, await readAgent(req, { actAs: true }), customerId);
   });
 
   app.patch("/customers/:customerId", async (req) => {
@@ -546,7 +589,7 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   // ─── Ish sessiyasi ───────────────────────────────────────────────────────
 
-  app.get("/work-session", async (req) => ({ session: await currentWorkSession(db, await readAgent(req)) }));
+  app.get("/work-session", async (req) => ({ session: await currentWorkSession(db, await readAgent(req, { actAs: true })) }));
 
   app.post("/work-session/start", async (req, reply) => {
     const body = locationBody.parse(req.body);
@@ -582,7 +625,7 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   // ─── Tashriflar ──────────────────────────────────────────────────────────
 
-  app.get("/visits/current", async (req) => ({ visit: await currentVisit(db, await readAgent(req)) }));
+  app.get("/visits/current", async (req) => ({ visit: await currentVisit(db, await readAgent(req, { actAs: true })) }));
 
   app.get("/visits", async (req) => {
     const { date } = dateQuery.parse(req.query);
@@ -648,18 +691,18 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/catalog", async (req) => {
     const query = catalogQuery.parse(req.query);
-    const context = await readAgent(req);
+    const context = await readAgent(req, { actAs: true });
     // Begona do'kon id'si bilan narx sizib chiqmasin — do'kon agentning marshrutida bo'lishi shart
     if (query.customerId) await accessibleStore(db, context, query.customerId);
     return agentCatalog(db, context, query, storageProvider.client);
   });
 
-  app.get("/catalog/filters", async (req) => catalogFilters(db, await readAgent(req)));
+  app.get("/catalog/filters", async (req) => catalogFilters(db, await readAgent(req, { actAs: true })));
 
   app.get("/catalog/:productId/image", async (req, reply) => {
     const { productId } = productParams.parse(req.params);
     // Saqlash (S3) sozlanmagan bo'lsa ham rasm bazadan beriladi — 503 faqat kalit saqlashda bo'lsa
-    const result = await catalogImageUrl(db, await readAgent(req), productId, storageProvider.client);
+    const result = await catalogImageUrl(db, await readAgent(req, { actAs: true }), productId, storageProvider.client);
     return result ?? storageUnavailable(reply);
   });
 
@@ -669,7 +712,7 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get("/catalog/:productId/image/content", async (req, reply) => {
     const { productId } = productParams.parse(req.params);
-    const context = await readAgent(req);
+    const context = await readAgent(req, { actAs: true });
     const [product] = await db
       .select({ id: products.id })
       .from(products)
@@ -683,24 +726,24 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/orders", async (req) => {
     const query = agentOrdersQuery.parse(req.query);
-    return { orders: await listAgentOrders(db, await readAgent(req), query) };
+    return { orders: await listAgentOrders(db, await readAgent(req, { actAs: true }), query) };
   });
 
   app.get("/orders/:orderId", async (req) => {
     const { orderId } = orderParams.parse(req.params);
-    return { order: await getAgentOrder(db, await readAgent(req), orderId) };
+    return { order: await getAgentOrder(db, await readAgent(req, { actAs: true }), orderId) };
   });
 
   app.put("/orders/drafts/:clientRequestId", async (req) => {
     const { clientRequestId } = draftParams.parse(req.params);
     const body = draftBody.parse(req.body);
-    return { order: await writeAgent(req, (tx, context) => saveAgentDraft(tx, context, clientRequestId, body, requestMeta(req))) };
+    return { order: await writeAgent(req, (tx, context) => saveAgentDraft(tx, context, clientRequestId, body, requestMeta(req)), { actAs: true }) };
   });
 
   app.post("/orders/:orderId/submit", async (req) => {
     const { orderId } = orderParams.parse(req.params);
-    const body = locationBody.parse(req.body);
-    const outcome = await writeAgent(req, (tx, context) => submitAgentOrder(tx, context, orderId, body, requestMeta(req)));
+    const body = submitBody.parse(req.body);
+    const outcome = await writeAgent(req, (tx, context) => submitAgentOrder(tx, context, orderId, body, requestMeta(req)), { actAs: true });
     if ("blocked" in outcome) throw outcome.blocked;
     return { order: outcome.order };
   });
@@ -708,7 +751,7 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
   app.post("/orders/:orderId/cancel", async (req) => {
     const { orderId } = orderParams.parse(req.params);
     const { reason } = cancelBody.parse(req.body ?? {});
-    return { order: await writeAgent(req, (tx, context) => cancelAgentOrder(tx, context, orderId, reason ?? null, requestMeta(req))) };
+    return { order: await writeAgent(req, (tx, context) => cancelAgentOrder(tx, context, orderId, reason ?? null, requestMeta(req)), { actAs: true }) };
   });
 
   // ─── Agentlar jamoasi ("Sotuv agenti qo'shish") ──────────────────────────
@@ -744,12 +787,12 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   // ─── Bosh sahifa va yangi mijozlar ───────────────────────────────────────
 
-  app.get("/dashboard", async (req) => agentDashboard(db, await readAgent(req)));
+  app.get("/dashboard", async (req) => agentDashboard(db, await readAgent(req, { actAs: true })));
 
   app.get("/reports", async (req) => {
     const query = reportQuery.parse(req.query);
     const today = todayIso();
-    return agentReport(db, await readAgent(req), { from: query.from ?? `${today.slice(0, 7)}-01`, to: query.to ?? today });
+    return agentReport(db, await readAgent(req, { actAs: true }), { from: query.from ?? `${today.slice(0, 7)}-01`, to: query.to ?? today });
   });
 
   app.get("/prospects", async (req) => ({ prospects: await listAgentProspects(db, await readAgent(req)) }));
@@ -791,7 +834,7 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/promotions", async (req) => {
     const { filter } = agentPromotionsQuery.parse(req.query);
-    return { promotions: await agentPromotions(db, await readAgent(req), filter) };
+    return { promotions: await agentPromotions(db, await readAgent(req, { actAs: true }), filter) };
   });
 
   app.get("/supervisor/promotions", async (req) => {
@@ -859,43 +902,72 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
 
   // ─── Supervayzer ─────────────────────────────────────────────────────────
 
-  app.get("/supervisor/agents", async (req) => ({
-    agents: await supervisorAgents(db, await readTenantWith(req, "sales_agent.location.view")),
-  }));
+  // "Mas'ul bo'lganlari" (`sales_agent.supervise`) yoqilgan supervayzer — faqat o'z jamoasi (serverda)
+  app.get("/supervisor/agents", async (req) => {
+    const tenant = await readTenantWith(req, "sales_agent.location.view");
+    return { agents: await supervisorAgents(db, tenant, await supervisedSalesRepIds(db, tenant)) };
+  });
 
   app.get("/supervisor/agents/:salesRepId", async (req) => {
     const { salesRepId } = historyParams.parse(req.params);
-    return supervisorAgentDetail(db, await readTenantWith(req, "sales_agent.location.view"), salesRepId);
+    const tenant = await readTenantWith(req, "sales_agent.location.view");
+    assertRepInScope(await supervisedSalesRepIds(db, tenant), salesRepId);
+    return supervisorAgentDetail(db, tenant, salesRepId);
   });
 
   app.get("/supervisor/live", async (req) => {
     const { since } = liveQuery.parse(req.query);
     const tenant = await readTenantWith(req, "sales_agent.location.live");
-    return { locations: await supervisorLive(db, tenant, since ?? new Date(Date.now() - 15 * 60_000)), serverTime: new Date() };
+    const scope = await supervisedSalesRepIds(db, tenant);
+    return { locations: await supervisorLive(db, tenant, since ?? new Date(Date.now() - 15 * 60_000), scope), serverTime: new Date() };
   });
 
   app.get("/supervisor/agents/:salesRepId/history", async (req) => {
     const { salesRepId } = historyParams.parse(req.params);
     const { date } = dateQuery.parse(req.query);
     const tenant = await readTenantWith(req, "sales_agent.location.history");
+    assertRepInScope(await supervisedSalesRepIds(db, tenant), salesRepId);
     return agentLocationHistory(db, tenant, salesRepId, date ?? todayIso(), requestMeta(req));
   });
 
   app.get("/supervisor/events", async (req) => {
     const query = eventsQuery.parse(req.query);
     const tenant = await readTenantWith(req, "sales_agent.supervise");
-    return { events: await locationEvents(db, tenant, { ...query, date: query.date ?? todayIso() }) };
+    const salesRepIds = await supervisedSalesRepIds(db, tenant);
+    return { events: await locationEvents(db, tenant, { ...query, salesRepIds, date: query.date ?? todayIso() }) };
   });
 
   app.get("/supervisor/visits", async (req) => {
     const query = supervisorVisitsQuery.parse(req.query);
     const tenant = await readTenantWith(req, "sales_agent.supervise");
-    return supervisorVisits(db, tenant, { ...query, date: query.date ?? todayIso() });
+    const salesRepIds = await supervisedSalesRepIds(db, tenant);
+    return supervisorVisits(db, tenant, { ...query, salesRepIds, date: query.date ?? todayIso() });
   });
 
   app.get("/supervisor/orders", async (req) => {
     const query = supervisorOrdersQuery.parse(req.query);
-    return { orders: await supervisorOrders(db, await readTenantWith(req, "sales_agent.supervise"), query) };
+    const tenant = await readTenantWith(req, "sales_agent.supervise");
+    return { orders: await supervisorOrders(db, tenant, { ...query, salesRepIds: await supervisedSalesRepIds(db, tenant) }) };
+  });
+
+  // Supervayzer paneli: jamoa KPI (oy/bugun), qarz, agentdagi naqd, yetkazish holati — mavjud manbalardan
+  app.get("/supervisor/overview", async (req) => {
+    const { date } = dateQuery.parse(req.query);
+    const tenant = await readTenantWith(req, "sales_agent.supervise");
+    const withDelivery = (await effectivePermissions(db, tenant)).includes("delivery.view");
+    return supervisorOverview(db, tenant, {
+      date: date ?? todayIso(),
+      salesRepIds: await supervisedSalesRepIds(db, tenant),
+      deliveryScope: withDelivery ? await deliveryScope(db, tenant) : null,
+      withDelivery,
+    });
+  });
+
+  // Zanjir: Agent → Buyurtma → Ombor → Yetkazish → To'lov → Qarz → Topshirish
+  app.get("/supervisor/orders/:orderId/chain", async (req) => {
+    const { orderId } = orderParams.parse(req.params);
+    const tenant = await readTenantWith(req, "sales_agent.supervise");
+    return supervisorOrderChain(db, tenant, orderId, await supervisedSalesRepIds(db, tenant));
   });
 
   app.post("/supervisor/orders/:orderId/approve", async (req) => {
@@ -903,7 +975,7 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
     const order = await withTransaction(async (tx) => {
       const tenant = await requireTenantForWrite(tx, authOf(req).user);
       await requirePermission(tx, tenant, "sales_agent.supervise");
-      return approveAgentOrder(tx, tenant, orderId, requestMeta(req));
+      return approveAgentOrder(tx, tenant, orderId, requestMeta(req), await supervisedSalesRepIds(tx, tenant));
     });
     return { order };
   });
@@ -914,7 +986,7 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
     const order = await withTransaction(async (tx) => {
       const tenant = await requireTenantForWrite(tx, authOf(req).user);
       await requirePermission(tx, tenant, "sales_agent.supervise");
-      return rejectAgentOrder(tx, tenant, orderId, reason, requestMeta(req));
+      return rejectAgentOrder(tx, tenant, orderId, reason, requestMeta(req), await supervisedSalesRepIds(tx, tenant));
     });
     return { order };
   });
@@ -922,6 +994,7 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
   app.get("/supervisor/visits/:visitId/photos/:photoId/url", async (req, reply) => {
     const ids = photoParams.parse(req.params);
     const tenant = await readTenantWith(req, "sales_agent.supervise");
+    await assertVisitInScope(tenant, ids.visitId);
     const ref = await visitPhotoRef(db, tenant.company.id, ids);
     return photoLink(reply, ref, `/api/sales-agent/supervisor/visits/${ids.visitId}/photos/${ids.photoId}/content`);
   });
@@ -929,6 +1002,7 @@ export async function salesAgentRoutes(app: FastifyInstance): Promise<void> {
   app.get("/supervisor/visits/:visitId/photos/:photoId/content", async (req, reply) => {
     const ids = photoParams.parse(req.params);
     const tenant = await readTenantWith(req, "sales_agent.supervise");
+    await assertVisitInScope(tenant, ids.visitId);
     return sendPhoto(reply, await visitPhotoContent(db, tenant.company.id, ids));
   });
 }

@@ -10,7 +10,7 @@ import { NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
-  LayoutDashboard, ShoppingCart, Users, BadgePercent, BarChart3, LogOut, Globe, UserX, RefreshCw, MapPin, MapPinOff, WifiOff,
+  LayoutDashboard, ShoppingCart, Users, BadgePercent, BarChart3, LogOut, Globe, UserX, RefreshCw, MapPin, MapPinOff, WifiOff, UserCheck,
   type LucideIcon,
 } from "lucide-react";
 import { DEFAULT_SALES_AGENT_POLICY, type SalesAgentPolicy } from "@bum/shared";
@@ -27,6 +27,7 @@ import { SUPPORTED_LOCALES, SUPPORTED_LOCALES_ARRAY, changeLocale, pathHasLocale
 import { AgentLocationContext } from "./_lib/agent-location.ts";
 import { useLocationTracking, type AgentLocation } from "./_lib/use-location-tracking.ts";
 import { useOnline } from "./_lib/use-online.ts";
+import { setActAs, useActAs } from "@/lib/act-as.ts";
 import type { AgentMe, WorkSession } from "./_lib/types.ts";
 
 const NAV: { path: string; labelKey: string; icon: LucideIcon }[] = [
@@ -128,11 +129,15 @@ export default function SalesAgentLayout() {
   const { signout } = useAuth();
   const currentUser = useCurrentUser();
   const { can, isLoading: permissionsLoading } = usePermissions();
-  const allowed = can("sales_agent.use");
+  // Supervayzer agent nomidan: agent ish joyi shu agent kontekstida (server `sales_agent.supervise` va jamoani tekshiradi)
+  const actAs = useActAs();
+  const acting = Boolean(actAs && can("sales_agent.supervise"));
+  const allowed = can("sales_agent.use") || acting;
   const meQuery = useApiQuery<AgentMe>(allowed ? "/api/sales-agent/me" : null);
   const policy = useApiQuery<{ policy: SalesAgentPolicy }>(meQuery.data ? "/api/sales-agent/policy" : null).data?.policy;
   // Lokatsiya faqat ish vaqtida (faol ish sessiyasi) kuzatiladi — shaxsiy vaqtda brauzer GPS'i so'ralmaydi
-  const workSession = useApiQuery<{ session: WorkSession | null }>(meQuery.data ? "/api/sales-agent/work-session" : null, undefined, {
+  // Agent nomidan ishlaganda supervayzer qurilmasining GPS'i agent nomidan kuzatilmaydi (ish sessiyasi — agentniki)
+  const workSession = useApiQuery<{ session: WorkSession | null }>(meQuery.data && !acting ? "/api/sales-agent/work-session" : null, undefined, {
     refetchInterval: 60_000,
   }).data?.session;
   const onDuty = workSession?.status === "active";
@@ -146,6 +151,7 @@ export default function SalesAgentLayout() {
   // Xato chegarasi sahifa almashganda tiklanishi uchun — YO'L, joylashuv holati emas
   const { pathname } = useLocation();
   const online = useOnline();
+  const navigate = useNavigate();
 
   if (currentUser === null) return <Navigate to={`/${lng}/login`} replace />;
   if (currentUser === undefined) return <Spinner />;
@@ -153,7 +159,23 @@ export default function SalesAgentLayout() {
   if (permissionsLoading) return <Spinner />;
   if (!allowed) return <Navigate to={`/${lng}/dashboard`} replace />;
 
+  const stopActing = () => {
+    setActAs(null);
+    queryClient.removeQueries({ predicate: (query) => String(query.queryKey[0] ?? "").startsWith("/api/sales-agent") });
+    navigate(`/${lng}/distribution?tab=supervisor`);
+  };
+
   const header = (
+    <>
+    {acting && actAs && (
+      <div role="status" data-testid="act-as-banner" className="sticky top-0 z-40 flex items-center gap-2 bg-indigo-600 px-4 py-2 text-xs font-medium text-white">
+        <UserCheck className="h-4 w-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">
+          Agent nomidan: <b>{actAs.name}</b> · kiritgan: {currentUser.name ?? "supervayzer"} (audit)
+        </span>
+        <Button size="sm" variant="secondary" className="h-7" onClick={stopActing}>Tugatish</Button>
+      </div>
+    )}
     <header className="sticky top-0 z-30 flex items-center gap-1 px-4 h-14 border-b border-border bg-card/95 backdrop-blur">
       <div className="min-w-0 flex-1 pr-2">
         <p className="text-sm font-semibold truncate">{meQuery.data?.agent.name ?? currentUser.name ?? t("title")}</p>
@@ -165,6 +187,7 @@ export default function SalesAgentLayout() {
         <LogOut className="h-5 w-5" />
       </Button>
     </header>
+    </>
   );
 
   if (meQuery.isError) {

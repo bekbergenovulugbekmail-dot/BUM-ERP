@@ -95,6 +95,8 @@ export type LockedVisit = {
 
 type VisitFilter = {
   salesRepId?: string;
+  /** Supervayzer jamoasi chegarasi (`null`/yo'q — chegara yo'q). */
+  salesRepIds?: string[] | null;
   visitId?: string;
   customerId?: string;
   date?: string;
@@ -111,6 +113,7 @@ async function findVisits(conn: DbOrTx, companyId: string, filter: VisitFilter, 
       and(
         eq(agentVisits.companyId, companyId),
         filter.salesRepId ? eq(agentVisits.salesRepId, filter.salesRepId) : undefined,
+        filter.salesRepIds ? (filter.salesRepIds.length > 0 ? inArray(agentVisits.salesRepId, filter.salesRepIds) : sql`false`) : undefined,
         filter.visitId ? eq(agentVisits.id, filter.visitId) : undefined,
         filter.customerId ? eq(agentVisits.customerId, filter.customerId) : undefined,
         filter.date ? eq(agentVisits.visitDate, filter.date) : undefined,
@@ -649,9 +652,9 @@ export async function visitPhotoContent(conn: DbOrTx, companyId: string, ids: { 
 export async function supervisorVisits(
   conn: DbOrTx,
   tenant: TenantContext,
-  options: { date: string; salesRepId?: string; limit: number },
+  options: { date: string; salesRepId?: string; salesRepIds?: string[] | null; limit: number },
 ) {
-  const visits = await findVisits(conn, tenant.company.id, { date: options.date, salesRepId: options.salesRepId }, options.limit);
+  const visits = await findVisits(conn, tenant.company.id, { date: options.date, salesRepId: options.salesRepId, salesRepIds: options.salesRepIds }, options.limit);
   const scope = and(
     eq(agentVisits.companyId, tenant.company.id),
     eq(agentVisits.visitDate, options.date),

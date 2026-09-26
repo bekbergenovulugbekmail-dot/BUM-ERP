@@ -24,6 +24,7 @@ import { createEmployee as createAccount } from "../users/user-admin.service.js"
 import { setMemberAccess } from "../users/member-access.js";
 import { publishDeliveryEvent } from "./realtime-bus.js";
 import { endDeliverySessions } from "./work-session.repo.js";
+import { agentScopeCondition, type DeliveryScope } from "./scope.js";
 
 export const DELIVERY_AGENT_ROLE = "Dostavka agenti";
 const LOGISTICS_DEPARTMENT = { code: "LOGISTIKA", name: "Logistika" };
@@ -140,11 +141,16 @@ function agentQuery(conn: DbOrTx) {
     .leftJoin(supervisorUser, eq(supervisorUser.id, deliveryAgents.supervisorUserId));
 }
 
-export function listDeliveryAgents(conn: DbOrTx, tenant: TenantContext, options: { activeOnly?: boolean; branchId?: string; territory?: string } = {}) {
+export function listDeliveryAgents(
+  conn: DbOrTx,
+  tenant: TenantContext,
+  options: { activeOnly?: boolean; branchId?: string; territory?: string; scope?: DeliveryScope } = {},
+) {
   return agentQuery(conn)
     .where(
       and(
         eq(deliveryAgents.companyId, tenant.company.id),
+        agentScopeCondition(options.scope ?? null),
         options.activeOnly ? eq(deliveryAgents.isActive, true) : undefined,
         options.branchId ? eq(deliveryAgents.branchId, options.branchId) : undefined,
         options.territory ? eq(deliveryAgents.territory, options.territory) : undefined,

@@ -5005,3 +5005,36 @@ Tekshiruv: API 164 fayl / 1147 test ✓, frontend 278 ✓, E2E 35 spec / 126 tes
 **Production (2026-09-26 06:27Z):** `447e968` deploy qilindi (egasi tasdig'i bilan) — AUD-013, AUD-020 (API), AUD-028/029/030,
 "Zakaz olish" menyudan olingan, nakladnoy va reys hujjatlarida marshrut. API bir marta ko'tarildi (qayta yiqilish yo'q), web
 build 06:26:41Z, yangi marshrutlar 401. Production (faqat o'qish): 1556 mijoz — kesh = jurnal, 0 farq; aylanma balans 0.00.
+
+## SUPERVAYZER + OMBOR EXCEL IMPORT (2026-09-26)
+
+Avval arxitektura auditi: supervayzer chegarasi faqat ruxsat bo'yicha (butun kompaniya), `supervisor_user_id` hech narsani
+cheklamasdi (AUD-032); agent nomidan buyurtma yo'li yo'q (AUD-033); qoldiqni Excel'dan yuklash yo'q (AUD-034). Yangi parallel
+tizim yaratilmadi — mavjud RBAC ("mas'ul bo'lganlari"), agent oqimi, yetkazish hayot sikli va qo'lda kirim yo'li kengaytirildi.
+
+**Supervayzer:**
+- `sales_agent.supervise` endi chegaralanadigan ruxsat; jamoa = o'zi + `supervisor_user_id` = o'zi (agentlar va yetkazuvchilar).
+  Serverda: supervisor endpointlari (agentlar, jonli, tarix, tashrif, rasmlar, buyurtmalar, tasdiq/rad), distribution qo'riqchisi
+  (marshrut, agent, biriktirish, tashrif; import/eksport yopiq), yetkazish qo'riqchisi `delivery/scope.ts` (yetkazma, yetkazuvchi,
+  biriktirish, naqd topshirish, panel, hisobot, dispetcher; avtomatik biriktirish yopiq). Chegara yoqilmagan rollar — o'zgarishsiz.
+- Agent nomidan: `x-act-as-sales-rep` — mavjud agent API (do'konlar, katalog, qoralama, yuborish, bekor, hisobot). GPS, tashrif,
+  ish vaqti, naqd — 403. `created_by` = supervayzer, `agent_orders.acting_user_id`, audit `details.actingAs`; shartni chetlab
+  o'tish faqat sabab bilan (`AGENT_ORDER_SUPERVISOR_OVERRIDE`), soxta GPS — hech qachon; o'zi kiritgan nasiyani o'zi tasdiqlamaydi.
+- `GET /api/sales-agent/supervisor/overview` (KPI bugun/oy, plan %, qarz, agentdagi naqd, yetkazish) va
+  `GET /api/sales-agent/supervisor/orders/:id/chain` (Agent → Buyurtma → Ombor → Yetkazish → To'lov → Qarz → Topshirish).
+- UI: Distributsiya → "Supervayzer" yorlig'i; "Agent nomidan" → agent ish joyi banner bilan, "Tugatish".
+- Migratsiya **0094** (qo'shuvchi): `agent_orders.acting_user_id`, `submit_override_reason`.
+
+**Ombor:** `POST /api/inventory/stock/import` (warehouse.receive) — preview (dryRun), birlik konversiyasi bir marta
+(10 blok × 6 = 60), xatolar (mahsulot/birlik/takror/ombor mos emas/miqdor), hammasi-yoki-hech-narsa, `importId` bilan takrorsiz;
+kirim mavjud qo'lda kirim orqali (AVCO, DR 1200 / CR 3000). Sotuv narxi o'zgartirilmaydi (ogohlantirish). Partiya/muddat —
+ombor harakatida yuritilmaydi, import qilinmaydi. A4 hisobot (Ombor → "A4 hisobot"): ko'p sahifa, sarlavha takrori, tannarx =
+`stock_levels.avg_cost_price`, tannarx ruxsatisiz ustunlar chiqmaydi; eksportga `salesPrice` qo'shildi.
+
+**Tekshirildi:** API 166 fayl / 1172 test ✓ (yangi: `supervisor-operations` 19, `stock-import` 5), frontend 50 fayl / 287 test ✓,
+E2E 36 spec / 128 test ✓ (yangi `supervisor-warehouse`: Excel → preview → baza → A4 pdf.js bilan), tsc ✓, eslint ✓.
+
+**Brauzerda sinash:** Ombor → "Excel import" (shablon) va "A4 hisobot"; Distributsiya → "Supervayzer" → "Agent nomidan";
+Sozlamalar → Rollar → Supervayzer → "faqat mas'ul bo'lganlari".
+
+**Production'ga deploy QILINMAGAN** (topshiriq talabi). Keyingi: deploy (egasi tasdig'i bilan), audit AUD-022…026.

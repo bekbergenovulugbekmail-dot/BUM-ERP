@@ -323,6 +323,10 @@ export const agentOrders = pgTable(
     approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     rejectionReason: text("rejection_reason"),
+    /** Supervayzer agent nomidan kiritgan bo'lsa — o'sha supervayzer (agentning o'zi kiritsa null). */
+    actingUserId: uuid("acting_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Supervayzer GPS/tashrif shartini chetlab yuborgan bo'lsa — sababi (alohida audit yozuvi bilan). */
+    submitOverrideReason: text("submit_override_reason"),
     ...timestamps(),
   },
   (t) => [
