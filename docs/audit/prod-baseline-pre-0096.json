@@ -1,0 +1,326 @@
+{
+  "purpose": "Production baseline BEFORE 0096-0098 (read-only). Compare after deploy.",
+  "takenAt": "2026-09-27 10:54:02.343135+00",
+  "backup": {
+    "id": "d33c4d9c-7aee-445d-8217-f2ca680ca6cf",
+    "externalId": "vs_1790506074077_afoavosyfw9ahm77",
+    "createdAt": "2026-09-27T10:47:54.154Z",
+    "volume": "postgres-volume-LRbC",
+    "volumeInstance": "cd083546-5740-47e6-85a4-45cd2b110320",
+    "referencedMB": 450
+  },
+  "database": {
+    "version": "18.6 (Debian 18.6-1.pgdg13+2)",
+    "migrations": {
+      "applied": 96,
+      "last_created_at": "1790520000000"
+    },
+    "pending": [
+      "0096_multi_kassa",
+      "0097_payment_methods",
+      "0098_order_seller"
+    ],
+    "paymentMethodsTableExists": false
+  },
+  "tenants": [
+    {
+      "name": "Bonnu Market",
+      "sales_n": 14,
+      "sales_total": "337600.00",
+      "payments_n": 14,
+      "payments_total": "161280.00",
+      "returns_n": 2,
+      "returns_total": "40320.00",
+      "customers_n": 5,
+      "suppliers_n": 2,
+      "stock_qty": "251.0000",
+      "stock_value": "4877750.00",
+      "customer_debt": "40320.00",
+      "supplier_debt": "4832750.00",
+      "cash_balance_base": "-44040.00",
+      "journal_debit": "5906270.00",
+      "journal_credit": "5906270.00",
+      "allocations_total": "0",
+      "open_shifts": 2,
+      "devices": 3,
+      "terminals": 0,
+      "bank_accounts": 3,
+      "cash_accounts": 5
+    },
+    {
+      "name": "Distributsiya",
+      "sales_n": 0,
+      "sales_total": "0",
+      "payments_n": 0,
+      "payments_total": "0",
+      "returns_n": 0,
+      "returns_total": "0",
+      "customers_n": 0,
+      "suppliers_n": 0,
+      "stock_qty": "0",
+      "stock_value": "0",
+      "customer_debt": "0",
+      "supplier_debt": "0",
+      "cash_balance_base": "0.00",
+      "journal_debit": "0",
+      "journal_credit": "0",
+      "allocations_total": "0",
+      "open_shifts": 0,
+      "devices": 0,
+      "terminals": 0,
+      "bank_accounts": 1,
+      "cash_accounts": 2
+    },
+    {
+      "name": "Ezo",
+      "sales_n": 9,
+      "sales_total": "1244500.00",
+      "payments_n": 2,
+      "payments_total": "35200.00",
+      "returns_n": 1,
+      "returns_total": "10000.00",
+      "customers_n": 1552,
+      "suppliers_n": 1,
+      "stock_qty": "234.0000",
+      "stock_value": "4609650.00",
+      "customer_debt": "35200.00",
+      "supplier_debt": "4646050.00",
+      "cash_balance_base": "70200.00",
+      "journal_debit": "4859030.00",
+      "journal_credit": "4859030.00",
+      "allocations_total": "0",
+      "open_shifts": 0,
+      "devices": 0,
+      "terminals": 0,
+      "bank_accounts": 1,
+      "cash_accounts": 5
+    }
+  ],
+  "structure": {
+    "cashAccounts": [
+      {
+        "type": "cash",
+        "is_default": true,
+        "is_active": true,
+        "currency": "UZS",
+        "agent": false,
+        "n": 3
+      },
+      {
+        "type": "cash",
+        "is_default": false,
+        "is_active": true,
+        "currency": "USD",
+        "agent": false,
+        "n": 1
+      },
+      {
+        "type": "cash",
+        "is_default": false,
+        "is_active": true,
+        "currency": "UZS",
+        "agent": true,
+        "n": 1
+      },
+      {
+        "type": "bank",
+        "is_default": false,
+        "is_active": true,
+        "currency": "UZS",
+        "agent": false,
+        "n": 5
+      },
+      {
+        "type": "card",
+        "is_default": false,
+        "is_active": true,
+        "currency": "UZS",
+        "agent": false,
+        "n": 2
+      }
+    ],
+    "shifts": [
+      {
+        "status": "open",
+        "desktop": false,
+        "n": 1
+      },
+      {
+        "status": "open",
+        "desktop": true,
+        "n": 1
+      },
+      {
+        "status": "closed",
+        "desktop": false,
+        "n": 1
+      },
+      {
+        "status": "closed",
+        "desktop": true,
+        "n": 1
+      }
+    ],
+    "devices": [
+      {
+        "is_active": false,
+        "n": 2,
+        "last_push": "2026-09-14 04:12:08.314+00"
+      },
+      {
+        "is_active": true,
+        "n": 1,
+        "last_push": "2026-09-17 11:59:45.407+00"
+      }
+    ],
+    "terminals": [],
+    "bankAccounts": {
+      "n": 5,
+      "show_in_pos": 3
+    },
+    "payments": [
+      {
+        "method": "cash",
+        "status": "posted",
+        "pos": false,
+        "terminal": false,
+        "n": 9,
+        "amount": "141640.00"
+      },
+      {
+        "method": "bank",
+        "status": "posted",
+        "pos": false,
+        "terminal": false,
+        "n": 3,
+        "amount": "11320.00"
+      },
+      {
+        "method": "card",
+        "status": "posted",
+        "pos": false,
+        "terminal": false,
+        "n": 4,
+        "amount": "43520.00"
+      }
+    ],
+    "sales": [
+      {
+        "source": "sales_agent",
+        "status": "draft",
+        "n": 1,
+        "total": "35200.00"
+      },
+      {
+        "source": "sales_agent",
+        "status": "confirmed",
+        "n": 5,
+        "total": "154100.00"
+      },
+      {
+        "source": "sales_agent",
+        "status": "returned",
+        "n": 1,
+        "total": "10000.00"
+      },
+      {
+        "source": "sales_agent",
+        "status": "completed",
+        "n": 2,
+        "total": "70400.00"
+      },
+      {
+        "source": "manual",
+        "status": "draft",
+        "n": 2,
+        "total": "40320.00"
+      },
+      {
+        "source": "manual",
+        "status": "shipped",
+        "n": 2,
+        "total": "40320.00"
+      },
+      {
+        "source": "manual",
+        "status": "delivered",
+        "n": 6,
+        "total": "141120.00"
+      },
+      {
+        "source": "manual",
+        "status": "returned",
+        "n": 2,
+        "total": "40320.00"
+      },
+      {
+        "source": "manual",
+        "status": "cancelled",
+        "n": 2,
+        "total": "1050320.00"
+      }
+    ],
+    "returns": {
+      "n": 3,
+      "total": "50320.00",
+      "refunds": "20160.00"
+    }
+  },
+  "invariants": {
+    "journalUnbalancedEntries": 0,
+    "journalTotals": {
+      "d": "10765300.00",
+      "c": "10765300.00"
+    },
+    "accountCacheVsLines": {
+      "accounts": 65,
+      "mismatched": 0
+    },
+    "customerDebt": {
+      "customers": 1557,
+      "mismatched": 0,
+      "total": "75520.00"
+    },
+    "supplierDebt": {
+      "suppliers": 3,
+      "mismatched": 0,
+      "total": "9478800.00"
+    },
+    "stock": {
+      "levels": 95,
+      "mismatched": 0
+    },
+    "cashBalance": {
+      "accounts": 12,
+      "mismatched": 0,
+      "total": "26161.71"
+    },
+    "allocationOverPayment": 0,
+    "crossTenant": {
+      "cash_tx": 0,
+      "payment_account": 0,
+      "payment_order": 0,
+      "shift_warehouse": 0,
+      "device_warehouse": 0,
+      "terminal_account": 0,
+      "journal_line_entry": 0,
+      "order_shift": 0
+    },
+    "duplicateEffects": {
+      "cash_tx_groups": 0,
+      "journal_groups": 0,
+      "payment_ref_groups": 0
+    }
+  },
+  "checksums": {
+    "sales_orders": "46213cac88071bab18776777af708dc3",
+    "customer_payments": "9122e525d5d10f6400dd53c52fc19c02",
+    "pos_shifts": "ddd4fa6f791873d49bcb1c5f3de3f10b",
+    "cash_transactions": "b684c66b2c12906d5dfb80032f9f2656",
+    "journal_lines": "f18d0cf6d1b33efc95387d991cfe1381",
+    "cash_accounts": "a8dad4339a7c382e53890d9f37c46189",
+    "terminals": null,
+    "pos_devices": "99b5a7b48bdf1ec235fa58d10d4ebfb2",
+    "taken_at": "2026-09-27 10:54:02.343135+00"
+  }
+}

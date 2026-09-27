@@ -5203,3 +5203,21 @@ BLOCKED — WAITING FOR EXPLICIT USER COMMAND
   ishga tushirilmagan. Backup holat maydoni API'da yo'q; tayyorlik snapshot ID orqali. Avtomatik jadval — yo'q.
 - Production DB (10:49Z): 96 migratsiya, oxirgisi 0095; 0096–0098 pending. Invariantlar 0 farq, begona havola 0, takroriy ta'sir 0.
   10:36Z suratiga nisbatan o'zgarish yo'q — sonlar va barcha nazorat summalari bir xil.
+
+### FINAL PRODUCTION DEPLOY GATE 0096–0098 (2026-09-27 ~11:10Z, faqat o'qish) — READY FOR EXPLICIT DEPLOY COMMAND
+
+- **Git:** branch `feat/postgres-migration`, worktree toza, `origin` dan oldinda (push qilinmagan). Production'da `332da55` kodi.
+  `332da55 → HEAD`: 54 fayl — faqat kassa / to'lov usullari / sotuvchi (Faza 1–6), testlar, hujjat; debug kod, bog'liqlik yoki
+  Dockerfile o'zgarishi yo'q. To'liq regressiyadan (`e1b9dcb`) keyin ilova kodi o'zgarmagan (faqat hujjat + E2E probel).
+- **Migratsiyalar:** DML 0, DROP TABLE/COLUMN 0; `DROP INDEX ps_one_open_per_warehouse` shu tranzaksiyada teng shart bilan qayta
+  yaratiladi; yangi ustunlar NULL, default'siz (jadval qayta yozilmaydi); drizzle barcha kutilayotganlarni BITTA tranzaksiyada qo'llaydi.
+  Qaytarib bo'lmaydigan qism: `kpi_metric` ga qo'shilgan 3 qiymat (zararsiz).
+- **Production (10:54Z):** 96 migratsiya, oxirgisi 0095; invariantlar 0 farq; 10:36 / 10:49 / 10:54 suratlari va nazorat summalari bir xil.
+  Baseline: `docs/audit/prod-baseline-pre-0096.json` (tenantlar kesimida summalar, invariantlar, nazorat summalari).
+- **Kuzatuv (LOW, bloklamaydi):** Bonnu "Asosiy kassa" −77 520 — 2026-09-17 desktop offline ta'minotchi to'lovi 180 000 (hali ochiq
+  desktop smenada); offline chiqim dizayn bo'yicha rad etilmaydi; balans = harakatlar; 0096–0098 ga aloqasi yo'q.
+- **Testlar (HEAD):** API build ✓, web build ✓, tsc ✓, eslint ✓, frontend 51/312 ✓; yangi suite'lar 4/18 ✓, xavfsizlik/RBAC/tenant
+  8 fayl / 72 ✓. To'liq API (`e1b9dcb`, kod bir xil) 171/1227 ✓. `sales-agent-security` flaky: qat'iy daqiqa oynali rate-limit —
+  13 so'rov daqiqa chegarasini kesib o'tsa 13-si 200 oladi (test vaqtiga bog'liq); alohida 2/2 ✓. Tavsiya: testda vaqtni muzlatish.
+- **Rollback:** `docs/audit/rollback-0096-0098.down.sql` (ishga tushirilmagan); asosiy yo'l — oldingi `332da55` ni qayta deploy
+  (sxema oldinga mos). DB restore — faqat egasi qarori bilan, backup `d33c4d9c…`.
