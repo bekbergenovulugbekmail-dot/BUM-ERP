@@ -863,22 +863,27 @@ export async function transferCash(
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 
-export async function financeDashboard(conn: DbOrTx, tenant: TenantContext) {
-  const companyId = tenant.company.id;
-  const monthStart = `${todayIso().slice(0, 7)}-01`;
-
-  const accountList = await listCashAccounts(conn, tenant);
-  // Valyutali kassalar joriy kurs bilan asosiy valyutada qo'shiladi
+/** Summani (hisob valyutasida) joriy kurs bilan asosiy valyutaga o'tkazuvchi — minor birlikda. */
+export async function baseCurrencyConverter(conn: DbOrTx, companyId: string) {
   const baseCurrency = await companyCurrency(conn, companyId);
   const rateRows = await conn
     .select({ code: companyCurrencies.code, rate: companyCurrencies.rate })
     .from(companyCurrencies)
     .where(eq(companyCurrencies.companyId, companyId));
   const rateOf = new Map(rateRows.map((row) => [row.code, toMinor(row.rate, 4)]));
-  const inBase = (account: { balance: string; currency: string }) =>
+  return (account: { balance: string; currency: string }) =>
     account.currency === baseCurrency
       ? toMinor(account.balance)
       : rescale(toMinor(account.balance) * (rateOf.get(account.currency) ?? 0n), 6, 2);
+}
+
+export async function financeDashboard(conn: DbOrTx, tenant: TenantContext) {
+  const companyId = tenant.company.id;
+  const monthStart = `${todayIso().slice(0, 7)}-01`;
+
+  const accountList = await listCashAccounts(conn, tenant);
+  // Valyutali kassalar joriy kurs bilan asosiy valyutada qo'shiladi
+  const inBase = await baseCurrencyConverter(conn, companyId);
   const totalOf = (type: CashAccountType) =>
     accountList.filter((a) => a.type === type).reduce((s, a) => s + inBase(a), 0n);
 

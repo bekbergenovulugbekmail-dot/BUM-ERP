@@ -3,6 +3,7 @@
  *  Yakunlangan 3 × 10 000 (to'lanmagan), 1 tasi qaytarildi (balansga) → sof 20 000, qarz 20 000.
  *  Qoralama 5 × 10 000 va tasdiqlangan (jo'natilmagan) 2 × 10 000 — tushum ham, qarz ham EMAS.
  *  Tekshiriladi: moliya dashboardi (oy savdosi), Telegram kunlik xulosa va qarzdorlar hisoboti; qarz = mijoz keshi.
+ *  Valyutali kassa: analitika dashboardi 100 $ ni kurs bilan (1 250 000) qo'shadi — moliya dashboardi bilan teng.
  */
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
@@ -22,7 +23,7 @@ let company: Awaited<ReturnType<typeof createCompany>>;
 let piece: string;
 let mainWh: string;
 
-const call = (method: "GET" | "POST", url: string, payload?: object) =>
+const call = (method: "GET" | "POST" | "PUT", url: string, payload?: object) =>
   app.inject({ method, url, headers: { cookie: company.ownerCookie }, ...(payload ? { payload } : {}) });
 
 beforeAll(async () => {
@@ -74,5 +75,17 @@ describe("AUD-025 hisobot ta'riflari", () => {
     const debtors = await debtorsReport(db, company.companyId);
     expect(debtors).toMatch(/jami 20\D000 so'm/);
     expect(debtors).toMatch(/Qarzdor — 20\D000 so'm/);
+  });
+
+  it("valyutali kassa analitika dashboardida kurs bilan qo'shiladi", async () => {
+    const rate = await call("PUT", "/api/finance/currencies", { cbuEnabled: false, currencies: [{ code: "USD", rate: "12500", source: "manual", isActive: true }] });
+    expect(rate.statusCode, rate.body).toBe(200);
+    const usd = await call("POST", "/api/finance/cash-accounts", { name: "Dollar kassa", type: "cash", currency: "USD", openingBalance: "100" });
+    expect(usd.statusCode, usd.body).toBe(201);
+
+    const analytics = (await call("GET", "/api/analytics/dashboard")).json();
+    const finance = (await call("GET", "/api/finance/dashboard")).json();
+    expect(analytics.cashBalance, "100 $ × 12 500").toBe("1250000.00");
+    expect(analytics.cashBalance).toBe(finance.totalCash);
   });
 });

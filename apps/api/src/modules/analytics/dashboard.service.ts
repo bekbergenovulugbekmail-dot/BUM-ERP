@@ -19,7 +19,7 @@ import { customerPayments, customers, salesOrderItems, salesOrders } from "../..
 import type { DbOrTx } from "../../db/transaction.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
-import { todayIso } from "../finance/cash.service.js";
+import { baseCurrencyConverter, todayIso } from "../finance/cash.service.js";
 import { shiftDate } from "./dates.js";
 
 /** Tushum tan olingan holatlar (`shipped`/`delivered` — eski yozuvlar, `completed` bilan bir ma'noda). */
@@ -89,11 +89,12 @@ export async function getDashboard(conn: DbOrTx, tenant: TenantContext) {
     .where(eq(customers.companyId, companyId));
 
   const accounts = await conn
-    .select({ type: cashAccounts.type, balance: cashAccounts.balance })
+    .select({ type: cashAccounts.type, balance: cashAccounts.balance, currency: cashAccounts.currency })
     .from(cashAccounts)
     .where(and(eq(cashAccounts.companyId, companyId), eq(cashAccounts.isActive, true)));
-  const balanceOf = (type: "cash" | "bank") =>
-    fromMinor(accounts.filter((a) => a.type === type).reduce((s, a) => s + toMinor(a.balance), 0n));
+  // AUD-025: valyutali kassa joriy kurs bilan asosiy valyutada (moliya dashboardi bilan bir xil)
+  const inBase = await baseCurrencyConverter(conn, companyId);
+  const balanceOf = (type: "cash" | "bank") => fromMinor(accounts.filter((a) => a.type === type).reduce((s, a) => s + inBase(a), 0n));
 
   const recentSales = await conn
     .select({
