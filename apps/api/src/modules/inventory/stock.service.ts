@@ -39,7 +39,7 @@ import { assertProductsInScope, categoryScope, productScopeCondition } from "../
 import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { todayIso } from "../finance/cash.service.js";
 import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
-import { allowedWarehouses, assertWarehouseAccess } from "./warehouses.service.js";
+import { allowedWarehouses, assertWarehouseAccess, getWarehouse } from "./warehouses.service.js";
 import { allocateBackorders } from "./backorders.service.js";
 
 export type MovementType = (typeof stockMovementType.enumValues)[number];
@@ -218,6 +218,51 @@ export async function moveStock(tx: Tx, companyId: string, performedBy: string |
 }
 
 // ─── O'qish ──────────────────────────────────────────────────────────────────
+
+/**
+ * AUD-026: qoldiq solishtiruvi (faqat o'qish). `moveStock` — qoldiqni o'zgartiradigan yagona yo'l va har harakat
+ * `quantity` ga ishorali delta yozadi, shuning uchun invariant: qoldiq = harakatlar yig'indisi. Farq — to'g'ridan-to'g'ri
+ * yozilgan (eski import/migratsiya) qoldiq. Manfiy qoldiq (offline POS ataylab ruxsat etadi) alohida ro'yxatda.
+ */
+export async function stockReconciliation(conn: DbOrTx, tenant: TenantContext, options: { warehouseId: string }) {
+  // Begona kompaniya ombori — 404, ruxsatsiz ombor — 403
+  await getWarehouse(conn, tenant, options.warehouseId);
+  const moved = conn
+    .select({
+      productId: stockMovements.productId,
+      total: sql<string>`sum(${stockMovements.quantity})`.as("total"),
+    })
+    .from(stockMovements)
+    .where(and(eq(stockMovements.companyId, tenant.company.id), eq(stockMovements.warehouseId, options.warehouseId)))
+    .groupBy(stockMovements.productId)
+    .as("moved");
+  const rows = await conn
+    .select({
+      productId: stockLevels.productId,
+      productName: products.name,
+      sku: products.sku,
+      unitName: units.shortName,
+      level: stockLevels.quantity,
+      movements: sql<string>`coalesce(${moved.total}, 0)::numeric(18,4)`,
+    })
+    .from(stockLevels)
+    .innerJoin(products, eq(products.id, stockLevels.productId))
+    .innerJoin(units, eq(units.id, products.baseUnitId))
+    .leftJoin(moved, eq(moved.productId, stockLevels.productId))
+    .where(
+      and(
+        eq(stockLevels.companyId, tenant.company.id),
+        eq(stockLevels.warehouseId, options.warehouseId),
+        productScopeCondition(await categoryScope(conn, tenant)),
+      ),
+    )
+    .orderBy(asc(products.name));
+  const mismatched = rows
+    .filter((row) => toMinor(row.level, 4) !== toMinor(row.movements, 4))
+    .map((row) => ({ ...row, difference: fromMinor(toMinor(row.level, 4) - toMinor(row.movements, 4), 4) }));
+  const negative = rows.filter((row) => toMinor(row.level, 4) < 0n);
+  return { warehouseId: options.warehouseId, checked: rows.length, ok: mismatched.length === 0, mismatched, negative };
+}
 
 export async function listStock(
   conn: DbOrTx,

@@ -7,6 +7,7 @@
  *   GET    /stock (?warehouseId=&search=&lowStockOnly=)   warehouse.view
  *   GET    /stock/export (?warehouseId=&inStockOnly=)    warehouse.view (tannarx — products.view_cost)
  *   GET    /stock/stats (?warehouseId=)                   warehouse.view
+ *   GET    /stock/reconciliation (?warehouseId=)          warehouse.view (qoldiq = harakatlar yig'indisi, manfiylar)
  *   GET    /stock/products/:productId                     warehouse.view
  *   GET    /stock/movements (?warehouseId=&productId=&type=&limit=&cursor=)   warehouse.view
  *   POST   /stock/movements                               receive → warehouse.receive; boshqalar → warehouse.manage
@@ -51,6 +52,7 @@ import {
   listStock,
   productStock,
   recordManualMovement,
+  stockReconciliation,
   transferStock,
   warehouseStats,
 } from "./stock.service.js";
@@ -267,6 +269,12 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ─── Zaxira ──────────────────────────────────────────────────────────────
+
+  /** AUD-026: qoldiq va harakatlar yig'indisi solishtiruvi (faqat o'qish). */
+  app.get("/stock/reconciliation", async (req) => {
+    const { warehouseId } = z.object({ warehouseId: z.uuid() }).parse(req.query);
+    return stockReconciliation(db, await readTenant(req, "warehouse.view"), { warehouseId });
+  });
 
   app.get("/stock", async (req) => {
     const query = stockQuery.parse(req.query);
