@@ -7,9 +7,9 @@
  *
  * Ko'rish — `sales.view`, o'zgartirish — `crm.manage`, balansni to'g'rilash — `finance.approve`.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, ShieldCheck, ShieldOff, X, PlusCircle, MinusCircle, FileText, Landmark, Tags } from "lucide-react";
+import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, ShieldCheck, ShieldOff, X, PlusCircle, MinusCircle, FileText, Landmark, Tags, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -32,7 +32,7 @@ import BankReceiptDialog from "./bank-receipt-dialog.tsx";
 import CustomerStatementDialog from "@/pages/sales/_components/customer-statement-dialog.tsx";
 import SetBalanceDialog from "@/components/balances/set-balance-dialog.tsx";
 import CustomerPricesDialog from "./customer-prices-dialog.tsx";
-import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
+import CsvToolbar, { type CsvToolbarHandle } from "@/components/csv/csv-toolbar.tsx";
 import CustomerFilters from "@/components/customers/customer-filters.tsx";
 import SuggestInput from "@/components/ui/suggest-input.tsx";
 import {
@@ -106,6 +106,7 @@ export default function CustomersSection() {
   /** Hisob-kitob akti ochilgan mijoz. */
   const [statementFor, setStatementFor] = useState<string | null>(null);
   const [pricesFor, setPricesFor] = useState<string | null>(null);
+  const balanceImport = useRef<CsvToolbarHandle>(null);
   const canViewPrices = can("sales.view");
   const [money, setMoney] = useState<{ customer: Customer; direction: "deposit" | "withdraw" } | null>(null);
   const [bankReceipt, setBankReceipt] = useState<Customer | null>(null);
@@ -312,6 +313,33 @@ export default function CustomersSection() {
               { key: "paymentTermDays", aliases: ["To'lov muddati (kun)", "paymentTermDays"], example: "14", shared: true },
             ]}
           />
+          {canAdjustBalance && (
+            <>
+              {/* Boshlang'ich balans (avans) importi: dryRun → tekshirish → tuzatma tranzaksiyasi, qarshi hisob kapital */}
+              <CsvToolbar
+                ref={balanceImport}
+                hideToolbar
+                exportUrl="/api/sales/customers/export"
+                filename="mijoz-balanslari"
+                importUrl="/api/sales/customers/balance-import"
+                invalidate={["/api/sales/customers", "/api/finance"]}
+                canImport
+                columns={[
+                  { key: "name", aliases: ["Mijoz", "name"], example: "Anvar aka do'koni" },
+                  { key: "phone", aliases: ["Telefon", "phone"], example: "+998901234567" },
+                  { key: "code", aliases: ["Kod", "code"], example: "C-0001" },
+                  { key: "balance", aliases: ["Balans", "balance"], required: true, example: "150000" },
+                  { key: "reason", aliases: ["Sabab", "reason"], example: "Boshlang'ich qoldiq" },
+                ]}
+              />
+              <Button size="sm" variant="secondary" data-testid="customer-balance-import" title="Mijoz avans balanslarini fayldan kiritish (avval tekshiriladi)" onClick={() => balanceImport.current?.openImport()}>
+                <WalletCards className="h-3.5 w-3.5 mr-1" /> Balans importi
+              </Button>
+              <Button size="sm" variant="ghost" data-testid="customer-balance-template" onClick={() => balanceImport.current?.downloadTemplate()}>
+                Balans shablon
+              </Button>
+            </>
+          )}
           <Button
             size="sm"
             variant={showArchive ? "default" : "secondary"}
