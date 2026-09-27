@@ -427,6 +427,8 @@ export const customerPayments = pgTable(
     paymentId: uuid("payment_id").references(() => payments.id, { onDelete: "set null" }),
     /** Karta to'lovi qaysi terminal orqali (hisob — terminalga bog'langan bank hisobi). */
     terminalId: uuid("terminal_id").references(() => paymentTerminals.id, { onDelete: "set null" }),
+    /** Boshqariladigan to'lov usuli (0097, sozlama qatlami); tarixiy to'lovlarda NULL. */
+    paymentMethodId: uuid("payment_method_id"),
     /**
      * Kassa smenasi: to'lov qaysi sessiyada qabul qilingan. Buyurtmasiz to'lovda (qarz to'lash)
      * smenani buyurtma orqali topib bo'lmaydi — shuning uchun to'g'ridan-to'g'ri saqlanadi.

@@ -104,6 +104,7 @@ export async function recordAllocations(
         method: part.method,
         cashAccountId: part.cashAccountId,
         terminalId: part.terminalId,
+        paymentMethodId: part.paymentMethodId ?? null,
         paymentId: header.id,
         posShiftId: target.posShiftId ?? null,
         reference,

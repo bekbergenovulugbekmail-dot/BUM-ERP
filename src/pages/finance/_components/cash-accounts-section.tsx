@@ -15,6 +15,7 @@ import { usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import { BankCommissionHint } from "@/components/payments/bank-commission-hint.tsx";
 import AccountCardPayments, { AccountCommissionSummary } from "./account-card-payments.tsx";
+import PaymentMethodsSection from "./payment-methods-section.tsx";
 import AgentCash from "./agent-cash.tsx";
 import Handovers from "./handovers.tsx";
 import PendingSettlements from "./pending-settlements.tsx";
@@ -437,6 +438,9 @@ export default function CashAccountsSection() {
 
       {/* Kutilayotgan karta/hamyon puli va qirqim */}
       <PendingSettlements />
+
+      {/* To'lov usullari — kassa tugmalari (sozlama; mavjud terminal/hisobga havola) */}
+      {canManage && accounts && <PaymentMethodsSection accounts={accounts} />}
 
       {selectedAccount && canManage && selectedAccount.type === "cash" && !selectedAccount.isDefault && warehouseList && (
         <PosKassaSettings

@@ -37,7 +37,7 @@ import {
   type PaymentBankAccountOption,
   type PaymentTerminalOption,
 } from "@/components/payments/split-payment.ts";
-import { addPart, paymentsBody, previewPayment, removePart, suggestAmount, type PayOption, type PayPart } from "./_lib/payment-parts.ts";
+import { addPart, paymentsBody, previewPayment, removePart, suggestAmount, type PayMethod, type PayOption, type PayPart } from "./_lib/payment-parts.ts";
 import { computeLine, fromMinor, minorToNumber } from "@/pages/sales/_lib/line-amounts.ts";
 import {
   num, PAYMENT_LABELS,
@@ -83,6 +83,8 @@ type SaleResult = {
 type LastReceipt = SaleResult & { payMethod: PaymentMethod; paymentLines?: { label: string; amount: number }[] };
 
 type PaymentOptionsResponse = {
+  /** Boshqariladigan usullar (smena kassasida ruxsat etilganlari); bo'sh — terminal/bank ro'yxati (tarixiy). */
+  paymentMethods?: { id: string; name: string; kind: "cash" | "card" | "bank" | "transfer"; terminalId: string | null; cashAccountId: string | null }[];
   terminals: PaymentTerminalOption[];
   bankAccounts?: PaymentBankAccountOption[];
   /** Biznes egasi tanlagan kassa tuzilishi (Sozlamalar → Kassa qurilmalari → Kassa ko'rinishi). */
@@ -153,7 +155,8 @@ export default function POSPage() {
   const searchRef = useRef<HTMLInputElement>(null);
 
   // To'lov usullari Moliya bo'limidan: "Kassada ko'rsatish" belgilangan terminallar (UZCARD, HUMO ...) va bank hisoblari
-  const paymentOptions = useApiQuery<PaymentOptionsResponse>("/api/sales/pos/payment-options", undefined, { staleTime: 60_000 }).data;
+  const paymentOptions = useApiQuery<PaymentOptionsResponse>("/api/sales/pos/payment-options", shift?.id ? { shiftId: shift.id } : undefined, { staleTime: 60_000 }).data;
+  const managedMethods = (paymentOptions?.paymentMethods ?? []).filter((method) => method.kind !== "transfer");
   const terminals = paymentOptions?.terminals ?? [];
   const bankAccounts = paymentOptions?.bankAccounts ?? [];
   const panelSide: PosPanelSide = paymentOptions?.layout?.paymentPanelSide ?? "right";
@@ -288,7 +291,15 @@ export default function POSPage() {
   const quickCash = activeParts.length === 0;
   // To'lov tugmalari: Naqd, Karta, Bank; yonida karta turlari (UZCARD, HUMO — bog'langan bank hisobiga, komissiya bilan) va
   // Moliya bo'limida kassada ko'rsatilgan bank hisoblari
-  const payOptions: PayOption[] = [
+  // Moliyada to'lov usullari sozlangan bo'lsa — tugmalar shu usullardan (smena kassasida ruxsat etilganlari)
+  const payOptions: PayOption[] = managedMethods.length > 0 ? managedMethods.map((method): PayOption => ({
+    key: `m:${method.id}`,
+    method: method.kind as PayMethod,
+    terminalId: method.terminalId,
+    cashAccountId: null,
+    label: method.name,
+    paymentMethodId: method.id,
+  })) : [
     { key: "cash", method: "cash", terminalId: null, cashAccountId: null, label: "Naqd" },
     ...(terminals.length === 0 ? [{ key: "card", method: "card", terminalId: null, cashAccountId: null, label: "Karta" } satisfies PayOption] : []),
     ...terminals.map((terminal): PayOption => ({

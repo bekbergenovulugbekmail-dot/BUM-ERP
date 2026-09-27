@@ -542,7 +542,14 @@ const minBigInt = (...values: bigint[]) => values.reduce((a, b) => (b < a ? b : 
 type BasePaymentMethod = "cash" | "card" | "bank" | "transfer";
 
 /** Kassadagi aralash to'lov qismi: karta — terminal bilan (pul terminalning bank hisobiga), yoki aniq kassa/bank hisobi. */
-export type PosPaymentPart = { method: "cash" | "card" | "bank"; amount: string; terminalId?: string | null; cashAccountId?: string | null };
+export type PosPaymentPart = {
+  method: "cash" | "card" | "bank";
+  amount: string;
+  terminalId?: string | null;
+  cashAccountId?: string | null;
+  /** Boshqariladigan to'lov usuli (UZCARD, HUMO, Payme …) — tur/terminal/hisob usul sozlamasidan. */
+  paymentMethodId?: string | null;
+};
 
 /** Asosiy valyutadagi to'lov qismlari: aralash (`payments`) yoki bitta usul (`paymentMethod` + `amountPaid`). */
 function posPaymentParts(input: { payments?: PosPaymentPart[]; paymentMethod: PaymentMethod; amountPaid?: string }): PaymentPartInput[] {
@@ -731,7 +738,12 @@ export async function completeSale(
     }
     return part;
   });
-  const requestedParts = await resolvePaymentParts(tx, companyId, rawParts, { offline: offline !== undefined });
+  // Usul → kassa ruxsati shu smena kassasi bo'yicha (offline — nomuvofiqlik, chek rad etilmaydi)
+  const requestedParts = await resolvePaymentParts(tx, companyId, rawParts, {
+    offline: offline !== undefined,
+    kassaId: shift.cashAccountId ?? null,
+    conflicts,
+  });
   const tendered = requestedParts.reduce((sum, part) => sum + part.amount, 0n);
   if (!buckets.has(baseCurrency) && tendered > 0n) {
     throw badRequest(`Chekda ${baseCurrency} dagi mahsulot yo'q — to'lov valyuta bo'yicha kiritiladi`);
@@ -1132,7 +1144,7 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
     if (offline) throw badRequest("Aralash to'lov offline kassada qo'llanmaydi");
     // Balansga kirim ham qismlarga bo'linadi: har qism o'z hisobiga (UZCARD → o'z banki), chegara butun summaga
     if (input.purpose === "deposit") {
-      const resolved = await resolvePaymentParts(tx, tenant.company.id, input.parts);
+      const resolved = await resolvePaymentParts(tx, tenant.company.id, input.parts, { kassaId: shift.cashAccountId ?? null, offline: offline !== undefined, conflicts });
       if (resolved.length === 0) throw badRequest("To'lov summasi kiritilmagan");
       const total = resolved.reduce((sum, part) => sum + part.amount, 0n);
       const { cashierDepositLimit } = await getSalesPolicy(tx, tenant.company.id);
@@ -1219,7 +1231,7 @@ export async function posCustomerPayment(tx: Tx, tenant: TenantContext, input: P
       .for("update");
     if (!row) throw notFound("Mijoz topilmadi");
     const debt = toMinor(row.totalDebt) > 0n ? toMinor(row.totalDebt) : 0n;
-    const resolved = await resolvePaymentParts(tx, tenant.company.id, input.parts);
+    const resolved = await resolvePaymentParts(tx, tenant.company.id, input.parts, { kassaId: shift.cashAccountId ?? null, offline: offline !== undefined, conflicts });
     // Qarzdan ortiq to'lov rad (ortig'i balansga — alohida "balansni to'ldirish" amali)
     const { allocations } = settlePaymentParts(resolved, debt, { allowCashChange: false, allowShortfall: true });
     if (allocations.length === 0) throw badRequest("To'lov summasi kiritilmagan");

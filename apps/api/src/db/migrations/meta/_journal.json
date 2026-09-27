@@ -680,6 +680,13 @@
       "when": 1790530000000,
       "tag": "0096_multi_kassa",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1790540000000,
+      "tag": "0097_payment_methods",
+      "breakpoints": true
     }
   ]
 }

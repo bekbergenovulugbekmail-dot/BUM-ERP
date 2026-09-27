@@ -31,6 +31,8 @@ export const CONFLICT_KINDS = {
   supplier_overpaid: "Ta'minotchi qarzidan ortiq to'landi (avans)",
   count_late_document: "Inventarizatsiyadan oldingi hujjat kech keldi (qoldiq sanoq bo'yicha tuzatildi)",
   record_changed: "Kassadagi tahrir serverdagi yangi o'zgarish bilan to'qnashdi (server qiymati saqlandi)",
+  payment_method_overridden: "To'lov usuli sozlamasidan boshqa terminal/hisob yuborildi — usul sozlamasi qo'llandi",
+  payment_method_kassa_mismatch: "To'lov usuli bu kassada ruxsat etilmagan edi",
   cash_account_overridden: "Chekdagi naqd boshqa kassaga ko'rsatilgan edi — pul qurilma kassasiga yozildi",
   cash_exceeds_expected: "Kassadan kutilgan naqddan ko'p chiqim qilindi",
 } as const;

@@ -127,7 +127,8 @@ import { getSalesPolicy, salesPolicySchema, saveSalesPolicy } from "./sales-poli
 import { CASH_MOVEMENT_KINDS, listCashMovements, posCashMovement } from "./pos-cash.service.js";
 import { REFUND_METHODS, RETURN_DISPOSITIONS, returnSaleItems } from "./returns.service.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
-import { kassasForUser } from "./kassa.service.js";
+import { kassasForUser, shiftCashAccount } from "./kassa.service.js";
+import { posPaymentMethods } from "../finance/payment-methods.service.js";
 
 const nullableText = (max: number) =>
   z
@@ -258,6 +259,8 @@ const paymentPart = z.strictObject({
   /** Karta terminali — pul uning bank hisobiga. */
   terminalId: z.uuid().nullable().optional(),
   cashAccountId: z.uuid().nullable().optional(),
+  /** Boshqariladigan to'lov usuli — tur, terminal va hisob usul sozlamasidan (server tekshiradi). */
+  paymentMethodId: z.uuid().nullable().optional(),
 });
 const posPaymentPart = paymentPart.extend({ method: z.enum(["cash", "card", "bank"]) });
 /** Aralash mijoz/buyurtma to'lovi: qismlar yig'indisi qarz yoki buyurtma qoldig'idan oshmaydi. */
@@ -980,7 +983,11 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   // Kassa ekrani: "Kassada ko'rsatish" belgilangan terminallar (UZCARD, HUMO ...) va bank hisoblari — komissiya ma'lumotisiz
   app.get("/pos/payment-options", async (req) => {
     const tenant = await readTenant(req, "pos.use");
+    const { shiftId } = z.object({ shiftId: z.uuid().optional() }).parse(req.query);
+    // Boshqariladigan usullar — smena kassasida ruxsat etilganlari (sozlanmagan kompaniyada bo'sh: terminal/bank ro'yxati ishlaydi)
+    const kassaId = shiftId ? await shiftCashAccount(db, tenant.company.id, shiftId) : null;
     return {
+      paymentMethods: await posPaymentMethods(db, tenant.company.id, kassaId),
       terminals: await paymentTerminalOptions(db, tenant.company.id, { posOnly: true }),
       bankAccounts: await posBankAccountOptions(db, tenant.company.id),
       maxParts: MAX_PAYMENT_PARTS,

@@ -134,6 +134,8 @@ export const syncOperationSchema = z.discriminatedUnion("type", [
             terminalId: z.uuid().nullable().optional(),
             /** Kassada tanlangan bank hisobi ("Bank: Kapitalbank"). */
             cashAccountId: z.uuid().nullable().optional(),
+            /** Boshqariladigan to'lov usuli. */
+            paymentMethodId: z.uuid().nullable().optional(),
           }),
         )
         .min(1)

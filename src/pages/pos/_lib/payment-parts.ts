@@ -9,7 +9,15 @@
 export type PayMethod = "cash" | "card" | "bank";
 
 /** Kassadagi to'lov tugmasi: usul va (ixtiyoriy) terminal yoki bank hisobi. */
-export type PayOption = { key: string; method: PayMethod; terminalId: string | null; cashAccountId: string | null; label: string };
+export type PayOption = {
+  key: string;
+  method: PayMethod;
+  terminalId: string | null;
+  cashAccountId: string | null;
+  label: string;
+  /** Boshqariladigan to'lov usuli (Moliya → To'lov usullari): terminal/hisob serverda usuldan olinadi. */
+  paymentMethodId?: string | null;
+};
 
 export type PayPart = PayOption & { amount: bigint };
 
@@ -90,5 +98,6 @@ export function paymentsBody(parts: PayPart[]) {
     amount: minorText(part.amount),
     ...(part.terminalId ? { terminalId: part.terminalId } : {}),
     ...(part.cashAccountId ? { cashAccountId: part.cashAccountId } : {}),
+    ...(part.paymentMethodId ? { paymentMethodId: part.paymentMethodId } : {}),
   }));
 }

@@ -17,12 +17,15 @@ import type { DbOrTx } from "../../db/transaction.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
 import { companyCurrency } from "./accounts.service.js";
 import { findCompanyTerminal } from "./terminals.service.js";
+import { applyPaymentMethod, type MethodConflict } from "./payment-methods.service.js";
 
 export type PaymentPartInput = {
   method: AllocationMethod;
   amount: string;
   terminalId?: string | null;
   cashAccountId?: string | null;
+  /** Boshqariladigan to'lov usuli (sozlama): tur, terminal va hisob shu usuldan olinadi. */
+  paymentMethodId?: string | null;
 };
 
 export type ResolvedPart = {
@@ -30,6 +33,7 @@ export type ResolvedPart = {
   amount: bigint;
   terminalId: string | null;
   cashAccountId: string | null;
+  paymentMethodId?: string | null;
 };
 
 /** Qismlarni tekshiradi va terminal hisobini aniqlaydi; nol summali qismlar natijaga kirmaydi. */
@@ -38,13 +42,25 @@ export async function resolvePaymentParts(
   companyId: string,
   parts: PaymentPartInput[],
   /** `offline` — desktop kassa cheki qurilmada yopilgan: keyin faolsizlantirilgan terminal yoki hisob rad etilmaydi. */
-  options: { allowedMethods?: readonly AllocationMethod[]; offline?: boolean } = {},
+  options: {
+    allowedMethods?: readonly AllocationMethod[];
+    offline?: boolean;
+    /** Kassa smenasi: usul kassaga cheklangan bo'lsa tekshiriladi (`null` — kassasiz smena). Berilmasa — kassadan tashqari. */
+    kassaId?: string | null;
+    /** Offline nomuvofiqliklar (usul sozlamasi ustun keldi). */
+    conflicts?: MethodConflict[];
+  } = {},
 ): Promise<ResolvedPart[]> {
   if (parts.length > MAX_PAYMENT_PARTS) throw badRequest(`Bitta to'lovda ko'pi bilan ${MAX_PAYMENT_PARTS} ta qism`);
   const baseCurrency = await companyCurrency(conn, companyId);
   const seen = new Set<string>();
   const resolved: ResolvedPart[] = [];
-  for (const part of parts) {
+  for (const rawPart of parts) {
+    const part = await applyPaymentMethod(conn, companyId, rawPart, {
+      ...(options.kassaId !== undefined ? { kassaId: options.kassaId } : {}),
+      ...(options.offline ? { offline: true } : {}),
+      ...(options.conflicts ? { conflicts: options.conflicts } : {}),
+    });
     const label = ALLOCATION_METHOD_LABELS[part.method] ?? part.method;
     const amount = toMinor(part.amount);
     if (amount < 0n) throw badRequest("To'lov summasi manfiy bo'lmasin");
@@ -74,10 +90,10 @@ export async function resolvePaymentParts(
       }
       if (account.currency !== baseCurrency) throw badRequest(`"${account.name}" asosiy valyutada emas — valyutadagi to'lov alohida kiritiladi`);
     }
-    const key = `${part.method}|${terminalId ?? ""}|${cashAccountId ?? ""}`;
+    const key = `${part.method}|${terminalId ?? ""}|${cashAccountId ?? ""}|${part.paymentMethodId ?? ""}`;
     if (seen.has(key)) throw badRequest(`${label} to'lovi bir marta kiritiladi`);
     seen.add(key);
-    if (amount > 0n) resolved.push({ method: part.method, amount, terminalId, cashAccountId });
+    if (amount > 0n) resolved.push({ method: part.method, amount, terminalId, cashAccountId, ...(part.paymentMethodId ? { paymentMethodId: part.paymentMethodId } : {}) });
   }
   return resolved;
 }

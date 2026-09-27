@@ -26,6 +26,8 @@
  *   POST   /cash-accounts/:cashAccountId/set-balance           finance.approve (qoldiqni to'g'rilash: farq kirim/chiqim)
  *   GET    /terminals (?includeInactive=), /terminals/:terminalId   finance.view (karta terminallari → bank hisobi)
  *   POST   /terminals, PATCH /terminals/:terminalId            finance.manage
+ *   GET    /payment-methods (?includeInactive=)                 finance.view (boshqariladigan to'lov usullari)
+ *   POST   /payment-methods, PATCH /payment-methods/:id, POST /payment-methods/bootstrap   finance.manage
  *   GET    /expenses (?status=&category=&dateFrom=&dateTo=&limit=&cursor=), /expenses/stats   finance.view
  *   POST   /expenses, PATCH / DELETE /expenses/:expenseId      finance.manage
  *   POST   /expenses/:expenseId/status                         finance.approve (paid — kassa chiqimi + jurnal)
@@ -137,6 +139,7 @@ import {
   updateCashCategory,
 } from "./cash-documents.service.js";
 import { createTerminal, getTerminal, listTerminals, updateTerminal } from "./terminals.service.js";
+import { bootstrapPaymentMethods, createPaymentMethod, listPaymentMethods, updatePaymentMethod } from "./payment-methods.service.js";
 
 const nullableText = (max: number) =>
   z
@@ -828,6 +831,52 @@ export async function financeRoutes(app: FastifyInstance): Promise<void> {
       updateTerminal(tx, tenant, terminalId, patch, requestMeta(req)),
     );
     return { terminal };
+  });
+
+  // ─── Boshqariladigan to'lov usullari (sozlama qatlami) ───────────────────
+
+  const paymentMethodBody = z.strictObject({
+    name: z.string().trim().min(1).max(100),
+    kind: z.enum(["cash", "card", "bank", "transfer"]),
+    /** Karta usuli — terminal (pul terminal hisobiga). */
+    terminalId: z.uuid().nullable().optional(),
+    /** Karta/bank/o'tkazma usuli — hisob (bank yoki kutilayotgan karta hisobi). */
+    cashAccountId: z.uuid().nullable().optional(),
+    showInPos: z.boolean().optional(),
+    isActive: z.boolean().optional(),
+    sortOrder: z.number().int().min(0).max(9999).optional(),
+    /** Ruxsat etilgan kassalar; bo'sh — barcha kassalarda. */
+    kassaIds: z.array(z.uuid()).max(100).optional(),
+  });
+  const paymentMethodParams = z.object({ paymentMethodId: z.uuid() });
+
+  app.get("/payment-methods", async (req) => {
+    const { includeInactive } = includeInactiveQuery.parse(req.query);
+    const tenant = await readTenant(req, "finance.view");
+    return { paymentMethods: await listPaymentMethods(db, tenant.company.id, { includeInactive: includeInactive ?? false }) };
+  });
+
+  app.post("/payment-methods", async (req, reply) => {
+    const body = paymentMethodBody.parse(req.body);
+    const paymentMethod = await writeInTenant(req, "finance.manage", (tx, tenant) => createPaymentMethod(tx, tenant, body, requestMeta(req)));
+    reply.status(201);
+    return { paymentMethod };
+  });
+
+  app.patch("/payment-methods/:paymentMethodId", async (req) => {
+    const { paymentMethodId } = paymentMethodParams.parse(req.params);
+    // Tur o'zgarmaydi (tarixiy to'lovlar boshqa turda ko'rinmasin)
+    const patch = paymentMethodBody.omit({ kind: true }).partial().parse(req.body);
+    const paymentMethod = await writeInTenant(req, "finance.manage", (tx, tenant) =>
+      updatePaymentMethod(tx, tenant, paymentMethodId, patch, requestMeta(req)),
+    );
+    return { paymentMethod };
+  });
+
+  // Mavjud terminallar va bank hisoblaridan usullar ro'yxatini tayyorlash (faqat havola; takror chaqirish xavfsiz)
+  app.post("/payment-methods/bootstrap", async (req) => {
+    const created = await writeInTenant(req, "finance.manage", (tx, tenant) => bootstrapPaymentMethods(tx, tenant, requestMeta(req)));
+    return { created };
   });
 
   // ─── Valyutalar va kurslar ───────────────────────────────────────────────

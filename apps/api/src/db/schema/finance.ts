@@ -24,6 +24,8 @@ import {
   uuid,
   varchar,
   type AnyPgColumn,
+  integer,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { branches, companies, users } from "./platform.js";
 import { percent } from "./_shared.js";
@@ -404,6 +406,49 @@ export const paymentTerminals = pgTable(
       .where(sql`${t.terminalIdentifier} IS NOT NULL`),
     check("pt_network_valid", sql`${t.network} in ('uzcard', 'humo', 'visa', 'mastercard', 'unionpay', 'other')`),
   ],
+);
+
+// ─── payment_methods ─────────────────────────────────────────────────────────
+// Boshqariladigan to'lov usullari (0097): kanonik tur (cash/card/bank/transfer) ustidagi sozlama — yangi pul hisobi
+// emas, mavjud terminal yoki hisobga havola. `payment_method_kassas` — ruxsat etilgan kassalar (bo'sh — hammasi).
+
+export const paymentMethods = pgTable(
+  "payment_methods",
+  {
+    id: pk(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    name: varchar("name", { length: 100 }).notNull(),
+    /** Kanonik tur: cash | card | bank | transfer. */
+    kind: varchar("kind", { length: 16 }).notNull().$type<"cash" | "card" | "bank" | "transfer">(),
+    terminalId: uuid("terminal_id").references(() => paymentTerminals.id, { onDelete: "restrict" }),
+    cashAccountId: uuid("cash_account_id").references(() => cashAccounts.id, { onDelete: "restrict" }),
+    showInPos: boolean("show_in_pos").notNull().default(true),
+    isActive: boolean("is_active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("pm_company_name_key").on(t.companyId, t.name),
+    index("pm_company_active_idx").on(t.companyId, t.isActive),
+    check("pm_kind_valid", sql`${t.kind} in ('cash', 'card', 'bank', 'transfer')`),
+    check("pm_cash_unbound", sql`${t.kind} <> 'cash' OR (${t.terminalId} IS NULL AND ${t.cashAccountId} IS NULL)`),
+    check("pm_terminal_card", sql`${t.terminalId} IS NULL OR ${t.kind} = 'card'`),
+  ],
+);
+
+export const paymentMethodKassas = pgTable(
+  "payment_method_kassas",
+  {
+    paymentMethodId: uuid("payment_method_id")
+      .notNull()
+      .references(() => paymentMethods.id, { onDelete: "cascade" }),
+    cashAccountId: uuid("cash_account_id")
+      .notNull()
+      .references(() => cashAccounts.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.paymentMethodId, t.cashAccountId] })],
 );
 
 // ─── expenses ────────────────────────────────────────────────────────────────

@@ -60,6 +60,8 @@ export type CustomerPaymentInput = {
   foreignAmount?: string;
   /** Karta to'lovi terminali: pul terminalga bog'langan bank hisobiga tushadi (faqat `card`). */
   terminalId?: string | null;
+  /** Boshqariladigan to'lov usuli (hisobot uchun; pul yo'li — method/terminal/hisob). */
+  paymentMethodId?: string | null;
   /** To'lov hujjati (aralash to'lov qismi) — `payment-allocation.service.ts`. */
   paymentId?: string | null;
   /** Kassa smenasi — to'lov qaysi sessiyada qabul qilingani (kassadan tashqarida null). */
@@ -159,6 +161,7 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
       reference: input.reference ?? null,
       notes: input.notes ?? null,
       terminalId: input.terminalId ?? null,
+      paymentMethodId: input.paymentMethodId ?? null,
       paymentId: input.paymentId ?? null,
       posShiftId: input.posShiftId ?? null,
       createdBy: tenant.user.id,
