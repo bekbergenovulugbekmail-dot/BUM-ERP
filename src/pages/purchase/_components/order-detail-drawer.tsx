@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import {
   X, CheckCircle, Truck, CreditCard,
-  Ban, ChevronDown, ChevronUp, FileDown, Tag, Zap,
+  Ban, ChevronDown, ChevronUp, FileDown, Tag, Undo2, Zap,
 } from "lucide-react";
 import LabelPrintDialog from "@/components/label-print-dialog.tsx";
 import { toLabelProduct, type LabelItem } from "@/lib/print/label-html.ts";
@@ -23,6 +23,7 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { useActiveCompany, usePermissions } from "@/hooks/use-company.ts";
 import { useCurrentUser } from "@/hooks/use-auth.ts";
 import ReversalDialog from "@/components/reversal-dialog.tsx";
+import PurchaseReturnDialog from "./purchase-return-dialog.tsx";
 import {
   PAYMENT_LABELS, newReference, num, todayLocal,
   type PaymentMethod, type PurchaseOrderDetail,
@@ -93,6 +94,7 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
   );
 
   const [showReceive, setShowReceive] = useState(false);
+  const [showReturn, setShowReturn] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [showComplete, setShowComplete] = useState(false);
   const [completeMethod, setCompleteMethod] = useState<PaymentMethod>("cash");
@@ -416,6 +418,11 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                       {showPayment ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
                     </Button>
                   )}
+                  {["partial", "received", "invoiced", "paid"].includes(order.status) && can("purchase.return") && (
+                    <Button size="sm" variant="secondary" onClick={() => setShowReturn(true)} data-testid="purchase-return-open">
+                      <Undo2 className="h-4 w-4 mr-1" /> Ta'minotchiga qaytarish
+                    </Button>
+                  )}
                   {["draft", "confirmed"].includes(order.status) && num(order.paidAmount) === 0 && can("purchase.cancel") && (
                     <Button size="sm" variant="ghost" className="text-destructive" onClick={handleCancel} disabled={cancelOrder.isPending}>
                       <Ban className="h-4 w-4 mr-1" /> Bekor qilish
@@ -432,6 +439,9 @@ export default function OrderDetailDrawer({ orderId, onClose }: Props) {
                 </div>
                 {labelItems && (
                   <LabelPrintDialog initialItems={labelItems} onClose={() => setLabelItems(null)} />
+                )}
+                {showReturn && (
+                  <PurchaseReturnDialog orderId={order.id} orderNumber={order.number} items={order.items} onClose={() => setShowReturn(false)} />
                 )}
 
                 {/* Receive form */}

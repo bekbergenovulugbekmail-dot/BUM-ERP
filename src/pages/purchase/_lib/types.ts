@@ -71,6 +71,8 @@ export type PurchaseOrderItem = {
   productSku: string;
   unitName: string;
   pendingQty: string;
+  /** Ta'minotchiga qaytarilgan miqdor (qabul qilingan birlikda). */
+  returnedQty?: string;
 };
 
 export type PurchaseReceipt = { id: string; receiptDate: string; notes: string | null; createdAt: string };

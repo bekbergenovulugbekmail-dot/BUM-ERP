@@ -284,6 +284,8 @@ export async function getOrder(conn: DbOrTx, tenant: TenantContext, orderId: str
       productCategoryId: products.categoryId,
       unitName: units.shortName,
       pendingQty: sql<string>`(${purchaseOrderItems.orderedQty} - ${purchaseOrderItems.receivedQty})::numeric(18,4)`,
+      // Ta'minotchiga qaytarilgan miqdor (qaytarish oynasi uchun — qaytarsa bo'ladigani = qabul − qaytarilgan)
+      returnedQty: sql<string>`(select coalesce(sum(pri.quantity), 0) from purchase_return_items pri where pri.order_item_id = ${purchaseOrderItems.id})::numeric(18,4)`,
     })
     .from(purchaseOrderItems)
     .innerJoin(products, eq(products.id, purchaseOrderItems.productId))
