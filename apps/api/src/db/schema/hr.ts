@@ -390,6 +390,9 @@ export const kpiMetric = pgEnum("kpi_metric", [
   "cashier_sales_amount",
   "warehouse_receipt_count",
   "warehouse_issue_count",
+  "seller_sales_amount",
+  "seller_receipt_count",
+  "seller_gross_profit",
 ]);
 
 /** `percent` — ko'rsatkich summasidan foiz; `per_unit` — har bir dona/kg uchun belgilangan summa. */

@@ -23,6 +23,7 @@ import { stockMovements } from "../../db/schema/inventory.js";
 import { employees, kpiRuleTiers, kpiRules } from "../../db/schema/hr.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
+import { sellerTotals } from "../sales/seller.service.js";
 
 export type KpiMetric = (typeof KPI_METRICS)[number];
 
@@ -38,6 +39,9 @@ export const KPI_METRICS = [
   "cashier_sales_amount",
   "warehouse_receipt_count",
   "warehouse_issue_count",
+  "seller_sales_amount",
+  "seller_receipt_count",
+  "seller_gross_profit",
 ] as const;
 
 /**
@@ -57,6 +61,9 @@ export const METRIC_KIND: Record<KpiMetric, "money" | "count" | "weight"> = {
   cashier_sales_amount: "money",
   warehouse_receipt_count: "count",
   warehouse_issue_count: "count",
+  seller_sales_amount: "money",
+  seller_receipt_count: "count",
+  seller_gross_profit: "money",
 };
 
 /** Ko'rsatkich turiga mos yagona stavka turi — foydalanuvchi noto'g'ri juftlik yubormasin. */
@@ -275,6 +282,16 @@ export async function metricValue(
           ),
         );
       const text = metric === "cashier_receipt_count" ? (row?.count ?? "0") : (row?.amount ?? "0");
+      return toMinor(Number(text).toFixed(VALUE_SCALE), VALUE_SCALE);
+    }
+
+    // Sotuvchi (chekdagi `seller_employee_id`): sof savdo (qaytarish ayirilgan), chek soni, yalpi foyda
+    case "seller_sales_amount":
+    case "seller_receipt_count":
+    case "seller_gross_profit": {
+      const [row] = await sellerTotals(conn, companyId, { from: start, toExclusive: next, employeeIds: [links.employeeId] });
+      if (!row) return zero;
+      const text = metric === "seller_receipt_count" ? String(row.receipts) : metric === "seller_sales_amount" ? row.netSales : row.grossProfit;
       return toMinor(Number(text).toFixed(VALUE_SCALE), VALUE_SCALE);
     }
 

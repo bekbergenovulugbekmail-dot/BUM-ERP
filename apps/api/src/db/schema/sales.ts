@@ -284,6 +284,8 @@ export const salesOrders = pgTable(
 
     notes: text("notes"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    /** Sotuvchi xodim (0098) — kassir/yaratgan/kassa/qurilmadan alohida; KPI `seller_*`. Tarixiy buyurtmalarda NULL. */
+    sellerEmployeeId: uuid("seller_employee_id"),
     ...timestamps(),
   },
   (t) => [

@@ -38,6 +38,10 @@ const METRICS = [
   { key: "cashier_sales_amount", label: "Kassir: kassa savdosi", unit: "so'm" },
   { key: "warehouse_receipt_count", label: "Ombor: qabul hujjatlari", unit: "dona" },
   { key: "warehouse_issue_count", label: "Ombor: chiqim hujjatlari", unit: "dona" },
+  // Sotuvchi — chekda tanlangan xodim (kassirdan alohida); qaytarish ayiriladi
+  { key: "seller_sales_amount", label: "Sotuvchi: sof savdo", unit: "so'm" },
+  { key: "seller_receipt_count", label: "Sotuvchi: chek soni", unit: "dona" },
+  { key: "seller_gross_profit", label: "Sotuvchi: yalpi foyda", unit: "so'm" },
 ] as const;
 
 type Metric = (typeof METRICS)[number]["key"];

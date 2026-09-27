@@ -57,6 +57,7 @@ import { getSalesPolicy, notifyMembersWithPermission } from "./sales-policy.serv
 import { postShiftDifferences } from "./pos-shift-difference.service.js";
 import { assertKassaForShift, defaultCashAccountId, warehouseKassas } from "./kassa.service.js";
 import { addCurrencyAmounts } from "./shift-totals.js";
+import { assertSeller } from "./seller.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...shiftFields } = getTableColumns(posShifts);
 /**
@@ -592,6 +593,8 @@ export async function completeSale(
      */
     currencyPayments?: { currency: string; amount: string; method?: "cash" | "card" }[];
     notes?: string | null;
+    /** Sotuvchi xodim (kassirdan alohida; bir kassada ko'p sotuvchi) — KPI `seller_*`. Ixtiyoriy. */
+    sellerEmployeeId?: string | null;
     /**
      * Desktop kassa sinxroni. Chek qurilmada allaqachon yopilgan (tovar va pul berilgan) — server rad etish o'rniga
      * nomuvofiqlikni qayd etadi: zaxira yetmasa (manfiy qoldiq), narx/kurs o'zgargan, mijoz faol emas, kredit limiti,
@@ -612,6 +615,16 @@ export async function completeSale(
   // Web kassa desktop smenasiga (va aksincha) chek yoza olmaydi
   if ((shift.deviceId ?? null) !== (offline?.deviceId ?? null)) throw notFound("Smena topilmadi");
   await assertShiftOperator(tx, tenant, shift.cashierId);
+  // Sotuvchi: shu kompaniyaning faol xodimi. Offline chek rad etilmaydi — noto'g'ri sotuvchi atributsiyasiz, nomuvofiqlik
+  let sellerEmployeeId: string | null = null;
+  if (input.sellerEmployeeId) {
+    try {
+      sellerEmployeeId = (await assertSeller(tx, companyId, input.sellerEmployeeId)).id;
+    } catch (err) {
+      if (!offline) throw err;
+      conflicts.push({ kind: "seller_invalid", details: { sellerEmployeeId: input.sellerEmployeeId } });
+    }
+  }
   assertWarehouseAccess(tenant, shift.warehouseId);
   // Idempotentlik: bir xil so'rov smena qulfi ostida ketma-ket — ikkinchisi birinchi yozgan chekni ko'radi
   if (input.clientRequestId && !offline) {
@@ -848,6 +861,7 @@ export async function completeSale(
       posShiftId: shift.id,
       notes: input.notes ?? null,
       createdBy: tenant.user.id,
+      sellerEmployeeId,
       ...(offline ? { id: offline.id, deviceId: offline.deviceId, createdAt: offline.soldAt } : {}),
       ...(input.clientRequestId && !offline ? { clientRequestId: input.clientRequestId } : {}),
     })

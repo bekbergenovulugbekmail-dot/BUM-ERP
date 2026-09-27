@@ -129,6 +129,7 @@ import { REFUND_METHODS, RETURN_DISPOSITIONS, returnSaleItems } from "./returns.
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
 import { kassaBoard, kassasForUser, shiftCashAccount } from "./kassa.service.js";
 import { posPaymentMethods } from "../finance/payment-methods.service.js";
+import { sellerOptions } from "./seller.service.js";
 
 const nullableText = (max: number) =>
   z
@@ -358,6 +359,8 @@ const closeShiftBody = z.strictObject({
 });
 const posSaleBody = z.strictObject({
   shiftId: z.uuid(),
+  /** Sotuvchi xodim (kassirdan alohida) — ixtiyoriy. */
+  sellerEmployeeId: z.uuid().nullable().optional(),
   customerId: z.uuid().nullable().optional(),
   items: z.array(salesItem).min(1).max(500),
   paymentMethod: paymentMethod.default("cash"),
@@ -999,6 +1002,12 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   app.get("/pos/shifts/open", async (req) => {
     const { warehouseId, cashAccountId } = openShiftKassaQuery.parse(req.query);
     return { shift: await getOpenShift(db, await readTenant(req, "pos.use"), warehouseId, cashAccountId) };
+  });
+
+  // Sotuvchi tanlash ro'yxati (kassa ekrani)
+  app.get("/pos/sellers", async (req) => {
+    const tenant = await readTenant(req, "pos.use");
+    return { sellers: await sellerOptions(db, tenant.company.id) };
   });
 
   // Kassalar paneli (rahbar): barcha POS kassalar — balans va ochiq smena

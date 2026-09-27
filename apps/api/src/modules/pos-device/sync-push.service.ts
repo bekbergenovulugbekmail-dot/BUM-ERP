@@ -145,6 +145,8 @@ export const syncOperationSchema = z.discriminatedUnion("type", [
       balanceAmount: moneySchema.optional(),
       changeToBalance: z.boolean().optional(),
       saleCurrencies: z.array(currencyCode).min(1).max(6).optional(),
+      /** Sotuvchi xodim (kassirdan alohida). */
+      sellerEmployeeId: z.uuid().nullable().optional(),
       currencyPayments: z
         .array(z.strictObject({ currency: currencyCode, amount: moneySchema, method: z.enum(["cash", "card"]) }))
         .max(6)
@@ -498,6 +500,7 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
           changeToBalance: payload.changeToBalance,
           saleCurrencies: payload.saleCurrencies,
           currencyPayments: payload.currencyPayments,
+          sellerEmployeeId: payload.sellerEmployeeId ?? null,
           notes: payload.notes ?? null,
           offline: {
             id: payload.saleId,

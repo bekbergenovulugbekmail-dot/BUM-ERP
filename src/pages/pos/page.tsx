@@ -157,6 +157,16 @@ export default function POSPage() {
   // To'lov usullari Moliya bo'limidan: "Kassada ko'rsatish" belgilangan terminallar (UZCARD, HUMO ...) va bank hisoblari
   const paymentOptions = useApiQuery<PaymentOptionsResponse>("/api/sales/pos/payment-options", shift?.id ? { shiftId: shift.id } : undefined, { staleTime: 60_000 }).data;
   const managedMethods = (paymentOptions?.paymentMethods ?? []).filter((method) => method.kind !== "transfer");
+  // Sotuvchi (kassirdan alohida, bir kassada ko'p): tanlov shu qurilmada eslab qolinadi; bo'sh — atributsiyasiz
+  const sellers = useApiQuery<{ sellers: { id: string; name: string; code: string }[] }>(shift ? "/api/sales/pos/sellers" : null, undefined, { staleTime: 5 * 60_000 }).data?.sellers;
+  const [sellerId, setSellerIdState] = useState<string>(() => {
+    try { return localStorage.getItem("bum.pos.seller") ?? ""; } catch { return ""; }
+  });
+  const setSellerId = (value: string) => {
+    setSellerIdState(value);
+    try { localStorage.setItem("bum.pos.seller", value); } catch { /* saqlash ixtiyoriy */ }
+  };
+  const activeSellerId = sellers?.some((seller) => seller.id === sellerId) ? sellerId : "";
   const terminals = paymentOptions?.terminals ?? [];
   const bankAccounts = paymentOptions?.bankAccounts ?? [];
   const panelSide: PosPanelSide = paymentOptions?.layout?.paymentPanelSide ?? "right";
@@ -490,6 +500,7 @@ export default function POSPage() {
         customerId: customer?.id ?? null,
         items: cart.map((i) => ({ productId: i.productId, unitId: i.unitId, quantity: i.qty })),
         clientRequestId: requestIdRef.current,
+        ...(activeSellerId ? { sellerEmployeeId: activeSellerId } : {}),
         ...(paymentParts.length > 0 && showBasePayment
           ? { payments: paymentsBody(paymentParts) }
           : { paymentMethod: "cash", amountPaid: showBasePayment ? fromMinor(dueMinor) : "0" }),
@@ -877,6 +888,21 @@ export default function POSPage() {
             </button>
           )}
           <div className="ml-auto flex items-center gap-2">
+            {sellers && sellers.length > 0 && (
+              <select
+                aria-label="Sotuvchi"
+                data-testid="pos-seller"
+                value={activeSellerId}
+                onChange={(event) => setSellerId(event.target.value)}
+                className="h-8 max-w-[11rem] rounded-md border border-input bg-background px-2 text-xs"
+                title="Chekni sotgan xodim (KPI)"
+              >
+                <option value="">Sotuvchi: —</option>
+                {sellers.map((seller) => (
+                  <option key={seller.id} value={seller.id}>{seller.name}</option>
+                ))}
+              </select>
+            )}
             {/* Chekni avtomatik chop etish — kassirning o'zi shu qurilma uchun yoqadi/o'chiradi */}
             <button
               type="button"
