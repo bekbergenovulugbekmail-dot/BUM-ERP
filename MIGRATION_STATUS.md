@@ -5153,3 +5153,6 @@ Migratsiyalarda DML yo'q; `DROP INDEX ps_one_open_per_warehouse` shu tranzaksiya
 kutilayotgan migratsiyalar bitta tranzaksiyada (drizzle) — xato bo'lsa hech biri qo'llanmaydi. **Xulosa: SAFE TO DEPLOY.**
 Backup: Railway CLI'da zaxira buyrug'i yo'q, `bum-api` konteynerida `pg_dump` yo'q — **NOT VERIFIED**, deploydan oldin
 dashboard'da tekshirish kerak. Deploydan keyingi tekshiruv — o'sha skript, tarixiy jadvallar nazorat summalari solishtiriladi.
+**Backup tekshiruvi (2026-09-27 10:18Z):** Railway API (CLI login, faqat o'qish): `Postgres--bSX` volume `postgres-volume-LRbC`
+(instance `cd083546…`, READY, ~450 MB) — backup ro'yxati **bo'sh**, avtomatik backup jadvali **yo'q**. `volumeInstanceBackupCreate`
+— **Not Authorized** (CLI tokeni yoki tarif ruxsat bermaydi). **BACKUP NOT VERIFIED** — 0096–0098 deployi backup'gacha to'xtatildi.
