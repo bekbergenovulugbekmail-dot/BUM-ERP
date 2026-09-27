@@ -268,6 +268,11 @@ const supplierDebtBody = z.strictObject({
   totalDebt: decimalSchema({ scale: 2 }),
   reason: z.string().trim().min(3).max(500),
   date: isoDate.optional(),
+  /**
+   * AUD-004: qarshi hisob. `pnl` (standart) — hayotdagi tuzatish, farq "Boshqa daromad/xarajat"; `equity` — BOSHLANG'ICH
+   * qoldiq (boshqa tizimdan ko'chirish): farq Ustav kapitaliga (3000), foyda-zararga tushmaydi (CSV import bilan bir xil qoida).
+   */
+  counter: z.enum(["pnl", "equity"]).optional(),
 });
 const orderParams = z.object({ orderId: z.uuid() });
 const supplierPaymentParams = z.object({ paymentId: z.uuid() });

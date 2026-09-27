@@ -181,7 +181,7 @@ export async function setSupplierDebt(
   tx: Tx,
   tenant: TenantContext,
   supplierId: string,
-  input: { totalDebt: string; reason: string; date?: string },
+  input: { totalDebt: string; reason: string; date?: string; counter?: "pnl" | "equity" },
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
@@ -209,6 +209,9 @@ export async function setSupplierDebt(
 
   const amount = fromMinor(delta > 0n ? delta : -delta);
   const payable = await requireAccountBySubtype(tx, companyId, "payable", "liability", "Kreditorlar");
+  // AUD-004: boshlang'ich qoldiq — Ustav kapitali (foyda-zararga tushmaydi); tuzatish — boshqa xarajat/daromad
+  const opening = input.counter === "equity";
+  const equity = () => requireAccountBySubtype(tx, companyId, "capital", "equity", "Ustav kapitali");
   await postJournalEntry(tx, companyId, tenant.user.id, {
     party: { type: "supplier", id: supplierId },
     entryDate: date,
@@ -218,12 +221,12 @@ export async function setSupplierDebt(
     lines:
       delta > 0n
         ? [
-            { accountId: await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"), debit: amount },
+            { accountId: opening ? await equity() : await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"), debit: amount },
             { accountId: payable, credit: amount },
           ]
         : [
             { accountId: payable, debit: amount },
-            { accountId: await requireAccountBySubtype(tx, companyId, "other", "income", "Boshqa daromadlar"), credit: amount },
+            { accountId: opening ? await equity() : await requireAccountBySubtype(tx, companyId, "other", "income", "Boshqa daromadlar"), credit: amount },
           ],
   });
   // Asosiy valyutada qarz va kitob qiymati teng — `total_debt` shu yerda yangilanadi
@@ -242,7 +245,7 @@ export async function setSupplierDebt(
     action: "SUPPLIER_DEBT_ADJUSTED",
     resource: "suppliers",
     resourceId: supplierId,
-    details: { reason, before: current.totalDebt, after: fromMinor(target), delta: fromMinor(delta) },
+    details: { reason, counter: input.counter ?? "pnl", before: current.totalDebt, after: fromMinor(target), delta: fromMinor(delta) },
   });
   const [fresh] = await tx.select(supplierFields).from(suppliers).where(eq(suppliers.id, supplierId));
   return { supplier: fresh!, delta: fromMinor(delta) };

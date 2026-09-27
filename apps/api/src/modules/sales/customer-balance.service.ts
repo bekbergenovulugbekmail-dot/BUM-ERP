@@ -580,6 +580,7 @@ export async function setCustomerBalances(
     resourceId: customer.id,
     details: {
       reason,
+      counter: input.counter ?? "pnl",
       before,
       after: { balance: input.balance ?? before.balance, totalDebt: input.totalDebt ?? before.totalDebt },
     },

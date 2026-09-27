@@ -199,6 +199,7 @@ export default function SuppliersTable({ suppliers }: Props) {
                   <SetBalanceDialog
                     title={`${s.name} — qarzni to'g'rilash`}
                     description="Farq buxgalteriyada boshqa daromad yoki xarajat bo'lib kreditorlar hisobiga yoziladi"
+                    openingOption
                     fields={[{ key: "totalDebt", label: "Qarz", current: s.totalDebt }]}
                     endpoint={`/api/purchase/suppliers/${s.id}/set-debt`}
                     invalidate={["/api/purchase/suppliers"]}

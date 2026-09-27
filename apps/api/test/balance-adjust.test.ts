@@ -43,6 +43,7 @@ beforeEach(async () => {
 const call = (cookie: string, method: "GET" | "POST" | "PATCH", url: string, payload?: object) =>
   app.inject({ method, url, headers: { cookie }, ...(payload ? { payload } : {}) });
 const owner = () => company.ownerCookie;
+const OTHER_EXPENSE = "5500";
 
 const ledger = async (code: string) =>
   (await db.select({ balance: accounts.balance }).from(accounts).where(and(eq(accounts.companyId, company.companyId), eq(accounts.code, code))))[0]?.balance ?? null;
@@ -118,6 +119,30 @@ describe("Balanslarni to'g'rilash", () => {
 
     expect((await setDebt({ totalDebt: "-1", reason: "Manfiy qarz" })).statusCode).toBe(400);
     expect((await setDebt({ totalDebt: "100", reason: "x" })).statusCode).toBe(400);
+  });
+
+  it("AUD-004: boshlang'ich qoldiq (counter=equity) — mijoz va ta'minotchi qarzi Ustav kapitaliga, foyda-zarar o'zgarmaydi", async () => {
+    const otherIncome0 = await ledger("4100");
+    const otherExpense0 = await ledger(OTHER_EXPENSE);
+    const capital0 = Number(await ledger("3000"));
+    // Mijoz: boshlang'ich qarz 250 000 (boshqa tizimdan)
+    const opened = await call(owner(), "POST", `/api/sales/customers/${customerId}/balance-adjust`, { totalDebt: "250000", reason: "Eski tizimdan boshlang'ich qarz", counter: "equity" });
+    expect(opened.statusCode, opened.body).toBe(200);
+    expect((await customerRow()).totalDebt).toBe("250000.00");
+    expect(Number(await ledger("1100"))).toBe(250000);
+    // Mijoz qarzi (aktiv) oshdi — qarshi tomon kapital: 3000 kreditda +250 000
+    expect(Number(await ledger("3000")) - capital0).toBe(250000);
+    // Ta'minotchi: boshlang'ich qarz 400 000 — kapital kamayadi (DR 3000 / CR 2000)
+    const supplierId = (await call(owner(), "POST", "/api/purchase/suppliers", { name: "Eski ta'minotchi", code: "S-OPEN" })).json().supplier.id as string;
+    const set = await call(owner(), "POST", `/api/purchase/suppliers/${supplierId}/set-debt`, { totalDebt: "400000", reason: "Eski tizimdan boshlang'ich qarz", counter: "equity" });
+    expect(set.statusCode, set.body).toBe(200);
+    expect(Number(await ledger("3000")) - capital0).toBe(250000 - 400000);
+    // Foyda-zarar hisoblari tegilmadi
+    expect(await ledger("4100")).toBe(otherIncome0);
+    expect(await ledger(OTHER_EXPENSE)).toBe(otherExpense0);
+    // Belgisiz (standart) — avvalgidek boshqa daromad
+    await call(owner(), "POST", `/api/sales/customers/${customerId}/balance-adjust`, { totalDebt: "260000", reason: "Hisob-kitob farqi" });
+    expect(Number(await ledger("4100")) - Number(otherIncome0 ?? 0)).toBe(10000);
   });
 
   it("kassa qoldig'i to'g'rilanadi — farq kirim/chiqim bo'lib tarixda ko'rinadi", async () => {

@@ -484,6 +484,11 @@ const balanceAdjustBody = z.strictObject({
   cashback: moneySchema.optional(),
   reason: z.string().trim().min(3).max(500),
   date: z.iso.date().optional(),
+  /**
+   * AUD-004: qarshi hisob. `pnl` (standart) — hayotdagi tuzatish, farq "Boshqa daromad/xarajat"; `equity` — BOSHLANG'ICH
+   * qoldiq (boshqa tizimdan ko'chirish): farq Ustav kapitaliga (3000), foyda-zararga tushmaydi (CSV import bilan bir xil qoida).
+   */
+  counter: z.enum(["pnl", "equity"]).optional(),
 });
 
 const customerParams = z.object({ customerId: z.uuid() });

@@ -102,6 +102,7 @@ export default function SetBalanceDialog({
   endpoint,
   historyUrl,
   invalidate,
+  openingOption = false,
   onClose,
 }: {
   title: string;
@@ -112,12 +113,18 @@ export default function SetBalanceDialog({
   /** Balans harakatlari tarixi (`GET`) — berilsa oynada ko'rsatiladi. */
   historyUrl?: string;
   invalidate: string[];
+  /**
+   * AUD-004: "Boshlang'ich qoldiq" belgisi (mijoz/ta'minotchi) — boshqa tizimdan ko'chirilgan qoldiq Ustav kapitaliga
+   * yoziladi (`counter: "equity"`), foyda-zararga tushmaydi. Belgisiz — oddiy tuzatish (boshqa daromad/xarajat).
+   */
+  openingOption?: boolean;
   onClose: () => void;
 }) {
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(fields.map((field) => [field.key, String(Number(field.current))])),
   );
   const [reason, setReason] = useState("");
+  const [opening, setOpening] = useState(false);
   const save = useApiMutation((body: Record<string, string>) => api.post(endpoint, body), { invalidate });
 
   // Faqat o'zgargan maydonlar yuboriladi — tegilmagan balans qayta yozilmasin
@@ -135,6 +142,7 @@ export default function SetBalanceDialog({
       await save.mutateAsync({
         ...Object.fromEntries(changed.map((field) => [field.key, String(numeric(values[field.key] ?? ""))])),
         reason: reason.trim(),
+        ...(openingOption && opening ? { counter: "equity" } : {}),
       });
       toast.success("Balans to'g'rilandi");
       onClose();
@@ -174,6 +182,15 @@ export default function SetBalanceDialog({
             />
             <p className="mt-1 text-[11px] text-muted-foreground">Sabab jurnal yozuvi va audit tarixida saqlanadi</p>
           </div>
+          {openingOption && (
+            <label className="flex items-start gap-2 rounded-md border p-2 text-xs" data-testid="set-balance-opening">
+              <input type="checkbox" className="mt-0.5" checked={opening} onChange={(e) => setOpening(e.target.checked)} />
+              <span>
+                <span className="font-medium">Boshlang'ich qoldiq</span> (boshqa tizimdan ko'chirish) — farq Ustav kapitaliga yoziladi,
+                foyda-zararga tushmaydi. Belgilanmasa — oddiy tuzatish (boshqa daromad/xarajat).
+              </span>
+            </label>
+          )}
           {historyUrl && (
             <div>
               <p className="mb-1 text-xs font-medium">Balans tarixi</p>
