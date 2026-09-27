@@ -14,7 +14,7 @@
  */
 import { and, desc, eq, getTableColumns, inArray, lt, or, sql } from "drizzle-orm";
 import { allowedWarehouses } from "../inventory/warehouses.service.js";
-import { badRequest, notFound } from "@bum/shared";
+import { badRequest, conflict, notFound } from "@bum/shared";
 import { customerPayments, customers, salesOrderItems, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
@@ -42,6 +42,24 @@ import { isPayableSale } from "./sale-status.js";
 import { enforceShiftCash } from "./kassa.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...paymentFields } = getTableColumns(customerPayments);
+
+/**
+ * AUD-009: `reference` bo'yicha takror — faqat AYNAN o'sha to'lov (summa, mijoz, buyurtma mos) bo'lsa mavjudi qaytadi.
+ * Boshqa summa/mijoz bilan bir xil kvitansiya raqami — xato kiritish: jimgina "muvaffaqiyat" emas, 409 (haqiqiy to'lov yo'qolmasin).
+ */
+function assertSameReferencePayment(
+  existing: { amount: string; foreignAmount: string; currency: string | null; customerId: string | null; orderId: string | null },
+  input: { amount: string; currency?: string | undefined; customerId?: string | null; orderId?: string | null },
+  baseCurrency: string,
+) {
+  const currency = input.currency ?? baseCurrency;
+  const storedAmount = currency === baseCurrency ? existing.amount : existing.foreignAmount;
+  const mismatch =
+    toMinor(storedAmount) !== toMinor(input.amount) ||
+    (input.orderId ? existing.orderId !== input.orderId : false) ||
+    (input.customerId && existing.customerId ? existing.customerId !== input.customerId : false);
+  if (mismatch) throw conflict("Bu reference (kvitansiya raqami) boshqa to'lovda ishlatilgan — summa yoki mijoz mos emas");
+}
 
 export type CustomerPaymentInput = {
   customerId?: string | null;
@@ -91,7 +109,11 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
       .from(customerPayments)
       .where(and(eq(customerPayments.companyId, companyId), eq(customerPayments.reference, input.reference)))
       .limit(1);
-    if (existing) return { payment: existing, created: false };
+    if (existing) {
+      // recordCustomerPayment: `amount` — asosiy valyutadagi qiymat, chet valyutada `foreignAmount`
+      assertSameReferencePayment(existing, { ...input, amount: input.currency && input.foreignAmount ? input.foreignAmount : input.amount }, input.currency && input.foreignAmount ? input.currency : await companyCurrency(tx, companyId));
+      return { payment: existing, created: false };
+    }
   }
 
   const amount = toMinor(input.amount);
@@ -316,7 +338,10 @@ export async function recordSalesPayment(tx: Tx, tenant: TenantContext, input: S
       .from(customerPayments)
       .where(and(eq(customerPayments.companyId, companyId), eq(customerPayments.reference, input.reference)))
       .limit(1);
-    if (existing) return { payment: existing, created: false };
+    if (existing) {
+      assertSameReferencePayment(existing, input, await companyCurrency(tx, companyId));
+      return { payment: existing, created: false };
+    }
   }
 
   const baseCurrency = await companyCurrency(tx, companyId);

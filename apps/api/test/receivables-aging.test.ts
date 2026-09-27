@@ -219,6 +219,27 @@ describe("Debitorlik: to'lov taqsimoti va qarz yoshi", () => {
     expect(await db.$count(customerPayments, eq(customerPayments.reference, reference))).toBe(1);
   });
 
+  it("AUD-009: bir xil reference boshqa summa yoki boshqa mijoz bilan — 409, pul va qarz o'zgarmaydi", async () => {
+    await sellOnCredit(shift(-10), "3"); // 300 000
+    const reference = `KV-${randomUUID()}`;
+    expect((await pay({ customerId, amount: "100000", reference })).statusCode).toBe(201);
+    const afterFirst = await journalTotals(company.companyId);
+    const debtAfterFirst = money(await debtOf(customerId));
+
+    const otherAmount = await pay({ customerId, amount: "150000", reference });
+    expect(otherAmount.statusCode, "boshqa summa — xato kiritish").toBe(409);
+    const other = await call(company.ownerCookie, "POST", "/api/sales/customers", { name: "Boshqa mijoz", phone: `+99897${String(Date.now()).slice(-7)}` });
+    expect(other.statusCode, other.body).toBe(201);
+    const otherCustomer = await pay({ customerId: other.json().customer.id, amount: "100000", reference });
+    expect(otherCustomer.statusCode, "boshqa mijoz — xato kiritish").toBe(409);
+    // Aynan o'sha to'lovning takrori — hamon idempotent (200, mavjud to'lov)
+    expect((await pay({ customerId, amount: "100000", reference })).statusCode).toBe(200);
+
+    expect(money(await debtOf(customerId))).toBe(debtAfterFirst);
+    expect(await journalTotals(company.companyId), "yangi jurnal yozuvi yo'q").toEqual(afterFirst);
+    expect(await db.$count(customerPayments, eq(customerPayments.reference, reference))).toBe(1);
+  });
+
   it("buyurtmaga to'g'ridan-to'g'ri to'lov taqsimotni chetlab o'tmaydi", async () => {
     const oldest = await sellOnCredit(shift(-60), "1"); // 100 000
     const newest = await sellOnCredit(todayIso(), "2"); // 200 000
