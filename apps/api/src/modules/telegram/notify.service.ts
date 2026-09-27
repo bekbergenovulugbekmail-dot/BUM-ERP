@@ -10,6 +10,7 @@ import { db } from "../../db/client.js";
 import { telegramBots, telegramChats } from "../../db/schema/telegram.js";
 import { salesOrderItems, salesOrders } from "../../db/schema/sales.js";
 import { products } from "../../db/schema/catalog.js";
+import { netAmountSql, openCondition } from "../sales/sale-status.js";
 import { logger } from "../../shared/logger.js";
 import { botToken } from "./bots.service.js";
 import { sendMessage } from "./telegram-api.service.js";
@@ -152,16 +153,9 @@ export async function notifyCustomerPaymentReceived(input: {
     const customerId = input.customerId ?? (input.orderId ? await orderCustomer(input.companyId, input.orderId) : null);
     if (!customerId) return;
     const [row] = await db
-      .select({ debt: sql<string>`coalesce(sum(${salesOrders.totalAmount} - ${salesOrders.paidAmount}), 0)::text` })
+      .select({ debt: sql<string>`coalesce(sum(${netAmountSql} - ${salesOrders.paidAmount}), 0)::text` })
       .from(salesOrders)
-      .where(
-        and(
-          eq(salesOrders.companyId, input.companyId),
-          eq(salesOrders.customerId, customerId),
-          sql`${salesOrders.totalAmount} > ${salesOrders.paidAmount}`,
-          sql`${salesOrders.status} <> 'cancelled'`,
-        ),
-      );
+      .where(and(eq(salesOrders.companyId, input.companyId), eq(salesOrders.customerId, customerId), openCondition));
     await notifyPayment({ ...input, customerId, remainingDebt: row?.debt ?? "0" });
   } catch (error) {
     logger.warn({ err: error, orderId: input.orderId }, "To'lov xabarini yuborib bo'lmadi");

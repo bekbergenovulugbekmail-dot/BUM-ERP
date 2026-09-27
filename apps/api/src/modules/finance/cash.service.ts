@@ -37,6 +37,7 @@ import { accounts, cashAccounts, cashTransactions, companyCurrencies } from "../
 import { employees } from "../../db/schema/hr.js";
 import { purchaseOrders } from "../../db/schema/purchase.js";
 import { posShifts, salesOrders } from "../../db/schema/sales.js";
+import { REALIZED_STATUSES, netAmountSql } from "../sales/sale-status.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
@@ -901,10 +902,11 @@ export async function financeDashboard(conn: DbOrTx, tenant: TenantContext) {
   const monthIncome = cashRows.reduce((sum, row) => sum + inBase({ balance: row.income, currency: row.currency }), 0n);
   const monthExpense = cashRows.reduce((sum, row) => sum + inBase({ balance: row.expense, currency: row.currency }), 0n);
 
+  // AUD-025: tushum — faqat yakunlangan sotuv, qaytarilgani chegirilgan (qoralama/tasdiqlangan sanalmaydi)
   const [sales] = await conn
-    .select({ total: sql<string>`coalesce(sum(${salesOrders.totalAmount}), 0)::numeric(18,2)` })
+    .select({ total: sql<string>`coalesce(sum(${netAmountSql}), 0)::numeric(18,2)` })
     .from(salesOrders)
-    .where(and(eq(salesOrders.companyId, companyId), gte(salesOrders.orderDate, monthStart), ne(salesOrders.status, "cancelled")));
+    .where(and(eq(salesOrders.companyId, companyId), gte(salesOrders.orderDate, monthStart), inArray(salesOrders.status, [...REALIZED_STATUSES])));
 
   const [purchases] = await conn
     .select({ total: sql<string>`coalesce(sum(${purchaseOrders.totalAmount}), 0)::numeric(18,2)` })

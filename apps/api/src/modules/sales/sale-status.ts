@@ -40,3 +40,18 @@ export const paymentStatusSql = sql<SalePaymentStatus>`(case
   when ${salesOrders.paidAmount} > 0 then 'partial'
   else 'unpaid'
 end)`;
+
+/**
+ * Hujjatning SOF summasi: qaytarilgan tovar qiymati chegirilgan.
+ *
+ * Qisman qaytarishda `total_amount` o'zgarmaydi (hujjat tarixi buzilmaydi), lekin mijoz endi
+ * faqat qolgan tovar uchun qarzdor. Shuning uchun qarz sof summadan hisoblanadi — aks holda
+ * qarz yoshi `customers.total_debt` dan katta chiqardi.
+ */
+export const netAmountSql = sql<string>`(${salesOrders.totalAmount} - coalesce((
+  select sum(r."total_amount") from "sales_returns" r where r."order_id" = ${salesOrders.id}
+), 0))::numeric(18,2)`;
+
+/** Ochiq qarz hujjati — `completed | shipped | delivered` va to'lanmagan sof qoldiq bilan. */
+export const openCondition = sql`${salesOrders.status} in ${sql.raw(`(${COMPLETED_STATUSES.map((status) => `'${status}'`).join(", ")})`)}
+  and ${netAmountSql} > ${salesOrders.paidAmount}`;

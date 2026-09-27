@@ -5,12 +5,13 @@
  * faqat webhook siri va ulashilgan telefon orqali aniqlanadi. Bog'lanmagan suhbatga
  * biznes ma'lumoti KO'RSATILMAYDI — avval kontakt so'raladi.
  */
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { customers, salesOrders } from "../../db/schema/sales.js";
 import { products } from "../../db/schema/catalog.js";
 import { logger } from "../../shared/logger.js";
+import { REALIZED_STATUSES, netAmountSql, openCondition } from "../sales/sale-status.js";
 import {
   botToken,
   findChat,
@@ -331,11 +332,11 @@ async function customerHistory(customerId: string) {
     .select({
       number: salesOrders.number,
       date: salesOrders.orderDate,
-      total: salesOrders.totalAmount,
+      total: netAmountSql,
       paid: salesOrders.paidAmount,
     })
     .from(salesOrders)
-    .where(and(eq(salesOrders.customerId, customerId), sql`${salesOrders.status} <> 'cancelled'`))
+    .where(and(eq(salesOrders.customerId, customerId), inArray(salesOrders.status, [...REALIZED_STATUSES])))
     .orderBy(desc(salesOrders.orderDate), desc(salesOrders.createdAt))
     .limit(10);
 
@@ -352,10 +353,10 @@ async function customerHistory(customerId: string) {
 async function customerDebt(customerId: string) {
   const [row] = await db
     .select({
-      debt: sql<string>`coalesce(sum(${salesOrders.totalAmount} - ${salesOrders.paidAmount}), 0)::text`,
+      debt: sql<string>`coalesce(sum(${netAmountSql} - ${salesOrders.paidAmount}), 0)::text`,
     })
     .from(salesOrders)
-    .where(and(eq(salesOrders.customerId, customerId), sql`${salesOrders.totalAmount} > ${salesOrders.paidAmount}`, sql`${salesOrders.status} <> 'cancelled'`));
+    .where(and(eq(salesOrders.customerId, customerId), openCondition));
 
   const [card] = await db
     .select({ cashback: customers.cashbackBalance, name: customers.name })

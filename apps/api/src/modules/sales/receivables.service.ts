@@ -20,7 +20,9 @@ import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
 import { todayIso } from "../finance/cash.service.js";
-import { COMPLETED_STATUSES } from "./sale-status.js";
+import { netAmountSql, openCondition } from "./sale-status.js";
+
+export { netAmountSql, openCondition };
 
 /** Yosh guruhlari (kun). Chegaralar hisobot va kredit siyosatida bir xil ishlatiladi. */
 export const AGING_BUCKETS = ["current", "d0_7", "d8_30", "d31_60", "d61_90", "d90_plus"] as const;
@@ -37,21 +39,6 @@ export function agingBucketOf(daysOverdue: number): AgingBucket {
 }
 
 const dayNumber = (date: string) => Math.floor(Date.parse(`${date}T00:00:00Z`) / 86_400_000);
-
-/**
- * Hujjatning SOF summasi: qaytarilgan tovar qiymati chegirilgan.
- *
- * Qisman qaytarishda `total_amount` o'zgarmaydi (hujjat tarixi buzilmaydi), lekin mijoz endi
- * faqat qolgan tovar uchun qarzdor. Shuning uchun qarz sof summadan hisoblanadi — aks holda
- * qarz yoshi `customers.total_debt` dan katta chiqardi.
- */
-export const netAmountSql = sql<string>`(${salesOrders.totalAmount} - coalesce((
-  select sum(r."total_amount") from "sales_returns" r where r."order_id" = ${salesOrders.id}
-), 0))::numeric(18,2)`;
-
-/** Ochiq qarz hujjati — `completed | shipped | delivered` va to'lanmagan sof qoldiq bilan. */
-export const openCondition = sql`${salesOrders.status} in ${sql.raw(`(${COMPLETED_STATUSES.map((status) => `'${status}'`).join(", ")})`)}
-  and ${netAmountSql} > ${salesOrders.paidAmount}`;
 
 /** To'lov muddati: hujjat sanasi + mijozning to'lov muddati (kun). */
 export const dueDateSql = sql<string>`(${salesOrders.orderDate} + ${customers.paymentTermDays})::text`;

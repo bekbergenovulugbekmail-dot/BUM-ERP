@@ -13,6 +13,7 @@ import { db } from "../../db/client.js";
 import { telegramBots, telegramChats } from "../../db/schema/telegram.js";
 import { customers, salesOrders } from "../../db/schema/sales.js";
 import { logger } from "../../shared/logger.js";
+import { netAmountSql, openCondition } from "../sales/sale-status.js";
 import { botToken } from "./bots.service.js";
 import { dailySummary, stockAlert } from "./owner-reports.service.js";
 import { notifyDebtReminder } from "./notify.service.js";
@@ -109,7 +110,7 @@ export async function runCustomerDebtReminders(now = new Date()): Promise<number
       // Muddati kelgan (yoki yaqinlashgan) qarz: buyurtma sanasi + mijozning to'lov muddati
       const [row] = await db
         .select({
-          debt: sql<string>`coalesce(sum(${salesOrders.totalAmount} - ${salesOrders.paidAmount}), 0)::text`,
+          debt: sql<string>`coalesce(sum(${netAmountSql} - ${salesOrders.paidAmount}), 0)::text`,
           dueDate: sql<string | null>`min((${salesOrders.orderDate} + (${customers.paymentTermDays} || ' days')::interval)::date)::text`,
         })
         .from(salesOrders)
@@ -118,8 +119,7 @@ export async function runCustomerDebtReminders(now = new Date()): Promise<number
           and(
             eq(salesOrders.companyId, chat.companyId),
             eq(salesOrders.customerId, chat.customerId),
-            sql`${salesOrders.totalAmount} > ${salesOrders.paidAmount}`,
-            sql`${salesOrders.status} <> 'cancelled'`,
+            openCondition,
             lte(sql`(${salesOrders.orderDate} + (${customers.paymentTermDays} || ' days')::interval)::date`, sql`${horizon}::date`),
           ),
         );

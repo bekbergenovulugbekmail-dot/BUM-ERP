@@ -4,13 +4,14 @@
  * Har so'rov aniq bitta kompaniya bo'yicha (suhbat bog'langan biznes), shuning uchun
  * boshqa biznesning ma'lumoti chiqib ketmaydi.
  */
-import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { cashAccounts } from "../../db/schema/finance.js";
 import { products } from "../../db/schema/catalog.js";
 import { stockLevels } from "../../db/schema/inventory.js";
 import { customers, salesOrderItems, salesOrders } from "../../db/schema/sales.js";
 import { agentVisits } from "../../db/schema/sales-agent.js";
 import type { DbOrTx } from "../../db/transaction.js";
+import { REALIZED_STATUSES, netAmountSql, openCondition } from "../sales/sale-status.js";
 
 const money = (value: string | number | null) =>
   new Intl.NumberFormat("uz-UZ").format(Math.round(Number(value ?? 0)));
@@ -25,16 +26,17 @@ function dayRange(date = new Date()) {
 /** Bugungi savdo xulosasi: summa, chek soni, to'lov turlari, eng ko'p sotilganlar. */
 export async function dailySummary(conn: DbOrTx, companyId: string, date = new Date()) {
   const { day, next } = dayRange(date);
-  const notCancelled = sql`${salesOrders.status} <> 'cancelled'`;
+  // AUD-025: faqat yakunlangan sotuv (qoralama/tasdiqlangan/bekor sanalmaydi), summa — qaytarilgani chegirilgan
+  const realized = inArray(salesOrders.status, [...REALIZED_STATUSES]);
 
   const [totals] = await conn
     .select({
       receipts: sql<string>`count(*)::text`,
-      total: sql<string>`coalesce(sum(${salesOrders.totalAmount}), 0)::text`,
+      total: sql<string>`coalesce(sum(${netAmountSql}), 0)::text`,
       paid: sql<string>`coalesce(sum(${salesOrders.paidAmount}), 0)::text`,
     })
     .from(salesOrders)
-    .where(and(eq(salesOrders.companyId, companyId), gte(salesOrders.orderDate, day), lt(salesOrders.orderDate, next), notCancelled));
+    .where(and(eq(salesOrders.companyId, companyId), gte(salesOrders.orderDate, day), lt(salesOrders.orderDate, next), realized));
 
   const top = await conn
     .select({
@@ -45,7 +47,7 @@ export async function dailySummary(conn: DbOrTx, companyId: string, date = new D
     .from(salesOrderItems)
     .innerJoin(salesOrders, eq(salesOrders.id, salesOrderItems.orderId))
     .innerJoin(products, eq(products.id, salesOrderItems.productId))
-    .where(and(eq(salesOrders.companyId, companyId), gte(salesOrders.orderDate, day), lt(salesOrders.orderDate, next), notCancelled))
+    .where(and(eq(salesOrders.companyId, companyId), gte(salesOrders.orderDate, day), lt(salesOrders.orderDate, next), realized))
     .groupBy(products.name)
     .orderBy(desc(sql`sum(${salesOrderItems.lineTotal})`))
     .limit(5);
@@ -109,13 +111,14 @@ export async function debtorsReport(conn: DbOrTx, companyId: string) {
     .select({
       name: customers.name,
       phone: customers.phone,
-      debt: sql<string>`sum(${salesOrders.totalAmount} - ${salesOrders.paidAmount})::text`,
+      debt: sql<string>`sum(${netAmountSql} - ${salesOrders.paidAmount})::text`,
     })
     .from(salesOrders)
     .innerJoin(customers, eq(customers.id, salesOrders.customerId))
-    .where(and(eq(salesOrders.companyId, companyId), sql`${salesOrders.totalAmount} > ${salesOrders.paidAmount}`, sql`${salesOrders.status} <> 'cancelled'`))
+    // AUD-025: qarz aging bilan bir ta'rifda — yakunlangan hujjat, sof (qaytarishsiz) qoldiq
+    .where(and(eq(salesOrders.companyId, companyId), openCondition))
     .groupBy(customers.id, customers.name, customers.phone)
-    .orderBy(desc(sql`sum(${salesOrders.totalAmount} - ${salesOrders.paidAmount})`))
+    .orderBy(desc(sql`sum(${netAmountSql} - ${salesOrders.paidAmount})`))
     .limit(10);
 
   if (rows.length === 0) return "Qarzdor mijoz yo'q.";
