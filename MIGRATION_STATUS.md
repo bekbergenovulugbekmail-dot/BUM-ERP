@@ -5238,3 +5238,14 @@ test/demo/qa/staging/sandbox/acceptance ga mos tenant yoki ombor **yo'q**; POS k
 Bazadagi kompaniyalararo havolalar (qoldiq, buyurtma, to'lov, kassa, smena, qurilma, sotuvchi, usul) — 0. API: 17 GET marshrut login'siz
 va `x-bum-company` bilan ham 401, noma'lum — 404; UI sahifalari 200 (SPA). Discovery oldidan va keyin: tenantlar kesimi, invariantlar
 va tarixiy nazorat summalari bir xil. Funksional smoke test uchun alohida muhit kerak — egasi qarorini kutadi.
+
+### Staging discovery (2026-09-27, faqat o'qish — hech narsa yaratilmadi)
+
+Railway workspace tarifi **PRO**; loyihada bitta muhit (`production`). API'da `environmentCreate` (`sourceEnvironmentId` — servislar,
+volume'lar, sozlama va o'zgaruvchilar nusxasi; `stageInitialChanges` / `skipInitialDeploys`) mavjud. `bum-api.DATABASE_URL` —
+havola (`Postgres--bSX.DATABASE_URL`), shuning uchun staging nusxasida o'zining Postgres'iga ulanadi. Oddiy matn sifatida nusxalanadigan
+va stagingda ALMASHTIRILISHI SHART: `SESSION_SECRET`, `BOOTSTRAP_ADMIN_PASSWORD`, `POSTGRES_PASSWORD`, `WEB_ORIGIN`, `PUBLIC_API_URL`.
+Tashqi integratsiya kalitlari (Telegram, SMS) o'zgaruvchilarda yo'q. Sessiya cookie'si domen belgilanmagan (host-only) — production
+cookie staging manziliga yuborilmaydi. Backup restore (`volumeInstanceBackupRestore`) backup'ning O'Z volume'iga tiklaydi (boshqa
+muhit argumenti yo'q) — production backup'ini stagingga to'g'ridan-to'g'ri tiklab bo'lmaydi; bu amal production'ni ustidan yozadi, ishlatilmaydi.
+Tavsiya: staging — yangi bo'sh Postgres (migratsiyalar avtomatik) + sintetik QA tenant.
