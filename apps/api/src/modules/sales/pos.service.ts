@@ -1060,6 +1060,8 @@ export async function completeSale(
     details: {
       number,
       shiftId: shift.id,
+      cashAccountId: shift.cashAccountId ?? null,
+      sellerEmployeeId,
       total: totals.totalAmount,
       paid: paidText,
       payments: paymentSummary,

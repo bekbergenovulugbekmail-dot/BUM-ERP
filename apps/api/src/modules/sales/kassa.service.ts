@@ -68,7 +68,10 @@ export async function assertKassaForShift(conn: DbOrTx, tenant: TenantContext, c
   if (!kassa.isActive) throw badRequest("Kassa faol emas");
   if (kassa.deliveryAgentId || kassa.salesRepId) throw badRequest("Agentning yo'ldagi naqd hisobi kassa bo'la olmaydi");
   if (kassa.currency !== (await companyCurrency(conn, tenant.company.id))) throw badRequest("Kassa asosiy valyutada bo'lishi kerak");
-  if (kassa.warehouseId && kassa.warehouseId !== warehouseId) throw badRequest("Kassa boshqa omborga tegishli");
+  // POS kassa — faqat shu omborga biriktirilgan, asosiy bo'lmagan kassa (asosiy kassa — inkassatsiya manzili; omborsiz
+  // hisob — moliya registri, POS kassa emas)
+  if (kassa.isDefault) throw badRequest("Asosiy kassa POS smena kassasi bo'la olmaydi");
+  if (kassa.warehouseId !== warehouseId) throw badRequest(kassa.warehouseId ? "Kassa boshqa omborga tegishli" : "Kassa bu omborga biriktirilmagan");
   if (kassa.employeeId) {
     const mine = await userEmployeeIds(conn, tenant);
     if (!mine.includes(kassa.employeeId) && !(await effectivePermissions(conn, tenant)).includes("sales.approve")) {
@@ -80,6 +83,13 @@ export async function assertKassaForShift(conn: DbOrTx, tenant: TenantContext, c
 
 /** Foydalanuvchi shu omborda smena ocha oladigan kassalar (POS "Smena ochish" oynasi uchun). */
 export async function kassasForUser(conn: DbOrTx, tenant: TenantContext, warehouseId: string) {
+  // Ombor shu kompaniyaniki bo'lmasa — 404 (begona ombor ID'si bo'sh ro'yxat emas, "topilmadi")
+  const [warehouse] = await conn
+    .select({ id: warehouses.id })
+    .from(warehouses)
+    .where(and(eq(warehouses.id, warehouseId), eq(warehouses.companyId, tenant.company.id)))
+    .limit(1);
+  if (!warehouse) throw notFound("Ombor topilmadi");
   const list = await warehouseKassas(conn, tenant.company.id, warehouseId);
   const canAny = (await effectivePermissions(conn, tenant)).includes("sales.approve");
   const mine = canAny ? [] : await userEmployeeIds(conn, tenant);
@@ -141,7 +151,8 @@ export async function assertKassaForDevice(conn: DbOrTx, companyId: string, cash
     .limit(1);
   if (!kassa) throw notFound("Kassa topilmadi");
   if (kassa.type !== "cash" || !kassa.isActive || kassa.deliveryAgentId || kassa.salesRepId) throw badRequest("Qurilmaga faqat faol naqd kassa biriktiriladi");
-  if (kassa.warehouseId && kassa.warehouseId !== warehouseId) throw badRequest("Kassa boshqa omborga tegishli");
+  if (kassa.isDefault) throw badRequest("Asosiy kassa qurilma kassasi bo'la olmaydi");
+  if (kassa.warehouseId !== warehouseId) throw badRequest(kassa.warehouseId ? "Kassa boshqa omborga tegishli" : "Kassa qurilma omboriga biriktirilmagan");
   return kassa;
 }
 

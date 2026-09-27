@@ -15,7 +15,7 @@ import { units } from "../src/db/schema/catalog.js";
 import { accounts, cashAccounts, cashTransactions } from "../src/db/schema/finance.js";
 import { warehouses } from "../src/db/schema/inventory.js";
 import { employees } from "../src/db/schema/hr.js";
-import { users } from "../src/db/schema/platform.js";
+import { auditLogs, users } from "../src/db/schema/platform.js";
 import { posSyncConflicts } from "../src/db/schema/pos.js";
 import { posShifts } from "../src/db/schema/sales.js";
 import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
@@ -358,6 +358,31 @@ describe("Ko'p kassa", () => {
     const [after] = await db.select().from(posShifts).where(eq(posShifts.id, shiftId));
     expect(n(after!.cashDifference)).toBe(0);
     expect(await ledger(company.companyId, "1010")).toBe(await cashTotal(company.companyId));
+  });
+
+  it("POS smena kassasi — faqat shu omborga biriktirilgan, asosiy bo'lmagan kassa; begona ombor — 404; auditda sotuvchi va kassa", async () => {
+    const k1 = await createKassa(company.ownerCookie, "Kassa 1", "K1");
+    const kassir = await addEmployee(app, company);
+    // Asosiy kassa va omborga biriktirilmagan naqd hisob — POS smena kassasi emas
+    expect((await pos(kassir.cookie, "POST", "/shifts", { warehouseId: mainWh, cashAccountId: mainCash })).statusCode).toBe(400);
+    const loose = await call(company.ownerCookie, "POST", "/api/finance/cash-accounts", { name: "Omborsiz", type: "cash", code: "LX" });
+    expect((await pos(kassir.cookie, "POST", "/shifts", { warehouseId: mainWh, cashAccountId: loose.json().cashAccount.id })).statusCode).toBe(400);
+    // Begona kompaniya ombori — 404 (bo'sh ro'yxat emas)
+    const foreignWh = (await db.select().from(warehouses).where(eq(warehouses.companyId, other.companyId)))[0]!.id;
+    expect((await pos(company.ownerCookie, "GET", `/kassas?warehouseId=${foreignWh}`)).statusCode).toBe(404);
+    // Audit: chekda sotuvchi va kassa; kassa biriktirish eski → yangi
+    const [emp] = await db.select({ id: employees.id }).from(employees).innerJoin(users, eq(users.id, employees.userId)).where(and(eq(employees.companyId, company.companyId), eq(users.phone, kassir.phone)));
+    const shift = (await pos(kassir.cookie, "POST", "/shifts", { warehouseId: mainWh, cashAccountId: k1 })).json().shift.id as string;
+    const sale = await pos(kassir.cookie, "POST", "/sales", { shiftId: shift, items: [{ productId, quantity: "1" }], paymentMethod: "cash", amountPaid: "5000", sellerEmployeeId: emp!.id });
+    expect(sale.statusCode).toBe(201);
+    const [log] = await db.select().from(auditLogs).where(and(eq(auditLogs.action, "POS_SALE_COMPLETED"), eq(auditLogs.resourceId, sale.json().order.id)));
+    expect(log!.details).toMatchObject({ sellerEmployeeId: emp!.id, cashAccountId: k1 });
+    const k2 = await createKassa(company.ownerCookie, "Kassa 2", "K2");
+    expect((await call(company.ownerCookie, "PATCH", `/api/finance/cash-accounts/${k2}`, { code: "K2B" })).statusCode).toBe(200);
+    const [upd] = await db.select().from(auditLogs).where(and(eq(auditLogs.action, "CASH_ACCOUNT_UPDATED"), eq(auditLogs.resourceId, k2)));
+    expect(upd!.details).toMatchObject({ codeFrom: "K2", codeTo: "K2B" });
+    const [crt] = await db.select().from(auditLogs).where(and(eq(auditLogs.action, "CASH_ACCOUNT_CREATED"), eq(auditLogs.resourceId, k2)));
+    expect(crt!.details).toMatchObject({ warehouseId: mainWh, code: "K2" });
   });
 
   it("parallel ikki so'rov bitta kassada smena ochmoqchi — faqat bittasi o'tadi", async () => {

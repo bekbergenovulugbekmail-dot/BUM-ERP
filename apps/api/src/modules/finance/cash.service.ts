@@ -452,7 +452,7 @@ export async function createCashAccount(tx: Tx, tenant: TenantContext, input: Ca
     action: "CASH_ACCOUNT_CREATED",
     resource: "cash_accounts",
     resourceId: account!.id,
-    details: { name: account!.name, type: account!.type, openingBalance: openingBalance ?? "0" },
+    details: { name: account!.name, type: account!.type, openingBalance: openingBalance ?? "0", warehouseId: account!.warehouseId ?? null, code: account!.code ?? null },
   });
 
   const [fresh] = await tx.select(cashAccountFields).from(cashAccounts).where(eq(cashAccounts.id, account!.id));
@@ -539,7 +539,12 @@ export async function updateCashAccount(
     action: "CASH_ACCOUNT_UPDATED",
     resource: "cash_accounts",
     resourceId: cashAccountId,
-    details: { changes: Object.keys(patch) },
+    details: {
+      changes: Object.keys(patch),
+      // POS kassa biriktirish tarixi: eski → yangi
+      ...(patch.warehouseId !== undefined ? { warehouseFrom: current.warehouseId, warehouseTo: patch.warehouseId } : {}),
+      ...(patch.code !== undefined ? { codeFrom: current.code, codeTo: patch.code } : {}),
+    },
   });
   return updated!;
 }
