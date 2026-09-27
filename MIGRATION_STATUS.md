@@ -5101,3 +5101,8 @@ SUP-004 web kassa skaneri (shtrix-kod ustun, qidiruv maydonida skaner), SUP-005 
 
 **Tekshirildi:** API 167 fayl / 1209 test ✓, frontend 51 fayl / 312 ✓, E2E 39 spec ✓ (yangi `supermarket-pos`: skaner → savat →
 to'lov → chek → baza), tsc ✓, eslint ✓. **Production'ga deploy qilinmagan** (topshiriq talabi).
+
+**Production (2026-09-27 05:13Z):** `332da55` deploy qilindi (egasi: "Deploy qil") — `bum-api` + `bum-web`. API bir marta ko'tarildi
+(0095 qo'llandi, 96 migratsiya, qayta yiqilish yo'q), web `build.json` 05:11:56Z; `/api/analytics/reports/product-profitability` —
+401 (mavjud). Production bazasida faqat o'qish: shtrix-kod dublikati 0 → unikal indeks `products_company_barcode_key` yaratildi;
+1557 mijoz — qarz keshi = jurnal, 0 farq. Production'da brauzer orqali sinalmadi.
