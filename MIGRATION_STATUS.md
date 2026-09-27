@@ -5181,3 +5181,25 @@ BLOCKED — WAITING FOR EXPLICIT USER COMMAND
   smena, kassa harakatlari, jurnal, kassalar, terminal, qurilma) — bir xil.
 - **Migratsiyalar (statik, 22e1076 dan beri o'zgarmagan):** DML yo'q, destruktiv DDL yo'q; yagona `DROP INDEX` shu tranzaksiyada
   teng shart bilan qayta yaratiladi; yangi ustunlar NULL — tarixiy qatorlar, to'lovlar, hisoblar, KPI qoidalari o'zgarmaydi.
+
+### Backup tasdiqlandi (2026-09-27 10:49Z, faqat o'qish)
+
+```
+PRODUCTION MIGRATION:
+0096 = PENDING
+0097 = PENDING
+0098 = PENDING
+
+BACKUP:
+VERIFIED
+
+PRODUCTION DEPLOY:
+BLOCKED — WAITING FOR EXPLICIT USER COMMAND
+```
+
+- Backup (egasi Dashboard'da yaratdi): ID `d33c4d9c-7aee-445d-8217-f2ca680ca6cf`, nomi "Manual", yaratilgan 2026-09-27 10:47:54Z,
+  snapshot `vs_1790506074077_afoavosyfw9ahm77`, referencedMB 450 (volume 5000 MB), muddati cheklanmagan. Volume instance
+  `cd083546…` = production `Postgres--bSX` → `postgres-volume-LRbC`. Restore amali (`volumeInstanceBackupRestore`) API'da mavjud —
+  ishga tushirilmagan. Backup holat maydoni API'da yo'q; tayyorlik snapshot ID orqali. Avtomatik jadval — yo'q.
+- Production DB (10:49Z): 96 migratsiya, oxirgisi 0095; 0096–0098 pending. Invariantlar 0 farq, begona havola 0, takroriy ta'sir 0.
+  10:36Z suratiga nisbatan o'zgarish yo'q — sonlar va barcha nazorat summalari bir xil.
