@@ -18,7 +18,8 @@ import { suppliers } from "../src/db/schema/purchase.js";
 import { customers } from "../src/db/schema/sales.js";
 import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
 import { buildServer } from "../src/server.js";
-import { createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
+import { auditLogs } from "../src/db/schema/platform.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
 
@@ -181,5 +182,52 @@ describe("Dublikat nazorati (CREATE ONLY)", () => {
     expect(again.json().duplicates).toHaveLength(1);
     expect(again.json().duplicates[0].message).toContain("SKU");
     expect(await countOf(products)).toBe(1);
+  });
+});
+
+describe("Mahsulot importi — mavjudlarini yangilash (narx ro'yxati)", () => {
+  it("SKU bo'yicha nomi/sotuv narxi/min. qoldiq yangilanadi; tannarx o'zgarmaydi; audit; ruxsat products.edit", async () => {
+    const created = await post("/api/catalog/products/import", {
+      rows: [{ name: "Choy", sku: "CH-1", purchasePrice: "5000", salesPrice: "8000", minStock: "2" }],
+    });
+    expect(created.json()).toMatchObject({ created: 1 });
+
+    const rows = [
+      { name: "Choy (yashil)", sku: "CH-1", purchasePrice: "1", salesPrice: "9000", minStock: "5" },
+      { name: "Yangi mahsulot", sku: "NEW-1", salesPrice: "1000" },
+    ];
+    // Standart (CREATE ONLY): mavjud SKU — dublikat, o'zgarmaydi
+    const plain = await post("/api/catalog/products/import", { rows, dryRun: true });
+    expect(plain.json()).toMatchObject({ valid: 1 });
+    expect(plain.json().duplicates).toHaveLength(1);
+
+    const preview = await post("/api/catalog/products/import", { rows, dryRun: true, updateExisting: true });
+    expect(preview.statusCode, preview.body).toBe(200);
+    expect(preview.json()).toMatchObject({ created: 0, updated: 1, valid: 2, dryRun: true });
+    expect(preview.json().warnings.map((w: { message: string }) => w.message).join()).toMatch(/Kirim narxi/);
+    const [before] = await db.select().from(products).where(eq(products.sku, "CH-1"));
+    expect(before).toMatchObject({ name: "Choy", salesPrice: "8000.0000" });
+
+    const commit = await post("/api/catalog/products/import", { rows, updateExisting: true });
+    expect(commit.statusCode, commit.body).toBe(200);
+    expect(commit.json()).toMatchObject({ created: 1, updated: 1 });
+    const [after] = await db.select().from(products).where(eq(products.sku, "CH-1"));
+    expect(after).toMatchObject({ name: "Choy (yashil)", salesPrice: "9000.0000", purchasePrice: "5000.0000" });
+    expect(Number(after!.minStock)).toBe(5);
+    expect(await countOf(products)).toBe(2);
+    const audits = await db.select().from(auditLogs).where(eq(auditLogs.resourceId, after!.id));
+    const updated = audits.find((row) => row.action === "PRODUCT_UPDATED");
+    expect((updated?.details as { diff: Record<string, unknown> }).diff.salesPrice).toEqual({ old: "8000.0000", new: "9000.0000" });
+
+    // Faqat products.create bo'lgan xodim yangilash rejimini ishlata olmaydi
+    const role = await post("/api/company/roles", { name: "Faqat qo'shuvchi", permissions: ["products.view", "products.create"] });
+    expect(role.statusCode, role.body).toBe(201);
+    const clerk = await addEmployee(app, company);
+    const assigned = await app.inject({ method: "PATCH", url: `/api/company/employees/${clerk.id}`, headers: { cookie: company.ownerCookie }, payload: { role: "Faqat qo'shuvchi" } });
+    expect(assigned.statusCode).toBe(200);
+    const denied = await app.inject({ method: "POST", url: "/api/catalog/products/import", headers: { cookie: clerk.cookie }, payload: { rows, updateExisting: true } });
+    expect(denied.statusCode).toBe(403);
+    const [unchanged] = await db.select().from(products).where(eq(products.sku, "CH-1"));
+    expect(unchanged!.salesPrice).toBe("9000.0000");
   });
 });

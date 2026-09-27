@@ -145,6 +145,9 @@ export default function ProductsPage() {
               importUrl="/api/catalog/products/import"
               invalidate={["/api/catalog/products"]}
               canImport={perms.create}
+              // Narx ro'yxati yangilanishi: server products.edit ni ham tekshiradi
+              canUpdateExisting={perms.edit}
+              updateExistingHint="SKU mos keladigan mahsulotda nomi, sotuv narxi, min. qoldiq va shtrix-kod fayldagidek yangilanadi (bo'sh katak o'zgartirmaydi). Kirim narxi (tannarx), birlik va kategoriya import orqali o'zgarmaydi; har o'zgarish auditda."
               columns={[
                 { key: "name", aliases: ["Nomi", "name"], required: true, example: "Coca Cola 1L" },
                 { key: "sku", aliases: ["SKU", "sku"], example: "COLA-1L" },

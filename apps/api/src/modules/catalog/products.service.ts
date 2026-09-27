@@ -610,10 +610,16 @@ export async function importProducts(
   tenant: TenantContext,
   rows: ImportRow[],
   meta: RequestMeta,
-  options: { dryRun?: boolean } = {},
+  /**
+   * `updateExisting` — mavjud SKU dublikat emas, balki NARX RO'YXATI yangilanishi: faqat faylda to'ldirilgan
+   * nomi, sotuv narxi, min. qoldiq va shtrix-kod `updateProduct` orqali (audit: eski → yangi). Kirim narxi
+   * (tannarx), birliklar va kategoriya import orqali o'zgartirilmaydi. Route `products.edit` ni talab qiladi.
+   */
+  options: { dryRun?: boolean; updateExisting?: boolean } = {},
 ) {
   const companyId = tenant.company.id;
   const dryRun = options.dryRun === true;
+  const updateExisting = options.updateExisting === true;
 
   const unitIndex = new Map<string, string>();
   for (const unit of await listUnits(tx)) {
@@ -634,15 +640,19 @@ export async function importProducts(
   const scope = await categoryScope(tx, tenant);
 
   const fileSkus = [...new Set(rows.map((r) => r.sku?.trim()).filter((s): s is string => Boolean(s)))];
-  const taken = new Set(
+  const existingBySku = new Map(
     fileSkus.length === 0
       ? []
       : (await tx
-          .select({ sku: products.sku })
+          .select({ id: products.id, sku: products.sku, barcode: products.barcode })
           .from(products)
           .where(and(eq(products.companyId, companyId), inArray(products.sku, fileSkus))))
-          .map((p) => p.sku),
+          .map((p) => [p.sku, p] as const),
   );
+  const taken = new Set(existingBySku.keys());
+  /** Yangilash rejimi: mavjud mahsulotga yoziladigan o'zgarishlar (faylda bir SKU bir marta). */
+  const updates: { productId: string; patch: { name: string; salesPrice?: string; minStock?: string; barcode?: string } }[] = [];
+  const updatedSkus = new Set<string>();
 
   // Shtrix-kod: bazada band yoki faylda takrorlangan — xato (SUP-001)
   const fileBarcodes = [...new Set(rows.map((r) => r.barcode?.trim()).filter((b): b is string => Boolean(b)))];
@@ -680,9 +690,40 @@ export async function importProducts(
       autoSku += 1n;
     }
     if (name.length > 300 || sku.length > 64) return fail("Nomi yoki SKU juda uzun");
-    // CREATE ONLY: mavjud SKU — xato emas, dublikat (yangi mahsulot ochilmaydi)
+    // CREATE ONLY (standart): mavjud SKU — xato emas, dublikat (yangi mahsulot ochilmaydi)
+    const existing = existingBySku.get(sku);
+    if (existing && updateExisting && !updatedSkus.has(sku)) {
+      const patch: (typeof updates)[number]["patch"] = { name };
+      const salesText = cleanNumber(row.salesPrice);
+      if (salesText) {
+        const parsed = priceSchema.safeParse(salesText);
+        if (!parsed.success) return fail("Sotuv narxi noto'g'ri son");
+        patch.salesPrice = parsed.data;
+      }
+      const minText = cleanNumber(row.minStock);
+      if (minText) {
+        const parsed = qtySchema.safeParse(minText);
+        if (!parsed.success) return fail("Min. qoldiq noto'g'ri son");
+        patch.minStock = parsed.data;
+      }
+      const code = row.barcode?.trim();
+      if (code && code !== existing.barcode) {
+        const invalid = barcodeError(code);
+        if (invalid) return fail(invalid);
+        if (takenBarcodes.has(code)) return fail(`Shtrix-kod ${code} band (bazada yoki faylda takrorlangan)`);
+        takenBarcodes.add(code);
+        patch.barcode = code;
+      }
+      if (cleanNumber(row.purchasePrice)) {
+        warnings.push({ row: line, sku, message: "Kirim narxi mavjud mahsulotda import orqali o'zgartirilmaydi (tannarx — xarid qabulidan)" });
+      }
+      updatedSkus.add(sku);
+      updates.push({ productId: existing.id, patch });
+      preview.push({ ...errorPreview({ row: line, sku, message: "Mavjud mahsulot yangilanadi" }, "duplicate"), name, salesPrice: patch.salesPrice ?? "0" });
+      return;
+    }
     if (taken.has(sku)) {
-      duplicates.push({ row: line, sku, message: "Bu SKU allaqachon mavjud" });
+      duplicates.push({ row: line, sku, message: updatedSkus.has(sku) ? "Bu SKU faylda takrorlangan" : "Bu SKU allaqachon mavjud" });
       return;
     }
 
@@ -783,7 +824,9 @@ export async function importProducts(
   preview.sort((a, b) => a.row - b.row);
 
   // Preview (`dryRun`): tekshiruv tugadi — bazaga hech narsa yozilmaydi
-  if (dryRun) return { created: 0, valid: values.length, errors, duplicates, warnings, preview, dryRun: true };
+  if (dryRun) return { created: 0, updated: updates.length, valid: values.length + updates.length, errors, duplicates, warnings, preview, dryRun: true };
+
+  for (const item of updates) await updateProduct(tx, tenant, item.productId, item.patch, meta);
 
   const insertedIds = new Map<string, string>();
   for (let i = 0; i < values.length; i += IMPORT_CHUNK) {
@@ -812,9 +855,9 @@ export async function importProducts(
     action: "PRODUCTS_IMPORTED",
     resource: "products",
     resourceId: "import",
-    details: { created: values.length, failed: errors.length, duplicates: duplicates.length, conversions: conversionValues.length },
+    details: { created: values.length, updated: updates.length, failed: errors.length, duplicates: duplicates.length, conversions: conversionValues.length },
   });
-  return { created: values.length, valid: values.length, errors, duplicates, warnings, preview, dryRun: false };
+  return { created: values.length, updated: updates.length, valid: values.length + updates.length, errors, duplicates, warnings, preview, dryRun: false };
 }
 
 const CSV_HEADER = ["Nomi", "SKU", "Shtrix-kod", "Kategoriya", "Brend", "O'lchov birligi", "Kirim narxi", "Sotuv narxi", "Min. qoldiq", "Faol"];

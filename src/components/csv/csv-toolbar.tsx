@@ -232,6 +232,7 @@ export default function CsvToolbar({
   templateFormat = "csv",
   hideToolbar = false,
   canUpdateExisting = false,
+  updateExistingHint,
   ref,
 }: {
   exportUrl: string;
@@ -259,6 +260,8 @@ export default function CsvToolbar({
    * to'ldirilgan ustunlar bo'yicha yangilanadi.
    */
   canUpdateExisting?: boolean;
+  /** "Mavjudlarini yangilash" izohi — bo'limga xos (qaysi kalit bo'yicha, nima yangilanadi). */
+  updateExistingHint?: string;
   ref?: React.Ref<CsvToolbarHandle>;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -984,9 +987,8 @@ export default function CsvToolbar({
                 <span className="space-y-0.5">
                   <span className="block font-medium">Mavjudlarini yangilash</span>
                   <span className="block text-muted-foreground">
-                    Telefoni (telefonsiz qatorda — nomi) mos keladigan yozuv o'tkazib yuborilmaydi, balki faylda
-                    to'ldirilgan ustunlar bo'yicha yangilanadi. Bo'sh katak eski qiymatni o'chirmaydi; qarz va
-                    balansga tegilmaydi.
+                    {updateExistingHint ??
+                      "Telefoni (telefonsiz qatorda — nomi) mos keladigan yozuv o'tkazib yuborilmaydi, balki faylda to'ldirilgan ustunlar bo'yicha yangilanadi. Bo'sh katak eski qiymatni o'chirmaydi; qarz va balansga tegilmaydi."}
                   </span>
                 </span>
               </label>

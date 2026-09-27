@@ -180,6 +180,8 @@ const importCell = z.union([z.string().max(1000), z.number()]).optional();
 const importBody = z.strictObject({
   /** Preview: faqat tekshirish — bazaga hech narsa yozilmaydi. */
   dryRun: z.boolean().optional(),
+  /** Mavjud SKU — narx ro'yxati yangilanishi (nomi, sotuv narxi, min. qoldiq, shtrix-kod); `products.edit` kerak. */
+  updateExisting: z.boolean().optional(),
   rows: z
     .array(
       z.object({
@@ -411,8 +413,12 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/products/import", async (req) => {
-    const { rows, dryRun } = importBody.parse(req.body);
-    return writeInTenant(req, "products.create", (tx, tenant) => importProducts(tx, tenant, rows, requestMeta(req), { dryRun }));
+    const { rows, dryRun, updateExisting } = importBody.parse(req.body);
+    return writeInTenant(req, "products.create", async (tx, tenant) => {
+      // Mavjud mahsulotni o'zgartirish — alohida ruxsat (yaratish ruxsati yetmaydi)
+      if (updateExisting) await requirePermission(tx, tenant, "products.edit");
+      return importProducts(tx, tenant, rows, requestMeta(req), { dryRun, updateExisting });
+    });
   });
 
   app.get("/products/by-barcode/:barcode", async (req) => {
