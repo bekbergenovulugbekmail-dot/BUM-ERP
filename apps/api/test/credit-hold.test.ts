@@ -36,7 +36,8 @@ let foreignCustomerId: string;
 const call = (cookie: string, method: Method, url: string, payload?: object) =>
   app.inject({ method, url, headers: { cookie }, ...(payload ? { payload } : {}) });
 
-const shift = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+// Biznes sanasi (todayIso bilan bir xil soat mintaqasi) — yarim tunda UTC bilan bir kun farq qilmasin
+const shift = (days: number) => todayIso(new Date(Date.now() + days * 86_400_000));
 const money = (value: string | number | null | undefined) => Number(value ?? 0);
 const near = { latitude: 41.3115, longitude: 69.2406, accuracy: 10 };
 const shop = { latitude: 41.311081, longitude: 69.240562 };
