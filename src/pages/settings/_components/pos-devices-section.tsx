@@ -50,6 +50,8 @@ type Device = {
   code: string;
   warehouseId: string;
   warehouseName: string | null;
+  /** Qurilma kassasi (pul qutisi): smena shu kassada, naqd shu kassaga. `null` — asosiy kassa (tarixiy). */
+  cashAccountId: string | null;
   isActive: boolean;
   appVersion: string | null;
   platform: string | null;
@@ -763,15 +765,22 @@ function QuickSaleCard() {
   );
 }
 
+type DevicePatch = { name?: string; isActive?: boolean; cashAccountId?: string | null };
+const NO_KASSA = "none";
+
 function DevicesTable() {
   const devicesQuery = useApiQuery<DevicesResponse>(DEVICES_PATH);
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const update = useApiMutation(
-    ({ id, ...patch }: { id: string; name?: string; isActive?: boolean }) => api.patch<{ device: Device }>(`${DEVICES_PATH}/${id}`, patch),
+    ({ id, ...patch }: { id: string } & DevicePatch) => api.patch<{ device: Device }>(`${DEVICES_PATH}/${id}`, patch),
     { invalidate: [DEVICES_PATH] },
   );
+  // Qurilmaga biriktiriladigan kassalar — omborga bog'langan faol naqd kassalar
+  const kassas = useApiQuery<{ cashAccounts: { id: string; name: string; code: string | null; type: string; isActive: boolean; warehouseId: string | null }[] }>(
+    "/api/finance/cash-accounts",
+  ).data?.cashAccounts.filter((account) => account.type === "cash" && account.isActive && account.warehouseId);
 
-  const save = async (id: string, patch: { name?: string; isActive?: boolean }, message: string) => {
+  const save = async (id: string, patch: DevicePatch, message: string) => {
     try {
       await update.mutateAsync({ id, ...patch });
       setEditing(null);
@@ -806,6 +815,7 @@ function DevicesTable() {
             <th className="text-left font-medium px-2 py-1.5">Kod</th>
             <th className="text-left font-medium px-2 py-1.5">Nomi</th>
             <th className="text-left font-medium px-2 py-1.5">Ombor</th>
+            <th className="text-left font-medium px-2 py-1.5">Kassa</th>
             <th className="text-left font-medium px-2 py-1.5">Versiya</th>
             <th className="text-left font-medium px-2 py-1.5">Oxirgi aloqa</th>
             <th className="text-left font-medium px-2 py-1.5">Sinxron (olish / yuborish)</th>
@@ -854,6 +864,24 @@ function DevicesTable() {
                 )}
               </td>
               <td className="px-2 py-2">{device.warehouseName ?? "—"}</td>
+              <td className="px-2 py-2">
+                <select
+                  className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                  data-testid={`device-kassa-${device.code}`}
+                  value={device.cashAccountId ?? NO_KASSA}
+                  disabled={update.isPending || !kassas}
+                  onChange={(event) =>
+                    void save(device.id, { cashAccountId: event.target.value === NO_KASSA ? null : event.target.value }, "Qurilma kassasi saqlandi")
+                  }
+                >
+                  <option value={NO_KASSA}>Asosiy kassa</option>
+                  {(kassas ?? [])
+                    .filter((kassa) => kassa.warehouseId === device.warehouseId || kassa.id === device.cashAccountId)
+                    .map((kassa) => (
+                      <option key={kassa.id} value={kassa.id}>{kassa.code ? `${kassa.code} · ${kassa.name}` : kassa.name}</option>
+                    ))}
+                </select>
+              </td>
               <td className="px-2 py-2 tabular-nums">
                 {device.appVersion ?? "—"}
                 {device.platform && <span className="text-xs text-muted-foreground"> · {device.platform}</span>}

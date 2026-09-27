@@ -11,6 +11,7 @@ import type { TenantContext } from "../company/tenant.js";
 import { posCashMovement } from "../sales/pos-cash.service.js";
 import { createOrder, receiveGoods, type OrderItemInput } from "./orders.service.js";
 import { recordSupplierPayment } from "./payments.service.js";
+import { shiftCashAccount } from "../sales/kassa.service.js";
 
 export type DirectPurchaseInput = {
   supplierId: string;
@@ -61,7 +62,16 @@ export async function completeDirectPurchase(tx: Tx, tenant: TenantContext, inpu
     const paid = await recordSupplierPayment(
       tx,
       tenant,
-      { supplierId: input.supplierId, orderId: order.id, amount: input.payment.amount, method: input.payment.method, paymentDate: date, offline: true },
+      {
+        supplierId: input.supplierId,
+        orderId: order.id,
+        amount: input.payment.amount,
+        method: input.payment.method,
+        // Kassali smena: naqd shu smena kassasidan
+        cashAccountId: input.payment.method === "cash" ? await shiftCashAccount(tx, tenant.company.id, input.payment.shiftId) : null,
+        paymentDate: date,
+        offline: true,
+      },
       meta,
     );
     if (input.payment.method === "cash") {

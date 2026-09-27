@@ -37,6 +37,7 @@ import { createCustomer } from "../sales/customers.service.js";
 import { REFUND_METHODS, returnSaleItems } from "../sales/returns.service.js";
 import { isAccessDenial } from "../subscription/access.js";
 import { assertCashierBound, cashierTenant, type DeviceContext } from "./device-auth.js";
+import { shiftCashAccount } from "../sales/kassa.service.js";
 
 export const MAX_OPS_PER_PUSH = 100;
 const MAX_FUTURE_MS = 5 * 60_000;
@@ -731,7 +732,14 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
         {
           items: payload.items,
           reason: payload.reason ?? null,
-          refund: payload.refund ? { amount: payload.refund.amount, method: payload.refund.method } : null,
+          // Kassali smena: ta'minotchi qaytargan naqd — shu qurilma smenasining kassasiga
+          refund: payload.refund
+            ? {
+                amount: payload.refund.amount,
+                method: payload.refund.method,
+                cashAccountId: payload.refund.method === "cash" ? await shiftCashAccount(tx, tenant.company.id, payload.refund.shiftId) : null,
+              }
+            : null,
           offline: { id: payload.returnId, number: payload.number, occurredAt: op.createdAt, deviceId: context.device.id },
         },
         meta,
@@ -767,6 +775,8 @@ async function executeOperation(tx: Tx, context: DeviceContext, tenant: TenantCo
           orderId: payload.orderId ?? null,
           amount: payload.amount,
           method: payload.method,
+          // Kassali smena: naqd shu qurilma smenasining kassasidan (kassasiz — asosiy kassa, avvalgidek)
+          cashAccountId: payload.method === "cash" ? await shiftCashAccount(tx, tenant.company.id, payload.shiftId) : null,
           paymentDate: date,
           notes: payload.notes ?? null,
           offline: true,

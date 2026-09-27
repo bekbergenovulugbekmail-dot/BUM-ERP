@@ -126,6 +126,8 @@ import {
 import { getSalesPolicy, salesPolicySchema, saveSalesPolicy } from "./sales-policy.service.js";
 import { CASH_MOVEMENT_KINDS, listCashMovements, posCashMovement } from "./pos-cash.service.js";
 import { REFUND_METHODS, RETURN_DISPOSITIONS, returnSaleItems } from "./returns.service.js";
+import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
+import { kassasForUser } from "./kassa.service.js";
 
 const nullableText = (max: number) =>
   z
@@ -341,7 +343,10 @@ const openShiftBody = z.strictObject({
   /** Chet valyutadagi boshlang'ich naqd. */
   openingForeignCash: z.array(currencyAmount).max(10).optional(),
   notes: nullableText(1000),
+  /** Kassa (pul qutisi) — omborda kassalar bo'lsa majburiy. */
+  cashAccountId: z.uuid().optional(),
 });
+const openShiftKassaQuery = z.object({ warehouseId: z.uuid(), cashAccountId: z.uuid().optional() });
 const closeShiftBody = z.strictObject({
   closingCash: moneySchema,
   /** Kassada sanalgan chet valyuta naqdi. */
@@ -382,6 +387,8 @@ const cashMovementBody = z.strictObject({
   notes: nullableText(500),
   /** Inkassatsiyani bank yoki boshqa kassaga o'tkazish. */
   targetAccountId: z.uuid().nullable().optional(),
+  /** So'rov kaliti — takroriy yuborishda ikkinchi harakat yozilmaydi (200 va o'sha harakat). */
+  requestId: z.uuid().optional(),
 });
 const posCustomerBody = z.strictObject({
   name: z.string().trim().min(1).max(200),
@@ -983,8 +990,16 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get("/pos/shifts/open", async (req) => {
+    const { warehouseId, cashAccountId } = openShiftKassaQuery.parse(req.query);
+    return { shift: await getOpenShift(db, await readTenant(req, "pos.use"), warehouseId, cashAccountId) };
+  });
+
+  // Smena ochish oynasi: omborning kassalari (foydalanuvchi ocha oladiganlari) va har birining ochiq smenasi
+  app.get("/pos/kassas", async (req) => {
     const { warehouseId } = openShiftQuery.parse(req.query);
-    return { shift: await getOpenShift(db, await readTenant(req, "pos.use"), warehouseId) };
+    const tenant = await readTenant(req, "pos.use");
+    assertWarehouseAccess(tenant, warehouseId);
+    return { kassas: await kassasForUser(db, tenant, warehouseId) };
   });
 
   app.get("/pos/shifts/:shiftId", async (req) => {
@@ -1053,7 +1068,7 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
     const { shiftId } = shiftParams.parse(req.params);
     const body = cashMovementBody.parse(req.body);
     const result = await writeInTenant(req, "pos.use", (tx, tenant) => posCashMovement(tx, tenant, { ...body, shiftId }, requestMeta(req)));
-    reply.status(201);
+    reply.status(result.duplicate ? 200 : 201);
     return { movement: result.movement, shift: result.shift };
   });
 

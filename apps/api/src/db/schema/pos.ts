@@ -50,6 +50,11 @@ export const posDevices = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     lastPullAt: timestamp("last_pull_at", { withTimezone: true }),
     lastPushAt: timestamp("last_push_at", { withTimezone: true }),
+    /**
+     * Qurilma kassasi: shu qurilmadagi smenalar (va offline sinxron cheklar) puli aynan shu kassaga tushadi.
+     * NULL — tarixiy xulq (asosiy kassa). FK migratsiyada.
+     */
+    cashAccountId: uuid("cash_account_id"),
     ...timestamps(),
   },
   (t) => [

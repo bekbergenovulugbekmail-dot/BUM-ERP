@@ -39,6 +39,7 @@ import { salesAudit } from "./customers.service.js";
 import { orderCurrencyBuckets } from "./orders.service.js";
 import { allocateCustomerPayment } from "./receivables.service.js";
 import { isPayableSale } from "./sale-status.js";
+import { enforceShiftCash } from "./kassa.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...paymentFields } = getTableColumns(customerPayments);
 
@@ -76,6 +77,10 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
     terminal = await findCompanyTerminal(tx, companyId, input.terminalId);
     if (cashAccountId && cashAccountId !== terminal.cashAccountId) throw badRequest("Hisob terminalga bog'langan bank hisobiga mos emas");
     cashAccountId = terminal.cashAccountId;
+  }
+  // Kassa smenasidagi NAQD (asosiy valyuta) to'lov — faqat smena kassasiga (HIGH: mijoz boshqa kassani ko'rsata olmaydi)
+  if (input.posShiftId && input.method === "cash" && (!input.currency || input.currency === (await companyCurrency(tx, companyId)))) {
+    cashAccountId = await enforceShiftCash(tx, companyId, input.posShiftId, cashAccountId);
   }
 
   if (input.reference) {

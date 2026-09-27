@@ -209,15 +209,25 @@ export const posShifts = pgTable(
     differenceReviewNote: text("difference_review_note"),
 
     notes: text("notes"),
+    /**
+     * Smena kassasi (pul qutisi): naqd tushum, qaytarish, kirim/chiqim, inkassatsiya va farq SHU hisobga yoziladi.
+     * NULL — tarixiy (0096 dan oldingi) yoki kassasiz smena: asosiy kassa (avvalgi xulq). FK migratsiyada.
+     */
+    cashAccountId: uuid("cash_account_id"),
+    /** Kassali smena ochilganda kassa hisobidagi qoldiq (sanalgan `openingCash` bilan solishtirish uchun). */
+    openingBalance: money("opening_balance"),
     ...timestamps(),
   },
   (t) => [
     index("ps_company_warehouse_idx").on(t.companyId, t.warehouseId),
     index("ps_company_status_idx").on(t.companyId, t.status),
-    /** Web kassa: bitta omborda bir vaqtda bitta ochiq smena; desktop kassa: har qurilmada bitta. */
+    /** Kassasiz (tarixiy) web smena: omborda bitta; kassali smena — kassada bitta; desktop — qurilmada bitta. */
     uniqueIndex("ps_one_open_per_warehouse")
       .on(t.companyId, t.warehouseId)
-      .where(sql`${t.status} = 'open' and ${t.deviceId} is null`),
+      .where(sql`${t.status} = 'open' and ${t.deviceId} is null and ${t.cashAccountId} is null`),
+    uniqueIndex("ps_one_open_per_kassa")
+      .on(t.cashAccountId)
+      .where(sql`${t.status} = 'open' and ${t.cashAccountId} is not null`),
     uniqueIndex("ps_one_open_per_device")
       .on(t.deviceId)
       .where(sql`${t.status} = 'open' and ${t.deviceId} is not null`),

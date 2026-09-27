@@ -53,6 +53,10 @@ export type CashAccount = {
   settlementCommissionPercent: string;
   /** Kassaning mas'ul xodimi: rahbar (asosiy) kassada bo'lmaydi, qolganlari xodimga biriktiriladi. */
   employeeId: string | null;
+  /** POS kassa (pul qutisi): qaysi omborda ishlaydi; `null` — oddiy kassa. */
+  warehouseId?: string | null;
+  /** Kassa kodi (K1, K2 …). */
+  code?: string | null;
   /** Ro'yxatda qulaylik uchun — mas'ul xodimning ismi va kodi. */
   employeeName?: string | null;
   employeeCode?: string | null;

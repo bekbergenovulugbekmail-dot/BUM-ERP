@@ -2,10 +2,11 @@
  * Kassa qurilmalari: ro'yxatdan o'tkazish (desktop ilovada telefon + parol bilan, `pos.devices.manage`),
  * web'dan ro'yxat va o'chirish. Token bir marta qaytadi. Audit: POS_DEVICE_REGISTERED / POS_DEVICE_UPDATED.
  */
-import { and, asc, eq } from "drizzle-orm";
-import { badRequest, notFound } from "@bum/shared";
+import { and, asc, eq, ne } from "drizzle-orm";
+import { badRequest, conflict, notFound } from "@bum/shared";
 import { companies, companyMembers, users } from "../../db/schema/platform.js";
 import { posDevices } from "../../db/schema/pos.js";
+import { posShifts } from "../../db/schema/sales.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
@@ -14,6 +15,7 @@ import type { SessionUser } from "../auth/session.js";
 import { requirePermission, requireTenantForWrite, type TenantContext } from "../company/tenant.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
 import { newDeviceToken, revokeDeviceCashiers } from "./device-auth.js";
+import { assertKassaForDevice } from "../sales/kassa.service.js";
 
 const deviceFields = {
   id: posDevices.id,
@@ -21,6 +23,7 @@ const deviceFields = {
   code: posDevices.code,
   warehouseId: posDevices.warehouseId,
   warehouseName: warehouses.name,
+  cashAccountId: posDevices.cashAccountId,
   isActive: posDevices.isActive,
   appVersion: posDevices.appVersion,
   platform: posDevices.platform,
@@ -135,10 +138,28 @@ export async function updateDevice(
   tx: Tx,
   tenant: TenantContext,
   deviceId: string,
-  patch: { name?: string; isActive?: boolean },
+  patch: { name?: string; isActive?: boolean; cashAccountId?: string | null },
   meta: RequestMeta,
 ) {
   const current = await deviceById(tx, tenant.company.id, deviceId);
+  if (patch.cashAccountId !== undefined && patch.cashAccountId !== current.cashAccountId) {
+    // Qurilma → kassa deterministik: ochiq smena davomida kassa almashsa, smena puli ikki kassaga bo'linib ketadi
+    const [open] = await tx
+      .select({ id: posShifts.id })
+      .from(posShifts)
+      .where(and(eq(posShifts.companyId, tenant.company.id), eq(posShifts.deviceId, deviceId), eq(posShifts.status, "open")))
+      .limit(1);
+    if (open) throw conflict("Qurilmada ochiq smena bor — kassani smena yopilgach almashtiring");
+    if (patch.cashAccountId) {
+      await assertKassaForDevice(tx, tenant.company.id, patch.cashAccountId, current.warehouseId);
+      const [other] = await tx
+        .select({ code: posDevices.code })
+        .from(posDevices)
+        .where(and(eq(posDevices.companyId, tenant.company.id), eq(posDevices.cashAccountId, patch.cashAccountId), eq(posDevices.isActive, true), ne(posDevices.id, deviceId)))
+        .limit(1);
+      if (other) throw conflict(`Bu kassa boshqa qurilmaga biriktirilgan: ${other.code}`);
+    }
+  }
   // O'chirilganda token yangi tasodifiy xesh bilan almashtiriladi va kassir bog'lanishlari bekor: qayta yoqish eski
   // (o'g'irlangan bo'lishi mumkin) tokenni tiklamaydi — kassa ilovada qayta ro'yxatdan o'tkaziladi
   const deactivating = patch.isActive === false && current.isActive;
@@ -155,7 +176,11 @@ export async function updateDevice(
       action: patch.isActive === false && current.isActive ? "POS_DEVICE_DEACTIVATED" : "POS_DEVICE_UPDATED",
       resource: "pos_devices",
       resourceId: deviceId,
-      details: { changes: Object.keys(patch), code: current.code },
+      details: {
+        changes: Object.keys(patch),
+        code: current.code,
+        ...(patch.cashAccountId !== undefined ? { cashAccountFrom: current.cashAccountId, cashAccountTo: patch.cashAccountId } : {}),
+      },
       ...meta,
     },
     tx,

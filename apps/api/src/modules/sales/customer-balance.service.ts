@@ -28,6 +28,7 @@ import { setCustomerCashback } from "./cashback.service.js";
 import { salesAudit } from "./customers.service.js";
 import { isPayableSale } from "./sale-status.js";
 import { allocateCustomerPayment } from "./receivables.service.js";
+import { enforceShiftCash } from "./kassa.service.js";
 
 const { companyId: _companyId, ...balanceTxFields } = getTableColumns(customerBalanceTransactions);
 
@@ -127,8 +128,10 @@ export async function depositToBalance(
   const id = input.id ?? randomUUID();
   const date = input.date ?? todayIso();
   const description = input.description ?? (input.type === "change" ? `Qaytim balansga: ${customer.name}` : `Balansni to'ldirish: ${customer.name}`);
+  // Kassa smenasidagi naqd — smena kassasiga (mijoz ko'rsatgan boshqa kassa — rad)
+  const requestedAccount = input.method === "cash" && input.posShiftId ? await enforceShiftCash(tx, companyId, input.posShiftId, input.cashAccountId) : input.cashAccountId;
   const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
-    cashAccountId: await resolvePaymentAccount(tx, companyId, input.method, input.cashAccountId),
+    cashAccountId: await resolvePaymentAccount(tx, companyId, input.method, requestedAccount),
     type: "in",
     amount: input.amount,
     txDate: date,

@@ -18,6 +18,7 @@
 import { and, desc, eq, getTableColumns, inArray, isNull, or, sql } from "drizzle-orm";
 import { AppError, badRequest, conflict, forbidden, notFound } from "@bum/shared";
 import { cashAccounts, paymentTerminals } from "../../db/schema/finance.js";
+import { posDevices } from "../../db/schema/pos.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import { customerBalanceTransactions, customerPayments, customers, posShifts, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
@@ -54,11 +55,22 @@ import {
 import { recordCustomerPayment } from "./payments.service.js";
 import { getSalesPolicy, notifyMembersWithPermission } from "./sales-policy.service.js";
 import { postShiftDifferences } from "./pos-shift-difference.service.js";
+import { assertKassaForShift, defaultCashAccountId, warehouseKassas } from "./kassa.service.js";
 import { addCurrencyAmounts } from "./shift-totals.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...shiftFields } = getTableColumns(posShifts);
-/** Kassada bo'lishi kerak: boshlang'ich + naqd tushum + kassaga kirimlar − chiqimlar (inkassatsiya, xarajat). */
-const expectedCashSql = sql<string>`(${posShifts.openingCash} + ${posShifts.totalCash} + ${posShifts.cashIn} - ${posShifts.cashOut})::numeric(18,2)`;
+/**
+ * Kassada bo'lishi kerak.
+ *  - Kassasiz (tarixiy) smena: boshlang'ich + naqd tushum + kirimlar − chiqimlar (hisoblagichlar, avvalgidek).
+ *  - Kassali smena: KASSA BALANSI — kanonik manba (`cash_transactions` yig'indisi): boshlang'ich qoldiq + naqd sotuv +
+ *    kirim − chiqim − naqd qaytarish ± o'tkazmalar. Karta/UZCARD/HUMO/bank naqd kassaga umuman tushmaydi.
+ *    Yopilgan kassali smena — yopilgandagi qiymat (sanalgan − farq), keyingi harakatlar unga ta'sir qilmaydi.
+ */
+const expectedCashSql = sql<string>`(case
+  when ${posShifts.cashAccountId} is null then ${posShifts.openingCash} + ${posShifts.totalCash} + ${posShifts.cashIn} - ${posShifts.cashOut}
+  when ${posShifts.status} = 'closed' then ${posShifts.closingCash} - coalesce(${posShifts.cashDifference}, 0)
+  else (select ca.balance from cash_accounts ca where ca.id = ${posShifts.cashAccountId})
+end)::numeric(18,2)`;
 
 export type ShiftStatus = (typeof posShifts.status.enumValues)[number];
 
@@ -123,7 +135,7 @@ export async function shiftPaymentBreakdown(conn: DbOrTx, companyId: string, shi
     .orderBy(customerPayments.method);
 }
 
-export async function getOpenShift(conn: DbOrTx, tenant: TenantContext, warehouseId: string) {
+export async function getOpenShift(conn: DbOrTx, tenant: TenantContext, warehouseId: string, cashAccountId?: string) {
   assertWarehouseAccess(tenant, warehouseId);
   const [shift] = await conn
     .select({ ...shiftFields, warehouseName: warehouses.name, expectedCash: expectedCashSql })
@@ -136,8 +148,15 @@ export async function getOpenShift(conn: DbOrTx, tenant: TenantContext, warehous
         eq(posShifts.status, "open"),
         // Desktop kassa smenalari web kassaga ko'rinmaydi (har qurilmaning o'z smenasi)
         isNull(posShifts.deviceId),
+        // Ko'p kassa: kassa ko'rsatilmasa — kassali smenalardan faqat o'zimniki (boshqa kassirning kassasi ekranimga
+        // tushmaydi); kassasiz (tarixiy) smena — ombor bo'yicha umumiy, avvalgidek
+        cashAccountId
+          ? eq(posShifts.cashAccountId, cashAccountId)
+          : or(isNull(posShifts.cashAccountId), eq(posShifts.cashierId, tenant.user.id)),
       ),
     )
+    // Ko'p kassa: kassa ko'rsatilmasa — avval o'zimning smenam
+    .orderBy(sql`(${posShifts.cashierId} = ${tenant.user.id}) desc`, desc(posShifts.openedAt))
     .limit(1);
   // Yopish oynasi shu javobdan foydalanadi — usul va terminal kesimi ham qaytadi
   return shift ? { ...shift, payments: await shiftPaymentBreakdown(conn, tenant.company.id, shift.id) } : null;
@@ -182,6 +201,8 @@ export async function openShift(
     id?: string;
     openedAt?: Date;
     deviceId?: string;
+    /** Web kassa: qaysi kassada (pul qutisi) smena ochiladi. Desktop — qurilmaga biriktirilgan kassa. */
+    cashAccountId?: string | null;
   },
   meta: RequestMeta,
 ) {
@@ -195,6 +216,29 @@ export async function openShift(
   if (!warehouse.isActive) throw badRequest("Ombor faol emas");
   assertWarehouseAccess(tenant, input.warehouseId);
 
+  // Kassa: desktop — qurilmaga biriktirilgani (deterministik); web — tanlangani. Omborda kassalar bo'lsa — tanlash majburiy.
+  // Kassasiz smena faqat omborda kassa bo'lmaganda (tarixiy xulq: pul asosiy kassaga)
+  let kassaId: string | null = null;
+  let openingBalance: string | null = null;
+  if (input.deviceId) {
+    const [device] = await tx
+      .select({ cashAccountId: posDevices.cashAccountId })
+      .from(posDevices)
+      .where(and(eq(posDevices.id, input.deviceId), eq(posDevices.companyId, companyId)))
+      .limit(1);
+    kassaId = device?.cashAccountId ?? null;
+  } else if (input.cashAccountId) {
+    kassaId = input.cashAccountId;
+  } else if ((await warehouseKassas(tx, companyId, input.warehouseId)).length > 0) {
+    throw new AppError("BAD_REQUEST", "Kassani tanlang — bu omborda bir nechta kassa bor", { reason: "kassa_required" });
+  }
+  if (kassaId) {
+    if (!input.deviceId) await assertKassaForShift(tx, tenant, kassaId, input.warehouseId);
+    // Kassa qatori qulflanadi: bir kassaga parallel ikki smena ochilmaydi (unikal indeks — ikkinchi qatlam)
+    const [kassa] = await tx.select({ balance: cashAccounts.balance }).from(cashAccounts).where(eq(cashAccounts.id, kassaId)).for("update");
+    openingBalance = kassa?.balance ?? null;
+  }
+
   const [existing] = await tx
     .select({ id: posShifts.id })
     .from(posShifts)
@@ -202,11 +246,23 @@ export async function openShift(
       and(
         eq(posShifts.companyId, companyId),
         eq(posShifts.status, "open"),
-        input.deviceId ? eq(posShifts.deviceId, input.deviceId) : and(eq(posShifts.warehouseId, input.warehouseId), isNull(posShifts.deviceId)),
+        input.deviceId
+          ? eq(posShifts.deviceId, input.deviceId)
+          : kassaId
+            ? eq(posShifts.cashAccountId, kassaId)
+            : and(eq(posShifts.warehouseId, input.warehouseId), isNull(posShifts.deviceId), isNull(posShifts.cashAccountId)),
       ),
     )
     .limit(1);
-  if (existing) throw conflict(input.deviceId ? "Bu kassada smena allaqachon ochiq" : "Bu omborda smena allaqachon ochiq");
+  if (existing) throw conflict(input.deviceId || kassaId ? "Bu kassada smena allaqachon ochiq" : "Bu omborda smena allaqachon ochiq");
+  if (kassaId && input.deviceId) {
+    const [kassaOpen] = await tx
+      .select({ id: posShifts.id })
+      .from(posShifts)
+      .where(and(eq(posShifts.companyId, companyId), eq(posShifts.status, "open"), eq(posShifts.cashAccountId, kassaId)))
+      .limit(1);
+    if (kassaOpen) throw conflict("Bu kassada smena allaqachon ochiq");
+  }
 
   // Chet valyutadagi boshlang'ich naqd — faqat yoqilgan qo'shimcha valyutalar, har biri bir marta
   const baseCurrency = await companyCurrency(tx, companyId);
@@ -227,6 +283,8 @@ export async function openShift(
       companyId,
       warehouseId: input.warehouseId,
       deviceId: input.deviceId ?? null,
+      cashAccountId: kassaId,
+      openingBalance,
       cashierId: tenant.user.id,
       cashierName: tenant.user.name,
       openedAt: input.openedAt ?? new Date(),
@@ -240,7 +298,7 @@ export async function openShift(
     action: "POS_SHIFT_OPENED",
     resource: "pos_shifts",
     resourceId: shift!.id,
-    details: { warehouseId: input.warehouseId, openingCash: input.openingCash, openingForeignCash },
+    details: { warehouseId: input.warehouseId, cashAccountId: kassaId, openingBalance, openingCash: input.openingCash, openingForeignCash },
   });
   return getShift(tx, tenant, shift!.id);
 }
@@ -309,7 +367,12 @@ export async function closeShift(
   }
   await assertShiftOperator(tx, tenant, shift.cashierId);
 
-  const expected = toMinor(shift.openingCash) + toMinor(shift.totalCash) + toMinor(shift.cashIn) - toMinor(shift.cashOut);
+  // Kassali smena: kutilgan = kassa balansi (qulflangan — yopish paytida kassaga parallel yozuv bo'lmaydi)
+  let expected = toMinor(shift.openingCash) + toMinor(shift.totalCash) + toMinor(shift.cashIn) - toMinor(shift.cashOut);
+  if (shift.cashAccountId) {
+    const [kassa] = await tx.select({ balance: cashAccounts.balance }).from(cashAccounts).where(eq(cashAccounts.id, shift.cashAccountId)).for("update");
+    expected = toMinor(kassa!.balance);
+  }
   const difference = toMinor(input.closingCash) - expected;
 
   // Har chet valyuta alohida sanaladi: kutilgan = boshlang'ich + naqd tushum
@@ -357,6 +420,7 @@ export async function closeShift(
   const closedAt = input.closedAt ?? new Date();
   const differencePostings = await postShiftDifferences(tx, tenant, {
     shiftId,
+    cashAccountId: shift.cashAccountId,
     label: `smena ${closedAt.toISOString().slice(0, 10)}, ${shift.cashierName ?? "kassir"}`,
     date: todayIso(closedAt),
     baseDifference: difference,
@@ -655,7 +719,19 @@ export async function completeSale(
   // rad, qaytim naqd qismdan; kam to'lov — faqat mijoz tanlanib nasiya (`onCredit`) belgilanganda.
   // Offline chek qurilmada yopilgan (pul va qaytim berilgan) — qaytim va qarz rad etilmaydi
   const due = baseTotal - baseCovered;
-  const requestedParts = await resolvePaymentParts(tx, companyId, posPaymentParts(input), { offline: offline !== undefined });
+  // Naqd qismdagi `cashAccountId` ishonchli emas: web — kassa servisida smena kassasidan boshqasi rad; offline (chek
+  // qurilmada yopilgan) — smena kassasiga yo'naltiriladi va nomuvofiqlik yoziladi
+  const shiftCashTarget = offline ? (shift.cashAccountId ?? (await defaultCashAccountId(tx, companyId))) : null;
+  const rawParts = posPaymentParts(input).map((part) => {
+    if (offline && part.method === "cash" && part.cashAccountId) {
+      if (part.cashAccountId !== shiftCashTarget) {
+        conflicts.push({ kind: "cash_account_overridden", details: { requested: part.cashAccountId, shiftKassa: shift.cashAccountId } });
+      }
+      return { ...part, cashAccountId: null };
+    }
+    return part;
+  });
+  const requestedParts = await resolvePaymentParts(tx, companyId, rawParts, { offline: offline !== undefined });
   const tendered = requestedParts.reduce((sum, part) => sum + part.amount, 0n);
   if (!buckets.has(baseCurrency) && tendered > 0n) {
     throw badRequest(`Chekda ${baseCurrency} dagi mahsulot yo'q — to'lov valyuta bo'yicha kiritiladi`);

@@ -36,7 +36,8 @@ import { badRequest, conflict, forbidden, notFound } from "@bum/shared";
 import { accounts, cashAccounts, cashTransactions, companyCurrencies } from "../../db/schema/finance.js";
 import { employees } from "../../db/schema/hr.js";
 import { purchaseOrders } from "../../db/schema/purchase.js";
-import { salesOrders } from "../../db/schema/sales.js";
+import { posShifts, salesOrders } from "../../db/schema/sales.js";
+import { warehouses } from "../../db/schema/inventory.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import type { RequestMeta } from "../../shared/audit.js";
 import { UUID_RE, decodeCursor, encodeCursor } from "../../shared/cursor.js";
@@ -304,7 +305,43 @@ export type CashAccountInput = {
   settlementCommissionPercent?: string;
   /** Kassaning mas'ul xodimi (rahbar kassasi mas'ulsiz bo'lishi mumkin). */
   employeeId?: string | null;
+  /** POS kassa (pul qutisi): qaysi omborda ishlaydi — faqat naqd, asosiy bo'lmagan hisob. */
+  warehouseId?: string | null;
+  /** Kassa qisqa kodi (K1, K2 …) — kompaniyada takrorlanmaydi. */
+  code?: string | null;
 };
+
+/**
+ * POS kassa sozlamasi (ombor, kod): ombor — shu kompaniyaniki; kassa — naqd, asosiy valyuta, asosiy kassa emas (asosiy
+ * kassa — inkassatsiya manzili, u o'zi smena kassasi bo'lolmaydi), agent hisobi emas; kod — kompaniyada yagona.
+ */
+async function assertKassaSettings(
+  conn: DbOrTx,
+  companyId: string,
+  account: { id?: string; type: CashAccountType; isDefault: boolean; currency: string; deliveryAgentId?: string | null; salesRepId?: string | null },
+  settings: { warehouseId?: string | null; code?: string | null },
+) {
+  if (settings.warehouseId) {
+    if (account.type !== "cash") throw badRequest("Omborga faqat naqd kassa biriktiriladi");
+    if (account.isDefault) throw badRequest("Asosiy kassa omborga (POS kassa sifatida) biriktirilmaydi — alohida kassa oching");
+    if (account.deliveryAgentId || account.salesRepId) throw badRequest("Agentning yo'ldagi naqd hisobi kassa bo'la olmaydi");
+    if (account.currency !== (await companyCurrency(conn, companyId))) throw badRequest("POS kassa asosiy valyutada bo'lishi kerak");
+    const [warehouse] = await conn
+      .select({ id: warehouses.id })
+      .from(warehouses)
+      .where(and(eq(warehouses.id, settings.warehouseId), eq(warehouses.companyId, companyId)))
+      .limit(1);
+    if (!warehouse) throw notFound("Ombor topilmadi");
+  }
+  if (settings.code) {
+    const [taken] = await conn
+      .select({ id: cashAccounts.id })
+      .from(cashAccounts)
+      .where(and(eq(cashAccounts.companyId, companyId), eq(cashAccounts.code, settings.code), ...(account.id ? [ne(cashAccounts.id, account.id)] : [])))
+      .limit(1);
+    if (taken) throw conflict(`Kassa kodi band: ${settings.code}`);
+  }
+}
 
 /**
  * Kassaning mas'ul xodimi shu kompaniyaning faol xodimi bo'lishi shart —
@@ -373,6 +410,7 @@ export async function createCashAccount(tx: Tx, tenant: TenantContext, input: Ca
   } else if (input.settlesToCashAccountId || toMinor(input.settlementCommissionPercent ?? "0") > 0n) {
     throw badRequest("Qirqim sozlamasi faqat kutilayotgan hisobda (karta, hamyon) bo'ladi");
   }
+  await assertKassaSettings(tx, companyId, { type: input.type, isDefault: input.isDefault ?? false, currency }, input);
   if (input.isDefault) await clearDefault(tx, companyId);
 
   const [account] = await tx
@@ -437,6 +475,8 @@ export async function updateCashAccount(
     settlesToCashAccountId?: string | null;
     settlementCommissionPercent?: string;
     employeeId?: string | null;
+    warehouseId?: string | null;
+    code?: string | null;
   },
   meta: RequestMeta,
 ) {
@@ -469,6 +509,23 @@ export async function updateCashAccount(
   }
   if (patch.isDefault && current.currency !== (await companyCurrency(tx, companyId))) {
     throw badRequest("Asosiy kassa asosiy valyutada bo'lishi kerak");
+  }
+  if (patch.warehouseId !== undefined || patch.code !== undefined || patch.isDefault || patch.isActive === false) {
+    await assertKassaSettings(
+      tx,
+      companyId,
+      { ...current, isDefault: patch.isDefault ?? current.isDefault },
+      { warehouseId: patch.warehouseId !== undefined ? patch.warehouseId : current.warehouseId, code: patch.code },
+    );
+    // Ochiq smena paytida kassa omborini o'zgartirish yoki o'chirish — smena puli "yo'qoladi"
+    const [openShift] = await tx
+      .select({ id: posShifts.id })
+      .from(posShifts)
+      .where(and(eq(posShifts.companyId, companyId), eq(posShifts.cashAccountId, cashAccountId), eq(posShifts.status, "open")))
+      .limit(1);
+    if (openShift && ((patch.warehouseId !== undefined && patch.warehouseId !== current.warehouseId) || patch.isActive === false || patch.isDefault)) {
+      throw conflict("Kassada ochiq smena bor — avval smenani yoping");
+    }
   }
   if (patch.isDefault && !current.isDefault) await clearDefault(tx, companyId);
 
@@ -716,7 +773,15 @@ export async function recordManualCashTransaction(
 export async function transferCash(
   tx: Tx,
   tenant: TenantContext,
-  input: { fromCashAccountId: string; toCashAccountId: string; amount: string; txDate?: string; description?: string | null },
+  input: {
+    fromCashAccountId: string;
+    toCashAccountId: string;
+    amount: string;
+    txDate?: string;
+    description?: string | null;
+    /** Offline kassa sinxroni: pul jismonan ko'chgan — manfiy qoldiq bloklamaydi (nomuvofiqlik chaqiruvchida yoziladi). */
+    allowOverdraft?: boolean;
+  },
   meta: RequestMeta,
 ) {
   if (input.fromCashAccountId === input.toCashAccountId) throw badRequest("Bir xil hisob tanlandi");
@@ -749,7 +814,7 @@ export async function transferCash(
     referenceId,
   };
 
-  const out = await recordCashTransaction(tx, companyId, tenant.user.id, { ...common, cashAccountId: source.id, type: "out" });
+  const out = await recordCashTransaction(tx, companyId, tenant.user.id, { ...common, cashAccountId: source.id, type: "out", ...(input.allowOverdraft ? { allowOverdraft: true } : {}) });
   const into = await recordCashTransaction(tx, companyId, tenant.user.id, { ...common, cashAccountId: target.id, type: "in" });
 
   // Hisoblar rejasidagi hisob farq qilsa (kassa ↔ bank yoki alohida bog'langan bank hisoblari) — jurnalda ham pul ko'chadi

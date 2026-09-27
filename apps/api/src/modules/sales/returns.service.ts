@@ -45,6 +45,8 @@ import { salesAudit } from "./customers.service.js";
 import { getOrder } from "./orders.service.js";
 import { isCompletedSale } from "./sale-status.js";
 import { assertShiftOperator, type SaleConflict } from "./pos.service.js";
+import { shiftCashAccount } from "./kassa.service.js";
+import { companyCurrency } from "../finance/accounts.service.js";
 
 export const REFUND_METHODS = ["cash", "card", "bank", "balance"] as const;
 /** Qaytgan tovar holati (sotuvdan keyingi qaytarishda). */
@@ -527,9 +529,16 @@ export async function returnSaleItems(tx: Tx, tenant: TenantContext, orderId: st
   // Har usul asl to'lov hisoblariga bo'linadi (bir usul ikki bankka tushgan bo'lsa — ikki qism); hujjatda hisobi bilan
   const pool = await refundAccountPool(tx, orderId, order.currency);
   const pieces: { method: RefundMethod; amount: bigint; cashAccountId: string | null }[] = [];
+  // Kassali smenada qaytarish: naqd pul SHU kassadan (kassir o'z qutisidan beradi). Kassasiz/ofisdagi qaytarish —
+  // avvalgidek asl to'lov hisobidan
+  const shiftKassa = shift ? await shiftCashAccount(tx, companyId, shift.id) : null;
   for (const part of parts) {
     if (part.method === "balance") {
       pieces.push({ ...part, cashAccountId: null });
+      continue;
+    }
+    if (part.method === "cash" && shiftKassa && order.currency === (await companyCurrency(tx, companyId))) {
+      pieces.push({ method: part.method, amount: part.amount, cashAccountId: shiftKassa });
       continue;
     }
     for (const piece of splitByAccounts(pool, part.method, part.amount)) {

@@ -31,6 +31,8 @@ export const CONFLICT_KINDS = {
   supplier_overpaid: "Ta'minotchi qarzidan ortiq to'landi (avans)",
   count_late_document: "Inventarizatsiyadan oldingi hujjat kech keldi (qoldiq sanoq bo'yicha tuzatildi)",
   record_changed: "Kassadagi tahrir serverdagi yangi o'zgarish bilan to'qnashdi (server qiymati saqlandi)",
+  cash_account_overridden: "Chekdagi naqd boshqa kassaga ko'rsatilgan edi — pul qurilma kassasiga yozildi",
+  cash_exceeds_expected: "Kassadan kutilgan naqddan ko'p chiqim qilindi",
 } as const;
 
 /** Nomuvofiqliklar ro'yxati: turi nomi va tafsilotdagi mahsulotlar nomi bilan (web sahifasi uchun). */

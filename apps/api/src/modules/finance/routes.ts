@@ -220,6 +220,10 @@ const cashAccountBody = z.strictObject({
   employeeId: z.uuid().nullable().optional(),
   /** Qirqim komissiyasi, % (0–100) — kutilayotgan hisobdan bankka o'tkazishda ushlanadi. */
   settlementCommissionPercent: percentSchema.optional(),
+  /** POS kassa: ombor (faqat naqd, asosiy bo'lmagan hisob). */
+  warehouseId: z.uuid().nullable().optional(),
+  /** Kassa kodi (K1, K2 …). */
+  code: z.string().trim().min(1).max(16).nullable().optional(),
 });
 const cashAccountPatch = z.strictObject({
   name: z.string().trim().min(1).max(200).optional(),
@@ -236,6 +240,9 @@ const cashAccountPatch = z.strictObject({
   employeeId: z.uuid().nullable().optional(),
   /** Qirqim komissiyasi, % (0–100). */
   settlementCommissionPercent: percentSchema.optional(),
+  /** POS kassa ombori; `null` — kassani ombordan ajratadi (ochiq smena bo'lmasa). */
+  warehouseId: z.uuid().nullable().optional(),
+  code: z.string().trim().min(1).max(16).nullable().optional(),
 });
 /** Qoldiqni to'g'rilash: farq kirim yoki chiqim bo'lib yoziladi, sabab majburiy. */
 const cashBalanceBody = z.strictObject({

@@ -26,14 +26,23 @@ import { ensureAccountBySubtype, postJournalEntry } from "../finance/journal.ser
 
 export type ShiftDifferencePosting = { currency: string; difference: string; posted: boolean; error?: string };
 
-async function postOne(tx: Tx, tenant: TenantContext, shiftId: string, label: string, date: string, currency: string, difference: bigint) {
+async function postOne(
+  tx: Tx,
+  tenant: TenantContext,
+  shiftId: string,
+  label: string,
+  date: string,
+  currency: string,
+  difference: bigint,
+  kassaId: string | null = null,
+) {
   const companyId = tenant.company.id;
   const base = await companyCurrency(tx, companyId);
   const shortage = difference < 0n;
   const amount = fromMinor(shortage ? -difference : difference);
   const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
-    // Asosiy valyuta naqdi — asosiy kassa (POS naqd tushumi ham shu yerga tushadi); valyuta — o'z kassasi
-    cashAccountId: await resolvePaymentAccount(tx, companyId, "cash", null, currency),
+    // Asosiy valyuta naqdi — smena kassasi (kassasiz tarixiy smena — asosiy kassa); valyuta — o'z kassasi
+    cashAccountId: currency === base && kassaId ? kassaId : await resolvePaymentAccount(tx, companyId, "cash", null, currency),
     type: shortage ? "out" : "in",
     amount,
     currency,
@@ -68,7 +77,15 @@ async function postOne(tx: Tx, tenant: TenantContext, shiftId: string, label: st
 export async function postShiftDifferences(
   tx: Tx,
   tenant: TenantContext,
-  input: { shiftId: string; label: string; date: string; baseDifference: bigint; foreign: { currency: string; difference: string }[] },
+  input: {
+    shiftId: string;
+    /** Smena kassasi: asosiy valyutadagi farq shu kassaga (NULL — tarixiy smena, asosiy kassa). */
+    cashAccountId?: string | null;
+    label: string;
+    date: string;
+    baseDifference: bigint;
+    foreign: { currency: string; difference: string }[];
+  },
 ): Promise<ShiftDifferencePosting[]> {
   const base = await companyCurrency(tx, tenant.company.id);
   const rows = [
@@ -81,7 +98,7 @@ export async function postShiftDifferences(
     try {
       // Savepoint: bitta yozuv yiqilsa ham smena yopilishi (tashqi tranzaksiya) saqlanadi
       await tx.transaction(async (inner) => {
-        await postOne(inner as unknown as Tx, tenant, input.shiftId, input.label, input.date, row.currency, row.difference);
+        await postOne(inner as unknown as Tx, tenant, input.shiftId, input.label, input.date, row.currency, row.difference, input.cashAccountId ?? null);
       });
       results.push({ currency: row.currency, difference: fromMinor(row.difference), posted: true });
     } catch (error) {

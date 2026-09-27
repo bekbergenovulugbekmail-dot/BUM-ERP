@@ -197,7 +197,12 @@ const conflictsQuery = z.object({
   resolved: z.enum(["true", "false"]).transform((value) => value === "true").optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
 });
-const devicePatchBody = z.strictObject({ name: z.string().trim().min(1).max(100).optional(), isActive: z.boolean().optional() });
+const devicePatchBody = z.strictObject({
+  name: z.string().trim().min(1).max(100).optional(),
+  isActive: z.boolean().optional(),
+  /** Qurilma kassasi (pul qutisi): smena shu kassada ochiladi, naqd shu kassaga tushadi; `null` — asosiy kassa (tarixiy). */
+  cashAccountId: z.uuid().nullable().optional(),
+});
 
 const appVersionOf = (req: FastifyRequest) => {
   const header = req.headers["x-app-version"];

@@ -673,6 +673,13 @@
       "when": 1790520000000,
       "tag": "0095_product_barcode_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1790530000000,
+      "tag": "0096_multi_kassa",
+      "breakpoints": true
     }
   ]
 }

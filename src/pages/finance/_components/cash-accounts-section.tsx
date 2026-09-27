@@ -37,8 +37,62 @@ const NO_EMPLOYEE = "none";
 const PERCENT_RE = /^\d{1,3}(\.\d{1,2})?$/;
 
 type AccountPatch = Partial<
-  Pick<CashAccount, "ledgerAccountId" | "showInPos" | "outgoingCommissionPercent" | "settlesToCashAccountId" | "settlementCommissionPercent">
+  Pick<
+    CashAccount,
+    "ledgerAccountId" | "showInPos" | "outgoingCommissionPercent" | "settlesToCashAccountId" | "settlementCommissionPercent" | "warehouseId" | "code"
+  >
 >;
+const NO_WAREHOUSE = "none";
+
+/** POS kassa sozlamasi: ombor (shu omborda smena ochiladi) va kod. Asosiy kassa — inkassatsiya manzili, POS kassa emas. */
+function PosKassaSettings({
+  account,
+  warehouses,
+  busy,
+  onSave,
+}: {
+  account: CashAccount;
+  warehouses: { id: string; name: string }[];
+  busy: boolean;
+  onSave: (patch: AccountPatch, message: string) => void;
+}) {
+  const [code, setCode] = useState(account.code ?? "");
+  return (
+    <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-3 text-sm" data-testid="pos-kassa-settings">
+      <div>
+        <Label className="text-xs text-muted-foreground">POS kassa — ombor</Label>
+        <Select
+          value={account.warehouseId ?? NO_WAREHOUSE}
+          disabled={busy}
+          onValueChange={(value) => onSave({ warehouseId: value === NO_WAREHOUSE ? null : value }, "Kassa ombori saqlandi")}
+        >
+          <SelectTrigger className="h-8 w-56 max-w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NO_WAREHOUSE}>POS kassa emas</SelectItem>
+            {warehouses.map((warehouse) => (
+              <SelectItem key={warehouse.id} value={warehouse.id}>{warehouse.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label className="text-xs text-muted-foreground">Kod</Label>
+        <Input className="h-8 w-24" maxLength={16} value={code} onChange={(e) => setCode(e.target.value)} placeholder="K1" />
+      </div>
+      <Button
+        size="sm"
+        variant="secondary"
+        disabled={busy || code.trim() === (account.code ?? "")}
+        onClick={() => onSave({ code: code.trim() || null }, "Kassa kodi saqlandi")}
+      >
+        Saqlash
+      </Button>
+      <p className="basis-full text-[11px] text-muted-foreground">
+        Omborga biriktirilgan kassada kassir smena ochadi; naqd savdo, qaytarish va inkassatsiya faqat shu kassa balansida.
+      </p>
+    </div>
+  );
+}
 
 /** Bank hisobi sozlamalari: kassada ko'rsatish (darhol saqlanadi) va pul chiqarish komissiyasi. */
 function BankAccountSettings({ account, busy, onSave }: { account: CashAccount; busy: boolean; onSave: (patch: AccountPatch, message: string) => void }) {
@@ -174,6 +228,9 @@ type CashAccountBody = {
   settlementCommissionPercent?: string;
   /** Kassaning mas'ul xodimi (rahbar kassasi mas'ulsiz bo'ladi). */
   employeeId?: string | null;
+  /** POS kassa ombori va kodi. */
+  warehouseId?: string | null;
+  code?: string | null;
 };
 
 export default function CashAccountsSection() {
@@ -200,6 +257,7 @@ export default function CashAccountsSection() {
   const recordTx = useApiMutation((body: CashTransactionBody) => api.post("/api/finance/cash-transactions", body));
   const createAccount = useApiMutation((body: CashAccountBody) => api.post("/api/finance/cash-accounts", body));
   // Kassaga mas'ul qilib biriktiriladigan xodimlar (faol kartochkalar)
+  const warehouseList = useApiQuery<{ warehouses: { id: string; name: string }[] }>(canManage ? "/api/inventory/warehouses" : null).data?.warehouses;
   const employees = useApiQuery<{ employees: { id: string; name: string; code: string; status: string }[] }>(
     canManage ? "/api/hr/employees" : null,
   ).data?.employees.filter((employee) => employee.status === "active");
@@ -245,6 +303,8 @@ export default function CashAccountsSection() {
   const [acctCommission, setAcctCommission] = useState("");
   const [acctShowInPos, setAcctShowInPos] = useState(false);
   const [acctEmployee, setAcctEmployee] = useState(NO_EMPLOYEE);
+  const [acctWarehouse, setAcctWarehouse] = useState(NO_WAREHOUSE);
+  const [acctCode, setAcctCode] = useState("");
 
   const handleTx = async () => {
     if (!selectedAccount || !txDialog) return;
@@ -287,11 +347,14 @@ export default function CashAccountsSection() {
             }
           : {}),
         ...(acctEmployee !== NO_EMPLOYEE ? { employeeId: acctEmployee } : {}),
+        ...(acctType === "cash" && acctWarehouse !== NO_WAREHOUSE ? { warehouseId: acctWarehouse } : {}),
+        ...(acctType === "cash" && acctCode.trim() ? { code: acctCode.trim() } : {}),
       });
       toast.success("Hisob qo'shildi");
       setCreateAccountOpen(false);
       setAcctName(""); setAcctBank(""); setAcctNumber(""); setAcctOpening(""); setAcctCurrency(""); setAcctCommission(""); setAcctShowInPos(false);
       setAcctSettlesTo(NO_SETTLEMENT); setAcctSettlementCommission(""); setAcctEmployee(NO_EMPLOYEE);
+      setAcctWarehouse(NO_WAREHOUSE); setAcctCode("");
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -374,6 +437,16 @@ export default function CashAccountsSection() {
 
       {/* Kutilayotgan karta/hamyon puli va qirqim */}
       <PendingSettlements />
+
+      {selectedAccount && canManage && selectedAccount.type === "cash" && !selectedAccount.isDefault && warehouseList && (
+        <PosKassaSettings
+          key={selectedAccount.id}
+          account={selectedAccount}
+          warehouses={warehouseList}
+          busy={updateAccount.isPending}
+          onSave={(patch, message) => void saveAccount(patch, message)}
+        />
+      )}
 
       {/* Buxgalteriya hisobi: bir nechta bank hisobi hisoblar rejasida alohida ko'rinsin (bo'lmasa 1010 / 1020) */}
       {selectedAccount && canManage && ledgerOptions && (
@@ -610,6 +683,26 @@ export default function CashAccountsSection() {
                 </Select>
                 <p className="mt-1 text-xs text-muted-foreground">Kassa pulini kim yuritishi — hisobotlarda shu xodim ko'rinadi.</p>
               </div>
+              {acctType === "cash" && (
+                <div className="grid grid-cols-[1fr_6rem] gap-2">
+                  <div>
+                    <Label>POS kassa — ombor</Label>
+                    <Select value={acctWarehouse} onValueChange={setAcctWarehouse}>
+                      <SelectTrigger data-testid="new-kassa-warehouse"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_WAREHOUSE}>POS kassa emas</SelectItem>
+                        {(warehouseList ?? []).map((warehouse) => (
+                          <SelectItem key={warehouse.id} value={warehouse.id}>{warehouse.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Kod</Label>
+                    <Input data-testid="new-kassa-code" maxLength={16} value={acctCode} onChange={(e) => setAcctCode(e.target.value)} placeholder="K1" />
+                  </div>
+                </div>
+              )}
               {currencies.codes.length > 1 && (
                 <div>
                   <Label>Valyuta</Label>

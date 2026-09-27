@@ -8,6 +8,14 @@
  *    web'da `targetAccountId` berilsa (masalan, bank) — asosiy kassadan o'sha hisobga o'tkazma.
  *  - Xarajat — "to'langan" xarajat hujjati (EXP-…), asosiy kassadan chiqim va jurnal; ruxsat `pos.cash.expense`
  *    (yoki `finance.manage`).
+ *
+ * KASSALI SMENA (2026-09-27): kassa (pul qutisi) — alohida naqd hisob, kutilgan naqd = kassa balansi. Shuning uchun har
+ * harakat HAQIQIY hisob harakati bo'ladi (aks holda qutidagi pul va balans ajralib ketardi):
+ *  - inkassatsiya → kassadan asosiy kassaga (yoki `targetAccountId` — bank/seyf, `finance.manage`) o'tkazma;
+ *  - almashtirish puli / boshqa kirim → asosiy kassadan shu kassaga; boshqa chiqim → shu kassadan asosiy kassaga;
+ *  - xarajat → shu kassadan to'lanadi.
+ * Kompaniya jami naqdi o'tkazmada o'zgarmaydi; jurnal — bir xil 1010 bo'lsa yozuvsiz (mavjud o'tkazma qoidasi).
+ * `requestId` — takroriy yuborishda ikkinchi harakat (va o'tkazma) yozilmaydi.
  */
 import { and, asc, eq, getTableColumns, sql } from "drizzle-orm";
 import { badRequest, forbidden, notFound } from "@bum/shared";
@@ -69,11 +77,22 @@ export async function posCashMovement(
     targetAccountId?: string | null;
     /** Desktop kassa sinxroni: qurilmadagi ID, vaqt va qurilma. */
     offline?: { id: string; occurredAt: Date; deviceId: string };
+    /** Web so'rov kaliti — harakat ID'si; takror — mavjud harakat qaytadi, ikkinchi ta'sir yo'q. */
+    requestId?: string | null;
   },
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
   const offline = input.offline;
+  if (input.requestId) {
+    // Smena qulfidan keyin tekshiriladi (parallel takror birinchisini kutadi)
+    await lockShift(tx, tenant, input.shiftId);
+    const [existing] = await tx.select(movementFields).from(posCashMovements).where(eq(posCashMovements.id, input.requestId)).limit(1);
+    if (existing) {
+      if (existing.shiftId !== input.shiftId) throw badRequest("So'rov kaliti boshqa smenaga tegishli");
+      return { movement: existing, shift: await getShift(tx, tenant, input.shiftId), conflicts: [] as SaleConflict[], duplicate: true as const };
+    }
+  }
   const conflicts: SaleConflict[] = [];
   const shift = await lockShift(tx, tenant, input.shiftId);
   if ((shift.deviceId ?? null) !== (offline?.deviceId ?? null)) throw notFound("Smena topilmadi");
@@ -140,11 +159,43 @@ export async function posCashMovement(
         currency: expenses.currency,
         accountId: expenses.accountId,
       });
-    await postExpensePayment(tx, tenant, expense!, { paidDate: date, allowOverdraft: offline !== undefined });
+    // Kassali smena — xarajat shu kassadan; kassasiz (tarixiy) — asosiy kassadan (avvalgidek)
+    await postExpensePayment(tx, tenant, expense!, { cashAccountId: shift.cashAccountId ?? null, paidDate: date, allowOverdraft: offline !== undefined });
     expenseId = expense!.id;
   }
 
-  if (input.targetAccountId) {
+  if (shift.cashAccountId && input.kind !== "expense" && !input.reference) {
+    // Kassali smena: harakat — kassa va asosiy kassa (yoki tanlangan hisob) orasidagi haqiqiy o'tkazma
+    const [main] = await tx
+      .select({ id: cashAccounts.id })
+      .from(cashAccounts)
+      .where(and(eq(cashAccounts.companyId, companyId), eq(cashAccounts.isDefault, true), eq(cashAccounts.isActive, true)))
+      .limit(1);
+    if (!main) throw badRequest("Asosiy kassa belgilanmagan");
+    let counterpart = main.id;
+    if (input.targetAccountId && input.targetAccountId !== main.id) {
+      if (offline || input.kind !== "collection") throw badRequest("Hisobga faqat onlayn inkassatsiya o'tkaziladi");
+      if (!(await effectivePermissions(tx, tenant)).includes("finance.manage")) {
+        throw forbidden("Inkassatsiyani boshqa hisobga o'tkazish uchun ruxsat yo'q: finance.manage");
+      }
+      counterpart = input.targetAccountId;
+    }
+    if (counterpart === shift.cashAccountId) throw badRequest("Kassa o'zidan o'ziga o'tkazilmaydi");
+    const outgoing = type === "out";
+    await transferCash(
+      tx,
+      tenant,
+      {
+        fromCashAccountId: outgoing ? shift.cashAccountId : counterpart,
+        toCashAccountId: outgoing ? counterpart : shift.cashAccountId,
+        amount: fromMinor(amount),
+        txDate: date,
+        description: `${LABELS[input.kind]}: smena ${shift.cashierName ?? ""}`.trim(),
+        ...(offline ? { allowOverdraft: true } : {}),
+      },
+      meta,
+    );
+  } else if (input.targetAccountId) {
     if (offline || input.kind !== "collection") throw badRequest("Hisobga faqat onlayn inkassatsiya o'tkaziladi");
     // Asosiy kassadan boshqa hisobga (bank, boshqa kassa) pul o'tkazish — moliya amali, oddiy kassir ruxsati yetmaydi
     if (!(await effectivePermissions(tx, tenant)).includes("finance.manage")) {
@@ -167,7 +218,7 @@ export async function posCashMovement(
   const [movement] = await tx
     .insert(posCashMovements)
     .values({
-      ...(offline ? { id: offline.id } : {}),
+      ...(offline ? { id: offline.id } : input.requestId ? { id: input.requestId } : {}),
       companyId,
       shiftId: shift.id,
       deviceId: offline?.deviceId ?? null,
@@ -209,5 +260,5 @@ export async function posCashMovement(
       ...(offline ? { deviceId: offline.deviceId, occurredAt: occurredAt.toISOString() } : {}),
     },
   });
-  return { movement: movement!, shift: await getShift(tx, tenant, shift.id), conflicts };
+  return { movement: movement!, shift: await getShift(tx, tenant, shift.id), conflicts, duplicate: false as const };
 }

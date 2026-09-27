@@ -212,6 +212,13 @@ export const cashAccounts = pgTable(
      * xodim shu kompaniyaniki ekani kodda tekshiriladi; xodim o'chirilsa bog'lanish bo'shatiladi.
      */
     employeeId: uuid("employee_id"),
+    /**
+     * Kassa (POS pul qutisi) qaysi ombor/do'konga tegishli — bitta omborda bir nechta kassa bo'ladi (Kassa 1, Kassa 2 …).
+     * NULL — omborga bog'lanmagan (asosiy kassa, seyf, bank). FK migratsiyada (import aylanmasi bo'lmasin).
+     */
+    warehouseId: uuid("warehouse_id"),
+    /** Kassa kodi (K1, K2 …), kompaniyada unikal; chek va hisobotlarda. */
+    code: varchar("code", { length: 16 }),
     isDefault: boolean("is_default").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps(),
@@ -226,6 +233,8 @@ export const cashAccounts = pgTable(
       .where(sql`${t.salesRepId} is not null`),
     index("ca_company_employee_idx").on(t.companyId, t.employeeId),
     index("ca_company_default_idx").on(t.companyId, t.isDefault),
+    index("ca_company_warehouse_idx").on(t.companyId, t.warehouseId),
+    uniqueIndex("ca_company_code_key").on(t.companyId, t.code).where(sql`${t.code} is not null`),
     /** Har kompaniyada bitta asosiy kassa — to'lovlar shunga tushadi. */
     uniqueIndex("ca_one_default_per_company_key")
       .on(t.companyId)

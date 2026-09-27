@@ -41,7 +41,7 @@ export type PurchaseReturnInput = {
   items: { orderItemId: string; quantity: string }[];
   reason?: string | null;
   /** Ta'minotchi qaytargan pul (asosiy valyutada): naqd — asosiy kassaga, karta — bankka. */
-  refund?: { amount: string; method: "cash" | "card" } | null;
+  refund?: { amount: string; method: "cash" | "card"; /** Kassali smena: naqd shu kassaga. */ cashAccountId?: string | null } | null;
   /** Desktop kassa sinxroni: qurilmadagi ID, raqam (`K01-R000001`), vaqt va qurilma. */
   offline?: { id: string; number: string; occurredAt: Date; deviceId: string };
 };
@@ -147,7 +147,7 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
   });
   const total = lines.reduce((sum, line) => sum + line.value, 0n);
 
-  const refund = input.refund ? { amount: toMinor(input.refund.amount), method: input.refund.method } : null;
+  const refund = input.refund ? { amount: toMinor(input.refund.amount), method: input.refund.method, cashAccountId: input.refund.cashAccountId ?? null } : null;
   if (refund && refund.amount <= 0n) throw badRequest("Qaytgan pul summasi musbat bo'lishi kerak");
   // Qaytgan pul qaytarilgan tovar qiymatidan oshmaydi — aks holda kassaga yo'q pul va ta'minotchiga soxta qarz yoziladi
   if (refund && refund.amount > total) {
@@ -269,7 +269,7 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
     const amount = fromMinor(refund.amount);
     const description = `Ta'minotchidan qaytgan pul: ${number}`;
     const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
-      cashAccountId: await resolvePaymentAccount(tx, companyId, refund.method),
+      cashAccountId: await resolvePaymentAccount(tx, companyId, refund.method, refund.method === "cash" ? refund.cashAccountId : null),
       type: "in",
       amount,
       txDate: date,
