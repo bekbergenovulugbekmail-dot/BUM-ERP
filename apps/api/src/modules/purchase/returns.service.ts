@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { badRequest, notFound } from "@bum/shared";
+import { badRequest, conflict, notFound } from "@bum/shared";
 import { products } from "../../db/schema/catalog.js";
 import {
   purchaseOrderItems,
@@ -44,6 +44,8 @@ export type PurchaseReturnInput = {
   refund?: { amount: string; method: "cash" | "card"; /** Kassali smena: naqd shu kassaga. */ cashAccountId?: string | null } | null;
   /** Desktop kassa sinxroni: qurilmadagi ID, raqam (`K01-R000001`), vaqt va qurilma. */
   offline?: { id: string; number: string; occurredAt: Date; deviceId: string };
+  /** Web so'rov kaliti — qaytarish ID'si; takror yuborilsa mavjud qaytarish qaytadi (ombor/qarz ikki marta o'zgarmaydi). */
+  requestId?: string | null;
 };
 
 const RETURNABLE = new Set(["partial", "received", "invoiced", "paid"]);
@@ -68,8 +70,28 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
     .limit(1)
     .for("update");
   if (!order) throw notFound("Xarid topilmadi");
-  if (!RETURNABLE.has(order.status)) throw badRequest("Faqat tovari qabul qilingan xarid qaytariladi");
   assertWarehouseAccess(tenant, order.warehouseId);
+  // Takroriy so'rov (ikki marta bosish, tarmoq qayta urinishi) — xarid qatori qulflangandan keyin tekshiriladi
+  if (input.requestId && !offline) {
+    const [existing] = await tx
+      .select({
+        id: purchaseReturns.id,
+        number: purchaseReturns.number,
+        orderId: purchaseReturns.orderId,
+        totalAmount: purchaseReturns.totalAmount,
+        refundMethod: purchaseReturns.refundMethod,
+        refundAmount: purchaseReturns.refundAmount,
+        cashAccountId: purchaseReturns.cashAccountId,
+      })
+      .from(purchaseReturns)
+      .where(and(eq(purchaseReturns.id, input.requestId), eq(purchaseReturns.companyId, companyId)))
+      .limit(1);
+    if (existing) {
+      if (existing.orderId !== orderId) throw conflict("So'rov kaliti boshqa xarid qaytarishida ishlatilgan");
+      return { return: { ...existing, orderNumber: order.number }, conflicts, duplicate: true as const };
+    }
+  }
+  if (!RETURNABLE.has(order.status)) throw badRequest("Faqat tovari qabul qilingan xarid qaytariladi");
 
   const ids = input.items.map((item) => item.orderItemId);
   if (ids.length === 0) throw badRequest("Qaytariladigan mahsulotni tanlang");
@@ -155,7 +177,7 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
   }
 
   const date = offline ? offline.occurredAt.toISOString().slice(0, 10) : todayIso();
-  const returnId = offline?.id ?? randomUUID();
+  const returnId = offline?.id ?? input.requestId ?? randomUUID();
   const number =
     offline?.number ??
     (await nextDocumentNumber(tx, {
@@ -324,5 +346,5 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
       ...(conflicts.length > 0 ? { conflicts: conflicts.map((item) => item.kind) } : {}),
     },
   });
-  return { return: summary, conflicts };
+  return { return: summary, conflicts, duplicate: false as const };
 }

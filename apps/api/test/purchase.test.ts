@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, eq, ne } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -5,7 +6,7 @@ import { closeDb, db } from "../src/db/client.js";
 import { batches, units } from "../src/db/schema/catalog.js";
 import { accounts } from "../src/db/schema/finance.js";
 import { stockLevels, stockMovements, warehouses } from "../src/db/schema/inventory.js";
-import { suppliers } from "../src/db/schema/purchase.js";
+import { purchaseReturns, suppliers } from "../src/db/schema/purchase.js";
 import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
 import { buildServer } from "../src/server.js";
 import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
@@ -223,6 +224,35 @@ describe("Xarid buyurtmalari", () => {
       kassir.cookie,
     );
     expect(forbidden.statusCode).toBe(403);
+  });
+
+  it("ta'minotchiga qaytarish: so'rov kaliti bilan takror (ketma-ket va parallel) — bitta qaytarish, ombor va qarz bir marta", async () => {
+    const p = await product("NOK");
+    const order = await confirmedOrder([{ productId: p, unitId: piece, orderedQty: "10", unitPrice: "1000" }]);
+    expect((await purchase("POST", `/orders/${order.id}/receipts`, { items: [{ orderItemId: order.items[0].id, receivedQty: "10" }] })).statusCode).toBe(201);
+    const debtOf = async () => (await db.select().from(suppliers).where(eq(suppliers.id, order.supplierId)))[0]!.totalDebt;
+    const body = { items: [{ orderItemId: order.items[0].id, quantity: "3" }], reason: "Muddati o'tgan", requestId: randomUUID() };
+
+    const first = await purchase("POST", `/orders/${order.id}/returns`, body);
+    expect(first.statusCode, first.body).toBe(201);
+    const again = await purchase("POST", `/orders/${order.id}/returns`, body);
+    expect(again.statusCode, "takror — mavjud qaytarish").toBe(200);
+    expect(again.json().return.id).toBe(first.json().return.id);
+    expect(await stock(p)).toMatchObject({ quantity: "7.0000" });
+    expect(await debtOf()).toBe("7000.00");
+
+    // Parallel ikki marta bosish
+    const key = randomUUID();
+    const both = await Promise.all([0, 1].map(() => purchase("POST", `/orders/${order.id}/returns`, { items: [{ orderItemId: order.items[0].id, quantity: "2" }], requestId: key })));
+    expect(both.map((r) => r.statusCode).sort()).toEqual([200, 201]);
+    expect(await stock(p)).toMatchObject({ quantity: "5.0000" });
+    expect(await debtOf()).toBe("5000.00");
+    const returns = await db.select().from(purchaseReturns).where(eq(purchaseReturns.orderId, order.id));
+    expect(returns).toHaveLength(2);
+    // Boshqa xaridda o'sha kalit — rad
+    const other = await confirmedOrder([{ productId: p, unitId: piece, orderedQty: "1", unitPrice: "1000" }]);
+    await purchase("POST", `/orders/${other.id}/receipts`, { items: [{ orderItemId: other.items[0].id, receivedQty: "1" }] });
+    expect((await purchase("POST", `/orders/${other.id}/returns`, { items: [{ orderItemId: other.items[0].id, quantity: "1" }], requestId: key })).statusCode).toBe(409);
   });
 
   it("qutida xarid zaxiraga asosiy birlikda tushadi; partiya kuzatiladigan mahsulotga partiya raqami shart", async () => {

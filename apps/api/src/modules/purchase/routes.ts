@@ -220,6 +220,8 @@ const purchaseReturnBody = z.strictObject({
     .strictObject({ amount: decimalSchema({ scale: 2, positive: true }), method: z.enum(["cash", "card"]) })
     .nullable()
     .optional(),
+  /** So'rov kaliti — takror yuborilsa ikkinchi qaytarish yozilmaydi (200, mavjud qaytarish). */
+  requestId: z.uuid().optional(),
 });
 
 /** Aralash to'lov qismi — mijoz to'lovlaridagi bilan bir xil shakl. */
@@ -457,9 +459,9 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
     const body = purchaseReturnBody.parse(req.body);
     const result = await writeInTenant(req, "purchase.return", async (tx, tenant) => {
       const created = await returnPurchaseItems(tx, tenant, orderId, body, requestMeta(req));
-      return { return: created.return, order: await getOrder(tx, tenant, orderId) };
+      return { return: created.return, order: await getOrder(tx, tenant, orderId), duplicate: created.duplicate };
     });
-    reply.status(201);
+    reply.status(result.duplicate ? 200 : 201);
     return result;
   });
 
