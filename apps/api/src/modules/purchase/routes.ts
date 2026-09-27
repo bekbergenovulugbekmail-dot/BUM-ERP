@@ -22,7 +22,7 @@
  *   POST   /payments                                      purchase.approve (201 yangi / 200 takroriy reference)
  */
 import { previewSupplierPaymentReversal, reverseSupplierPayment } from "./payment-reversal.service.js";
-import { supplierDebtReconciliation, supplierStatement } from "./supplier-statement.service.js";
+import { supplierAging, supplierDebtReconciliation, supplierStatement } from "./supplier-statement.service.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { ALLOCATION_METHODS, MAX_PAYMENT_PARTS, type Permission } from "@bum/shared";
@@ -314,6 +314,12 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
     const { supplierId } = supplierParams.parse(req.params);
     const query = statementQuery.parse(req.query);
     return supplierStatement(db, await readTenant(req, "purchase.view"), supplierId, query);
+  });
+
+  /** Ta'minotchi qarzi yoshi (aging) — kreditorlar subhisobidan FIFO; jami = jurnal qoldig'i. */
+  app.get("/suppliers-aging", async (req) => {
+    const { asOf } = z.object({ asOf: z.iso.date().optional() }).parse(req.query);
+    return supplierAging(db, await readTenant(req, "purchase.view"), { asOf });
   });
 
   /** Barcha ta'minotchilar: kesh va jurnal solishtiruvi (nomuvofiqlar). */

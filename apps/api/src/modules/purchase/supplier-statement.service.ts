@@ -17,6 +17,7 @@ import type { DbOrTx } from "../../db/transaction.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
 import type { TenantContext } from "../company/tenant.js";
 import { todayIso } from "../finance/cash.service.js";
+import { AGING_BUCKETS, agingBucketOf, type AgingBucket } from "../sales/receivables.service.js";
 
 export function supplierOperationKind(referenceType: string | null): { kind: string; label: string } {
   const type = referenceType ?? "";
@@ -197,3 +198,96 @@ export async function supplierDebtReconciliation(conn: DbOrTx, tenant: TenantCon
   const mismatched = list.filter((row) => toMinor(row.cached) !== toMinor(row.ledger));
   return { suppliers: list.length, mismatched: mismatched.map((row) => ({ ...row, difference: fromMinor(toMinor(row.cached) - toMinor(row.ledger)) })) };
 }
+
+/**
+ * Ta'minotchi qarzining yoshi (aging) — akt bilan bir xil manba: kreditorlar subhisobi (tasdiqlangan jurnal, `asOf` gacha).
+ * Qarzni oshirgan yozuvlar (qabul, to'lov bekor qilinishi …) navbatga qo'yiladi; kamaytirganlari (to'lov, qaytarish) eng
+ * eskisidan boshlab FIFO yopadi. Ochiq qolgani "qabul sanasi + to'lov muddati" dan o'tgan kun bo'yicha guruhlanadi.
+ * Ortiqcha to'lov — avans. Invariant: guruhlar jami − avans = jurnal qoldig'i (buyurtma `paid_amount` ishlatilmaydi —
+ * buyurtmasiz to'lov va qaytarishni ko'rmaydi).
+ */
+export async function supplierAging(conn: DbOrTx, tenant: TenantContext, options: { asOf?: string }) {
+  const companyId = tenant.company.id;
+  const asOf = options.asOf ?? todayIso();
+  const lines = await conn
+    .select({
+      supplierId: journalLines.partyId,
+      entryDate: journalEntries.entryDate,
+      debit: journalLines.debit,
+      credit: journalLines.credit,
+    })
+    .from(journalLines)
+    .innerJoin(journalEntries, eq(journalEntries.id, journalLines.entryId))
+    .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
+    .where(
+      and(
+        eq(journalLines.companyId, companyId),
+        eq(journalLines.partyType, "supplier"),
+        eq(accounts.subtype, "payable"),
+        eq(journalEntries.status, "posted"),
+        lte(journalEntries.entryDate, asOf),
+      ),
+    )
+    .orderBy(asc(journalLines.partyId), asc(journalEntries.entryDate), asc(journalEntries.createdAt), asc(journalEntries.id));
+  const list = await conn
+    .select({ id: suppliers.id, name: suppliers.name, code: suppliers.code, paymentTermDays: suppliers.paymentTermDays })
+    .from(suppliers)
+    .where(eq(suppliers.companyId, companyId));
+
+  const byId = new Map<string, { date: string; amount: bigint }[]>();
+  const decreased = new Map<string, bigint>();
+  for (const line of lines) {
+    if (!line.supplierId) continue;
+    const effect = toMinor(line.credit) - toMinor(line.debit);
+    if (effect > 0n) byId.set(line.supplierId, [...(byId.get(line.supplierId) ?? []), { date: line.entryDate, amount: effect }]);
+    else if (effect < 0n) decreased.set(line.supplierId, (decreased.get(line.supplierId) ?? 0n) - effect);
+  }
+
+  const asOfDay = dayOf(asOf);
+  const grand = Object.fromEntries(AGING_BUCKETS.map((bucket) => [bucket, 0n])) as Record<AgingBucket, bigint>;
+  let grandAdvance = 0n;
+  const rows = [];
+  for (const supplier of list) {
+    const queue = (byId.get(supplier.id) ?? []).map((item) => ({ ...item }));
+    let left = decreased.get(supplier.id) ?? 0n;
+    for (const item of queue) {
+      if (left === 0n) break;
+      const take = item.amount < left ? item.amount : left;
+      item.amount -= take;
+      left -= take;
+    }
+    const buckets = Object.fromEntries(AGING_BUCKETS.map((bucket) => [bucket, 0n])) as Record<AgingBucket, bigint>;
+    let oldest: string | null = null;
+    for (const item of queue) {
+      if (item.amount === 0n) continue;
+      oldest ??= item.date;
+      const overdue = asOfDay - (dayOf(item.date) + supplier.paymentTermDays);
+      buckets[agingBucketOf(overdue)] += item.amount;
+    }
+    const total = AGING_BUCKETS.reduce((sum, bucket) => sum + buckets[bucket], 0n);
+    if (total === 0n && left === 0n) continue;
+    for (const bucket of AGING_BUCKETS) grand[bucket] += buckets[bucket];
+    grandAdvance += left;
+    rows.push({
+      id: supplier.id,
+      name: supplier.name,
+      code: supplier.code,
+      paymentTermDays: supplier.paymentTermDays,
+      oldestOpenDate: oldest,
+      ...Object.fromEntries(AGING_BUCKETS.map((bucket) => [bucket, fromMinor(buckets[bucket])])),
+      total: fromMinor(total),
+      advance: fromMinor(left),
+      net: fromMinor(total - left),
+    });
+  }
+  rows.sort((a, b) => Number(toMinor(b.net) - toMinor(a.net)));
+  const grandTotal = AGING_BUCKETS.reduce((sum, bucket) => sum + grand[bucket], 0n);
+  return {
+    asOf,
+    buckets: AGING_BUCKETS,
+    totals: { ...Object.fromEntries(AGING_BUCKETS.map((bucket) => [bucket, fromMinor(grand[bucket])])), total: fromMinor(grandTotal), advance: fromMinor(grandAdvance), net: fromMinor(grandTotal - grandAdvance) },
+    suppliers: rows,
+  };
+}
+
+const dayOf = (date: string) => Math.floor(Date.parse(`${date}T00:00:00Z`) / 86_400_000);

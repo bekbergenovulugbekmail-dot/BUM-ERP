@@ -2,7 +2,7 @@ import { useState } from "react";
 import { motion } from "motion/react";
 import {
   ShoppingCart, Plus, TrendingUp,
-  Truck, CreditCard, Users, FileText,
+  Truck, CreditCard, Users, FileText, Hourglass,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
@@ -14,6 +14,7 @@ import { usePermissions } from "@/hooks/use-company.ts";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import OrdersTable from "./_components/orders-table.tsx";
 import SuppliersTable from "./_components/suppliers-table.tsx";
+import SupplierAging from "./_components/supplier-aging.tsx";
 import CreateOrderDialog from "./_components/create-order-dialog.tsx";
 import OrderDetailDrawer from "./_components/order-detail-drawer.tsx";
 import { num, todayLocal, type PurchaseOrderRow, type PurchaseOrderStatus, type Supplier } from "./_lib/types.ts";
@@ -143,6 +144,9 @@ export default function PurchasePage() {
             <TabsTrigger value="suppliers">
               <Users className="h-4 w-4 mr-1.5" /> Yetkazuvchilar
             </TabsTrigger>
+            <TabsTrigger value="aging">
+              <Hourglass className="h-4 w-4 mr-1.5" /> Qarz yoshi
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="orders" className="flex-1 min-h-0 mt-0 flex flex-col gap-3">
@@ -173,6 +177,10 @@ export default function PurchasePage() {
 
           <TabsContent value="suppliers" className="flex-1 min-h-0 mt-0">
             <SuppliersTable suppliers={suppliers} />
+          </TabsContent>
+
+          <TabsContent value="aging" className="flex-1 min-h-0 mt-0">
+            {mainTab === "aging" && <SupplierAging />}
           </TabsContent>
         </Tabs>
       </div>

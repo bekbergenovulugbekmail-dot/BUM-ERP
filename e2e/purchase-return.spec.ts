@@ -2,6 +2,7 @@
  * TA'MINOTCHIGA QAYTARISH — HAQIQIY BRAUZERDA (2026-09-27):
  *   xarid (10 dona × 5 000) qabul qilingan → xarid oynasi → "Ta'minotchiga qaytarish" → 3 dona, sabab → "Qaytarish" tugmasi
  *   IKKI MARTA bosiladi → BAZADA: faqat bitta qaytarish (qaytarilgan 3), ombor 10 − 3, ta'minotchi qarzi 50 000 − 15 000.
+ *   Keyin akt (35 000, kesh = jurnal) va "Qarz yoshi" jadvali (netto 35 000).
  */
 import { expect, test, type Page } from "@playwright/test";
 import { appPath, login } from "./_lib/accounts.ts";
@@ -72,4 +73,12 @@ test("xarid oynasidan ta'minotchiga qaytarish: ikki marta bosish — bitta qayta
   await expect(page.getByTestId("supplier-act-closing")).toHaveText(/35[\s ]?000/);
   await expect(page.getByTestId("supplier-act-reconciled")).toBeVisible();
   await page.screenshot({ path: "e2e/.screenshots/supplier-act.png" });
+
+  // Qarz yoshi: shu ta'minotchi qatori netto 35 000 (bugungi qabul — muddati kelmagan)
+  await page.keyboard.press("Escape");
+  await page.getByRole("tab", { name: /Qarz yoshi/ }).click();
+  const agingRow = page.getByTestId(`supplier-aging-row-${supplier.json.supplier.id}`);
+  await expect(agingRow).toBeVisible({ timeout: 20_000 });
+  await expect(agingRow).toContainText(/35\D?000/);
+  await page.screenshot({ path: "e2e/.screenshots/supplier-aging.png" });
 });
