@@ -5249,3 +5249,21 @@ Tashqi integratsiya kalitlari (Telegram, SMS) o'zgaruvchilarda yo'q. Sessiya coo
 cookie staging manziliga yuborilmaydi. Backup restore (`volumeInstanceBackupRestore`) backup'ning O'Z volume'iga tiklaydi (boshqa
 muhit argumenti yo'q) — production backup'ini stagingga to'g'ridan-to'g'ri tiklab bo'lmaydi; bu amal production'ni ustidan yozadi, ishlatilmaydi.
 Tavsiya: staging — yangi bo'sh Postgres (migratsiyalar avtomatik) + sintetik QA tenant.
+
+### STAGING muhiti yaratildi (2026-09-27 ~12:50Z) — READY FOR FUNCTIONAL SMOKE TEST
+
+- **Muhit:** `staging` (`5a8e273a-d03e-44d0-8d58-bb7bc6a2483b`), production nusxasidan `skipInitialDeploys` bilan. Web:
+  https://bum-web-staging.up.railway.app (Railway domeni; bum-erp.uz domenlari ko'chmagan). API — ommaviy domensiz, web `/api` orqali.
+- **Postgres:** staging `Postgres--bSX` + yangi volume `postgres--bsx-volume` (faqat staging, `environmentId` aniq berilgan) — bo'sh
+  bazadan; 99 migratsiya (1.1 s). Klaster `system_identifier`: staging 7690195100549431358 ≠ production 7684308940965802050.
+- **Secret'lar:** staging'da yangi `SESSION_SECRET`, `BOOTSTRAP_ADMIN_PASSWORD`, `POSTGRES_PASSWORD`; `WEB_ORIGIN`/`PUBLIC_API_URL` =
+  staging domeni. Staging parollari faqat egasi kompyuterida (`Documents/BUM-ERP-staging-admin.txt`), repoda yo'q.
+- **Izolyatsiya:** staging cookie production'da 401; staging bazada production sessiyalari yo'q; tashqi integratsiya kalitlari
+  (Eskiz, Anthropic, storage) o'rnatilmagan, Telegram botlari bazada — staging bo'sh.
+- **Ishlatilmaydigan servislar** (logto, eski `Postgres`, `BUM-ERP`): staging'da hech qachon deploy qilinmagan; o'chirilmadi — servis
+  ob'ektlari production bilan umumiy.
+- **QA tenant (faqat staging):** "BUM QA Test" (litsenziya 10), "QA Main Warehouse", kassirlar Ozoda/Diana, sotuvchi Ali,
+  3 mahsulot × 100 (qiymati 4 900 000), mijoz "QA Mijoz Karim", kassalar QA1/QA2, UZCARD/HUMO terminallari, usullar Naqd/UZCARD/HUMO/Bank.
+  Staging invariantlari 0 farq. Sotuv, to'lov, smena — yaratilmagan.
+- **Production:** deploy'lar o'zgarmagan (`b87cecc8`, `8595c41f`), Postgres qayta ishga tushmagan, tenantlar kesimi va nazorat
+  summalari bir xil, backup `d33c4d9c…` joyida.
