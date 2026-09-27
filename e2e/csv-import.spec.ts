@@ -54,8 +54,9 @@ test("fayl sarlavhalari boshqacha bo'lsa — ustunlar qo'lda moslanadi va import
     `Import Test ${stamp};+99893${stamp}1;qo'lda moslash`,
   ].join("\n");
 
-  await page.getByTestId("csv-import").click();
-  await page.locator('input[type="file"]').setInputFiles({
+  // CRM sahifasida bir nechta import (mijozlar, balans) — aynan shu tugma ochgan fayl tanlagich
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("csv-import").click()]);
+  await chooser.setFiles({
     name: "mijozlar.csv",
     mimeType: "text/csv",
     buffer: Buffer.from(csv, "utf8"),
