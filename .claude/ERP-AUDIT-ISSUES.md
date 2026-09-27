@@ -206,7 +206,8 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 - **SEVERITY:** LOW · **MODULE:** Stock
 - **ROOT CAUSE:** CHECK 0032 migratsiyada olib tashlangan (offline POS uchun ataylab), izoh eskirgan
   (stock.service.ts:9-10); solishtirish tekshiruvi yo'q. Sanashda zaxiradan past kamomad yozilmaydi
-  (stock.service.ts:166). **STATUS:** OPEN
+  (stock.service.ts:166). **STATUS:** PARTIAL — `56e4c6e`: `GET /api/inventory/stock/reconciliation` (qoldiq = harakatlar,
+  manfiylar); production read-only 2026-09-28: farq 0, manfiy 0. CHECK qaytarilmaydi (offline POS ataylab).
 
 ## AUD-027 — Tenant izolyatsiyasi: ekspluatatsiya qilinadigan kamchilik TOPILMADI
 - **SEVERITY:** — (ijobiy natija) · **MODULE:** Tenant isolation

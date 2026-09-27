@@ -5334,5 +5334,15 @@ Davomi (2026-09-27/28):
 - Topshirish (handover) tekshirildi: ikki marta topshirish/qabul allaqachon 409 (indeks + qulf) — o'zgarish kerak emas.
 Tekshirildi: API 174 fayl ✓ (to'liq), frontend 51/312 ✓, tsc/eslint ✓, e2e purchase-return (akt + aging bilan) ✓.
 Brauzerda sinash: Xarid → buyurtma → "Ta'minotchiga qaytarish"; Yetkazuvchilar → "Akt"; "Qarz yoshi" tabi.
-Keyingi qadam: egasi qarorlari (yuqoridagi ro'yxat); qarori kerak bo'lmagan P3 — customer-prices UI, balance-import UI.
+2026-09-28 davomi:
+- `e3170a0` — CRM → Mijozlar: kelishilgan narxlar dialogi (joriy/tarix, qo'shish, yopish; ustma-ust narx server xabari bilan).
+- `5a4f272` — CRM → Mijozlar: "Balans importi" (finance.approve; dryRun → import; qayta yuklash o'zgartirmaydi).
+- `0b9bf0a` — mahsulot importi "Mavjudlarini yangilash": SKU bo'yicha nomi/sotuv narxi/min. qoldiq/shtrix-kod
+  (products.edit; tannarx, birlik, kategoriya o'zgarmaydi; audit eski → yangi).
+- `56e4c6e` — `GET /api/inventory/stock/reconciliation?warehouseId` (AUD-026). Production read-only: farq 0, manfiy 0.
+- `48247af` — HR terminate → litsenziya bo'shaydi testi. `a3bdfa5` — e2e lokator (CRM'da ikki import).
+Brauzerda sinash: CRM → Mijozlar → narx (teg) belgisi va "Balans importi"; Mahsulotlar → Import → "Mavjudlarini yangilash".
+Qoldirildi: web POS tarozi shtrix-kodi (format sozlamasi — POS pul yo'li, qaror kerak), analitika server eksporti (P3).
+Keyingi qadam: egasi qarorlari (AUD-008, AUD-003, AUD-016, AUD-022, AUD-015/014, KPI qaytarish, maosh) va migratsiyalar.
+Yakuniy regressiya (2026-09-28): API 175 fayl / 1241 test ✓ (0 xato), frontend 51/312 ✓, tsc/eslint ✓.
 Commitlar push qilinmagan; production va staging — `5ba4778`.
