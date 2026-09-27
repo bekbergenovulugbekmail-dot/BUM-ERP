@@ -5290,3 +5290,13 @@ mutatsiya bloklangan. Skriptlar va natija: `docs/audit/qa-acceptance.js`, `qa-re
   qo'shadi) — tavsiya.
 - **Production:** sinovdan oldin va keyin tenantlar kesimi, invariantlar va tarixiy nazorat summalari bir xil; deploy'lar o'zgarmagan.
   `5ba4778` production'da **yo'q** — "DEPLOY QIL" kutilmoqda.
+
+### Fix scope audit `5ba4778` (2026-09-27, statik + read-only) — READY FOR PRODUCTION FIX DEPLOY
+
+`fd12153 → 5ba4778`: kod o'zgartiradigan yagona commit — `5ba4778` (qolganlari hujjat). 3 manba fayl (+22/−4): `kassa.service.ts`
+(A: POS smena/qurilma kassasi — faqat shu omborga biriktirilgan, asosiy bo'lmagan; B: `kassasForUser` begona ombor → 404),
+`pos.service.ts` va `cash.service.ts` (C: auditda sotuvchi, kassa, ombor/kod eski → yangi). Test: `pos-multi-kassa.test.ts` —
+1 yangi test, mavjudlarida faqat import. Migratsiya, sxema, bog'liqlik, Dockerfile, env, debug kod — yo'q; web o'zgarmagan
+(faqat `bum-api` deploy). Production (read-only): kassa biriktirilgan hisob/smena/qurilma 0 — yangi qoida mavjud ma'lumotga ta'sir
+qilmaydi. tsc ✓, eslint ✓, POS/kassa/desktop/to'lov/sotuvchi/kassa-hisob suite'lari 26 fayl / 90 test ✓. Staging qabul testi 29/29
+aynan shu kod bilan (staging `bum-api` deployment `1eb3c080`).
