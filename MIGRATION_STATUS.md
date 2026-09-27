@@ -5221,3 +5221,12 @@ BLOCKED — WAITING FOR EXPLICIT USER COMMAND
   13 so'rov daqiqa chegarasini kesib o'tsa 13-si 200 oladi (test vaqtiga bog'liq); alohida 2/2 ✓. Tavsiya: testda vaqtni muzlatish.
 - **Rollback:** `docs/audit/rollback-0096-0098.down.sql` (ishga tushirilmagan); asosiy yo'l — oldingi `332da55` ni qayta deploy
   (sxema oldinga mos). DB restore — faqat egasi qarori bilan, backup `d33c4d9c…`.
+
+**Production (2026-09-27 11:35Z):** `fd12153` deploy qilindi (egasi: "Deploy qil") — `bum-api` (deployment `b87cecc8…`, SUCCESS) +
+`bum-web` (`8595c41f…`, SUCCESS, `build.json` 11:36:43Z). Loglarda "Migratsiyalar qo'llandi (59ms)" bir marta, server turg'un.
+0096–0098 **APPLIED** (99 migratsiya). Tashqaridan: `/api/sales/pos/kassas`, `/kassa-board`, `/sellers`, `/api/finance/payment-methods`,
+`/api/analytics/reports/kassa|sellers` — 401 (mavjud); bundle'da kassa tanlash, POS kassalar paneli, to'lov usullari, sotuvchi.
+Read-only audit 11:38Z: invariantlar 0 farq, tenantlar kesimidagi baseline bir xil, tarixiy nazorat summalari (sotuv, to'lov, smena,
+kassa harakatlari, jurnal, kassalar, terminal, qurilma) — o'zgarmagan; yangi ustunlar hammasi NULL, `payment_methods` bo'sh,
+2 ochiq smena kassasiz (tarixiy xulq). Funksional smoke test productionda **qilinmadi** (jonli tenantlarga test yozuvi kerak bo'ladi —
+egasi ruxsatini kutadi). Backup `d33c4d9c…` o'zgarmagan.
