@@ -175,6 +175,8 @@ const orderImportBody = z.strictObject({
 });
 const cancelBody = z.strictObject({ reason: nullableText(1000) }).optional();
 const receiptBody = z.strictObject({
+  /** So'rov kaliti — takroriy yuborishda ikkinchi kirim yozilmaydi (200 va o'sha hujjat). */
+  requestId: z.uuid().optional(),
   receiptDate: isoDate.optional(),
   notes: nullableText(2000),
   items: z
@@ -426,7 +428,7 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
     const result = await writeInTenant(req, "warehouse.receive", (tx, tenant) =>
       receiveGoods(tx, tenant, orderId, body, requestMeta(req)),
     );
-    reply.status(201);
+    reply.status(result.duplicate ? 200 : 201);
     return result;
   });
 

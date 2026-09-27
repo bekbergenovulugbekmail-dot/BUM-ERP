@@ -381,16 +381,27 @@ export default function POSPage() {
   });
 
   // HID scanner support (USB/Bluetooth barcode scanners)
-  const handleBarcodeScan = useCallback(async (barcode: string) => {
-    const matches = (p: ProductOption) => p.isActive && p.isSaleable && (p.barcode === barcode || p.sku === barcode);
-    let found = products?.find(matches);
+  const handleBarcodeScan = useCallback(async (barcode: string, options: { fallbackSearch?: boolean } = {}): Promise<boolean> => {
+    // Shtrix-kod va SKU — alohida tushunchalar: avval ANIQ shtrix-kod (yuklangan ro'yxat, keyin server — manba),
+    // faqat shtrix-kod topilmasa SKU. Aks holda bir mahsulotning SKU'si boshqasining shtrix-kodiga teng bo'lsa,
+    // skaner noto'g'ri mahsulotni qo'shardi.
+    const sellable = (p: ProductOption) => p.isActive && p.isSaleable;
+    let found = products?.find((p) => sellable(p) && p.barcode === barcode);
     if (!found) {
-      // Yuklangan ro'yxatda yo'q — serverdan aniq barkod bo'yicha
+      try {
+        const result = await api.get<{ product: ProductOption }>(`/api/catalog/products/by-barcode/${encodeURIComponent(barcode)}`);
+        if (sellable(result.product)) found = result.product;
+      } catch {
+        // shtrix-kod bo'yicha yo'q — SKU bo'yicha
+      }
+    }
+    if (!found) found = products?.find((p) => sellable(p) && p.sku === barcode);
+    if (!found) {
       try {
         const result = await api.get<{ products: ProductOption[] }>("/api/catalog/products", {
           search: barcode, isActive: true, limit: 10,
         });
-        found = result.products.find(matches);
+        found = result.products.find((p) => sellable(p) && p.sku === barcode);
       } catch {
         // pastda qidiruvga o'tiladi
       }
@@ -398,10 +409,13 @@ export default function POSPage() {
     if (found) {
       addToCartRef.current(found);
       toast.success(`${found.name} savatchaga qo'shildi`);
-    } else {
+      return true;
+    }
+    if (options.fallbackSearch !== false) {
       setSearch(barcode);
       toast.info(`"${barcode}" qidirilmoqda...`);
     }
+    return false;
   }, [products]);
 
   const updateQty = (idx: number, delta: number) => {
@@ -894,11 +908,20 @@ export default function POSPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => {
-                  if (tableLayout && e.key === "Enter" && searchResults[0]) {
-                    e.preventDefault();
-                    addToCart(searchResults[0]);
-                    setSearch("");
-                  }
+                  if (e.key !== "Enter") return;
+                  const code = search.trim();
+                  if (!code) return;
+                  e.preventDefault();
+                  // Skaner qidiruv maydoniga yozgan bo'lsa ham (fokus shu yerda) — kod bo'yicha aniq mahsulot qo'shiladi;
+                  // takroriy skaner miqdorni oshiradi. Aniq kod topilmasa: jadval ko'rinishida birinchi natija (avvalgidek)
+                  const first = searchResults[0];
+                  void handleBarcodeScan(code, { fallbackSearch: false }).then((added) => {
+                    if (added) setSearch("");
+                    else if (tableLayout && first) {
+                      addToCart(first);
+                      setSearch("");
+                    }
+                  });
                 }}
               />
               {searchResults.length > 0 && (

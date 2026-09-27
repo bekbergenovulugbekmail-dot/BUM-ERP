@@ -19,7 +19,7 @@
  *    raqam parallel yaratishda takrorlanardi; `list` / `getById` ruxsat tekshirmasdi
  */
 import { and, asc, desc, eq, getTableColumns, gte, ilike, inArray, lt, lte, or, sql } from "drizzle-orm";
-import { badRequest, notFound } from "@bum/shared";
+import { conflict, badRequest, notFound } from "@bum/shared";
 import { batches, products, units } from "../../db/schema/catalog.js";
 import { warehouses } from "../../db/schema/inventory.js";
 import {
@@ -575,6 +575,11 @@ export async function cancelOrder(tx: Tx, tenant: TenantContext, orderId: string
 // ─── Tovar qabuli ────────────────────────────────────────────────────────────
 
 export type ReceiptInput = {
+  /**
+   * So'rov kaliti (SUP-002): qabul hujjatining o'z ID'si bo'ladi — ikki marta bosish yoki tarmoq qayta urinishi ikkinchi
+   * kirim (ombor +, qarz +) yaratmaydi, mavjud hujjat qaytadi (`duplicate: true`).
+   */
+  requestId?: string;
   receiptDate?: string;
   notes?: string | null;
   items: { orderItemId: string; receivedQty: string; batchNumber?: string | null; expiryDate?: string | null }[];
@@ -597,6 +602,19 @@ export async function receiveGoods(
   let productsEditable: boolean | null = null;
   const canEditProducts = async () => (productsEditable ??= (await effectivePermissions(tx, tenant)).includes("products.edit"));
   const order = await lockOrder(tx, tenant, orderId);
+  // Takroriy so'rov: buyurtma qulfidan keyin tekshiriladi — parallel ikkinchisi birinchisi tugagach mavjudini ko'radi
+  if (input.requestId) {
+    const [existing] = await tx
+      .select({ ...receiptFields, ownerCompanyId: purchaseReceipts.companyId })
+      .from(purchaseReceipts)
+      .where(eq(purchaseReceipts.id, input.requestId))
+      .limit(1);
+    if (existing) {
+      const { ownerCompanyId, ...receipt } = existing;
+      if (ownerCompanyId !== companyId || receipt.orderId !== orderId) throw conflict("Bu so'rov kaliti boshqa hujjatga tegishli");
+      return { receipt, total: null, status: order.status, allocations: [], duplicate: true as const };
+    }
+  }
   if (order.status !== "confirmed" && order.status !== "partial" && order.status !== "paid") {
     throw badRequest("Faqat tasdiqlangan buyurtma bo'yicha tovar qabul qilinadi");
   }
@@ -635,6 +653,7 @@ export async function receiveGoods(
   const [receipt] = await tx
     .insert(purchaseReceipts)
     .values({
+      ...(input.requestId ? { id: input.requestId } : {}),
       companyId,
       orderId,
       supplierId: order.supplierId,
@@ -804,7 +823,7 @@ export async function receiveGoods(
     resourceId: receipt!.id,
     details: { orderId, number: order.number, total: totalText, status, ...(allocations.length > 0 ? { backorderAllocations: allocations } : {}) },
   });
-  return { receipt: receipt!, total: totalText, status, allocations };
+  return { receipt: receipt!, total: totalText, status, allocations, duplicate: false as const };
 }
 
 /**

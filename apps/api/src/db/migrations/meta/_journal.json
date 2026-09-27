@@ -666,6 +666,13 @@
       "when": 1790510000000,
       "tag": "0094_supervisor_acting_order",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1790520000000,
+      "tag": "0095_product_barcode_unique",
+      "breakpoints": true
     }
   ]
 }

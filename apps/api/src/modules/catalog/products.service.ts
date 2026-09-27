@@ -14,9 +14,9 @@
  *  - CSV import serverda: qatorma-qator xatolar, noma'lum o'lchov birligi rad
  *    etiladi (Convex frontendi jimgina birinchi birlikni qo'yardi)
  */
-import { and, asc, eq, getTableColumns, gt, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gt, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { badRequest, notFound } from "@bum/shared";
+import { badRequest, conflict, notFound } from "@bum/shared";
 import { batches, brands, categories, productKind, products, unitConversions, units } from "../../db/schema/catalog.js";
 
 /** Katalog turi — sxemadagi enum bilan bir xil. */
@@ -206,11 +206,12 @@ export async function getProductByBarcode(
     .where(
       and(
         eq(products.companyId, tenant.company.id),
-        eq(products.barcode, barcode),
+        eq(products.barcode, barcode.trim()),
         productScopeCondition(await categoryScope(conn, tenant)),
       ),
     )
-    .orderBy(asc(products.createdAt))
+    // Eski dublikatlar bo'lsa (0095 dan oldingi ma'lumot) — faol mahsulot ustun
+    .orderBy(desc(products.isActive), asc(products.createdAt))
     .limit(1);
   if (!row) throw notFound("Mahsulot topilmadi");
   return stripCost(row, options.canViewCost === true);
@@ -351,6 +352,25 @@ async function assertPluFree(tx: Tx, companyId: string, pluCode: number | null |
   if (taken) throw badRequest(`PLU ${pluCode} band: ${taken.name}`);
 }
 
+/**
+ * Shtrix-kod kompaniyada BITTA mahsulotga tegishli (SUP-001): kassada skanerlanganda boshqa mahsulot sotilib ketmasin.
+ * Faolsizlantirilgan mahsulot ham hisobga olinadi (tarixdagi cheklar shu kodga bog'liq). Bo'sh kod — tekshirilmaydi.
+ * Unikal indeks (0095) — ikkinchi qatlam; bu yerda tushunarli xabar.
+ */
+async function assertBarcodeFree(tx: Tx, companyId: string, barcode: string | null | undefined, exceptProductId?: string) {
+  const code = barcode?.trim();
+  if (!code) return;
+  const [taken] = await tx
+    .select({ name: products.name, sku: products.sku })
+    .from(products)
+    .where(and(eq(products.companyId, companyId), eq(products.barcode, code), exceptProductId ? sql`${products.id} <> ${exceptProductId}` : undefined))
+    .limit(1);
+  if (taken) throw conflict(`Shtrix-kod ${code} band: ${taken.name} (SKU ${taken.sku})`);
+}
+
+/** Narx va tannarx maydonlari — o'zgarsa auditga ESKI va YANGI qiymat yoziladi. */
+const AUDITED_FIELDS = ["name", "sku", "barcode", "pluCode", "purchasePrice", "salesPrice", "wholesalePrice", "retailPrice", "promoPrice", "isActive", "categoryId", "baseUnitId"] as const;
+
 export async function createProduct(tx: Tx, tenant: TenantContext, rawInput: ProductInput, meta: RequestMeta) {
   assertCostingMethod(rawInput.costingMethod);
   await assertReferences(tx, tenant, rawInput);
@@ -358,6 +378,7 @@ export async function createProduct(tx: Tx, tenant: TenantContext, rawInput: Pro
   // Cheklangan xodim mahsulotni faqat o'z kategoriyasida yaratadi (kategoriyasiz — yo'q)
   assertCategoryInScope(await categoryScope(tx, tenant), input.categoryId);
   await assertPluFree(tx, tenant.company.id, input.pluCode);
+  await assertBarcodeFree(tx, tenant.company.id, input.barcode);
 
   const [product] = await tx
     .insert(products)
@@ -390,7 +411,9 @@ export async function updateProduct(
   await assertReferences(tx, tenant, patch);
   if (patch.categoryId !== undefined) assertCategoryInScope(await categoryScope(tx, tenant), patch.categoryId);
   await assertPluFree(tx, tenant.company.id, patch.pluCode, current.id);
+  if (patch.barcode !== undefined) await assertBarcodeFree(tx, tenant.company.id, patch.barcode, current.id);
 
+  const [before] = await tx.select(productFields).from(products).where(eq(products.id, current.id)).limit(1);
   const { costingMethod: _costing, ...fields } = await normalizeCurrencies(tx, tenant.company.id, patch);
   const [updated] = await tx
     .update(products)
@@ -398,11 +421,18 @@ export async function updateProduct(
     .where(eq(products.id, current.id))
     .returning(productFields);
 
+  // Kim, qachon (audit o'zi), NIMA: eski → yangi (narx, tannarx, shtrix-kod va h.k.)
+  const diff: Record<string, { old: unknown; new: unknown }> = {};
+  for (const field of AUDITED_FIELDS) {
+    const oldValue = (before as Record<string, unknown> | undefined)?.[field];
+    const newValue = (updated as Record<string, unknown>)[field];
+    if (field in patch && String(oldValue ?? "") !== String(newValue ?? "")) diff[field] = { old: oldValue ?? null, new: newValue ?? null };
+  }
   await audit(tx, tenant, meta, {
     action: "PRODUCT_UPDATED",
     resource: "products",
     resourceId: current.id,
-    details: { sku: updated!.sku, changes: Object.keys(patch) },
+    details: { sku: updated!.sku, changes: Object.keys(patch), diff },
   });
   return updated!;
 }
@@ -607,6 +637,18 @@ export async function importProducts(
           .map((p) => p.sku),
   );
 
+  // Shtrix-kod: bazada band yoki faylda takrorlangan — xato (SUP-001)
+  const fileBarcodes = [...new Set(rows.map((r) => r.barcode?.trim()).filter((b): b is string => Boolean(b)))];
+  const takenBarcodes = new Set(
+    fileBarcodes.length === 0
+      ? []
+      : (await tx
+          .select({ barcode: products.barcode })
+          .from(products)
+          .where(and(eq(products.companyId, companyId), inArray(products.barcode, fileBarcodes))))
+          .map((p) => p.barcode!),
+  );
+
   const errors: ImportError[] = [];
   const duplicates: ImportError[] = [];
   const warnings: ImportError[] = [];
@@ -678,6 +720,8 @@ export async function importProducts(
     }
 
     const barcode = row.barcode?.trim();
+    if (barcode && takenBarcodes.has(barcode)) return fail(`Shtrix-kod ${barcode} band (bazada yoki faylda takrorlangan)`);
+    if (barcode) takenBarcodes.add(barcode);
     taken.add(sku);
     values.push({
       companyId,

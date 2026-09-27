@@ -5084,3 +5084,20 @@ yo'q), web `build.json` 10:54:58Z (bundle'da ERP'ga qaytish tugmasi bor, "A4 his
 (yangi: `uz-cyrillic`, surish testi `sales-agent`), tsc ✓, eslint ✓, `vite build` ✓.
 
 **Production (2026-09-26 14:44Z):** `00feb5e` — faqat `bum-web` (API o'zgarmagan); `build.json` 14:44:34Z, bundle'da ustun tanlash va "Ўзбекча" bor. Production'da brauzer orqali sinalmadi.
+
+## BUSINESS 02 — SUPERMARKET 0→100 qabul testi (2026-09-27)
+
+`apps/api/test/acceptance-supermarket.test.ts` — BONNU MARKET (40 mahsulot, 12 kategoriya, EAN-13, PLU, blok = 6, POS-01 web +
+POS-02 desktop qurilma) va begona TEST MARKET; alohida BONNU FINAL da 58-bo'lim senariysi aniq raqamlar bilan. Har qadamda kassa,
+bank (kitob = hisob = 1010/1020), ombor (1200 = Σ qoldiq × AVCO), qarzlar (kesh = jurnal), jurnal balansi va foyda mustaqil hisob bilan.
+Natija: 36/36 ✓. Yakuniy senariy: kassa 8 000 000, bank 20 600 000, tushum 1 300 000, COGS 1 060 000, yalpi foyda 240 000,
+xarajat 500 000, sof natija −260 000, mijoz qarzi 200 000, ta'minotchi qarzi 4 800 000, ombor 5 740 000 — tizim = mustaqil hisob.
+
+**Tuzatildi:** SUP-001 shtrix-kod dublikati (servis + migratsiya **0095** shartli unikal indeks), SUP-002 xarid qabulida so'rov kaliti,
+SUP-004 web kassa skaneri (shtrix-kod ustun, qidiruv maydonida skaner), SUP-005 mahsulot rentabelligi hisoboti
+(`/api/analytics/reports/product-profitability`), SUP-006 narx o'zgarishi auditida eski → yangi.
+**Egasi qarori kerak:** SUP-003 — web kassada omborga bitta smena (ko'p kassa — desktop qurilmalar orqali ishlaydi).
+**GAP:** o'tkazma "yo'lda" bosqichi, FEFO sotuvi, yetkazuvchi naqdi SUBMITTED→ACCEPTED, importda UPDATE.
+
+**Tekshirildi:** API 167 fayl / 1209 test ✓, frontend 51 fayl / 312 ✓, E2E 39 spec ✓ (yangi `supermarket-pos`: skaner → savat →
+to'lov → chek → baza), tsc ✓, eslint ✓. **Production'ga deploy qilinmagan** (topshiriq talabi).

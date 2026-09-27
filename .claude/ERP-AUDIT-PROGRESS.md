@@ -107,3 +107,8 @@ akti, tarixiy qarz, aging, Excel/PDF.
 - Arxitektura auditi: supervayzer chegarasi butun kompaniya (AUD-032), agent nomidan yo'l yo'q (AUD-033), qoldiq importi yo'q (AUD-034).
 - Hammasi FIXED (migratsiya 0094 qo'shuvchi). Production'ga deploy QILINMAGAN (topshiriq talabi).
 - **Keyingi (audit):** AUD-022/023/024/025, AUD-004, AUD-008, AUD-014/015/016/018/019/026, AUD-031 (LOW).
+
+### 2026-09-27 — BUSINESS 02 SUPERMARKET 0→100
+- `apps/api/test/acceptance-supermarket.test.ts` — 30 bosqich (BONNU MARKET) + 6 bosqich yakuniy senariy (BONNU FINAL) = 36/36 ✓.
+- Topildi va tuzatildi: SUP-001 (HIGH), SUP-002 (HIGH), SUP-004, SUP-005, SUP-006; SUP-003 — egasi qarori kerak. Migratsiya 0095.
+- Production'ga deploy QILINMAGAN (topshiriq talabi).

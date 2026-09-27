@@ -6,6 +6,7 @@
  *   GET /reports/sales, /reports/expenses, /reports/purchases, /reports/overview, /reports/stock-velocity (?days=)
  *   GET /reports/stock
  *   GET /reports/top-customers (?days=&limit=)
+ *   GET /reports/product-profitability (?from=&to=)   analytics.view + products.view_cost (tannarx va foyda)
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -21,6 +22,7 @@ import {
 } from "../company/tenant.js";
 import type { TenantAccess } from "../subscription/access.js";
 import { getDashboard } from "./dashboard.service.js";
+import { productProfitability } from "./product-profitability.service.js";
 import {
   biOverview,
   expenseSummary,
@@ -33,6 +35,9 @@ import {
 
 const daysQuery = z.object({ days: z.coerce.number().int().min(1).max(366).default(30) });
 const topCustomersQuery = daysQuery.extend({ limit: z.coerce.number().int().min(1).max(50).default(10) });
+
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const profitabilityQuery = z.object({ from: isoDay, to: isoDay }).refine((query) => query.from <= query.to, "Davr boshi oxiridan keyin bo'lmasin");
 
 async function readTenant(req: FastifyRequest, access: TenantAccess = "business"): Promise<TenantContext> {
   const tenant = await requireTenant(db, authOf(req).user, { access });
@@ -111,6 +116,14 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /** Qoldiq qiymati (`value`) tannarxdan hisoblanadi — miqdor va harakatlilik ochiq, pul yopiq. */
+  // Mahsulot rentabelligi: tannarx va foyda — faqat tannarx ruxsati bilan (kassir va ruxsatsizlarga 403)
+  app.get("/reports/product-profitability", async (req) => {
+    const range = profitabilityQuery.parse(req.query);
+    const tenant = await readTenant(req);
+    await requirePermission(db, tenant, "products.view_cost");
+    return productProfitability(db, tenant, range);
+  });
+
   app.get("/reports/stock-velocity", async (req) => {
     const { days } = daysQuery.parse(req.query);
     const tenant = await readTenant(req);

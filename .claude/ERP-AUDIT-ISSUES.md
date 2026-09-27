@@ -265,3 +265,39 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 - **FIX:** `POST /api/inventory/stock/import` (preview → hammasi-yoki-hech-narsa, `importId` bilan takrorsiz), mavjud qo'lda kirim
   yo'li orqali (konversiya bir marta, AVCO, 1200 / 3000 jurnal); A4 hisobot (AVCO). **STATUS:** FIXED — VERIFIED
   `test/stock-import.test.ts` (5 ✓), `e2e/supervisor-warehouse.spec.ts`.
+
+
+## BUSINESS 02 — SUPERMARKET 0→100 qabul testi (2026-09-27) topilmalari
+
+## SUP-001 — Shtrix-kod dublikati ruxsat etilgan edi (kassada boshqa mahsulot sotilishi mumkin)
+- **SEVERITY:** HIGH · **MODULE:** Catalog / POS
+- **ACTUAL:** yaratish, tahrir va importda shtrix-kod tekshirilmasdi; indeks unikal emas; skaner eng eski mahsulotni olardi.
+- **FIX:** servis tekshiruvi (yaratish/tahrir — 409, import — xato), qidiruvda faol mahsulot ustun, migratsiya 0095 — unikal indeks
+  FAQAT dublikat bo'lmasa (aks holda ogohlantirish, ma'lumot o'zgarmaydi). Kompaniyalar orasida bir xil kod — mumkin.
+  **STATUS:** FIXED — VERIFIED `acceptance-supermarket` S03, S26; `e2e/supermarket-pos.spec.ts`.
+
+## SUP-002 — Xarid qabulida so'rov kaliti yo'q (takroriy qabul ombor va qarzni ikki marta oshirardi)
+- **SEVERITY:** HIGH · **MODULE:** Purchase / Stock
+- **FIX:** `receipts` `requestId` = qabul hujjati ID'si; takror (parallel ham) — 200 va o'sha hujjat. **STATUS:** FIXED — VERIFIED S05.
+
+## SUP-003 — Web kassada omborga bitta ochiq smena (bir do'konda ikki web kassir bir vaqtda ishlay olmaydi)
+- **SEVERITY:** MEDIUM · **MODULE:** POS
+- **HOLAT:** bir nechta kassa mavjud arxitekturada desktop kassa QURILMALARI (K01/K02) orqali — qurilma bo'yicha smena; testda POS-02
+  qurilma sifatida ishladi. Web kassaga kassir bo'yicha smena berish — kassa solishtiruvini o'zgartiradi (moliyaviy qaror):
+  **OPEN — egasi qarori kerak**, o'zgartirilmadi.
+
+## SUP-004 — Web kassa skaneri SKU va shtrix-kodni aralashtirardi; kursor qidiruvda bo'lsa takroriy skaner yo'qolardi
+- **SEVERITY:** MEDIUM · **MODULE:** POS UI
+- **FIX:** avval aniq shtrix-kod (ro'yxat → server `by-barcode`), keyin SKU; qidiruv maydonida Enter — xuddi skaner. **STATUS:** FIXED — VERIFIED E2E.
+
+## SUP-005 — Mahsulot rentabelligi hisoboti yo'q edi
+- **SEVERITY:** LOW (funksional) · **FIX:** `GET /api/analytics/reports/product-profitability` (analytics.view + products.view_cost),
+  kanonik manba (sotuv/qaytarish qatorlari, to'liq qaytarilgan buyurtma ham). **STATUS:** FIXED — VERIFIED S25, F6.
+
+## SUP-006 — Narx o'zgarishi auditida eski/yangi qiymat yo'q edi
+- **SEVERITY:** LOW · **FIX:** `PRODUCT_UPDATED.details.diff` (narx, tannarx, shtrix-kod, PLU, holat: old → new). **STATUS:** FIXED — VERIFIED S29.
+
+## GAP (yangi tizim yaratilmadi, topshiriq qoidasi bo'yicha)
+- O'tkazma bir bosqichli ("yo'lda" holati yo'q). Partiya/muddat: qabulda partiya yoziladi, sotuv FEFO bo'yicha kamaytirmaydi.
+  Yetkazuvchi naqdi topshirilishi to'g'ridan-to'g'ri (SUBMITTED → ACCEPTED bosqichi yo'q). Mahsulot importi faqat yaratadi
+  (mavjud SKU — dublikat, UPDATE yo'q); boshlang'ich qoldiq — alohida ombor importi.

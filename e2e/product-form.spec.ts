@@ -24,9 +24,11 @@ test("mahsulot oynasi: skaner tugmasi, kategoriya/brend qo'shish va konversiya",
   await page.getByRole("button", { name: /Qo'lda \/ HID skaner/ }).click();
   const manual = page.getByPlaceholder("0000000000000");
   await expect(manual).toBeVisible({ timeout: 15_000 });
-  await manual.fill("4780000001234");
+  // Shtrix-kod kompaniyada unikal (SUP-001) — har yugurishda yangi kod
+  const code = `478${String(Date.now()).slice(-10)}`;
+  await manual.fill(code);
   await page.getByRole("button", { name: "Yuborish" }).click();
-  await expect(dialog.getByTestId("product-barcode")).toHaveValue("4780000001234", { timeout: 15_000 });
+  await expect(dialog.getByTestId("product-barcode")).toHaveValue(code, { timeout: 15_000 });
 
   // ── Kategoriya va brend shu oynadan qo'shiladi ──────────────────────────
   const suffix = stamp();
