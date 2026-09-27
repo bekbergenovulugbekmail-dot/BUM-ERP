@@ -199,7 +199,8 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
   (drafts ham). Analitika dashboardi kassalarni valyuta kursisiz qo'shadi (dashboard.service.ts:95-96).
   To'liq qaytarish `sales_returns` qatori yaratmaydi → `customerTurnover` sof sotuvni oshiradi.
 - **FIX PLAN:** tushum — jurnal/realized hujjatlar bitta ta'rifi; qarz — mijoz jurnal subhisobi
-  (AUD-002 yechimi). **STATUS:** OPEN
+  (AUD-002 yechimi). **STATUS:** FIXED (hisobotlar) — `f8ae4ee`: moliya dashboardi, Telegram kunlik/qarzdorlar/eslatma/bot —
+  yakunlangan sotuvning sof summasi, qarz `openCondition`; `9ad3c7a`: analitika kassasi kurs bilan. Qolgani AUD-002 da (kesh o'qish).
 
 ## AUD-026 — Ombor qoldig'i va harakatlar yig'indisi solishtirilmaydi; manfiy qoldiq mumkin
 - **SEVERITY:** LOW · **MODULE:** Stock

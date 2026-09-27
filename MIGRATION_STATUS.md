@@ -5322,4 +5322,17 @@ Tekshirildi: API 172 fayl / 1234 ✓, frontend 51/312 ✓, tsc ✓, eslint ✓; 
 delivery-return-pickup, delivery-agent ✓ (bir marta xotira tanqisligi — mashinada 1.2 GB bo'sh; alohida qayta ishga tushirishda ✓).
 **Egasi qarori kerak:** AUD-008, AUD-003, AUD-016, AUD-022, AUD-015/014, kassir/agent KPI qaytarishi, maosh (bekor qilish, hisoblash).
 **Migratsiya kerak (yozilmadi):** KPI "dona" (`kpi_metric` + qiymat), `audit_logs` o'zgartirishdan himoya triggeri, AUD-024 tasdiq saqlash.
+Davomi (2026-09-27/28):
+- `a748c53` + `02c3d9f` — ta'minotchiga qaytarish: `requestId` (ketma-ket va parallel takror bitta qaytarish), xarid oynasida
+  "Ta'minotchiga qaytarish" dialogi (e2e: ikki marta bosish → ombor 10→7, qarz 50 000→35 000 bir marta).
+- `1d72238` — ta'minotchi bilan hisob-kitob akti UI (+ Excel, "Kesh = jurnal" belgisi).
+- `b7ab51c` — `GET /api/purchase/suppliers-aging?asOf` (kreditorlar subhisobidan FIFO, avans, netto = 2000 qoldig'i) va
+  Xarid → "Qarz yoshi" tabi.
+- `f8ae4ee` AUD-025 — moliya dashboardi, Telegram kunlik xulosa/qarzdorlar/eslatma/bot: tushum — yakunlangan sotuvning sof
+  summasi (qoralama/tasdiqlangan sanalmaydi), qarz — aging bilan bir xil `openCondition`. `9ad3c7a` — analitika kassasi kurs bilan.
+- `9295edd`, `835b149`, `d2a56c4` — test sanalari biznes soat mintaqasida (Toshkent 00:00–05:00 da flaky edi).
+- Topshirish (handover) tekshirildi: ikki marta topshirish/qabul allaqachon 409 (indeks + qulf) — o'zgarish kerak emas.
+Tekshirildi: API 174 fayl ✓ (to'liq), frontend 51/312 ✓, tsc/eslint ✓, e2e purchase-return (akt + aging bilan) ✓.
+Brauzerda sinash: Xarid → buyurtma → "Ta'minotchiga qaytarish"; Yetkazuvchilar → "Akt"; "Qarz yoshi" tabi.
+Keyingi qadam: egasi qarorlari (yuqoridagi ro'yxat); qarori kerak bo'lmagan P3 — customer-prices UI, balance-import UI.
 Commitlar push qilinmagan; production va staging — `5ba4778`.
