@@ -9,7 +9,7 @@
  */
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, ShieldCheck, ShieldOff, X, PlusCircle, MinusCircle, FileText, Landmark } from "lucide-react";
+import { Plus, UserPlus, Phone, Mail, MapPin, Pencil, LocateFixed, User, Navigation, Wallet, Archive, ArchiveRestore, ShieldCheck, ShieldOff, X, PlusCircle, MinusCircle, FileText, Landmark, Tags } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -31,6 +31,7 @@ import CustomerMoneyDialog from "./customer-money-dialog.tsx";
 import BankReceiptDialog from "./bank-receipt-dialog.tsx";
 import CustomerStatementDialog from "@/pages/sales/_components/customer-statement-dialog.tsx";
 import SetBalanceDialog from "@/components/balances/set-balance-dialog.tsx";
+import CustomerPricesDialog from "./customer-prices-dialog.tsx";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import CustomerFilters from "@/components/customers/customer-filters.tsx";
 import SuggestInput from "@/components/ui/suggest-input.tsx";
@@ -104,6 +105,8 @@ export default function CustomersSection() {
   const [adjusting, setAdjusting] = useState<Customer | null>(null);
   /** Hisob-kitob akti ochilgan mijoz. */
   const [statementFor, setStatementFor] = useState<string | null>(null);
+  const [pricesFor, setPricesFor] = useState<string | null>(null);
+  const canViewPrices = can("sales.view");
   const [money, setMoney] = useState<{ customer: Customer; direction: "deposit" | "withdraw" } | null>(null);
   const [bankReceipt, setBankReceipt] = useState<Customer | null>(null);
 
@@ -405,6 +408,18 @@ export default function CustomersSection() {
                     >
                       <FileText className="h-3.5 w-3.5" />
                     </Button>
+                    {canViewPrices && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        title="Kelishilgan narxlar"
+                        aria-label={`${c.name} — kelishilgan narxlar`}
+                        onClick={() => setPricesFor(c.id)}
+                      >
+                        <Tags className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     {canMoveMoney && (
                       // Haqiqiy pul harakati — "to'g'rilash" dan alohida tugmalar
                       <>
@@ -488,6 +503,7 @@ export default function CustomersSection() {
                       </Button>
                     )}
                     {statementFor === c.id && <CustomerStatementDialog customerId={c.id} onClose={() => setStatementFor(null)} />}
+                    {pricesFor === c.id && <CustomerPricesDialog customer={c} onClose={() => setPricesFor(null)} />}
                     {bankReceipt?.id === c.id && <BankReceiptDialog customer={c} onClose={() => setBankReceipt(null)} />}
                     {money?.customer.id === c.id && (
                       <CustomerMoneyDialog
