@@ -20,14 +20,14 @@ Dalil manbalari: uchta read-only audit (AUD topilmalari joriy kodda; A–M; N–
 | G | Qaytarish | PARTIAL | qisman/to'liq, requestId, ombor/COGS/jurnal (audit-return-kinds, S13) | AUD-008 (refund:false → manfiy qarz, avans emas); kassir/agent KPI qaytarishni ayirmaydi | P1/P2 |
 | H | Mijoz | PARTIAL | narx, limit/hold/override, aging, balance-adjust; AUD-004 kapital opsiyasi, AUD-009 (`7db0123`); kelishilgan narx UI (`e3170a0`), balans importi UI (`5a4f272`) — e2e | AUD-003 (taqsimlanmagan qism), AUD-008 — egasi qarori | P1/P2 |
 | I | Ta'minotchi | PASS | akt API + UI + Excel (`1d72238`), aging API + UI (`b7ab51c`, netto = 2000), to'lov taqsimoti | AUD-014 (valyuta) — egasi qarori | P3 |
-| J | To'lov tizimi | PASS | usullar, kassa ruxsati, idempotentlik, bekor qilish (mijoz/ta'minotchi/xarajat) | AUD-009 | P2 |
+| J | To'lov tizimi | PASS | usullar, kassa ruxsati, idempotentlik, bekor qilish (mijoz/ta'minotchi/xarajat); AUD-009 reference solishtiruvi (`7db0123`) | — | — |
 | K | Kassa | PASS | ko'p kassa, formula, ortiqcha/kamomad, inkassatsiya (pos-multi-kassa, staging) | AUD-016 (eski smenada "boshqa chiqim" semantikasi) | P2 |
 | L | Xarajat | PASS | kassa/bank, jurnal, bekor qilish | kategoriyalar qat'iy ro'yxat | P4 |
 | M | Maosh | PARTIAL | hisoblash→tasdiq→to'lov, jurnal, KPI qatorlari | to'langan maoshni bekor qilish yo'q; hisoblash (accrual) yozuvi yo'q; avans/qisman to'lov yo'q | P2 |
 | N | KPI | PARTIAL | Rule Builder, seller_* (qaytarish/chegirma hisobga olinadi) | "dona" ko'rsatkichi yo'q (migratsiya kerak); cashier/agent_sales qaytarishni ayirmaydi | P2 |
 | O | Sotuv agenti | PASS (API) | 17 test fayli, e2e, PWA + Android | real qurilmada tekshirilmagan | NV |
 | P | Zakaz olish | PASS | `sales_agent.use` toggle, holatlar, band qilish | AUD-024 (limitdan oshgan tasdiqlangan zakaz jo'natilmaydi) | P2 |
-| Q | Yetkazma | PASS | 11 holat, dalil, A4 yo'l varaqasi (13 test fayli) | AUD-007 (bekor qilingan zakaz vazifasi ochiq), AUD-023 (qaytarilgan zakaz "yetkazildi") | P2 |
+| Q | Yetkazma | PASS | 11 holat, dalil, A4 yo'l varaqasi (13 test fayli); AUD-007 + AUD-023 (`adda945`) | real qurilmada agent oqimi | NV |
 | R | Topshirish (handover) | PASS | naqd: kutilgan/qabul/farq/audit/qulf; AUD-019 (`5eae428`); ikki marta topshirish — `handover_one_open` indeksi, ikki marta qabul — qulf + holat (409) | karta summasi faqat ma'lumot (pul sotuvda bankka tushgan) | P4 |
 | S | Hisobotlar | PARTIAL | server CSV, Excel (klient), tannarx ruxsati; AUD-025: tushum/qarz bitta ta'rif (`f8ae4ee`), valyutali kassa kurs bilan (`9ad3c7a`) | analitika server eksportisiz; dashboard/agent qarzi keshdan (kesh = jurnal solishtiruvi bor) | P3 |
 | T | Chop etish | PASS | 80mm chek, yorliq, A4 nakladnoy/yo'l varaqasi, invoice, xarid hujjati | 58×30 tayyor preset yo'q (sozlanadi) | P4 |
