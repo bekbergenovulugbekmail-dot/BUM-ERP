@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
 import { accounts, cashAccounts } from "../src/db/schema/finance.js";
 import { buildServer } from "../src/server.js";
+import { todayIso } from "../src/modules/finance/cash.service.js";
 import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
 
 type Company = Awaited<ReturnType<typeof createCompany>>;
@@ -135,7 +136,7 @@ describe("Maosh", () => {
     await fund("3000000");
     const paid = await hr("POST", `/salaries/${monthlySalary.id}/pay`, undefined, finance.cookie);
     expect(paid.statusCode).toBe(200);
-    expect(paid.json().salary).toMatchObject({ status: "paid", paidDate: new Date().toISOString().slice(0, 10) });
+    expect(paid.json().salary).toMatchObject({ status: "paid", paidDate: todayIso() });
     const [cash] = await db.select().from(cashAccounts).where(eq(cashAccounts.id, mainCash));
     expect(cash!.balance).toBe("891000.00");
     expect(await ledger("5100")).toBe("2400000.00");

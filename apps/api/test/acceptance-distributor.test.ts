@@ -20,6 +20,7 @@ import { cashAccounts, journalEntries, journalLines } from "../src/db/schema/fin
 import { stockLevels, warehouses } from "../src/db/schema/inventory.js";
 import { agentVisits } from "../src/db/schema/sales-agent.js";
 import { customers, salesOrders } from "../src/db/schema/sales.js";
+import { todayIso } from "../src/modules/finance/cash.service.js";
 import { buildServer } from "../src/server.js";
 import { JPEG, NO_PROOFS, agentAction, assign, deliveryAgent, iso, near, resetUnits, setPolicy, shop, startShift, taskForOrder } from "./delivery-setup.js";
 import { addEmployee, createCompany, login, resetDatabase, salesRepOf, signedIn, uniquePhone } from "./helpers.js";
@@ -34,8 +35,9 @@ let box: string | null = null;
 const call = (cookie: string, method: Method, url: string, payload?: object) =>
   app.inject({ method, url, headers: { cookie }, ...(payload ? { payload } : {}) });
 
-const today = () => new Date().toISOString().slice(0, 10);
-const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+// Biznes sanasi (server todayIso bilan bir xil) — yarim tunda UTC bilan bir kun farq qilmasin
+const today = () => todayIso();
+const inDays = (days: number) => todayIso(new Date(Date.now() + days * 86_400_000));
 const money = (value: string | number | null | undefined) => Number(value ?? 0);
 
 type Distributor = {

@@ -40,7 +40,7 @@ const call = (cookie: string, method: Method, url: string, payload?: object) =>
   app.inject({ method, url, headers: { cookie }, ...(payload ? { payload } : {}) });
 
 const money = (value: string | number | null | undefined) => Number(value ?? 0);
-const shift = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+const shift = (days: number) => todayIso(new Date(Date.now() + days * 86_400_000));
 const near = { latitude: 41.3115, longitude: 69.2406, accuracy: 10 };
 const shop = { latitude: 41.311081, longitude: 69.240562 };
 const iso = () => new Date().toISOString();
