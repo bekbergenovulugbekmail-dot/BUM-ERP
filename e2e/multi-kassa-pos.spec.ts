@@ -131,7 +131,7 @@ test("rahbar: 2 kassa → kassa tanlab smena → usul tugmalari → aralash to'l
     const kassaReport = page.getByTestId("report-kassa");
     await expect(kassaReport).toBeVisible({ timeout: 20_000 });
     const rowB = kassaReport.locator("tr").filter({ hasText: `B${stamp}` });
-    await expect(rowB).toContainText(/18[\s  ]?000/);
+    await expect(rowB).toContainText(/18[\s ]?000/);
     await expect(page.getByTestId("report-payment-methods")).toContainText(`Payme ${stamp}`);
     await page.screenshot({ path: "e2e/.screenshots/multi-kassa-reports.png", fullPage: true });
   } finally {

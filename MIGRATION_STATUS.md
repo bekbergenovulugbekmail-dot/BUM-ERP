@@ -6,7 +6,7 @@
 | | |
 |---|---|
 | Branch | `feat/postgres-migration` |
-| Oxirgi yangilanish | 2026-09-26 |
+| Oxirgi yangilanish | 2026-09-27 |
 | Umumiy holat | 16 / 16 PHASE — kod tayyor; qolgan: brauzerda qo'lda sinov, production deploy va ma'lumot importi |
 | Ishlab turgan ilova | Yangi versiya Railway'da ishlayapti: https://bum-web-production.up.railway.app (bum-erp.uz DNS o'zgarishini kutmoqda). Eski Convex versiyasi `main` da |
 
@@ -5106,3 +5106,37 @@ to'lov → chek → baza), tsc ✓, eslint ✓. **Production'ga deploy qilinmaga
 (0095 qo'llandi, 96 migratsiya, qayta yiqilish yo'q), web `build.json` 05:11:56Z; `/api/analytics/reports/product-profitability` —
 401 (mavjud). Production bazasida faqat o'qish: shtrix-kod dublikati 0 → unikal indeks `products_company_barcode_key` yaratildi;
 1557 mijoz — qarz keshi = jurnal, 0 farq. Production'da brauzer orqali sinalmadi.
+
+## BITO BENCHMARK — ko'p kassa, to'lov usullari, sotuvchi (2026-09-27)
+
+Commitlar: `e1b974b` (Faza 1) · `1c79115` (Faza 2) · `249b52c` (Faza 3) · `d8a2e62` (Faza 4) · `024c33e`, `e1b9dcb` (Faza 5–6).
+Migratsiyalar **0096** (kassa: `cash_accounts.warehouse_id/code`, `pos_shifts.cash_account_id/opening_balance`,
+`pos_devices.cash_account_id`, har kassada bitta ochiq smena), **0097** (`payment_methods`, `payment_method_kassas`,
+`customer_payments.payment_method_id`), **0098** (`sales_orders.seller_employee_id`, `kpi_metric` + `seller_*`). Faqat lokal dev va
+test bazada qo'llandi. **Production'ga deploy va production migratsiya QILINMAGAN** (topshiriq talabi). Eski ma'lumot qayta yozilmadi,
+backfill yo'q — kassasiz (tarixiy) smena va usulsiz to'lov avvalgidek ishlaydi.
+
+- **Faza 1 — kassa va HIGH xavfsizlik teshigi:** kassa = mavjud naqd hisob (yangi pul tizimi emas, 1010 xaritasi o'zgarmagan). Naqd pul
+  qaysi hisobga tushishini server `smena → kassa` zanjiridan aniqlaydi; mijoz boshqa `cashAccountId` yuborsa — 403 (offline — kassaga
+  yo'naltiriladi + `cash_account_overridden`). Kassali smenada kutilgan = kassa balansi; qaytarish, xarajat, ta'minotchi to'lovi,
+  yopish farqi shu kassada; inkassatsiya/almashtirish puli — haqiqiy o'tkazma, `requestId` bilan idempotent. Qurilma → kassa
+  biriktirish (ochiq smenada o'zgarmaydi). `GET /api/sales/pos/kassas`, smena ochishda kassa kartalari.
+- **Faza 2 — to'lov usullari:** usul — mavjud terminal/hisobga havola (yangi hisob yaratilmaydi); kassaga cheklash backend'da (403);
+  `/api/finance/payment-methods` CRUD + `bootstrap`; kassa tugmalari usullardan (sozlanmagan kompaniyada — avvalgidek).
+- **Faza 3:** `GET /api/sales/pos/kassa-board` (rahbar), POS sarlavhasida kassa nomi, Kassalar bo'limida jonli panel.
+- **Faza 4 — sotuvchi:** kassa, kassir, yaratgan, qurilma va sotuvchi — alohida. POS/desktop chekda `sellerEmployeeId`,
+  `GET /api/sales/pos/sellers`, KPI Rule Builder ko'rsatkichlari `seller_sales_amount` / `seller_receipt_count` / `seller_gross_profit`.
+- **Faza 5 — hisobotlar:** `/api/analytics/reports/kassa` (cash_transactions manbasidan: boshlang'ich … kutilgan, ortiqcha/kamomad,
+  yakuniy), `/cashiers`, `/sellers` (+KPI bonus), `/payment-methods`; Tahlil → "Kassa va sotuvchilar".
+- **Faza 6 — qabul:** `acceptance-multi-kassa.test.ts` (Bonnu Market: 3 kassa, 3 kassir, 4 sotuvchi, naqd/UZCARD/HUMO/aralash/nasiya,
+  qaytarish, qarz to'lovi, inkassatsiya, almashtirish puli, yopish farqi, parallel, idempotentlik, tenant) 7/7 ✓ — kassalar = harakatlar
+  yig'indisi, 1010 = Σ naqd, 1020 = bank, qarz kesh = jurnal, 1200 = ombor, jurnal balansda, hisobotlar = mustaqil kitob.
+
+**Tekshirildi:** API 171 fayl / 1227 test ✓ (`sales-agent-security` rate-limit testi bir marta vaqtga bog'liq yiqildi, alohida 2/2 ✓),
+frontend 51 / 312 ✓, tsc ✓, eslint ✓. E2E (haqiqiy Chrome): `multi-kassa-pos` (kassa tanlash → usul tugmalari → aralash to'lov →
+naqd Kassa B da → panel → hisobot) ✓, `pos-session`, `pos-critical`, `supermarket-pos`, `pos-mobile`, `hr-kpi`, `desktop-kassa`,
+`priority-distribution-cash` ✓, `pos-acceptance` 17/18 + skrinshot taymauti bo'lgan bo'lim qayta 1/1 ✓.
+
+**Cheklov (keyingi qadam):** desktop POS ilovasi hali to'lov usullari va sotuvchi tanlashni ko'rsatmaydi (server qabul qiladi;
+naqd kassaga baribir qurilma kassasi bo'yicha tushadi). Omborga kassa biriktirilgach, o'sha omborda web smena kassa tanlab ochiladi.
+**Keyingi qadam:** egasi ruxsati bilan deploy (0096–0098 production'da qo'llanadi), desktop ilovada usul/sotuvchi tanlash.

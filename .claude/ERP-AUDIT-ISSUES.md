@@ -285,6 +285,13 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 - **HOLAT:** bir nechta kassa mavjud arxitekturada desktop kassa QURILMALARI (K01/K02) orqali — qurilma bo'yicha smena; testda POS-02
   qurilma sifatida ishladi. Web kassaga kassir bo'yicha smena berish — kassa solishtiruvini o'zgartiradi (moliyaviy qaror):
   **OPEN — egasi qarori kerak**, o'zgartirilmadi.
+- **2026-09-27 (egasi arxitekturani tasdiqladi):** web kassada KASSA bo'yicha smena (har kassada bitta ochiq, unikal indeks),
+  kutilgan = kassa balansi. **STATUS:** FIXED — VERIFIED (`pos-multi-kassa`, `acceptance-multi-kassa`, E2E `multi-kassa-pos`).
+
+## MK-001 — POS naqd qismi istalgan naqd hisobga yo'naltirilardi (HIGH, xavfsizlik)
+- **SEVERITY:** HIGH · **MODULE:** POS / Moliya
+- **FIX:** naqd hisob server `smena → kassa` zanjiridan; boshqa `cashAccountId` — 403 (offline — kassaga + `cash_account_overridden`);
+  mijoz to'lovi, balansga kirim, qaytarish, ta'minotchi to'lovi ham smena kassasida. **STATUS:** FIXED — VERIFIED (web, desktop, tenant).
 
 ## SUP-004 — Web kassa skaneri SKU va shtrix-kodni aralashtirardi; kursor qidiruvda bo'lsa takroriy skaner yo'qolardi
 - **SEVERITY:** MEDIUM · **MODULE:** POS UI
