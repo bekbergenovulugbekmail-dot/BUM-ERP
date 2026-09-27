@@ -5300,3 +5300,9 @@ mutatsiya bloklangan. Skriptlar va natija: `docs/audit/qa-acceptance.js`, `qa-re
 (faqat `bum-api` deploy). Production (read-only): kassa biriktirilgan hisob/smena/qurilma 0 — yangi qoida mavjud ma'lumotga ta'sir
 qilmaydi. tsc ✓, eslint ✓, POS/kassa/desktop/to'lov/sotuvchi/kassa-hisob suite'lari 26 fayl / 90 test ✓. Staging qabul testi 29/29
 aynan shu kod bilan (staging `bum-api` deployment `1eb3c080`).
+
+**Production (2026-09-27 14:25Z):** `5ba4778` tuzatishi (ishchi papka `e4be7f1`, kod bir xil) deploy qilindi (egasi: "Deploy qil") —
+faqat `bum-api` (deployment `a377dcd4…`, SUCCESS); `bum-web` o'zgarmagan (`8595c41f`). Loglarda "Migratsiyalar qo'llandi (28ms)"
+bir marta — yangi migratsiya yo'q (99). Tashqaridan: marshrutlar 401, noma'lum 404. Read-only audit: tenantlar kesimi,
+invariantlar va tarixiy nazorat summalari deploydan oldingi bilan bir xil; kassa biriktirilgan hisob/smena/qurilma 0.
+Staging va production endi bir xil API kodida.
