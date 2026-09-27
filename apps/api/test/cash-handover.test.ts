@@ -10,7 +10,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
 import { units } from "../src/db/schema/catalog.js";
-import { cashAccounts } from "../src/db/schema/finance.js";
+import { cashAccounts, cashHandovers, cashTransactions } from "../src/db/schema/finance.js";
 import { warehouses } from "../src/db/schema/inventory.js";
 import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
 import { buildServer } from "../src/server.js";
@@ -133,6 +133,21 @@ describe("Pul topshirish hayot sikli", () => {
     expect(await agentCash(repId), "agentda naqd qolmadi").toBe(0);
     // FAQAT naqd ko'chadi: karta puli allaqachon bank/karta hisobida, ikkinchi marta qo'shilmaydi
     expect(await mainCashBalance() - kassaBefore, "kassaga faqat naqd tushdi").toBe(300_000);
+  });
+
+  it("AUD-019: qabul qilingan topshirish kassaga kirgan tranzaksiyaga bog'lanadi; parallel topshirish raqamlari takrorlanmaydi", async () => {
+    const [a1, a2, a3] = [await agentWithCash("100000"), await agentWithCash("100000"), await agentWithCash("100000")];
+    const submitted = await Promise.all([a1, a2, a3].map((agent) => call(agent.employee.cookie, "POST", "/api/finance/handovers", { cashAmount: "100000" })));
+    expect(submitted.map((r) => r.statusCode), submitted.map((r) => r.body).join(" | ")).toEqual([201, 201, 201]);
+    const numbers = submitted.map((r) => r.json().handover.number as string);
+    expect(new Set(numbers).size, `raqamlar: ${numbers}`).toBe(3);
+
+    const id = submitted[0]!.json().handover.id as string;
+    expect((await call(company.ownerCookie, "POST", `/api/finance/handovers/${id}/accept`)).statusCode).toBe(200);
+    const [row] = await db.select().from(cashHandovers).where(eq(cashHandovers.id, id));
+    expect(row!.cashTransactionId, "o'tkazma bog'lanishi saqlandi").not.toBeNull();
+    const [tx] = await db.select().from(cashTransactions).where(eq(cashTransactions.id, row!.cashTransactionId!));
+    expect(tx).toMatchObject({ cashAccountId: row!.toCashAccountId, type: "in", amount: "100000.00" });
   });
 
   it("rad etilsa pul agentda qoladi va u QAYTA topshira oladi — ikki marta hisoblanmaydi", async () => {

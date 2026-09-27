@@ -26,6 +26,7 @@ import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
 import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { transferCash } from "./cash.service.js";
+import { nextDocumentNumber } from "../../shared/numbering.js";
 
 export type HandoverStatus = "submitted" | "accepted" | "rejected" | "cancelled";
 export type HandoverHolder = { kind: "sales_rep"; salesRepId: string } | { kind: "delivery_agent"; deliveryAgentId: string };
@@ -53,13 +54,12 @@ async function holderCashAccount(conn: DbOrTx, companyId: string, holder: Handov
   return account ?? null;
 }
 
-/** Hujjat raqami: TP-000001 (kompaniya ichida ketma-ket). */
-async function nextNumber(tx: Tx, companyId: string) {
-  const [row] = await tx
-    .select({ count: sql<string>`count(*)` })
-    .from(cashHandovers)
-    .where(eq(cashHandovers.companyId, companyId));
-  return `TP-${String(Number(row?.count ?? "0") + 1).padStart(6, "0")}`;
+/**
+ * Hujjat raqami: TP-000001 (kompaniya ichida ketma-ket). AUD-019: umumiy `nextDocumentNumber` — advisory lock va max+1
+ * (count+1 parallel topshirishda bir xil raqam berib, unikal indeksda yiqilardi).
+ */
+function nextNumber(tx: Tx, companyId: string) {
+  return nextDocumentNumber(tx, { table: cashHandovers, column: cashHandovers.number, companyColumn: cashHandovers.companyId, companyId, prefix: "TP-", width: 6 });
 }
 
 /**
@@ -215,7 +215,8 @@ export async function acceptHandover(
       },
       meta,
     );
-    transferId = (transfer as { id?: string }).id ?? null;
+    // AUD-019: topshirish maqsad kassaga kirgan tranzaksiyaga bog'lanadi (`transferCash` — { from, to, ... })
+    transferId = transfer.to.id;
   }
 
   const [updated] = await tx
