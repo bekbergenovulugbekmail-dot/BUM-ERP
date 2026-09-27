@@ -55,7 +55,7 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
   customer-balance.service.ts:519-533), `referenceId: randomUUID()` → mijozga bog'lanmagan.
 - **IMPACT:** boshlang'ich qarz P&L da "daromad" bo'lib chiqadi (foyda sun'iy oshadi); aging,
   akt va taqsimot uni ko'rmaydi. **EXPECTED:** boshlang'ich qoldiq hujjati, kapital/boshlang'ich
-  qoldiq hisobi, mijozga bog'langan. **STATUS:** OPEN
+  qoldiq hisobi, mijozga bog'langan. **STATUS:** PARTIAL (2026-09-27, `c83b70d`) — qo'lda kiritilgan boshlang'ich mijoz va ta'minotchi qarzi `counter: equity` bilan Ustav kapitaliga (3000), foyda-zarar o'zgarmaydi (`balance-adjust.test` AUD-004). Qoldi: ochiq "boshlang'ich qarz hujjati" (aging/taqsimot uchun) — AUD-003 bilan birga, egasi qarori
 
 ## AUD-005 — Tarixiy qarz (istalgan sanaga), oyma-oy aylanma va mijoz akti yo'q
 - **SEVERITY:** HIGH · **MODULE:** Customer debt / Reports (topshiriqning 1-bo'limi)
@@ -74,7 +74,7 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 - **SEVERITY:** MEDIUM · **MODULE:** Sales / Delivery
 - **ROOT CAUSE:** `cancelOrder` `delivery_tasks` ga tegmaydi; tasdiqlashda avtomatik vazifa
   yaratiladi (sales/routes.ts:714). Kuryer boshlaganda `order_not_deliverable` xatosi.
-- **STATUS:** OPEN
+- **STATUS:** FIXED — VERIFIED (2026-09-27, `adda945`): `cancelOrder` ochiq vazifalarni `cancelDeliveryTask` orqali bekor qiladi (voqea + audit); yo'ldagi vazifa bo'lsa 409 `delivery_in_progress` (`audit-delivery-order-state.test`)
 
 ## AUD-008 — To'liq qaytarishda `refund:false` → qarz manfiy, kredit faqat keshda
 - **SEVERITY:** MEDIUM · **MODULE:** Sales return
@@ -87,7 +87,7 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 - **SEVERITY:** LOW · **MODULE:** Payments
 - **ROOT CAUSE:** payments.service.ts:81-88 — mavjud `reference` topilsa o'sha qator qaytariladi,
   summa yoki mijoz boshqa bo'lsa ham (xato kiritilgan bir xil chek raqami jim "muvaffaqiyat").
-- **EXPECTED:** boshqa summa/mijoz bilan takrorlansa 409. **STATUS:** OPEN
+- **EXPECTED:** boshqa summa/mijoz bilan takrorlansa 409. **STATUS:** FIXED — VERIFIED (2026-09-27, `7db0123`): summa/mijoz/buyurtma farq qilsa 409, aynan takror — 200 (`receivables-aging.test` AUD-009)
 
 ## AUD-010 — Kassa smenasi farqi (kamomad/ortiqcha) kassa va jurnalga tushmaydi
 - **SEVERITY:** CRITICAL · **MODULE:** Cash / POS (oldingi auditda F-1, 2026-09-25 da qayta tasdiqlandi)
@@ -156,7 +156,7 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 ## AUD-019 — Pul topshirishda o'tkazma bog'lanishi yo'qoladi; raqamlash poygaga moyil
 - **SEVERITY:** LOW · **MODULE:** Cash handover
 - **ROOT CAUSE:** finance/handover.service.ts:218 `transfer.id` doim `undefined` (`transferCash`
-  `{referenceId,…}` qaytaradi); raqam `count(*)+1` (:57-63). **STATUS:** OPEN
+  `{referenceId,…}` qaytaradi); raqam `count(*)+1` (:57-63). **STATUS:** FIXED — VERIFIED (2026-09-27, `5eae428`): `cashTransactionId` = maqsad kassaga kirim; raqam `nextDocumentNumber` (parallel 3 topshirish — tuzatishsiz 409 takrorlandi, `cash-handover.test` AUD-019)
 
 ## AUD-020 — Ta'minotchi bilan solishtirish akti yo'q
 - **SEVERITY:** HIGH · **MODULE:** Suppliers / Reports (F-3 ning ta'minotchi qismi)
@@ -183,7 +183,7 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 ## AUD-023 — To'liq qaytarilgan buyurtmani haydovchi "yetkazildi" deb tasdiqlay oladi
 - **SEVERITY:** MEDIUM · **MODULE:** Delivery
 - **ROOT CAUSE:** `returnOrder` ochiq yetkazma vazifasini tekshirmaydi/bekor qilmaydi;
-  `confirmDelivery` buyurtma holatini tekshirmaydi (delivery/lifecycle.service.ts:651). **STATUS:** OPEN
+  `confirmDelivery` buyurtma holatini tekshirmaydi (delivery/lifecycle.service.ts:651). **STATUS:** FIXED — VERIFIED (2026-09-27, `adda945`): holat o'tishidan keyin buyurtma `isCompletedSale` tekshiriladi → 409 `order_not_deliverable` (`audit-delivery-order-state.test`)
 
 ## AUD-024 — Supervayzer tasdiqlagan (limitdan oshgan) agent buyurtmasi jo'natishda yiqiladi
 - **SEVERITY:** MEDIUM · **MODULE:** Sales agent / Credit

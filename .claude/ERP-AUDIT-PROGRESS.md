@@ -112,3 +112,11 @@ akti, tarixiy qarz, aging, Excel/PDF.
 - `apps/api/test/acceptance-supermarket.test.ts` — 30 bosqich (BONNU MARKET) + 6 bosqich yakuniy senariy (BONNU FINAL) = 36/36 ✓.
 - Topildi va tuzatildi: SUP-001 (HIGH), SUP-002 (HIGH), SUP-004, SUP-005, SUP-006; SUP-003 — egasi qarori kerak. Migratsiya 0095.
 - Production'ga deploy QILINMAGAN (topshiriq talabi).
+
+### 2026-09-27 — AUDIT RESUMED: SUPERMARKET 0→100 MASTER AUDIT
+- Matritsa: `.claude/SUPERMARKET-0-100-MATRIX.md` (A–Z modullar, dalil, qolgan ish, ustuvorlik).
+- 18 ochiq/qisman AUD joriy kodda qayta tekshirildi: hech biri avval yopilmagan edi. Yopildi (test bilan, tuzatishsiz yiqilishi
+  tekshirildi): AUD-009, AUD-007, AUD-023, AUD-019; AUD-004 qisman (kapital opsiyasi). Qo'shimcha: server EAN-13.
+- P0 ochiq topilma yo'q. Egasi qarori kerak: AUD-008, AUD-003, AUD-016, AUD-022, AUD-015/014, kassir/agent KPI qaytarishi, maosh
+  (to'langan maoshni bekor qilish, hisoblash yozuvi). Migratsiya kerak (faqat hujjat): KPI "dona", audit_logs trigger, AUD-024.
+- Production'ga tegilmadi (deploy/write/migratsiya yo'q).

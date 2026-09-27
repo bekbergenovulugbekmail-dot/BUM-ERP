@@ -5306,3 +5306,20 @@ faqat `bum-api` (deployment `a377dcd4…`, SUCCESS); `bum-web` o'zgarmagan (`859
 bir marta — yangi migratsiya yo'q (99). Tashqaridan: marshrutlar 401, noma'lum 404. Read-only audit: tenantlar kesimi,
 invariantlar va tarixiy nazorat summalari deploydan oldingi bilan bir xil; kassa biriktirilgan hisob/smena/qurilma 0.
 Staging va production endi bir xil API kodida.
+
+### SUPERMARKET 0→100 master audit (2026-09-27, lokal — production'ga tegilmagan)
+
+Matritsa: `.claude/SUPERMARKET-0-100-MATRIX.md` (A–Z modullar: PASS 14, PARTIAL 12, NOT VERIFIED 1). P0 ochiq topilma yo'q.
+Yopildi (har biri test bilan; tuzatishsiz testning yiqilishi tekshirildi):
+- `7db0123` AUD-009 — takroriy `reference` boshqa summa/mijoz bilan 409 (avval jimgina "muvaffaqiyat", haqiqiy to'lov yo'qolardi).
+- `adda945` AUD-007 — bekor qilingan buyurtmaning ochiq yetkazma vazifalari bekor qilinadi; AUD-023 — qaytarilgan buyurtmani
+  "yetkazildi" deb bo'lmaydi.
+- `5eae428` AUD-019 — topshirish kassa tranzaksiyasiga bog'lanadi; TP raqami poygasiz (`nextDocumentNumber`).
+- `c83b70d` AUD-004 (qisman) — boshlang'ich mijoz/ta'minotchi qarzi `counter: equity` → Ustav kapitali (UI belgisi bilan).
+- `afd6a84` — server EAN-13 nazorat raqami (13 xonali kod; o'zgarmagan eski kod to'silmaydi; production'da ziddiyat 0).
+Bo'lim 4 senariysi (10 mln kassa … topshirish 300 000 + 200 000) — mavjud `acceptance-supermarket` BONNU FINAL F1–F6, PASS.
+Tekshirildi: API 172 fayl / 1234 ✓, frontend 51/312 ✓, tsc ✓, eslint ✓; E2E product-form, audit-customer-debt,
+delivery-return-pickup, delivery-agent ✓ (bir marta xotira tanqisligi — mashinada 1.2 GB bo'sh; alohida qayta ishga tushirishda ✓).
+**Egasi qarori kerak:** AUD-008, AUD-003, AUD-016, AUD-022, AUD-015/014, kassir/agent KPI qaytarishi, maosh (bekor qilish, hisoblash).
+**Migratsiya kerak (yozilmadi):** KPI "dona" (`kpi_metric` + qiymat), `audit_logs` o'zgartirishdan himoya triggeri, AUD-024 tasdiq saqlash.
+Commitlar push qilinmagan; production va staging — `5ba4778`.
