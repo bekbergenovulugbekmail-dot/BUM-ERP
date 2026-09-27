@@ -217,6 +217,28 @@ describe("Litsenziya limiti va qo'shimcha litsenziya", () => {
     expect(await auditCount("LICENSE_RENEWED")).toBe(1);
   });
 
+  it("HR'da ishdan bo'shatish litsenziyani bo'shatadi va kirishni yopadi; qayta ishga olish litsenziya bilan", async () => {
+    const company = await trialCompany();
+    const first = await addEmployee(app, company);
+    await addEmployee(app, company);
+    expect(reasonOf((await newEmployee(company)).res)).toBe("license_limit_reached");
+
+    const [card] = await db.select().from(employees).where(and(eq(employees.companyId, company.companyId), eq(employees.userId, first.id)));
+    expect(card, "xodim kartochkasi a'zoga bog'langan").toBeDefined();
+    const fired = await call(company.ownerCookie, "PATCH", `/api/hr/employees/${card!.id}`, { status: "terminated" });
+    expect(fired.statusCode, fired.body).toBe(200);
+    expect(await activeLicenses(company.companyId)).toHaveLength(2);
+    const [member] = await db.select().from(companyMembers).where(and(eq(companyMembers.companyId, company.companyId), eq(companyMembers.userId, first.id)));
+    expect(member!.isActive, "ishdan bo'shagan xodim kira olmaydi").toBe(false);
+    expect((await call(first.cookie, "GET", "/api/company/me")).statusCode).toBeGreaterThanOrEqual(401);
+
+    // Bo'shagan o'rin yangi xodimga beriladi; eski xodimni qaytarish — litsenziya yo'q bo'lsa rad
+    expect((await newEmployee(company)).res.statusCode).toBe(201);
+    const rehire = await call(company.ownerCookie, "PATCH", `/api/hr/employees/${card!.id}`, { status: "active" });
+    expect(rehire.statusCode).toBe(403);
+    expect(reasonOf(rehire)).toBe("license_limit_reached");
+  });
+
   it("egasi a'zolikni o'chirsa included bo'shaydi; qayta yoqish bo'sh litsenziya yoki qo'shimcha tarif bilan", async () => {
     const company = await trialCompany();
     const first = await addEmployee(app, company);
