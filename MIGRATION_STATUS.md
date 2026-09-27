@@ -5267,3 +5267,26 @@ Tavsiya: staging — yangi bo'sh Postgres (migratsiyalar avtomatik) + sintetik Q
   Staging invariantlari 0 farq. Sotuv, to'lov, smena — yaratilmagan.
 - **Production:** deploy'lar o'zgarmagan (`b87cecc8`, `8595c41f`), Postgres qayta ishga tushmagan, tenantlar kesimi va nazorat
   summalari bir xil, backup `d33c4d9c…` joyida.
+
+### STAGING 0→100 funksional qabul testi (2026-09-27 13:05–13:34Z) — staging: PASS; production'ga tuzatish deploy'i kutilmoqda
+
+Faqat staging, QA tenant "BUM QA Test"; har bir so'rov skriptda staging hostiga cheklangan, production kompaniya ID'lari bilan
+mutatsiya bloklangan. Skriptlar va natija: `docs/audit/qa-acceptance.js`, `qa-retest.js`, `qa-verify.js`, `staging-acceptance-2026-09-27.json`.
+
+- **1-prognon:** 23 sinovdan 21 PASS, 2 FAIL (+ bazadagi sverkada audit FAIL):
+  1. Kassir asosiy (omborga biriktirilmagan) kassada POS smena ocha oldi — **FIXED**: POS smena/qurilma kassasi faqat shu omborga
+     biriktirilgan, asosiy bo'lmagan kassa.
+  2. `GET /pos/kassas` begona ombor ID'si bilan 200 (bo'sh ro'yxat, ma'lumot chiqmagan) — **FIXED**: 404.
+  3. `POS_SALE_COMPLETED` auditida sotuvchi yo'q, kassa yaratish auditida ombor/kod yo'q — **FIXED**: sotuvchi + kassa; kassa
+     o'zgarishi eski → yangi.
+  Tuzatish `5ba4778`, lokal regressiya ✓ (kassa/POS/desktop/kassa hisob suite'lari), **faqat staging'ga deploy qilindi**; qayta sinov 3/3 PASS.
+- **Mustaqil sverka (staging DB):** qoldiq = harakatlar (NON 47, SUT 95, CHOY 95; band 0), Karim qarzi kesh = jurnal = 0, jurnal
+  D = K 7 393 000, 1200 = qoldiq qiymati, 1010 = Σ kassalar 869 000, 1020 = bank 185 000, 4000 = sotuv − qaytarish, har sotuv/to'lov/
+  qaytarish jurnalda, takroriy ta'sir 0, sotuvchi = kassir holati 0.
+- **Ali (sotuvchi):** 8 chek, 14 dona, sotuv 349 000, chegirma 1 000, qaytarish 10 000, sof 339 000, tannarx 224 000, YF 115 000
+  (33.92%), KPI bonus 9 940 (1% + 100/chek + 5% YF — Rule Builder qoidalari). Ozoda (kassir) sotuvchi KPI'siga tushmagan.
+- **Eslatmalar:** KPI Rule Builder'da "dona" ko'rsatkichi yo'q (dona — sotuvchi hisobotida); staging'da bitta tenant — kompaniyalararo
+  sinov begona slug, production ID'lari va tasodifiy ID'lar bilan; `audit_logs` bazada trigger bilan himoyalanmagan (ilova faqat
+  qo'shadi) — tavsiya.
+- **Production:** sinovdan oldin va keyin tenantlar kesimi, invariantlar va tarixiy nazorat summalari bir xil; deploy'lar o'zgarmagan.
+  `5ba4778` production'da **yo'q** — "DEPLOY QIL" kutilmoqda.

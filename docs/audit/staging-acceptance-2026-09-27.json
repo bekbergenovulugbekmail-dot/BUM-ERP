@@ -1,0 +1,821 @@
+{
+  "environment": "staging 5a8e273a-d03e-44d0-8d58-bb7bc6a2483b",
+  "company": "BUM QA Test 5c57c9b9-f860-4968-9fae-58fb9737d4a2",
+  "date": "2026-09-27",
+  "run1": [
+    {
+      "no": 2,
+      "name": "Kassa assignment",
+      "status": "FAIL",
+      "info": null,
+      "error": "asosiy kassada POS smena ochildi (201) — omborga biriktirilmagan kassa smena kassasi bo'lmasligi kerak"
+    },
+    {
+      "no": 3,
+      "name": "Shift",
+      "status": "PASS",
+      "info": {
+        "shift1": "0c856c96-795f-4c1b-ad3d-8458f6b132a9",
+        "shift2": "690c7fbd-7559-4629-a1d5-e3f063f2ee04",
+        "openingBalance": "100000.00"
+      },
+      "error": null
+    },
+    {
+      "no": 4,
+      "name": "Salesperson ≠ cashier (sotuv 35 000)",
+      "status": "PASS",
+      "info": {
+        "order": "SO-2026-0001"
+      },
+      "error": null
+    },
+    {
+      "no": 5,
+      "name": "Cash sale 45 000",
+      "status": "PASS",
+      "info": null,
+      "error": null
+    },
+    {
+      "no": 6,
+      "name": "UZCARD sale 40 000",
+      "status": "PASS",
+      "info": null,
+      "error": null
+    },
+    {
+      "no": 7,
+      "name": "HUMO sale 40 000",
+      "status": "PASS",
+      "info": null,
+      "error": null
+    },
+    {
+      "no": 8,
+      "name": "Bank payment 25 000",
+      "status": "PASS",
+      "info": null,
+      "error": null
+    },
+    {
+      "no": 9,
+      "name": "Mixed payment 75 000 + replay",
+      "status": "PASS",
+      "info": {
+        "replay": 409
+      },
+      "error": null
+    },
+    {
+      "no": 10,
+      "name": "Credit sale 80 000",
+      "status": "PASS",
+      "info": null,
+      "error": null
+    },
+    {
+      "no": 11,
+      "name": "Debt payment 50 000 + replay",
+      "status": "PASS",
+      "info": {
+        "debtAfter": 30000,
+        "replay": 201
+      },
+      "error": null
+    },
+    {
+      "no": 12,
+      "name": "Partial payment 20 000 UZCARD + 10 000 Bank",
+      "status": "PASS",
+      "info": null,
+      "error": null
+    },
+    {
+      "no": 13,
+      "name": "Forbidden payment method (HUMO faqat QA2)",
+      "status": "PASS",
+      "info": {
+        "status": 403
+      },
+      "error": null
+    },
+    {
+      "no": 14,
+      "name": "Forbidden kassa",
+      "status": "PASS",
+      "info": {
+        "toK2": 403,
+        "toMain": 403,
+        "foreignShift": 403,
+        "deposit": 403
+      },
+      "error": null
+    },
+    {
+      "no": 15,
+      "name": "Concurrency (oversell yo'q)",
+      "status": "PASS",
+      "info": {
+        "before": 96,
+        "each": 49,
+        "statuses": [
+          201,
+          400
+        ],
+        "winner": "QA1",
+        "after": 47
+      },
+      "error": null
+    },
+    {
+      "no": 16,
+      "name": "Return (1 × QA-NON, S2) + replay",
+      "status": "PASS",
+      "info": {
+        "replay": 200
+      },
+      "error": null
+    },
+    {
+      "no": 17,
+      "name": "Discount (10% QA-NON, rahbar, QA2)",
+      "status": "PASS",
+      "info": null,
+      "error": null
+    },
+    {
+      "no": 26,
+      "name": "Cash movement idempotency (inkassatsiya 50 000 QA1 → asosiy)",
+      "status": "PASS",
+      "info": null,
+      "error": null
+    },
+    {
+      "no": 18,
+      "name": "Kassa report (QA1)",
+      "status": "PASS",
+      "info": {
+        "report": {
+          "id": "8c58de15-3c0b-44c5-baa3-d1c97594dc3c",
+          "name": "QA Kassa 1",
+          "code": "QA1",
+          "warehouseName": "QA Main Warehouse",
+          "opening": "0.00",
+          "cashSales": "645000.00",
+          "otherIn": "0.00",
+          "supplierRefunds": "0.00",
+          "transfersIn": "100000.00",
+          "over": "0.00",
+          "refunds": "10000.00",
+          "salesReversals": "0.00",
+          "expenses": "0.00",
+          "supplierPayments": "0.00",
+          "otherOut": "0.00",
+          "transfersOut": "50000.00",
+          "short": "0.00",
+          "expected": "685000.00",
+          "overShort": "0.00",
+          "closing": "685000.00",
+          "balanceNow": "685000.00",
+          "shifts": {
+            "count": 1,
+            "closed": 1,
+            "counted": "685000.00",
+            "difference": "0.00"
+          }
+        }
+      },
+      "error": null
+    },
+    {
+      "no": 19,
+      "name": "KPI (Rule Builder)",
+      "status": "PASS",
+      "info": {
+        "aliTotal": "9940.00"
+      },
+      "error": null
+    },
+    {
+      "no": 20,
+      "name": "Salesperson report",
+      "status": "PASS",
+      "info": null,
+      "error": null
+    },
+    {
+      "no": 21,
+      "name": "Payment method report",
+      "status": "PASS",
+      "info": {
+        "total": 839000
+      },
+      "error": null
+    },
+    {
+      "no": 24,
+      "name": "Tenant isolation (staging)",
+      "status": "FAIL",
+      "info": null,
+      "error": "prodWarehouseKassas 200"
+    },
+    {
+      "no": 25,
+      "name": "RBAC",
+      "status": "PASS",
+      "info": {
+        "cashierCreateKassa": 403,
+        "cashierPatchMethod": 403,
+        "cashierBoard": 403,
+        "cashierKassaReport": 403,
+        "sellerKpiRules": 403,
+        "sellerSellers": 200,
+        "sellerOtherShift": 403,
+        "managerBoard": 200,
+        "managerMethods": 200,
+        "managerReport": 200
+      },
+      "error": null
+    }
+  ],
+  "retestAfterFix5ba4778": [
+    {
+      "no": 2,
+      "name": "Kassa assignment (retest)",
+      "status": "PASS",
+      "info": {
+        "onMain": 400,
+        "message": "Asosiy kassa POS smena kassasi bo'la olmaydi",
+        "kassas": [
+          "QA1",
+          "QA2"
+        ]
+      }
+    },
+    {
+      "no": 24,
+      "name": "Tenant isolation (retest)",
+      "status": "PASS",
+      "info": {
+        "prodWarehouseKassas": 404,
+        "prodCompanyProducts": 404,
+        "prodCashAccountTx": 404,
+        "randomOrder": 404,
+        "randomShift": 404,
+        "randomCustomer": 404,
+        "otherSlug": 403
+      }
+    },
+    {
+      "no": 27,
+      "name": "Audit (retest: yangi sotuv + kassa kodi)",
+      "status": "PASS",
+      "info": {
+        "id": "059cd5ca-3172-41f4-82e4-330aaa462962",
+        "number": "SO-2026-0010",
+        "kassaQA2": "a6c4fdbc-e2c1-41a4-9bf0-d004c6a16ab1"
+      }
+    }
+  ],
+  "book": {
+    "k1": 685000,
+    "k2": 9000,
+    "main": 150000,
+    "bank": 185000,
+    "non": 47,
+    "sut": 96,
+    "choy": 95,
+    "debt": 0
+  },
+  "kpiAli": {
+    "employeeId": "52cd676c-dd5c-46b3-b690-1d2752f7f85e",
+    "name": "QA Sotuvchi Ali",
+    "positionName": "Kassir",
+    "total": "9940.00",
+    "lines": [
+      {
+        "metric": "seller_sales_amount",
+        "metricValue": "339000.0000",
+        "amount": "3390.00",
+        "ruleId": "bac08cdf-dd11-4782-895d-3fcffdc15c58",
+        "target": null,
+        "achievementPercent": null,
+        "weight": null,
+        "bonusType": "tiered"
+      },
+      {
+        "metric": "seller_receipt_count",
+        "metricValue": "8.0000",
+        "amount": "800.00",
+        "ruleId": "ff1a5c62-9008-45cd-9b9e-b1edd01f84ab",
+        "target": null,
+        "achievementPercent": null,
+        "weight": null,
+        "bonusType": "tiered"
+      },
+      {
+        "metric": "seller_gross_profit",
+        "metricValue": "115000.0000",
+        "amount": "5750.00",
+        "ruleId": "9652c65c-8a81-46e2-8fbd-cd535b9e7a1a",
+        "target": null,
+        "achievementPercent": null,
+        "weight": null,
+        "bonusType": "tiered"
+      }
+    ]
+  },
+  "sellerReportAli": {
+    "employeeId": "52cd676c-dd5c-46b3-b690-1d2752f7f85e",
+    "receipts": 8,
+    "units": "14.0000",
+    "grossSales": "350000.00",
+    "discount": "1000.00",
+    "sales": "349000.00",
+    "returns": "10000.00",
+    "returnedUnits": "1.0000",
+    "netSales": "339000.00",
+    "cogs": "224000.00",
+    "grossProfit": "115000.00",
+    "marginPercent": "33.92",
+    "name": "QA Sotuvchi Ali",
+    "code": "EMP-0003",
+    "kpi": [
+      {
+        "metric": "seller_sales_amount",
+        "metricValue": "339000.0000",
+        "amount": "3390.00",
+        "ruleId": "bac08cdf-dd11-4782-895d-3fcffdc15c58",
+        "target": null,
+        "achievementPercent": null,
+        "weight": null,
+        "bonusType": "tiered"
+      },
+      {
+        "metric": "seller_receipt_count",
+        "metricValue": "8.0000",
+        "amount": "800.00",
+        "ruleId": "ff1a5c62-9008-45cd-9b9e-b1edd01f84ab",
+        "target": null,
+        "achievementPercent": null,
+        "weight": null,
+        "bonusType": "tiered"
+      },
+      {
+        "metric": "seller_gross_profit",
+        "metricValue": "115000.0000",
+        "amount": "5750.00",
+        "ruleId": "9652c65c-8a81-46e2-8fbd-cd535b9e7a1a",
+        "target": null,
+        "achievementPercent": null,
+        "weight": null,
+        "bonusType": "tiered"
+      }
+    ],
+    "bonus": "9940.00"
+  },
+  "paymentReport": {
+    "from": "2026-09-27",
+    "to": "2026-09-27",
+    "total": "839000.00",
+    "methods": [
+      {
+        "paymentMethodId": "d8d95605-3895-408b-b4a8-fd706d55c0c8",
+        "methodName": "Naqd",
+        "method": "cash",
+        "terminalId": null,
+        "terminalName": null,
+        "count": 6,
+        "amount": "654000.00",
+        "posAmount": "654000.00",
+        "label": "Naqd",
+        "sharePercent": "77.94"
+      },
+      {
+        "paymentMethodId": "4507d847-bb03-4f83-aadc-06228d434adf",
+        "methodName": "UZCARD",
+        "method": "card",
+        "terminalId": "9a74fa1b-f554-43b8-af24-70790d38e15f",
+        "terminalName": "UZCARD",
+        "count": 3,
+        "amount": "85000.00",
+        "posAmount": "85000.00",
+        "label": "UZCARD",
+        "sharePercent": "10.13"
+      },
+      {
+        "paymentMethodId": "2934e5c7-6b0f-4597-abcb-cecb655d0f13",
+        "methodName": "Bank o'tkazma",
+        "method": "bank",
+        "terminalId": null,
+        "terminalName": null,
+        "count": 3,
+        "amount": "60000.00",
+        "posAmount": "60000.00",
+        "label": "Bank o'tkazma",
+        "sharePercent": "7.15"
+      },
+      {
+        "paymentMethodId": "b915adfe-6856-4e2e-a8b6-25a89d2af01d",
+        "methodName": "HUMO",
+        "method": "card",
+        "terminalId": "d195281e-0314-484c-8a6b-6be8ef65cf6c",
+        "terminalName": "HUMO",
+        "count": 1,
+        "amount": "40000.00",
+        "posAmount": "40000.00",
+        "label": "HUMO",
+        "sharePercent": "4.76"
+      }
+    ]
+  },
+  "kassaReportQA1": {
+    "id": "8c58de15-3c0b-44c5-baa3-d1c97594dc3c",
+    "name": "QA Kassa 1",
+    "code": "QA1",
+    "warehouseName": "QA Main Warehouse",
+    "opening": "0.00",
+    "cashSales": "645000.00",
+    "otherIn": "0.00",
+    "supplierRefunds": "0.00",
+    "transfersIn": "100000.00",
+    "over": "0.00",
+    "refunds": "10000.00",
+    "salesReversals": "0.00",
+    "expenses": "0.00",
+    "supplierPayments": "0.00",
+    "otherOut": "0.00",
+    "transfersOut": "50000.00",
+    "short": "0.00",
+    "expected": "685000.00",
+    "overShort": "0.00",
+    "closing": "685000.00",
+    "balanceNow": "685000.00",
+    "shifts": {
+      "count": 1,
+      "closed": 1,
+      "counted": "685000.00",
+      "difference": "0.00"
+    }
+  },
+  "stagingVerifyAfterRetest": {
+    "stock": [
+      {
+        "sku": "QA-CHOY",
+        "qty": "95.0000",
+        "reserved": "0.0000",
+        "received": "100.0000",
+        "issued": "5.0000",
+        "returned": "0",
+        "diff": "0.0000",
+        "value": "2660000.00"
+      },
+      {
+        "sku": "QA-NON",
+        "qty": "47.0000",
+        "reserved": "0.0000",
+        "received": "100.0000",
+        "issued": "54.0000",
+        "returned": "1.0000",
+        "diff": "0.0000",
+        "value": "282000.00"
+      },
+      {
+        "sku": "QA-SUT",
+        "qty": "95.0000",
+        "reserved": "0.0000",
+        "received": "100.0000",
+        "issued": "5.0000",
+        "returned": "0",
+        "diff": "0.0000",
+        "value": "1425000.00"
+      }
+    ],
+    "debt": [
+      {
+        "name": "QA Mijoz Karim",
+        "cache": "0.00",
+        "journal": "0.00",
+        "orders_open": "0.00"
+      }
+    ],
+    "journal": {
+      "entries": 30,
+      "unbalanced": 0,
+      "debit": "7393000.00",
+      "credit": "7393000.00"
+    },
+    "ledgers": [
+      {
+        "code": "1010",
+        "name": "Naqd kassa",
+        "balance": "869000.00"
+      },
+      {
+        "code": "1020",
+        "name": "Bank hisobi",
+        "balance": "185000.00"
+      },
+      {
+        "code": "1030",
+        "name": "Kutilayotgan to'lovlar",
+        "balance": "0.00"
+      },
+      {
+        "code": "1100",
+        "name": "Debitorlar",
+        "balance": "0.00"
+      },
+      {
+        "code": "1200",
+        "name": "Tovar zaxirasi",
+        "balance": "4367000.00"
+      },
+      {
+        "code": "4000",
+        "name": "Sotuv daromadi",
+        "balance": "854000.00"
+      },
+      {
+        "code": "4100",
+        "name": "Boshqa daromadlar",
+        "balance": "200000.00"
+      },
+      {
+        "code": "5000",
+        "name": "Tovar tannarxi",
+        "balance": "533000.00"
+      }
+    ],
+    "moneyAccounts": [
+      {
+        "code": null,
+        "name": "Asosiy kassa",
+        "type": "cash",
+        "balance": "150000.00",
+        "tx_sum": "150000.00"
+      },
+      {
+        "code": "QA1",
+        "name": "QA Kassa 1",
+        "type": "cash",
+        "balance": "685000.00",
+        "tx_sum": "685000.00"
+      },
+      {
+        "code": "QA2",
+        "name": "QA Kassa 2",
+        "type": "cash",
+        "balance": "34000.00",
+        "tx_sum": "34000.00"
+      },
+      {
+        "code": null,
+        "name": "Asosiy bank hisobi",
+        "type": "bank",
+        "balance": "185000.00",
+        "tx_sum": "185000.00"
+      }
+    ],
+    "inventory1200": {
+      "stock_value": "4367000.00",
+      "ledger": "4367000.00"
+    },
+    "eventsWithoutJournal": {
+      "sales": 0,
+      "payments": 0,
+      "returns": 0
+    },
+    "payments": {
+      "n": 14,
+      "total": "864000.00",
+      "over_allocated": 0,
+      "allocated": "80000.00"
+    },
+    "sales": {
+      "n": 10,
+      "total": "864000.00",
+      "with_seller": 9,
+      "seller_equals_cashier": 0,
+      "cashiers": 3,
+      "pos": 10
+    },
+    "returns": {
+      "n": 1,
+      "total": "10000.00",
+      "cogs": "6000.00"
+    },
+    "shifts": [
+      {
+        "kassa": null,
+        "status": "closed",
+        "opening_balance": "100000.00",
+        "opening_cash": "0.00",
+        "closing_cash": "100000.00",
+        "cash_difference": "0.00",
+        "receipt_count": 0
+      },
+      {
+        "kassa": "QA1",
+        "status": "closed",
+        "opening_balance": "100000.00",
+        "opening_cash": "100000.00",
+        "closing_cash": "685000.00",
+        "cash_difference": "0.00",
+        "receipt_count": 8
+      },
+      {
+        "kassa": "QA2",
+        "status": "open",
+        "opening_balance": "0.00",
+        "opening_cash": "0.00",
+        "closing_cash": null,
+        "cash_difference": null,
+        "receipt_count": 2
+      }
+    ],
+    "duplicates": {
+      "cash_tx": 0,
+      "journal": 0
+    },
+    "audit": [
+      {
+        "action": "CASH_ACCOUNT_BALANCE_ADJUSTED",
+        "n": 1,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "CASH_ACCOUNT_CREATED",
+        "n": 2,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "CASH_ACCOUNT_UPDATED",
+        "n": 1,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "CASH_TRANSFERRED",
+        "n": 2,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "COMPANY_CREATED",
+        "n": 1,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "CUSTOMER_CREATED",
+        "n": 1,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "CUSTOMER_PAYMENT_RECORDED",
+        "n": 14,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "EMPLOYEE_CREATED",
+        "n": 6,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "KPI_RULE_CREATED",
+        "n": 6,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "LICENSE_ASSIGNED",
+        "n": 4,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "login_success",
+        "n": 9,
+        "has_seller": null,
+        "has_warehouse": null
+      },
+      {
+        "action": "PAYMENT_METHOD_CREATED",
+        "n": 4,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "PAYMENT_METHOD_UPDATED",
+        "n": 1,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "PAYMENT_TERMINAL_CREATED",
+        "n": 2,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "POS_CASH_MOVEMENT",
+        "n": 1,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "POS_SALE_COMPLETED",
+        "n": 10,
+        "has_seller": true,
+        "has_warehouse": false
+      },
+      {
+        "action": "POS_SHIFT_CLOSED",
+        "n": 2,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "POS_SHIFT_OPENED",
+        "n": 3,
+        "has_seller": false,
+        "has_warehouse": true
+      },
+      {
+        "action": "PRODUCT_CREATED",
+        "n": 3,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "SALES_RETURN_CREATED",
+        "n": 1,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "STOCK_MOVEMENT_RECORDED",
+        "n": 3,
+        "has_seller": false,
+        "has_warehouse": true
+      },
+      {
+        "action": "SUBSCRIPTION_LICENSES_CHANGED",
+        "n": 1,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "TRIAL_CREATED",
+        "n": 1,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "USER_CREATED",
+        "n": 1,
+        "has_seller": false,
+        "has_warehouse": false
+      },
+      {
+        "action": "WAREHOUSE_CREATED",
+        "n": 1,
+        "has_seller": false,
+        "has_warehouse": false
+      }
+    ],
+    "auditDetail": [
+      {
+        "action": "CASH_ACCOUNT_UPDATED",
+        "seller": null,
+        "kassa": null,
+        "code_from": "QA2",
+        "code_to": "QA2",
+        "occurred_at": "2026-09-27 13:32:43.487+00"
+      },
+      {
+        "action": "POS_SALE_COMPLETED",
+        "seller": "52cd676c-dd5c-46b3-b690-1d2752f7f85e",
+        "kassa": "a6c4fdbc-e2c1-41a4-9bf0-d004c6a16ab1",
+        "code_from": null,
+        "code_to": null,
+        "occurred_at": "2026-09-27 13:32:42.988+00"
+      }
+    ],
+    "auditMutable": {
+      "n": 0
+    },
+    "crossTenant": {
+      "seller": 0,
+      "shift_kassa": 0,
+      "method": 0
+    }
+  }
+}
