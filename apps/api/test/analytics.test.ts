@@ -5,6 +5,7 @@ import { closeDb, db } from "../src/db/client.js";
 import { units } from "../src/db/schema/catalog.js";
 import { warehouses } from "../src/db/schema/inventory.js";
 import { seedDefaultUnits } from "../src/modules/catalog/units.service.js";
+import { todayIso } from "../src/modules/finance/cash.service.js";
 import { buildServer } from "../src/server.js";
 import { addEmployee, createCompany, resetDatabase, signedIn } from "./helpers.js";
 
@@ -15,7 +16,8 @@ let company: Company;
 let piece: string;
 let mainWh: string;
 
-const today = new Date().toISOString().slice(0, 10);
+// Biznes sanasi (server todayIso bilan bir xil) — yarim tunda UTC bilan bir kun farq qilmasin
+const today = todayIso();
 
 beforeAll(async () => {
   app = await buildServer();
