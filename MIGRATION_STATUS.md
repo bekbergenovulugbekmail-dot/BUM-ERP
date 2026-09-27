@@ -5156,3 +5156,28 @@ dashboard'da tekshirish kerak. Deploydan keyingi tekshiruv — o'sha skript, tar
 **Backup tekshiruvi (2026-09-27 10:18Z):** Railway API (CLI login, faqat o'qish): `Postgres--bSX` volume `postgres-volume-LRbC`
 (instance `cd083546…`, READY, ~450 MB) — backup ro'yxati **bo'sh**, avtomatik backup jadvali **yo'q**. `volumeInstanceBackupCreate`
 — **Not Authorized** (CLI tokeni yoki tarif ruxsat bermaydi). **BACKUP NOT VERIFIED** — 0096–0098 deployi backup'gacha to'xtatildi.
+
+### Production safety + backup final gate (2026-09-27 10:36Z, faqat o'qish)
+
+```
+PRODUCTION MIGRATION:
+0096 = PENDING
+0097 = PENDING
+0098 = PENDING
+
+BACKUP:
+NOT VERIFIED
+
+PRODUCTION DEPLOY:
+BLOCKED — WAITING FOR EXPLICIT USER COMMAND
+```
+
+- **Backup:** Railway API (o'qish): `Postgres--bSX` → volume `postgres-volume-LRbC` (instance `cd083546…`, READY) — backuplar 0 ta,
+  avtomatik jadval yo'q. CLI tokeni bilan yaratish — `Not Authorized`; aylanib o'tilmadi, lokal dump olinmadi.
+- **Production (PG 18.6):** 96 migratsiya, oxirgisi 0095 (`1790520000000`); 0096–0098 pending, ularning ob'ektlari oldindan yo'q.
+  Tenantlar: Bonnu Market (14 sotuv, 14 to'lov, 2 ochiq smena — 1 web + 1 desktop), Distributsiya (bo'sh), Ezo (9 sotuv, 2 to'lov,
+  1552 mijoz). Invariantlar 0 farq (jurnal D = K 10 765 300; mijoz qarzi 75 520; ta'minotchi qarzi 9 478 800; qoldiq, kassa,
+  taqsimot), begona kompaniya havolasi 0, takroriy ta'sir 0. 09:58Z va 10:36Z suratlaridagi nazorat summalari (sotuv, to'lov,
+  smena, kassa harakatlari, jurnal, kassalar, terminal, qurilma) — bir xil.
+- **Migratsiyalar (statik, 22e1076 dan beri o'zgarmagan):** DML yo'q, destruktiv DDL yo'q; yagona `DROP INDEX` shu tranzaksiyada
+  teng shart bilan qayta yaratiladi; yangi ustunlar NULL — tarixiy qatorlar, to'lovlar, hisoblar, KPI qoidalari o'zgarmaydi.
