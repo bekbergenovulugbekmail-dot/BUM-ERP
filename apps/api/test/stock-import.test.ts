@@ -26,7 +26,7 @@ const n = (value: unknown) => Number(value ?? 0);
 
 const rows = [
   { sku: "IMP-A", name: "Product A", unit: "bl", quantity: "10", costPrice: "60000", salesPrice: "15000" },
-  { barcode: "4780000000022", name: "Product B", unit: "d", quantity: 100, costPrice: "5000", salesPrice: "8000" },
+  { barcode: "4780000000021", name: "Product B", unit: "d", quantity: 100, costPrice: "5000", salesPrice: "8000" },
   { name: "Product C", unit: "Pachka", quantity: "20", costPrice: "30000" },
 ];
 
@@ -56,7 +56,7 @@ beforeAll(async () => {
   const block = (await db.select().from(units).where(eq(units.shortName, "bl")))[0]!.id;
   const packRes = await call(admin, "POST", "/api/catalog/units", { name: "Pachka", shortName: "pch", isBase: false });
   const pack = packRes.json().unit.id as string;
-  for (const [key, sku, barcode, price] of [["A", "IMP-A", "4780000000011", "12000"], ["B", "IMP-B", "4780000000022", "8000"], ["C", "IMP-C", "4780000000033", "4000"]] as const) {
+  for (const [key, sku, barcode, price] of [["A", "IMP-A", "4780000000014", "12000"], ["B", "IMP-B", "4780000000021", "8000"], ["C", "IMP-C", "4780000000038", "4000"]] as const) {
     const res = await call(S.owner, "POST", "/api/catalog/products", { name: `Product ${key}`, sku, barcode, baseUnitId: piece, salesPrice: price, taxRate: "0" });
     expect(res.statusCode, res.body).toBe(201);
     S.p[key] = res.json().product.id;

@@ -51,7 +51,7 @@ export const SAMPLE_LABEL_PRODUCT: LabelProduct = {
   id: "sample",
   name: "Coca-Cola 1.5 l",
   sku: "1001",
-  barcode: "4780001234567",
+  barcode: "4780001234562",
   salesPrice: 14_000,
 };
 

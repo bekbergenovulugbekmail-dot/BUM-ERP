@@ -16,7 +16,7 @@
  */
 import { and, asc, desc, eq, getTableColumns, gt, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { badRequest, conflict, notFound } from "@bum/shared";
+import { badRequest, barcodeError, conflict, notFound } from "@bum/shared";
 import { batches, brands, categories, productKind, products, unitConversions, units } from "../../db/schema/catalog.js";
 
 /** Katalog turi — sxemadagi enum bilan bir xil. */
@@ -331,6 +331,7 @@ async function loadProductForUpdate(tx: Tx, tenant: TenantContext, productId: st
       sku: products.sku,
       isActive: products.isActive,
       categoryId: products.categoryId,
+      barcode: products.barcode,
     })
     .from(products)
     .where(and(eq(products.id, productId), eq(products.companyId, tenant.company.id)))
@@ -360,6 +361,9 @@ async function assertPluFree(tx: Tx, companyId: string, pluCode: number | null |
 async function assertBarcodeFree(tx: Tx, companyId: string, barcode: string | null | undefined, exceptProductId?: string) {
   const code = barcode?.trim();
   if (!code) return;
+  // 13 xonali raqamli kod — EAN-13 nazorat raqami (xato terilgan kod skanerda topilmaydi)
+  const invalid = barcodeError(code);
+  if (invalid) throw badRequest(invalid, { reason: "invalid_ean13" });
   const [taken] = await tx
     .select({ name: products.name, sku: products.sku })
     .from(products)
@@ -411,7 +415,10 @@ export async function updateProduct(
   await assertReferences(tx, tenant, patch);
   if (patch.categoryId !== undefined) assertCategoryInScope(await categoryScope(tx, tenant), patch.categoryId);
   await assertPluFree(tx, tenant.company.id, patch.pluCode, current.id);
-  if (patch.barcode !== undefined) await assertBarcodeFree(tx, tenant.company.id, patch.barcode, current.id);
+  // O'zgarmagan shtrix-kod qayta tekshirilmaydi (eski kod tahrirni to'smasin); yangi/o'zgargan — unikal va EAN-13
+  if (patch.barcode !== undefined && (patch.barcode?.trim() || null) !== (current.barcode ?? null)) {
+    await assertBarcodeFree(tx, tenant.company.id, patch.barcode, current.id);
+  }
 
   const [before] = await tx.select(productFields).from(products).where(eq(products.id, current.id)).limit(1);
   const { costingMethod: _costing, ...fields } = await normalizeCurrencies(tx, tenant.company.id, patch);
@@ -720,6 +727,8 @@ export async function importProducts(
     }
 
     const barcode = row.barcode?.trim();
+    const barcodeInvalid = barcodeError(barcode);
+    if (barcodeInvalid) return fail(barcodeInvalid);
     if (barcode && takenBarcodes.has(barcode)) return fail(`Shtrix-kod ${barcode} band (bazada yoki faylda takrorlangan)`);
     if (barcode) takenBarcodes.add(barcode);
     taken.add(sku);

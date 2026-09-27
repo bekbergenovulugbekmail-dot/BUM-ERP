@@ -207,6 +207,12 @@ afterAll(async () => {
   await closeDb();
 });
 
+/** 12 raqam + EAN-13 nazorat raqami (server 13 xonali kodni tekshiradi). */
+function ean13(base12: string) {
+  const sum = [...base12].reduce((total, digit, index) => total + Number(digit) * (index % 2 === 0 ? 1 : 3), 0);
+  return base12 + String((10 - (sum % 10)) % 10);
+}
+
 describe("BUSINESS 01 — MINI MARKET (TEST-01-MINIMARKET)", () => {
   it("PHASE 1 — bootstrap: kompaniya, MAIN-WH, rollar, boshlang'ich kassa 10 mln va bank 20 mln", async () => {
     const company = await createCompany(app, adminCookie, { name: "TEST-01-MINIMARKET" });
@@ -301,7 +307,7 @@ describe("BUSINESS 01 — MINI MARKET (TEST-01-MINIMARKET)", () => {
       ["Z", "Sharbat 1L", "MM-SHARBAT", "20000", "Ichimliklar"],
     ];
     for (const [key, name, sku, price, category] of catalog) {
-      const res = await call(S.owner, "POST", "/api/catalog/products", { name, sku, barcode: `478${sku.replace(/\D/g, "").padEnd(3, "0")}${String(Object.keys(S.p).length).padStart(7, "0")}`, baseUnitId: piece, salesPrice: price, taxRate: "0", categoryId: categories[category] });
+      const res = await call(S.owner, "POST", "/api/catalog/products", { name, sku, barcode: ean13(`478${sku.replace(/\D/g, "").padEnd(3, "0")}${String(Object.keys(S.p).length).padStart(6, "0")}`), baseUnitId: piece, salesPrice: price, taxRate: "0", categoryId: categories[category] });
       expect(res.statusCode, `${name}: ${res.body}`).toBe(201);
       S.p[key] = res.json().product.id;
     }

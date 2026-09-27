@@ -17,3 +17,4 @@ export * from "./pos-quick-sale.ts";
 export * from "./subscription.ts";
 export * from "./company-paths.ts";
 export * from "./document-template.ts";
+export * from "./barcode.ts";

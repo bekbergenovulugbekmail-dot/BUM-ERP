@@ -137,13 +137,27 @@ describe("Ro'yxat va qidiruv", () => {
     expect((await api(companyA.ownerCookie, "GET", "/products?cursor=buzuq")).statusCode).toBe(400);
   });
 
-  it("shtrix-kod qidiruvi faqat o'z kompaniyasida (Convex xatosi tuzatildi)", async () => {
-    const bProduct = (await create(companyB, { name: "B mahsulot", sku: "B-1", barcode: "4780000000001" })).json().product;
-    const aProduct = (await create(companyA, { name: "A mahsulot", sku: "A-1", barcode: "4780000000001" })).json().product;
+  it("EAN-13: 13 xonali kod nazorat raqami tekshiriladi; boshqa formatlar va o'zgarmagan eski kod to'silmaydi", async () => {
+    const bad = await create(companyA, { name: "Xato EAN", sku: "EAN-BAD", barcode: "4780000000001" });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().details).toMatchObject({ reason: "invalid_ean13" });
+    expect((await create(companyA, { name: "To'g'ri EAN", sku: "EAN-OK", barcode: "4780000000007" })).statusCode).toBe(201);
+    expect((await create(companyA, { name: "Ichki kod", sku: "EAN-INT", barcode: "2000123" })).statusCode).toBe(201);
+    expect((await create(companyA, { name: "Harfli kod", sku: "EAN-ALPHA", barcode: "ABC-12345" })).statusCode).toBe(201);
+    // Bazada eski noto'g'ri kod bo'lsa (tekshiruvdan oldingi ma'lumot) — boshqa maydon tahriri to'silmaydi, kodni xatoga almashtirib bo'lmaydi
+    const legacy = (await create(companyA, { name: "Eski", sku: "EAN-LEGACY", barcode: "2000124" })).json().product;
+    await db.update(products).set({ barcode: "4780000000099" }).where(eq(products.id, legacy.id));
+    expect((await api(companyA.ownerCookie, "PATCH", `/products/${legacy.id}`, { name: "Eski (yangi nom)", barcode: "4780000000099" })).statusCode).toBe(200);
+    expect((await api(companyA.ownerCookie, "PATCH", `/products/${legacy.id}`, { barcode: "4780000000098" })).statusCode).toBe(400);
+  });
 
-    const aFound = await api(companyA.ownerCookie, "GET", "/products/by-barcode/4780000000001");
+  it("shtrix-kod qidiruvi faqat o'z kompaniyasida (Convex xatosi tuzatildi)", async () => {
+    const bProduct = (await create(companyB, { name: "B mahsulot", sku: "B-1", barcode: "4780000000007" })).json().product;
+    const aProduct = (await create(companyA, { name: "A mahsulot", sku: "A-1", barcode: "4780000000007" })).json().product;
+
+    const aFound = await api(companyA.ownerCookie, "GET", "/products/by-barcode/4780000000007");
     expect(aFound.json().product.id).toBe(aProduct.id);
-    const bFound = await api(companyB.ownerCookie, "GET", "/products/by-barcode/4780000000001");
+    const bFound = await api(companyB.ownerCookie, "GET", "/products/by-barcode/4780000000007");
     expect(bFound.json().product.id).toBe(bProduct.id);
 
     expect((await api(companyA.ownerCookie, "GET", `/products/${bProduct.id}`)).statusCode).toBe(404);

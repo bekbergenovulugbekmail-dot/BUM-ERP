@@ -284,7 +284,7 @@ describe("Qoldiq eksporti", () => {
 
   it("barcha omborlar, mavjud = qoldiq − band, sotuv narxi va kategoriya bilan; bitta ombor va faqat bor qoldiq filtri", async () => {
     const second = (await api(companyA.ownerCookie, "POST", "/warehouses", { name: "Ikkinchi", code: "WH-002" })).json().warehouse as { id: string };
-    const cola = await product(companyA, "COLA", { barcode: "4780000000011", retailPrice: "12000" });
+    const cola = await product(companyA, "COLA", { barcode: "4780000000014", retailPrice: "12000" });
     const chips = await product(companyA, "CHIPS");
     await move(companyA.ownerCookie, { type: "receive", productId: cola, warehouseId: mainA, quantity: "60", costPrice: "9000" });
     await move(companyA.ownerCookie, { type: "receive", productId: cola, warehouseId: second.id, quantity: "12", costPrice: "9000" });
@@ -296,7 +296,7 @@ describe("Qoldiq eksporti", () => {
     const all = await exported(companyA.ownerCookie);
     expect(all.costVisible).toBe(true);
     const colaMain = all.rows.find((row) => row.productSku === "COLA" && row.warehouseId === mainA)!;
-    expect(colaMain).toMatchObject({ quantity: "60.0000", reservedQty: "6.0000", availableQty: "54.0000", productBarcode: "4780000000011", unitName: "d" });
+    expect(colaMain).toMatchObject({ quantity: "60.0000", reservedQty: "6.0000", availableQty: "54.0000", productBarcode: "4780000000014", unitName: "d" });
     expect(Number(colaMain.avgCostPrice)).toBe(9000);
     expect(Number(colaMain.retailPrice)).toBe(12000);
     expect(all.rows.filter((row) => row.productSku === "COLA").map((row) => Number(row.quantity)).sort((a, b) => a - b)).toEqual([12, 60]);
