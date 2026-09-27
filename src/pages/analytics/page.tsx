@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { BarChart2, Package, TrendingUp, Sparkles, ShieldAlert, Landmark } from "lucide-react";
+import { BarChart2, Package, TrendingUp, Sparkles, ShieldAlert, Landmark, Monitor } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import PageTabs from "@/components/page-tabs.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
@@ -12,12 +12,13 @@ import StockAnalysisSection from "./_components/stock-analysis-section.tsx";
 import SalesReportSection from "./_components/sales-report-section.tsx";
 import AIAssistantSection from "./_components/ai-assistant-section.tsx";
 import BankFeesSection from "./_components/bank-fees-section.tsx";
+import KassaReportsSection from "./_components/kassa-reports-section.tsx";
 
 const DAY_OPTIONS = [7, 14, 30, 60, 90];
 
 export default function AnalyticsPage() {
   const { t } = useTranslation("modules");
-  const [tab, setTab] = useState<"overview" | "sales" | "stock" | "bankFees" | "ai">("overview");
+  const [tab, setTab] = useState<"overview" | "sales" | "stock" | "kassa" | "bankFees" | "ai">("overview");
   const [days, setDays] = useState(30);
 
   const { can, isLoading: permissionsLoading } = usePermissions();
@@ -31,6 +32,7 @@ export default function AnalyticsPage() {
     { key: "overview" as const, label: t("analytics.tab.overview"), icon: BarChart2 },
     { key: "sales" as const, label: t("analytics.tab.sales"), icon: TrendingUp },
     { key: "stock" as const, label: t("analytics.tab.stock"), icon: Package },
+    { key: "kassa" as const, label: t("analytics.tab.kassa"), icon: Monitor },
     { key: "bankFees" as const, label: t("analytics.tab.bankFees"), icon: Landmark },
     { key: "ai" as const, label: t("analytics.tab.ai"), icon: Sparkles },
   ].filter((item) => (item.key !== "ai" || aiEnabled) && (item.key !== "bankFees" || canViewFinance));
@@ -96,6 +98,7 @@ export default function AnalyticsPage() {
             {activeTab === "overview" && <OverviewSection days={days} />}
             {activeTab === "sales" && <SalesReportSection days={days} />}
             {activeTab === "stock" && <StockAnalysisSection days={days} />}
+            {activeTab === "kassa" && <KassaReportsSection days={days} />}
             {activeTab === "bankFees" && <BankFeesSection days={days} />}
             {activeTab === "ai" && <AIAssistantSection />}
           </motion.div>

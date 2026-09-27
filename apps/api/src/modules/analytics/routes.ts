@@ -7,6 +7,9 @@
  *   GET /reports/stock
  *   GET /reports/top-customers (?days=&limit=)
  *   GET /reports/product-profitability (?from=&to=)   analytics.view + products.view_cost (tannarx va foyda)
+ *   GET /reports/kassa (?from=&to=&cashAccountId=)    analytics.view + finance.view (manba harakatlaridan kassa sverkasi)
+ *   GET /reports/cashiers, /reports/payment-methods (?from=&to=)   analytics.view
+ *   GET /reports/sellers (?from=&to=)                 analytics.view (tannarx/YF — products.view_cost bilan), KPI bonus
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -23,6 +26,7 @@ import {
 import type { TenantAccess } from "../subscription/access.js";
 import { getDashboard } from "./dashboard.service.js";
 import { productProfitability } from "./product-profitability.service.js";
+import { cashierReport, kassaReport, paymentMethodReport, sellerReport } from "./kassa-reports.service.js";
 import {
   biOverview,
   expenseSummary,
@@ -122,6 +126,29 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
     const tenant = await readTenant(req);
     await requirePermission(db, tenant, "products.view_cost");
     return productProfitability(db, tenant, range);
+  });
+
+  app.get("/reports/kassa", async (req) => {
+    const query = profitabilityQuery.and(z.object({ cashAccountId: z.uuid().optional() })).parse(req.query);
+    const tenant = await readTenant(req);
+    await requirePermission(db, tenant, "finance.view");
+    return kassaReport(db, tenant, query);
+  });
+
+  app.get("/reports/cashiers", async (req) => {
+    const range = profitabilityQuery.parse(req.query);
+    return cashierReport(db, await readTenant(req), range);
+  });
+
+  app.get("/reports/sellers", async (req) => {
+    const range = profitabilityQuery.parse(req.query);
+    const tenant = await readTenant(req);
+    return sellerReport(db, tenant, range, { withProfit: await hasPermission(db, tenant, "products.view_cost") });
+  });
+
+  app.get("/reports/payment-methods", async (req) => {
+    const range = profitabilityQuery.parse(req.query);
+    return paymentMethodReport(db, await readTenant(req), range);
   });
 
   app.get("/reports/stock-velocity", async (req) => {
