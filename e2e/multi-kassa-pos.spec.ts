@@ -28,7 +28,7 @@ test("rahbar: 2 kassa → kassa tanlab smena → usul tugmalari → aralash to'l
   const methodIds: string[] = [];
   let shiftId: string | null = null;
   try {
-    const wh = await api<{ warehouse: { id: string } }>(page, "POST", "/api/inventory/warehouses", { name: `E2E Kassa ombori ${stamp}` });
+    const wh = await api<{ warehouse: { id: string } }>(page, "POST", "/api/inventory/warehouses", { name: `E2E Kassa ombori ${stamp}`, code: `EK${stamp}` });
     expect(wh.status, JSON.stringify(wh.json)).toBe(201);
     const warehouseId = wh.json.warehouse.id;
     const mk = async (name: string, code: string) => {
@@ -52,10 +52,18 @@ test("rahbar: 2 kassa → kassa tanlab smena → usul tugmalari → aralash to'l
     expect(product.status).toBe(201);
     expect((await api(page, "POST", "/api/inventory/stock/movements", { type: "receive", productId: product.json.product.id, warehouseId, quantity: "20", costPrice: "6000" })).status).toBe(201);
 
-    // POS: agar rahbarda ochiq smena bo'lsa (boshqa test) — kassa ombori tanlanmaydi, shuning uchun avval yopiladi
+    // Boshqa testlardan qolgan umumiy (kassasiz) smena ochiq bo'lsa — ombor tanlash ekrani chiqmaydi: kutilgan naqd bilan
+    // (farqsiz) yopiladi; keyingi testlar smenani o'zi ochadi
+    const all = (await api<{ warehouses: { id: string; name: string; isDefault: boolean }[] }>(page, "GET", "/api/inventory/warehouses")).json.warehouses;
+    const defaultWh = all.find((row) => row.isDefault) ?? all[0]!;
+    const legacy = (await api<{ shift: { id: string; expectedCash: string } | null }>(page, "GET", `/api/sales/pos/shifts/open?warehouseId=${defaultWh.id}`)).json.shift;
+    if (legacy) {
+      const closed = await api(page, "POST", `/api/sales/pos/shifts/${legacy.id}/close`, { closingCash: legacy.expectedCash });
+      expect(closed.status, JSON.stringify(closed.json)).toBe(200);
+    }
     await page.goto(appPath("pos"));
     await expect(page.getByRole("button", { name: /Smena (ochish|yopish)/ }).first()).toBeVisible({ timeout: 30_000 });
-    const whTrigger = page.getByRole("combobox").filter({ hasText: /./ }).first();
+    const whTrigger = page.getByRole("combobox").filter({ hasText: defaultWh.name }).first();
     await expect(whTrigger, "smenasiz ekranda ombor tanlash").toBeVisible({ timeout: 15_000 });
     await whTrigger.click();
     await page.getByRole("option", { name: `E2E Kassa ombori ${stamp}` }).click();
@@ -116,6 +124,16 @@ test("rahbar: 2 kassa → kassa tanlab smena → usul tugmalari → aralash to'l
     await expect(board.getByTestId(`board-kassa-B${stamp}`)).toContainText("Ochiq");
     await expect(board.getByTestId(`board-kassa-A${stamp}`)).toContainText("Yopiq");
     await page.screenshot({ path: "e2e/.screenshots/multi-kassa-board.png" });
+
+    // Tahlil → Kassa va sotuvchilar: kassa sverkasida Kassa B — naqd tushum 18 000
+    await page.goto(appPath("analytics"));
+    await page.getByRole("tab", { name: /Kassa va sotuvchilar/ }).or(page.getByRole("button", { name: /Kassa va sotuvchilar/ })).first().click();
+    const kassaReport = page.getByTestId("report-kassa");
+    await expect(kassaReport).toBeVisible({ timeout: 20_000 });
+    const rowB = kassaReport.locator("tr").filter({ hasText: `B${stamp}` });
+    await expect(rowB).toContainText(/18[\s  ]?000/);
+    await expect(page.getByTestId("report-payment-methods")).toContainText(`Payme ${stamp}`);
+    await page.screenshot({ path: "e2e/.screenshots/multi-kassa-reports.png", fullPage: true });
   } finally {
     if (shiftId) await api(page, "POST", `/api/sales/pos/shifts/${shiftId}/close`, { closingCash: "18000" });
     for (const id of methodIds) await api(page, "PATCH", `/api/finance/payment-methods/${id}`, { isActive: false });
