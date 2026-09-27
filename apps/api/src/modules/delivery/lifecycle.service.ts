@@ -660,6 +660,16 @@ export async function confirmDelivery(
   const policy = await getDeliveryPolicy(tx, context.company.id);
   const { at, offline } = resolveOccurredAt(policy, input.occurredAt);
   if (task.status !== "arrived" && task.status !== "delivering") assertTransition(task.status, "delivered");
+  // AUD-023: buyurtma yo'lda qaytarilgan/bekor qilingan bo'lsa — "yetkazildi" deb bo'lmaydi (haydovchidan yo'q pul kutilmasin)
+  const [order] = await tx
+    .select({ status: salesOrders.status, number: salesOrders.number })
+    .from(salesOrders)
+    .where(eq(salesOrders.id, task.orderId))
+    .limit(1)
+    .for("update");
+  if (!order || !isCompletedSale(order.status)) {
+    throw new AppError("CONFLICT", `Buyurtma ${order?.number ?? ""} holati yetkazishga yaroqsiz`, { reason: "order_not_deliverable", orderStatus: order?.status ?? null });
+  }
   await requireSessionAt(tx, context.deliveryAgent.id, at, offline);
   assertPlace(policy, input.place, at);
   const geo = await geofence(tx, context, task, policy, input.place, at, offline, "confirm", meta);

@@ -27,7 +27,7 @@
  *    statistika oxirgi 500 ta buyurtmadan
  */
 import { and, asc, desc, eq, getTableColumns, gte, ilike, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
-import { AppError, activePromoPrice, badRequest, forbidden, notFound } from "@bum/shared";
+import { AppError, OPEN_DELIVERY_STATUSES, activePromoPrice, badRequest, canDeliveryTransition, forbidden, notFound } from "@bum/shared";
 import { products, units } from "../../db/schema/catalog.js";
 import { deliveryTasks } from "../../db/schema/delivery.js";
 import { warehouses } from "../../db/schema/inventory.js";
@@ -73,6 +73,7 @@ import { assertProductsInScope, categoryScope, documentHasScopedItem } from "../
 import { salesAudit } from "./customers.service.js";
 import { getSalesPolicy } from "./sales-policy.service.js";
 import { COMPLETED_STATUSES, isCompletedSale, paymentStatusSql } from "./sale-status.js";
+import { cancelDeliveryTask } from "../delivery/tasks.service.js";
 
 const { legacyId: _l1, companyId: _c1, ...orderFields } = getTableColumns(salesOrders);
 const { legacyId: _l2, companyId: _c2, ...itemFields } = getTableColumns(salesOrderItems);
@@ -828,6 +829,19 @@ export async function cancelOrder(tx: Tx, tenant: TenantContext, orderId: string
   }
   if (toMinor(order.paidAmount) > 0n) throw badRequest("To'lov qilingan buyurtmani bekor qilib bo'lmaydi");
   await assertOrderInScope(tx, tenant, orderId);
+
+  // AUD-007: buyurtmaning ochiq yetkazma vazifalari ham bekor qilinadi (zombi vazifa qolmaydi). Vazifa allaqachon yo'lda
+  // bo'lsa (bekor qilish o'tishi yo'q) — buyurtma bekor qilinmaydi: avval yetkazmani yakunlash kerak
+  const openTasks = await tx
+    .select({ id: deliveryTasks.id, status: deliveryTasks.status, number: deliveryTasks.number })
+    .from(deliveryTasks)
+    .where(and(eq(deliveryTasks.companyId, tenant.company.id), eq(deliveryTasks.orderId, orderId), inArray(deliveryTasks.status, [...OPEN_DELIVERY_STATUSES])));
+  for (const task of openTasks) {
+    if (!canDeliveryTransition(task.status, "cancelled")) {
+      throw new AppError("CONFLICT", `Yetkazma ${task.number} yo'lda — buyurtmani bekor qilishdan oldin yetkazmani yakunlang`, { reason: "delivery_in_progress", taskId: task.id });
+    }
+    await cancelDeliveryTask(tx, tenant, task.id, reason ?? `Buyurtma ${order.number} bekor qilindi`, meta);
+  }
 
   // Bekor qilingan buyurtma band qilgan qoldiqni bo'shatadi
   await releaseOrderStock(tx, tenant.company.id, { id: orderId, warehouseId: order.warehouseId, stockReserved: order.stockReserved });
