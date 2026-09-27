@@ -9,7 +9,7 @@
  * Mijoz yuborgan `cashAccountId` ishonchli emas: boshqa kassani ko'rsatsa — rad (offline sinxronda — smena kassasiga
  * yo'naltiriladi va nomuvofiqlik yoziladi). Kassasiz (tarixiy) smena — asosiy kassa, avvalgi xulq.
  */
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 import { AppError, badRequest, notFound } from "@bum/shared";
 import { employees } from "../../db/schema/hr.js";
 import { cashAccounts } from "../../db/schema/finance.js";
@@ -17,6 +17,8 @@ import { posShifts } from "../../db/schema/sales.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { effectivePermissions, type TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
+import { warehouses } from "../../db/schema/inventory.js";
+import { allowedWarehouses } from "../inventory/warehouses.service.js";
 
 const kassaFields = {
   id: cashAccounts.id,
@@ -153,3 +155,54 @@ export async function kassaHasOpenShift(conn: DbOrTx, companyId: string, cashAcc
   return Boolean(row);
 }
 
+
+/**
+ * Kassalar paneli (rahbar): har POS kassa — ombor, balans (kassadagi pul), ochiq smena (kassir, cheklar, tushum usul
+ * bo'yicha). Ruxsat berilmagan omborlar kassalari ko'rinmaydi.
+ */
+export async function kassaBoard(conn: DbOrTx, tenant: TenantContext) {
+  const allowed = allowedWarehouses(tenant);
+  const list = await conn
+    .select({ ...kassaFields, warehouseName: warehouses.name })
+    .from(cashAccounts)
+    .innerJoin(warehouses, eq(warehouses.id, cashAccounts.warehouseId))
+    .where(
+      and(
+        eq(cashAccounts.companyId, tenant.company.id),
+        isNotNull(cashAccounts.warehouseId),
+        eq(cashAccounts.type, "cash"),
+        ...(allowed ? [inArray(cashAccounts.warehouseId, allowed.length ? allowed : ["00000000-0000-0000-0000-000000000000"])] : []),
+      ),
+    )
+    .orderBy(asc(warehouses.name), asc(cashAccounts.code), asc(cashAccounts.name));
+  const ids = list.map((kassa) => kassa.id);
+  const open = ids.length
+    ? await conn
+        .select({
+          id: posShifts.id,
+          cashAccountId: posShifts.cashAccountId,
+          cashierName: posShifts.cashierName,
+          deviceId: posShifts.deviceId,
+          openedAt: posShifts.openedAt,
+          receiptCount: posShifts.receiptCount,
+          totalSales: posShifts.totalSales,
+          totalCash: posShifts.totalCash,
+          totalCard: posShifts.totalCard,
+          totalBank: posShifts.totalBank,
+          totalReturns: posShifts.totalReturns,
+          openingBalance: posShifts.openingBalance,
+        })
+        .from(posShifts)
+        .where(and(eq(posShifts.companyId, tenant.company.id), eq(posShifts.status, "open"), inArray(posShifts.cashAccountId, ids)))
+    : [];
+  return list.map((kassa) => ({
+    id: kassa.id,
+    name: kassa.name,
+    code: kassa.code,
+    warehouseId: kassa.warehouseId,
+    warehouseName: kassa.warehouseName,
+    isActive: kassa.isActive,
+    balance: kassa.balance,
+    openShift: open.find((shift) => shift.cashAccountId === kassa.id) ?? null,
+  }));
+}

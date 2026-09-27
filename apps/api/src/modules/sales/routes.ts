@@ -127,7 +127,7 @@ import { getSalesPolicy, salesPolicySchema, saveSalesPolicy } from "./sales-poli
 import { CASH_MOVEMENT_KINDS, listCashMovements, posCashMovement } from "./pos-cash.service.js";
 import { REFUND_METHODS, RETURN_DISPOSITIONS, returnSaleItems } from "./returns.service.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
-import { kassasForUser, shiftCashAccount } from "./kassa.service.js";
+import { kassaBoard, kassasForUser, shiftCashAccount } from "./kassa.service.js";
 import { posPaymentMethods } from "../finance/payment-methods.service.js";
 
 const nullableText = (max: number) =>
@@ -999,6 +999,12 @@ export async function salesRoutes(app: FastifyInstance): Promise<void> {
   app.get("/pos/shifts/open", async (req) => {
     const { warehouseId, cashAccountId } = openShiftKassaQuery.parse(req.query);
     return { shift: await getOpenShift(db, await readTenant(req, "pos.use"), warehouseId, cashAccountId) };
+  });
+
+  // Kassalar paneli (rahbar): barcha POS kassalar — balans va ochiq smena
+  app.get("/pos/kassa-board", async (req) => {
+    const tenant = await readTenant(req, "sales.approve");
+    return { kassas: await kassaBoard(db, tenant) };
   });
 
   // Smena ochish oynasi: omborning kassalari (foydalanuvchi ocha oladiganlari) va har birining ochiq smenasi

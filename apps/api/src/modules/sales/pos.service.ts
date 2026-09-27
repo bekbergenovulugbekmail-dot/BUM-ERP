@@ -66,6 +66,8 @@ const { legacyId: _legacyId, companyId: _companyId, ...shiftFields } = getTableC
  *    kirim − chiqim − naqd qaytarish ± o'tkazmalar. Karta/UZCARD/HUMO/bank naqd kassaga umuman tushmaydi.
  *    Yopilgan kassali smena — yopilgandagi qiymat (sanalgan − farq), keyingi harakatlar unga ta'sir qilmaydi.
  */
+/** Smena kassasi nomi ("K1 · Kassa 1"); kassasiz (tarixiy) smena — null. */
+const kassaNameSql = sql<string | null>`(select coalesce(ca.code || ' · ', '') || ca.name from cash_accounts ca where ca.id = ${posShifts.cashAccountId})`;
 const expectedCashSql = sql<string>`(case
   when ${posShifts.cashAccountId} is null then ${posShifts.openingCash} + ${posShifts.totalCash} + ${posShifts.cashIn} - ${posShifts.cashOut}
   when ${posShifts.status} = 'closed' then ${posShifts.closingCash} - coalesce(${posShifts.cashDifference}, 0)
@@ -82,7 +84,7 @@ async function seesAllShifts(conn: DbOrTx, tenant: TenantContext) {
 
 export async function getShift(conn: DbOrTx, tenant: TenantContext, shiftId: string) {
   const [shift] = await conn
-    .select({ ...shiftFields, warehouseName: warehouses.name, expectedCash: expectedCashSql })
+    .select({ ...shiftFields, warehouseName: warehouses.name, kassaName: kassaNameSql, expectedCash: expectedCashSql })
     .from(posShifts)
     .innerJoin(warehouses, eq(warehouses.id, posShifts.warehouseId))
     .where(and(eq(posShifts.id, shiftId), eq(posShifts.companyId, tenant.company.id)))
@@ -138,7 +140,7 @@ export async function shiftPaymentBreakdown(conn: DbOrTx, companyId: string, shi
 export async function getOpenShift(conn: DbOrTx, tenant: TenantContext, warehouseId: string, cashAccountId?: string) {
   assertWarehouseAccess(tenant, warehouseId);
   const [shift] = await conn
-    .select({ ...shiftFields, warehouseName: warehouses.name, expectedCash: expectedCashSql })
+    .select({ ...shiftFields, warehouseName: warehouses.name, kassaName: kassaNameSql, expectedCash: expectedCashSql })
     .from(posShifts)
     .innerJoin(warehouses, eq(warehouses.id, posShifts.warehouseId))
     .where(
@@ -172,7 +174,7 @@ export async function listShifts(
   const allowed = allowedWarehouses(tenant);
   const ownOnly = !(await seesAllShifts(conn, tenant));
   return conn
-    .select({ ...shiftFields, warehouseName: warehouses.name, expectedCash: expectedCashSql })
+    .select({ ...shiftFields, warehouseName: warehouses.name, kassaName: kassaNameSql, expectedCash: expectedCashSql })
     .from(posShifts)
     .innerJoin(warehouses, eq(warehouses.id, posShifts.warehouseId))
     .where(
@@ -479,7 +481,7 @@ export async function closeShift(
 export async function listShiftReviews(conn: DbOrTx, tenant: TenantContext, options: { status: "pending" | "approved" | "rejected"; limit: number }) {
   const allowed = allowedWarehouses(tenant);
   return conn
-    .select({ ...shiftFields, warehouseName: warehouses.name, expectedCash: expectedCashSql })
+    .select({ ...shiftFields, warehouseName: warehouses.name, kassaName: kassaNameSql, expectedCash: expectedCashSql })
     .from(posShifts)
     .innerJoin(warehouses, eq(warehouses.id, posShifts.warehouseId))
     .where(

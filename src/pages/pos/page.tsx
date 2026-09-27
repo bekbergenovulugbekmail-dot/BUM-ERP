@@ -870,6 +870,7 @@ export default function POSPage() {
               onClick={() => setSessionDetail(true)}
               className="min-w-0 truncate rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400 cursor-pointer"
             >
+              {shift.kassaName && <span className="font-semibold" data-testid="pos-kassa-name">{shift.kassaName} · </span>}
               <span className="hidden lg:inline">{shift.warehouseName} · </span>
               Naqd {fmt(num(shift.totalCash))} · Karta {fmt(num(shift.totalCard) + num(shift.totalBank))} · Jami{" "}
               {fmt(num(shift.totalSales))}

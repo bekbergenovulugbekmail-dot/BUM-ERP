@@ -20,6 +20,7 @@ import { useApiMutation, useApiQuery } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { cn } from "@/lib/utils.ts";
 import CashDocumentDialog from "./cash-document-dialog.tsx";
+import PosKassaBoard from "./pos-kassa-board.tsx";
 import { KIND_LABELS, TYPE_LABELS, localToday, money, type CashDocument, type CashDocumentKind, type CashRegister, type CashReport } from "../_lib/types.ts";
 
 export default function RegistersPanel() {
@@ -51,6 +52,7 @@ export default function RegistersPanel() {
 
   return (
     <div className="space-y-4" data-testid="registers-panel">
+      {can("sales.approve") && <PosKassaBoard />}
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {registers.map((row) => (
           <button

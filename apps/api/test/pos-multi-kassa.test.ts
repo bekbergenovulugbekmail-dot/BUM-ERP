@@ -167,6 +167,13 @@ describe("Ko'p kassa", () => {
     // Kutilgan = kassa balansi
     expect(n((await pos(ozoda.cookie, "GET", `/shifts/${s1}`)).json().shift.expectedCash)).toBe(10000);
     expect(n((await pos(diana.cookie, "GET", `/shifts/${s2}`)).json().shift.expectedCash)).toBe(15000);
+    expect((await pos(diana.cookie, "GET", `/shifts/${s2}`)).json().shift.kassaName).toBe("K2 · Kassa 2");
+
+    // Kassalar paneli: rahbar ko'radi, kassir — yo'q; begona kompaniya — o'z (bo'sh) ro'yxati
+    expect((await pos(ozoda.cookie, "GET", "/kassa-board")).statusCode).toBe(403);
+    const board = (await pos(company.ownerCookie, "GET", "/kassa-board")).json().kassas as { code: string; balance: string; openShift: { receiptCount: number } | null }[];
+    expect(board.map((k) => [k.code, n(k.balance), k.openShift?.receiptCount])).toEqual([["K1", 10000, 1], ["K2", 15000, 2], ["K3", 20000, 1]]);
+    expect((await pos(other.ownerCookie, "GET", "/kassa-board")).json().kassas).toEqual([]);
   });
 
   it("qaytarish, inkassatsiya, almashtirish puli, xarajat — shu kassada; takror so'rov ikkinchi marta yozilmaydi; yopish farqi kassaga", async () => {

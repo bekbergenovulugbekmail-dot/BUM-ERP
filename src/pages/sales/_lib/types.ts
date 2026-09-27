@@ -217,6 +217,9 @@ export type PosShift = {
   receiptCount: number;
   notes: string | null;
   warehouseName: string;
+  /** Kassa (pul qutisi) — "K1 · Kassa 1"; kassasiz (tarixiy) smena — null. */
+  kassaName?: string | null;
+  cashAccountId?: string | null;
   /** Boshlang'ich naqd + naqd tushum. */
   expectedCash: string;
   /** Chet valyutada: boshlang'ich naqd, naqd va karta tushumi, yopilishda sanalgan naqd — `{ USD: "20.00" }`. */
