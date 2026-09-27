@@ -5140,3 +5140,16 @@ naqd Kassa B da → panel → hisobot) ✓, `pos-session`, `pos-critical`, `supe
 **Cheklov (keyingi qadam):** desktop POS ilovasi hali to'lov usullari va sotuvchi tanlashni ko'rsatmaydi (server qabul qiladi;
 naqd kassaga baribir qurilma kassasi bo'yicha tushadi). Omborga kassa biriktirilgach, o'sha omborda web smena kassa tanlab ochiladi.
 **Keyingi qadam:** egasi ruxsati bilan deploy (0096–0098 production'da qo'llanadi), desktop ilovada usul/sotuvchi tanlash.
+
+### Production safety gate 0096–0098 (2026-09-27, faqat o'qish — deploy qilinmagan)
+
+Production bazasi (PG 18.6, 96 migratsiya, oxirgisi 0095 = `1790520000000`) `railway ssh` orqali READ ONLY REPEATABLE READ tranzaksiyada
+tekshirildi, hech narsa yozilmadi. Yangi ob'ektlar oldindan yo'q (nom to'qnashuvi yo'q). Jadvallar juda kichik (eng kattasi
+`journal_lines` 124 qator), ulanishlarda ochiq tranzaksiya yo'q. 3 kompaniyaning har birida bitta faol UZS asosiy kassa. 4 smena
+(ochiq: 1 web, 1 desktop), 3 qurilma (1 faol), terminal 0, bank 5, POS to'lovi 0. Barcha invariantlar 0 farq: jurnal D = K
+(10 765 300), hisob keshi = qatorlar, mijoz qarzi (1557) = jurnal, ta'minotchi qarzi = jurnal, qoldiq = harakatlar, kassa = harakatlar,
+taqsimot ≤ to'lov, begona kompaniya havolasi 0, takroriy ta'sir 0.
+Migratsiyalarda DML yo'q; `DROP INDEX ps_one_open_per_warehouse` shu tranzaksiyada teng shart bilan qayta yaratiladi. Barcha
+kutilayotgan migratsiyalar bitta tranzaksiyada (drizzle) — xato bo'lsa hech biri qo'llanmaydi. **Xulosa: SAFE TO DEPLOY.**
+Backup: Railway CLI'da zaxira buyrug'i yo'q, `bum-api` konteynerida `pg_dump` yo'q — **NOT VERIFIED**, deploydan oldin
+dashboard'da tekshirish kerak. Deploydan keyingi tekshiruv — o'sha skript, tarixiy jadvallar nazorat summalari solishtiriladi.
