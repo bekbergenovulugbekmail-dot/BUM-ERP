@@ -62,4 +62,14 @@ test("xarid oynasidan ta'minotchiga qaytarish: ikki marta bosish — bitta qayta
   expect(await debtOf(), "qarz 50 000 − 15 000 (bir marta)").toBe(35_000);
   const detail = (await api<{ order: { items: { returnedQty: string }[] } }>(page, "GET", `/api/purchase/orders/${order.id}`)).json.order;
   expect(Number(detail.items[0]!.returnedQty), "qaytarilgan jami 3").toBe(3);
+
+  // Ta'minotchi akti (AUD-020 UI): qabul 50 000 − qaytarish 15 000 = 35 000; kesh = jurnal
+  await page.keyboard.press("Escape");
+  await page.goto(appPath("purchase"));
+  await page.getByRole("tab", { name: /Yetkazuvchilar|Ta'minotchilar/ }).click();
+  await page.getByRole("button", { name: `Ta'minotchi ${stamp} hisob-kitob akti` }).click();
+  await expect(page.getByTestId("supplier-act")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("supplier-act-closing")).toHaveText(/35[\s ]?000/);
+  await expect(page.getByTestId("supplier-act-reconciled")).toBeVisible();
+  await page.screenshot({ path: "e2e/.screenshots/supplier-act.png" });
 });

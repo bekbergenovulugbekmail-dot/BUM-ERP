@@ -14,6 +14,7 @@ import { useApiMutation } from "@/lib/query.ts";
 import { usePermissions } from "@/hooks/use-company.ts";
 import { formatMoney, useCurrencies } from "@/hooks/use-currencies.ts";
 import SetBalanceDialog from "@/components/balances/set-balance-dialog.tsx";
+import SupplierStatementDialog from "./supplier-statement-dialog.tsx";
 import CsvToolbar from "@/components/csv/csv-toolbar.tsx";
 import { num, type Supplier } from "../_lib/types.ts";
 
@@ -49,6 +50,7 @@ export default function SuppliersTable({ suppliers }: Props) {
   /** Qarzni to'g'rilash — moliyaviy tasdiq ruxsati bilan. */
   const canAdjustDebt = can("finance.approve");
   const [adjusting, setAdjusting] = useState<Supplier | null>(null);
+  const [statementOf, setStatementOf] = useState<string | null>(null);
   const [form, setForm] = useState<SupplierForm>(EMPTY_FORM);
 
   const createSupplier = useApiMutation((body: SupplierForm) =>
@@ -184,6 +186,10 @@ export default function SuppliersTable({ suppliers }: Props) {
                     <p className="font-medium">{s.paymentTermDays} kun</p>
                   </div>
                 </div>
+                <Button size="sm" variant="secondary" className="mt-3 mr-2" aria-label={`${s.name} hisob-kitob akti`} onClick={() => setStatementOf(s.id)}>
+                  Akt
+                </Button>
+                {statementOf === s.id && <SupplierStatementDialog supplierId={s.id} onClose={() => setStatementOf(null)} />}
                 {canAdjustDebt && (
                   <Button
                     size="sm"
