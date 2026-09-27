@@ -5230,3 +5230,11 @@ Read-only audit 11:38Z: invariantlar 0 farq, tenantlar kesimidagi baseline bir x
 kassa harakatlari, jurnal, kassalar, terminal, qurilma) — o'zgarmagan; yangi ustunlar hammasi NULL, `payment_methods` bo'sh,
 2 ochiq smena kassasiz (tarixiy xulq). Funksional smoke test productionda **qilinmadi** (jonli tenantlarga test yozuvi kerak bo'ladi —
 egasi ruxsatini kutadi). Backup `d33c4d9c…` o'zgarmagan.
+
+### Post-deploy test muhiti discovery (2026-09-27 ~12:00Z, faqat o'qish) — TEST ENVIRONMENT NOT AVAILABLE
+
+Production'da 3 tenant: Bonnu Market, Distributsiya (bo'sh: 0 mahsulot/mijoz/sotuv, 1 xodim, POS kassa yo'q), Ezo. Nomi/slug'i
+test/demo/qa/staging/sandbox/acceptance ga mos tenant yoki ombor **yo'q**; POS kassa, to'lov usuli, terminal — hech bir tenantda yo'q.
+Bazadagi kompaniyalararo havolalar (qoldiq, buyurtma, to'lov, kassa, smena, qurilma, sotuvchi, usul) — 0. API: 17 GET marshrut login'siz
+va `x-bum-company` bilan ham 401, noma'lum — 404; UI sahifalari 200 (SPA). Discovery oldidan va keyin: tenantlar kesimi, invariantlar
+va tarixiy nazorat summalari bir xil. Funksional smoke test uchun alohida muhit kerak — egasi qarorini kutadi.
