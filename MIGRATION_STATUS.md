@@ -5443,3 +5443,28 @@ Tuzatish yo'llari (egasi tanlaydi): (a) pul haqiqatan shu kassadan chiqqan bo'ls
 haqiqiy holatga keltirish; (b) pul boshqa kassadan/hisobdan chiqqan bo'lsa — to'lovni bekor qilib, to'g'ri hisobdan
 qayta yozish. Kod tomonidan qo'shimcha tuzatish talab qilinmaydi.
 
+### Ikkinchi deploy (2026-09-28 11:17Z) va qolgan ochiq bandlar
+
+`fc6f862` — `bum-web` deployment `af5e2a64…` SUCCESS (yangi `build.json`, sayt 200, `/api/auth/me` 401).
+Kassalar bo'limida manfiy qoldiqli kassa uchun ogohlantirish bloki va qizil summa; smena ochish oynasida
+kassirga darhol ogohlantirish. Frontend 52 fayl / 314 test, tsc va eslint toza.
+
+**"Kassa ≠ jurnal" farqi yo'q ekan:** naqd kassalar ichida valyutali kassa ham bor — uning qoldig'i o'z valyutasida,
+jurnal 1010 esa asosiy valyutada. Kurs bilan hisoblanganda ikkalasi teng (oldingi bo'limdagi "farq" — solishtirish
+xatosi, kod muammosi emas).
+
+**Domenlar:** `app.bum-erp.uz` va `www.bum-erp.uz` — Railway'da ro'yxatdan o'tgan, sertifikat VALID, ikkalasi ishlaydi.
+`bum-erp.uz` (apex) Railway'da YO'Q va DNS'da boshqa serverga qaragan — brauzerda sertifikat xatosi beradi.
+Tarif 2 ta custom domenga ruxsat beradi, shuning uchun apex uchun: (a) DNS provayderida apex'ni `app.bum-erp.uz` ga
+yo'naltirish (redirect), yoki (b) `www` ni olib tashlab apex'ni qo'shish, yoki (c) tarifni kengaytirish — egasi tanlaydi.
+
+**Kutilayotgan (egasi harakati kerak):**
+1. `WEB_ORIGIN` hali `https://bum-erp.uz` — ya'ni CORS ro'yxatida biz boshqarmaydigan serverdagi domen turibdi.
+   To'g'ri qiymat — `https://app.bum-erp.uz` (mobil ilova va admin havolalari ham shu domenda). O'zgaruvchini
+   o'zgartirish avtomatik rejimda bloklandi ("Modify Shared Resources") — egasi o'zi bajaradi:
+   `railway variables --project <id> --environment production --service bum-api --set "WEB_ORIGIN=https://app.bum-erp.uz"`.
+2. Manfiy qoldiqli kassani to'g'rilash (yuqoridagi (a) yoki (b)) — shundan keyin navbatdagi naqd chek ham sinxronlanadi.
+3. Maosh **accrual** — hali qaror yo'q, kod naqd asosda qoldi (ataylab).
+4. Desktop kassa yangiliklari (savatni tozalash, ekran masshtabi, sotuvchi, chekdagi soliq) — yangi `.exe` relizi
+   yig'ilib, Admin panel → "Desktop kassa" orqali yuklanishi kerak; bu Railway deployiga kirmaydi.
+
