@@ -275,6 +275,8 @@ const supplierDebtBody = z.strictObject({
    * qoldiq (boshqa tizimdan ko'chirish): farq Ustav kapitaliga (3000), foyda-zararga tushmaydi (CSV import bilan bir xil qoida).
    */
   counter: z.enum(["pnl", "equity"]).optional(),
+  /** AUD-014: qaysi valyuta qoldig'i to'g'rilanadi (berilmasa — asosiy; valyutali qoldig'i bor ta'minotchida majburiy). */
+  currency: currencyCode.optional(),
 });
 const orderParams = z.object({ orderId: z.uuid() });
 const supplierPaymentParams = z.object({ paymentId: z.uuid() });

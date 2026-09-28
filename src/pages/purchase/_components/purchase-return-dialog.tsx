@@ -40,6 +40,10 @@ export default function PurchaseReturnDialog({ orderId, orderNumber, items, onCl
     .map(({ item, left }) => ({ item, left, qty: Number((quantities[item.id] ?? "").replace(",", ".")) }))
     .filter((line) => line.qty > 0);
   const over = lines.find((line) => line.qty > line.left);
+  // AUD-015: qaytgan pul qaytarilayotgan tovar valyutasida (server ham tekshiradi); turli valyuta — pulni alohida kiriting
+  const lineCurrencies = [...new Set(lines.map((line) => line.item.currency ?? null))];
+  const refundCurrency = lineCurrencies.length === 1 ? lineCurrencies[0] : null;
+  const mixedCurrencies = lineCurrencies.length > 1;
   const refund = Number(refundAmount.replace(/\s/g, "").replace(",", ".") || "0");
 
   const handleSave = async () => {
@@ -47,6 +51,7 @@ export default function PurchaseReturnDialog({ orderId, orderNumber, items, onCl
     if (over) return toast.error(`${over.item.productName}: ko'pi bilan ${qtyText(over.left)}`);
     if (reason.trim().length < 3) return toast.error("Qaytarish sababini yozing");
     if (Number.isNaN(refund) || refund < 0) return toast.error("Qaytgan pul summasi noto'g'ri");
+    if (refund > 0 && mixedCurrencies) return toast.error("Turli valyutadagi tovarlar uchun qaytgan pulni har valyuta bo'yicha alohida qaytarishda kiriting");
     try {
       await submit.mutateAsync({
         items: lines.map((line) => ({ orderItemId: line.item.id, quantity: String(line.qty) })),
@@ -98,7 +103,9 @@ export default function PurchaseReturnDialog({ orderId, orderNumber, items, onCl
             </div>
             <div className="grid grid-cols-[1fr_auto] items-end gap-2">
               <div>
-                <Label htmlFor="purchase-return-refund">Ta'minotchi qaytargan pul (ixtiyoriy)</Label>
+                <Label htmlFor="purchase-return-refund">
+                  Ta'minotchi qaytargan pul{refundCurrency ? ` (${refundCurrency})` : ""} (ixtiyoriy)
+                </Label>
                 <Input id="purchase-return-refund" inputMode="decimal" placeholder="0" value={refundAmount} onChange={(e) => setRefundAmount(e.target.value)} />
               </div>
               <select

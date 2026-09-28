@@ -29,10 +29,11 @@ import { unitFactorToBase } from "../catalog/conversions.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
 import { ledgerAccountFor, recordCashTransaction, resolvePaymentAccount, todayIso } from "../finance/cash.service.js";
-import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { currencyRate } from "../finance/currencies.service.js";
+import { ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { moveStock } from "../inventory/stock.service.js";
 import { assertWarehouseAccess } from "../inventory/warehouses.service.js";
-import { applySupplierBalance } from "./supplier-balances.service.js";
+import { applySupplierBalance, lockSupplierBalance } from "./supplier-balances.service.js";
 import { purchaseAudit } from "./suppliers.service.js";
 
 export type PurchaseReturnConflict = { kind: string; details: Record<string, unknown> };
@@ -171,9 +172,17 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
 
   const refund = input.refund ? { amount: toMinor(input.refund.amount), method: input.refund.method, cashAccountId: input.refund.cashAccountId ?? null } : null;
   if (refund && refund.amount <= 0n) throw badRequest("Qaytgan pul summasi musbat bo'lishi kerak");
+  // AUD-015: qaytgan pul qaytarilgan tovar VALYUTASIDA (buyurtma qatori valyutasi; null — asosiy). Aralash valyutali
+  // qaytarishda bitta summa qaysi valyutaga tegishli ekani noaniq — jim konvertatsiya o'rniga rad etiladi.
+  const refundCurrencies = new Set(lines.map((line) => line.row.currency ?? null));
+  if (refund && refundCurrencies.size > 1) {
+    throw badRequest("Turli valyutadagi tovarlar qaytarilganda pul qaytarishni har valyuta uchun alohida qaytarish bilan kiriting");
+  }
+  const refundForeignCurrency = [...refundCurrencies][0] ?? null;
+  const refundLimit = refundForeignCurrency ? lines.reduce((sum, line) => sum + line.foreign, 0n) : total;
   // Qaytgan pul qaytarilgan tovar qiymatidan oshmaydi — aks holda kassaga yo'q pul va ta'minotchiga soxta qarz yoziladi
-  if (refund && refund.amount > total) {
-    throw badRequest(`Qaytgan pul qaytarilgan tovar qiymatidan (${fromMinor(total)}) oshmasligi kerak`);
+  if (refund && refund.amount > refundLimit) {
+    throw badRequest(`Qaytgan pul qaytarilgan tovar qiymatidan (${fromMinor(refundLimit)}${refundForeignCurrency ? ` ${refundForeignCurrency}` : ""}) oshmasligi kerak`);
   }
 
   const date = offline ? offline.occurredAt.toISOString().slice(0, 10) : todayIso();
@@ -302,10 +311,26 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
   if (refund) {
     const amount = fromMinor(refund.amount);
     const description = `Ta'minotchidan qaytgan pul: ${number}`;
+    // AUD-015: o'z valyutasidagi kassaga va o'z valyutasi qoldig'iga. Asosiy valyutadagi qiymat — bugungi kurs; kreditorlar
+    // kitobidan esa ta'minotchi to'lovidagi kabi ulush (qoldiqning kitob qiymati bo'yicha), farq — kurs farqi (4200/5700).
+    const currency = refundForeignCurrency ?? baseCurrency;
+    const rateMinor = toMinor(currency === baseCurrency ? "1" : await currencyRate(tx, companyId, currency), 4);
+    const baseAmount = rescale(refund.amount * rateMinor, 6, 2);
+    const balance = await lockSupplierBalance(tx, companyId, order.supplierId, currency);
+    const credit = -toMinor(balance.debt);
+    const creditBook = -toMinor(balance.bookValue);
+    let bookIncrease = baseAmount;
+    if (credit > 0n && creditBook > 0n) {
+      const covered = refund.amount < credit ? refund.amount : credit;
+      const coveredBook = covered === credit ? creditBook : mulDivRound(creditBook, covered, credit);
+      bookIncrease = coveredBook + rescale((refund.amount - covered) * rateMinor, 6, 2);
+    }
+    const fx = baseAmount - bookIncrease;
     const { account } = await recordCashTransaction(tx, companyId, tenant.user.id, {
-      cashAccountId: await resolvePaymentAccount(tx, companyId, refund.method, refund.method === "cash" ? refund.cashAccountId : null),
+      cashAccountId: await resolvePaymentAccount(tx, companyId, refund.method, refund.method === "cash" ? refund.cashAccountId : null, currency),
       type: "in",
       amount,
+      currency,
       txDate: date,
       description,
       category: "purchase_refund",
@@ -319,17 +344,19 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
       referenceType: "purchase_return_refund",
       referenceId: returnId,
       lines: [
-        { accountId: await ledgerAccountFor(tx, companyId, account), debit: amount },
-        { accountId: payable, credit: amount },
+        { accountId: await ledgerAccountFor(tx, companyId, account), debit: fromMinor(baseAmount) },
+        { accountId: payable, credit: fromMinor(bookIncrease) },
+        ...(fx > 0n ? [{ accountId: await ensureAccountBySubtype(tx, companyId, "fx_gain"), credit: fromMinor(fx) }] : []),
+        ...(fx < 0n ? [{ accountId: await ensureAccountBySubtype(tx, companyId, "fx_loss"), debit: fromMinor(-fx) }] : []),
       ],
     });
     await applySupplierBalance(tx, {
       companyId,
       userId: tenant.user.id,
       supplierId: order.supplierId,
-      currency: baseCurrency,
+      currency,
       debtDelta: refund.amount,
-      bookDelta: refund.amount,
+      bookDelta: bookIncrease,
       date,
       description,
     });

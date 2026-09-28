@@ -11,16 +11,17 @@
  *    faqat qabul va to'lovdan o'zgaradi
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, ilike, ne, or, sql } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "@bum/shared";
-import { purchaseOrders, suppliers } from "../../db/schema/purchase.js";
+import { purchaseOrders, supplierBalances, suppliers } from "../../db/schema/purchase.js";
 import type { DbOrTx, Tx } from "../../db/transaction.js";
 import { writeAuditLog, type RequestMeta } from "../../shared/audit.js";
-import { fromMinor, toMinor } from "../../shared/decimal.js";
+import { fromMinor, mulDivRound, rescale, toMinor } from "../../shared/decimal.js";
 import { nextDocumentNumber } from "../../shared/numbering.js";
-import { applySupplierBalance, supplierDebtsByCurrency } from "./supplier-balances.service.js";
+import { applySupplierBalance, lockSupplierBalance, supplierDebtsByCurrency } from "./supplier-balances.service.js";
 import type { TenantContext } from "../company/tenant.js";
 import { companyCurrency } from "../finance/accounts.service.js";
+import { currencyRate } from "../finance/currencies.service.js";
 import { assertPeriodOpen, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 
 const { legacyId: _legacyId, companyId: _companyId, ...supplierFields } = getTableColumns(suppliers);
@@ -181,7 +182,7 @@ export async function setSupplierDebt(
   tx: Tx,
   tenant: TenantContext,
   supplierId: string,
-  input: { totalDebt: string; reason: string; date?: string; counter?: "pnl" | "equity" },
+  input: { totalDebt: string; reason: string; date?: string; counter?: "pnl" | "equity"; currency?: string },
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
@@ -200,14 +201,38 @@ export async function setSupplierDebt(
     .for("update");
   if (!current) throw notFound("Ta'minotchi topilmadi");
 
-  const currency = await companyCurrency(tx, companyId);
-  if (current.currency !== currency) {
-    throw badRequest(`To'g'rilash faqat asosiy valyutadagi (${currency}) ta'minotchida`);
+  // AUD-014 (egasi qarori): har valyuta alohida — delta faqat ko'rsatilgan valyuta qoldig'iga. Valyutasiz so'rov faqat
+  // asosiy valyuta qoldig'i uchun; ta'minotchida boshqa valyutada qoldiq bo'lsa — rad (yig'indi UZS ga jim yozilmaydi).
+  const baseCurrency = await companyCurrency(tx, companyId);
+  if (!input.currency) {
+    const [foreign] = await tx
+      .select({ currency: supplierBalances.currency })
+      .from(supplierBalances)
+      .where(and(eq(supplierBalances.supplierId, supplierId), ne(supplierBalances.currency, baseCurrency), sql`(${supplierBalances.debt} <> 0 or ${supplierBalances.bookValue} <> 0)`))
+      .limit(1);
+    if (foreign) throw badRequest(`Ta'minotchida ${foreign.currency} qoldig'i bor — to'g'rilanadigan valyutani ko'rsating`, { reason: "currency_required" });
   }
-  const delta = target - toMinor(current.totalDebt);
+  const currency = input.currency ?? baseCurrency;
+  const balance = await lockSupplierBalance(tx, companyId, supplierId, currency);
+  const debt = toMinor(balance.debt);
+  const book = toMinor(balance.bookValue);
+  const delta = target - debt;
   if (delta === 0n) return { supplier: current, delta: "0.00" };
+  // Asosiy valyutada kitob = qarz. Valyutada: kamayish — qoldiq kitob qiymatining ulushi (kurs farqi emas), oshish — joriy kurs
+  let bookDelta = delta;
+  if (currency !== baseCurrency) {
+    const rateMinor = toMinor(await currencyRate(tx, companyId, currency), 4);
+    if (delta < 0n && debt > 0n && book > 0n) {
+      const covered = -delta < debt ? -delta : debt;
+      const coveredBook = covered === debt ? book : mulDivRound(book, covered, debt);
+      bookDelta = -(coveredBook + rescale((-delta - covered) * rateMinor, 6, 2));
+    } else {
+      bookDelta = delta < 0n ? -rescale(-delta * rateMinor, 6, 2) : rescale(delta * rateMinor, 6, 2);
+    }
+  }
+  if (bookDelta === 0n) throw badRequest("To'g'rilash summasi asosiy valyutada nolga teng — kursni tekshiring");
 
-  const amount = fromMinor(delta > 0n ? delta : -delta);
+  const amount = fromMinor(bookDelta > 0n ? bookDelta : -bookDelta);
   const payable = await requireAccountBySubtype(tx, companyId, "payable", "liability", "Kreditorlar");
   // AUD-004: boshlang'ich qoldiq — Ustav kapitali (foyda-zararga tushmaydi); tuzatish — boshqa xarajat/daromad
   const opening = input.counter === "equity";
@@ -219,7 +244,7 @@ export async function setSupplierDebt(
     referenceType: "supplier_debt_adjustment",
     referenceId: randomUUID(),
     lines:
-      delta > 0n
+      bookDelta > 0n
         ? [
             { accountId: opening ? await equity() : await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"), debit: amount },
             { accountId: payable, credit: amount },
@@ -229,14 +254,14 @@ export async function setSupplierDebt(
             { accountId: opening ? await equity() : await requireAccountBySubtype(tx, companyId, "other", "income", "Boshqa daromadlar"), credit: amount },
           ],
   });
-  // Asosiy valyutada qarz va kitob qiymati teng — `total_debt` shu yerda yangilanadi
+  // `total_debt` (kitob qiymatlari yig'indisi) shu yerda yangilanadi
   await applySupplierBalance(tx, {
     companyId,
     userId: tenant.user.id,
     supplierId,
     currency,
     debtDelta: delta,
-    bookDelta: delta,
+    bookDelta,
     date,
     description: `Qarz to'g'rilandi — ${reason}`,
   });
@@ -245,7 +270,7 @@ export async function setSupplierDebt(
     action: "SUPPLIER_DEBT_ADJUSTED",
     resource: "suppliers",
     resourceId: supplierId,
-    details: { reason, counter: input.counter ?? "pnl", before: current.totalDebt, after: fromMinor(target), delta: fromMinor(delta) },
+    details: { reason, counter: input.counter ?? "pnl", currency, before: fromMinor(debt), after: fromMinor(target), delta: fromMinor(delta), bookDelta: fromMinor(bookDelta) },
   });
   const [fresh] = await tx.select(supplierFields).from(suppliers).where(eq(suppliers.id, supplierId));
   return { supplier: fresh!, delta: fromMinor(delta) };
