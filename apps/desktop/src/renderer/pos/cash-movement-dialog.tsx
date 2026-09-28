@@ -17,8 +17,8 @@ const HINTS: Record<CashMovementKind, string> = {
   collection: "Naqdni kassadan seyf yoki bankka olish",
   change_fund: "Maydalash uchun kassaga pul qo'yish",
   expense: "Kassadan to'langan xarajat — xarajatlar ro'yxatiga tushadi",
-  other_in: "Boshqa sabab bilan kassaga kirim",
-  other_out: "Boshqa sabab bilan kassadan chiqim",
+  other_in: "Asosiy kassadan pul olish — ichki o'tkazma, daromad emas",
+  other_out: "Pulni asosiy kassaga topshirish — ichki o'tkazma; real xarajat — «Kassadan xarajat»",
 };
 
 /** Kassaga kirim yoki chiqim (inkassatsiya, xarajat) — internet bo'lmasa ham yoziladi. */

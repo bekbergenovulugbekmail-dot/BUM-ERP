@@ -75,8 +75,8 @@ export const CASH_KIND_LABELS: Record<string, string> = {
   collection: "Inkassatsiya",
   change_fund: "Almashtirish puli",
   expense: "Kassadan xarajat",
-  other_in: "Boshqa kirim",
-  other_out: "Boshqa chiqim",
+  other_in: "Asosiy kassadan olish",
+  other_out: "Asosiy kassaga topshirish",
 };
 
 export const PAYMENT_LABELS: Record<string, string> = { cash: "Naqd", card: "Karta", bank: "Bank", transfer: "O'tkazma", balance: "Mijoz balansiga" };

@@ -43,8 +43,9 @@ const LABELS: Record<ShiftCashMovementKind, string> = {
   collection: "Inkassatsiya",
   change_fund: "Almashtirish puli",
   expense: "Kassadan xarajat",
-  other_in: "Kassaga kirim",
-  other_out: "Kassadan chiqim",
+  // AUD-016 (egasi qarori): real kirim/xarajat emas — asosiy kassa bilan ichki o'tkazma; real chiqim faqat `expense`
+  other_in: "Asosiy kassadan olish",
+  other_out: "Asosiy kassaga topshirish",
   supplier_payment: "Ta'minotchiga to'lov",
   supplier_refund: "Ta'minotchidan qaytgan pul",
 };

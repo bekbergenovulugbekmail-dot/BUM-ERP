@@ -130,6 +130,8 @@ export const RU_PHRASES: Record<string, string> = {
   "Kassadan xarajat": "Расход из кассы",
   "Boshqa kirim": "Прочий приход",
   "Boshqa chiqim": "Прочий расход",
+  "Asosiy kassadan olish": "Получение из основной кассы",
+  "Asosiy kassaga topshirish": "Сдача в основную кассу",
   "Naqd": "Наличные",
   "Karta": "Карта",
   "Bank": "Банк",
@@ -365,6 +367,8 @@ export const RU_PHRASES: Record<string, string> = {
   "Kassadan to'langan xarajat — xarajatlar ro'yxatiga tushadi": "Расход, оплаченный из кассы — попадёт в список расходов",
   "Boshqa sabab bilan kassaga kirim": "Внесение в кассу по другой причине",
   "Boshqa sabab bilan kassadan chiqim": "Выдача из кассы по другой причине",
+  "Asosiy kassadan pul olish — ichki o'tkazma, daromad emas": "Получение денег из основной кассы — внутреннее перемещение, не доход",
+  "Pulni asosiy kassaga topshirish — ichki o'tkazma; real xarajat — «Kassadan xarajat»": "Сдача денег в основную кассу — внутреннее перемещение; реальный расход — «Расход из кассы»",
   "kassa, transport, kommunal…": "касса, транспорт, коммунальные…",
 
   // ─── Kassa bo'limi (kassa-screen.tsx) ───
@@ -1097,6 +1101,8 @@ export const RU_PATTERNS: [string, string][] = [
   ["Kassadan xarajat ({})", "Расход из кассы ({})"],
   ["Boshqa kirim ({})", "Прочий приход ({})"],
   ["Boshqa chiqim ({})", "Прочий расход ({})"],
+  ["Asosiy kassadan olish ({})", "Получение из основной кассы ({})"],
+  ["Asosiy kassaga topshirish ({})", "Сдача в основную кассу ({})"],
   ["· {} (valyutada)", "· {} (в валюте)"],
   ["{} (valyutada)", "{} (в валюте)"],
   ["{}: {} qabul qilindi", "{}: принято {}"],

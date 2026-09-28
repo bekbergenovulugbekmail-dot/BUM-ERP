@@ -335,8 +335,9 @@ export const CASH_KINDS: Record<CashMovementKind, { type: "in" | "out"; label: s
   collection: { type: "out", label: "Inkassatsiya" },
   change_fund: { type: "in", label: "Almashtirish puli" },
   expense: { type: "out", label: "Kassadan xarajat" },
-  other_in: { type: "in", label: "Boshqa kirim" },
-  other_out: { type: "out", label: "Boshqa chiqim" },
+  // AUD-016: asosiy kassa bilan ichki o'tkazma (xarajat emas)
+  other_in: { type: "in", label: "Asosiy kassadan olish" },
+  other_out: { type: "out", label: "Asosiy kassaga topshirish" },
 };
 
 const METHOD_LABELS: Record<string, string> = {
