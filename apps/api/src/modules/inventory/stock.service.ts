@@ -57,6 +57,13 @@ export type StockMove = {
   quantity: string;
   /** Faqat kirimda (receive, transfer_in, return_in) AVCO ni o'zgartiradi. */
   costPrice?: string | null;
+  /**
+   * Faqat chiqimda, ixtiyoriy (AUD-022 — ta'minotchiga qaytarish): ombordan shu QIYMAT (asosiy valyuta, 2 kasr) chiqariladi
+   * va qolgan zaxira uchun AVCO qayta hisoblanadi. Qolgan baho manfiy bo'lmaydi; qoldiq 0 bo'lsa hammasi chiqadi, AVCO
+   * o'zgarmaydi. Haqiqatda chiqqan qiymat `valueOut` da qaytadi: ombor bahosi (qty × AVCO) farqi, shuning uchun
+   * 1200 = Σ round(qty × AVCO, 2) invarianti saqlanadi. Berilmasa — avvalgidek joriy AVCO bilan chiqim.
+   */
+  outValue?: string | null;
   batchId?: string | null;
   zoneId?: string | null;
   referenceType?: string | null;
@@ -144,10 +151,28 @@ export async function moveStock(tx: Tx, companyId: string, performedBy: string |
   // Nol tannarxli kirim (bepul tovar) ham o'rtachani kamaytiradi; tannarx berilmasa o'zgarmaydi.
   // Qoldiq nol yoki manfiy bo'lsa (offline sotuvdan keyin) o'rtacha — kirim tannarxi (manfiy miqdor bilan tortish ma'nosiz).
   const updatesCost = INCOMING.has(move.type) && move.costPrice != null;
+  // AUD-022: qiymat bilan chiqim — qator qulflangan, hisob JS'da (bigint). Baho = round(qty × AVCO, 2).
+  let outAvg: string | null = null;
+  let valueOut: bigint | null = null;
+  if (!incoming && move.outValue != null) {
+    const before = signedQtyMinor(level!.quantity);
+    const avg = toMinor(level!.avgCostPrice, 4);
+    const after = before + signedQtyMinor(delta);
+    const valueOf = (qty: bigint, cost: bigint) => (qty < 0n ? -rescale(-qty * cost, 8, 2) : rescale(qty * cost, 8, 2));
+    const valueBefore = valueOf(before, avg);
+    let avgAfter = avg;
+    if (before > 0n && after > 0n) {
+      const remaining = valueBefore - toMinor(move.outValue);
+      avgAfter = remaining > 0n ? mulDivRound(remaining, 1_000_000n, after) : 0n;
+      outAvg = fromMinor(avgAfter, 4);
+    }
+    valueOut = valueBefore - valueOf(after, avgAfter);
+  }
   const [updated] = await tx
     .update(stockLevels)
     .set({
       quantity: sql`${stockLevels.quantity} + ${delta}::numeric`,
+      ...(outAvg !== null ? { avgCostPrice: outAvg } : {}),
       ...(updatesCost
         ? {
             avgCostPrice: sql`case when ${stockLevels.quantity} <= 0 then round(${move.costPrice}::numeric, 4)
@@ -187,6 +212,11 @@ export async function moveStock(tx: Tx, companyId: string, performedBy: string |
   if (move.allowNegative && !incoming && toMinor(issueCost, 4) === 0n && !product.purchaseCurrency) {
     issueCost = product.purchasePrice;
   }
+  // Qiymat bilan chiqimda harakat narxi — haqiqatda chiqqan qiymatning bir donaga ulushi (ma'lumot uchun)
+  if (valueOut !== null) {
+    const magnitudeMinor = toMinor(magnitude, 4);
+    issueCost = fromMinor(valueOut > 0n ? mulDivRound(valueOut, 1_000_000n, magnitudeMinor) : 0n, 4);
+  }
 
   const [movement] = await tx
     .insert(stockMovements)
@@ -214,7 +244,7 @@ export async function moveStock(tx: Tx, companyId: string, performedBy: string |
     txMovements.set(tx, moved);
   }
 
-  return { movement: movement!, level: updated };
+  return { movement: movement!, level: updated, valueOut: valueOut === null ? null : fromMinor(valueOut) };
 }
 
 // ─── O'qish ──────────────────────────────────────────────────────────────────

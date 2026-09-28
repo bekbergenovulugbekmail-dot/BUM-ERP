@@ -208,6 +208,8 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
 
   const baseCurrency = await companyCurrency(tx, companyId);
   const byCurrency = new Map<string, { foreign: bigint; base: bigint }>();
+  /** Ombordan haqiqatda chiqqan baho (AUD-022) — hujjat qiymatidan faqat yaxlitlash/chekka holatda farq qiladi. */
+  let inventoryOut = 0n;
   for (const line of lines) {
     const factor = toMinor(await unitFactorToBase(tx, companyId, line.product, line.row.unitId), 4);
     const baseQty = rescale(line.qty * factor, 8, 4);
@@ -223,17 +225,20 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
       currency: line.row.currency,
       foreignTotal: fromMinor(line.foreign),
     });
-    const { level } = await moveStock(tx, companyId, tenant.user.id, {
+    // AUD-022 (egasi qarori): qaytarilayotgan partiyaning xarid narxida chiqadi, qolgan zaxira AVCO si qayta hisoblanadi
+    const { level, valueOut } = await moveStock(tx, companyId, tenant.user.id, {
       type: "return_out",
       productId: line.row.productId,
       warehouseId: order.warehouseId,
       quantity: fromMinor(baseQty, 4),
+      outValue: fromMinor(line.value),
       referenceType: "purchase_return",
       referenceId: returnId,
       notes: `Ta'minotchiga qaytarish: ${number} (${order.number})`,
       occurredAt: offline?.occurredAt,
       allowNegative: offline !== undefined,
     });
+    inventoryOut += toMinor(valueOut ?? "0");
     const after = toMinor(level.quantity, 4);
     if (after < 0n) {
       conflicts.push({
@@ -257,6 +262,10 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
 
   const payable = await requireAccountBySubtype(tx, companyId, "payable", "liability", "Kreditorlar");
   if (total > 0n) {
+    // Ta'minotchi qarzi — hujjat (xarid) qiymatida; 1200 — ombordan haqiqatda chiqqan baho. Farq (AVCO 4 kasr yaxlitlashi
+    // yoki qolgan baho partiya narxidan kam bo'lgan chekka holat) — tannarx tuzatmasi (5000): 1200 = ombor bahosi.
+    const difference = total - inventoryOut;
+    const cogs = difference !== 0n ? await requireAccountBySubtype(tx, companyId, "cogs", "expense", "Tovar tannarxi") : null;
     await postJournalEntry(tx, companyId, tenant.user.id, {
       party: { type: "supplier", id: order.supplierId },
       entryDate: date,
@@ -265,7 +274,10 @@ export async function returnPurchaseItems(tx: Tx, tenant: TenantContext, orderId
       referenceId: returnId,
       lines: [
         { accountId: payable, debit: fromMinor(total) },
-        { accountId: await requireAccountBySubtype(tx, companyId, "inventory", "asset", "Tovar zaxirasi"), credit: fromMinor(total) },
+        ...(inventoryOut > 0n ? [{ accountId: await requireAccountBySubtype(tx, companyId, "inventory", "asset", "Tovar zaxirasi"), credit: fromMinor(inventoryOut) }] : []),
+        ...(inventoryOut < 0n ? [{ accountId: await requireAccountBySubtype(tx, companyId, "inventory", "asset", "Tovar zaxirasi"), debit: fromMinor(-inventoryOut) }] : []),
+        ...(difference > 0n ? [{ accountId: cogs!, credit: fromMinor(difference), description: "Qaytarish: tannarx tuzatmasi" }] : []),
+        ...(difference < 0n ? [{ accountId: cogs!, debit: fromMinor(-difference), description: "Qaytarish: tannarx tuzatmasi" }] : []),
       ],
     });
   }
