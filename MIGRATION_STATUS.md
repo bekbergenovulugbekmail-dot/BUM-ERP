@@ -5506,8 +5506,24 @@ naqd tushum 1010 ga tushib 1020 nolda qoladi), `tsc --noEmit` toza.
 Deploy: `bum-api` `9137013a…` SUCCESS (2026-09-28 16:07Z) — "Migratsiyalar qo'llandi" bir marta, server tinglayapti,
 tashqaridan `/api/auth/me` 401, `app.bum-erp.uz` 200. Sxema migratsiyasi kerak emas (oxirgisi 0099).
 
-**NOT VERIFIED — production'da mavjud bog'lanishlar.** Yangi tekshiruv faqat yangi/tahrirlangan bog'lanishga ta'sir
-qiladi; bazada allaqachon noto'g'ri bog'langan kassa bor-yo'qligi tekshirilmadi: `railway ssh` orqali read-only
-so'rov auto-rejim klassifikatori tomonidan bloklandi ("Production Reads"). Egasi ruxsat bersa, `cash_accounts` ⋈
-`accounts` bo'yicha bir martalik read-only so'rov mos kelmagan bog'lanishlarni ko'rsatadi; topilsa — bu moliyaviy
-ma'lumot, tuzatish (hisobni almashtirish va kerak bo'lsa jurnalni to'g'rilash) egasi qarori bilan qilinadi.
+**PRODUCTION READ-ONLY AUDIT (2026-09-28, egasi ruxsati bilan) — CASH LEDGER INTEGRITY = FAIL, mismatch = 2.**
+So'rovlar `railway ssh --service bum-api -- node` orqali, `set default_transaction_read_only = on` + `begin read only`
+bilan bajarildi (`show transaction_read_only` = `on` tekshirildi, oxirida `rollback`). HECH QANDAY yozuv, migratsiya
+yoki tuzatish qilinmadi. Bog'langan kassalar: 2 ta (ikkalasi ham mos emas); bog'lanmagan: 10 ta (3 naqd, 5 bank,
+2 karta) — ular turi bo'yicha umumiy 1010/1020 ga yozadi, muammo yo'q.
+
+1. **Bonnu Market** (`1b83a193…`) — kassa "Asosiy kassa" (`e109bad9…`, turi `cash`, UZS, faol) → hisob **1020
+   "Bank hisobi"** (`891237cf…`, subtype `bank`). Kutilgan: `cash` (1010). Kassa harakatlari: 13 ta, 604 580 so'm
+   (2026-09-11 … 2026-09-28). Noto'g'ri hisobga aynan shu kassadan tushgan jurnal satrlari: **2 ta, debet
+   114 100 so'm** (qolgan satrlar haqiqiy bank kassalaridan — ular 1020 ga to'g'ri tushgan). Ko'rinadigan oqibat:
+   1010 "Naqd kassa" = **−57 360**, 1020 = 327 580, bank kassalari yig'indisi esa 33 480.
+2. **Ezo** (`5acffa9a…`) — kassa "Yetkazuvchi DA-002 — yo'ldagi naqd" (`a9263b08…`, turi `cash`, UZS, faol) → hisob
+   **1100 "Debitorlar"** (`e521c5b8…`, subtype `receivable`). Kutilgan: `cash` (1010). Kassa harakatlari: 2 ta,
+   40 000 so'm (2026-09-23). Shu kassadan noto'g'ri hisobga tushgan satr: **1 ta, kredit 20 000 so'm**.
+
+Kassaning o'z qoldig'i (`cash_accounts.balance`) to'g'ri — xato faqat buxgalteriya jurnalining qaysi hisobiga
+tushganida. Ya'ni naqd pul balansda bank/debitor sifatida ko'rinadi, 1010 esa manfiy chiqadi.
+
+**REPAIR REQUIRED — OWNER APPROVAL NEEDED.** Tuzatish ikki qadam: (a) kassaning `ledger_account_id` ni to'g'ri
+hisobga o'tkazish (endi API o'zi tekshiradi — noto'g'ri hisob qabul qilinmaydi); (b) allaqachon yozilgan satrlarni
+to'g'rilovchi jurnal yozuvi. Ikkalasi ham moliyaviy ma'lumotga tegadi — egasining alohida ruxsatisiz qilinmaydi.
