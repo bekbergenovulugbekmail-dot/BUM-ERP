@@ -50,8 +50,22 @@ export default function RegistersPanel() {
     { kind: "method_correction", label: "Usulni tuzatish", icon: Wrench, show: can("finance.manage") },
   ];
 
+  // Manfiy qoldiq — kassada bo'lmagan pul chiqib ketgan (eski oflayn amal yoki import): shu kassada naqd sotuv,
+  // to'lov va chiqim RAD ETILADI ("Kassada yetarli mablag' yo'q"), shuning uchun rahbarga darhol ko'rinadi
+  const negative = registers.filter((row) => Number(row.balance) < 0);
+
   return (
     <div className="space-y-4" data-testid="registers-panel">
+      {negative.length > 0 && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm" data-testid="registers-negative-alert">
+          <p className="font-semibold text-destructive">Manfiy qoldiqli kassa: {negative.map((row) => row.name).join(", ")}</p>
+          <p className="mt-1 text-muted-foreground">
+            Bunday kassada naqd sotuv va to'lov qabul qilinmaydi. Sabab odatda kassadagi puldan ko'p chiqim yozilgani —
+            pul haqiqatan shu kassadan chiqqan bo'lsa "Kirim" bilan haqiqiy qoldiqni tiklang, boshqa hisobdan chiqqan
+            bo'lsa o'sha to'lovni bekor qilib, to'g'ri hisobdan qayta yozing.
+          </p>
+        </div>
+      )}
       {can("sales.approve") && <PosKassaBoard />}
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {registers.map((row) => (
@@ -66,7 +80,13 @@ export default function RegistersPanel() {
               <span className="truncate font-medium">{row.name}</span>
               <Badge variant="outline" className="text-[10px]">{TYPE_LABELS[row.type]}{row.isDefault ? " · asosiy" : ""}</Badge>
             </div>
-            <p className="mt-1 text-lg font-semibold tabular-nums" data-testid={`register-balance-${row.id}`}>{money(row.balance, row.currency)}</p>
+            <p
+              className={cn("mt-1 text-lg font-semibold tabular-nums", Number(row.balance) < 0 && "text-destructive")}
+              data-testid={`register-balance-${row.id}`}
+              title={Number(row.balance) < 0 ? "Manfiy qoldiq — bu kassada naqd amallar rad etiladi" : undefined}
+            >
+              {money(row.balance, row.currency)}
+            </p>
             <p className="text-xs text-muted-foreground">Mas'ul: {row.employeeName ?? "—"}</p>
           </button>
         ))}

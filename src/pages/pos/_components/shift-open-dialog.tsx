@@ -77,7 +77,7 @@ export default function ShiftOpenDialog({ warehouseId, warehouseName, onClose }:
                       } ${busy ? "cursor-not-allowed opacity-50" : ""}`}
                     >
                       <div className="font-semibold">{kassa.code ? `${kassa.code} · ${kassa.name}` : kassa.name}</div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className={`text-xs ${!busy && Number(kassa.balance) < 0 ? "font-semibold text-destructive" : "text-muted-foreground"}`}>
                         {busy ? `Band: ${kassa.openShift!.cashierName ?? "smena ochiq"}` : `Qoldiq: ${Number(kassa.balance).toLocaleString("ru-RU")} so'm`}
                       </div>
                     </button>
@@ -85,6 +85,13 @@ export default function ShiftOpenDialog({ warehouseId, warehouseName, onClose }:
                 })}
               </div>
               {freeKassas.length === 0 && <p className="mt-1 text-xs text-destructive">Bo'sh kassa yo'q — barcha kassalarda smena ochiq</p>}
+              {/* Manfiy qoldiqli kassada naqd sotuv serverda rad etiladi — kassir sababni sotuv paytida emas, hozir bilsin */}
+              {selectedKassa && Number(kassaList!.find((kassa) => kassa.id === selectedKassa)?.balance ?? 0) < 0 && (
+                <p className="mt-1 text-xs text-destructive" data-testid="kassa-negative-warning">
+                  Bu kassada qoldiq manfiy — naqd sotuv va to'lov rad etiladi. Rahbar Kassalar bo'limida qoldiqni
+                  to'g'rilagach ishlaydi.
+                </p>
+              )}
             </div>
           )}
           <div>
