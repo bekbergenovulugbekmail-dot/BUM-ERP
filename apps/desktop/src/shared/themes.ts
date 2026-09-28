@@ -90,6 +90,23 @@ export const isPosFontScale = (value: unknown): value is PosFontScale => typeof 
 /** Ildiz shrift o'lchami (Tailwind rem — butun interfeys mutanosib kattalashadi). */
 export const FONT_SCALE_PERCENT: Record<PosFontScale, string> = { normal: "", large: "112.5%", xlarge: "125%" };
 
+/**
+ * Butun ekran masshtabi (CSS `zoom` ildizda): shrift, tugma, logo va rasmlar birga kattalashadi/kichrayadi.
+ * Shrift o'lchamidan (`fontScale`) farqi — piksel bilan berilgan elementlar ham o'zgaradi.
+ */
+export const ZOOM_MIN = 60;
+export const ZOOM_MAX = 200;
+export const ZOOM_STEP = 10;
+export const ZOOM_DEFAULT = 100;
+
+/** Foizni ruxsat etilgan oraliqqa va qadamga tushiradi (noto'g'ri qiymat — standart 100%). */
+export function normalizeZoom(value: unknown, fallback = ZOOM_DEFAULT): number {
+  const percent = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(percent)) return fallback;
+  const stepped = Math.round(percent / ZOOM_STEP) * ZOOM_STEP;
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, stepped));
+}
+
 export const POS_SHADOWS = ["none", "soft", "strong"] as const;
 export type PosShadow = (typeof POS_SHADOWS)[number];
 

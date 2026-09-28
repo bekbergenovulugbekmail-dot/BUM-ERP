@@ -16,6 +16,10 @@ import {
   THEME_HINTS,
   THEME_ICONS,
   THEME_LABELS,
+  ZOOM_DEFAULT,
+  ZOOM_MAX,
+  ZOOM_MIN,
+  ZOOM_STEP,
   type PosThemeChoice,
   type ThemeSource,
 } from "../../shared/themes.js";
@@ -320,6 +324,20 @@ function AppearancePanel({ prefs, save }: { prefs: DevicePrefs; save: SaveFn }) 
       </Row>
       <Row label="Shrift o'lchami" hint="Butun interfeys mutanosib kattalashadi">
         <Choice value={prefs.fontScale} options={POS_FONT_SCALES.map((value) => ({ value, label: FONT_SCALE_LABELS[value] }))} onChange={(fontScale) => void save({ fontScale })} />
+      </Row>
+      <Row label="Ekran masshtabi" hint="Shrift, tugma, logo va rasmlar birga — ekran pastidagi «− % +» yoki Ctrl + / Ctrl − / Ctrl 0">
+        <div className="flex items-center gap-2">
+          <Button variant="outline" className="h-10 w-10" aria-label="Kichraytirish" disabled={prefs.zoomPercent <= ZOOM_MIN} onClick={() => void save({ zoomPercent: prefs.zoomPercent - ZOOM_STEP })}>
+            −
+          </Button>
+          <span className="min-w-14 text-center text-sm font-semibold tabular-nums">{prefs.zoomPercent}%</span>
+          <Button variant="outline" className="h-10 w-10" aria-label="Kattalashtirish" disabled={prefs.zoomPercent >= ZOOM_MAX} onClick={() => void save({ zoomPercent: prefs.zoomPercent + ZOOM_STEP })}>
+            +
+          </Button>
+          <Button variant="ghost" className="h-10" disabled={prefs.zoomPercent === ZOOM_DEFAULT} onClick={() => void save({ zoomPercent: ZOOM_DEFAULT })}>
+            100%
+          </Button>
+        </div>
       </Row>
     </>
   );

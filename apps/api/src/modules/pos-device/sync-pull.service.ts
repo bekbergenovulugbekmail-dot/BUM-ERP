@@ -26,6 +26,7 @@ import { isTaxEnabled } from "../company/tax-settings.service.js";
 import { permissionsFromRoles } from "../company/tenant.js";
 import { paymentTerminalOptions, posBankAccountOptions } from "../finance/terminals.service.js";
 import { getCashbackSettings } from "../sales/cashback.service.js";
+import { sellerOptions } from "../sales/seller.service.js";
 import type { DeviceContext } from "./device-auth.js";
 
 export const PULL_ENTITIES = [
@@ -94,6 +95,11 @@ export async function posConfig(conn: DbOrTx, companyId: string, accessDigest = 
     terminals: await paymentTerminalOptions(conn, companyId, { posOnly: true }),
     /** Kassada ko'rsatiladigan bank hisoblari ("Bank: Kapitalbank") — to'lov shu hisobga yoziladi. */
     bankAccounts: await posBankAccountOptions(conn, companyId),
+    /**
+     * Chekka biriktiriladigan sotuvchilar (faol xodimlar) — kassir bilan bir xil emas: sotuvchi KPI va hisobotlar
+     * shu maydon bo'yicha. Xodim qo'shilsa yoki ishdan bo'shasa xesh o'zgaradi — qurilma yangi ro'yxatni oladi.
+     */
+    sellers: await sellerOptions(conn, companyId),
   };
   return { hash: createHash("sha256").update(JSON.stringify(body)).update(accessDigest).digest("hex").slice(0, 32), ...body };
 }

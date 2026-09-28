@@ -297,4 +297,70 @@ describe("Desktop kassa: offline chek va qaytarish sinxroni", () => {
     expect((await web(company.ownerCookie, "GET", "/api/pos/devices/conflicts")).json().conflicts).toEqual([]);
     expect((await web(company.ownerCookie, "GET", "/api/pos/devices/conflicts?resolved=true")).json().conflicts).toHaveLength(1);
   });
+
+  it("sotuvchi: faol xodimlar config bilan keladi (xesh o'zgaradi); chekda sotuvchi saqlanadi, kassirdan alohida; begona xodim — nomuvofiqlik", async () => {
+    const kassir = await addEmployee(app, company, "Kassir");
+    // Sotuvchi — HR xodimi (kassir hisobi emas): chek shu xodimga biriktiriladi
+    const hire = await web(company.ownerCookie, "POST", "/api/hr/employees", { name: "Hadicha", hireDate: "2024-01-01", baseSalary: "0", salaryType: "monthly" });
+    expect(hire.statusCode, hire.body).toBe(201);
+    const sotuvchiId = hire.json().employee.id as string;
+    const begona = await createCompany(app, (await signedIn(app, { isPlatformAdmin: true })).cookie, { name: "Begona" });
+    const begonaHire = await web(begona.ownerCookie, "POST", "/api/hr/employees", { name: "Begona xodim", hireDate: "2024-01-01", baseSalary: "0", salaryType: "monthly" });
+    expect(begonaHire.statusCode, begonaHire.body).toBe(201);
+    const begonaId = begonaHire.json().employee.id as string;
+    const { token } = await register("Kassa 1");
+    expect((await device(token, "POST", "/api/pos-device/cashiers/login", { phone: kassir.phone, password: "xodim-parol-123" })).statusCode).toBe(200);
+
+    // Config: sotuvchilar ro'yxati kassaga sinxronlanadi; begona kompaniya xodimi ro'yxatda yo'q
+    const pull = async (configHash?: string) => {
+      const res = await device(token, "POST", "/api/pos-device/pull", { limit: 1, ...(configHash ? { configHash } : {}) });
+      expect(res.statusCode, res.body).toBe(200);
+      return res.json().config as { hash: string; sellers: { id: string; name: string }[] } | null;
+    };
+    const config = await pull();
+    expect(config!.sellers.map((row) => row.id)).toContain(sotuvchiId);
+    expect(config!.sellers.some((row) => row.id === begonaId)).toBe(false);
+    // O'zgarmagan config qayta yuborilmaydi
+    expect(await pull(config!.hash)).toBeNull();
+
+    const suv = await product("Suv", "SUV", "3000");
+    await receive(suv, "10");
+    const shiftId = await openDeviceShift(token, kassir.id);
+    const saleId = randomUUID();
+    const [applied] = await push(token, [
+      op("sale.complete", kassir.id, {
+        saleId,
+        shiftId,
+        number: "K01-000001",
+        sellerEmployeeId: sotuvchiId,
+        items: [saleItem(suv, "2", "3000")],
+        paymentMethod: "cash",
+        amountPaid: "6000",
+      }),
+    ]);
+    expect(applied!.status, JSON.stringify(applied)).toBe("applied");
+    const [order] = await db.select().from(salesOrders).where(eq(salesOrders.id, saleId));
+    // Sotuvchi kassirdan alohida yoziladi — sotuvchi KPI va hisoboti shu maydon bo'yicha
+    expect(order!.sellerEmployeeId).toBe(sotuvchiId);
+    expect(order!.sellerEmployeeId).not.toBe(kassir.id);
+
+    // Begona kompaniya xodimi: oflayn chek RAD ETILMAYDI — sotuvchisiz yoziladi va nomuvofiqlik qayd etiladi
+    const secondId = randomUUID();
+    const [second] = await push(token, [
+      op("sale.complete", kassir.id, {
+        saleId: secondId,
+        shiftId,
+        number: "K01-000002",
+        sellerEmployeeId: begonaId,
+        items: [saleItem(suv, "1", "3000")],
+        paymentMethod: "cash",
+        amountPaid: "3000",
+      }),
+    ]);
+    expect(second!.status, JSON.stringify(second)).toBe("applied");
+    const [fallback] = await db.select().from(salesOrders).where(eq(salesOrders.id, secondId));
+    expect(fallback!.sellerEmployeeId).toBeNull();
+    const conflicts = await db.select().from(posSyncConflicts).where(eq(posSyncConflicts.companyId, company.companyId));
+    expect(conflicts.map((row) => row.kind)).toContain("seller_invalid");
+  });
 });

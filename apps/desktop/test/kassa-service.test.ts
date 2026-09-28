@@ -708,6 +708,80 @@ describe("Kassa xizmati (main jarayon)", () => {
     expect((queued!.payload as { payments: object[] }).payments[0]).not.toHaveProperty("cashAccountId");
   });
 
+  it("sotuvchi: config bilan keladi, chekda va navbatdagi amalda saqlanadi; noma'lum sotuvchi rad, tanlanmagani yuborilmaydi", async () => {
+    const api = fakeApi();
+    const kassa = service(api);
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    store.saveCashier({ id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true, permissions: ["pos.use"] });
+    const sellers = [
+      { id: "e-hadicha", name: "Hadicha", code: "X-001" },
+      { id: "e-zuhra", name: "Zuhra", code: null },
+    ];
+    store.applyPull({
+      ...pullResponse({
+        units: { rows: [{ id: "unit-d", name: "Dona", shortName: "dona", isBase: true, isActive: true }] },
+        products: { rows: [product("p1", "Cola")] },
+        stockLevels: { rows: [{ id: "s1", productId: "p1", warehouseId: "w1", quantity: "5.0000", reservedQty: "0.0000" }] },
+      }),
+      config: {
+        hash: "cfg-sellers",
+        company: { name: "Bonnu", address: null, phone: null, taxId: null, currency: "UZS" },
+        cashback: { enabled: false, accrualBase: "paid", maxUsagePercent: 0, tiers: [], categoryRates: [] },
+        receipt: {},
+        sellers,
+      },
+    });
+
+    api.state.online = false;
+    expect(kassa.posContext().sellers).toEqual(sellers);
+    kassa.openShift({ openingCash: "0" });
+    const base = {
+      customerId: null,
+      lines: [{ productId: "p1", unitId: "unit-d", quantity: "1" }],
+      saleCurrencies: [],
+      paymentMethod: "cash" as const,
+      amountPaid: null,
+      cashbackAmount: null,
+      balanceAmount: null,
+      changeToBalance: false,
+      currencyPayments: [],
+    };
+    // Ro'yxatda yo'q xodim (yoki ishdan bo'shagan) — chek yozilmaydi
+    expect(() => kassa.completeSale({ ...base, sellerEmployeeId: "e-yoq" })).toThrow("Sotuvchi topilmadi");
+
+    const sale = kassa.completeSale({ ...base, sellerEmployeeId: "e-hadicha" });
+    expect(sale.seller).toEqual({ id: "e-hadicha", name: "Hadicha" });
+    expect(store.pendingOps(50).find((op) => op.type === "sale.complete")?.payload).toMatchObject({ sellerEmployeeId: "e-hadicha" });
+
+    // Sotuvchi tanlanmagan chek — maydon umuman yuborilmaydi (server uni kassirga bog'lamaydi)
+    const plain = kassa.completeSale(base);
+    expect(plain.seller).toBeNull();
+    const plainOp = store.pendingOps(50).find((op) => op.type === "sale.complete" && (op.payload as { number?: string }).number === plain.number);
+    expect(plainOp!.payload).not.toHaveProperty("sellerEmployeeId");
+  });
+
+  it("ekran masshtabi: kassir bo'yicha saqlanadi, oraliqqa va qadamga tushadi, qayta ishga tushirilganda tiklanadi", async () => {
+    const api = fakeApi();
+    const kassa = service(api);
+    await kassa.register({ phone: "+998900000001", password: "right", warehouseId: "w1", name: "Kassa 1" });
+    await kassa.firstLogin({ phone: "+998901112233", password: "kassir", pin: "1234" });
+    store.saveCashier({ id: "m1", userId: "u1", name: "Ali", phone: "+998901112233", role: "Kassir", active: true, permissions: ["pos.use"] });
+
+    expect(kassa.prefs().zoomPercent).toBe(100);
+    expect(kassa.savePrefs({ ...kassa.prefs(), zoomPercent: 130 }).zoomPercent).toBe(130);
+    // Oraliqdan tashqarisi va qadamga tushmagani to'g'rilanadi; noto'g'ri qiymat — o'zgarishsiz
+    expect(kassa.savePrefs({ ...kassa.prefs(), zoomPercent: 400 }).zoomPercent).toBe(200);
+    expect(kassa.savePrefs({ ...kassa.prefs(), zoomPercent: 10 }).zoomPercent).toBe(60);
+    expect(kassa.savePrefs({ ...kassa.prefs(), zoomPercent: 117 }).zoomPercent).toBe(120);
+    expect(kassa.savePrefs({ ...kassa.prefs(), zoomPercent: "katta" as never }).zoomPercent).toBe(120);
+
+    // Ilova qayta ishga tushdi (yangi xizmat, o'sha lokal baza) — kassir PIN bilan kirgach tanlovi tiklanadi
+    const restarted = service(api);
+    await restarted.unlock({ userId: "u1", pin: "1234" });
+    expect(restarted.prefs().zoomPercent).toBe(120);
+  });
+
   it("kassa bo'limi: kirim-chiqim, xarajat ruxsati, mijoz to'lovi (qarzdan ortig'i balansga), X/Z-hisobot, tarix, navbat tartibi", async () => {
     const api = fakeApi();
     const kassa = service(api);

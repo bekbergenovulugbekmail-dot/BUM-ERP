@@ -15,7 +15,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_PATTERN } from "../shared/hotkeys.js";
-import { isPosDensity, isPosFontScale, normalizePosTheme, parseCustomTheme, resolvePosTheme } from "../shared/themes.js";
+import { ZOOM_DEFAULT, isPosDensity, isPosFontScale, normalizePosTheme, normalizeZoom, parseCustomTheme, resolvePosTheme } from "../shared/themes.js";
 import type {
   AppStatus,
   CartLineInput,
@@ -178,6 +178,7 @@ export const DEFAULT_PREFS: DevicePrefs = {
   customTheme: null,
   density: "comfortable",
   fontScale: "normal",
+  zoomPercent: ZOOM_DEFAULT,
   productView: "cards",
   paymentPanelSide: "right",
   companyLayout: "classic",
@@ -215,7 +216,7 @@ type ProductRow = CalcProduct & {
 };
 type CategoryRow = { id: string; name: string; parentId: string | null; sortOrder?: number; isActive: boolean };
 /** Kassirning ko'rinish tanlovi (qurilmada, kassir bo'yicha): mavzu, zichlik, shrift. */
-type CashierPrefs = { theme?: string; density?: string; fontScale?: string };
+type CashierPrefs = { theme?: string; density?: string; fontScale?: string; zoomPercent?: number };
 
 const IMAGE_EXTENSIONS = [
   ["jpg", "image/jpeg"],
@@ -886,6 +887,8 @@ export class KassaService {
       permissions: cashier.permissions,
       terminals: (config?.terminals ?? []).map(({ id, name, network }) => ({ id, name, network })),
       bankAccounts: (config?.bankAccounts ?? []).map(({ id, name, bankName }) => ({ id, name, bankName })),
+      // Sotuvchilar (faol xodimlar) — chekka biriktiriladi; eski serverda ro'yxat yo'q (kassada tanlov ko'rsatilmaydi)
+      sellers: (config?.sellers ?? []).map(({ id, name, code }) => ({ id, name, code })),
     };
   }
 
@@ -1348,6 +1351,14 @@ export class KassaService {
       }
     }
 
+    // Sotuvchi — serverdan sinxronlangan faol xodimlar ro'yxatidan (kassir bilan bir xil emas; KPI shu maydon bo'yicha)
+    let seller: { id: string; name: string } | null = null;
+    if (input.sellerEmployeeId) {
+      const found = (this.config()?.sellers ?? []).find((row) => row.id === String(input.sellerEmployeeId));
+      if (!found) throw new KassaError("BAD_REQUEST", "Sotuvchi topilmadi yoki faol emas — sinxronlashni kuting");
+      seller = { id: found.id, name: found.name };
+    }
+
     let customer: CustomerRow | null = null;
     if (input.customerId) {
       customer = this.store.customer<CustomerRow>(String(input.customerId));
@@ -1437,6 +1448,7 @@ export class KassaService {
         shiftId: shift.id,
         number,
         customerId: customer?.id ?? null,
+        ...(seller ? { sellerEmployeeId: seller.id } : {}),
         items: prepared.map((line) => ({
           id: line.id,
           productId: line.product.id,
@@ -1477,6 +1489,7 @@ export class KassaService {
         shiftId: shift.id,
         cashierId: cashier.userId,
         cashierName: cashier.name,
+        seller,
         customer: customer ? { id: customer.id, name: customer.name, phone: customer.phone } : null,
         createdAt: now.toISOString(),
         lines: prepared.map((line, index) => ({
@@ -3557,6 +3570,8 @@ export class KassaService {
       customTheme,
       density: [own?.density, stored.density, themeDefaults?.density].find(isPosDensity) ?? "comfortable",
       fontScale: [own?.fontScale, stored.fontScale, themeDefaults?.fontScale].find(isPosFontScale) ?? "normal",
+      // Ekran masshtabi — kassirniki; tanlamagan bo'lsa qurilma darajasidagi qiymat, u ham bo'lmasa 100%
+      zoomPercent: normalizeZoom(own?.zoomPercent ?? stored.zoomPercent, ZOOM_DEFAULT),
       // Joylashuv va tuzilish — kompaniya sozlamasi (web: Sozlamalar → Kassa qurilmalari); eski server — standart
       paymentPanelSide: appearance?.paymentPanelSide === "left" ? "left" : "right",
       companyLayout: appearance?.layout === "table" ? "table" : appearance?.layout === "compact" ? "compact" : "classic",
@@ -3579,6 +3594,10 @@ export class KassaService {
     // Zichlik va shrift — kassirniki (faqat o'zgarganda — tanlanmagani maxsus mavzu standartiga ergashadi)
     if (isPosDensity(input.density) && input.density !== current.density) own.density = input.density;
     if (isPosFontScale(input.fontScale) && input.fontScale !== current.fontScale) own.fontScale = input.fontScale;
+    // Ekran masshtabi — kassirniki (ekran pastidagi "− % +" boshqaruvi); oraliqdan tashqarisi qisqartiriladi
+    if (input.zoomPercent !== undefined && normalizeZoom(input.zoomPercent, current.zoomPercent) !== current.zoomPercent) {
+      own.zoomPercent = normalizeZoom(input.zoomPercent, current.zoomPercent);
+    }
     this.store.setMeta(ownKey, own);
     const storedDevice = this.store.getMeta<Partial<DevicePrefs>>("devicePrefs") ?? {};
     const methods = Array.isArray(input.enabledPaymentMethods)
@@ -3617,6 +3636,7 @@ export class KassaService {
       // Qurilma darajasidagi (eski) shrift/zichlik — kassir tanlamaganda
       ...(isPosDensity(storedDevice.density) ? { density: storedDevice.density } : {}),
       ...(isPosFontScale(storedDevice.fontScale) ? { fontScale: storedDevice.fontScale } : {}),
+      ...(storedDevice.zoomPercent !== undefined ? { zoomPercent: normalizeZoom(storedDevice.zoomPercent) } : {}),
     } satisfies Partial<DevicePrefs>;
     const invalid = validateDrawerPrefs(prefs.drawer);
     if (invalid) throw new KassaError("BAD_REQUEST", invalid);

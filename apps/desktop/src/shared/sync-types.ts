@@ -354,6 +354,8 @@ export type SalePayload = {
   /** `K01-000123` — qurilma kodi bilan, kompaniyada unikal. */
   number: string;
   customerId?: string | null;
+  /** Chekni rasmiylashtirgan sotuvchi (xodim) — KPI va sotuvchi hisoboti uchun; kassirdan alohida. */
+  sellerEmployeeId?: string | null;
   items: {
     id: string;
     productId: string;
@@ -468,7 +470,12 @@ export type PosConfig = {
   terminals?: PosTerminal[];
   /** Kassada ko'rsatiladigan bank hisoblari (web: Moliya → Kassa & Bank → "Kassada ko'rsatish"); eski server — yo'q. */
   bankAccounts?: PosBankAccount[];
+  /** Chekka biriktiriladigan sotuvchilar (faol xodimlar); eski server — yo'q (kassada tanlov ko'rsatilmaydi). */
+  sellers?: PosSeller[];
 };
+
+/** Sotuvchi (xodim): kassir bilan bir xil emas — sotuvchi KPI va hisobotlari shu maydon bo'yicha. */
+export type PosSeller = { id: string; name: string; code: string | null };
 
 /** Kassada to'lov usuli sifatida ko'rsatiladigan bank hisobi — to'lov shu hisobga yoziladi. */
 export type PosBankAccount = { id: string; name: string; bankName: string | null };

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppStatus, DevicePrefs } from "../shared/kassa-api.js";
 import { call, errorText } from "./kassa.ts";
 import UpdateBanner from "./update-banner.tsx";
+import ZoomBar from "./zoom-bar.tsx";
 import AnalyticsScreen from "./screens/analytics-screen.tsx";
 import CashierScreen from "./screens/cashier-screen.tsx";
 import CountScreen from "./screens/count-screen.tsx";
@@ -152,6 +153,8 @@ export default function App() {
       )}
       {view !== "pos" && renderView()}
       {locked && <LockOverlay status={status} onUnlocked={afterLogin} onSwitched={afterLogin} />}
+      {/* Ekran masshtabi (pastki chap burchak) — barcha bo'limlarda; qulf ostida ko'rsatilmaydi */}
+      {!locked && prefs && <ZoomBar prefs={prefs} onPrefs={setPrefs} />}
       {/* Yangi versiya haqida xabar — kassir kirgach avtomatik tekshiriladi, yuklash qo'lda */}
       {!locked && <UpdateBanner cashierId={cashierId} />}
     </>

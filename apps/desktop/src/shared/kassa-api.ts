@@ -145,12 +145,16 @@ export type PosContext = {
   terminals?: { id: string; name: string; network: string }[];
   /** Kassada ko'rsatiladigan bank hisoblari; yo'q — bank to'lovi asosiy bank hisobiga. */
   bankAccounts?: { id: string; name: string; bankName: string | null }[];
+  /** Chekka biriktiriladigan sotuvchilar (faol xodimlar); bo'sh — kassada sotuvchi tanlovi ko'rsatilmaydi. */
+  sellers?: { id: string; name: string; code: string | null }[];
 };
 
 export type CartLineInput = { productId: string; unitId: string; quantity: string; unitPrice?: string; discountPercent?: string };
 
 export type SaleInput = {
   customerId: string | null;
+  /** Chekni rasmiylashtirgan sotuvchi (xodim) — kassirdan alohida; null — tanlanmagan. */
+  sellerEmployeeId?: string | null;
   lines: CartLineInput[];
   saleCurrencies: string[];
   paymentMethod: PaymentMethod;
@@ -193,6 +197,8 @@ export type LocalSale = {
   shiftId: string;
   cashierId: string;
   cashierName: string | null;
+  /** Chek sotuvchisi (xodim) — tanlangan bo'lsa; kassirdan alohida, chekda va tarixda ko'rinadi. */
+  seller?: { id: string; name: string } | null;
   customer: { id: string; name: string; phone: string | null } | null;
   createdAt: string;
   lines: ReceiptLine[];
@@ -636,6 +642,11 @@ export type DevicePrefs = {
   density: PosDensity;
   /** Shrift o'lchami — kassir bo'yicha. */
   fontScale: PosFontScale;
+  /**
+   * BUTUN EKRAN MASSHTABI, foizda (shrift, tugma, logo, rasm — hammasi birga). Kassir bo'yicha saqlanadi va
+   * ekranning pastidagi "− % +" boshqaruvidan o'zgartiriladi. `ZOOM_MIN`–`ZOOM_MAX` oralig'ida, qadam `ZOOM_STEP`.
+   */
+  zoomPercent: number;
   /** Kassa ekranidagi mahsulotlar: rasmli kartalar yoki ixcham jadval. */
   productView: "cards" | "table";
   /** Faqat o'qish: to'lov paneli tomoni — biznes egasi web'da tanlaydi (Sozlamalar → Kassa qurilmalari). */

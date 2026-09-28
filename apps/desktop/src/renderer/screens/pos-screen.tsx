@@ -249,6 +249,8 @@ export default function PosScreen({
   const [foreignTender, setForeignTender] = useState<Record<string, string>>({});
   const [foreignMethod, setForeignMethod] = useState<Record<string, "cash" | "card">>({});
   const [dialog, setDialog] = useState<DialogName | null>(null);
+  /** Chekka biriktiriladigan sotuvchi (xodim) — savat tozalanganda saqlanadi, kassir uni qo'lda almashtiradi. */
+  const [sellerId, setSellerId] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<LocalSale | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
@@ -260,6 +262,10 @@ export default function PosScreen({
   const lastSyncAt = status.sync.lastSyncAt;
   const hotkeys = prefs?.hotkeys ?? DEFAULT_HOTKEYS;
   const enabledMethods = PAY_METHODS.filter((method) => !prefs || prefs.enabledPaymentMethods.includes(method.key));
+  // Sotuvchilar serverdan sinxronlanadi; ro'yxat bo'sh bo'lsa (eski server) tanlov ko'rsatilmaydi
+  const sellers = context?.sellers ?? [];
+  // Sinxrondan keyin xodim ro'yxatdan chiqsa (ishdan bo'shagan) — tanlov "Tanlanmagan" ko'rinadi va chekka yozilmaydi
+  const selectedSeller = sellerId ? (sellers.find((row) => row.id === sellerId) ?? null) : null;
   const hotkeyList: [string, string][] = [
     ...HOTKEY_ACTIONS.filter((action) => !PAY_METHODS.some((method) => method.action === action) || enabledMethods.some((method) => method.action === action)).map(
       (action): [string, string] => [hotkeys[action], HOTKEY_LABELS[action]],
@@ -607,6 +613,8 @@ export default function PosScreen({
     try {
       const sale = await call("pos:complete-sale", {
         customerId: customer?.id ?? null,
+        // Sotuvchi chekdan chekka saqlanadi (kassir bir necha sotuvchi nomidan chek yopadi); ro'yxatdan chiqqan bo'lsa — yubormaymiz
+        sellerEmployeeId: selectedSeller?.id ?? null,
         lines: cartInput(cart),
         saleCurrencies: activeCurrencies,
         paymentMethod: payMethod,
@@ -1322,9 +1330,52 @@ export default function PosScreen({
           </Button>
         </div>
 
-        <div className="flex items-center justify-between px-3 pt-2 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        {/* Sotuvchi — kassirdan alohida: sotuvchi KPI va hisobotlari shu maydon bo'yicha (server sinxronlagan faol xodimlar) */}
+        {sellers.length > 0 && (
+          <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+            <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Sotuvchi</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="ml-auto h-8 max-w-[60%] justify-between gap-2 truncate px-2 text-xs">
+                  <span className="truncate">{selectedSeller?.name ?? "Tanlanmagan"}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto">
+                <DropdownMenuLabel>Sotuvchi</DropdownMenuLabel>
+                <DropdownMenuRadioGroup value={selectedSeller?.id ?? ""} onValueChange={(value) => setSellerId(value || null)}>
+                  <DropdownMenuRadioItem value="">Tanlanmagan</DropdownMenuRadioItem>
+                  {sellers.map((seller) => (
+                    <DropdownMenuRadioItem key={seller.id} value={seller.id}>
+                      {seller.name}
+                      {seller.code ? <span className="ml-2 text-xs text-muted-foreground">{seller.code}</span> : null}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-2 px-3 pt-2 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
           <span>Savat</span>
-          <span className="tabular-nums">{itemsCount > 0 ? `${itemsCount} ta mahsulot` : ""}</span>
+          <div className="flex items-center gap-2">
+            <span className="tabular-nums">{itemsCount > 0 ? `${itemsCount} ta mahsulot` : ""}</span>
+            {/* Butun savatni bir bosishda bo'shatish: mahsulotlar, mijoz va to'lov qismlari (chek yakunlanmaydi) */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 px-2 text-xs text-destructive hover:text-destructive"
+              disabled={cart.length === 0}
+              title="Savatni tozalash"
+              onClick={() => {
+                resetCart();
+                setNotice({ tone: "info", text: "Savat tozalandi" });
+              }}
+            >
+              <Trash2 className="size-3.5" />
+              Tozalash
+            </Button>
+          </div>
         </div>
         <ul className="min-h-[5.5rem] flex-1 divide-y divide-border overflow-y-auto">
           {cart.map((line, index) => {

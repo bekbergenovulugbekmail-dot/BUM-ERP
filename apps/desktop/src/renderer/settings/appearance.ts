@@ -4,9 +4,9 @@
  * holati, savat, sotuv va sinxronga tegmaydi (ilova qayta yuklanmaydi).
  */
 import type { DevicePrefs } from "../../shared/kassa-api.js";
-import { FONT_SCALE_PERCENT, concreteTheme, customThemeTokens, isDarkTheme } from "../../shared/themes.js";
+import { FONT_SCALE_PERCENT, ZOOM_DEFAULT, concreteTheme, customThemeTokens, isDarkTheme, normalizeZoom } from "../../shared/themes.js";
 
-type AppearancePrefs = Pick<DevicePrefs, "theme" | "fontScale" | "density" | "customTheme">;
+type AppearancePrefs = Pick<DevicePrefs, "theme" | "fontScale" | "density" | "customTheme"> & { zoomPercent?: number };
 
 let media: MediaQueryList | null = null;
 let listener: (() => void) | null = null;
@@ -36,5 +36,9 @@ export function applyAppearance(prefs: AppearancePrefs, root: HTMLElement = docu
   listener = query ? update : null;
   query?.addEventListener("change", update);
   root.dataset.density = prefs.density;
+  // Butun ekran masshtabi: shrift, tugma, logo va rasmlar birga o'zgaradi (100% — tegilmaydi)
+  const zoom = normalizeZoom(prefs.zoomPercent, ZOOM_DEFAULT);
+  if (zoom === ZOOM_DEFAULT) root.style.removeProperty("zoom");
+  else root.style.setProperty("zoom", String(zoom / 100));
   update();
 }
