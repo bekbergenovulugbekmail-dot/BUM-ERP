@@ -5345,4 +5345,8 @@ Brauzerda sinash: CRM → Mijozlar → narx (teg) belgisi va "Balans importi"; M
 Qoldirildi: web POS tarozi shtrix-kodi (format sozlamasi — POS pul yo'li, qaror kerak), analitika server eksporti (P3).
 Keyingi qadam: egasi qarorlari (AUD-008, AUD-003, AUD-016, AUD-022, AUD-015/014, KPI qaytarish, maosh) va migratsiyalar.
 Yakuniy regressiya (2026-09-28): API 175 fayl / 1241 test ✓ (0 xato), frontend 51/312 ✓, tsc/eslint ✓.
+FINANCIAL INTEGRITY GATE (2026-09-28, faqat tahlil — kod o'zgarmadi): `.claude/FINANCIAL-DECISIONS.md` — AUD-008 va AUD-022
+haqiqiy API bilan reproduksiya (lokal, vaqtinchalik fayllar o'chirildi), AUD-003/016/015/014, KPI qaytarish, maosh (bekor qilish,
+accrual) variantlari. Production read-only: AUD-008/022/003/016/014/015 bo'yicha real holat 0; Ezo 1 KPI qoidasi, Bonnu 4 qoralama
+maosh. Hammasi OPEN — egasi qarori kutilmoqda. Deploy: YO'Q (moliyaviy qarorlar kutilmoqda).
 Commitlar push qilinmagan; production va staging — `5ba4778`.

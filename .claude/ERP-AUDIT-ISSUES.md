@@ -47,7 +47,7 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 - **CURRENT:** kesh qarzi hujjatlardan katta bo'lsa (AUD-002 a/b), to'lov o'tadi, kesh kamayadi,
   lekin ortiqcha qism hech bir hujjatga bog'lanmaydi va hech qayerda ko'rinmaydi.
 - **EXPECTED:** taqsimlanmagan qism ochiq "boshlang'ich qarz" hujjatiga yoki mijoz avansiga
-  (2300) tushadi va ko'rinadi. **STATUS:** PARTIAL — taqsimot endi `customer_payment_allocations` ga yoziladi va bekor qilishda aynan qaytariladi; taqsimlanmagan qism (hujjatsiz qarz) hali ko'rinmaydi → AUD-004 bilan yopiladi
+  (2300) tushadi va ko'rinadi. **STATUS:** PARTIAL — taqsimot endi `customer_payment_allocations` ga yoziladi va bekor qilishda aynan qaytariladi; taqsimlanmagan qism (hujjatsiz qarz) hali ko'rinmaydi → AUD-004 bilan yopiladi · 2026-09-28: tahlil qilindi → `.claude/FINANCIAL-DECISIONS.md` — OWNER DECISION NEEDED
 
 ## AUD-004 — Boshlang'ich qarz uchun hujjat turi yo'q, "boshqa daromad"ga yoziladi
 - **SEVERITY:** HIGH · **MODULE:** Customer debt / Accounting
@@ -81,7 +81,7 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 - **ROOT CAUSE:** returnOrder (orders.service.ts:1138) qarzni to'liq kamaytiradi, pul qaytarilmaydi,
   buyurtma `returned` → hujjatlar asosidagi hisobotlardan chiqib ketadi. Qoida "qarz manfiy
   bo'lmaydi — ortiqcha balansga" (customer-balance.service.ts:514) bilan zid.
-- **EXPECTED:** qaytarilmagan pul mijoz avansiga (hamyon, 2300) o'tadi. **STATUS:** OPEN
+- **EXPECTED:** qaytarilmagan pul mijoz avansiga (hamyon, 2300) o'tadi. **STATUS:** OPEN · 2026-09-28: tahlil qilindi → `.claude/FINANCIAL-DECISIONS.md` — OWNER DECISION NEEDED
 
 ## AUD-009 — `reference` bo'yicha idempotentlik summa/mijozni solishtirmaydi
 - **SEVERITY:** LOW · **MODULE:** Payments
@@ -132,17 +132,17 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 ## AUD-014 — `setSupplierDebt` valyutalarni aralashtiradi
 - **SEVERITY:** MEDIUM · **MODULE:** Suppliers
 - **ROOT CAUSE:** delta hamma valyutalar yig'indisidan hisoblanadi, lekin faqat asosiy valyuta
-  qismiga qo'llanadi (purchase/suppliers.service.ts:207, 229-238). **STATUS:** OPEN
+  qismiga qo'llanadi (purchase/suppliers.service.ts:207, 229-238). **STATUS:** PARTIAL (faqat asosiy valyutali ta'minotchi) · 2026-09-28: tahlil qilindi → `.claude/FINANCIAL-DECISIONS.md` — OWNER DECISION NEEDED
 
 ## AUD-015 — Valyutali xarid qaytarishida qaytarilgan pul asosiy valyuta qismiga yoziladi
 - **SEVERITY:** MEDIUM · **MODULE:** Purchase return / Currency
-- **ROOT CAUSE:** purchase/returns.service.ts:290-299 `currency: baseCurrency`. **STATUS:** OPEN
+- **ROOT CAUSE:** purchase/returns.service.ts:290-299 `currency: baseCurrency`. **STATUS:** OPEN · 2026-09-28: tahlil qilindi → `.claude/FINANCIAL-DECISIONS.md` — OWNER DECISION NEEDED
 
 ## AUD-016 — POS "boshqa chiqim" kompaniya kassasidan ayrilmaydi
 - **SEVERITY:** MEDIUM · **MODULE:** POS / Cash
 - **ROOT CAUSE:** sales/pos-cash.service.ts — `other_out` faqat smena hisoblagichini o'zgartiradi
   (kassa qutisi asosiy kassaning qismi deb hisoblangan). Pul haqiqatan chiqib ketsa, asosiy kassa
-  va 1010 oshirilgan bo'lib qoladi (smena farqi bilan birga — AUD-010). **STATUS:** OPEN
+  va 1010 oshirilgan bo'lib qoladi (smena farqi bilan birga — AUD-010). **STATUS:** OPEN · 2026-09-28: tahlil qilindi → `.claude/FINANCIAL-DECISIONS.md` — OWNER DECISION NEEDED
 
 ## AUD-017 — To'langan xarajat to'lov sanasi davr qulfini chetlab o'tadi
 - **SEVERITY:** MEDIUM · (AUD-011 ning xususiy holi, u bilan birga yopiladi) · **STATUS:** FIXED (AUD-011 bilan)
@@ -178,7 +178,7 @@ Dalillar `apps/api/src/` ga nisbatan (fayl:qator), 2026-09-25 holatida tekshiril
 ## AUD-022 — Xarid qaytarishida ombor AVCO bilan, jurnal xarid narxi bilan chiqadi
 - **SEVERITY:** MEDIUM · **MODULE:** Purchase return / Stock
 - **ROOT CAUSE:** purchase/returns.service.ts:204 `return_out` narxsiz (AVCO), jurnal esa `total`
-  (xarid qiymati) bilan CR 1200 (:238-247). Farq hech qayerga yozilmaydi. **STATUS:** OPEN
+  (xarid qiymati) bilan CR 1200 (:238-247). Farq hech qayerga yozilmaydi. **STATUS:** OPEN · 2026-09-28: tahlil qilindi → `.claude/FINANCIAL-DECISIONS.md` — OWNER DECISION NEEDED
 
 ## AUD-023 — To'liq qaytarilgan buyurtmani haydovchi "yetkazildi" deb tasdiqlay oladi
 - **SEVERITY:** MEDIUM · **MODULE:** Delivery
