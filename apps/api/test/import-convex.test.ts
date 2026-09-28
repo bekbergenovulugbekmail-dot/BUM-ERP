@@ -14,6 +14,7 @@ import { notifications } from "../src/db/schema/notifications.js";
 import { branches, companyMembers, users } from "../src/db/schema/platform.js";
 import { salesOrderItems } from "../src/db/schema/sales.js";
 import { importConvexExport } from "../src/migration/convex-import.js";
+import { DEFAULT_ACCOUNTS } from "../src/modules/finance/accounts.service.js";
 import { buildServer } from "../src/server.js";
 import { login, resetDatabase } from "./helpers.js";
 
@@ -156,9 +157,11 @@ describe("Convex eksportidan import", () => {
     const [notification] = await db.select().from(notifications).where(eq(notifications.legacyId, "n_1"));
     expect(notification!.link).toBeNull();
 
-    // Hisoblar rejasi to'ldirildi: Convex'dagi 1010 va 4000 + qolgan standart hisoblar
+    // Hisoblar rejasi to'ldirildi: Convex'dagi 1010 va 4000 mavjudlariga tushadi, qolgani standart rejadan.
+    // Aniq songa bog'lanmaymiz — standart rejaga yangi hisob qo'shilganda (masalan 2250 ish haqi qarzi) test
+    // kodda emas, shu yerda yiqilardi.
     const companyAccounts = await db.select().from(accounts).where(eq(accounts.companyId, ownerRow!.activeCompanyId!));
-    expect(companyAccounts.length).toBe(25);
+    expect(companyAccounts.length).toBe(DEFAULT_ACCOUNTS.length);
 
     expect(report.reconciliation).toMatchObject({ companies: 1, users: 2, customer_debt: "0.30", journal_imbalance: "0.50" });
     const [box] = await db.select().from(units).where(eq(units.name, unitName));

@@ -5513,17 +5513,66 @@ yoki tuzatish qilinmadi. Bog'langan kassalar: 2 ta (ikkalasi ham mos emas); bog'
 2 karta) — ular turi bo'yicha umumiy 1010/1020 ga yozadi, muammo yo'q.
 
 1. **Bonnu Market** (`1b83a193…`) — kassa "Asosiy kassa" (`e109bad9…`, turi `cash`, UZS, faol) → hisob **1020
-   "Bank hisobi"** (`891237cf…`, subtype `bank`). Kutilgan: `cash` (1010). Kassa harakatlari: 13 ta, 604 580 so'm
-   (2026-09-11 … 2026-09-28). Noto'g'ri hisobga aynan shu kassadan tushgan jurnal satrlari: **2 ta, debet
-   114 100 so'm** (qolgan satrlar haqiqiy bank kassalaridan — ular 1020 ga to'g'ri tushgan). Ko'rinadigan oqibat:
-   1010 "Naqd kassa" = **−57 360**, 1020 = 327 580, bank kassalari yig'indisi esa 33 480.
+   "Bank hisobi"** (`891237cf…`, subtype `bank`). Kutilgan: `cash` (1010). Noto'g'ri hisobga shu kassadan tushgan
+   jurnal satrlari: **3 ta, jami 294 100 so'm debet** — JE-2026-00039 `purchase_return_refund` 180 000,
+   JE-2026-00041 `customer_payment` 18 000, JE-2026-00043 `customer_payment` 96 100 (hammasi 2026-09-28).
+   Oqibat: 1010 "Naqd kassa" = **−57 360**, 1020 = 327 580, bank kassalari yig'indisi esa 33 480.
 2. **Ezo** (`5acffa9a…`) — kassa "Yetkazuvchi DA-002 — yo'ldagi naqd" (`a9263b08…`, turi `cash`, UZS, faol) → hisob
-   **1100 "Debitorlar"** (`e521c5b8…`, subtype `receivable`). Kutilgan: `cash` (1010). Kassa harakatlari: 2 ta,
-   40 000 so'm (2026-09-23). Shu kassadan noto'g'ri hisobga tushgan satr: **1 ta, kredit 20 000 so'm**.
+   **1100 "Debitorlar"** (`e521c5b8…`, subtype `receivable`). Kutilgan: `cash` (1010). Noto'g'ri jurnal satri:
+   **0 ta** — bu kassaning to'lovi JE-2026-00003 da 1010 ga TO'G'RI tushgan, topshirish esa `cash_transfer` bo'lib,
+   umuman jurnal yozuvi yaratmaydi. Ya'ni tarixiy zarar yo'q, faqat kelajakdagi yozuvlar xavfi.
+
+Dastlabki hisobotdagi "Bonnu 2 satr / 114 100" va "Ezo 1 satr / 20 000" raqamlari NOTO'G'RI edi: 180 000 so'mlik
+satr o'tkazib yuborilgan (kassa harakatida manba `purchase_return`, jurnalda `purchase_return_refund` — nomlar mos
+kelmagani uchun solishtiruv uni topmagan), Ezo'da esa to'lovning debitor tomoni kassa tomoni deb belgilangan.
+Yuqoridagi raqamlar — tekshirilgan yakuniy holat.
 
 Kassaning o'z qoldig'i (`cash_accounts.balance`) to'g'ri — xato faqat buxgalteriya jurnalining qaysi hisobiga
-tushganida. Ya'ni naqd pul balansda bank/debitor sifatida ko'rinadi, 1010 esa manfiy chiqadi.
+tushganida.
 
-**REPAIR REQUIRED — OWNER APPROVAL NEEDED.** Tuzatish ikki qadam: (a) kassaning `ledger_account_id` ni to'g'ri
-hisobga o'tkazish (endi API o'zi tekshiradi — noto'g'ri hisob qabul qilinmaydi); (b) allaqachon yozilgan satrlarni
-to'g'rilovchi jurnal yozuvi. Ikkalasi ham moliyaviy ma'lumotga tegadi — egasining alohida ruxsatisiz qilinmaydi.
+**STATUS = REPAIR PENDING OWNER APPROVAL.** Tuzatish kodi yozildi va lokal/test muhitida tekshirildi (pastga qarang),
+lekin **production'da BAJARILMAGAN**: egasining alohida ruxsati kutilmoqda.
+
+### Tuzatish kodi: kassa ↔ hisob bog'lanishi (2026-09-28, production'da BAJARILMAGAN)
+
+`apps/api/src/modules/finance/cash-ledger-repair.service.ts` + `apps/api/src/cli/repair-cash-ledger.ts`.
+HTTP marshruti ATAYLAB yo'q — faqat CLI, ya'ni oddiy foydalanuvchi (hatto `finance.manage` bilan ham) chaqira olmaydi.
+
+Nima qiladi (BITTA tranzaksiyada): kassa qatorini `for update` bilan qulflaydi → bog'lanishni to'g'rilaydi →
+noto'g'ri hisobda qolgan, shu kassadan kelgan satrlarni topib, ularning sof summasini reklassifikatsiya yozuvi bilan
+ko'chiradi (DR yangi hisob / CR eski hisob) → audit yozuvini qoldiradi. Biror qadam xato bersa — hammasi rollback.
+
+Nega UPDATE emas: `journal_lines` tahrirlanmaydi/o'chirilmaydi (jurnalga yozishning yagona yo'li `postJournalEntry`);
+bu yozuvlarda `reference_type` bor, shuning uchun `voidManualEntry` ularni rad etadi, hujjat orqali bekor qilish esa
+to'lovni va kassa harakatini ham qaytarardi; `createManualEntry` `cash`/`bank` subtype'larini bloklaydi.
+
+Idempotentlik: yozuv `reference_type = cash_ledger_reclass`, `reference_id` = kassa id; `(company_id,
+reference_type, reference_id)` yagona indeksi takroriy yozuvga yo'l qo'ymaydi — ikkinchi chaqiruv `already_repaired`
+qaytaradi. Bog'lanish allaqachon to'g'ri bo'lsa `nothing_to_repair` (Ezo holati).
+
+Satrlarni topish IKKI kalit bo'yicha: hujjatdan kelgan harakatda jurnal `reference_id` = kassa harakatining
+`reference_id` si (`reference_type` lar bir xil emas — aynan shu 180 000 so'mlik satrni o'tkazib yuborgan edi),
+qo'lda kassa kirim/chiqimida esa jurnal `reference_id` = harakatning o'z id'si.
+
+CLI: `--list` (faqat o'qish, mos kelmaganlar ro'yxati), `--apply` siz — tranzaksiya ochiladi va ROLLBACK bilan
+tugaydi (dry run), `--apply` bilan — COMMIT.
+
+Tuzatilgandan keyin bog'lanish qayta buzilsa (faqat bazaga to'g'ridan-to'g'ri yozish bilan mumkin), ikkinchi reklass
+yozuvini yagona indeks bloklaydi — shuning uchun bu holat jimgina "tuzatilgan" demaydi, `repaired_but_remapped`
+sababi bilan xato beradi va odam aralashuvini so'raydi.
+
+Test: `apps/api/test/cash-ledger-repair.test.ts` — 13 test, A–N matritsasi (eski holat, atomarlik, bog'lanish,
+jurnal, debet=kredit, kassa=jurnal, tarixiy ma'lumot daxlsizligi, audit, idempotentlik, rollback, tenant izolyatsiyasi,
+Ezo'ning bo'sh holati, HTTP orqali chaqirib bo'lmasligi, parallel chaqiruv, qayta buzilgan bog'lanish).
+
+CLI lokal test bazasida uchidan-uchiga tekshirildi: `--list` mos kelmaganni topdi → `--apply` siz dry run ROLLBACK
+qildi (ro'yxat o'zgarmadi) → `--apply` COMMIT qildi (1010 = 10 000, 1020 = 0, kassa qoldig'i o'zgarmadi, bitta
+`posted` yozuv, audit yozildi) → takroriy chaqiruv `already_repaired` qaytardi.
+
+**To'liq API regressiyasi:** 183 test fayli / 1284 test — hammasi o'tdi (xotira cheklovi tufayli 6 bo'lakda,
+bo'laklar orasida orfan `node` jarayonlari o'chirilgan). `tsc --noEmit` va `eslint` toza.
+
+Regressiya bitta ESKI yiqilishni ochdi va u tuzatildi: `import-convex.test.ts` hisoblar rejasida 25 ta hisob kutardi,
+holbuki `af6f31e` (maosh accrual) standart rejaga 26-hisob — **2250 "Ish haqi bo'yicha qarz"** ni qo'shgan va test
+o'sha sessiyada yangilanmagan edi. Endi tekshiruv aniq songa emas, `DEFAULT_ACCOUNTS.length` ga bog'landi —
+kelgusida rejaga hisob qo'shilganda test yana eskirmaydi. Bu tuzatishning kassa bog'lanishiga aloqasi yo'q.

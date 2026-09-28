@@ -103,6 +103,16 @@ export async function ledgerAccountFor(
   return requireAccountBySubtype(conn, companyId, type, "asset", type === "cash" ? "Naqd kassa" : "Bank hisobi");
 }
 
+/** Kassa turi uchun ruxsat etilgan hisob subtype'lari — tekshiruv va tuzatish shu yagona qoidadan foydalanadi. */
+export function allowedLedgerSubtypes(type: CashAccountType): readonly string[] {
+  return type === "cash" ? ["cash"] : ["bank", "clearing"];
+}
+
+/** Bog'langan hisob kassa turiga mos keladimi (subtype belgilanmagan eski hisob — mos deb qaraladi). */
+export function ledgerSubtypeMatches(type: CashAccountType, subtype: string | null): boolean {
+  return subtype === null || allowedLedgerSubtypes(type).includes(subtype);
+}
+
 /**
  * Kassaga bog'lanadigan buxgalteriya hisobi: shu kompaniyaning faol aktiv hisobi VA kassa turiga mos.
  *
@@ -119,8 +129,7 @@ export async function assertLedgerAccount(conn: DbOrTx, companyId: string, ledge
   if (!row) throw notFound("Buxgalteriya hisobi topilmadi");
   if (row.type !== "asset" || !row.isActive) throw badRequest("Kassaga faqat faol aktiv (asset) hisob bog'lanadi");
   if (!type) return;
-  const allowed = type === "cash" ? ["cash"] : ["bank", "clearing"];
-  if (row.subtype && !allowed.includes(row.subtype)) {
+  if (!ledgerSubtypeMatches(type, row.subtype)) {
     throw badRequest(
       type === "cash"
         ? `"${row.code} ${row.name}" naqd hisobi emas — naqd kassaga naqd (1010) hisobi bog'lanadi`
