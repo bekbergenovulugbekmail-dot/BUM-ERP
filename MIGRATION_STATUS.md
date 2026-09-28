@@ -5414,9 +5414,32 @@ implementatsiya o'zgartirilmaydi.
 | Accrual implement qilindimi | **YO'Q** (ataylab) |
 | Accrual qarori | **KUTILMOQDA** |
 
-**DEPLOY QARORI: DEPLOY QILINMAYDI** (production ham, staging ham). Sabab: maosh accrual (hisoblash) bo'yicha
-biznes/buxgalteriya qarori yakunlanmagan. Branch texnik jihatdan deployga tayyor holatga keltirildi.
+**DEPLOY QARORI (2026-09-28 gacha): DEPLOY QILINMAYDI** — maosh accrual qarori yakunlanmagan. Egasi keyin
+"deploy qil" dedi (quyidagi bo'limga qarang) — accrual hali ham implement qilinmagan, lekin qolgan ishlar chiqarildi.
 Push xavfsiz: Railway'da `bum-api`/`bum-web` GitHub manbasiga ulanmagan va repo triggeri yo'q (production `82f1871b`,
 staging `5a8e273a` — GraphQL bilan tekshirildi), repoda CI workflow yo'q → `git push` deploy qilmaydi, deploy faqat
 qo'lda `railway up`.
+
+### PRODUCTION DEPLOY (2026-09-28 10:10–10:13Z) — egasi: "deploy qil"
+
+`6b183c6` production'ga chiqarildi (staging tegilmagan): `bum-api` deployment `3a153e81…` SUCCESS,
+`bum-web` deployment `9014abc6…` SUCCESS. Loglarda "Migratsiyalar qo'llandi (41ms)" **bir marta** — `0099` qo'llandi,
+xato yo'q, server tinglayapti. Tashqaridan: `/api/auth/me` 401, `POST /api/hr/salaries/:id/reverse` 401,
+`/api/purchase/suppliers-aging` 401, `/api/inventory/stock/reconciliation` 401, noma'lum marshrut 404, sayt 200,
+`build.json` = `2026-09-28T10:12:37Z`.
+
+**Deploydan keyin baza (faqat o'qish, summalarsiz):** migratsiyalar soni oshdi (oxirgisi `0099`); `salary_payments` da
+`reversed_at/by/reason` ustunlari bor, enum'da `reversed`, yagona indeks `... WHERE reversed_at IS NULL` bilan qayta
+yaratilgan; maosh yozuvlari o'zgarmagan (hammasi qoralama holatida); har kompaniyada jurnal debet = kredit;
+yechilmagan sinxron nomuvofiqligi yo'q.
+
+**TOPILGAN MUAMMO (egasi qarori kerak) — bitta kassada qoldiq MANFIY.** Sabab: 2026-09-17 da qurilmadan kelgan
+oflayn ta'minotchi to'lovi kassadagi puldan ko'p bo'lgani holda qabul qilingan — o'sha paytdagi kod oflayn amalda
+qoldiqni manfiyga tushirishga ruxsat berardi (`allowOverdraft`; hozir bu bekor qilingan, yangi manfiy qoldiq
+yaratilmaydi). Oqibati: **o'sha kassada har qanday naqd sotuv rad etiladi** ("Kassada yetarli mablag' yo'q") —
+egasi 2026-09-28 da web kassada shu xatoga duch keldi. Yana: naqd kassalar yig'indisi jurnal 1010 dan farq qiladi —
+alohida tekshiriladi. Aniq summalar va hujjat raqamlari repoda saqlanmaydi (egasining panelida va sessiya yozuvida).
+Tuzatish yo'llari (egasi tanlaydi): (a) pul haqiqatan shu kassadan chiqqan bo'lsa — kassaga kirim hujjati bilan
+haqiqiy holatga keltirish; (b) pul boshqa kassadan/hisobdan chiqqan bo'lsa — to'lovni bekor qilib, to'g'ri hisobdan
+qayta yozish. Kod tomonidan qo'shimcha tuzatish talab qilinmaydi.
 
