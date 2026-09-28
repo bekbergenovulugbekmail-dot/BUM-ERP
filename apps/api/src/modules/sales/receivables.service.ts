@@ -207,7 +207,55 @@ export async function receivablesAging(
   }
 
   const customersRows = [...byCustomer.values()].sort((a, b) => b.maxDaysOverdue - a.maxDaysOverdue || Number(toMinor(b.totals.total) - toMinor(a.totals.total)));
-  return { asOf, totals, customers: customersRows, items };
+  return { asOf, totals, customers: customersRows, items, undocumented: await undocumentedBalances(conn, companyId, options.customerId) };
+}
+
+/**
+ * AUD-003 (egasi qarori): HUJJATSIZ QOLDIQ — mijoz hisobi (kesh = jurnal 1100 subhisobi) va ochiq hujjatlar farqi.
+ * Musbat — hujjatsiz qarz (boshlang'ich qoldiq, tuzatma; umumiy to'lovning taqsimlanmagan qismi shuni yopadi), manfiy —
+ * hujjatga bog'lanmagan kredit. Aging jami va kredit to'xtatishga qo'shilmaydi — alohida ko'rsatiladi.
+ */
+export async function undocumentedBalances(conn: DbOrTx, companyId: string, customerId?: string) {
+  const open = conn
+    .select({
+      customerId: salesOrders.customerId,
+      amount: sql<string>`sum(${netAmountSql} - ${salesOrders.paidAmount})`.as("amount"),
+    })
+    .from(salesOrders)
+    .where(and(eq(salesOrders.companyId, companyId), openCondition))
+    .groupBy(salesOrders.customerId)
+    .as("open_docs");
+  const rows = await conn
+    .select({
+      customerId: customers.id,
+      customerName: customers.name,
+      customerCode: customers.code,
+      ledger: customers.totalDebt,
+      documented: sql<string>`coalesce(${open.amount}, 0)::numeric(18,2)`,
+    })
+    .from(customers)
+    .leftJoin(open, eq(open.customerId, customers.id))
+    .where(
+      and(
+        eq(customers.companyId, companyId),
+        customerId ? eq(customers.id, customerId) : undefined,
+        sql`${customers.totalDebt} <> coalesce(${open.amount}, 0)`,
+      ),
+    )
+    .orderBy(asc(customers.name));
+  let debt = 0n;
+  let credit = 0n;
+  const list = rows.map((row) => {
+    const difference = toMinor(row.ledger) - toMinor(row.documented);
+    if (difference > 0n) debt += difference;
+    else credit -= difference;
+    return {
+      ...row,
+      undocumentedDebt: fromMinor(difference > 0n ? difference : 0n),
+      unappliedCredit: fromMinor(difference < 0n ? -difference : 0n),
+    };
+  });
+  return { debt: fromMinor(debt), unappliedCredit: fromMinor(credit), customers: list };
 }
 
 /** Bitta mijozning ochiq qarzi (kredit tekshiruvi va credit hold uchun) — hisobot bilan bir xil ta'rif. */

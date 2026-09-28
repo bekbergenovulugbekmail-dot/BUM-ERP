@@ -235,6 +235,7 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
     .returning(paymentFields);
 
   let allocations: { orderId: string; number: string; amount: string }[] = [];
+  let unallocated = "0.00";
   if (order) {
     const paid = toMinor(order.paidAmount) + amount;
     // To'lov sotuv holatini o'zgartirmaydi: to'langanlik summalardan, yetkazilgani esa yetkazma hujjatidan o'qiladi
@@ -245,7 +246,8 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
   } else if (customerId) {
     // Buyurtmasiz (umumiy qarz) to'lovi ochiq hujjatlarga taqsimlanadi — eng eski muddat birinchi.
     // Shusiz hujjatlar "to'lanmagan" bo'lib qolar, qarz yoshi va muddat ogohlantirishi noto'g'ri chiqardi.
-    ({ allocations } = await allocateCustomerPayment(tx, companyId, customerId, amount, payment!.id));
+    // AUD-003: taqsimlanmagan qism — hujjatsiz qarzni yopgan pul (kesh va jurnalda saqlanadi); javob va auditda ko'rinadi
+    ({ allocations, unallocated } = await allocateCustomerPayment(tx, companyId, customerId, amount, payment!.id));
   }
   if (customerId) {
     await tx
@@ -267,9 +269,10 @@ export async function recordCustomerPayment(tx: Tx, tenant: TenantContext, input
       ...(input.terminalId ? { terminalId: input.terminalId } : {}),
       ...(input.paymentId ? { paymentId: input.paymentId } : {}),
       ...(allocations.length > 0 ? { allocations } : {}),
+      ...(toMinor(unallocated) > 0n ? { unallocated } : {}),
     },
   });
-  return { payment: updated!, created: true, allocations };
+  return { payment: updated!, created: true, allocations, unallocated };
 }
 
 /**
@@ -332,6 +335,7 @@ export async function recordSalesPayment(tx: Tx, tenant: TenantContext, input: S
   if (input.paymentDate) await assertPeriodOpen(tx, tenant.company.id, input.paymentDate);
   const companyId = tenant.company.id;
   if (!input.orderId && !input.customerId) throw badRequest("Mijoz yoki buyurtma tanlanishi kerak");
+  let distribution: Awaited<ReturnType<typeof recordCustomerPayment>> | null = null;
   if (input.reference) {
     const [existing] = await tx
       .select(paymentFields)
@@ -403,21 +407,28 @@ export async function recordSalesPayment(tx: Tx, tenant: TenantContext, input: S
   } else if (currency !== baseCurrency) {
     const foreignAmount = toMinor(input.amount);
     const base = await foreignPaymentBase(tx, companyId, input.orderId ?? null, currency, foreignAmount);
-    const { payment } = await recordCustomerPayment(
+    const recorded = await recordCustomerPayment(
       tx,
       tenant,
       { ...input, method: input.method, amount: fromMinor(base), currency, foreignAmount: fromMinor(foreignAmount) },
       meta,
     );
-    paymentId = payment.id;
+    paymentId = recorded.payment.id;
+    distribution = recorded;
   } else {
-    const { payment } = await recordCustomerPayment(tx, tenant, { ...input, method: input.method }, meta);
-    paymentId = payment.id;
+    const recorded = await recordCustomerPayment(tx, tenant, { ...input, method: input.method }, meta);
+    paymentId = recorded.payment.id;
+    distribution = recorded;
   }
 
   if (input.orderId) await earnOrderCashback(tx, tenant, input.orderId);
   const [payment] = await tx.select(paymentFields).from(customerPayments).where(eq(customerPayments.id, paymentId)).limit(1);
-  return { payment: payment!, created: true };
+  // AUD-003: umumiy to'lovda hujjatlarga taqsimot va taqsimlanmagan (hujjatsiz qarzni yopgan) qism
+  return {
+    payment: payment!,
+    created: true,
+    ...(distribution && "allocations" in distribution ? { allocations: distribution.allocations, unallocated: distribution.unallocated } : {}),
+  };
 }
 
 export async function listCustomerPayments(

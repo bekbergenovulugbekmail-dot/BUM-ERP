@@ -27,6 +27,13 @@ type AgingCustomer = {
   maxDaysOverdue: number;
 };
 
+/** AUD-003: mijoz hisobi (kesh = jurnal) va ochiq hujjatlar farqi — aging jamiga qo'shilmaydi. */
+type Undocumented = {
+  debt: string;
+  unappliedCredit: string;
+  customers: { customerId: string; customerName: string; customerCode: string; documented: string; ledger: string; undocumentedDebt: string; unappliedCredit: string }[];
+};
+
 type AgingItem = {
   orderId: string;
   number: string;
@@ -59,7 +66,7 @@ export default function ReceivablesAging() {
   const [bucket, setBucket] = useState<"all" | Bucket>("all");
   const [view, setView] = useState<"customers" | "orders">("customers");
 
-  const query = useApiQuery<{ asOf: string; totals: Totals; customers: AgingCustomer[]; items: AgingItem[] }>(
+  const query = useApiQuery<{ asOf: string; totals: Totals; customers: AgingCustomer[]; items: AgingItem[]; undocumented?: Undocumented }>(
     mode === "aging" ? "/api/sales/receivables/aging" : null,
     { bucket: bucket === "all" ? undefined : bucket, limit: 1000 },
   );
@@ -108,6 +115,49 @@ export default function ReceivablesAging() {
           </Card>
         ))}
       </div>
+
+      {data?.undocumented && data.undocumented.customers.length > 0 && (
+        <Card data-testid="aging-undocumented">
+          <CardContent className="space-y-2 p-3">
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <p className="text-sm font-semibold">Hujjatsiz qoldiq</p>
+              <p className="text-xs text-muted-foreground">
+                Mijoz hisobidagi, lekin ochiq hujjatga bog'lanmagan summa — yuqoridagi qarz yoshi jamiga kirmaydi.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <span>Hujjatsiz qarz: <b className="tabular-nums">{fmt(data.undocumented.debt)}</b></span>
+              <span>Hujjatga bog'lanmagan to'lov/kredit: <b className="tabular-nums">{fmt(data.undocumented.unappliedCredit)}</b></span>
+            </div>
+            <div className="max-h-48 overflow-auto rounded border">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/60 text-muted-foreground">
+                  <tr>
+                    <th className="px-2 py-1.5 text-left font-medium">Mijoz</th>
+                    <th className="px-2 py-1.5 text-right font-medium">Hujjatlar bo'yicha</th>
+                    <th className="px-2 py-1.5 text-right font-medium">Hisob bo'yicha</th>
+                    <th className="px-2 py-1.5 text-right font-medium">Hujjatsiz qarz</th>
+                    <th className="px-2 py-1.5 text-right font-medium">Bog'lanmagan kredit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.undocumented.customers.map((row) => (
+                    <tr key={row.customerId} className="border-t" data-testid={`aging-undocumented-${row.customerId}`}>
+                      <td className="px-2 py-1.5">
+                        <button type="button" className="text-left hover:underline" onClick={() => setStatementFor(row.customerId)}>{row.customerName}</button>
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.documented)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.ledger)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{num(row.undocumentedDebt) > 0 ? fmt(row.undocumentedDebt) : "—"}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{num(row.unappliedCredit) > 0 ? fmt(row.unappliedCredit) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
