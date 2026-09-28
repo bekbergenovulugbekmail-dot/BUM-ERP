@@ -5489,3 +5489,25 @@ frontend 2, tsc va eslint toza.
 4. Desktop kassa yangiliklari (savatni tozalash, ekran masshtabi, sotuvchi, chekdagi soliq) — yangi `.exe` relizi
    yig'ilib, Admin panel → "Desktop kassa" orqali yuklanishi kerak; bu Railway deployiga kirmaydi.
 
+
+### Kassa ↔ buxgalteriya hisobi turi (2026-09-28, deploy `ae43fa9`)
+
+Naqd kassaga bank hisobi (1020) bog'lash mumkin edi — bunday kassaga tushgan naqd pul jurnalda 1010 emas, 1020 ga
+tushardi va "naqd qoldiq = jurnal 1010" solishtiruvi noto'g'ri natija berardi. Endi tur tekshiriladi: naqd kassa —
+naqd (subtype `cash`, 1010) hisobiga; bank/karta/hamyon — bank (`bank`, 1020) yoki kutilayotgan to'lovlar
+(`clearing`, 1030) hisobiga. Mos kelmasa 400 va `details.reason = "ledger_type_mismatch"` qaytadi; xabar qaysi hisob
+va nega yaramasligini aytadi. Tekshiruv yangi kassa ochishda ham, tahrirlashda ham ishlaydi (tahrirda kassaning
+bazadagi joriy turi bo'yicha, satr `for update` bilan qulflangandan keyin — turni va hisobni bir vaqtda o'zgartirish
+poygasi yo'q). Bog'lanmagan kassalar avvalgidek turi bo'yicha umumiy 1010/1020 ga yozadi.
+
+Test: `apps/api` cash.test.ts 7/7 (yangi test: naqd↔bank almashtirish rad etiladi, to'g'ri hisob qabul qilinadi,
+naqd tushum 1010 ga tushib 1020 nolda qoladi), `tsc --noEmit` toza.
+
+Deploy: `bum-api` `9137013a…` SUCCESS (2026-09-28 16:07Z) — "Migratsiyalar qo'llandi" bir marta, server tinglayapti,
+tashqaridan `/api/auth/me` 401, `app.bum-erp.uz` 200. Sxema migratsiyasi kerak emas (oxirgisi 0099).
+
+**NOT VERIFIED — production'da mavjud bog'lanishlar.** Yangi tekshiruv faqat yangi/tahrirlangan bog'lanishga ta'sir
+qiladi; bazada allaqachon noto'g'ri bog'langan kassa bor-yo'qligi tekshirilmadi: `railway ssh` orqali read-only
+so'rov auto-rejim klassifikatori tomonidan bloklandi ("Production Reads"). Egasi ruxsat bersa, `cash_accounts` ⋈
+`accounts` bo'yicha bir martalik read-only so'rov mos kelmagan bog'lanishlarni ko'rsatadi; topilsa — bu moliyaviy
+ma'lumot, tuzatish (hisobni almashtirish va kerak bo'lsa jurnalni to'g'rilash) egasi qarori bilan qilinadi.
