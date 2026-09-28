@@ -298,6 +298,59 @@ describe("Desktop kassa: offline chek va qaytarish sinxroni", () => {
     expect((await web(company.ownerCookie, "GET", "/api/pos/devices/conflicts?resolved=true")).json().conflicts).toHaveLength(1);
   });
 
+  it("soliq chekdan keyin o'zgargan: chek qurilmadagi soliq bilan yoziladi (nomuvofiqlik); eski chek rad etilmaydi — karta ortig'i nomuvofiqlik", async () => {
+    const kassir = await addEmployee(app, company, "Kassir");
+    const { token } = await register("Kassa 1");
+    expect((await device(token, "POST", "/api/pos-device/cashiers/login", { phone: kassir.phone, password: "xodim-parol-123" })).statusCode).toBe(200);
+    // Mahsulot QQS 12% bilan sotilgan, keyin web'da soliq 0 ga tushirilgan
+    const created = await web(company.ownerCookie, "POST", "/api/catalog/products", { name: "Borjomi", sku: "BORJ", baseUnitId: piece, salesPrice: "18000", taxRate: "12" });
+    expect(created.statusCode, created.body).toBe(201);
+    const borjomi = created.json().product.id as string;
+    await receive(borjomi, "10");
+    expect((await web(company.ownerCookie, "PATCH", `/api/catalog/products/${borjomi}`, { taxRate: "0" })).statusCode).toBe(200);
+    const shiftId = await openDeviceShift(token, kassir.id);
+    const line = (extra: object = {}) => ({ id: randomUUID(), productId: borjomi, unitId: piece, quantity: "1", unitPrice: "18000.0000", ...extra });
+
+    // 1) Yangi qurilma chekdagi soliqni yuboradi — chek summasi 20 160 bo'lib qoladi, karta to'lovi to'liq o'tadi
+    const withTax = randomUUID();
+    const [applied] = await push(token, [
+      op("sale.complete", kassir.id, {
+        saleId: withTax,
+        shiftId,
+        number: "K01-000001",
+        items: [line({ taxRate: "12", taxIncluded: false })],
+        paymentMethod: "bank",
+        amountPaid: "20160.00",
+        payments: [{ method: "bank", amount: "20160.00" }],
+      }),
+    ]);
+    expect(applied!.status, JSON.stringify(applied)).toBe("applied");
+    expect(applied!.result).toMatchObject({ totalAmount: "20160.00", paid: "20160.00" });
+    const [taxed] = await db.select().from(salesOrders).where(eq(salesOrders.id, withTax));
+    expect(taxed!.totalAmount).toBe("20160.00");
+
+    // 2) Eski chek (soliqsiz yuborilgan — yangilanmagan qurilma): server jami 18 000, karta 20 160.
+    //    Chek RAD ETILMAYDI — ortiqcha qism yozilmaydi va nomuvofiqlik sifatida ko'rinadi
+    const oldOne = randomUUID();
+    const [legacy] = await push(token, [
+      op("sale.complete", kassir.id, {
+        saleId: oldOne,
+        shiftId,
+        number: "K01-000002",
+        items: [line()],
+        paymentMethod: "bank",
+        amountPaid: "20160.00",
+        payments: [{ method: "bank", amount: "20160.00" }],
+      }),
+    ]);
+    expect(legacy!.status, JSON.stringify(legacy)).toBe("applied");
+    expect(legacy!.result).toMatchObject({ totalAmount: "18000.00", paid: "18000.00" });
+
+    const kinds = (await db.select().from(posSyncConflicts).where(eq(posSyncConflicts.companyId, company.companyId))).map((row) => row.kind);
+    expect(kinds).toContain("tax_changed");
+    expect(kinds).toContain("payment_over_total");
+  });
+
   it("sotuvchi: faol xodimlar config bilan keladi (xesh o'zgaradi); chekda sotuvchi saqlanadi, kassirdan alohida; begona xodim — nomuvofiqlik", async () => {
     const kassir = await addEmployee(app, company, "Kassir");
     // Sotuvchi — HR xodimi (kassir hisobi emas): chek shu xodimga biriktiriladi

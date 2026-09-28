@@ -1456,6 +1456,9 @@ export class KassaService {
           quantity: line.quantity,
           unitPrice: line.unitPrice,
           discountPercent: line.discountPercent,
+          // Chekdagi soliq serverga ham boradi: mahsulotda keyin o'zgarsa ham chek summasi o'zgarmaydi
+          taxRate: line.product.taxRate,
+          taxIncluded: line.product.taxIncluded,
         })),
         paymentMethod: primaryMethod,
         amountPaid: fromMinor(calc.tendered),

@@ -664,7 +664,7 @@ export async function completeSale(
 
   if (offline && offline.itemIds.length !== input.items.length) throw badRequest("Chek qatorlari identifikatori noto'g'ri");
   // Offline chek: narx va chegirma qurilmadagi shartda (prays-listdan farqi — nomuvofiqlik), kurs — sotuv lahzasidagi
-  const { items, totals, priceChanges, discountOverLimit } = await prepareSalesItems(
+  const { items, totals, priceChanges, discountOverLimit, taxChanges } = await prepareSalesItems(
     tx,
     tenant,
     input.items,
@@ -680,6 +680,7 @@ export async function completeSale(
       : { promoDate: todayIso(), customerId: input.customerId ?? null, priceDate: todayIso() },
   );
   if (priceChanges.length > 0) conflicts.push({ kind: "price_changed", details: { items: priceChanges } });
+  if (taxChanges.length > 0) conflicts.push({ kind: "tax_changed", details: { items: taxChanges } });
   if (discountOverLimit.length > 0) conflicts.push({ kind: "discount_over_limit", details: { items: discountOverLimit } });
   const total = toMinor(totals.totalAmount);
   const cashbackSettings = input.customerId ? await getCashbackSettings(tx, companyId) : null;
@@ -767,14 +768,20 @@ export async function completeSale(
   // bo'lmaydi — aralash to'lovda ham (masalan 70 000 chekka naqd 60 000 + karta 20 000 → qaytim 10 000)
   const hasCash = requestedParts.some((part) => part.method === "cash");
   const creditAllowed = !!input.customerId && (offline !== undefined || input.onCredit === true);
-  const { allocations, change, paid } = settlePaymentParts(requestedParts, due, {
+  const { allocations, change, paid, nonCashOver } = settlePaymentParts(requestedParts, due, {
     allowCashChange: offline !== undefined || hasCash,
     allowShortfall: creditAllowed,
+    // Oflayn chek rad etilmaydi: karta/bank ortig'i (odatda narx yoki soliq o'zgargani uchun) — nomuvofiqlik
+    allowNonCashOver: offline !== undefined,
     shortfallMessage: input.customerId
       ? (remaining) => `To'lov to'liq emas: qoldiq ${remaining} — qarzga yozish uchun nasiya belgilanadi`
       : "Mijozsiz sotuvda chek to'liq to'lanishi kerak",
   });
   const cashPaid = allocations.reduce((sum, part) => sum + (part.method === "cash" ? part.amount : 0n), 0n);
+  // Karta/bank terminalidan o'tgan, lekin chekka sig'magan summa: pul bankda, hujjatda yo'q — rahbar solishtiradi
+  if (nonCashOver > 0n) {
+    conflicts.push({ kind: "payment_over_total", details: { amount: fromMinor(nonCashOver), total: fromMinor(due), tendered: fromMinor(tendered) } });
+  }
 
   // Chet valyutadagi qismlar: naqd (ortig'i — o'sha valyutada qaytim) yoki karta; shu valyutadagi kassa/bankka
   const tenderedByCurrency = new Map<string, { amount: bigint; method: "cash" | "card" }>();

@@ -25,6 +25,8 @@ export const CONFLICT_KINDS = {
   discount_over_limit: "Chegirma savdo siyosatidagi chegaradan oshdi",
   deposit_over_limit: "Balansga yozilgan summa kassir chegarasidan oshdi",
   change_over_total: "Balansga o'tgan qaytim chek summasidan katta",
+  payment_over_total: "Karta/bank to'lovi chek summasidan katta bo'ldi (narx yoki soliq o'zgargan) — farq hujjatga yozilmadi",
+  tax_changed: "Chekdagi soliq stavkasi mahsulotning joriy sozlamasidan farq qildi (chekdagi stavka qo'llandi)",
   return_foreign_order: "Boshqa kassa yoki web savdosi shu kassada qaytarildi",
   return_other_shift: "Boshqa kassirning smenasida qaytarildi",
   refund_method_mismatch: "Pul chekdagi to'lov usulidan boshqacha qaytarildi",

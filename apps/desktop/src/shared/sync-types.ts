@@ -363,6 +363,12 @@ export type SalePayload = {
     quantity: string;
     unitPrice: string;
     discountPercent?: string;
+    /**
+     * Chek yopilgan lahzadagi soliq: mahsulot sozlamasi keyin o'zgarsa ham server chekni shu stavka bilan yozadi
+     * (aks holda jami boshqa chiqib, karta/bank to'lovi "chek summasidan ortiq" bo'lardi). Farqi — nomuvofiqlik.
+     */
+    taxRate?: string;
+    taxIncluded?: boolean;
   }[];
   paymentMethod: PaymentMethod;
   amountPaid: string;

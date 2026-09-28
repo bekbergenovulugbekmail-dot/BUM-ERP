@@ -90,6 +90,14 @@ export type SalesItemInput = {
   unitPrice?: string;
   /** Standart — mijoz chegirmasi. */
   discountPercent?: string;
+  /**
+   * OFLAYN KASSA CHEKI (`trustedPricing`): chek yopilgan lahzadagi soliq stavkasi va uning narxga kiritilgani.
+   * Mahsulot sozlamasi keyin o'zgarsa ham chek summasi o'zgarmaydi — aks holda server jami boshqa chiqib,
+   * karta/bank to'lovi "chek summasidan ortiq" bo'lib qolardi. Farq `taxChanges` — rahbar ko'radigan nomuvofiqlik.
+   * Boshqa yo'llarda (web, agent) e'tiborga olinmaydi.
+   */
+  taxRate?: string;
+  taxIncluded?: boolean;
   notes?: string | null;
 };
 
@@ -144,6 +152,16 @@ export type PriceChange = {
   listPrice: string;
   discountPercent: string;
   customerDiscount: string;
+};
+
+/** Oflayn chekdagi soliq stavkasi mahsulotning joriy sozlamasidan farq qilgan qator (kassa nomuvofiqligi). */
+export type TaxChange = {
+  productId: string;
+  name: string;
+  taxRate: string;
+  taxIncluded: boolean;
+  productTaxRate: string;
+  productTaxIncluded: boolean;
 };
 
 export async function prepareSalesItems(
@@ -205,6 +223,7 @@ export async function prepareSalesItems(
     notes: string | null;
   }[] = [];
   const priceChanges: PriceChange[] = [];
+  const taxChanges: TaxChange[] = [];
 
   // Soliq kompaniya sozlamasida o'chirilgan bo'lsa — yangi hujjatlarda stavka 0
   const taxOn = await isTaxEnabled(tx, companyId);
@@ -256,12 +275,29 @@ export async function prepareSalesItems(
       }
     }
 
+    // Soliq: odatda mahsulotning joriy sozlamasi. Oflayn chekda — chek yopilgan lahzadagi stavka (qurilma yuboradi):
+    // chek summasi o'zgarmaydi, farqi bo'lsa rahbar ko'radigan nomuvofiqlik.
+    const productTaxRate = effectiveTaxRate(product.taxRate, taxOn);
+    const deviceTax = options.trustedPricing && item.taxRate !== undefined;
+    const taxRate = deviceTax ? effectiveTaxRate(item.taxRate!, taxOn) : productTaxRate;
+    const taxIncluded = deviceTax ? (item.taxIncluded ?? product.taxIncluded) : product.taxIncluded;
+    if (deviceTax && (toMinor(taxRate, 2) !== toMinor(productTaxRate, 2) || taxIncluded !== product.taxIncluded)) {
+      taxChanges.push({
+        productId: product.id,
+        name: product.name,
+        taxRate,
+        taxIncluded,
+        productTaxRate,
+        productTaxIncluded: product.taxIncluded,
+      });
+    }
+
     const amounts = computeLine({
       quantity: item.quantity,
       unitPrice,
       discountPercent,
-      taxRate: effectiveTaxRate(product.taxRate, taxOn),
-      taxIncluded: product.taxIncluded,
+      taxRate,
+      taxIncluded,
     });
     subtotal += amounts.net;
     taxAmount += amounts.tax;
@@ -271,7 +307,7 @@ export async function prepareSalesItems(
       unitId,
       quantity: item.quantity,
       unitPrice,
-      taxRate: effectiveTaxRate(product.taxRate, taxOn),
+      taxRate,
       discountPercent,
       lineTotal: fromMinor(amounts.lineTotal),
       notes: item.notes ?? null,
@@ -289,6 +325,8 @@ export async function prepareSalesItems(
     priceChanges,
     /** Ishonchli narxlashda (offline kassa) chegaradan oshgan chegirmalar — chaqiruvchi nomuvofiqlik sifatida yozadi. */
     discountOverLimit,
+    /** Oflayn chekdagi soliq mahsulotning joriy sozlamasidan farq qilgan qatorlar. */
+    taxChanges,
   };
 }
 

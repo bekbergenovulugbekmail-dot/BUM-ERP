@@ -105,6 +105,13 @@ export type SettleRules = {
   allowShortfall: boolean;
   /** Kam to'lov rad etilganda xabar (masalan, mijozsiz sotuv); funksiya — qoldiq summa bilan. */
   shortfallMessage?: string | ((remaining: string) => string);
+  /**
+   * OFLAYN KASSA CHEKI: karta/bank qismi chek summasidan oshsa ham hujjat RAD ETILMAYDI — chek qurilmada
+   * yopilgan, mahsulot berilgan va pul terminaldan o'tgan. Ortiqcha qism qabul qilinmaydi (qism qisqartiriladi),
+   * farq `nonCashOver` da qaytariladi: chaqiruvchi uni nomuvofiqlik sifatida rahbarga ko'rsatadi.
+   * Odatda bu narx yoki SOLIQ qurilmadagi chekdan keyin o'zgarganda yuz beradi.
+   */
+  allowNonCashOver?: boolean;
 };
 
 export type Settlement = {
@@ -114,12 +121,31 @@ export type Settlement = {
   paid: bigint;
   change: bigint;
   shortfall: bigint;
+  /** Oflayn chekda qabul qilinmagan karta/bank ortig'i (0 — ortiqcha yo'q). */
+  nonCashOver: bigint;
 };
 
 /** Jami summa `due` ga nisbatan qoidalar: sof funksiya (bazaga yozmaydi). */
 export function settlePaymentParts(parts: ResolvedPart[], due: bigint, rules: SettleRules): Settlement {
+  const nonCashTendered = parts.reduce((sum, part) => sum + (part.method === "cash" ? 0n : part.amount), 0n);
+  let nonCashOver = 0n;
+  if (nonCashTendered > due) {
+    if (!rules.allowNonCashOver) throw badRequest("Karta yoki bank to'lovi chek summasidan oshmasligi kerak", { reason: "overpayment" });
+    // Ortiqcha qism oxirgi karta/bank qism(lar)idan ayriladi — chek qabul qilinadi, farq nomuvofiqlikda
+    nonCashOver = nonCashTendered - due;
+    let over = nonCashOver;
+    parts = [...parts]
+      .reverse()
+      .map((part) => {
+        if (part.method === "cash" || over === 0n) return part;
+        const take = part.amount < over ? part.amount : over;
+        over -= take;
+        return { ...part, amount: part.amount - take };
+      })
+      .reverse()
+      .filter((part) => part.amount > 0n);
+  }
   const nonCash = parts.reduce((sum, part) => sum + (part.method === "cash" ? 0n : part.amount), 0n);
-  if (nonCash > due) throw badRequest("Karta yoki bank to'lovi chek summasidan oshmasligi kerak", { reason: "overpayment" });
   const cash = parts.reduce((sum, part) => sum + (part.method === "cash" ? part.amount : 0n), 0n);
   const tendered = nonCash + cash;
   let change = 0n;
@@ -155,5 +181,5 @@ export function settlePaymentParts(parts: ResolvedPart[], due: bigint, rules: Se
       remaining,
     });
   }
-  return { allocations, tendered, paid, change, shortfall };
+  return { allocations, tendered, paid, change, shortfall, nonCashOver };
 }

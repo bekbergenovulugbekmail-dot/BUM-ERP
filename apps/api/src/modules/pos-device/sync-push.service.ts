@@ -118,6 +118,9 @@ export const syncOperationSchema = z.discriminatedUnion("type", [
             quantity: positiveQty,
             unitPrice: priceSchema,
             discountPercent: percentSchema.optional(),
+            /** Chek yopilgan lahzadagi soliq (keyin mahsulotda o'zgarsa ham chek summasi o'zgarmaydi). */
+            taxRate: percentSchema.optional(),
+            taxIncluded: z.boolean().optional(),
           }),
         )
         .min(1)
