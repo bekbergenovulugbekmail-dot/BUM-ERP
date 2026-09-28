@@ -1263,6 +1263,11 @@ describe("Kassa xizmati (main jarayon)", () => {
     store.saveCashier({ ...cashier, permissions: ["pos.use", "sales.refund", "analytics.view"] });
     await expect(kassa.analyticsReport({ from: today, to: "2020-01-01" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
+    // Tannarx va foyda — faqat `products.view_cost` / `analytics.view_profit` bilan (egasi qarori 888fb0d): ruxsatsiz null, 0 emas
+    const hidden = await kassa.analyticsReport({ from: today, to: today });
+    expect(hidden.kpis).toMatchObject({ revenue: "40000.00", cogs: null, grossProfit: null, margin: null });
+    store.saveCashier({ ...cashier, permissions: ["pos.use", "sales.refund", "analytics.view", "products.view_cost", "analytics.view_profit"] });
+
     // 4 × 10000 = 40000, qaytarish 10000; tannarx (4 − 1) × 6000 = 18000
     const report = await kassa.analyticsReport({ from: today, to: today });
     expect(report).toMatchObject({
@@ -1375,6 +1380,9 @@ describe("Kassa xizmati (main jarayon)", () => {
     expect(() => kassa.writeOff({ lines: [{ productId: "p1", quantity: "1" }], reason: "Singan" })).toThrow("warehouse.manage");
 
     store.saveCashier({ ...cashier, permissions: ["pos.use", "warehouse.view", "warehouse.manage", "warehouse.transfer", "warehouse.count"] });
+    // Ombor qiymati — tannarx: faqat `products.view_cost` bilan (egasi qarori 888fb0d)
+    expect(kassa.stockList({ query: "" }).summary.totalValue).toBeNull();
+    store.saveCashier({ ...cashier, permissions: ["pos.use", "warehouse.view", "warehouse.manage", "warehouse.transfer", "warehouse.count", "products.view_cost"] });
     // 4 × 7000 + 10 × 3000
     expect(kassa.stockList({ query: "" }).summary.totalValue).toBe("58000.00");
 
