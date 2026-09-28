@@ -239,7 +239,16 @@ export async function recordCashTransaction(tx: Tx, companyId: string, createdBy
       ),
     )
     .returning({ balance: cashAccounts.balance });
-  if (!updated) throw badRequest("Kassada yetarli mablag' yo'q");
+  // Qaysi kassa va qancha yetmaganini xabarga qo'shamiz: kassir (va oflayn chek rad etilganda rahbar) sababni
+  // taxmin qilmasin — hisobotsiz "yetarli mablag' yo'q" xabari bilan buni aniqlab bo'lmasdi.
+  if (!updated) {
+    throw badRequest(`"${account.name}" kassasida yetarli mablag' yo'q: qoldiq ${account.balance} ${account.currency}, kerak ${move.amount}`, {
+      reason: "insufficient_cash",
+      cashAccountId: account.id,
+      balance: account.balance,
+      required: move.amount,
+    });
+  }
 
   const [transaction] = await tx
     .insert(cashTransactions)

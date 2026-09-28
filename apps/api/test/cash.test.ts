@@ -96,7 +96,11 @@ describe("Kassa va bank", () => {
 
     const tooMuch = await record({ cashAccountId: mainCash, type: "out", amount: "500000" });
     expect(tooMuch.statusCode).toBe(400);
+    // Xabarda qaysi kassa, qancha qoldiq va qancha kerakligi — kassir va rahbar sababni taxmin qilmasin
     expect(tooMuch.json().message).toContain("yetarli");
+    expect(tooMuch.json().message).toContain("300000.00");
+    expect(tooMuch.json().message).toContain("500000");
+    expect(tooMuch.json().details).toMatchObject({ reason: "insufficient_cash", cashAccountId: mainCash, balance: "300000.00", required: "500000" });
     expect(await cashBalance(mainCash)).toBe("300000.00");
     expect(await db.select().from(cashTransactions).where(eq(cashTransactions.cashAccountId, mainCash))).toHaveLength(1);
 
