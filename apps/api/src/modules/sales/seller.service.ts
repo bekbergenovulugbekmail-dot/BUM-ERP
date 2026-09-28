@@ -14,9 +14,10 @@
 import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { badRequest, notFound } from "@bum/shared";
 import { employees } from "../../db/schema/hr.js";
-import { salesOrderItems, salesOrders, salesReturnItems, salesReturns } from "../../db/schema/sales.js";
+import { salesOrderItems, salesOrders } from "../../db/schema/sales.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
+import { returnEventsByOrder, sumReturnEvents } from "./return-events.service.js";
 import { COMPLETED_STATUSES } from "./sale-status.js";
 
 const sold = sql.raw(`(${[...COMPLETED_STATUSES, "returned"].map((status) => `'${status}'`).join(", ")})`);
@@ -87,26 +88,12 @@ export async function sellerTotals(
       ),
     )
     .groupBy(salesOrders.sellerEmployeeId);
-  const returns = await conn
-    .select({
-      employeeId: sql<string>`${salesOrders.sellerEmployeeId}`,
-      units: sql<string>`coalesce(sum(${salesReturnItems.quantity}), 0)::numeric(18,4)::text`,
-      amount: sql<string>`coalesce(sum(${salesReturnItems.lineTotal}), 0)::numeric(18,2)::text`,
-      cogs: sql<string>`coalesce(sum(${salesReturnItems.cogs}), 0)::numeric(18,2)::text`,
-    })
-    .from(salesReturnItems)
-    .innerJoin(salesReturns, eq(salesReturns.id, salesReturnItems.returnId))
-    .innerJoin(salesOrders, eq(salesOrders.id, salesReturns.orderId))
-    .where(
-      and(
-        eq(salesReturns.companyId, companyId),
-        isNotNull(salesOrders.sellerEmployeeId),
-        ...sellerFilter,
-        sql`(${salesReturns.createdAt} at time zone 'Asia/Tashkent')::date >= ${range.from}::date`,
-        sql`(${salesReturns.createdAt} at time zone 'Asia/Tashkent')::date < ${range.toExclusive}::date`,
-      ),
-    )
-    .groupBy(salesOrders.sellerEmployeeId);
+  // Qaytarishlar — yagona manba (qisman va hujjatsiz to'liq), qaytarish oyida; sotuvchi ko'rsatkichi qator asosida
+  const events = await returnEventsByOrder(conn, companyId, range, and(isNotNull(salesOrders.sellerEmployeeId), ...sellerFilter));
+  const returns = [...new Set(events.map((event) => event.sellerEmployeeId!))].map((employeeId) => {
+    const totals = sumReturnEvents(events.filter((event) => event.sellerEmployeeId === employeeId));
+    return { employeeId, amount: fromMinor(totals.lineAmount), units: fromMinor(totals.units, 4), cogs: fromMinor(totals.cogs) };
+  });
 
   const ids = [...new Set([...sales.map((row) => row.employeeId), ...returns.map((row) => row.employeeId)])];
   return ids.map((employeeId) => {

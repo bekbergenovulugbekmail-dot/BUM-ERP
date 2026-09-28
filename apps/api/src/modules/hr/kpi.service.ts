@@ -24,6 +24,8 @@ import { employees, kpiRuleTiers, kpiRules } from "../../db/schema/hr.js";
 import type { DbOrTx } from "../../db/transaction.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
 import { sellerTotals } from "../sales/seller.service.js";
+import { returnEventsByOrder, sumReturnEvents } from "../sales/return-events.service.js";
+import { COMPLETED_STATUSES } from "../sales/sale-status.js";
 
 export type KpiMetric = (typeof KPI_METRICS)[number];
 
@@ -141,6 +143,18 @@ export async function employeeLinks(conn: DbOrTx, companyId: string, employeeIds
 const DELIVERED = ["delivered", "partially_delivered"] as const;
 
 /**
+ * Egasi qarori (2026-09-28): savdo KPI — real sof natija. Sotuv — amalga oshgan (yakunlangan yoki keyin qaytarilgan)
+ * hujjat, sotuv oyida; qaytarish — QAYTARISH OYIDA ayiriladi (asl sotuv o'tgan oyda bo'lsa ham; o'tgan oy qiymati
+ * o'zgarmaydi). Qoralama, tasdiqlangan va bekor qilingan hujjat sotuv emas. Yig'ilgan to'lov (`agent_collected_amount`)
+ * — alohida ko'rsatkich, qaytarish ayirilmaydi.
+ */
+const REALIZED_OR_RETURNED = sql.raw(`(${[...COMPLETED_STATUSES, "returned"].map((status) => `'${status}'`).join(", ")})`);
+const netOf = (gross: string, returned: bigint) => {
+  const net = toMinor(gross) - returned;
+  return toMinor(fromMinor(net > 0n ? net : 0n), VALUE_SCALE);
+};
+
+/**
  * Bitta ko'rsatkichning oylik qiymati (4 xonali bigint). Faqat SELECT.
  * Xodim tegishli profilga bog'lanmagan bo'lsa (masalan yetkazuvchi emas) — 0.
  */
@@ -174,8 +188,18 @@ export async function metricValue(
             lt(deliveryTasks.scheduledDate, next),
           ),
         );
-      const text = metric === "delivery_count" ? (row?.count ?? "0") : (row?.amount ?? "0");
-      return toMinor(Number(text).toFixed(VALUE_SCALE), VALUE_SCALE);
+      if (metric === "delivery_count") return toMinor(Number(row?.count ?? "0").toFixed(VALUE_SCALE), VALUE_SCALE);
+      // Sof yetkazilgan summa: shu yetkazuvchi yetkazgan buyurtmalardagi rad etish va qaytarishlar (qaytarish oyida)
+      const returned = sumReturnEvents(
+        await returnEventsByOrder(
+          conn,
+          companyId,
+          { from: start, toExclusive: next },
+          sql`exists (select 1 from ${deliveryTasks} dt where dt.order_id = ${salesOrders.id}
+            and dt.delivery_agent_id = ${links.deliveryAgentId} and dt.status in ('delivered', 'partially_delivered'))`,
+        ),
+      );
+      return netOf(row?.amount ?? "0", returned.amount);
     }
 
     case "delivery_weight_kg": {
@@ -220,12 +244,22 @@ export async function metricValue(
             eq(agentOrders.salesRepId, links.salesRepId),
             gte(salesOrders.orderDate, start),
             lt(salesOrders.orderDate, next),
-            // Bekor qilingan buyurtma KPI ga kirmaydi
-            sql`${salesOrders.status} <> 'cancelled'`,
+            // Faqat amalga oshgan sotuv (qoralama, tasdiqlangan va bekor qilingan — yo'q)
+            sql`${salesOrders.status} in ${REALIZED_OR_RETURNED}`,
           ),
         );
-      const text = metric === "agent_order_count" ? (row?.count ?? "0") : (row?.amount ?? "0");
-      return toMinor(Number(text).toFixed(VALUE_SCALE), VALUE_SCALE);
+      const events = await returnEventsByOrder(
+        conn,
+        companyId,
+        { from: start, toExclusive: next },
+        sql`exists (select 1 from ${agentOrders} ao where ao.order_id = ${salesOrders.id} and ao.sales_rep_id = ${links.salesRepId})`,
+      );
+      if (metric === "agent_order_count") {
+        // Buyurtma soni: to'liq qaytarilgan (hujjatsiz to'liq qaytarish) buyurtma qaytarish oyida ayiriladi; qisman — son o'zgarmaydi
+        const count = BigInt(row?.count ?? "0") - BigInt(events.filter((event) => event.kind === "full").length);
+        return toMinor(String(count > 0n ? count : 0n), VALUE_SCALE);
+      }
+      return netOf(row?.amount ?? "0", sumReturnEvents(events).amount);
     }
 
     case "agent_visit_count": {
@@ -278,11 +312,15 @@ export async function metricValue(
             eq(salesOrders.source, "pos"),
             gte(salesOrders.orderDate, start),
             lt(salesOrders.orderDate, next),
-            sql`${salesOrders.status} <> 'cancelled'`,
+            sql`${salesOrders.status} in ${REALIZED_OR_RETURNED}`,
           ),
         );
-      const text = metric === "cashier_receipt_count" ? (row?.count ?? "0") : (row?.amount ?? "0");
-      return toMinor(Number(text).toFixed(VALUE_SCALE), VALUE_SCALE);
+      // Chek soni — amalga oshgan cheklar; summa — sof (shu kassir cheklari bo'yicha qaytarishlar qaytarish oyida ayiriladi)
+      if (metric === "cashier_receipt_count") return toMinor(Number(row?.count ?? "0").toFixed(VALUE_SCALE), VALUE_SCALE);
+      const returned = sumReturnEvents(
+        await returnEventsByOrder(conn, companyId, { from: start, toExclusive: next }, and(eq(salesOrders.createdBy, links.userId), eq(salesOrders.source, "pos"))),
+      );
+      return netOf(row?.amount ?? "0", returned.amount);
     }
 
     // Sotuvchi (chekdagi `seller_employee_id`): sof savdo (qaytarish ayirilgan), chek soni, yalpi foyda
