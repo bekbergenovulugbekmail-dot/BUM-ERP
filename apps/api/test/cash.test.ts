@@ -163,6 +163,31 @@ describe("Kassa va bank", () => {
     expect(await cashBalance(mainCash)).toBe("20.00");
   });
 
+  it("kassaga bog'lanadigan hisob turi: naqd kassaga bank hisobi bog'lanmaydi (aks holda naqd tushum jurnalda bankka tushardi)", async () => {
+    const bankLedger = await ledger("1020");
+    const cashLedger = await ledger("1010");
+    const income = await ledger("4100");
+
+    // Naqd kassaga bank hisobi — rad; naqd hisobi — mumkin
+    const wrong = await api(company.ownerCookie, "PATCH", `/cash-accounts/${mainCash}`, { ledgerAccountId: bankLedger.id });
+    expect(wrong.statusCode, wrong.body).toBe(400);
+    expect(wrong.json()).toMatchObject({ details: { reason: "ledger_type_mismatch" } });
+    expect((await api(company.ownerCookie, "PATCH", `/cash-accounts/${mainCash}`, { ledgerAccountId: cashLedger.id })).statusCode).toBe(200);
+
+    // Bank hisobiga naqd hisobi — rad
+    expect((await api(company.ownerCookie, "PATCH", `/cash-accounts/${mainBank}`, { ledgerAccountId: cashLedger.id })).statusCode).toBe(400);
+    expect((await api(company.ownerCookie, "PATCH", `/cash-accounts/${mainBank}`, { ledgerAccountId: bankLedger.id })).statusCode).toBe(200);
+
+    // Yangi kassa ochishda ham shu qoida
+    const created = await api(company.ownerCookie, "POST", "/cash-accounts", { name: "Ikkinchi kassa", type: "cash", ledgerAccountId: bankLedger.id });
+    expect(created.statusCode, created.body).toBe(400);
+
+    // Naqd tushum jurnalda 1010 ga tushadi (1020 ga emas)
+    expect((await record({ cashAccountId: mainCash, type: "in", amount: "5000", counterAccountId: income.id })).statusCode).toBe(201);
+    expect((await ledger("1010")).balance).toBe("5000.00");
+    expect((await ledger("1020")).balance).toBe("0.00");
+  });
+
   it("dashboard, asosiy kassa yagonaligi, faolsizlantirish qoidalari va ruxsatlar", async () => {
     await record({ cashAccountId: mainBank, type: "in", amount: "50" });
     const dashboard = (await api(company.ownerCookie, "GET", "/dashboard")).json();

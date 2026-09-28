@@ -103,15 +103,31 @@ export async function ledgerAccountFor(
   return requireAccountBySubtype(conn, companyId, type, "asset", type === "cash" ? "Naqd kassa" : "Bank hisobi");
 }
 
-/** Kassaga bog'lanadigan buxgalteriya hisobi: shu kompaniyaning faol aktiv hisobi. */
-export async function assertLedgerAccount(conn: DbOrTx, companyId: string, ledgerAccountId: string) {
+/**
+ * Kassaga bog'lanadigan buxgalteriya hisobi: shu kompaniyaning faol aktiv hisobi VA kassa turiga mos.
+ *
+ * Nega tur tekshiriladi: production'da naqd kassaga "1020 Bank hisobi" bog'lanib qolgan edi — naqd tushum
+ * jurnalda bankka tushib, "kassa = jurnal" solishtiruvi buzilgan. Naqd kassa — naqd hisobiga, bank/karta/hamyon —
+ * bank yoki kutilayotgan to'lovlar hisobiga bog'lanadi.
+ */
+export async function assertLedgerAccount(conn: DbOrTx, companyId: string, ledgerAccountId: string, type?: CashAccountType) {
   const [row] = await conn
-    .select({ id: accounts.id, type: accounts.type, isActive: accounts.isActive })
+    .select({ id: accounts.id, type: accounts.type, subtype: accounts.subtype, code: accounts.code, name: accounts.name, isActive: accounts.isActive })
     .from(accounts)
     .where(and(eq(accounts.id, ledgerAccountId), eq(accounts.companyId, companyId)))
     .limit(1);
   if (!row) throw notFound("Buxgalteriya hisobi topilmadi");
   if (row.type !== "asset" || !row.isActive) throw badRequest("Kassaga faqat faol aktiv (asset) hisob bog'lanadi");
+  if (!type) return;
+  const allowed = type === "cash" ? ["cash"] : ["bank", "clearing"];
+  if (row.subtype && !allowed.includes(row.subtype)) {
+    throw badRequest(
+      type === "cash"
+        ? `"${row.code} ${row.name}" naqd hisobi emas — naqd kassaga naqd (1010) hisobi bog'lanadi`
+        : `"${row.code} ${row.name}" bank hisobi emas — bank/karta hisobiga bank (1020) yoki kutilayotgan to'lovlar (1030) hisobi bog'lanadi`,
+      { reason: "ledger_type_mismatch", cashAccountType: type, ledgerSubtype: row.subtype },
+    );
+  }
 }
 
 export type PaymentMethod = "cash" | "bank" | "card" | "transfer";
@@ -403,7 +419,7 @@ async function assertSettlementTarget(conn: DbOrTx, companyId: string, targetId:
 export async function createCashAccount(tx: Tx, tenant: TenantContext, input: CashAccountInput, meta: RequestMeta) {
   const companyId = tenant.company.id;
   const { openingBalance, currency: requestedCurrency, ...fields } = input;
-  if (input.ledgerAccountId) await assertLedgerAccount(tx, companyId, input.ledgerAccountId);
+  if (input.ledgerAccountId) await assertLedgerAccount(tx, companyId, input.ledgerAccountId, input.type);
   if (input.employeeId) await assertEmployee(tx, companyId, input.employeeId);
   const baseCurrency = await companyCurrency(tx, companyId);
   const currency = requestedCurrency ?? baseCurrency;
@@ -491,7 +507,6 @@ export async function updateCashAccount(
   meta: RequestMeta,
 ) {
   const companyId = tenant.company.id;
-  if (patch.ledgerAccountId) await assertLedgerAccount(tx, companyId, patch.ledgerAccountId);
   if (patch.employeeId) await assertEmployee(tx, companyId, patch.employeeId);
   const [current] = await tx
     .select(cashAccountFields)
@@ -500,6 +515,8 @@ export async function updateCashAccount(
     .limit(1)
     .for("update");
   if (!current) throw notFound("Kassa topilmadi");
+  // Hisob kassa turiga mos bo'lsin (naqd → naqd hisobi): aks holda naqd tushum jurnalda bankka tushib ketadi
+  if (patch.ledgerAccountId) await assertLedgerAccount(tx, companyId, patch.ledgerAccountId, current.type);
   if (patch.employeeId !== undefined || patch.isActive !== undefined) await assertNotOwnRegister(tx, tenant, current.employeeId);
 
   if (patch.settlesToCashAccountId !== undefined || patch.settlementCommissionPercent !== undefined) {
