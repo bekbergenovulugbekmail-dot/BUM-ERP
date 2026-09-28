@@ -5350,3 +5350,73 @@ haqiqiy API bilan reproduksiya (lokal, vaqtinchalik fayllar o'chirildi), AUD-003
 accrual) variantlari. Production read-only: AUD-008/022/003/016/014/015 bo'yicha real holat 0; Ezo 1 KPI qoidasi, Bonnu 4 qoralama
 maosh. Hammasi OPEN — egasi qarori kutilmoqda. Deploy: YO'Q (moliyaviy qarorlar kutilmoqda).
 Commitlar push qilinmagan; production va staging — `5ba4778`.
+
+### Moliyaviy qarorlar kod bilan yopildi (2026-09-28) — LIVE EMAS
+
+Egasi qarorlari bo'yicha 8 commit + 1 migratsiya. **Production va staging hali `5ba4778`** — quyidagilarning birortasi ham
+deploy qilinmagan (accrual qarori kutilmoqda, pastda). Migratsiya faqat bittasida — `0099`, u ham production bazasiga
+**qo'llanmagan**.
+
+| Commit | Nima qildi | Migratsiya | Sxema / ma'lumot ta'siri | Moliyaviy ta'sir | Production |
+|---|---|---|---|---|---|
+| `8f7200e` | AUD-008 — to'liq qaytarishda (`refund:false`) mijoz to'lagan pul avansga (hamyon) o'tadi | kerak emas | sxema o'zgarmadi; yangi ma'lumot faqat `customer_balance_transactions` da (qaytarish paytida) | Qarz manfiy bo'lmaydi: 1100 mijoz subhisobi 0, 2300 avans +P. Kassa harakati yo'q. Eski yozuvlar o'zgarmaydi (backfill yo'q) | **deploy YO'Q** — real holat 0 (Bonnu/Ezo), ta'sirlangan hujjat yo'q |
+| `d6d5565` | AUD-022 — ta'minotchiga qaytarish partiya narxida, qolgan zaxira AVCO si qayta hisoblanadi | kerak emas | sxema o'zgarmadi; `moveStock` ga ixtiyoriy `outValue` (faqat xarid qaytarish) | DR 2000 hujjat qiymati / CR 1200 haqiqiy chiqqan baho; yaxlitlash farqi 5000 ga. 1200 = Σ round(qty × AVCO, 2) invarianti saqlanadi | **deploy YO'Q** — production'da xarid qaytarish hujjati 0 |
+| `eafafd6` | AUD-015/AUD-014 — ta'minotchi qarzi har valyuta alohida (qaytgan pul, `set-debt` to'g'rilash) | kerak emas | sxema o'zgarmadi; `set-debt` ga ixtiyoriy `currency` (valyutali qoldiqda majburiy — 400 `currency_required`) | Jim konvertatsiya yo'q: pul o'sha valyuta kassasiga, kitob qiymati ulushda, kurs farqi 4200/5700. Aralash valyutali qaytarishda pul qaytarish rad | **deploy YO'Q** — asosiy valyutadan boshqa ta'minotchi qoldig'i 0 |
+| `0d36b88` | AUD-003 — qarz yoshida "hujjatsiz qoldiq" alohida blok | kerak emas | sxema o'zgarmadi; aging javobiga `undocumented`, to'lov javobiga `allocations`/`unallocated` | Hujjatsiz qoldiq aging jamisiga va kredit to'xtatishga KIRMAYDI; kesh = jurnal 1100 tekshiruvi ko'rinadi. Pul harakati yo'q | **deploy YO'Q** — mijoz keshi ≠ hujjatlar holati 0 |
+| `8a748c3` | AUD-016 — POS "boshqa chiqim" = asosiy kassaga topshirish (ichki o'tkazma), nomi API/desktop/ru lug'atda | kerak emas | sxema o'zgarmadi; faqat yorliq va hisobot ajratimi | Topshirish xarajat emas (kategoriya berilsa ham); real chiqim faqat "Kassadan xarajat". Buxgalteriya avvaldan ichki o'tkazma — yozuvlar o'zgarmaydi | **deploy YO'Q** — `other_in`/`other_out` harakati 0 |
+| `ea9e10e` | Savdo KPI sof natija bo'yicha (kassir, agent, sotuvchi, yetkazuvchi); qaytarish — qaytarish oyida | kerak emas | sxema o'zgarmadi; yangi `return-events.service` (yagona manba) | KPI bonus summalari kamayishi mumkin: qoralama/tasdiqlangan hujjat sotuv sanalmaydi, to'liq qaytarish ayiriladi. O'tgan (yopilgan) oy o'zgarmaydi; oy qiymati manfiy emas. Yig'ilgan to'lov ko'rsatkichi o'zgarmadi | **deploy YO'Q** — Ezo'da 1 `agent_sales_amount` qoidasi bor, deploydan keyin bonus boshqacha hisoblanadi |
+| `9b22daa` | `kpi-net-returns` testida `KpiMetric` turi `kpi.service` dan (tsc) | kerak emas | faqat test fayli | yo'q | **deploy YO'Q** (test) |
+| `6b21ece` | To'langan maoshni bekor qilish: `POST /api/hr/salaries/:id/reverse` (`hr.approve`, sabab majburiy, davr ochiq), kompensatsion kassa + jurnal, audit, UI "Bekor qilish" | **KERAK — `0099`** | quyida | Pul to'langan kassa/bankka qaytadi, 5100/2200 (va bank komissiyasi) teskari yoziladi; asl hujjat va yozuvlar O'CHIRILMAYDI. Shu oy uchun to'g'rilangan maosh qayta tayyorlanadi | **deploy YO'Q; migratsiya production'da qo'llanmagan** — Bonnu'da to'langan maosh 0, ya'ni qoida mavjud ma'lumotga ta'sir qilmaydi |
+| `81fdb02` | Maoshni bekor qilish — haqiqiy brauzer E2E (jurnal, audit, takror, ruxsat, refresh) | kerak emas | faqat `e2e/` | yo'q | **deploy YO'Q** (test) |
+
+**Migratsiya `0099_salary_reversal.sql`** (`apps/api/src/db/migrations`, `_journal.json` ga yozilgan; oxirgi raqam — 99):
+`salary_payment_status` enum'ga `'reversed'` (shu migratsiyada ISHLATILMAYDI — bitta tranzaksiyada yangi qiymatni ishlatib
+bo'lmaydi), `salary_payments` ga 3 ustun (`reversed_at`, `reversed_by` → `users` ON DELETE SET NULL, `reversal_reason`),
+`sal_employee_month_key` yagona indeksi qayta yaratiladi — endi **shartli**: `WHERE reversed_at IS NULL` (shu oy uchun
+to'g'rilangan maosh yaratilishi mumkin). Hammasi `IF NOT EXISTS`/`IF EXISTS` bilan — qayta qo'llash xavfsiz. Ma'lumot
+o'zgartirmaydi (backfill yo'q), mavjud qatorlarda yangi ustunlar `NULL`. **Production bazasida qo'llanmagan** (deploy yo'q).
+
+**Tekshiruv (2026-09-28, lokal):** API tsc ✓, web tsc ✓, eslint ✓ (0 ogohlantirish), frontend unit 51 fayl / 312 test ✓.
+Brauzer E2E (haqiqiy Chrome, lokal `bum-demo`): `salary-reversal` 2/2 — to'lov kassani kamaytiradi → UI'da "Bekor qilish" →
+sabab → tasdiq → holat `reversed`, sabab va vaqt saqlanadi, pul aynan to'lovdan oldingi qoldiqqa qaytadi, asl jurnal yozuvi
+`posted` qoladi, bitta kompensatsion yozuv (debet = kredit, summa asl to'lovga teng, 1010 debetlanadi), audit
+`SALARY_REVERSED` (sabab + asl havola), jamida `reversed` sanaladi, qayta bekor qilish yo'q (tugma yo'qoladi, API 409, pul
+ikkinchi marta qaytmaydi), sahifa yangilangandan keyin holat o'sha; ruxsat: kassirda `hr.*` yo'q → bo'lim qo'riqchi xabari,
+API 403, holat `paid` va kassa o'zgarmagan. Regressiya E2E: `hr-kpi`, `audit-reversal-aud013`, `audit-customer-debt`,
+`aging-undocumented`, `purchase-return`, `multi-kassa-pos`, `supermarket-pos` — 11 test ✓.
+
+**Maoshni bekor qilish — mustaqil moliyaviy sverka** (lokal baza, `default_transaction_read_only`, E2E dan keyin):
+to'lov 1 000 000 (sof 880 000 + soliq 120 000) → jurnal `salary_payment` [posted]: DR 5100 1 000 000 / CR 1010 880 000 /
+CR 2200 120 000; bekor qilishdan keyin `salary_reversal:salary_payment` [posted]: DR 1010 880 000 / DR 2200 120 000 /
+CR 5100 1 000 000. Debet = kredit ✓ (2 000 000 = 2 000 000), teskari summa = asl to'lov ✓, asl yozuv `posted` va joyida ✓,
+teskari yozuv soni 1 (takror yo'q) ✓, kassa chiqim 880 000 = qaytim 880 000 ✓, shu hujjat bo'yicha 1010/2200/5100 sof
+ta'siri 0 ✓, kassa (naqd) = jurnal 1010 ✓, kompaniya jurnali debet = kredit ✓, maosh tarixi: `reversed` + yangi `draft` ✓,
+audit `SALARY_APPROVED` → `SALARY_PAID` → `SALARY_REVERSED` (sabab bilan) ✓.
+
+**ACCRUAL — QARORSIZ, TEGILMADI.** Joriy model: `salary expense recognized on payment` (naqd asos) — tasdiqlashda jurnal
+yozuvi 0, hisoblar rejasida ish haqi majburiyati (25xx) hisobi YO'Q (bazada tekshirildi). Implement QILINMAGAN:
+`salary accrual / salary payable` (tasdiqlashda DR 5100 / CR 25xx, to'lovda DR 25xx / CR kassa). Bu alohida biznes/buxgalteriya
+qarori — `.claude/FINANCIAL-DECISIONS.md` "Maosh — Decision 2" da variantlar. Qaror chiqmaguncha mavjud moliyaviy
+implementatsiya o'zgartirilmaydi.
+
+#### PRE-DEPLOY GATE (2026-09-28)
+
+| Tekshiruv | Natija |
+|---|---|
+| E2E maosh bekor qilish (haqiqiy Chrome) | **PASS** — 2/2 (`e2e/salary-reversal.spec.ts`, commit `81fdb02`) |
+| API regressiya (vitest) | **PASS** — 182 fayl / 1267 test, 0 xato |
+| Frontend unit (vitest) | **PASS** — 51 fayl / 312 test |
+| Brauzer E2E regressiya | **PASS** — 11 test: `hr-kpi`, `audit-reversal-aud013`, `audit-customer-debt`, `aging-undocumented`, `purchase-return`, `multi-kassa-pos`, `supermarket-pos` |
+| TypeScript (API + web) | **PASS** |
+| ESLint (`--max-warnings=0`) | **PASS** |
+| Moliyaviy sverka (maosh bekor qilish) | **PASS** — debet = kredit, teskari = asl to'lov, kassa = jurnal, takror yo'q, audit to'liq |
+| MIGRATION_STATUS yangilandi | **HA** |
+| Accrual implement qilindimi | **YO'Q** (ataylab) |
+| Accrual qarori | **KUTILMOQDA** |
+
+**DEPLOY QARORI: DEPLOY QILINMAYDI** (production ham, staging ham). Sabab: maosh accrual (hisoblash) bo'yicha
+biznes/buxgalteriya qarori yakunlanmagan. Branch texnik jihatdan deployga tayyor holatga keltirildi.
+Push xavfsiz: Railway'da `bum-api`/`bum-web` GitHub manbasiga ulanmagan va repo triggeri yo'q (production `82f1871b`,
+staging `5a8e273a` — GraphQL bilan tekshirildi), repoda CI workflow yo'q → `git push` deploy qilmaydi, deploy faqat
+qo'lda `railway up`.
+
