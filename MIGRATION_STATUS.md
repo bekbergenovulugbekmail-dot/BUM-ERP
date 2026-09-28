@@ -5458,6 +5458,27 @@ xatosi, kod muammosi emas).
 Tarif 2 ta custom domenga ruxsat beradi, shuning uchun apex uchun: (a) DNS provayderida apex'ni `app.bum-erp.uz` ga
 yo'naltirish (redirect), yoki (b) `www` ni olib tashlab apex'ni qo'shish, yoki (c) tarifni kengaytirish — egasi tanlaydi.
 
+### Maosh hisoblash (accrual) va kassa yangilanishi (2026-09-28, egasi qarori)
+
+Egasi: "oy xarajati o'z oyida ko'rsatiladi" va "yangilanish bor — yangilaysizmi deb o'zi so'rasin, qo'lda
+yuklash bo'lmasin". Commit `af6f31e` (deploy holati pastda).
+
+**Accrual:** maosh TASDIQLANGANDA yozuv — DR 5100 ish haqi + DR 5500 kompensatsiya / CR 2250 «Ish haqi bo'yicha qarz»
++ CR 2200 soliq; yozuv sanasi maosh oyining oxirgi kuni (davr yopiq bo'lsa amal rad etiladi). TO'LOVDA faqat qarz
+yopiladi: DR 2250 / CR kassa. Qoralamaga qaytarish hisoblash yozuvini teskari yozadi; to'langan maoshni bekor qilish
+endi ikkala yozuvni ham qaytaradi (5100, 5500, 2200, 2250 va kassa nolga). Yangi standart hisob **2250**
+(`payroll_payable`) — sxema migratsiyasi kerak emas, birinchi murojaatda ochiladi. Accrual'gacha tasdiqlangan eski
+maoshlar avvalgi yo'l bilan to'lanadi (production'da to'langan maosh 0 — mos kelmaslik yo'q).
+
+**Kassa yangilanishi:** o'rnatuvchi fonda o'zi yuklab olinadi, tayyor bo'lgach kassirga bitta savol
+("Yangilanish bor — hozir yangilaysizmi?"), majburiy versiyada "Keyinroq" yo'q; chek o'rtasida o'zi qayta
+ishga tushmaydi. Reliz chiqarish bitta buyruqqa aylandi:
+`pnpm --filter @bum/desktop release:build-publish` (yig'ish → SHA-256 → Ed25519 imzo → yuklash → e'lon;
+parol `BUM_ADMIN_PHONE`/`BUM_ADMIN_PASSWORD` muhit o'zgaruvchilarida, kodda saqlanmaydi).
+
+Test: API 13 (maosh, bekor qilish, hisoblar rejasi, HR, invariantlar, moliya hisobotlari), desktop 10 fayl / 61,
+frontend 2, tsc va eslint toza.
+
 **Kutilayotgan (egasi harakati kerak):**
 1. `WEB_ORIGIN` hali `https://bum-erp.uz` — ya'ni CORS ro'yxatida biz boshqarmaydigan serverdagi domen turibdi.
    To'g'ri qiymat — `https://app.bum-erp.uz` (mobil ilova va admin havolalari ham shu domenda). O'zgaruvchini
