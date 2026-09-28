@@ -179,14 +179,16 @@ describe("Qaytarish", () => {
     expect((await sales("POST", `/orders/${orderId}/return`, undefined, kassir.cookie)).statusCode).toBe(403);
   });
 
-  it("pul qaytarilmasa mijozga avans (manfiy qarz) bo'lib qoladi", async () => {
+  // AUD-008 (egasi qarori, 2026-09-28): avval qarz manfiy (−10 000) bo'lib qolardi; endi pul mijoz avansiga (2300, hamyon)
+  it("pul qaytarilmasa mijoz avansiga (hamyon, 2300) o'tadi — qarz manfiy bo'lmaydi", async () => {
     const { orderId, customerId } = await shippedOrder("1");
     await sales("POST", "/payments", { orderId, amount: "10000" });
 
     const returned = await sales("POST", `/orders/${orderId}/return`, { refund: false });
-    expect(returned.json()).toMatchObject({ refunded: "0.00", order: { status: "returned", paidAmount: "10000.00" } });
-    expect((await customerRow(customerId)).totalDebt).toBe("-10000.00");
-    expect(await cashBalance()).toBe("10000.00");
-    expect(await ledger("1100")).toBe("-10000.00");
+    expect(returned.json()).toMatchObject({ refunded: "10000.00", order: { status: "returned", paidAmount: "0.00" } });
+    expect(await customerRow(customerId)).toMatchObject({ totalDebt: "0.00", balance: "10000.00" });
+    expect(await cashBalance(), "kassadan pul chiqmadi").toBe("10000.00");
+    expect(await ledger("1100")).toBe("0.00");
+    expect(await ledger("2300")).toBe("10000.00");
   });
 });

@@ -1188,6 +1188,11 @@ export async function returnOrder(
     .where(and(eq(customerPayments.orderId, orderId), ne(customerPayments.currency, order.currency), eq(customerPayments.status, "posted")));
   const foreignPaid = foreignPayments.reduce((sum, payment) => sum + toMinor(payment.amount), 0n);
   const cashPaid = paid - balancePaid - cashbackPaid - foreignPaid;
+  // AUD-008 (egasi qarori, 2026-09-28): pul fizik qaytarilmasa (`refund:false`) mijoz to'lagan pul uning avansiga (hamyon,
+  // 2300) o'tadi — qisman qaytarishdagi `refundMethod: "balance"` bilan bir xil manba. Qarz manfiy bo'lmaydi.
+  // Hamyon va keshbekdan to'langan qismlar har doim o'z manbasiga qaytadi.
+  const toWallet = !refund && order.customerId ? cashPaid + foreignPaid : 0n;
+  const restoreSources = refund || Boolean(order.customerId);
   // Asosiy valyutadagi pul: usul ko'rsatilsa — shu usulda; aks holda asl to'lov tarkibi bo'yicha (aralash to'lovli chek:
   // naqd — kassaga, karta va bank — bankdan). Asl sotuv hujjati o'zgarmaydi, har qism — alohida kassa harakati va jurnal
   // Asl to'lov tarkibidan farqli usul yoki boshqa hisobdan qaytarish (masalan, karta to'lovini naqd) — moliya ruxsati kerak
@@ -1249,7 +1254,8 @@ export async function returnOrder(
       refundAccountId ??= account.id;
     }
   }
-  if (refund && balancePaid > 0n) {
+  const walletBack = (restoreSources ? balancePaid : 0n) + toWallet;
+  if (walletBack > 0n) {
     await refundToBalance(
       tx,
       tenant,
@@ -1257,7 +1263,7 @@ export async function returnOrder(
         customerId: order.customerId!,
         orderId,
         orderNumber: order.number,
-        amount: fromMinor(balancePaid),
+        amount: fromMinor(walletBack),
         posShiftId: order.posShiftId,
         date: today,
       },
@@ -1318,11 +1324,11 @@ export async function returnOrder(
     await reverseOrderCashback(
       tx,
       tenant,
-      { customerId: order.customerId, orderId, orderNumber: order.number, redeemed: refund ? cashbackPaid : 0n, date: today },
+      { customerId: order.customerId, orderId, orderNumber: order.number, redeemed: restoreSources ? cashbackPaid : 0n, date: today },
       meta,
     );
   }
-  const refunded = cashRefunded + foreignRefunded + (refund ? balancePaid + cashbackPaid : 0n);
+  const refunded = cashRefunded + foreignRefunded + (restoreSources ? balancePaid + cashbackPaid : 0n) + toWallet;
 
   // Ochiq smenada qaytarish kassir yig'indisidan ayriladi — smena yopilishida kassa farqi to'g'ri chiqsin
   if (order.posShiftId) {
