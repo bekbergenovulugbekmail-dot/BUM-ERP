@@ -118,6 +118,10 @@ describe("Maosh", () => {
 
     expect((await hr("POST", `/salaries/${monthlySalary.id}/approve`, undefined, hrManager.cookie)).statusCode).toBe(403);
     expect((await hr("POST", `/salaries/${monthlySalary.id}/approve`, undefined, finance.cookie)).json().salary.status).toBe("approved");
+    // Tasdiqlash = hisoblash: xarajat o'z oyida tan olinadi (to'lov keyingi oyda bo'lsa ham)
+    expect(await ledger("5100")).toBe("2400000.00");
+    expect(await ledger("2250")).toBe("2109000.00");
+    expect(await ledger("1010")).toBe("0.00");
     expect((await hr("PATCH", `/salaries/${monthlySalary.id}`, { bonus: "1" }, hrManager.cookie)).statusCode).toBe(400);
 
     // Tayyorlagan o'zi tasdiqlay olmaydi; kompaniya egasi mumkin
@@ -139,8 +143,11 @@ describe("Maosh", () => {
     expect(paid.json().salary).toMatchObject({ status: "paid", paidDate: todayIso() });
     const [cash] = await db.select().from(cashAccounts).where(eq(cashAccounts.id, mainCash));
     expect(cash!.balance).toBe("891000.00");
-    expect(await ledger("5100")).toBe("2400000.00");
-    expect(await ledger("2200")).toBe("291000.00");
+    // HISOBLASH (accrual): xarajat va soliq TASDIQLASHDA yozilgan — ikkala maosh ham (to'langani va to'lanmagani).
+    // To'lov faqat ish haqi qarzini (2250) yopadi: 2 989 000 − 2 109 000 = 880 000 (to'lanmagan maosh).
+    expect(await ledger("5100")).toBe("3400000.00");
+    expect(await ledger("2200")).toBe("411000.00");
+    expect(await ledger("2250")).toBe("880000.00");
     expect(await ledger("1010")).toBe("891000.00");
 
     expect((await hr("POST", `/salaries/${monthlySalary.id}/pay`, undefined, finance.cookie)).statusCode).toBe(400);

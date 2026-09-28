@@ -43,9 +43,9 @@ import {
   todayIso,
   type PaymentMethod,
 } from "../finance/cash.service.js";
-import { assertPeriodOpen, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { assertPeriodOpen, ensureAccountBySubtype, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
 import { mirrorReferences, type SourceRef } from "../finance/reversal.service.js";
-import { expenses } from "../../db/schema/finance.js";
+import { expenses, journalEntries } from "../../db/schema/finance.js";
 import { applyOutgoingBankCommission } from "../finance/bank-commission.service.js";
 import { monthRange } from "./attendance.service.js";
 import { allowanceTotalsForMonth } from "./allowances.service.js";
@@ -333,12 +333,95 @@ export async function updateSalary(
   return updated!;
 }
 
+/** Oyning oxirgi kuni (`2026-09` → `2026-09-30`) — hisoblangan xarajat shu sanada tan olinadi. */
+function monthEndIso(month: string): string {
+  const [year, index] = month.split("-").map(Number);
+  return new Date(Date.UTC(year!, index!, 0)).toISOString().slice(0, 10);
+}
+
+/** Maosh tarkibi: soliq solinadigan ish haqi (5100), kompensatsiya (5500), soliq (2200) va qo'lga beriladigan summa. */
+function salaryParts(salary: { grossSalary: string; deductions: string; allowances: string; tax: string; netSalary: string }) {
+  return {
+    expense: toMinor(salary.grossSalary) - toMinor(salary.deductions),
+    compensation: toMinor(salary.allowances),
+    tax: toMinor(salary.tax),
+    net: toMinor(salary.netSalary),
+  };
+}
+
+/**
+ * HISOBLASH (accrual, egasi qarori 2026-09-28): maosh TASDIQLANGANDA xarajat o'z oyida tan olinadi —
+ * DR 5100 ish haqi + DR 5500 kompensatsiya / CR 2250 ish haqi bo'yicha qarz + CR 2200 soliq.
+ * To'lov keyingi oyda bo'lsa ham o'sha oy foydasi o'zgarmaydi: to'lovda faqat DR 2250 / CR kassa.
+ * Yozuv sanasi — maosh oyining oxirgi kuni; o'sha davr yopilgan bo'lsa amal rad etiladi (hisobot topshirilgan).
+ */
+async function postSalaryAccrual(
+  tx: Tx,
+  tenant: TenantContext,
+  salary: { id: string; month: string; grossSalary: string; deductions: string; allowances: string; tax: string; netSalary: string },
+  employeeName: string,
+) {
+  const companyId = tenant.company.id;
+  const { expense, compensation, tax, net } = salaryParts(salary);
+  if (net + tax === 0n) return null;
+  const entryDate = monthEndIso(salary.month);
+  await assertPeriodOpen(tx, companyId, entryDate);
+  const description = `Maosh hisoblandi ${salary.month}: ${employeeName}`.trim();
+  const lines: { accountId: string; debit?: string; credit?: string; description?: string }[] = [];
+  if (expense > 0n) {
+    lines.push({ accountId: await requireAccountBySubtype(tx, companyId, "salary", "expense", "Ish haqi xarajatlari"), debit: fromMinor(expense) });
+  }
+  if (compensation > 0n) {
+    lines.push({
+      accountId: await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"),
+      debit: fromMinor(compensation),
+      description: "Xodimga kompensatsiya (yo'l, ovqat va boshqa)",
+    });
+  }
+  if (net > 0n) {
+    lines.push({ accountId: await ensureAccountBySubtype(tx, companyId, "payroll_payable"), credit: fromMinor(net) });
+  }
+  if (tax > 0n) {
+    lines.push({ accountId: await requireAccountBySubtype(tx, companyId, "payroll_tax", "liability", "Ish haqidan soliq majburiyati"), credit: fromMinor(tax) });
+  }
+  if (lines.length < 2) return null;
+  const { entry } = await postJournalEntry(tx, companyId, tenant.user.id, {
+    entryDate,
+    description,
+    referenceType: "salary_accrual",
+    referenceId: salary.id,
+    lines,
+  });
+  return entry;
+}
+
+/** Shu maosh uchun hisoblash yozuvi bormi (eski, accrual'gacha tasdiqlangan maoshlarda — yo'q). */
+async function accrualEntryId(tx: Tx, companyId: string, salaryId: string) {
+  const [row] = await tx
+    .select({ id: journalEntries.id })
+    .from(journalEntries)
+    .where(
+      and(
+        eq(journalEntries.companyId, companyId),
+        eq(journalEntries.referenceType, "salary_accrual"),
+        eq(journalEntries.referenceId, salaryId),
+        eq(journalEntries.status, "posted"),
+      ),
+    )
+    .limit(1);
+  return row?.id ?? null;
+}
+
 export async function approveSalary(tx: Tx, tenant: TenantContext, salaryId: string, meta: RequestMeta) {
   const salary = await lockSalary(tx, tenant, salaryId);
   if (salary.status !== "draft") throw badRequest("Faqat qoralama maosh tasdiqlanadi");
   if (salary.createdBy === tenant.user.id && !isFullAccessRole(tenant.membership.companyRole)) {
     throw forbidden("Maoshni tayyorlagan xodim uni o'zi tasdiqlay olmaydi");
   }
+  // Tasdiqlash endi buxgalteriya yozuvini yozadi — moliya moduli o'chiq bo'lsa amalga oshmaydi
+  await assertModuleEnabled(tx, tenant.company.id, "finance");
+  const [employee] = await tx.select({ name: employees.name }).from(employees).where(eq(employees.id, salary.employeeId));
+  const entry = await postSalaryAccrual(tx, tenant, salary, employee?.name ?? "");
 
   const [updated] = await tx
     .update(salaryPayments)
@@ -349,7 +432,7 @@ export async function approveSalary(tx: Tx, tenant: TenantContext, salaryId: str
     action: "SALARY_APPROVED",
     resource: "salary_payments",
     resourceId: salaryId,
-    details: { employeeId: salary.employeeId, month: salary.month, netSalary: salary.netSalary },
+    details: { employeeId: salary.employeeId, month: salary.month, netSalary: salary.netSalary, accrualEntryId: entry?.id ?? null },
   });
   return updated!;
 }
@@ -357,6 +440,16 @@ export async function approveSalary(tx: Tx, tenant: TenantContext, salaryId: str
 export async function revertSalary(tx: Tx, tenant: TenantContext, salaryId: string, meta: RequestMeta) {
   const salary = await lockSalary(tx, tenant, salaryId);
   if (salary.status !== "approved") throw badRequest("Faqat tasdiqlangan (to'lanmagan) maosh qaytariladi");
+  // Tasdiqlashdagi hisoblash yozuvi teskari yoziladi (asl yozuv o'chirilmaydi) — qoralamada xarajat bo'lmaydi
+  if (await accrualEntryId(tx, tenant.company.id, salary.id)) {
+    const [employee] = await tx.select({ name: employees.name }).from(employees).where(eq(employees.id, salary.employeeId));
+    await mirrorReferences(tx, tenant.company.id, tenant.user.id, {
+      refs: [{ type: "salary_accrual", id: salary.id }],
+      reversalType: "salary_accrual_reversal",
+      label: `Maosh hisobi bekor qilindi ${salary.month}: ${employee?.name ?? ""}`.trim(),
+      date: todayIso(),
+    });
+  }
 
   const [updated] = await tx
     .update(salaryPayments)
@@ -401,16 +494,14 @@ export async function paySalary(
   const [employee] = await tx.select({ name: employees.name }).from(employees).where(eq(employees.id, salary.employeeId));
   const paidDate = input.paidDate ?? todayIso();
   const description = `Maosh ${salary.month}: ${employee?.name ?? ""}`.trim();
-  const net = toMinor(salary.netSalary);
-  const tax = toMinor(salary.tax);
-  /** Soliq solinadigan ish haqi xarajati (5100) — soliq bazasi shu summadan hisoblangan. */
-  const expense = toMinor(salary.grossSalary) - toMinor(salary.deductions);
+  const { expense, compensation, tax, net } = salaryParts(salary);
   /**
-   * Kompensatsiya (yo'l puli, ovqat puli, aloqa ...) — ish haqi emas: soliqqa kirmaydi va soliq
-   * bazasini buzmasligi uchun ish haqi hisobiga (5100) qo'shilmaydi, "Boshqa xarajatlar" (5500)
-   * hisobiga alohida qator bo'lib tushadi. Tafsiloti `employee_allowances` da qoladi.
+   * Hisoblash (accrual) yozuvi tasdiqlashda yozilgan bo'lsa — to'lovda faqat qarz yopiladi:
+   * DR 2250 ish haqi bo'yicha qarz / CR kassa. Xarajat va soliq o'z oyida qolaveradi.
+   * Eski (accrual'gacha tasdiqlangan) maoshlarda yozuv yo'q — o'shalar avvalgidek to'liq yoziladi:
+   * DR 5100 + DR 5500 / CR kassa + CR 2200.
    */
-  const compensation = toMinor(salary.allowances);
+  const accrued = (await accrualEntryId(tx, companyId, salary.id)) !== null;
 
   const lines: { accountId: string; debit?: string; credit?: string; description?: string }[] = [];
   let paidAccountId: string | null = null;
@@ -428,24 +519,30 @@ export async function paySalary(
     lines.push({ accountId: await ledgerAccountFor(tx, companyId, account), credit: salary.netSalary });
     paidAccountId = account.id;
   }
-  if (tax > 0n) {
-    lines.push({
-      accountId: await requireAccountBySubtype(tx, companyId, "payroll_tax", "liability", "Ish haqidan soliq majburiyati"),
-      credit: salary.tax,
-    });
-  }
-  if (compensation > 0n) {
-    lines.unshift({
-      accountId: await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"),
-      debit: fromMinor(compensation),
-      description: "Xodimga kompensatsiya (yo'l, ovqat va boshqa)",
-    });
-  }
-  if (expense > 0n) {
-    lines.unshift({
-      accountId: await requireAccountBySubtype(tx, companyId, "salary", "expense", "Ish haqi xarajatlari"),
-      debit: fromMinor(expense),
-    });
+  if (accrued) {
+    if (net > 0n) {
+      lines.unshift({ accountId: await ensureAccountBySubtype(tx, companyId, "payroll_payable"), debit: salary.netSalary });
+    }
+  } else {
+    if (tax > 0n) {
+      lines.push({
+        accountId: await requireAccountBySubtype(tx, companyId, "payroll_tax", "liability", "Ish haqidan soliq majburiyati"),
+        credit: salary.tax,
+      });
+    }
+    if (compensation > 0n) {
+      lines.unshift({
+        accountId: await requireAccountBySubtype(tx, companyId, "other", "expense", "Boshqa xarajatlar"),
+        debit: fromMinor(compensation),
+        description: "Xodimga kompensatsiya (yo'l, ovqat va boshqa)",
+      });
+    }
+    if (expense > 0n) {
+      lines.unshift({
+        accountId: await requireAccountBySubtype(tx, companyId, "salary", "expense", "Ish haqi xarajatlari"),
+        debit: fromMinor(expense),
+      });
+    }
   }
   // Debet (ish haqi + kompensatsiya) = kredit (qo'lga berilgan + soliq) — invariant postJournalEntry da ham tekshiriladi
   if (lines.length >= 2) {
@@ -507,7 +604,13 @@ export async function reverseSalary(tx: Tx, tenant: TenantContext, salaryId: str
     .select({ id: expenses.id })
     .from(expenses)
     .where(and(eq(expenses.companyId, companyId), eq(expenses.referenceType, "salary_payment"), eq(expenses.referenceId, salary.id), ne(expenses.status, "reversed")));
-  const refs: SourceRef[] = [{ type: "salary_payment", id: salary.id }, ...fees.map((fee) => ({ type: "bank_fee", id: fee.id }))];
+  // Hisoblash (accrual) yozuvi ham teskari yoziladi: xarajat, soliq majburiyati va ish haqi qarzi nolga qaytadi
+  const accrued = (await accrualEntryId(tx, companyId, salary.id)) !== null;
+  const refs: SourceRef[] = [
+    { type: "salary_payment", id: salary.id },
+    ...(accrued ? [{ type: "salary_accrual", id: salary.id }] : []),
+    ...fees.map((fee) => ({ type: "bank_fee", id: fee.id })),
+  ];
   const [employee] = await tx.select({ name: employees.name }).from(employees).where(eq(employees.id, salary.employeeId));
   const entries = await mirrorReferences(tx, companyId, tenant.user.id, {
     refs,

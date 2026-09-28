@@ -86,15 +86,21 @@ describe("To'langan maoshni bekor qilish", () => {
     expect(await cash(), "pul kassaga qaytdi").toBe(cashBefore);
     expect(await ledger("5100")).toBe("0.00");
     expect(await ledger("2200")).toBe("0.00");
+    expect(await ledger("2250"), "ish haqi qarzi ham nolga qaytdi").toBe("0.00");
     await expectBalanced();
 
-    // Asl jurnal yozuvi joyida (o'chirilmagan) + teskari yozuv
+    // Asl yozuvlar joyida (o'chirilmagan) + har biriga teskarisi: hisoblash (tasdiqlashda) va to'lov
     const entries = await db.select({ type: journalEntries.referenceType, status: journalEntries.status }).from(journalEntries).where(eq(journalEntries.referenceId, salary.id));
-    expect(entries.map((entry) => `${entry.type}:${entry.status}`).sort()).toEqual(["salary_payment:posted", "salary_reversal:salary_payment:posted"]);
+    expect(entries.map((entry) => `${entry.type}:${entry.status}`).sort()).toEqual([
+      "salary_accrual:posted",
+      "salary_payment:posted",
+      "salary_reversal:salary_accrual:posted",
+      "salary_reversal:salary_payment:posted",
+    ]);
     const [audit] = await db.select().from(auditLogs).where(and(eq(auditLogs.action, "SALARY_REVERSED"), eq(auditLogs.resourceId, salary.id)));
     expect(audit).toMatchObject({ userId: expect.any(String) });
     expect(audit!.details).toMatchObject({ reason: "Noto'g'ri xodimga to'langan", netSalary: salary.netSalary, originalReference: { type: "salary_payment", id: salary.id } });
-    expect((audit!.details as { reversalJournalEntries: string[] }).reversalJournalEntries).toHaveLength(1);
+    expect((audit!.details as { reversalJournalEntries: string[] }).reversalJournalEntries).toHaveLength(2);
 
     // Qayta bekor qilish — 409, hech narsa ikki marta qaytmaydi
     expect((await call("POST", `/api/hr/salaries/${salary.id}/reverse`, { reason: "Yana" })).statusCode).toBe(409);
@@ -107,6 +113,49 @@ describe("To'langan maoshni bekor qilish", () => {
     expect(rows.map((row) => row.status).sort()).toEqual(["draft", "reversed"]);
     const summary = (await call("GET", `/api/hr/salaries/summary?month=${month()}`)).json();
     expect(summary.summary ?? summary).toMatchObject({ reversed: 1, totalNet: salary.netSalary });
+  });
+
+  it("hisoblash (accrual): xarajat tasdiqlangan OYDA, to'lov keyingi oyda faqat qarzni yopadi; qoralamaga qaytarish hisobni teskari yozadi", async () => {
+    const employeeId = (await call("POST", "/api/hr/employees", { name: "Hadicha", hireDate: "2020-01-01", baseSalary: "2000000", salaryType: "monthly" })).json().employee.id as string;
+    expect((await call("POST", "/api/hr/salaries/generate", { month: month() })).statusCode).toBeLessThan(300);
+    const salary = (await call("GET", `/api/hr/salaries?month=${month()}&employeeId=${employeeId}`)).json().salaries[0] as { id: string; netSalary: string; tax: string };
+
+    const cashBefore = await cash();
+    expect((await call("POST", `/api/hr/salaries/${salary.id}/approve`)).statusCode).toBe(200);
+    // Tasdiqlash: xarajat va soliq majburiyati yoziladi, pul tegilmaydi
+    expect(await ledger("5100")).toBe("2000000.00");
+    expect(await ledger("2200")).toBe(salary.tax);
+    expect(await ledger("2250"), "qo'lga beriladigan summa — ish haqi bo'yicha qarz").toBe(salary.netSalary);
+    expect(await cash()).toBe(cashBefore);
+    await expectBalanced();
+
+    // Hisoblash yozuvi maosh OYINING oxirgi kunida (to'lov keyin bo'lsa ham o'sha oy foydasi o'zgarmaydi)
+    const [accrual] = await db
+      .select({ date: journalEntries.entryDate, status: journalEntries.status })
+      .from(journalEntries)
+      .where(and(eq(journalEntries.referenceId, salary.id), eq(journalEntries.referenceType, "salary_accrual")));
+    expect(accrual!.status).toBe("posted");
+    expect(accrual!.date.startsWith(month())).toBe(true);
+    expect(Number(accrual!.date.slice(8))).toBeGreaterThanOrEqual(28);
+
+    // To'lov: faqat qarz yopiladi — xarajat va soliq o'zgarmaydi
+    expect((await call("POST", `/api/hr/salaries/${salary.id}/pay`)).statusCode).toBe(200);
+    expect(await ledger("5100")).toBe("2000000.00");
+    expect(await ledger("2200")).toBe(salary.tax);
+    expect(await ledger("2250"), "qarz yopildi").toBe("0.00");
+    expect(await cash()).toBe((Number(cashBefore) - Number(salary.netSalary)).toFixed(2));
+    await expectBalanced();
+
+    // Boshqa xodim: tasdiqlab, qoralamaga qaytarilsa — hisob teskari yoziladi (xarajat qolmaydi)
+    const second = (await call("POST", "/api/hr/employees", { name: "Zuhra", hireDate: "2020-01-01", baseSalary: "1000000", salaryType: "monthly" })).json().employee.id as string;
+    await call("POST", "/api/hr/salaries/generate", { month: month() });
+    const draft = (await call("GET", `/api/hr/salaries?month=${month()}&employeeId=${second}`)).json().salaries[0] as { id: string };
+    expect((await call("POST", `/api/hr/salaries/${draft.id}/approve`)).statusCode).toBe(200);
+    expect(await ledger("5100")).toBe("3000000.00");
+    expect((await call("POST", `/api/hr/salaries/${draft.id}/revert`)).statusCode).toBe(200);
+    expect(await ledger("5100"), "qoralamada xarajat yo'q").toBe("2000000.00");
+    expect(await ledger("2250")).toBe("0.00");
+    await expectBalanced();
   });
 
   it("parallel ikki bekor qilish: bittasi o'tadi; to'lanmagan maosh bekor qilinmaydi; tenant va ruxsat", async () => {

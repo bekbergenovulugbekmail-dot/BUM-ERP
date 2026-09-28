@@ -31,6 +31,11 @@ export const DEFAULT_ACCOUNTS: { code: string; name: string; type: AccountType; 
   { code: "2000", name: "Kreditorlar", type: "liability", subtype: "payable" },
   { code: "2100", name: "Qisqa muddatli qarzlar", type: "liability", subtype: "short_debt" },
   { code: "2200", name: "Ish haqidan soliq majburiyati", type: "liability", subtype: "payroll_tax" },
+  /**
+   * Hisoblangan, lekin hali to'lanmagan maosh (egasi qarori 2026-09-28: xarajat o'z oyida tan olinadi).
+   * Tasdiqlashda CR 2250, to'lovda DR 2250 / CR kassa — to'lov oyi xarajatni o'zgartirmaydi.
+   */
+  { code: "2250", name: "Ish haqi bo'yicha qarz", type: "liability", subtype: "payroll_payable" },
   { code: "2300", name: "Mijozlar avanslari (balans)", type: "liability", subtype: "customer_advance" },
   { code: "2400", name: "Keshbek majburiyati", type: "liability", subtype: "cashback_liability" },
   { code: "3000", name: "Ustav kapitali", type: "equity", subtype: "capital" },

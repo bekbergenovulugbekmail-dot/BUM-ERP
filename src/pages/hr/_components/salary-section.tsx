@@ -187,6 +187,13 @@ export default function SalarySection() {
         )}
       </div>
 
+      {/* Hisob siyosati: xarajat o'z oyida (egasi qarori 2026-09-28) — kassir/buxgalter kutgani bilan mos kelsin */}
+      <p className="text-xs text-muted-foreground">
+        Maosh <b>tasdiqlanganda</b> xarajat o'sha oyga yoziladi (ish haqi va kompensatsiya — xarajat, qo'lga
+        beriladigani «Ish haqi bo'yicha qarz», soliq — majburiyat). <b>To'lov</b> keyingi oyda bo'lsa ham o'sha oy
+        foydasini o'zgartirmaydi: to'lovda faqat qarz yopiladi va kassadan pul chiqadi.
+      </p>
+
       {/* Summary cards */}
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
