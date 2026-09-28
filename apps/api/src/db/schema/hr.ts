@@ -17,6 +17,7 @@ import {
   pgTable,
   text,
   time,
+  timestamp,
   uniqueIndex,
   uuid,
   varchar,
@@ -57,6 +58,8 @@ export const salaryPaymentStatus = pgEnum("salary_payment_status", [
   "draft",
   "approved",
   "paid",
+  /** To'langan maosh teskari (kompensatsion) yozuvlar bilan bekor qilingan — asl hujjat o'zgarmaydi (egasi qarori 2026-09-28). */
+  "reversed",
 ]);
 
 // ─── departments ─────────────────────────────────────────────────────────────
@@ -294,11 +297,16 @@ export const salaryPayments = pgTable(
     /** Kim tasdiqladi — tayyorlaganidan farq qilishi kerak. */
     approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
     notes: text("notes"),
+    /** Bekor qilish (to'langan maosh): kim, qachon, nega — teskari jurnal yozuvlari `salary_reversal:*` havolasi bilan. */
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
+    reversedBy: uuid("reversed_by").references(() => users.id, { onDelete: "set null" }),
+    reversalReason: text("reversal_reason"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     ...timestamps(),
   },
   (t) => [
-    uniqueIndex("sal_employee_month_key").on(t.employeeId, t.month),
+    // Bekor qilingan maosh o'rniga shu oy uchun to'g'rilangan maosh yaratiladi — yagonalik faqat amaldagilar orasida
+    uniqueIndex("sal_employee_month_key").on(t.employeeId, t.month).where(sql`${t.reversedAt} is null`),
     index("sal_company_month_idx").on(t.companyId, t.month),
     index("sal_company_status_idx").on(t.companyId, t.status),
     check("sal_amounts_non_negative", sql`${t.netSalary} >= 0 AND ${t.tax} >= 0 AND ${t.deductions} >= 0`),

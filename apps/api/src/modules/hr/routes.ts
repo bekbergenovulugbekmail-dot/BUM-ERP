@@ -64,6 +64,7 @@ import {
   generateSalaries,
   listSalaries,
   paySalary,
+  reverseSalary,
   revertSalary,
   salarySummary,
   updateSalary,
@@ -618,5 +619,12 @@ export async function hrRoutes(app: FastifyInstance): Promise<void> {
     const id = param(req, "salaryId");
     const body = payBody.parse(req.body) ?? {};
     return { salary: await writeInTenant(req, "hr.approve", (tx, t) => paySalary(tx, t, id, body, requestMeta(req))) };
+  });
+
+  /** To'langan maoshni bekor qilish — kompensatsion teskari yozuvlar; sabab majburiy; qayta bekor qilish 409. */
+  app.post("/salaries/:salaryId/reverse", async (req) => {
+    const id = param(req, "salaryId");
+    const { reason } = z.strictObject({ reason: z.string().trim().min(3).max(500) }).parse(req.body);
+    return { salary: await writeInTenant(req, "hr.approve", (tx, t) => reverseSalary(tx, t, id, reason, requestMeta(req))) };
   });
 }

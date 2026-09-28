@@ -26,8 +26,8 @@
  *  - "to'landi" kassadan pul chiqarmasdi va jurnalga yozmasdi
  *  - bir oy uchun parallel hisoblash dublikat yaratardi (endi advisory lock + unique)
  */
-import { and, asc, eq, getTableColumns, gte, inArray, lt, sql } from "drizzle-orm";
-import { badRequest, forbidden, notFound } from "@bum/shared";
+import { and, asc, eq, getTableColumns, gte, inArray, lt, ne, sql } from "drizzle-orm";
+import { badRequest, conflict, forbidden, notFound } from "@bum/shared";
 import { attendances, departments, employees, leaves, positions, salaryKpiLines, salaryPayments } from "../../db/schema/hr.js";
 import { computeKpi, employeeLinks, resolveRules } from "./kpi.service.js";
 import { effectiveSalaries } from "./salary-history.service.js";
@@ -43,7 +43,9 @@ import {
   todayIso,
   type PaymentMethod,
 } from "../finance/cash.service.js";
-import { postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { assertPeriodOpen, postJournalEntry, requireAccountBySubtype } from "../finance/journal.service.js";
+import { mirrorReferences, type SourceRef } from "../finance/reversal.service.js";
+import { expenses } from "../../db/schema/finance.js";
 import { applyOutgoingBankCommission } from "../finance/bank-commission.service.js";
 import { monthRange } from "./attendance.service.js";
 import { allowanceTotalsForMonth } from "./allowances.service.js";
@@ -100,10 +102,12 @@ export async function salarySummary(conn: DbOrTx, tenant: TenantContext, month: 
       draft: sql<number>`(count(*) filter (where ${salaryPayments.status} = 'draft'))::int`,
       approved: sql<number>`(count(*) filter (where ${salaryPayments.status} = 'approved'))::int`,
       paid: sql<number>`(count(*) filter (where ${salaryPayments.status} = 'paid'))::int`,
-      totalGross: sql<string>`coalesce(sum(${salaryPayments.grossSalary}), 0)::numeric(18,2)`,
-      totalBonus: sql<string>`coalesce(sum(${salaryPayments.bonus}), 0)::numeric(18,2)`,
-      totalTax: sql<string>`coalesce(sum(${salaryPayments.tax}), 0)::numeric(18,2)`,
-      totalNet: sql<string>`coalesce(sum(${salaryPayments.netSalary}), 0)::numeric(18,2)`,
+      reversed: sql<number>`(count(*) filter (where ${salaryPayments.status} = 'reversed'))::int`,
+      // Bekor qilingan maosh jamiga kirmaydi (uning o'rniga to'g'rilangani hisoblanadi)
+      totalGross: sql<string>`coalesce(sum(${salaryPayments.grossSalary}) filter (where ${salaryPayments.status} <> 'reversed'), 0)::numeric(18,2)`,
+      totalBonus: sql<string>`coalesce(sum(${salaryPayments.bonus}) filter (where ${salaryPayments.status} <> 'reversed'), 0)::numeric(18,2)`,
+      totalTax: sql<string>`coalesce(sum(${salaryPayments.tax}) filter (where ${salaryPayments.status} <> 'reversed'), 0)::numeric(18,2)`,
+      totalNet: sql<string>`coalesce(sum(${salaryPayments.netSalary}) filter (where ${salaryPayments.status} <> 'reversed'), 0)::numeric(18,2)`,
     })
     .from(salaryPayments)
     .where(and(eq(salaryPayments.companyId, tenant.company.id), eq(salaryPayments.month, month)));
@@ -137,7 +141,8 @@ export async function generateSalaries(
       await tx
         .select({ employeeId: salaryPayments.employeeId })
         .from(salaryPayments)
-        .where(and(eq(salaryPayments.companyId, companyId), eq(salaryPayments.month, input.month)))
+        // Bekor qilingan maosh o'rniga to'g'rilangani tayyorlanadi
+        .where(and(eq(salaryPayments.companyId, companyId), eq(salaryPayments.month, input.month), ne(salaryPayments.status, "reversed")))
     ).map((r) => r.employeeId),
   );
   const pending = staff.filter((s) => !existing.has(s.id));
@@ -475,6 +480,68 @@ export async function paySalary(
     resource: "salary_payments",
     resourceId: salaryId,
     details: { employeeId: salary.employeeId, month: salary.month, netSalary: salary.netSalary },
+  });
+  return updated!;
+}
+
+/**
+ * TO'LANGAN MAOSHNI BEKOR QILISH (egasi qarori, 2026-09-28). Asl maosh hujjati, kassa harakati va jurnal yozuvi
+ * o'zgarmaydi va o'chirilmaydi — kompensatsion teskari yozuvlar (`reversal.service`): pul o'sha kassa/bankka qaytadi,
+ * jurnal debet ↔ kredit (ish haqi xarajati, kompensatsiya, soliq majburiyati), bank komissiyasi (bo'lsa) ham qaytadi.
+ * Holat `reversed`, kim/qachon/nega saqlanadi va auditga yoziladi (asl va teskari yozuvlar id lari bilan). Qayta bekor
+ * qilish — 409. Shu oy uchun to'g'rilangan maosh qaytadan tayyorlanadi (yagonalik faqat bekor qilinmaganlar orasida).
+ */
+export async function reverseSalary(tx: Tx, tenant: TenantContext, salaryId: string, reason: string, meta: RequestMeta) {
+  const companyId = tenant.company.id;
+  const cleanReason = reason.trim();
+  if (cleanReason.length < 3) throw badRequest("Bekor qilish sababini yozing");
+  await assertModuleEnabled(tx, companyId, "finance");
+  const today = todayIso();
+  await assertPeriodOpen(tx, companyId, today);
+  const salary = await lockSalary(tx, tenant, salaryId);
+  if (salary.status === "reversed") throw conflict("Maosh allaqachon bekor qilingan");
+  if (salary.status !== "paid") throw badRequest("Faqat to'langan maosh bekor qilinadi — to'lanmaganini qoralamaga qaytaring");
+
+  // Bankdan to'langanda yozilgan komissiya xarajatlari — ular ham qaytadi
+  const fees = await tx
+    .select({ id: expenses.id })
+    .from(expenses)
+    .where(and(eq(expenses.companyId, companyId), eq(expenses.referenceType, "salary_payment"), eq(expenses.referenceId, salary.id), ne(expenses.status, "reversed")));
+  const refs: SourceRef[] = [{ type: "salary_payment", id: salary.id }, ...fees.map((fee) => ({ type: "bank_fee", id: fee.id }))];
+  const [employee] = await tx.select({ name: employees.name }).from(employees).where(eq(employees.id, salary.employeeId));
+  const entries = await mirrorReferences(tx, companyId, tenant.user.id, {
+    refs,
+    reversalType: "salary_reversal",
+    label: `Maosh ${salary.month} bekor qilindi: ${employee?.name ?? ""} — ${cleanReason}`,
+    date: today,
+  });
+  const reversedAt = new Date();
+  for (const fee of fees) {
+    await tx
+      .update(expenses)
+      .set({ status: "reversed", reversedAt, reversedBy: tenant.user.id, reversalReason: cleanReason, updatedAt: reversedAt })
+      .where(eq(expenses.id, fee.id));
+  }
+  const [updated] = await tx
+    .update(salaryPayments)
+    .set({ status: "reversed", reversedAt, reversedBy: tenant.user.id, reversalReason: cleanReason, updatedAt: reversedAt })
+    .where(eq(salaryPayments.id, salary.id))
+    .returning(salaryFields);
+
+  await hrAudit(tx, tenant, meta, {
+    action: "SALARY_REVERSED",
+    resource: "salary_payments",
+    resourceId: salary.id,
+    details: {
+      employeeId: salary.employeeId,
+      month: salary.month,
+      netSalary: salary.netSalary,
+      paidDate: salary.paidDate,
+      reason: cleanReason,
+      originalReference: { type: "salary_payment", id: salary.id },
+      reversalJournalEntries: entries,
+      fees: fees.map((fee) => fee.id),
+    },
   });
   return updated!;
 }

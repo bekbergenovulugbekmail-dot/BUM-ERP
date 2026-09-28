@@ -694,6 +694,13 @@
       "when": 1790550000000,
       "tag": "0098_order_seller",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1790560000000,
+      "tag": "0099_salary_reversal",
+      "breakpoints": true
     }
   ]
 }

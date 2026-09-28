@@ -22,6 +22,7 @@ const STATUS_MAP = {
   draft: { label: "Qoralama", color: "bg-muted text-muted-foreground" },
   approved: { label: "Tasdiqlangan", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
   paid: { label: "To'landi", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
+  reversed: { label: "Bekor qilingan", color: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400" },
 };
 
 type PaymentMethod = "cash" | "bank" | "card" | "transfer";
@@ -36,6 +37,9 @@ export default function SalarySection() {
   const thisMonth = localIsoDate().slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
   const [payDialog, setPayDialog] = useState<SalaryPayment | null>(null);
+  /** To'langan maoshni bekor qilish — sabab majburiy (teskari yozuvlar, asl hujjat o'zgarmaydi). */
+  const [reverseDialog, setReverseDialog] = useState<SalaryPayment | null>(null);
+  const [reverseReason, setReverseReason] = useState("");
   const [editDialog, setEditDialog] = useState<string | null>(null);
   const [payDate, setPayDate] = useState(localIsoDate());
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
@@ -66,6 +70,20 @@ export default function SalarySection() {
   const approvePayment = useApiMutation((id: string) => api.post(`/api/hr/salaries/${id}/approve`));
   const revertPayment = useApiMutation((id: string) => api.post(`/api/hr/salaries/${id}/revert`));
   const markPaid = useApiMutation(({ id, ...body }: PayBody) => api.post(`/api/hr/salaries/${id}/pay`, body));
+  const reversePayment = useApiMutation(({ id, reason }: { id: string; reason: string }) => api.post(`/api/hr/salaries/${id}/reverse`, { reason }), {
+    invalidate: ["/api/hr", "/api/finance"],
+  });
+
+  const handleReverse = async () => {
+    if (!reverseDialog) return;
+    if (reverseReason.trim().length < 3) { toast.error("Bekor qilish sababini yozing"); return; }
+    try {
+      await reversePayment.mutateAsync({ id: reverseDialog.id, reason: reverseReason.trim() });
+      toast.success("Maosh bekor qilindi — pul kassaga qaytdi");
+      setReverseDialog(null);
+      setReverseReason("");
+    } catch (e) { toast.error(errorMessage(e)); }
+  };
 
   const handleGenerate = async () => {
     if (!validMonth) { toast.error("Oyni tanlang"); return; }
@@ -228,7 +246,7 @@ export default function SalarySection() {
                     <td className="px-3 py-2.5 text-right text-rose-600">{fmt(p.tax)}</td>
                     <td className="px-3 py-2.5 text-right font-bold">{fmt(p.netSalary)} so'm</td>
                     <td className="px-3 py-2.5">
-                      <span className={cn("text-xs px-2 py-0.5 rounded-full", st.color)}>{st.label}</span>
+                      <span className={cn("text-xs px-2 py-0.5 rounded-full", st.color)} title={p.reversalReason ?? undefined}>{st.label}</span>
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex gap-1 justify-end">
@@ -258,6 +276,13 @@ export default function SalarySection() {
                             </Button>
                           </>
                         )}
+                        {p.status === "paid" && canApprove && (
+                          <Button size="sm" variant="ghost" className="h-6 px-2 text-xs text-rose-600"
+                            data-testid={`salary-reverse-${p.id}`}
+                            onClick={() => { setReverseDialog(p); setReverseReason(""); }}>
+                            Bekor qilish
+                          </Button>
+                        )}
                         <Button size="icon" variant="ghost" className="h-6 w-6"
                           title="PDF yuklash"
                           onClick={() => void handlePrintPayslip(p)}>
@@ -271,6 +296,29 @@ export default function SalarySection() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* To'langan maoshni bekor qilish */}
+      {reverseDialog && (
+        <Dialog open onOpenChange={(o) => !o && setReverseDialog(null)}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Maoshni bekor qilish — {reverseDialog.employeeName}</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              To'langan {fmt(reverseDialog.netSalary)} so'm kassaga qaytadi, xarajat va soliq yozuvlari teskari yoziladi. Asl hujjat
+              o'zgarmaydi; shu oy uchun to'g'rilangan maoshni qaytadan hisoblash mumkin.
+            </p>
+            <div>
+              <Label htmlFor="salary-reverse-reason">Sabab *</Label>
+              <Input id="salary-reverse-reason" value={reverseReason} onChange={(e) => setReverseReason(e.target.value)} placeholder="Masalan: noto'g'ri summa to'langan" />
+            </div>
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => setReverseDialog(null)}>Yopish</Button>
+              <Button className="bg-rose-600 hover:bg-rose-700" onClick={() => void handleReverse()} disabled={reversePayment.isPending} data-testid="salary-reverse-confirm">
+                Bekor qilish
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* Edit dialog */}

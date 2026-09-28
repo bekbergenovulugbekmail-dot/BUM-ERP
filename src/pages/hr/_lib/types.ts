@@ -107,10 +107,12 @@ export type AttendanceStats = {
   totalOvertime: string;
 };
 
-export type SalaryStatus = "draft" | "approved" | "paid";
+export type SalaryStatus = "draft" | "approved" | "paid" | "reversed";
 
 export type SalaryPayment = {
   id: string;
+  /** Bekor qilingan (to'langan maosh teskari yozuvlar bilan) — sabab. */
+  reversalReason?: string | null;
   employeeId: string;
   month: string;
   baseSalary: string;
@@ -142,6 +144,7 @@ export type SalarySummary = {
   draft: number;
   approved: number;
   paid: number;
+  reversed?: number;
   totalGross: string;
   totalBonus: string;
   totalTax: string;
