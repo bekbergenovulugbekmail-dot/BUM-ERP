@@ -5625,3 +5625,24 @@ qilinmaguncha production'da `--apply` ishlatilmasin** — u 6 160 so'mni noto'g'
 
 Keyingi qadam (egasi ruxsati bilan): `26a5a49` ni push va deploy → yangi dry run (kutilgan: 5 satr / 329 300,
 skipped 2) → egasi tasdiqlagach `--apply` → PHASE 7–8 tekshiruvlari.
+
+### Deploy urinishi 2 (2026-09-29) — YANGI BUILD TUSHMADI, STATUS = STOPPED
+
+Egasi `railway up` ni o'zi ishga tushirdi (men uchun "Production Deploy" bloklangan edi). Tekshiruv: API sog'lom
+(`/api/auth/me` 401), CLI ishlaydi, lekin konteynerda HAMON eski build (`993b9e3`). Dalil raqamga bog'liq emas:
+konteynerdagi `dist/modules/finance/cash-ledger-repair.service.js` da `matchByAmount` = 0 ta, `wantsDebit` = 0 ta;
+dry-run javobida `skippedLines` maydoni yo'q. `railway up` buyrug'ining chiqishi menga ko'rinmadi, shuning uchun
+sababi (yuklash uzilishi yoki boshqa) aniqlanmagan.
+
+**Production'da hech narsa o'zgarmadi:** `cash_ledger_reclass` = 0, `CASH_LEDGER_REPAIRED` audit = 0, JE-2026-00039,
+00041, 00043, 00045, 00047 — hammasi `posted`, summalari o'zgarmagan; Bonnu 1010 = −57 360, 1020 = 362 780, kassa
+251 780; Ezo 1010 = 55 000, 1100 = 35 200.
+
+**Eski build QANCHALIK xavfli ekani aniqlandi (dry run, rollback bilan):**
+- Bonnu: 7 satr / 323 140 — bank kassalarining 3 000 va 3 160 i ham ko'chirilardi (6 160 so'm noto'g'ri).
+- **Ezo: 1 satr / 20 000** — DR 1100 / CR 1010. Ya'ni jurnal xatosi UMUMAN YO'Q kompaniyada 20 000 so'mni 1010 dan
+  olib Debitorlarga o'tkazardi va sog'lom hisobni buzardi. Yangi moslik (tomon tekshiruvi) buni 0 ta satr deb
+  topadi: kassa harakati "kirim", 1100 dagi satr esa kredit — tomon mos emas.
+
+Shuning uchun **eski build bilan `--apply` hech qachon ishlatilmasin**. Tuzatilgan build `26a5a49` (lokal `dist` da
+`matchByAmount`/`wantsDebit` bor, build muvaffaqiyatli) deploy qilinishi kerak.
