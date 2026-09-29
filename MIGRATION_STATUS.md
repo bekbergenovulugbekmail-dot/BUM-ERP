@@ -5769,3 +5769,96 @@ Bugun bazaga tushgan yozuvlar: `JE-2026-00048` — egasi tasdiqlagan kassa tuzat
 — **egasining o'z ishi** (04:46Z, K03-Q000002 qaytarishi, naqd 17 200 chiqim). Shu sababli Bonnu 1010
 271 940 → **254 740**. Invariant saqlanmoqda: naqd kassalar 234 580 + USD kassa 20 160 = 254 740. Muhim dalil —
 bu qaytarish endi 1010 ga tushdi (tuzatishdan oldin 1020 ga tushardi), ya'ni bog'lanish tuzatishi jonli ishlayapti.
+
+### Apex domen va public landing sayt (2026-09-29) — STATUS = BLOKLANGAN, o'zgartirilmadi
+
+So'ralgan arxitektura: `bum-erp.uz` — public landing sayt, `www.bum-erp.uz` — apex'ga redirect, `app.bum-erp.uz` — ERP.
+DNS va Railway konfiguratsiyasiga **hech qanday o'zgarish kiritilmadi** — quyidagi uch to'siq sababli.
+
+**O'lchangan joriy holat (8.8.8.8 orqali, 2026-09-29):**
+
+| domen | yozuv | qiymat | TLS / holat |
+|---|---|---|---|
+| `bum-erp.uz` | A | `95.46.96.77` (CNAME yo'q) | sertifikat MOS EMAS — brauzerda ochilmaydi; hosting'ning "Здесь будет сайт!" parking sahifasi (2022) |
+| `www.bum-erp.uz` | CNAME | `br5m6hjv.up.railway.app` → 69.46.46.100 | Railway, sertifikat VALID, DNS PROPAGATED |
+| `app.bum-erp.uz` | CNAME | `vdhio0zu.up.railway.app` → 69.46.46.117 | Railway, sertifikat VALID, DNS PROPAGATED |
+
+Apex DNS provayderi: **webspace.uz** (`dns1…dns4.webspace.uz`). Railway `bum-web` servisi (`c7092a40…`,
+production env `82f1871b…`): generated domen `bum-web-production.up.railway.app`, custom domenlar — aynan
+**2 ta**: `www.bum-erp.uz` va `app.bum-erp.uz`.
+
+**To'siq 1 — public landing sayt mavjud emas.** Repoda faqat ERP SPA bor; `src/App.tsx:139` da ildiz (`/`)
+`RootRedirect` orqali ERP'ga yo'naltiradi. Apex'ni Railway `bum-web` ga qaratish `bum-erp.uz` da ERP login
+sahifasini ochib yuborardi — bu topshiriqda ATAYLAB taqiqlangan. Landing sayt yaratish alohida mahsulot ishi.
+
+**To'siq 2 — Railway custom domen limiti to'lgan** (2/2: `www` va `app`). Apex'ni qo'shish uchun slot bo'shatish
+kerak; `app.bum-erp.uz` ni olib tashlash taqiqlangan, `www` ni olib tashlash esa uni ishlamay qoldiradi.
+
+**To'siq 3 — apex uchun ALIAS/ANAME kerak.** Railway CNAME nishonini beradi, zona apex'ida esa yalang'och CNAME
+DNS standarti bo'yicha yaroqsiz. webspace.uz ALIAS/ANAME yoki CNAME-flattening qo'llab-quvvatlashi tekshirilishi
+kerak — bu ma'lumot menda yo'q va taxmin qilmadim.
+
+**Qo'shimcha xavf — `www` ni ERP'dan uzish kassalarni sindirishi mumkin.** Admin paneldagi ko'rsatma
+(`src/pages/settings/_components/pos-devices-section.tsx:805`) kassa qurilmasini ro'yxatdan o'tkazishda server
+manzili sifatida aynan `https://www.bum-erp.uz` ni aytadi. Desktop kassa `<apiUrl>/api/...` ga murojaat qiladi
+(standart `https://app.bum-erp.uz`, lekin qurilmada boshqa manzil saqlangan bo'lishi mumkin). `www` redirectga
+aylantirilsa, o'sha manzil bilan ro'yxatdan o'tgan kassalar serverga ulana olmaydi.
+
+**Egasi qaror qabul qilishi kerak (variantlar):**
+1. Landing sayt tayyorlanadi va u **Railway'dan tashqarida**, hozirgi apex hostingida (webspace.uz, 95.46.96.77)
+   joylashtiriladi — DNS va Railway o'zgarmaydi, `www` ERP bo'lib qolaveradi. Eng kam xavfli yo'l.
+2. Landing sayt Railway'ga qo'yiladi — u holda tarifni kengaytirish (3-domen) yoki `www` ni bo'shatish kerak;
+   `www` bo'shatilsa, avval barcha kassalar `app.bum-erp.uz` ga o'tkazilishi shart.
+3. Apex `app.bum-erp.uz` ga redirect qilinadi — bu ERP'ni apex'da ochadi, topshiriq talabiga zid.
+
+Har qanday holatda DNS yozuvini men o'zgartira olmayman: webspace.uz panelига kirish menda yo'q.
+
+### Desktop kassa 0.4.8 relizi (2026-09-29) — yig'ildi, E'LON QILINMAGAN
+
+Production'da e'lon qilingan yagona reliz — **0.3.0** (2026-09-12), repo esa 0.4.7 da edi. `release/` dagi
+`0.4.7` o'rnatuvchisi 2026-09-18 da yig'ilgan, lekin desktop manbasi shundan keyin ham o'zgargan
+(`fb64a51` savatni tozalash/masshtab/sotuvchi, `8a748c3` AUD-016 ichki o'tkazma, `6b183c6` oflayn chek soliq,
+`af6f31e` yangilanish so'rovi). Bir xil versiya raqami ostida boshqa binar e'lon qilinmasligi uchun versiya
+minimal oshirildi: **0.4.7 → 0.4.8** (yagona kanonik manba — `apps/desktop/package.json`; Electron
+`app.getVersion()` shundan oladi).
+
+Mavjud kanonik reliz yo'li ishlatildi (`dist:win` → `electron-builder --win nsis --x64`), yangi tizim
+yaratilmadi.
+
+| | |
+|---|---|
+| Versiya | **0.4.8** |
+| O'rnatuvchi | `BUM-POS-KASSA-Setup-0.4.8.exe` |
+| Arxitektura | x64 (NSIS, `perMachine: false`) |
+| Hajm | 111 924 526 bayt (106.74 MB) |
+| SHA-256 | `b639af57e970c81efddbede3c9d3b1e1f9f71b617574b51371546bee6049ae5d` |
+| exe metadata | ProductName `BUM POS KASSA`, FileVersion/ProductVersion `0.4.8` |
+
+Paket auditi (`release/win-unpacked/resources/app.asar`): `https://app.bum-erp.uz` — bor (to'g'ri API bazasi);
+`https://bum-erp.uz` — YO'Q; `localhost:5173`, `127.0.0.1:3000`, `convex`, `hercules`, `openDevTools`,
+`BUM_ADMIN_PASSWORD` — YO'Q. Yangilanish mexanizmi (`pos-device/app-update`) paketda bor. Electron fuses
+qo'llangan (runAsNode, NODE_OPTIONS, --inspect o'chirilgan), asar yaxlitligi yangilangan.
+
+**Ishga tushirish sinovi ATAYLAB BAJARILMADI.** Bu kompyuterda ishlaydigan kassa o'rnatilgan (v0.4.7,
+`%LOCALAPPDATA%\Programs\BUM POS KASSA`) va uning mahalliy bazasi `%APPDATA%\BUM POS KASSA\bum-kassa.sqlite`
+bugun 10:34Z da o'zgargan, ya'ni faol ishlatilmoqda. O'rnatuvchini ishga tushirish yoki yangi build'ni ochish
+o'sha bazani (oflayn cheklar bilan) yangi sxemaga ko'chirib yuborishi mumkin edi. Sinov alohida kompyuterda yoki
+boshqa `userData` katalogi bilan bajarilishi kerak.
+
+**E'LON QILINMAGAN — egasi harakati kerak.** Kanonik yo'l platforma admini bilan kiradi, shuning uchun parol
+talab qilinadi; men uni so'ramadim va so'ramayman. O'rnatuvchi tayyor va `release/` da turibdi; imzo kaliti
+shu kompyuterda (`~/.bum-erp/release-signing-ed25519.pem`). Egasi quyidagini bajaradi:
+
+```
+$env:BUM_ADMIN_PHONE="+998..."; $env:BUM_ADMIN_PASSWORD="..."
+pnpm --filter @bum/desktop release:publish
+```
+
+Skript SHA-256 ni qayta hisoblaydi, Ed25519 bilan imzolaydi, `POST /api/platform/desktop-releases` ga yuklaydi va
+`/publish` bilan e'lon qiladi (oldingi reliz avtomatik arxivga tushadi). Bu — mavjud yagona mexanizm; ikkinchi
+yuklash yo'li yaratilmadi.
+
+Eslatma: hozir productionda 0.3.0 e'lon qilingan. 0.3.0 ichida yangilanish mexanizmi bor-yo'qligini o'rnatuvchi
+ichidan tekshirib bo'lmadi (NSIS paketni siqadi, matn qidiruvi ishonchsiz). Yangilanish kodi `9ce088c`
+(2026-09-12 09:19Z) da qo'shilgan, 0.3.0 esa 15:14Z da yuklangan — ya'ni ehtimol bor, lekin ISBOTLANMAGAN.
+Agar eski kassalar o'zi yangilanmasa, ular `.exe` ni qo'lda o'rnatishi kerak bo'ladi.
