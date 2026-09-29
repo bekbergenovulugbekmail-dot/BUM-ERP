@@ -5576,3 +5576,52 @@ Regressiya bitta ESKI yiqilishni ochdi va u tuzatildi: `import-convex.test.ts` h
 holbuki `af6f31e` (maosh accrual) standart rejaga 26-hisob — **2250 "Ish haqi bo'yicha qarz"** ni qo'shgan va test
 o'sha sessiyada yangilanmagan edi. Endi tekshiruv aniq songa emas, `DEFAULT_ACCOUNTS.length` ga bog'landi —
 kelgusida rejaga hisob qo'shilganda test yana eskirmaydi. Bu tuzatishning kassa bog'lanishiga aloqasi yo'q.
+
+### Production repair urinishi (2026-09-29) — STATUS = STOPPED, APPLY QILINMADI
+
+Egasi to'liq bajarishga ruxsat berdi (PHASE 1–9). PHASE 5 (dry run) da to'xtatildi — **production'ga hech narsa
+yozilmadi**: `cash_ledger_reclass` yozuvlari 0 ta, `CASH_LEDGER_REPAIRED` audit yozuvlari 0 ta (tekshirildi).
+
+**PHASE 1** ✅ branch `feat/postgres-migration`, ishchi katalog toza, HEAD = `993b9e3`, deploy qilinadigan kod aynan
+sinovdan o'tgan versiya. **PHASE 2** ⛔ `git push` auto-rejim klassifikatori tomonidan rad etildi
+("Out-of-Place Publication") — 5 ta commit lokal qoldi. **PHASE 3** ✅ `bum-api` `2eef6bce…` deploy qilindi,
+tashqaridan `/api/auth/me` 401; yangi build konteynerda ekani `dist/cli/repair-cash-ledger.js` ishlagani bilan
+tasdiqlandi. **PHASE 4** ✅ `--list`: aynan 2 ta mos kelmagan kassa (Bonnu → 1020, Ezo → 1100).
+
+**PHASE 5 — STOP. Production holati auditdan moddiy farq qildi:**
+
+| | audit 2026-09-28 | dry run 2026-09-29 |
+|---|---|---|
+| noto'g'ri satrlar | 3 | 7 |
+| summa | 294 100 | 323 140 |
+| "Asosiy kassa" qoldig'i | 216 580 | 251 780 |
+| 1020 | 327 580 | 362 780 |
+
+Ikki sabab, ikkalasi ham aniqlandi:
+
+1. **Yangi savdo.** Auditdan keyin Bonnu'da yana ikkita mijoz to'lovi shu kassaga tushgan va bog'lanish hali xato
+   bo'lgani uchun ular ham 1020 ga yozilgan: JE-2026-00045 (18 000, SO-2026-0015) va JE-2026-00047 (17 200,
+   K03-000004). Kassa qoldig'i 216 580 → 251 780 (+35 200) — mos.
+2. **Tuzatish kodidagi XATO** (dry run ochdi). Satrlar faqat `reference_id` bo'yicha topilardi, holbuki bitta hujjat
+   bir nechta kassadan pul harakatlantirishi mumkin: qaytarish hujjati K03-Q000001 naqd kassadan 14 000, ikkita BANK
+   kassasidan 3 000 va 3 160 qaytargan — uchala satr bitta havolaga ega va uchalasi ham 1020 da. Eski moslik bank
+   satrlarini ham naqd kassaga tegishli deb hisoblab, 6 160 so'mni NOTO'G'RI ko'chirardi.
+
+**To'g'ri raqam: 5 satr / 329 300 so'm** (180 000 + 18 000 + 96 100 + 18 000 + 17 200), 323 140 emas.
+Tekshiruv: 1010 = −57 360 + 329 300 = **271 940** = naqd kassalar (251 780 + USD kassa 20 160) ✓;
+1020 = 362 780 − 329 300 = **33 480** = bank kassalar (28 320 + 5 160 + 0) ✓.
+
+Tuzatildi (`26a5a49`): endi har kassa harakati jurnal satri bilan juftlanadi — havola + tomon (kirim → debet,
+chiqim → kredit) + summa; da'vosiz qolgan satrlar boshqa kassaniki, tegilmaydi va `skippedLines` sifatida hisobotda
+va auditda ko'rinadi. Test: `cash-ledger-repair.test.ts` **14 test** (yangi: bir hujjat / bir necha kassa), tsc va
+eslint toza. Tuzatish faqat shu modulga tegdi (undan boshqa hech qayerdan import qilinmaydi).
+
+**Ezo** o'zgarmagan va auditga mos: bog'lanish 1100, noto'g'ri jurnal satri 0, 1010 = 55 000, 1100 = 35 200.
+
+**⚠️ OCHIQ XAVF — EGASI HARAKATI KERAK.** Production konteynerida hozir CLI'ning **xatoli** versiyasi turibdi
+(`993b9e3`), tuzatilgan versiya (`26a5a49`) deploy qilinmadi: `railway up` auto-rejim klassifikatori tomonidan rad
+etildi ("Production Deploy"), `git push` esa "Out-of-Place Publication" bilan. **Tuzatilgan build deploy
+qilinmaguncha production'da `--apply` ishlatilmasin** — u 6 160 so'mni noto'g'ri ko'chiradi.
+
+Keyingi qadam (egasi ruxsati bilan): `26a5a49` ni push va deploy → yangi dry run (kutilgan: 5 satr / 329 300,
+skipped 2) → egasi tasdiqlagach `--apply` → PHASE 7–8 tekshiruvlari.
