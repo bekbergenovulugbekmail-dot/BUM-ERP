@@ -5718,5 +5718,24 @@ Shu sababli SPA so'rovlari bir manbada qoladi va CORS umuman ishga tushmaydi.
 Tekshiruv: konteynerda `printenv WEB_ORIGIN` = `https://app.bum-erp.uz`; `/api/auth/me` 401 (`app` va `www` da);
 `app.bum-erp.uz`, `www.bum-erp.uz`, `bum-web-production.up.railway.app` — 200.
 
-Yondosh kuzatuv: `/api/delivery/ws` dagi Origin tekshiruvi kutilganidek ishlamayotgani aniqlandi (sabab
-aniqlanmagan, tuzatilmagan) — egasiga alohida aytildi, keyingi sessiyada ko'rib chiqiladi.
+Yondosh kuzatuv tekshirildi va yopildi — pastga qarang.
+
+### WS Origin tekshiruvi hook tartibi (2026-09-29)
+
+Oldingi sessiyada `/api/delivery/ws` da Origin tekshiruvi ishlamayotgandek ko'ringan edi. Sabab aniqlandi:
+`deliveryRoutes` `requireAuth` ni PLAGIN darajasida `preHandler` qilib qo'shadi, Fastify'da esa plagin hooki
+marshrutnikidan oldin ishlaydi — Origin tekshiruvi marshrut `preHandler` ida turgani uchun sessiyasiz so'rov
+Origin ko'rilmasdan 401 olardi.
+
+**Bu zaiflik EMAS edi.** Sessiya bilan kelgan cross-site handshake `requireAuth` dan o'tib, keyin Origin
+tekshiruviga tushardi va 403 olardi — himoya ishlab turgan, mavjud test ham buni qoplagan. Oldingi
+"tekshiruv ishlamayapti" degan xulosam sessiyasiz so'rov natijasini noto'g'ri talqin qilishdan kelib chiqqan.
+
+Shunga qaramay tekshiruv zanjirning eng boshida turgani ma'qul: u marshrutning `onRequest` iga ko'chirildi, endi
+begona manba sessiya holatidan qat'i nazar rad etiladi va javob foydalanuvchi kirgan-kirmaganini oshkor qilmaydi.
+`originAllowed()` va `WEB_ORIGIN` arxitekturasi o'zgarmadi.
+
+Test: handshake lifecycle'i orqali yangi test (begona/buzuq manba sessiyali va sessiyasiz → 403; Origin yo'q,
+ruxsat etilgan manba, bir host → o'tadi; ruxsat etilgan manba + sessiya → ulanadi). Tuzatishsiz test aynan
+401 bilan yiqiladi — tekshirildi. Regressiya: 10 fayl / 92 test, tsc va eslint toza. Commit `3dc51a7`.
+Production'ga tegilmadi — deploy qilinmagan.
