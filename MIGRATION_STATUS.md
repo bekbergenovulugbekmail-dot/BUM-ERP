@@ -5739,3 +5739,33 @@ Test: handshake lifecycle'i orqali yangi test (begona/buzuq manba sessiyali va s
 ruxsat etilgan manba, bir host → o'tadi; ruxsat etilgan manba + sessiya → ulanadi). Tuzatishsiz test aynan
 401 bilan yiqiladi — tekshirildi. Regressiya: 10 fayl / 92 test, tsc va eslint toza. Commit `3dc51a7`.
 Production'ga tegilmadi — deploy qilinmagan.
+
+### WS Origin tuzatishi production'ga chiqarildi (2026-09-29)
+
+Deployment `382300fb-af1a-457c-b5ce-edc75656c8de`, faqat `bum-api` (web tegilmadi — bundle xeshi
+`index-CPylpYLu.js` o'zgarmagan). Kod `4482859`. Yangi build ekani konteynerdagi
+`dist/modules/delivery/routes.js` da tasdiqlandi: `onRequest` ichida `originAllowed(...)` tekshiruvi turibdi.
+
+Production smoke-test (`/api/delivery/ws`):
+
+| Origin | natija |
+|---|---|
+| `https://app.bum-erp.uz` (ruxsat etilgan) | 401 — tekshiruvdan o'tdi, autentifikatsiya rad etdi |
+| `https://evil.example.com` (begona) | **403 "Ruxsat etilmagan manba"** (ilgari 401 edi) |
+| `not a url` (buzuq) | **403** |
+| Origin yo'q | 401 — siyosat saqlandi |
+
+`www.bum-erp.uz` da ham begona Origin → 403. Autentifikatsiyalangan ruxsat etilgan Origin bilan ulanish
+production'da SINALMADI: buning uchun haqiqiy sessiya kerak, sessiya yaratish esa bazaga yozuv bo'lardi —
+bu holat lokal testda (`delivery-realtime.test.ts`) qoplangan.
+
+REST regressiya: `/api/auth/me`, `/api/delivery/tasks`, `/api/delivery/agents`, `/api/delivery/dispatch`,
+`/api/finance/cash-accounts` — hammasi 401 (marshrutlar joyida va himoyalangan); sayt 200.
+
+Migratsiya: yangi migratsiya qo'llanmadi (jami 100 ta, oxirgisi 2026-09-28). `PUBLIC_API_URL` va `WEB_ORIGIN`
+o'zgarmadi (ikkalasi `https://app.bum-erp.uz`). Deploy hech qanday moliyaviy yozuv yaratmadi.
+
+Bugun bazaga tushgan yozuvlar: `JE-2026-00048` — egasi tasdiqlagan kassa tuzatishi (04:29Z); `JE-2026-00049/00050`
+— **egasining o'z ishi** (04:46Z, K03-Q000002 qaytarishi, naqd 17 200 chiqim). Shu sababli Bonnu 1010
+271 940 → **254 740**. Invariant saqlanmoqda: naqd kassalar 234 580 + USD kassa 20 160 = 254 740. Muhim dalil —
+bu qaytarish endi 1010 ga tushdi (tuzatishdan oldin 1020 ga tushardi), ya'ni bog'lanish tuzatishi jonli ishlayapti.
