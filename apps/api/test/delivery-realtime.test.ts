@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { DeliveryRealtimeMessage } from "@bum/shared";
 import { closeDb, db } from "../src/db/client.js";
+import { env } from "../src/env.js";
 import { withTransaction } from "../src/db/transaction.js";
 import { revokeUserSessions } from "../src/modules/auth/session.js";
 import { publishDeliveryEvent } from "../src/modules/delivery/realtime-bus.js";
@@ -143,6 +144,34 @@ describe("dostavka real-time (WebSocket)", () => {
     const agent = await deliveryAgent(app, company);
     const agentSocket = await connect(agent.cookie);
     expect(agentSocket.ready).toEqual({ type: "ready", manager: false, agent: true });
+  });
+
+  /**
+   * Origin tekshiruvi handshake zanjirining ENG BOSHIDA (`onRequest`) turishi kerak. Ilgari u marshrutning
+   * `preHandler` ida edi, `deliveryRoutes` esa `requireAuth` ni PLAGIN darajasida qo'shadi — Fastify'da plagin hooki
+   * oldin ishlaydi, shuning uchun sessiyasiz begona so'rov Origin umuman ko'rilmasdan 401 olardi.
+   */
+  it("Origin tekshiruvi autentifikatsiyadan OLDIN: begona va buzuq manba sessiyadan qat'i nazar 403", async () => {
+    const ws = (headers: Record<string, string>) => app.injectWS("/api/delivery/ws", { headers });
+
+    // Sessiyasiz ham Origin birinchi rad etiladi — javob kirgan/kirmaganini oshkor qilmaydi
+    await expect(ws({ origin: "https://evil.example" })).rejects.toThrow(/403/);
+    await expect(ws({ origin: "not a url" })).rejects.toThrow(/403/);
+    // Sessiya bilan ham xuddi shunday
+    await expect(ws({ cookie: company.ownerCookie, origin: "https://evil.example" })).rejects.toThrow(/403/);
+    await expect(ws({ cookie: company.ownerCookie, origin: "not a url" })).rejects.toThrow(/403/);
+
+    // Origin yo'q (brauzer bo'lmagan mijoz) — siyosat bo'yicha o'tadi, keyin autentifikatsiya ishlaydi
+    await expect(ws({})).rejects.toThrow(/401/);
+    // Ruxsat etilgan manba, lekin sessiyasiz — Origin o'tadi, autentifikatsiya rad etadi
+    await expect(ws({ origin: env.WEB_ORIGIN })).rejects.toThrow(/401/);
+    // Bir host (proksi orqasidagi bir domen) — o'tadi, keyin autentifikatsiya
+    await expect(ws({ host: "kassa.example", origin: "https://kassa.example" })).rejects.toThrow(/401/);
+
+    // Ruxsat etilgan manba + sessiya — ulanish ochiladi
+    const allowed = await app.injectWS("/api/delivery/ws", { headers: { cookie: company.ownerCookie, origin: env.WEB_ORIGIN } });
+    sockets.push(allowed);
+    expect(allowed.readyState).toBe(allowed.OPEN);
   });
 
   it("hodisalar: boshqaruvchi — kompaniya yetkazmalari, agent — faqat o'zinikiga; boshqa kompaniya hech narsa olmaydi", async () => {

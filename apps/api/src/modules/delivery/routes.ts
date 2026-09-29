@@ -988,9 +988,18 @@ export async function deliveryRoutes(app: FastifyInstance): Promise<void> {
     "/ws",
     {
       websocket: true,
-      // Ulanishdan oldin (HTTP javob bilan rad etiladi): Origin, sessiya, kompaniya va ruxsat
-      preHandler: async (req) => {
+      /**
+       * Origin — ENG BIRINCHI bosqichda. `deliveryRoutes` plagin darajasida `requireAuth` ni `preHandler` sifatida
+       * qo'shadi (yuqoriga qarang), Fastify'da esa plagin hooki marshrutnikidan OLDIN ishlaydi — tekshiruv shu yerda
+       * qolganda begona saytdan kelgan handshake avval 401 olardi va Origin umuman ko'rilmasdi. `onRequest` butun
+       * `preHandler` bosqichidan oldin bajariladi, shuning uchun endi boshqa manba sessiya holatidan qat'i nazar rad
+       * etiladi va javob foydalanuvchi kirgan-kirmaganini oshkor qilmaydi.
+       */
+      onRequest: async (req) => {
         if (!originAllowed(req.headers.origin, req.headers.host)) throw forbidden("Ruxsat etilmagan manba");
+      },
+      // Ulanishdan oldin (HTTP javob bilan rad etiladi): sessiya, kompaniya va ruxsat
+      preHandler: async (req) => {
         const token = req.cookies[SESSION_COOKIE] ?? "";
         // Tab biznesi — WebSocket sarlavha yubora olmaydi, shuning uchun so'rov parametrida
         const companyKey = companyKeyFrom((req.query as Record<string, unknown> | undefined)?.[COMPANY_CONTEXT_QUERY]);
