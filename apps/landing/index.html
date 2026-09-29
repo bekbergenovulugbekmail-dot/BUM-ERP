@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="uz">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BUM ERP — savdo, ombor, moliya va boshqaruv tizimi</title>
+    <meta
+      name="description"
+      content="BUM ERP — ko'p tilli, ko'p kompaniyali ERP tizimi: mahsulotlar, ombor, savdo, POS kassa, xarid, ishlab chiqarish, CRM, distribyutsiya, dostavka, moliya, xodimlar va hisobotlar."
+    />
+    <link rel="icon" type="image/png" href="assets/favicon.png" />
+    <meta property="og:title" content="BUM ERP" />
+    <meta property="og:description" content="Ko'p tilli, ko'p kompaniyali BUM ERP tizimi" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://bum-erp.uz" />
+    <meta property="og:image" content="https://bum-erp.uz/assets/bum-logo.png" />
+    <meta name="theme-color" content="#1e1b4b" />
+    <style>
+      :root {
+        --brand: #1e1b4b;
+        --brand-soft: #312e81;
+        --accent: #6366f1;
+        --bg: #ffffff;
+        --surface: #f8fafc;
+        --border: #e2e8f0;
+        --text: #0f172a;
+        --muted: #64748b;
+        --radius: 14px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0b1020;
+          --surface: #121a2f;
+          --border: #24304d;
+          --text: #e8ecf5;
+          --muted: #9aa6bf;
+          --brand: #c7d2fe;
+          --brand-soft: #a5b4fc;
+        }
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: inherit; }
+      .wrap { width: min(1120px, 100% - 32px); margin-inline: auto; }
+
+      /* ── Sarlavha ── */
+      header {
+        position: sticky; top: 0; z-index: 10;
+        background: color-mix(in srgb, var(--bg) 88%, transparent);
+        backdrop-filter: blur(10px);
+        border-bottom: 1px solid var(--border);
+      }
+      .bar { display: flex; align-items: center; gap: 16px; padding: 12px 0; }
+      .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -0.02em; text-decoration: none; }
+      .logo img { height: 34px; width: auto; display: block; }
+      nav { margin-left: auto; display: flex; align-items: center; gap: 22px; }
+      nav a { text-decoration: none; color: var(--muted); font-size: 0.95rem; }
+      nav a:hover { color: var(--text); }
+      .btn {
+        display: inline-block; padding: 10px 18px; border-radius: 10px;
+        background: var(--accent); color: #fff; text-decoration: none; font-weight: 600;
+        border: 1px solid transparent; white-space: nowrap;
+      }
+      .btn:hover { background: #4f46e5; }
+      .btn.ghost { background: transparent; color: var(--text); border-color: var(--border); }
+      .btn.ghost:hover { background: var(--surface); }
+      @media (max-width: 760px) { nav .hide-sm { display: none; } }
+
+      /* ── Hero ── */
+      .hero { padding: 72px 0 56px; }
+      .hero h1 { font-size: clamp(2rem, 5vw, 3.1rem); line-height: 1.15; letter-spacing: -0.03em; margin: 0 0 16px; }
+      .hero p.lead { font-size: clamp(1.02rem, 2.2vw, 1.2rem); color: var(--muted); max-width: 62ch; margin: 0 0 28px; }
+      .cta-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+      .note { color: var(--muted); font-size: 0.9rem; margin-top: 14px; }
+      code {
+        background: var(--surface); border: 1px solid var(--border);
+        padding: 2px 7px; border-radius: 6px; font-size: 0.9em;
+        font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      }
+
+      /* ── Bo'limlar ── */
+      section { padding: 56px 0; border-top: 1px solid var(--border); }
+      h2 { font-size: clamp(1.4rem, 3vw, 1.9rem); letter-spacing: -0.02em; margin: 0 0 8px; }
+      .sub { color: var(--muted); margin: 0 0 28px; max-width: 64ch; }
+
+      .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+      .card {
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 18px;
+      }
+      .card h3 { margin: 0 0 6px; font-size: 1.02rem; }
+      .card p { margin: 0; color: var(--muted); font-size: 0.93rem; }
+
+      .split { display: grid; gap: 28px; grid-template-columns: 1.1fr 0.9fr; align-items: center; }
+      @media (max-width: 880px) { .split { grid-template-columns: 1fr; } }
+      .panel {
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 22px;
+      }
+      ul.clean { margin: 0; padding-left: 20px; color: var(--muted); }
+      ul.clean li { margin-bottom: 8px; }
+
+      footer { border-top: 1px solid var(--border); padding: 28px 0 40px; color: var(--muted); font-size: 0.92rem; }
+      .foot { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="wrap bar">
+        <a class="logo" href="#top"><img src="assets/bum-logo.png" alt="BUM ERP" /></a>
+        <nav>
+          <a class="hide-sm" href="#modullar">Modullar</a>
+          <a class="hide-sm" href="#kassa">Kassa</a>
+          <a class="hide-sm" href="#aloqa">Aloqa</a>
+          <a class="btn" href="https://app.bum-erp.uz">Tizimga kirish</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="top">
+      <div class="wrap hero">
+        <h1>Biznesingizni bitta tizimda boshqaring</h1>
+        <p class="lead">
+          BUM ERP — ko'p tilli, ko'p kompaniyali boshqaruv tizimi: mahsulotlar va ombor, savdo va POS kassa, xarid,
+          ishlab chiqarish, CRM, distribyutsiya, dostavka, moliya, xodimlar va hisobotlar.
+        </p>
+        <div class="cta-row">
+          <a class="btn" href="https://app.bum-erp.uz">Tizimga kirish</a>
+          <a class="btn ghost" href="#modullar">Modullar bilan tanishish</a>
+        </div>
+        <p class="note">Tizim manzili — <code>app.bum-erp.uz</code>. Har bir biznes o'z manzilidan kiradi:
+          <code>app.bum-erp.uz/&lt;biznes&gt;</code>.</p>
+      </div>
+
+      <section id="modullar">
+        <div class="wrap">
+          <h2>Modullar</h2>
+          <p class="sub">
+            Har bir modul alohida yoqiladi va o'chiriladi. Modul o'chirilganda ma'lumot o'chirilmaydi — faqat unga
+            kirish yopiladi, qayta yoqilganda hammasi avvalgidek qoladi.
+          </p>
+          <div class="grid">
+            <div class="card"><h3>Mahsulotlar</h3><p>Tovar katalogi, kategoriyalar, narxlar va o'lchov birliklari</p></div>
+            <div class="card"><h3>Ombor</h3><p>Zaxira, kirim-chiqim, ko'chirish va inventarizatsiya</p></div>
+            <div class="card"><h3>Savdo</h3><p>Buyurtmalar, mijoz to'lovlari, qaytarishlar va keshbek</p></div>
+            <div class="card"><h3>POS kassa</h3><p>Web kassa, smenalar va BUM POS KASSA desktop qurilmalari</p></div>
+            <div class="card"><h3>Xarid</h3><p>Ta'minotchilar, xarid buyurtmalari va ularga to'lovlar</p></div>
+            <div class="card"><h3>Ishlab chiqarish</h3><p>Retseptlar (BOM) va ishlab chiqarish buyurtmalari</p></div>
+            <div class="card"><h3>CRM</h3><p>Lidlar, mijozlar bilan ishlash va faoliyatlar</p></div>
+            <div class="card"><h3>Distribyutsiya</h3><p>Savdo agentlari, tashriflar va marshrutlar</p></div>
+            <div class="card"><h3>Dostavka</h3><p>Yetkazmalar, dostavshiklar, xarita va to'lov yig'ish</p></div>
+            <div class="card"><h3>Moliya</h3><p>Kassa va bank hisoblari, terminallar, xarajatlar, jurnal</p></div>
+            <div class="card"><h3>Xodimlar (HR)</h3><p>Xodimlar kartochkasi, davomat, ta'til va maosh</p></div>
+            <div class="card"><h3>Hisobot va tahlil</h3><p>Hisobotlar, analitika va AI tahlil</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="kassa">
+        <div class="wrap split">
+          <div>
+            <h2>BUM POS KASSA — Windows uchun kassa</h2>
+            <p class="sub">
+              Do'kon kassasi uchun alohida Windows dasturi. Internet uzilganda ham sotuv davom etadi: chek qurilmada
+              saqlanadi va aloqa tiklanganda serverga sinxronlanadi.
+            </p>
+            <ul class="clean">
+              <li>Oflayn rejim — sotuv internetsiz ham yozib boriladi</li>
+              <li>Smenalar, to'lov usullari va chek chiqarish</li>
+              <li>Qurilma admin panelidan ro'yxatdan o'tkaziladi</li>
+              <li>Yangilanish chiqqanda dastur o'zi xabar beradi</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <p style="margin:0 0 10px"><strong>O'rnatish</strong></p>
+            <p style="margin:0;color:var(--muted);font-size:0.93rem">
+              Dasturni yuklab olish va kassa qurilmasini ro'yxatdan o'tkazish tizimning admin panelida —
+              <em>Sozlamalar → Kassa qurilmalari</em> bo'limida. Buning uchun «Kassa qurilmalarini boshqarish»
+              ruxsatiga ega login kerak.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="imkoniyat">
+        <div class="wrap">
+          <h2>Tizim haqida</h2>
+          <div class="grid">
+            <div class="card"><h3>Ko'p kompaniyali</h3><p>Bir nechta biznes bitta tizimda yuritiladi, har birining ma'lumoti alohida.</p></div>
+            <div class="card"><h3>Ko'p tilli</h3><p>Interfeys bir nechta tilda ishlaydi.</p></div>
+            <div class="card"><h3>Ruxsatlar</h3><p>Har bir xodimga roli bo'yicha kerakli bo'limlar ochiladi.</p></div>
+            <div class="card"><h3>Brauzerda ishlaydi</h3><p>O'rnatish shart emas — kassa dasturidan tashqari hammasi brauzerda.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="aloqa">
+        <div class="wrap">
+          <h2>Aloqa</h2>
+          <p class="sub">Savol yoki qo'llab-quvvatlash uchun yozing.</p>
+          <p style="margin:0">
+            <a class="btn" href="mailto:support@bum-erp.uz">support@bum-erp.uz</a>
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap foot">
+        <span>© <span id="yil">2026</span> BUM ERP</span>
+        <span><a href="https://app.bum-erp.uz">app.bum-erp.uz</a></span>
+      </div>
+    </footer>
+    <script>
+      document.getElementById("yil").textContent = String(new Date().getFullYear());
+    </script>
+  </body>
+</html>

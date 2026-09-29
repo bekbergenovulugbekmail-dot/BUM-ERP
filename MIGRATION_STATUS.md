@@ -5862,3 +5862,55 @@ Eslatma: hozir productionda 0.3.0 e'lon qilingan. 0.3.0 ichida yangilanish mexan
 ichidan tekshirib bo'lmadi (NSIS paketni siqadi, matn qidiruvi ishonchsiz). Yangilanish kodi `9ce088c`
 (2026-09-12 09:19Z) da qo'shilgan, 0.3.0 esa 15:14Z da yuklangan — ya'ni ehtimol bor, lekin ISBOTLANMAGAN.
 Agar eski kassalar o'zi yangilanmasa, ular `.exe` ni qo'lda o'rnatishi kerak bo'ladi.
+
+### Ommaviy sayt va kassa 0.4.8 (2026-09-29, egasi qarori: apex Railway'ga KO'CHIRILMAYDI)
+
+**APEX — `bum-erp.uz`.** Egasi qaroriga ko'ra apex mavjud hostingda (webspace.uz, `95.46.96.77`) qoladi va
+u yerda ommaviy sayt turadi. Sayt tayyorlandi: `apps/landing/` — build bosqichisiz statik paket
+(`index.html` + `assets/`). Unda ERP kirish formasi, tenant login yoki boshqaruv paneli **YO'Q**; yagona
+o'tish nuqtasi — `app.bum-erp.uz` ga havola. Kontent faqat repodan: modul nomlari va tavsiflari
+`packages/shared/src/modules.ts` (MODULE_REGISTRY, 12 modul), aloqa `support@bum-erp.uz`
+(`src/components/erp-layout.tsx:603`), brend `public/brand/`. Narx, mijozlar soni, integratsiya, kafolat
+kabi da'volar qo'shilmadi.
+
+**DNS o'zgarishi: 0.** Apex allaqachon `95.46.96.77` ga qaraydi — landing shu serverga yuklansa yetadi.
+`www` va `app` CNAME'lari tegilmadi.
+
+**TLS — egasi harakati kerak.** Apex hozir `CN=dns1.webspace.uz` sertifikatini beradi (Let's Encrypt,
+11.09.2026–10.12.2026), ya'ni `bum-erp.uz` uchun sertifikat CHIQARILMAGAN — brauzer
+`SEC_E_WRONG_PRINCIPAL` xatosini beradi. Provayder LE'dan foydalanishi ko'rinib turibdi, shuning uchun
+webspace.uz panelidan `bum-erp.uz` uchun sertifikat yoqilishi va HTTP→HTTPS yo'naltirish sozlanishi kerak
+(hozir `http://bum-erp.uz` 200 qaytaradi, HTTPS'ga o'tkazmaydi). Repodan boshqarilmaydi.
+
+**WWW — ATAYLAB o'zgartirilmadi.** `www.bum-erp.uz` ERP bo'lib qoladi, apex'ga redirect YOQILMADI.
+Sabab kod bilan tasdiqlangan: admin paneldagi ko'rsatma
+(`src/pages/settings/_components/pos-devices-section.tsx:805`) kassa qurilmasini ro'yxatdan o'tkazishda server
+manzili sifatida `https://www.bum-erp.uz` ni aytadi — qurilmalarda o'sha manzil saqlangan bo'lishi mumkin va
+redirect ularni serverdan uzardi. Butun repo bo'ylab qidiruv: `www` ga boshqa funksional bog'liqlik yo'q
+(desktop `api-client.ts:53` va `ru-dictionary.ts:892-893` — faqat xato matnidagi misol; `docs/audit/*.js` —
+audit vositasi ro'yxati).
+
+**APP — `app.bum-erp.uz`** ERP bo'lib qoladi, tegilmadi.
+
+**DESKTOP KASSA 0.4.8** — yig'ilgan, **E'LON QILINMAGAN**:
+
+| | |
+|---|---|
+| O'rnatuvchi | `BUM-POS-KASSA-Setup-0.4.8.exe` |
+| Hajm | 111 924 526 bayt · x64 · NSIS |
+| SHA-256 | `b639af57e970c81efddbede3c9d3b1e1f9f71b617574b51371546bee6049ae5d` |
+| Production'dagi reliz | hamon **0.3.0** (o'zgarmadi) |
+
+Smoke-test **bajarildi va izolyatsiyalangan**: paketlangan ilova `--user-data-dir` bilan vaqtinchalik katalogga
+ishga tushirildi (`KASSA_USER_DATA` yaramaydi — u `!app.isPackaged` sharti bilan cheklangan). Natija: oyna
+ochildi (sarlavha «BUM POS KASSA»), jarayon versiyasi **0.4.8.0**, fatal xato yo'q, vaqtinchalik katalogda yangi
+bo'sh `bum-kassa.sqlite` yaratildi. **Jonli kassa ma'lumoti daxlsiz**: `%APPDATA%\BUM POS KASSA\bum-kassa.sqlite`
+hajmi, o'zgarish vaqti va SHA-256 xeshi sinovdan oldin ham, keyin ham bir xil. Vaqtinchalik katalog o'chirildi.
+
+Tekshirilmagani: kirish/qurilma ro'yxatdan o'tkazish oqimi UI orqali sinalmadi (haqiqiy login talab qiladi).
+Kassa foydalanadigan `/api/pos-device/app-update` tashqaridan 401 qaytaradi (marshrut joyida);
+`/setup/options` — POST marshrut, shuning uchun GET'da 404 normal.
+
+**Qolgan qo'lda ishlar:** (1) `apps/landing/` ni webspace hujjatlar ildiziga yuklash; (2) webspace panelida
+`bum-erp.uz` uchun TLS sertifikati va HTTP→HTTPS; (3) `pnpm --filter @bum/desktop release:publish` (platforma
+admin paroli muhit o'zgaruvchilarida — kodga, .env'ga yoki gitga yozilmaydi).
