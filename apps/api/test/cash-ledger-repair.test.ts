@@ -5,14 +5,16 @@
  * jurnalda bankka tushgan) va naqd kassa → "1100 Debitorlar" (tarixiy satr yo'q, faqat kelajakdagi yozuvlar xavfi).
  * Shu testlar tuzatish kodini o'sha ikki holat bo'yicha, production'ga tegmasdan tekshiradi.
  */
+import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../src/db/client.js";
-import { accounts, cashAccounts, journalEntries, journalLines } from "../src/db/schema/finance.js";
+import { accounts, cashAccounts, cashTransactions, journalEntries, journalLines } from "../src/db/schema/finance.js";
 import { auditLogs } from "../src/db/schema/platform.js";
 import { withTransaction } from "../src/db/transaction.js";
 import { CASH_LEDGER_RECLASS, repairCashLedgerMapping } from "../src/modules/finance/cash-ledger-repair.service.js";
+import { postJournalEntry } from "../src/modules/finance/journal.service.js";
 import { buildServer } from "../src/server.js";
 import { createCompany, resetDatabase, signedIn } from "./helpers.js";
 
@@ -21,6 +23,7 @@ type Company = Awaited<ReturnType<typeof createCompany>>;
 let app: FastifyInstance;
 let company: Company;
 let mainCash: string;
+let mainBank: string;
 let adminCookie: string;
 
 beforeAll(async () => {
@@ -40,6 +43,7 @@ beforeEach(async () => {
   company = await createCompany(app, admin.cookie, { name: "Tuzatish kompaniyasi" });
   const rows = await db.select().from(cashAccounts).where(eq(cashAccounts.companyId, company.companyId));
   mainCash = rows.find((r) => r.type === "cash")!.id;
+  mainBank = rows.find((r) => r.type === "bank")!.id;
 });
 
 const api = (cookie: string, method: "GET" | "POST" | "PATCH", url: string, payload?: object) =>
@@ -356,6 +360,61 @@ describe("Kassa ↔ hisob bog'lanishini tuzatish", () => {
       const res = await api(company.ownerCookie, "POST", url, { cashAccountId: mainCash });
       expect(res.statusCode, `${url} ochiq qolgan`).toBe(404);
     }
+  });
+
+  it("Bitta hujjat bir nechta kassadan pul harakatlantirsa — faqat shu kassaning satri ko'chiriladi", async () => {
+    // Production shakli: qaytarish hujjati K03-Q000001 naqd kassadan 14 000, ikkita bank kassasidan 3 000 va 3 160
+    // qaytargan; uchala jurnal satri bitta `reference_id` ga ega va uchalasi ham 1020 da. Faqat havola bo'yicha
+    // solishtirilganda bank satrlari ham naqd kassaga tegishli deb hisoblanardi.
+    const bank1020 = await ledger("1020");
+    const income = await ledger("4100");
+    await db.update(cashAccounts).set({ ledgerAccountId: bank1020.id }).where(eq(cashAccounts.id, mainCash));
+
+    const documentId = randomUUID();
+    const txDate = "2026-09-20";
+    await withTransaction(async (tx) => {
+      const movements: [string, string, string][] = [
+        [mainCash, "20000", "kassa ulushi"],
+        [mainBank, "3000", "bank ulushi 1"],
+        [mainBank, "3160", "bank ulushi 2"],
+      ];
+      for (const [accountId, amount, note] of movements) {
+        await tx.insert(cashTransactions).values({
+          companyId: company.companyId,
+          cashAccountId: accountId,
+          type: "in",
+          amount,
+          currency: "UZS",
+          txDate,
+          description: note,
+          referenceType: "sinov_hujjat",
+          referenceId: documentId,
+          balanceAfter: amount,
+        });
+      }
+      // Uchta alohida yozuv, bitta `reference_id`, har xil `reference_type` — yagona indeks shunga yo'l qo'yadi
+      for (const [i, amount] of ["20000", "3000", "3160"].entries()) {
+        await postJournalEntry(tx, company.companyId, null, {
+          entryDate: txDate,
+          description: `Sinov hujjati ${i}`,
+          referenceType: `sinov_hujjat_${i}`,
+          referenceId: documentId,
+          lines: [
+            { accountId: bank1020.id, debit: amount },
+            { accountId: income.id, credit: amount },
+          ],
+        });
+      }
+    });
+    expect((await ledger("1020")).balance).toBe("26160.00");
+
+    const result = await repair();
+    // Faqat naqd kassaning 20 000 i ko'chadi; bank kassasining 3 000 va 3 160 i tegilmaydi
+    expect(result.mispostedLines).toBe(1);
+    expect(result.skippedLines).toBe(2);
+    expect(result.amount).toBe("20000.00");
+    expect((await ledger("1010")).balance).toBe("20000.00");
+    expect((await ledger("1020")).balance).toBe("6160.00");
   });
 
   it("Tuzatilgandan keyin bog'lanish yana buzilsa — jimgina 'tuzatilgan' demaydi, odam aralashuvini so'raydi", async () => {

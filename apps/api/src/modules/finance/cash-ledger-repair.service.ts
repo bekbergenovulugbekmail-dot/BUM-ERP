@@ -25,6 +25,7 @@ import { accounts, cashAccounts, cashTransactions, journalEntries, journalLines 
 import type { Tx } from "../../db/transaction.js";
 import { writeAuditLog } from "../../shared/audit.js";
 import { fromMinor, toMinor } from "../../shared/decimal.js";
+import { companyCurrency } from "./accounts.service.js";
 import { assertLedgerAccount, ledgerAccountFor, ledgerSubtypeMatches, todayIso, type CashAccountType } from "./cash.service.js";
 import { assertPeriodOpen, postJournalEntry } from "./journal.service.js";
 
@@ -39,6 +40,11 @@ export type CashLedgerRepairResult = {
   newLedger: { id: string; code: string; name: string; subtype: string | null } | null;
   /** Noto'g'ri hisobda qolgan, shu kassadan kelgan satrlar. */
   mispostedLines: number;
+  /**
+   * Noto'g'ri hisobdagi, shu kassaning hujjatlariga havola qiladigan, LEKIN unga tegishli bo'lmagan satrlar
+   * (bitta hujjat bir nechta kassadan pul harakatlantirgan holat). Tuzatish ularga tegmaydi.
+   */
+  skippedLines: number;
   /** Ko'chirilgan summa (doim musbat; 0 bo'lsa yozuv yaratilmaydi). */
   amount: string;
   correction: { entryId: string; number: string; debitAccountId: string; creditAccountId: string } | null;
@@ -66,17 +72,40 @@ async function loadAccount(tx: Tx, companyId: string, accountId: string): Promis
  *  - qo'lda kassa kirim/chiqimi — jurnal `reference_type` = `cash_transaction`, `reference_id` = harakatning O'Z id'si.
  *
  * Faqat noto'g'ri hisobdagi satr olinadi, qarshi tomoni (masalan 1100 debitor) tegilmaydi.
+ *
+ * MUHIM: `reference_id` ning o'zi YETARLI EMAS — bitta hujjat bir nechta kassadan pul harakatlantirishi mumkin.
+ * Production'da qaytarish hujjati K03-Q000001 naqd kassadan 14 000, ikkita BANK kassasidan esa 3 000 va 3 160
+ * qaytargan; uchala jurnal satri bitta `reference_id` ga ega. Faqat havola bo'yicha solishtirilganda bank
+ * satrlari ham naqd kassaga tegishli deb hisoblanib, tuzatish 6 160 so'mni noto'g'ri ko'chirardi.
+ * Shuning uchun har bir kassa harakati jurnal satri bilan JUFTLANADI: havola + tomon (kirim → debet,
+ * chiqim → kredit) + summa. Da'vosiz qolgan satrlar boshqa kassaniki — ular TEGILMAYDI va alohida qaytariladi.
  */
-async function findMispostedLines(tx: Tx, companyId: string, cashAccountId: string, ledgerAccountId: string) {
-  const movements = await tx
-    .select({ id: cashTransactions.id, referenceId: cashTransactions.referenceId })
-    .from(cashTransactions)
-    .where(eq(cashTransactions.cashAccountId, cashAccountId));
-  const keys = [...new Set(movements.flatMap((m) => (m.referenceId ? [m.id, m.referenceId] : [m.id])))];
-  if (!keys.length) return [];
+type MispostedLine = { id: string; entryId: string; debit: string; credit: string };
 
-  return tx
-    .select({ id: journalLines.id, entryId: journalLines.entryId, debit: journalLines.debit, credit: journalLines.credit })
+async function findMispostedLines(
+  tx: Tx,
+  companyId: string,
+  cashAccountId: string,
+  ledgerAccountId: string,
+  /** Kassa valyutasi kompaniya asosiy valyutasi bilan bir xilmi — jurnal doim asosiy valyutada yoziladi. */
+  matchByAmount: boolean,
+): Promise<{ lines: MispostedLine[]; skipped: MispostedLine[] }> {
+  const movements = await tx
+    .select({ id: cashTransactions.id, referenceId: cashTransactions.referenceId, type: cashTransactions.type, amount: cashTransactions.amount })
+    .from(cashTransactions)
+    .where(eq(cashTransactions.cashAccountId, cashAccountId))
+    .orderBy(cashTransactions.txDate, cashTransactions.createdAt);
+  const keys = [...new Set(movements.flatMap((m) => (m.referenceId ? [m.id, m.referenceId] : [m.id])))];
+  if (!keys.length) return { lines: [], skipped: [] };
+
+  const rows = await tx
+    .select({
+      id: journalLines.id,
+      entryId: journalLines.entryId,
+      debit: journalLines.debit,
+      credit: journalLines.credit,
+      referenceId: journalEntries.referenceId,
+    })
     .from(journalLines)
     .innerJoin(journalEntries, eq(journalEntries.id, journalLines.entryId))
     .where(
@@ -88,6 +117,38 @@ async function findMispostedLines(tx: Tx, companyId: string, cashAccountId: stri
         inArray(journalEntries.referenceId, keys),
       ),
     );
+
+  const byReference = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const list = byReference.get(row.referenceId!) ?? [];
+    list.push(row);
+    byReference.set(row.referenceId!, list);
+  }
+
+  const used = new Set<string>();
+  const lines: MispostedLine[] = [];
+  for (const movement of movements) {
+    const wantsDebit = movement.type === "in";
+    const candidates = [movement.id, movement.referenceId]
+      .filter((key): key is string => Boolean(key))
+      .flatMap((key) => byReference.get(key) ?? [])
+      .filter((row) => !used.has(row.id) && toMinor(wantsDebit ? row.debit : row.credit) > 0n);
+    if (!candidates.length) continue;
+
+    // Summa bo'yicha aniq juftlik; valyutali kassada jurnal summasi boshqa (kurs bilan) — u holda faqat
+    // shubhasiz holat (yagona nomzod) olinadi, aks holda satr tegilmay qoladi va hisobotda ko'rinadi
+    const want = toMinor(movement.amount);
+    const picked = matchByAmount
+      ? candidates.find((row) => toMinor(wantsDebit ? row.debit : row.credit) === want)
+      : candidates.length === 1
+        ? candidates[0]
+        : undefined;
+    if (!picked) continue;
+    used.add(picked.id);
+    lines.push(picked);
+  }
+
+  return { lines, skipped: rows.filter((row) => !used.has(row.id)) };
 }
 
 /**
@@ -157,6 +218,7 @@ export async function repairCashLedgerMapping(
       oldLedger: null,
       newLedger: current,
       mispostedLines: 0,
+      skippedLines: 0,
       amount: "0",
       correction: null,
     };
@@ -172,6 +234,7 @@ export async function repairCashLedgerMapping(
       oldLedger: old,
       newLedger: old,
       mispostedLines: 0,
+      skippedLines: 0,
       amount: "0",
       correction: null,
     };
@@ -181,7 +244,8 @@ export async function repairCashLedgerMapping(
   if (targetLedgerAccountId) await assertLedgerAccount(tx, companyId, targetLedgerAccountId, cash.type);
 
   // 4. Noto'g'ri hisobda qolgan satrlar — bog'lanish o'zgartirilishidan OLDIN topiladi
-  const lines = await findMispostedLines(tx, companyId, cashAccountId, old.id);
+  const baseCurrency = await companyCurrency(tx, companyId);
+  const { lines, skipped } = await findMispostedLines(tx, companyId, cashAccountId, old.id, cash.currency === baseCurrency);
   let netMinor = 0n;
   for (const line of lines) netMinor += toMinor(line.debit) - toMinor(line.credit);
 
@@ -235,6 +299,7 @@ export async function repairCashLedgerMapping(
         oldLedger: { id: old.id, code: old.code, name: old.name, subtype: old.subtype },
         newLedger: { id: newLedger.id, code: newLedger.code, name: newLedger.name, subtype: newLedger.subtype },
         mispostedLines: lines.length,
+        skippedLines: skipped.length,
         amount: fromMinor(netMinor < 0n ? -netMinor : netMinor),
         reason,
         correctionEntryId: correction?.entryId ?? null,
@@ -251,6 +316,7 @@ export async function repairCashLedgerMapping(
     oldLedger: old,
     newLedger,
     mispostedLines: lines.length,
+    skippedLines: skipped.length,
     amount: fromMinor(netMinor < 0n ? -netMinor : netMinor),
     correction,
   };
