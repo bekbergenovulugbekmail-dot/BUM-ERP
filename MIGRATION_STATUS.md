@@ -5697,3 +5697,26 @@ eski-yangi hisob/summa/sabab/yozuv id); har kompaniyada debet = kredit (Bonnu 6 
 Ezo 4 859 030 = 4 859 030); `--list` → **mos kelmagan kassa 0 ta**; API sog'lom (`/api/auth/me` 401).
 
 Lokal commitlar hali push qilinmagan (`git push` auto-rejimda bloklangan) — egasi o'zi push qilishi kerak.
+
+### WEB_ORIGIN to'g'rilandi (2026-09-29)
+
+`WEB_ORIGIN`: `https://bum-erp.uz` → **`https://app.bum-erp.uz`**. Eski qiymat biz boshqarmaydigan serverga
+(hosting'ning parking sahifasi, TLS sertifikati mos emas) ishora qilardi.
+
+O'zgartirishdan oldingi read-only precheck — cross-origin bog'liqlik topilmadi:
+- apex `bum-erp.uz` — skriptsiz parking sahifa, brauzerda TLS tufayli ochilmaydi;
+- `www.bum-erp.uz` va `app.bum-erp.uz` — bitta `bum-web` servisi (HTML bayt-ba-bayt bir xil);
+- SPA bundle'ida 818 ta `/api/...` — hammasi NISBIY yo'l, `fetch()` da absolut manzil yo'q;
+- WebSocket manzili `new URL("/api/delivery/ws", window.location.href)` — bir manba.
+
+Shu sababli SPA so'rovlari bir manbada qoladi va CORS umuman ishga tushmaydi.
+
+`WEB_ORIGIN` butun kodda 4 joyda: CORS (`server.ts`), WS origin tekshiruvi (`realtime.ts`), Telegram webhook bazasi
+(`telegram-api.service.ts`), env validatsiyasi. Telegram ta'sirlanmadi — `PUBLIC_API_URL` allaqachon
+`https://app.bum-erp.uz` va u ustun.
+
+Tekshiruv: konteynerda `printenv WEB_ORIGIN` = `https://app.bum-erp.uz`; `/api/auth/me` 401 (`app` va `www` da);
+`app.bum-erp.uz`, `www.bum-erp.uz`, `bum-web-production.up.railway.app` — 200.
+
+Yondosh kuzatuv: `/api/delivery/ws` dagi Origin tekshiruvi kutilganidek ishlamayotgani aniqlandi (sabab
+aniqlanmagan, tuzatilmagan) — egasiga alohida aytildi, keyingi sessiyada ko'rib chiqiladi.
