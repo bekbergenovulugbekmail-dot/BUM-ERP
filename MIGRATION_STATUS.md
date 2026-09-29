@@ -5668,3 +5668,32 @@ Joriy haqiqiy qoldiqlardan hisoblangan kutilayotgan natija (apply'dan keyin):
 - Ezo 1010 = 55 000 va 1100 = 35 200 — o'zgarmaydi
 
 `--apply` egasining alohida tasdig'igacha bajarilmaydi.
+
+### STATUS = REPAIR APPLIED AND VERIFIED (2026-09-29, egasi ruxsati bilan)
+
+Deploy: `370a7ca6-396c-4f17-82ca-04f71f77dfa8` (`bum-api`), kod `26a5a49`. Konteynerda tuzatilgan moslik ekani
+`matchByAmount` = 2, `wantsDebit` = 3 bilan tasdiqlandi (eski buildda 0 edi). Apply'dan darhol oldin qayta dry-run
+qilinib, raqamlar tasdiqlangan qiymatlarga mos ekani tekshirildi.
+
+**Bonnu Market** — kassa "Asosiy kassa" `e109bad9…`, bajarilgan vaqt **2026-09-29 04:29:50Z**.
+Bog'lanish **1020 → NULL** (turi bo'yicha 1010). Tuzatuvchi yozuv **JE-2026-00048**
+(`620cccad-588a-4186-8215-db16ac3b9436`, `reference_type = cash_ledger_reclass`, `reference_id` = kassa id):
+**DR 1010 329 300 / CR 1020 329 300**, holati `posted`, debet = kredit. 5 ta satr ko'chirildi
+(JE-2026-00039 180 000, 00041 18 000, 00043 96 100, 00045 18 000, 00047 17 200), 2 ta satr ATAYLAB
+o'tkazib yuborildi — JE-2026-00029 (3 000) va JE-2026-00030 (3 160), ular bank kassalariniki va 1020 da qoldi.
+
+Natija: **1010 = −57 360 → 271 940**, **1020 = 362 780 → 33 480**, yig'indi **305 420** — o'zgarmadi (faqat qayta
+tasniflash). Solishtirish: 1010 = naqd kassalar 251 780 + USD kassa 20 160 ✓; 1020 = bank kassalar 28 320 + 5 160 + 0 ✓.
+
+**Ezo** — kassa "Yetkazuvchi DA-002 — yo'ldagi naqd" `a9263b08-8a57-4984-8d8a-c4b369df2d04`.
+Bog'lanish **1100 → NULL**. Jurnal tuzatishi **0** (`correction: null`) — to'g'ri, chunki noto'g'ri satr yo'q edi.
+1010 = 55 000 va 1100 = 35 200 — o'zgarmadi.
+
+**Tekshiruvlar (hammasi read-only, PASS):** tarixiy yozuvlar o'zgarmagan (JE-2026-00029/30/39/41/43/45/47 —
+`posted`, satrlari va summalari o'sha-o'sha); `cash_accounts.balance` o'zgarmagan (Bonnu 251 780, Ezo 0);
+takroriy chaqiruv — Bonnu `already_repaired`, Ezo `nothing_to_repair`, yangi yozuv yaratilmadi; butun bazada
+`cash_ledger_reclass` yozuvlari **1 ta**; audit **2 ta** (har kassaga bittadan, ichida kim/qachon/kompaniya/kassa/
+eski-yangi hisob/summa/sabab/yozuv id); har kompaniyada debet = kredit (Bonnu 6 989 070 = 6 989 070,
+Ezo 4 859 030 = 4 859 030); `--list` → **mos kelmagan kassa 0 ta**; API sog'lom (`/api/auth/me` 401).
+
+Lokal commitlar hali push qilinmagan (`git push` auto-rejimda bloklangan) — egasi o'zi push qilishi kerak.
