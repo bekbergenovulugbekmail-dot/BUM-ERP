@@ -5646,3 +5646,25 @@ sababi (yuklash uzilishi yoki boshqa) aniqlanmagan.
 
 Shuning uchun **eski build bilan `--apply` hech qachon ishlatilmasin**. Tuzatilgan build `26a5a49` (lokal `dist` da
 `matchByAmount`/`wantsDebit` bor, build muvaffaqiyatli) deploy qilinishi kerak.
+
+### Tuzatilgan build deploy qilindi (2026-09-29) — STATUS = READY FOR OWNER APPROVAL
+
+Deployment `370a7ca6-396c-4f17-82ca-04f71f77dfa8`, `bum-api` (web tegilmadi). Yangi build ekani kod bo'yicha
+tasdiqlandi: konteynerdagi `dist/modules/finance/cash-ledger-repair.service.js` da `matchByAmount` = 2,
+`wantsDebit` = 3 (eski buildda ikkalasi 0 edi). API sog'lom — `/api/auth/me` 401.
+
+Dry run (ROLLBACK, `--apply` YO'Q):
+- **Bonnu** `e109bad9…`: 1020 → 1010, `mispostedLines` = **5**, `skippedLines` = **2**, summa **329 300**.
+  O'tkazib yuborilgan 2 satr — bank kassalarining 3 000 va 3 160 i (bitta hujjat, boshqa kassa) — 1010 ga o'tmaydi.
+- **Ezo** `a9263b08…`: 1100 → 1010, `mispostedLines` = **0**, `skippedLines` = 1, jurnal yozuvi **yo'q**.
+
+Production yozuvlari: `cash_ledger_reclass` = 0, `CASH_LEDGER_REPAIRED` audit = 0, JE-2026-00039/41/43/45/47
+`posted` va o'zgarmagan, kassa qoldiqlari o'zgarmagan.
+
+Joriy haqiqiy qoldiqlardan hisoblangan kutilayotgan natija (apply'dan keyin):
+- Bonnu 1010 = −57 360 + 329 300 = **271 940** = naqd kassalar (251 780 + USD kassa 20 160) ✓
+- Bonnu 1020 = 362 780 − 329 300 = **33 480** = bank kassalar (28 320 + 5 160 + 0) ✓
+- Bonnu 1010 + 1020 = 305 420 — apply'dan oldin ham, keyin ham bir xil (faqat qayta tasniflash)
+- Ezo 1010 = 55 000 va 1100 = 35 200 — o'zgarmaydi
+
+`--apply` egasining alohida tasdig'igacha bajarilmaydi.
